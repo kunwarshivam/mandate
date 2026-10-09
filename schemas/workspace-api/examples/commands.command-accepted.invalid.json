@@ -1,0 +1,127 @@
+[
+  {
+    "label": "phase applied",
+    "set": {
+      "/phase": "applied"
+    }
+  },
+  {
+    "label": "an unknown step-up status",
+    "set": {
+      "/step_up_status": "valid"
+    }
+  },
+  {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "no served_at",
+    "remove": [
+      "/served_at"
+    ]
+  },
+  {
+    "label": "an extra member",
+    "set": {
+      "/approved": true
+    }
+  },
+  {
+    "label": "an empty dropped list",
+    "set": {
+      "/dropped": []
+    }
+  },
+  {
+    "label": "a dropped entry that is not a pointer",
+    "set": {
+      "/dropped": [
+        "step_up"
+      ]
+    }
+  },
+  {
+    "label": "a null step-up status",
+    "set": {
+      "/step_up_status": null
+    }
+  },
+  {
+    "label": "a null dropped list",
+    "set": {
+      "/dropped": null
+    }
+  },
+  {
+    "label": "auto: no /command_id",
+    "remove": [
+      "/command_id"
+    ]
+  },
+  {
+    "label": "auto: no /phase",
+    "remove": [
+      "/phase"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /phase outside its set",
+    "set": {
+      "/phase": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: /step_up_status outside its set",
+    "set": {
+      "/step_up_status": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /as_of/0/stream_id",
+    "remove": [
+      "/as_of/0/stream_id"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/seq",
+    "remove": [
+      "/as_of/0/seq"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/hash",
+    "remove": [
+      "/as_of/0/hash"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/recorded_at",
+    "remove": [
+      "/as_of/0/recorded_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /as_of/0",
+    "set": {
+      "/as_of/0/mutant_member": 1
+    }
+  },
+  {
+    "label": "a pointer dropped twice",
+    "set": {
+      "/dropped": [
+        "/a",
+        "/a"
+      ]
+    }
+  }
+]

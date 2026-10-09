@@ -131,7 +131,6 @@ fn parse_as_journal_draft(draft: &EventDraft) -> Result<Draft, Invalid> {
 }
 
 #[test]
-#[ignore = "pending E8-3"]
 fn every_answer_record_the_runtime_writes_passes_the_journals_check() {
     let mut seen = BTreeSet::new();
     let mut failed = Vec::new();
@@ -153,7 +152,6 @@ fn every_answer_record_the_runtime_writes_passes_the_journals_check() {
 /// check 7 and on a skip, and exactly the count and independence the request bound on a grant check
 /// 7 judged, whether it admitted, counted or refused it.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_responded_record_carries_its_quorum_only_where_check_7_was_judged() {
     for (name, ran) in runs() {
         let [responded] = records(&ran, "ApprovalResponded")[..] else {
@@ -191,7 +189,6 @@ fn a_responded_record_carries_its_quorum_only_where_check_7_was_judged() {
 /// DEC-533 item 4: an `auto` re-classification passes check 10 with no label, written `null`; an
 /// `ask` writes its own label, the bound one or another trigger's; a `deny` writes no label either.
 #[test]
-#[ignore = "pending E8-3"]
 fn decided_by_now_is_null_unless_the_reclassification_asks() {
     for (name, ran) in runs() {
         for revalidated in records(&ran, "ApprovalRevalidated") {
@@ -211,4 +208,41 @@ fn decided_by_now_is_null_unless_the_reclassification_asks() {
             }
         }
     }
+}
+
+/// DEC-533 item 4 and DEC-830: an `ask` re-classification whose label is empty names no trigger,
+/// so `decided_by_now` is `null`, as for an `auto` or a `deny`, never the empty text (#782 review:
+/// the mutant that drops the empty-label guard in `asked_by` survived every other test).
+#[test]
+fn an_ask_reclassification_with_an_empty_label_writes_a_null_decided_by_now() {
+    let (ids, gate) = (TestIds, AllowGate);
+    let mut view = universe(&["AAPL"]);
+    view.version = MANDATE_REF.to_owned();
+    let asking_plan = FixedPlan::opening(Autonomy::Ask);
+    let unlabelled_plan = FixedPlan {
+        decided_by: "",
+        ..FixedPlan::opening(Autonomy::Ask)
+    };
+    let asking = ports(&ids, &gate, &asking_plan, &view);
+    let unlabelled = ports(&ids, &gate, &unlabelled_plan, &view);
+    let (mut shell, asked) = asking_shell(&asking, Some(BOUND_LIMIT));
+    let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 30).event();
+    let ran = tail(&mut shell, &grant, &unlabelled);
+    let [revalidated] = records(&ran, "ApprovalRevalidated")[..] else {
+        panic!("one ApprovalRevalidated in {:?}", ran.draft_types())
+    };
+    assert_eq!(
+        revalidated.payload.get("decided_by_now"),
+        Some(&Value::Null),
+        "an empty ask label is written null: {:?}",
+        revalidated.payload
+    );
+    assert!(
+        revalidated
+            .payload
+            .get("decided_by_bound")
+            .is_some_and(|b| *b != Value::Null),
+        "the bound label is still the request's own: {:?}",
+        revalidated.payload
+    );
 }

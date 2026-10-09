@@ -86,6 +86,49 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
+/** The markup Kumo renders for each emphasis button, from `e2e/global-setup.mjs`. */
+function emphasisMarkup(): { primaryButton: string; primaryLink: string; destructiveButton: string } {
+  return JSON.parse(process.env.KUMO_EMPHASIS_MARKUP ?? "{}");
+}
+
+/**
+ * Mounts a Kumo button's markup in the specimen, under the page's theme, and reads its paint: the
+ * button's fill, each overlay span's class and paint, and every gradient on the button, its children
+ * and their pseudo-elements. React may re-render the specimen and drop a foreign node, so the button
+ * is appended, read and removed in one synchronous call.
+ */
+async function mountKumo(page: Page, markup: string) {
+  return page.evaluate(
+    ({ markup, paint }) => {
+      const host = document.createElement("div");
+      host.innerHTML = markup;
+      document.querySelector("[data-specimen=button]")!.append(host);
+      const button = host.firstElementChild!;
+      const read = (el: Element, props: string[]) => {
+        const style = getComputedStyle(el);
+        return Object.fromEntries(props.map((p) => [p, style.getPropertyValue(p)]));
+      };
+      const gradients = [button, ...button.querySelectorAll("*")].flatMap((el) =>
+        [null, "::before", "::after"].flatMap((pseudo) => {
+          const style = getComputedStyle(el, pseudo);
+          return paint.map((p) => style.getPropertyValue(p)).filter((v) => /gradient/i.test(v));
+        }),
+      );
+      const result = {
+        button: read(button, ["background-image"]),
+        overlays: [...button.querySelectorAll(':scope > span[aria-hidden="true"].absolute')].map((el) => ({
+          className: el.getAttribute("class") ?? "",
+          style: read(el, ["background-image", "background-color", "box-shadow"]),
+        })),
+        gradients,
+      };
+      host.remove();
+      return result;
+    },
+    { markup, paint: PAINT },
+  );
+}
+
 /** Saturated volt: the mandate's rules, markers and labels and the account's line. Never a block, and in light mode never text. */
 const SATURATED_VOLT = ["--mandate-strong", "--mandate-marker", "--mandate-edge", "--lapis-line"];
 const MARK_VOLT = ["--mandate-marker", "--mandate-edge", "--lapis-line"];
@@ -221,65 +264,39 @@ test.describe("Kumo surfaces are flat (DEC-200)", () => {
     await page.waitForLoadState("networkidle");
   });
 
-  test("primary Button and LinkButton: the emphasis overlay is a solid brand fill, with no shadow", async ({ page }) => {
-    const brand = await tokenColor(page, "--color-kumo-brand");
+  test("the specimen's Button and LinkButton are the key: a flat fill with no gradient (DEC-469)", async ({ page }) => {
     const buttons = page.locator("[data-specimen=button] [data-kumo-component]");
     await expect(buttons).toHaveCount(2);
     for (const button of await buttons.all()) {
       expect(await computed(button, ["background-image"])).toEqual({ "background-image": "none" });
-      const overlay = button.locator(':scope > span[aria-hidden="true"].absolute');
-      await expect(overlay).toHaveCount(1);
-      expect(await overlay.getAttribute("class")).toContain("bg-linear-to-b");
-      expect(await computed(overlay, ["background-image", "background-color", "box-shadow"])).toEqual({
-        "background-image": "none",
-        "background-color": brand,
-        "box-shadow": "none",
-      });
+    }
+    expect(await gradientsIn(page, "[data-specimen=button]")).toEqual([]);
+  });
+
+  test("primary Button and LinkButton: the emphasis overlay is a solid brand fill, with no shadow", async ({ page }) => {
+    const brand = await tokenColor(page, "--color-kumo-brand");
+    const { primaryButton, primaryLink } = emphasisMarkup();
+    for (const markup of [primaryButton, primaryLink]) {
+      const found = await mountKumo(page, markup);
+      expect(found.button).toEqual({ "background-image": "none" });
+      expect(found.overlays, "Kumo still paints one overlay span on an emphasis button").toHaveLength(1);
+      expect(found.overlays[0].className, "and still draws it as a gradient, which the theme must flatten").toContain("bg-linear-to-b");
+      expect(found.overlays[0].style).toEqual({ "background-image": "none", "background-color": brand, "box-shadow": "none" });
+      expect(found.gradients).toEqual([]);
     }
   });
 
   test("destructive-styled Button: Kumo's destructive classes and danger emphasis still paint a flat overlay", async ({ page }) => {
     const classes = process.env.KUMO_DESTRUCTIVE_BUTTON_CLASSES ?? "";
     expect(classes).toContain("bg-(--kumo-button-emphasis-bg)");
-    // React may re-render the specimen and drop a foreign node, so the clone is appended and read
-    // in one synchronous call.
-    const styles = await page.evaluate(
-      ({ classes, paint }) => {
-        const source = document.querySelector('[data-specimen=button] button[data-kumo-component="Button"]')!;
-        const clone = source.cloneNode(true) as HTMLElement;
-        clone.className = classes;
-        const token = "var(--color-kumo-danger)";
-        clone.style.setProperty("--kumo-button-emphasis-ring", `color-mix(in oklch, ${token}, black 10%)`);
-        clone.style.setProperty("--kumo-button-emphasis-bg", `color-mix(in oklch, ${token}, white 30%)`);
-        clone.style.setProperty("--kumo-button-emphasis-gradient-start", `color-mix(in oklch, ${token}, white 15%)`);
-        clone.style.setProperty("--kumo-button-emphasis-gradient-end", token);
-        source.parentElement!.append(clone);
-        const read = (el: Element | null, props: string[]) => {
-          if (!el) return null;
-          const style = getComputedStyle(el);
-          return Object.fromEntries(props.map((p) => [p, style.getPropertyValue(p)]));
-        };
-        const gradients = [clone, ...clone.querySelectorAll("*")].flatMap((el) =>
-          [null, "::before", "::after"].flatMap((pseudo) => {
-            const style = getComputedStyle(el, pseudo);
-            return paint.map((p) => style.getPropertyValue(p)).filter((v) => /gradient/i.test(v));
-          }),
-        );
-        const result = {
-          button: read(clone, ["background-image"]),
-          overlay: read(clone.querySelector(':scope > span[aria-hidden="true"].absolute'), ["background-image", "box-shadow"]),
-          gradients,
-        };
-        clone.remove();
-        return result;
-      },
-      { classes, paint: PAINT },
-    );
-    expect(styles).toEqual({
-      button: { "background-image": "none" },
-      overlay: { "background-image": "none", "box-shadow": "none" },
-      gradients: [],
-    });
+    const { destructiveButton } = emphasisMarkup();
+    expect(destructiveButton, "the markup carries Kumo's destructive classes").toContain(classes);
+    expect(destructiveButton, "and its danger emphasis").toContain("--kumo-button-emphasis-gradient-end:var(--color-kumo-danger)");
+    const found = await mountKumo(page, destructiveButton);
+    expect(found.button).toEqual({ "background-image": "none" });
+    expect(found.overlays).toHaveLength(1);
+    expect(found.overlays[0].style).toMatchObject({ "background-image": "none", "box-shadow": "none" });
+    expect(found.gradients).toEqual([]);
   });
 
   test("Table with a sticky header and sticky columns: no fade on any cell", async ({ page }) => {

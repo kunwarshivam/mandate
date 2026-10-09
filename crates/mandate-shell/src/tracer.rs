@@ -10,13 +10,14 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::{Key, Object, Value};
+use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::BrokerRequest;
-use mandate_journal::{AppendOutcome, Environment, StoredEvent};
+use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
     FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, Input, IntentHandoff, MandateView,
-    OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeState, SignalInputs, WriterEpoch,
+    Observation, OrderPlan, Ports, Proposal, Purpose, RiskClock, RuntimeState, SignalInputs,
+    WriterEpoch,
 };
 use mandate_time::UtcNanos;
 
@@ -25,7 +26,9 @@ use crate::envelope::{
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::map;
-use crate::stages::{Admitted, Classifier, ExitPath, Gate, JournalWriter, Sizing, Stage, Stages};
+use crate::stages::{
+    Admitted, Classifier, ExitPath, Gate, GovernedRefs, JournalWriter, Sizing, Stage, Stages,
+};
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +75,26 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
     let output = map::model_output(signal, &admitted.model, &instrument, clock)
         .map_err(refused(Stage::Signal))?;
-    execute_cycle(stages, setup, &admitted, output)
+    execute_cycle(stages, setup, &admitted, None, output)
+}
+
+/// One pass over the model host's observation and its output (E15-13, the brief's slice H3,
+/// DEC-503 item 6): the paper adapter stored the observation's data under its `data_ref` first,
+/// and the runtime journals `ObservationRecorded` before `ModelOutputRecorded`, both before any
+/// decision (FT-6). An observation whose artifact is not in the run's store stops the run before
+/// either record and before any order, refused as `market_data_untrusted`. The shell reads no bars
+/// and computes no output: the output it decides on is the one handed in.
+///
+/// # Errors
+/// Every [`ShellError`] is a stop after which nothing further is sent.
+pub fn run_observed(
+    stages: &mut Stages,
+    setup: &Setup,
+    observation: Observation,
+    output: mandate_runtime::ModelOutput,
+) -> Result<Report, ShellError> {
+    let admitted = admit(stages)?;
+    execute_cycle(stages, setup, &admitted, Some(observation), output)
 }
 
 fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
@@ -92,17 +114,25 @@ fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
     Ok(admitted)
 }
 
+/// One cycle over `output`, after `observation` when the host handed one. The observation is
+/// offered only once the replayed stream shows no open cycle, so a restart never journals it
+/// again (FT-12), and always before the output, so `ObservationRecorded` precedes
+/// `ModelOutputRecorded` (FT-6).
 fn execute_cycle(
     stages: &mut Stages,
     setup: &Setup,
     admitted: &Admitted,
+    observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Report, ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
-    let mut session = Session::open(stages, setup, &admitted.view)?;
+    let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
     session.start()?;
     if session.cycle_open && !setup.new_cycle {
         return Err(ShellError::CycleAlreadyOpen);
+    }
+    if let Some(observation) = observation {
+        session.observe(observation)?;
     }
     session.feed(Input::ModelOutput(output))?;
     session.feed(Input::Tick(clock))?;
@@ -127,7 +157,27 @@ impl ProductionCycle {
     /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
     pub fn run(&mut self, output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
         let admitted = admit(&mut self.stages)?;
-        execute_cycle(&mut self.stages, &self.setup, &admitted, output)
+        execute_cycle(&mut self.stages, &self.setup, &admitted, None, output)
+    }
+
+    /// Runs one cycle from the model host's observation and its output, as [`run_observed`] does
+    /// (E15-13, the brief's slice H3).
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
+    pub fn run_observed(
+        &mut self,
+        observation: Observation,
+        output: mandate_runtime::ModelOutput,
+    ) -> Result<Report, ShellError> {
+        let admitted = admit(&mut self.stages)?;
+        execute_cycle(
+            &mut self.stages,
+            &self.setup,
+            &admitted,
+            Some(observation),
+            output,
+        )
     }
 }
 
@@ -145,6 +195,8 @@ pub(crate) struct Session<'s> {
     stages: &'s mut Stages,
     setup: &'s Setup,
     view: &'s MandateView,
+    /// The registered objects a governed run's version-2 agent records reference (DEC-484).
+    governed: Option<GovernedRefs>,
     state: RuntimeState,
     agent_stream: String,
     account_stream: String,
@@ -160,11 +212,14 @@ pub(crate) struct Session<'s> {
 }
 
 impl<'s> Session<'s> {
-    /// Takes both streams and replays them, the agent stream first (journal spec §8).
-    pub(crate) fn open(
+    /// Takes both streams and replays them, the agent stream first (journal spec §8). A run that
+    /// `governed` governs writes its `ModelOutputRecorded` and `DecisionMade` at schema version 2
+    /// with their registered references.
+    pub(crate) fn open_governed(
         stages: &'s mut Stages,
         setup: &'s Setup,
         view: &'s MandateView,
+        governed: Option<GovernedRefs>,
     ) -> Result<Self, ShellError> {
         let deployment = &setup.deployment;
         let agent = agent_stream(&deployment.workspace.0, &deployment.agent.0);
@@ -174,6 +229,7 @@ impl<'s> Session<'s> {
             stages,
             setup,
             view,
+            governed,
             agent_stream: agent,
             account_stream: account,
             epochs: BTreeMap::new(),
@@ -207,6 +263,31 @@ impl<'s> Session<'s> {
             }
         }
         Ok(session)
+    }
+
+    /// Hands the runtime `observation` once its data is in the run's store under its `data_ref`
+    /// and re-hashes there; otherwise refuses before the runtime sees it, so no batch goes into
+    /// doubt and a later input, the kill switch included, still steps (E15-13, H3; rule 13).
+    ///
+    /// The check is a checked read ([`get_artifact`]), which re-hashes the stored bytes, so other
+    /// bytes under the digest are refused as missing ones are. It runs here, never inside the
+    /// journal append: an append refused there would leave the runtime's batch in doubt (B8).
+    pub(crate) fn observe(&mut self, observation: Observation) -> Result<(), ShellError> {
+        let reference = ArtifactRef::from_digest(observation.data_ref);
+        let stored = self
+            .stages
+            .artifacts
+            .as_deref()
+            .is_some_and(|store| get_artifact(store, &reference).is_ok());
+        if !stored {
+            return Err(ShellError::Refused {
+                stage: Stage::MarketData,
+                cause: Cause::Absent {
+                    what: "the observation's stored data",
+                },
+            });
+        }
+        self.feed(Input::Observation(observation))
     }
 
     /// Journal §2's stream lifecycle: the shell that owns a new stream writes its
@@ -283,6 +364,15 @@ impl<'s> Session<'s> {
         let agent_epoch = self.epoch(&self.agent_stream.clone());
         self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
         let account_epoch = self.epoch(&self.account_stream.clone());
+        let profile = self.stages.connector.profile().map_err(|_| {
+            refused(Stage::Connector)(Cause::Untrusted {
+                what: "the connector's capability profile",
+            })
+        })?;
+        self.stages
+            .executor
+            .use_profile(profile)
+            .map_err(refused(Stage::Executor))?;
         let executor_effects = self
             .stages
             .executor
@@ -504,18 +594,40 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Connector))
     }
 
+    /// A governed run writes `ModelOutputRecorded` with `model_registry` and `DecisionMade` with
+    /// `model_registry` and `policy_set` beside `mandate_version`, at schema version 2 (journal
+    /// spec v0.16, DEC-484 item 4). Every other record, and every record of an ungoverned run,
+    /// stays at version 1 with `mandate_version` alone.
+    fn agent_refs(&self, event_type: &str) -> Result<(u64, Object), ShellError> {
+        let mut refs = vec![("mandate_version", Value::Str(self.view.version.clone()))];
+        let reference = |digest: Digest| Value::Str(format!("sha256:{digest}"));
+        let mut version = 1;
+        if let Some(governed) = self.governed {
+            let decision = event_type == "DecisionMade";
+            if decision || event_type == "ModelOutputRecorded" {
+                refs.push(("model_registry", reference(governed.model_registry)));
+                version = 2;
+            }
+            if decision {
+                refs.push(("policy_set", reference(governed.policy_set)));
+            }
+        }
+        let mut config_refs = Object::new();
+        for (name, value) in refs {
+            config_refs.insert(
+                Key::new(name).map_err(|_| ShellError::Envelope { field: name })?,
+                value,
+            );
+        }
+        Ok((version, config_refs))
+    }
+
     fn append_agent(&mut self, drafts: &[EventDraft]) -> Result<(), ShellError> {
         let stream = self.agent_stream.clone();
-        let mut config_refs = Object::new();
-        config_refs.insert(
-            Key::new("mandate_version").map_err(|_| ShellError::Envelope {
-                field: "mandate_version",
-            })?,
-            Value::Str(self.view.version.clone()),
-        );
         let bytes = drafts
             .iter()
             .map(|draft| {
+                let (schema_version, config_refs) = self.agent_refs(&draft.event_type)?;
                 draft_bytes(
                     &Envelope {
                         stream: &stream,
@@ -526,7 +638,7 @@ impl<'s> Session<'s> {
                     &DraftFields {
                         event_id: &draft.event_id.0,
                         event_type: &draft.event_type,
-                        schema_version: 1,
+                        schema_version,
                         causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
                         config_refs: &config_refs,
                         payload: &draft.payload,

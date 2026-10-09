@@ -1,14 +1,14 @@
-"""Journal spec v0.22 §9.11's reference vectors (DEC-783): the control stream's `AnchorComputed` and
+"""Journal spec v0.27 §9.14's reference vectors (DEC-783): the control stream's `AnchorComputed` and
 `SegmentExported`.
 
-The schemas and rules 81 to 86 live in `control.py`, beside §9.2's to §9.10's, so one validator
+The schemas and rules 113 to 118 live in `control.py`, beside §9.2's to §9.13's, so one validator
 judges every closed schema. This module builds the `cold_records` section: a base draft of each
 record, an invalid draft for every member type and rule, and valid drafts for the cases a rule might
 be misread to refuse. It checks the section with oracles of its own: the base anchor's root is the
 v3 vectors' own `merkle.root` over the same leaves, every accepted anchor's root is recomputed by an
-iterative walk that shares no code with rule 82, every accepted segment's manifest hash is
+iterative walk that shares no code with rule 114, every accepted segment's manifest hash is
 recomputed from `json.dumps` rather than the canonicalizer, and every stream named is parsed for its
-workspace independently of rules 81 and 84. Every seeded bug is shown caught.
+workspace independently of rules 113 and 116. Every seeded bug is shown caught.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.22 §9.11 (DEC-783)"
+SPEC = "docs/specs/journal.md v0.27 §9.14 (DEC-783)"
 AT = "2026-09-21T16:00:00.000000000Z"
 IDS = {"anchor": "01J8Z3C1A000000000000000C1", "segment": "01J8Z3C2A000000000000000C2"}
 ACCOUNT_STREAM = f"acct:{WORKSPACE}:01J8Z2ACCT00000000000000A1"
@@ -179,21 +179,21 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for path, wrong_kind, wrong_form in cases:
             label = path.removeprefix("payload.")
-            out.append(invalid(f"{base}.{label}.kind", "§9.11 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{label}.kind", "§9.14 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 out.append(
-                    invalid(f"{base}.{label}.form", "§9.11 types", base, [change(path, wrong_form)], "non_canonical", path)
+                    invalid(f"{base}.{label}.form", "§9.14 types", base, [change(path, wrong_form)], "non_canonical", path)
                 )
     for base, members in NULLED.items():
         for path in members:
             label = path.removeprefix("payload.")
-            out.append(invalid(f"{base}.{label}.null", "§9.11 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{label}.null", "§9.14 types", base, [change(path, None)], "schema", path))
     for base in ("anchor", "segment"):
         first = next(iter(Section.bases[base]["payload"]))
-        out.append(invalid(f"{base}.missing", "§9.11 closed", base, [delete(f"payload.{first}")], "schema", f"payload.{first}"))
-        out.append(invalid(f"{base}.extra", "§9.11 closed", base, [change("payload.instrument", "x")], "schema", "payload.instrument"))
-    out.append(invalid("leaf_missing_member", "§9.11 closed", "anchor", [delete(f"{L0}.hash")], "schema", f"{L0}.hash"))
-    out.append(invalid("leaf_extra_member", "§9.11 closed", "anchor", [change(f"{L0}.price", "1")], "schema", f"{L0}.price"))
+        out.append(invalid(f"{base}.missing", "§9.14 closed", base, [delete(f"payload.{first}")], "schema", f"payload.{first}"))
+        out.append(invalid(f"{base}.extra", "§9.14 closed", base, [change("payload.instrument", "x")], "schema", "payload.instrument"))
+    out.append(invalid("leaf_missing_member", "§9.14 closed", "anchor", [delete(f"{L0}.hash")], "schema", f"{L0}.hash"))
+    out.append(invalid("leaf_extra_member", "§9.14 closed", "anchor", [change(f"{L0}.price", "1")], "schema", f"{L0}.price"))
     return out
 
 
@@ -204,30 +204,30 @@ def invalid_drafts() -> list[dict]:
     foreign = "acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1"
     return [
         *member_drafts(),
-        invalid("anchor_wrong_stream", "§9.11: an anchor is a control-stream record", "anchor", [change("stream_id", AGENT_STREAM)], "wrong_stream", "event_type"),
+        invalid("anchor_wrong_stream", "§9.14: an anchor is a control-stream record", "anchor", [change("stream_id", AGENT_STREAM)], "wrong_stream", "event_type"),
         invalid("token_not_listed", "§3: `artifact_refs` lists the token", "anchor", [], "artifact_refs", "artifact_refs", refs=[]),
         invalid(
             "anchor_without_its_own_leaf",
-            "rule 81: an anchor names its own control stream's head",
+            "rule 113: an anchor names its own control stream's head",
             "anchor",
             [change("payload.leaves", leaves[:2]), change("payload.root", merkle_root(leaves[:2]))],
             "schema",
             "payload.leaves",
         ),
-        invalid("anchor_of_nothing", "rule 81: at least one leaf", "anchor", [change("payload.leaves", []), change("payload.root", "0" * 64)], "schema", "payload.leaves"),
+        invalid("anchor_of_nothing", "rule 113: at least one leaf", "anchor", [change("payload.leaves", []), change("payload.root", "0" * 64)], "schema", "payload.leaves"),
         invalid(
             "anchor_leaf_of_another_workspace",
-            "rule 81: tenant isolation",
+            "rule 113: tenant isolation",
             "anchor",
             [change(f"{L0}.stream_id", foreign)],
             "schema",
             f"{L0}.stream_id",
             also=[("schema", "payload.root")],
         ),
-        invalid("anchor_leaf_at_seq_zero", "rule 81: seq starts at 1", "anchor", [change(f"{L0}.seq", 0)], "schema", f"{L0}.seq", also=[("schema", "payload.root")]),
+        invalid("anchor_leaf_at_seq_zero", "rule 113: seq starts at 1", "anchor", [change(f"{L0}.seq", 0)], "schema", f"{L0}.seq", also=[("schema", "payload.root")]),
         invalid(
             "anchor_leaves_unsorted",
-            "rule 81: leaves sort by stream",
+            "rule 113: leaves sort by stream",
             "anchor",
             [change("payload.leaves", swapped), change("payload.root", merkle_root(swapped))],
             "schema",
@@ -235,25 +235,25 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "anchor_stream_twice",
-            "rule 81: one leaf per stream",
+            "rule 113: one leaf per stream",
             "anchor",
             [change("payload.leaves", [leaves[2], leaves[2]]), change("payload.root", merkle_root([leaves[2], leaves[2]]))],
             "schema",
             f"{L1}.stream_id",
         ),
-        invalid("anchor_root_lies", "rule 82: the root is recomputed", "anchor", [change("payload.root", "3" * 64)], "schema", "payload.root"),
+        invalid("anchor_root_lies", "rule 114: the root is recomputed", "anchor", [change("payload.root", "3" * 64)], "schema", "payload.root"),
         invalid(
             "anchor_root_of_other_leaves",
-            "rule 82: a root over the leaves before a change proves nothing",
+            "rule 114: a root over the leaves before a change proves nothing",
             "anchor",
             [change(f"{L0}.hash", "1" * 64)],
             "schema",
             "payload.root",
         ),
-        invalid("anchor_by_a_user", "rule 83", "anchor", [change("actor", USER)], "schema", "actor.kind"),
+        invalid("anchor_by_a_user", "rule 115", "anchor", [change("actor", USER)], "schema", "actor.kind"),
         invalid(
             "segment_of_another_workspace",
-            "rule 84: tenant isolation",
+            "rule 116: tenant isolation",
             "segment",
             [change("payload.stream_id", foreign), change("payload.manifest_hash", manifest_hash({**Section.bases["segment"]["payload"], "stream_id": foreign}))],
             "schema",
@@ -261,7 +261,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "segment_from_seq_zero",
-            "rule 84: seq starts at 1",
+            "rule 116: seq starts at 1",
             "segment",
             [change("payload.first_seq", 0), change("payload.manifest_hash", manifest_hash({**Section.bases["segment"]["payload"], "first_seq": 0}))],
             "schema",
@@ -269,7 +269,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "segment_reversed",
-            "rule 84: `last_seq` is at least `first_seq`",
+            "rule 116: `last_seq` is at least `first_seq`",
             "segment",
             [change("payload.last_seq", 3), change("payload.manifest_hash", manifest_hash({**Section.bases["segment"]["payload"], "last_seq": 3}))],
             "schema",
@@ -277,7 +277,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "segment_from_one_not_genesis",
-            "rule 84: seq 1 follows 64 zeros",
+            "rule 116: seq 1 follows 64 zeros",
             "segment",
             [change("payload.first_seq", 1), change("payload.manifest_hash", manifest_hash({**Section.bases["segment"]["payload"], "first_seq": 1}))],
             "schema",
@@ -285,7 +285,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "segment_genesis_not_from_one",
-            "rule 84: only seq 1 follows 64 zeros",
+            "rule 116: only seq 1 follows 64 zeros",
             "segment",
             [change("payload.first_prev_hash", GENESIS), change("payload.manifest_hash", manifest_hash({**Section.bases["segment"]["payload"], "first_prev_hash": GENESIS}))],
             "schema",
@@ -293,7 +293,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "segment_manifest_hash_of_another_manifest",
-            "rule 85: the record and its manifest agree",
+            "rule 117: the record and its manifest agree",
             "segment",
             [change("payload.last_hash", "9" * 64)],
             "schema",
@@ -301,13 +301,13 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "segment_manifest_hash_of_the_file",
-            "rule 85: the manifest's hash, not the file's (DEC-263 item 3)",
+            "rule 117: the manifest's hash, not the file's (DEC-263 item 3)",
             "segment",
             [change("payload.manifest_hash", "7" * 64)],
             "schema",
             "payload.manifest_hash",
         ),
-        invalid("segment_by_a_user", "rule 86", "segment", [change("actor", USER)], "schema", "actor.kind"),
+        invalid("segment_by_a_user", "rule 118", "segment", [change("actor", USER)], "schema", "actor.kind"),
     ]
 
 
@@ -318,18 +318,18 @@ def valid_drafts() -> list[dict]:
     five.append({"hash": "4" * 64, "seq": 5, "stream_id": STREAM})
     one = [leaves[2]]
     return [
-        valid("anchor_of_one_stream", "rule 82: one leaf, its own stream's, is its own root", "anchor", [change("payload.leaves", one), change("payload.root", merkle_root(one))]),
-        valid("anchor_of_five_streams", "rule 82: the split is the largest power of two below the count", "anchor", [change("payload.leaves", five), change("payload.root", merkle_root(five))]),
-        valid("anchor_without_its_token", "§9.11: a timestamping outage leaves the token null (§10)", "anchor", [change("payload.token", None)]),
+        valid("anchor_of_one_stream", "rule 114: one leaf, its own stream's, is its own root", "anchor", [change("payload.leaves", one), change("payload.root", merkle_root(one))]),
+        valid("anchor_of_five_streams", "rule 114: the split is the largest power of two below the count", "anchor", [change("payload.leaves", five), change("payload.root", merkle_root(five))]),
+        valid("anchor_without_its_token", "§9.14: a timestamping outage leaves the token null (§10)", "anchor", [change("payload.token", None)]),
         valid(
             "segment_from_genesis",
-            "rule 84: a first segment follows 64 zeros",
+            "rule 116: a first segment follows 64 zeros",
             "segment",
             [change("payload", segment(ACCOUNT_STREAM, 1, 9, GENESIS))],
         ),
         valid(
             "segment_of_one_event",
-            "rule 84: `first_seq` may equal `last_seq`",
+            "rule 116: `first_seq` may equal `last_seq`",
             "segment",
             [change("payload", segment(f"ctl:{WORKSPACE}", 4, 4, "5" * 64))],
         ),
@@ -424,15 +424,15 @@ def trusted_starts() -> dict:
         "cases": [
             start_case("genesis_at_seq_one", "§11: the genesis start", acct, 1, genesis, {"from_seq": 1, "prev_hash": GENESIS}),
             start_case("genesis_after_seq_one", "§11: genesis is seq 1 only", acct, 2, genesis, None),
-            start_case("segment_at_its_first_seq", "§9.11: a SegmentExported's start", acct, 4, manifest, {"from_seq": 4, "prev_hash": "5" * 64}),
-            start_case("segment_entered_inside", "§9.11: a segment starts at its first_seq", acct, 5, manifest, None),
-            start_case("segment_of_another_stream", "§9.11: the segment's own stream", AGENT_STREAM, 4, manifest, None),
-            start_case("manifest_not_recorded", "§9.11: an absent manifest", acct, 4, {"kind": "manifest", "manifest_hash": "8" * 64}, None),
-            start_case("stamped_anchor_after_its_leaf", "§9.11: a stamped anchor's leaf at n - 1", acct, 10, stamped, {"from_seq": 10, "prev_hash": "1" * 64}),
-            start_case("stamped_anchor_at_its_leaf", "§9.11: the leaf is the event before the start", acct, 9, stamped, None),
-            start_case("unstamped_anchor_is_no_start", "§9.11, DEC-783 item 8: a null token vouches for nothing", acct, 13, unstamped, None),
-            start_case("anchor_without_the_stream", "§9.11: the anchor has no leaf for the stream", AGENT_STREAM, 10, stamped, None),
-            start_case("another_workspaces_segment", "§9.11, DEC-767: only the workspace's own records", acct, 20, {"kind": "manifest", "manifest_hash": FOREIGN_SEGMENT["manifest_hash"]}, None),
+            start_case("segment_at_its_first_seq", "§9.14: a SegmentExported's start", acct, 4, manifest, {"from_seq": 4, "prev_hash": "5" * 64}),
+            start_case("segment_entered_inside", "§9.14: a segment starts at its first_seq", acct, 5, manifest, None),
+            start_case("segment_of_another_stream", "§9.14: the segment's own stream", AGENT_STREAM, 4, manifest, None),
+            start_case("manifest_not_recorded", "§9.14: an absent manifest", acct, 4, {"kind": "manifest", "manifest_hash": "8" * 64}, None),
+            start_case("stamped_anchor_after_its_leaf", "§9.14: a stamped anchor's leaf at n - 1", acct, 10, stamped, {"from_seq": 10, "prev_hash": "1" * 64}),
+            start_case("stamped_anchor_at_its_leaf", "§9.14: the leaf is the event before the start", acct, 9, stamped, None),
+            start_case("unstamped_anchor_is_no_start", "§9.14, DEC-783 item 8: a null token vouches for nothing", acct, 13, unstamped, None),
+            start_case("anchor_without_the_stream", "§9.14: the anchor has no leaf for the stream", AGENT_STREAM, 10, stamped, None),
+            start_case("another_workspaces_segment", "§9.14, DEC-767: only the workspace's own records", acct, 20, {"kind": "manifest", "manifest_hash": FOREIGN_SEGMENT["manifest_hash"]}, None),
         ],
     }
 
@@ -463,8 +463,8 @@ def found(check: str, message: str) -> str:
 
 def root_by_levels(leaves: list[dict]) -> str:
     """§10's tree, built top down by its own split: each span of more than one leaf splits at the
-    largest power of two below its length, found from the length's bit count rather than rule 82's
-    doubling loop, and the halves are hashed recursively. It shares no code with rule 82."""
+    largest power of two below its length, found from the length's bit count rather than rule 114's
+    doubling loop, and the halves are hashed recursively. It shares no code with rule 114."""
 
     def leaf_hash(leaf: dict) -> bytes:
         body = json.dumps({k: leaf[k] for k in sorted(leaf)}, separators=(",", ":"), ensure_ascii=False)
@@ -525,7 +525,7 @@ def chain_breaks(chain: list[dict]) -> list[int]:
 
 
 def resolve_start(records: list[dict], case: dict) -> dict | None:
-    """The oracle's own resolver, written from §9.11's paragraph: filter by workspace first, then by
+    """The oracle's own resolver, written from §9.14's paragraph: filter by workspace first, then by
     the kind of start, and only then by the fit."""
     stream, n, request = case["stream_id"], case["from_seq"], case["request"]
     mine = [r for r in records if workspace_of(r["stream_id"]) == workspace_of(stream)]
@@ -612,22 +612,22 @@ def check_section(section: dict, v3: dict) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.81.empty",
-    "rule.81.workspace",
-    "rule.81.seq",
-    "rule.81.order",
-    "rule.81.self",
-    "rule.82",
-    "rule.83",
-    "rule.84.workspace",
-    "rule.84.first_seq",
-    "rule.84.last_seq",
-    "rule.84.genesis",
-    "rule.85",
-    "rule.86",
+    "rule.113.empty",
+    "rule.113.workspace",
+    "rule.113.seq",
+    "rule.113.order",
+    "rule.113.self",
+    "rule.114",
+    "rule.115",
+    "rule.116.workspace",
+    "rule.116.first_seq",
+    "rule.116.last_seq",
+    "rule.116.genesis",
+    "rule.117",
+    "rule.118",
     "boundary.leaf_prefix",
     "boundary.merkle_split",
-    "boundary.rule_84_first_seq",
+    "boundary.rule_116_first_seq",
     "record.extra",
     "record.missing",
     "artifact_refs",
@@ -672,9 +672,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         payload["manifest_hash"] = payload["file_sha256"]
 
     return [
-        ("a base draft breaks rule 86", "drafts.valid", mutated(lambda s: s["drafts"]["segment"]["actor"].update(kind="user", build=None))),
+        ("a base draft breaks rule 118", "drafts.valid", mutated(lambda s: s["drafts"]["segment"]["actor"].update(kind="user", build=None))),
         ("the base anchor is rebuilt over other leaves", "anchors.v3_root", mutated(base_root_of_other_leaves)),
-        ("a valid anchor's root is split at the half while rule 82 splits the same way", "anchors.root", mutated(five_split_halved)),
+        ("a valid anchor's root is split at the half while rule 114 splits the same way", "anchors.root", mutated(five_split_halved)),
         ("a valid segment's manifest hash is the file's", "segments.manifest", mutated(manifest_of_the_file)),
         ("a valid segment names another workspace's stream", "drafts.tenant", mutated(foreign_segment)),
         (

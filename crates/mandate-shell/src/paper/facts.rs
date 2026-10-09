@@ -6,9 +6,10 @@
 use std::path::Path;
 use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AssetSnapshot, DataClient, DataTransport, LatestQuote, MinuteBars, Pause, RetryPolicy,
-    TradingClient, TradingTransport,
+    AccountRules, AssetSnapshot, DataClient, DataTransport, LatestQuote, MinuteBars, Pause,
+    RetryPolicy, TradingClient, TradingTransport, alpaca_account_rules,
 };
 use mandate_executor::{BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest};
 use mandate_liquidity::{
@@ -16,17 +17,22 @@ use mandate_liquidity::{
     trailing_volume,
 };
 use mandate_num::{Price, Qty, Usd};
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 
+use super::absent;
 use super::artifacts::Artifacts;
-use super::{SYMBOL, absent};
-use crate::adapters::{trusted_daily_bars, untrusted};
+use crate::adapters::{trusted_daily_bars, trusted_daily_closes, untrusted};
 use crate::error::Cause;
 
-/// What the broker answered to the preflight's six GETs, exactly as `mandate-alpaca` read it.
+/// What the broker answered to the preflight's six GETs, exactly as `mandate-alpaca` read it, beside
+/// the account rules `mandate-alpaca` declares for it.
 #[derive(Debug, Clone)]
 pub struct BrokerFacts {
     pub account: BrokerAccount,
+    /// The account type and day-trading regime the connector declares for its broker (trading
+    /// spec §7.2), which the gate's account snapshot takes rather than any shell value (X-9,
+    /// DEC-840).
+    pub account_rules: AccountRules,
     pub positions: Vec<BrokerPosition>,
     pub open_orders: Vec<BrokerOrder>,
     pub asset: AssetSnapshot,
@@ -59,7 +65,9 @@ pub struct PaperFacts {
 /// `ListOpenOrders` through [`TradingClient::call_one`], the asset record through
 /// [`TradingClient::asset`], the latest IEX quote through [`DataClient::latest_quote`], whose age
 /// bound is the rule-set artifact's, and the trailing window's IEX minute bars through
-/// [`DataClient::recent_minute_bars`]. Nothing here can submit, cancel, or close.
+/// [`DataClient::recent_minute_bars`]. The account rules are the connector's declaration,
+/// [`alpaca_account_rules`], which no broker call answers. Nothing here can submit, cancel, or
+/// close.
 ///
 /// # Errors
 /// [`Cause::Absent`] when a read is not answered with the fact it asked for.
@@ -121,6 +129,7 @@ where
             .map_err(|_| absent("the trailing window's IEX minute bars"))?;
         Ok(BrokerFacts {
             account,
+            account_rules: alpaca_account_rules(),
             positions,
             open_orders,
             asset,
@@ -135,8 +144,10 @@ where
 /// - `daily` must pass the same trust check the signal's bars do, ending on the last completed
 ///   session; its stored close and volume fields are parsed into [`DailyBar`] values, and
 ///   [`daily_liquidity`] reads the last 20.
-/// - `minute_bars` must be AAPL's, as the preflight read them; [`trailing_volume`] sums those that
-///   start inside the five minutes before `now` and refuses one that ends after it.
+/// - `minute_bars` must be `symbol`'s, as the preflight read them; [`trailing_volume`] sums those
+///   that start inside the five minutes before `now` and refuses one that ends after it.
+///
+/// `symbol` is the run's instrument, the one its artifacts bind, so no instrument is pinned here.
 ///
 /// IEX volumes understate consolidated volume, so every figure errs toward the tighter limit.
 ///
@@ -144,14 +155,15 @@ where
 /// [`Cause::Untrusted`] or the dataset's own error when the daily bars cannot be trusted at `now`,
 /// and [`Cause::Absent`] naming the minute-bar fact that does not hold.
 pub fn liquidity_facts(
+    symbol: &InstrumentId,
     daily: &Path,
     minute_bars: &MinuteBars,
     now: UtcNanos,
 ) -> Result<LiquidityFacts, Cause> {
-    if minute_bars.instrument.as_str() != SYMBOL {
-        return Err(absent("AAPL's minute bars"));
+    if minute_bars.instrument != *symbol {
+        return Err(absent("the instrument's minute bars"));
     }
-    let daily: Vec<DailyBar> = trusted_daily_bars(daily, SYMBOL, now)?
+    let daily: Vec<DailyBar> = trusted_daily_bars(daily, symbol.as_str(), now)?
         .iter()
         .map(|bar| -> Result<DailyBar, LiquidityError> {
             Ok(DailyBar {
@@ -180,6 +192,21 @@ pub fn liquidity_facts(
         adv_20d,
         trailing_5m_volume: trailing_volume(&minutes, now).map_err(refusal)?,
     })
+}
+
+/// The pinned instrument's stored daily closes, each with its session, for the model host
+/// (E7-19 slice 5, the first paper trade brief's E1a, DEC-846 item 2): `daily` through the same
+/// trust check [`liquidity_facts`] reads it through, ending on the last completed session at
+/// `now`, and exactly as stored, one a day the manifest lists, in its date order.
+///
+/// # Errors
+/// [`Cause::Untrusted`] or the dataset's own error when the daily bars cannot be trusted at `now`.
+pub fn daily_closes(
+    symbol: &InstrumentId,
+    daily: &Path,
+    now: UtcNanos,
+) -> Result<Vec<(Date, Price)>, Cause> {
+    trusted_daily_closes(daily, symbol.as_str(), now)
 }
 
 fn refusal(error: LiquidityError) -> Cause {

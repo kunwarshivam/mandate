@@ -7,11 +7,12 @@
 //! never writes an agent or account stream and never talks to a runtime or a broker (`AGENTS.md`
 //! rule 12). Its local checks are a convenience: the runtime makes every one of them again.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
-use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
-use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
+use mandate_canon::{Digest, Int, Key, Object, Value, encode_ulid, parse, to_canonical};
+use mandate_journal::{AppendOutcome, ArtifactRef, Environment, Head, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
 
 /// The reads and the one append a command makes, with journal spec §5.1's append. The
@@ -217,12 +218,14 @@ fn build_ref() -> String {
     format!("sha256:{}", digest.to_hex())
 }
 
-/// What an envelope says of its event besides its type and payload: the schema version, and the
-/// content references the payload names, sorted, which the envelope must list (journal spec §3).
+/// What an envelope says of its event besides its type and payload: the schema version, the
+/// content references the payload names, sorted, which the envelope must list (journal spec §3),
+/// and the configuration it binds, by kind (§9's required `config_refs`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Shape {
     pub(crate) schema_version: u64,
     pub(crate) artifact_refs: Vec<String>,
+    pub(crate) config_refs: Vec<(&'static str, Value)>,
 }
 
 /// Who writes a control-stream draft. Private to this module, so no other module can name the
@@ -257,6 +260,7 @@ pub(crate) fn open_control_stream(
     let shape = Shape {
         schema_version: 1,
         artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
     };
     let bytes = draft(
         Writer::Opener,
@@ -307,6 +311,28 @@ fn draft(
     payload: Value,
     now: Now,
 ) -> Result<Vec<u8>, ControlError> {
+    let ids = (event_id, None);
+    draft_caused(writer, owner, stream, ids, event_type, shape, payload, now)
+}
+
+/// [`draft`] for an event that names its cause, `ids.1`, as its `causation_id` (journal spec §3).
+///
+/// # Errors
+/// As [`draft`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each is one envelope member's source; bundling them would name a type for one caller"
+)]
+fn draft_caused(
+    writer: Writer,
+    owner: &Owner,
+    stream: &StreamId,
+    (event_id, causation): (&str, Option<&str>),
+    event_type: &str,
+    shape: Shape,
+    payload: Value,
+    now: Now,
+) -> Result<Vec<u8>, ControlError> {
     let (kind, id) = match writer {
         Writer::Owner => ("user", owner.user.as_str()),
         Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
@@ -331,9 +357,9 @@ fn draft(
             "artifact_refs",
             Value::Array(shape.artifact_refs.iter().map(|r| text(r)).collect()),
         ),
-        ("causation_id", Value::Null),
+        ("causation_id", causation.map_or(Value::Null, text)),
         ("clock_source", text("local")),
-        ("config_refs", Value::Object(Object::new())),
+        ("config_refs", object(shape.config_refs)?),
         ("correlation_id", Value::Null),
         ("environment", text(owner.environment.as_str())),
         ("envelope_version", one.clone()),
@@ -521,29 +547,8 @@ fn derive(
     let digest = Digest::of(&to_canonical(&bound));
     let mut high = [0_u8; 16];
     high.copy_from_slice(&digest.as_bytes()[..16]);
-    Ok(ulid(u128::from_be_bytes(high)))
+    Ok(encode_ulid(u128::from_be_bytes(high)))
 }
-
-/// `n` in ULID's 26 Crockford base-32 digits, most significant first. The fallbacks are dead: a
-/// digit's shift is at most 125 bits, which neither overflows `checked_mul` nor reaches 128 for
-/// `checked_shr`, and a five-bit index always names one of the 32 letters; they stand in for the
-/// panics the lint header forbids.
-fn ulid(n: u128) -> String {
-    const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-    (0..ULID_LEN)
-        .rev()
-        .map(|digit| {
-            let shifted = digit
-                .checked_mul(5)
-                .and_then(|bits| n.checked_shr(bits))
-                .unwrap_or_default();
-            let index = usize::try_from(shifted & 0x1f).unwrap_or_default();
-            ALPHABET.get(index).copied().map_or('0', char::from)
-        })
-        .collect()
-}
-
-const ULID_LEN: u32 = 26;
 
 /// The pause before retry `retry` (1 for the first retry) of the command whose id is `event_id`:
 /// doubling from [`FIRST_BACKOFF`] to at most [`LAST_BACKOFF`], plus a jitter below that base drawn
@@ -572,27 +577,40 @@ pub fn backoff(retry: u32, event_id: &str) -> Result<Duration, ControlError> {
 /// overflows.
 const BACKOFF_DOUBLINGS: u32 = 16;
 
-/// One attempt at appending `bytes`, the draft of `event_id`: its stored `seq` once the journal
-/// holds it, or `None` for an answer that is retried.
+/// What one attempt at an append found.
+enum Attempted {
+    /// The journal holds the draft, at this `seq`.
+    Stored(u64),
+    /// The stream's head was not the one the append expected.
+    Moved,
+    /// A fence, a lost answer, or an unavailable journal: the same append is tried again.
+    Retry,
+}
+
+/// One attempt at appending `bytes`, the draft of `event_id`, at `pinned` when the caller decided
+/// at that head, or at the head read now.
 fn attempt(
     journal: &mut dyn ControlJournal,
     stream: &StreamId,
-    event_id: &str,
-    bytes: &[u8],
+    (event_id, bytes): (&str, &[u8]),
+    pinned: Option<u64>,
     now: Now,
-) -> Result<Option<u64>, ControlError> {
+) -> Result<Attempted, ControlError> {
     let epoch = journal.take_ownership(stream)?;
-    let head = journal.head(stream)?.seq;
+    let head = match pinned {
+        Some(head) => head,
+        None => journal.head(stream)?.seq,
+    };
     match journal.append(stream, head, epoch, now.at, &[bytes])? {
         AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows) => rows
             .iter()
             .find(|row| row.event_id == event_id)
-            .map(|row| Some(row.seq))
+            .map(|row| Attempted::Stored(row.seq))
             .ok_or_else(|| ControlError::Journal("the stored event is missing".into())),
-        AppendOutcome::Fenced { .. }
-        | AppendOutcome::HeadMismatch { .. }
-        | AppendOutcome::Ambiguous
-        | AppendOutcome::Unavailable => Ok(None),
+        AppendOutcome::HeadMismatch { .. } => Ok(Attempted::Moved),
+        AppendOutcome::Fenced { .. } | AppendOutcome::Ambiguous | AppendOutcome::Unavailable => {
+            Ok(Attempted::Retry)
+        }
         AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(format!(
             "another event is stored under this id at seq {stored_seq}"
         ))),
@@ -645,9 +663,12 @@ pub(crate) fn commit(
     };
     key.push(("step_up", evidence));
     let payload = object(key)?;
+    let mut referenced = BTreeSet::new();
+    digest_refs(&payload, &mut referenced);
     let shape = Shape {
         schema_version: 1,
-        artifact_refs: Vec::new(),
+        artifact_refs: referenced.into_iter().collect(),
+        config_refs: Vec::new(),
     };
     let bytes = draft(
         Writer::Owner,
@@ -660,6 +681,95 @@ pub(crate) fn commit(
         now,
     )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
+}
+
+/// A control-stream event the owner confirms that names another event as its cause: its type and
+/// schema version, the cause's event id, and the payload's members other than the step-up evidence.
+#[derive(Debug, Clone)]
+pub(crate) struct Caused {
+    /// The control stream's head the owner's command read the rows it checked at.
+    pub(crate) head: u64,
+    pub(crate) event_type: &'static str,
+    pub(crate) schema_version: u64,
+    pub(crate) causation_id: String,
+    pub(crate) key: Vec<(&'static str, Value)>,
+}
+
+/// Commits `caused` with fresh `cli_confirm` evidence whose `authenticated_at` is the instant the
+/// owner ran the command, a timestamp as journal spec §9.8 types it (DEC-802 item 8), appended at
+/// `caused.head` and nowhere else: what the command checked against the stream's rows holds at the
+/// append (#907 review). Its event id is derived from the key, the cause and that head (DEC-290), so
+/// a retry commits nothing twice. `None` when the stream has moved past that head: the command
+/// reads the rows again and decides again.
+///
+/// # Errors
+/// As [`commit`].
+pub(crate) fn commit_caused(
+    journal: &mut dyn ControlJournal,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    caused: Caused,
+    now: Now,
+) -> Result<Option<Submitted>, ControlError> {
+    let Caused {
+        head,
+        event_type,
+        schema_version,
+        causation_id,
+        mut key,
+    } = caused;
+    let stream = control_stream(owner)?;
+    let mut bound = key.clone();
+    bound.push(("causation_id", text(&causation_id)));
+    let event_id = derive(&stream, event_type, &object(bound)?, true, head)?;
+    let evidence = object(vec![
+        ("assertion_id", text(&ids.assertion_id())),
+        ("authenticated_at", text(&now.at.to_string())),
+        ("method", text("cli_confirm")),
+    ])?;
+    key.push(("step_up", evidence));
+    let shape = Shape {
+        schema_version,
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    let named = (event_id.as_str(), Some(causation_id.as_str()));
+    let payload = object(key)?;
+    let bytes = draft_caused(
+        Writer::Owner,
+        owner,
+        &stream,
+        named,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
+    let mut retries = 1..ATTEMPTS;
+    loop {
+        match attempt(journal, &stream, (&event_id, &bytes), Some(head), now)? {
+            Attempted::Stored(seq) => return Ok(Some(Submitted { event_id, seq })),
+            Attempted::Moved => return Ok(None),
+            Attempted::Retry => {}
+        }
+        let Some(retry) = retries.next() else {
+            return Err(unsettled(&event_id, Repeat::FindsEarlier));
+        };
+        journal.wait(backoff(retry, &event_id)?);
+    }
+}
+
+/// Every digest reference `value` holds, at any depth: what the envelope's `artifact_refs` lists,
+/// sorted and each once (journal spec §3), such as an answer's `content_hash` (DEC-533 item 6).
+fn digest_refs(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(s) if ArtifactRef::parse(s).is_some() => {
+            out.insert(s.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|v| digest_refs(v, out)),
+        Value::Object(members) => members.values().for_each(|v| digest_refs(v, out)),
+        _ => {}
+    }
 }
 
 /// [`commit`] for an event whose payload is exactly the owner's choice, with no second and no
@@ -710,17 +820,18 @@ fn settle(
 ) -> Result<Submitted, ControlError> {
     let mut retries = 1..ATTEMPTS;
     loop {
-        if let Some(stored) = attempt(journal, stream, &event_id, bytes, now)? {
-            return Ok(Submitted {
-                event_id,
-                seq: stored,
-            });
+        if let Attempted::Stored(seq) = attempt(journal, stream, (&event_id, bytes), None, now)? {
+            return Ok(Submitted { event_id, seq });
         }
         let Some(retry) = retries.next() else {
-            break;
+            return Err(unsettled(&event_id, repeat));
         };
         journal.wait(backoff(retry, &event_id)?);
     }
+}
+
+/// Why a command gave up after [`ATTEMPTS`], naming the event it may have committed.
+fn unsettled(event_id: &str, repeat: Repeat) -> ControlError {
     let again = match repeat {
         Repeat::FindsEarlier => {
             "if nothing else has been committed since, running it again finds it rather than \
@@ -728,10 +839,10 @@ fn settle(
         }
         Repeat::AlwaysCommits => "running it again commits another",
     };
-    Err(ControlError::Journal(format!(
+    ControlError::Journal(format!(
         "the control stream did not settle after {ATTEMPTS} attempts; the command may have been \
          committed once, as event {event_id}; {again}"
-    )))
+    ))
 }
 
 #[cfg(test)]
@@ -770,6 +881,7 @@ mod tests {
         let shape = || Shape {
             schema_version: 1,
             artifact_refs: Vec::new(),
+            config_refs: Vec::new(),
         };
         let actor = |writer, event_type| -> Result<(String, String), ControlError> {
             let bytes = draft(
@@ -805,5 +917,25 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// The references an envelope lists are every digest reference in the payload, at any depth,
+    /// inside arrays as inside objects, sorted and each once; a lookalike is not one (journal spec
+    /// §3, DEC-533 item 6).
+    #[test]
+    fn the_listed_references_are_every_digest_reference_at_any_depth() {
+        let [a, b, c] = ["a", "b", "c"].map(|d| format!("sha256:{}", d.repeat(64)));
+        let payload = parse(
+            format!(
+                r#"{{"top":"{c}","nested":{{"list":["{a}",{{"deep":"{b}"}},"{c}"]}},
+                "upper":"sha256:{}","short":"sha256:abc","plain":"cli-0123","n":1}}"#,
+                "A".repeat(64)
+            )
+            .as_bytes(),
+        )
+        .unwrap_or(Value::Null);
+        let mut listed = BTreeSet::new();
+        digest_refs(&payload, &mut listed);
+        assert_eq!(listed.into_iter().collect::<Vec<_>>(), [a, b, c]);
     }
 }

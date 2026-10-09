@@ -1,0 +1,172 @@
+[
+  {
+    "label": "an org scope",
+    "set": {
+      "/scope": {
+        "kind": "org",
+        "id": null
+      }
+    }
+  },
+  {
+    "label": "a workspace scope with an id",
+    "set": {
+      "/scope": {
+        "kind": "workspace",
+        "id": "ws_1"
+      }
+    }
+  },
+  {
+    "label": "an agent scope with id null",
+    "set": {
+      "/scope/id": null
+    }
+  },
+  {
+    "label": "a float bid",
+    "set": {
+      "/owner_exit/0/bid": 101.5
+    }
+  },
+  {
+    "label": "an uppercase asset id",
+    "set": {
+      "/owner_exit/0/asset_id": "7B4A1C2E-1111-4A2B-9C3D-000000000001"
+    }
+  },
+  {
+    "label": "no scope",
+    "remove": [
+      "/scope"
+    ]
+  },
+  {
+    "label": "auto: no /scope",
+    "remove": [
+      "/scope"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /environment_shown outside its set",
+    "set": {
+      "/environment_shown": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /scope/kind",
+    "remove": [
+      "/scope/kind"
+    ]
+  },
+  {
+    "label": "auto: no /scope/id",
+    "remove": [
+      "/scope/id"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /scope",
+    "set": {
+      "/scope/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /scope/kind outside its set",
+    "set": {
+      "/scope/kind": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /owner_exit/0/asset_id",
+    "remove": [
+      "/owner_exit/0/asset_id"
+    ]
+  },
+  {
+    "label": "auto: no /owner_exit/0/bid",
+    "remove": [
+      "/owner_exit/0/bid"
+    ]
+  },
+  {
+    "label": "auto: no /owner_exit/0/bid_size",
+    "remove": [
+      "/owner_exit/0/bid_size"
+    ]
+  },
+  {
+    "label": "auto: no /owner_exit/0/quoted_at",
+    "remove": [
+      "/owner_exit/0/quoted_at"
+    ]
+  },
+  {
+    "label": "auto: no /owner_exit/0/floor",
+    "remove": [
+      "/owner_exit/0/floor"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /owner_exit/0",
+    "set": {
+      "/owner_exit/0/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /record/artifact",
+    "remove": [
+      "/record/artifact"
+    ]
+  },
+  {
+    "label": "auto: no /record/ui_build",
+    "remove": [
+      "/record/ui_build"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /record",
+    "set": {
+      "/record/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /step_up/assertion_id",
+    "remove": [
+      "/step_up/assertion_id"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/authenticated_at",
+    "remove": [
+      "/step_up/authenticated_at"
+    ]
+  },
+  {
+    "label": "auto: no /step_up/method",
+    "remove": [
+      "/step_up/method"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /step_up",
+    "set": {
+      "/step_up/mutant_member": 1
+    }
+  },
+  {
+    "label": "a scope without its kind",
+    "set": {
+      "/scope": {
+        "id": null
+      }
+    }
+  }
+]

@@ -104,6 +104,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runner is slower; the same 691 tests run, so the saving comes from the harness and not from
   running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
   fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
+- **E1-7 (Should)** As an engineer, I want `xtask`'s own checks under the mutants gate, so that a
+  safety check written in `xtask`, such as X1's live-feature check (E7-26, DEC-529 item 3), cannot
+  lose a rule without a test failing. `xtask/layers.toml` marks `xtask` `safety_critical = false`,
+  so `cargo xtask ci mutants` never mutates it today; X1's mutants were run by hand on its diff
+  (#738 review, finding 3).
+  *Accepted when:* CI runs `cargo mutants -p xtask` on the diff of every PR that changes
+  `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
+  mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
+  in a follow-up story, so the job starts green.
 
 ### E2 Market data
 
@@ -706,6 +715,56 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-23 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want each broker to
+  declare what it supports as a capability profile, so that shared code never branches on a broker
+  and a new broker is one profile, not new rules ([DEC-531](decisions/DEC-531.md),
+  [DEC-630](decisions/DEC-630.md), [ADR-0004](../adr/0004-broker-capability-profiles.md), trading spec §5.2; the
+  [first live trade](tasks/first-live-trade.md) rows SP1, B1, B2a, B2b, B3). *Accepted when:*
+  `CapabilityProfile` and its canonical hash live in `mandate-domain`; `BrokerConnector::profile`
+  hands each connector's profile to the executor; Alpaca declares trading spec §5.2's table as its
+  profile with no Alpaca outcome changed (LT-14); protection, reconciliation and the builder's
+  quantity form read the profile, and the executor's `asset_class == Crypto` protection branch is
+  gone (LT-2); policy and profile intersect, never override (LT-3); and a property test over
+  generated profiles checks every order sent is one the profile allows.
+- **E7-24 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want to log in to
+  Robinhood with OAuth for one run, holding the token only in the connector process's memory, so
+  that no credential reaches a disk, a log, the journal or an agent (CN-1, `AGENTS.md` rule 7; the
+  [first live trade](tasks/first-live-trade.md) rows O1a, O1b). *Accepted when:* the PKCE login
+  runs in the founder's browser through a loopback redirect; the token is a `SecretString` in the
+  connector process only and is gone at exit (a restart logs out); a canary-token test scans every
+  output, error and artifact (LT-9); expiry mid-run leaves the deployment `closing_only` and the
+  resting stop untouched; and no test or CI job reaches a Robinhood host (LT-1).
+- **E7-25 (Must, M6, the first live trade, DEC-124; SC)** As the founder, I want a simulated
+  Robinhood server that speaks the published contract over loopback MCP with Robinhood's rules, so
+  that every Robinhood test and the founder's rehearsal run without touching Robinhood (DEC-124's
+  paper stage; the [first live trade](tasks/first-live-trade.md) rows S1, S2, R0). *Accepted
+  when:* `mandate-rh-sim` is a `tool` crate no production crate depends on; it serves the nine
+  allowlisted tools with the contract's shapes, its order states and its rules (no query by
+  `ref_id`, one GTC stop-limit as protection); its pure core carries the property tests
+  of S1's tests PRs; and the rehearsal (R0) runs the live build against it on a journal separate from
+  the live one.
+- **E7-26 (Must, M6, the first live trade, DEC-529 item 3; SC)** As the founder, I want one
+  deployment runner for any environment and broker, with live hosts only behind a `live` feature
+  that only the runner may enable, so that no other build can reach a live broker (ES-23; the
+  [first live trade](tasks/first-live-trade.md) rows X1, G1a, G1b). *Accepted when:*
+  `cargo xtask live-feature` lets only the runner declare a `live` feature, and no CI or release
+  build enables it except one compile-only job (ES-23 as DEC-529 item 3 narrows it), so the
+  default build contains no Robinhood host (LT-1); the runner built from the
+  paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
+  (LT-4); and a restart after a run sends no second order (LT-6).
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 5, #976's review):* X1's word scan does not
+  read through `time -p`, the wrappers `setsid`, `flock`, `ionice`, `taskset`, `unbuffer`,
+  `doas`, `su -c` and `runuser`, `env -S`, or a dynamic `printf -v "$N"`. They are disclosed
+  residuals; the build-file and live-feature checks and review stand behind them. Close them with
+  a tests correction that pins each form as refused, then the implementation that refuses it.
+- **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
+  want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
+  so that a token that may reach both environments is on the record before it is used
+  ([DEC-821](decisions/DEC-821.md) item 4, DEC-441 item 22, spec §5.3; follows E7-17,
+  [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
+  defines the event that records, with the connection, whether the token may reach the other
+  environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
+  OAuth connect appends `ConnectionEstablished` before that event.
 
 ### E8 Escalation and approvals
 
@@ -1066,13 +1125,26 @@ after U-A1 to U-A5 are recorded.
   perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
   dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
 - **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
-  item 21; until the founder decides, the adapter runs against a recorded fixture only.
-  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
-  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
-- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
-  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  item 21, decided in DEC-820 item 3 for the founder's own address only; every other recipient waits
+  for counsel's general footer.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match
+  `<origin>/n/<notice id>` (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider
+  configuration check; the founder-only SMTP transport (spec §4.4, DEC-820 items 3 and 4) sends only
+  to the one founder address the deployment's configuration names, read from the vault, with exactly
+  `Sent by your Mandate workspace to its owner.` as the footer; a notice for any other recipient, a
+  workspace owner who is not the founder included, is refused `recipient_not_permitted` before any
+  connection, is not retried, marks no address `unreachable`, and raises no `channel_lost`; the
+  `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
+  shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
+  outside the founder-only transport while the general footer is unresolved.
+- **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
+  founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
+  at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
-  from the vault and appears in no log (rule 7).
+  from the vault and appears in no log (rule 7). For Telegram (spec §4.5, DEC-700 item 2): a linking
+  code is refused once 10 minutes have passed since it was shown; it is spent by the first message
+  that carries it, even when no address is then recorded; showing a new code revokes the earlier
+  one; and the replies to an unknown, an expired, and a spent code are byte-identical.
 - **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
   inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
   the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
@@ -1165,6 +1237,19 @@ story buys a service, and none uses a real identity-provider account in tests (s
   removed members, clients, service accounts, and agents counting zero and an unreadable count reading
   as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
   closed within 60 s (ID-3).
+  *Follow-ups* (#789's second review, minors backlogged under the freeze rule):
+  - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
+    which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
+  - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
+    record for it: an invitation's roles are fixed by `MemberInvited`. Until a record exists, the
+    writer maps it to `MemberInvitationRevoked` then `MemberInvited` with the reduced roles (merge
+    coordinator, 2026-10-09); whether to add a record stays open.
+  - Fold vectors (#812's review, access-reducing): a reactivation with a strict subset of the kept
+    roles, an activation with a strict subset of the invitation's roles, and a grant of a role held
+    but still cooling off are each refused, but only disjoint roles are tested; add a valid and a
+    refused history and a fold mutant for each.
+  - Rule 103's non-cooling branch has no vector with a gap under 1 s (#789's delta review); add an
+    invalid 1 ns gap and a mutant.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -1379,6 +1464,14 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - every notification carries only an opaque ID and generic text (rule 6);
   - turning a monitor agent into one that trades is a new mandate the owner confirms, never an
     in-place change.
+- **E10-20 (Must, M6, blocker for starting an agent on the L2 host; SC)** As the founder, I want
+  `mandate agent pause` and `mandate agent kill` reachable from the CLI, so that the SSH
+  kill-switch fallback of [DEC-822](decisions/DEC-822.md) item 7 works and the rehearsal in
+  FOUNDER-STEPS step 16 (`deploy/README.md`) can pass. The code exists in
+  `crates/mandate-cli/src/agent.rs` and `control.rs`; `AgentCommand` in `gestures.rs` does not name
+  them. *Accepted when:* `AgentCommand` carries `pause` and `kill`, wired to that code; an agent
+  kill touches only its own scope (rule 13); and a test runs each command through the binary
+  against the journal. No agent starts on the L2 host before this lands.
 
 ### E11 Web app: dashboard and controls
 
@@ -1463,8 +1556,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 ### E12 Audit explorer
 
 - **E12-1 (Must)** As an auditor, I want a causal trace from any fill back to its causes.
+  *Follow-ups (A2 review):* the quoted items' `author` reads `owner_selected` for an owner-selected
+  signal model's output through `config_refs.mandate_version`, with the founder's label, once
+  [DEC-773](decisions/DEC-773.md) is decided. Slice A2b tests: `payload.client_order_id` with its
+  lower-`seq` filter, `OrderRequestRecorded`, `payload.approval`, `payload.outputs_used[]`, the
+  approval's `outputs[]`, `payload.thesis_id`, `OrderSubmitted` version 1, the quoted members of
+  `ThesisProposed` and `ModelInvocationRecorded`, a missing singular `IntentReceived`, and
+  [DEC-772](decisions/DEC-772.md) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
+  *Follow-ups ([#772](https://github.com/kunwarshivam/mandate/pull/772) review, journal spec):* rule 81
+  does not check that a client's `on_behalf_of` differs from its own `id` (predates #772); rule
+  108's break-glass check requires only a `causation_id` for a `platform_operator` read, not that it
+  cites a `PlatformOperatorAction` (with the E12-3 tests PR); "never a ticker" in
+  `RecordsAccessed.resources` and `operation` is prose only, both being `id`-typed; and the client
+  clause of rules 109 and 110 is unreachable, since rule 83 refuses a client first.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
@@ -1485,6 +1591,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `ExportCreated` before it is served, its canonical form passes the journal verifier, and derived
   JSON and CSV name their manifest hash (API-16); a viewer can read none of it and an auditor can act
   on nothing (API-2).
+  *Follow-up (#797 review; [DEC-770](decisions/DEC-770.md) item 5):* journal spec §2 defines the
+  notice stream `ntf:{workspace_id}`, but `mandate_journal::StreamId::parse` does not parse `ntf:`,
+  so `mandate-audit`'s `StreamType::Notice` is unreachable and an `ntf:` id reads as absent. Owed:
+  `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
+  case in `crates/mandate-audit/tests/scope.rs`.
 
 ### E13 Hybrid deployment
 
@@ -2426,6 +2537,16 @@ an agent on a different model, zero missed mutants, and green CI).
 
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
+From the review of workspace API spec §4.8.1 (the audit read contracts, #767):
+
+- Exports: define the file states `GET /exports/{id}` reports (recorded, building, ready). Map a
+  failed or `Ambiguous` `ExportCreated` append to §3.5's `journal_unavailable` or `effect:
+  unknown`, retryable with the same `Idempotency-Key`. Define the per-stream range when
+  `recorded_at` steps back (DEC-764 notes the clock may), for example by seq bounds read from a
+  monotone index. Make the view header's `format` match the request's (`json` against `jsonl`).
+- `mandate-audit` enforces tenant isolation, so it is safety-critical. Its `xtask/layers.toml`
+  entry, CODEOWNERS line, and lint header land with the crate (#797).
+
 From the final review of mandate spec v0.3:
 
 - Tie the loss carry to the broker account rather than `connection_id`; show the carry and its
@@ -2577,12 +2698,14 @@ From E10-1's slice-V implementation (DEC-161):
     This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
-    (HLD §8), as a new `schema_version` with its own vectors.
+    (HLD §8), as a new `schema_version` with its own vectors. Specified as version 2 in journal
+    §9.8 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
     which must name each action's members: the operator stop's subject, the global kill switch's
     scope, the acceptable-use action, and the row's "approval".
-  - **Proposed, item 10:** a clause binds an account stream to its connection, so that
-    `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Item 10, closed by [DEC-800](decisions/DEC-800.md):** `ConnectionEstablished` version 2's
+    `account_ref` binds an account stream to its connection (journal §9.8); the mapping reads its
+    argument from that binding.
   - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
@@ -3096,6 +3219,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   OCO is 1; the first completes (Q1 = 2) and its legs activate, so sells are 11 + 1 + 2 = 14 against
   a position of 13. The fix counts held legs, sized to their entry, in every cap and sizing,
   re-placement included, and pins the arithmetic with a hand case.
+  Two more paths size the same way (#689's round-2 review): `passive_exit`'s rest OCO, reachable
+  without E5 whenever another agent's bracket is working, and `re_cover` → `re_place`. The
+  re-placement alone oversells by f1 once the bracket completes, with no second entry: it covers
+  B + f1, and the bracket's legs then sell Q1 against a position of B + Q1. E1's tests
+  ([DEC-532](decisions/DEC-532.md)) pin all four paths as pending hand cases under
+  `BEHAVIOUR_ONLY_TESTS` rows, each with the protected 10 and a bracket holding 4 of 10:
+  `an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs` (8, not 12),
+  `a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs` (10, not 14),
+  `a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs` (7, not 11) and
+  `a_re_cover_leaves_a_held_brackets_shares_to_its_legs` (2, not 6). The fix sizes each path on
+  the position less every working bracket entry's filled quantity whose legs are held, deletes
+  the rows and the `#[ignore]` lines, and covers the original exit-beside-activated-legs case above.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):
@@ -3142,7 +3277,15 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `BEHAVIOUR_ONLY_TESTS` row and `#[ignore]` line. Minors from the same review, for the same PR or
   the backlog: `interval_limit` marks the first open interval alerted, which can re-alert a later
   one each tick; the fold's doc for these arms; and `awaiting.insert` replaces an instrument's
-  awaited set rather than adding to it.
+  awaited set rather than adding to it. #771's review added two tests before the fix: a hand case
+  with the awaited interval between two others (`a_new_start_ends_the_awaited_middle_interval_only`)
+  and a property lead where the awaited interval is the first open one and another is the latest
+  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. Done by E4b's
+  fix: that arm ends the open interval of a bracket whose OCO's acknowledgment was awaited (or an
+  unbracketed one), never another bracket's; `no_interval_exceeds_the_limit_without_an_alert` and
+  both hand cases are live again. The three minors stay open, with a fourth from that review: the
+  fix's match lets an unbracketed open interval (an exit's or a re-placement's) be ended for any
+  awaited bracket OCO; no script here has reached it yet, so pin it with a case if one does.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
@@ -4449,6 +4592,58 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
 
+From the workspace API contract's drift rule (DEC-683, E10-10):
+
+- **A `cargo xtask` check for stale planned markers.** List every `(planned: <story>)` in a spec
+  table and every `x-planned` value in `schemas/`, with its story's state, and fail on a marker
+  whose story is done. Until it exists, removing a story's markers is part of its done-definition.
+- **Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
+  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).
+- **Journal the members an API-7 operation dropped** (DEC-682 item 27): the command event names the
+  JSON pointers its `202` listed in `dropped`, so the record shows what the server ignored. A
+  journal spec change first.
+- **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
+  the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
+
+From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
+
+- **The mutation plan's tests** (#768).
+  - `the_planned_shards_test_the_gates_mutants_and_no_more_per_shard` seeds a diff whose mutants
+    are all in one package. Add a second mutated crate to its fixture, so the plan's sum across
+    packages is pinned as well as its listing.
+  - `ci_sizes_the_mutation_matrix_from_the_plan` pins exact `ci.yml` lines, so rewording one
+    fails the test even when the wiring still holds. It fails safe; parse the jobs' keys instead
+    when it next gets in the way.
+- **The behaviour-only rows** (#770, `xtask/behaviour-only/`).
+  - Pin the exact refusal message for a non-`.toml` file in `a_malformed_or_misnamed_row_is_refused`,
+    as the other refusals' messages are pinned.
+  - Read the rows through `git ls-files` rather than `read_dir`, as `ci pending` reads test files, so
+    an untracked or ignored file in the directory cannot change the gate's verdict.
+  - Say in the README that two tests whose paths differ only by `::` against `__` derive the same
+    file name, so the second row cannot be added until one is renamed.
+- **The feature map's directory** (#773, `.cursor/skills/verify-mandate/features/`).
+  - Check or refuse what else sits in the directory: today the README and any non-`.md` file are
+    skipped without a word.
+  - Refuse two feature files with the same `# ` title, which `--index` would list twice.
+  - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
+    the README is never read as a feature.
+
+From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is lane L2's):
+
+- **E7-16: switch `mandate-mcp`'s private fund-movement tokenizer to `mandate_domain::fund_movement`**
+  once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
+  `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
+  the scope check cannot disagree on a name.
+
+From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
+
+- **Delete the transitional Alpaca profile** (`mandate-executor`'s `shape::transitional_alpaca`,
+  which `ExecutorState::new` starts with, and the default body of the shell's
+  `Connector::profile`) in B3, before the first non-Alpaca executor
+  path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
+  constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
+  2's defensive path goes with it.
+
 From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
 
 - Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its
@@ -4457,4 +4652,4 @@ From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.
 - The anchor stamp record (§10, DEC-783 item 8): a control-stream record, `AnchorStamped`, that names
   an `AnchorComputed` as its `causation_id` and carries a timestamp token for its root. It backfills
   the token of an anchor appended during a timestamping outage, which until then is not a trusted
-  start (§9.11), and re-stamps an anchor before its token expires.
+  start (§9.14), and re-stamps an anchor before its token expires.

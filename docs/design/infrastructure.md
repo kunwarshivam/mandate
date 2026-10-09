@@ -54,7 +54,8 @@ yet.
 Rules that hold across the ladder:
 
 - Every environment except production runs a build in which only the paper trading and data hosts
-  are compiled in, and the `live` cargo feature is forbidden (ES-23). Configuration's
+  are compiled in, and the `live` cargo feature is forbidden (ES-23). The one exception, for paper
+  Alpaca OAuth only, is Alpaca's token endpoint in the token-exchange client (§2, OPS-5; [DEC-821](../project/decisions/DEC-821.md)). Configuration's
   `environment` accepts only `paper` or `backtest` there (ES-19).
 - A stream's `environment` is fixed in its `StreamOpened`, and appends with another environment
   are rejected (ES-23), so a paper journal can never become a live one.
@@ -100,7 +101,7 @@ startup or CI check that refuses to proceed.
 | **OPS-2** | Journal before acting survives any crash. No order request leaves a process unless its intent and `OrderSubmitted` are durably committed (`Committed` or `AlreadyCommitted`), and durable means `synchronous_commit = on`, with a synchronous standby in a second failure domain in managed live deployments | Rule 5; journal §5.2, §5.3 | Fault injection killing the process, the database connection, and the database at every step of submission (07, Phase 1 gate); a configuration check at startup that refuses live trading when `synchronous_commit` or the standby requirement is not met |
 | **OPS-3** | No single failure sends an order twice. Each order carries its journaled `client_order_id`; recovery resubmits only after the broker confirms the order is absent; one writer per stream is guaranteed by the writer epoch, not by the orchestrator | Rule 5; journal §5.1, §5.2; trading §5.7 | Fault injection: zero duplicates (Phase 1 gate); a test that starts two executors for one account and shows the older one is `Fenced` before it can send |
 | **OPS-4** | **Given an available journal,** no single failure loses a risk exit or protection: a journaled risk exit is re-driven by recovery, and the kill switch depends on no model, research agent, global control plane, or telemetry. **Whether or not the journal is available,** no deploy, restart, failover, or journal outage cancels a protective order resting at the broker. While the journal is unavailable, a new risk exit is **held**, not sent: that is the disclosed limit of §2.1, not part of this invariant | Rule 13; rule 5; trading §5.4, §5.5; HLD §5 Durability; §2.1 | Fault injection during exit sequences with the journal up; a test that runs the kill switch with the model gateway, the global control plane, and the metrics exporter all unreachable; the upgrade drill (OPS-7). For the journal-down case, a separate test asserts what §2.1 states and nothing more: no order of any kind is sent, no resting protective order is canceled, the hold is alerted, and the owed exit is the first thing sent once appends succeed |
-| **OPS-5** | Every environment except production has no path to live money: no live host compiled in, no live credential in its vault, and no network egress to a live trading host | Rule 8; ES-23 | CI forbids the `live` feature; an egress test in staging that a request to each live trading host fails at the network layer; the tracer refuses any host but Alpaca's paper host (E7-7) |
+| **OPS-5** | Every environment except production has no path to live money: no live host compiled in, no live credential in its vault, and no network egress to a live trading host. **Narrowing of ES-23 and of this invariant, for paper Alpaca OAuth only ([DEC-821](../project/decisions/DEC-821.md) items 2 and 5):** one live-host URL, `POST https://api.alpaca.markets/oauth/token`, is compiled in, only in the token-exchange client, and only the token-exchange process (§3.1) has egress to that host. No executor, runtime, or API process has egress to any live host. Nothing else in this invariant changes | Rule 8; ES-23; [DEC-821](../project/decisions/DEC-821.md) | CI forbids the `live` feature; a build test that the only live-host URL compiled in is the token-exchange client's; an egress test in staging that a request to each live trading host fails at the network layer from every process but the token-exchange process; the token-exchange client's pinned tests (connections spec §5.2 step 4); the tracer refuses any host but Alpaca's paper host (E7-7) |
 | **OPS-6** | Tenant isolation holds at every layer: agent processes are never shared across workspaces; rows carry `workspace_id` with row-level security; data and vault paths are per workspace, under per-workspace keys; telemetry and alerts carry opaque IDs only | HLD §8; journal §6.1, §6.5 | Cross-workspace access tests at the API, database, vault, and messaging layers (07, Isolation); a label lint on the metrics registry |
 | **OPS-7** | A deploy, upgrade, restart, or rollback never drops a running agent's protection, and never interrupts an exit sequence in a way the trading spec does not already bound | Trading §5.4; FR-9.3 | The upgrade drill: upgrade every process type with open positions, exits in flight, and pending approvals, and assert no protective order was canceled by the deploy and every unprotected interval stayed within `max_unprotected_s` |
 | **OPS-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades | Journal §10, §11 | The restore drill (§6.4) runs journal §11 verification, whose result is journaled as `VerificationRun`; the drill's own record (which backup, which drill, pass or fail) is journaled once the journal spec defines its events (E21-25, journal spec first); a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
@@ -152,9 +153,10 @@ journal returns.
 | Process | How many | Writes | Holds | Network (egress allow-list, §9) | Host-local channels (not network) |
 |---|---|---|---|---|---|
 | **Agent runtime** (`mandate-runtime` inside the shell; see `docs/specs/agent-harness.md`) | One per agent deployment (DEC-08) | Its agent stream | No broker credential (rule 12) | Postgres; model gateway; artifact store. No broker, no internet | Reads the workspace's data service |
-| **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection | Postgres; vault; that connection's broker hosts only | Reads the workspace's data service |
+| **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection. Never the platform's OAuth client secret | Postgres; vault (its one connection's lease, and while `connecting` one write: the broker account id into the personal-data vault under the pending connection's path); that connection's broker hosts only. A paper connection's executor reaches paper hosts only: no executor's egress contains a live host ([DEC-821](../project/decisions/DEC-821.md) item 4) | Reads the workspace's data service |
+| **Token-exchange process** (paper Alpaca OAuth only, [DEC-821](../project/decisions/DEC-821.md) item 2) | One per code exchange, started by the connection manager for one `connecting` connection; it stops when the exchange ends | Nothing: no journal stream, no writer epoch | The single-use grant on the platform's OAuth client secret; while it runs, the code, the PKCE verifier, and the token it receives, as `secrecy` values. No order client, no connector, and no token lease | Vault (redeem the grant; read once the code and verifier under the pending connection's path; write the token there and delete the code). One network destination: `api.alpaca.markets` on 443, for the one call `POST /oauth/token` that its dedicated client can make. Residual, disclosed: allow lists work on addresses, not paths, so at the network level it can reach the whole live API; the client type is the only barrier in this process ([DEC-821](../project/decisions/DEC-821.md) item 4; [connections spec](../specs/connections.md) §5.2) | None |
 | **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources | None |
-| **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider | Postgres; identity provider; users | None |
+| **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider; an OAuth authorization code only in transit, during the callback ([connections spec](../specs/connections.md) §5.2). Never the client secret or a token | Postgres; identity provider; users; vault, with these named capabilities and no read: write and delete under pending connections' credential paths (not the personal-data vault, whose entries end only by the retention erasure of journal §6.4); issue and revoke of the token-exchange process's single-use client-secret grant; and the keyed fingerprint computation, which returns only the result ([connections spec](../specs/connections.md) §3.1, §5.2 steps 3, 5, and 6) | None |
 | **Model gateway** ([inference spec](../specs/inference.md)) | One per workspace deployment, replicated; exactly one replica holds the meter writer role per workspace (inference spec §3.6; see below) | Each workspace's meter stream, `meter:{workspace_id}` (proposed, E15-8), by the holder only. The call record itself, `ModelInvocationRecorded`, is appended by the caller | Provider keys | Postgres; vault; the meter holder (other replicas); allowed model providers only | None |
 | **Cold exporter and anchorer** | One per workspace deployment | Control stream (`SegmentExported`, `AnchorComputed`) | Object-storage write credential | Postgres; object storage; timestamping authority | None |
 | **Market data service** ([data-plane spec](../specs/data-plane.md)) | Per workspace in v1 (no redistribution, HLD §12 item 3) | Parquet datasets; no journal stream | The workspace's data credential | That data host | Serves the workspace's runtimes and executors |
@@ -251,7 +253,11 @@ reference), and a workload identity issued by the orchestrator. Everything else 
    mandate version by content hash; the body comes from the content-addressed configuration store.
    A missing object halts replay (journal §8); the process never falls back to a default mandate.
 3. **Credentials:** only the executor asks the vault, authenticating with its workload identity, for
-   a lease on its one connection (§5). The runtime asks for nothing.
+   a lease on its one connection (§5). The token-exchange process, started by the connection
+   manager for one `connecting` paper Alpaca OAuth connection, redeems one single-use grant on the
+   platform's OAuth client secret and reads that connection's code and verifier once, for its one
+   code exchange; it writes the token but takes no lease on it (§5.2; [DEC-821](../project/decisions/DEC-821.md) item 2). No executor reads
+   the client secret. The runtime asks for nothing.
 4. **Configuration:** fee tables, calendars, and instrument snapshots by content hash
    (`config_refs`), never by "latest".
 
@@ -359,6 +365,7 @@ into hybrid or on-prem deployments (HLD §8).
 | Secret | Used by | Custody |
 |---|---|---|
 | Broker credentials (API keys, OAuth tokens) | The account executor for that connection | Workspace vault; write-only after entry: no person reads them back |
+| Broker OAuth client secrets (the platform's registered app, e.g. Alpaca) | The token-exchange process only, for the one code exchange, through a single-use grant ([connections spec](../specs/connections.md) §5.2; DEC-690 item 1; [DEC-821](../project/decisions/DEC-821.md) item 2) | The cell's vault; no person, no executor, and no API process reads it. Custody in hybrid and on-prem is open |
 | Model provider keys | The model gateway | Workspace vault (customer-supplied keys) or the cell's vault (platform keys) |
 | Database credentials | Each process type's role | Short-lived, issued by the vault per process |
 | Object-storage write credentials | Cold exporter, artifact writer | Vault, per workspace prefix |
@@ -372,8 +379,15 @@ into hybrid or on-prem deployments (HLD §8).
   workspace. **Hybrid and on-prem:** the customer's vault; credentials never leave the customer's
   environment (HLD §8).
 - **Per-process scoping.** An executor's workload identity can read exactly one connection's
-  credential. A runtime's identity can read none. The model gateway's can read its workspace's
-  provider keys. Nothing has a wildcard policy.
+  credential, and never the platform's OAuth client secret. The token-exchange process ([DEC-821](../project/decisions/DEC-821.md) item 2;
+  connections spec §5.2) is the only identity that reads the client secret, through a single-use
+  grant. The connection manager asks the vault to issue the grant when it starts that process. The
+  vault binds it to that process's workload identity, with a lifetime of the code's 10 minutes, and
+  revokes it when the exchange ends, at `ConnectionEstablished`, or at teardown. The same identity
+  may read the pending connection's code and verifier once, and write the token, but holds no lease
+  on the token. A refresh, if Alpaca ever issues refresh tokens, would run in that process with a
+  new grant (connections spec §5.4, U-A3, open). A runtime's identity can read none. The model gateway's can read its workspace's provider
+  keys. Nothing has a wildcard policy.
 - **Leases.** The executor holds its credential in memory as a `secrecy` value (ES-09), renews its
   lease ahead of expiry, and drops it on stop. A vault outage does not stop a running executor
   until the lease expires (Proposed lease length: 24 hours, renewed hourly); it does stop new
@@ -393,12 +407,33 @@ At connection time and at every executor start:
    ([connections spec](../specs/connections.md) CN-2, [DEC-441](../project/decisions/DEC-441.md)
    item 4).
 2. **Environment:** the credential must work against the environment the stream records and only
-   that one. In non-production builds only paper hosts exist (ES-23); in production a paper stream
-   refuses a live credential and the reverse.
+   that one. In non-production builds only paper hosts exist (ES-23), Alpaca's token endpoint in
+   the token-exchange client aside (§2, OPS-5); in production a paper stream refuses a live
+   credential and the reverse.
 3. **Account:** the account the credential reaches must be the account the connection names (the
    dedicated agentic account for Robinhood, E7-6).
 
-Each check's result is journaled on the control stream with the connection, never the credential.
+**Narrowings for paper Alpaca OAuth only ([DEC-821](../project/decisions/DEC-821.md) item 5).** Each cites DEC-821 and changes nothing
+else in its rule:
+
+- **ES-23 and §2 (OPS-5):** the one token endpoint, `POST https://api.alpaca.markets/oauth/token`,
+  reachable only by the token-exchange process's dedicated client.
+- **CN-3 and item 2 above:** a grant requested with `env=paper`, whose single-use `state` names a
+  request the server itself issued with `env=paper` for that workspace, is treated as paper-only.
+- **DEC-441 item 21:** superseded for `env=paper` grants only. A grant naming `live` or both
+  environments is still refused, and so is every live Alpaca OAuth connect; a live Alpaca OAuth
+  connection needs a new decision ([DEC-821](../project/decisions/DEC-821.md) item 7).
+
+DEC-441 item 22's conditions apply in full ([DEC-821](../project/decisions/DEC-821.md) item 4). Before the connection is established, the
+token's possible breadth (that Alpaca's live host might honour it) is journaled with the connection
+and disclosed to the owner; the journal spec change that adds that event comes first. Orders, and
+every trading or account call, go only to the paper trading host, from the executor.
+
+Each check's result is journaled without the credential. The executor appends checks 1, 2, 3, and
+7 on its account stream as `ConnectionChecked`; checks 5 and 6 come from `AccountStateObserved`
+(E7-17, PR #786; journal §9.2). Check 4, uniqueness, runs in the
+connection manager. The control stream's `ConnectionEstablished` cites the passing results
+([connections spec](../specs/connections.md) §5.2, §8.1).
 
 ### 5.4 Rotation and revocation
 
@@ -679,7 +714,8 @@ are authoritative; a few come from metrics.
   connection's hosts; the model gateway reaches only the providers the workspace policy allows
   (HLD "Where data lives"); the workspace deployment's only link to the global control plane is
   outbound mTLS (HLD §4). In non-production environments live trading hosts are unreachable
-  (OPS-5).
+  (OPS-5), except that the token-exchange process alone reaches Alpaca's token host for paper
+  OAuth ([DEC-821](../project/decisions/DEC-821.md); §3.1).
 - **No inbound ports** into a hybrid or on-prem data plane (HLD §4). In managed mode, the only
   ingress is the workspace API gateway behind the identity provider.
 - **Least privilege:** per-process database roles with INSERT and SELECT on the journal; the

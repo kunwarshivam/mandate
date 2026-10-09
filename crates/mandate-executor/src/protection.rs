@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_domain::MarketSession;
 use mandate_num::{Adverse, Fraction, Price, Qty, ShareIncrement, SignedQty, TickRule};
 
 use mandate_accounting::Side;
@@ -24,6 +25,7 @@ use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
 };
+use crate::shape::protective_shape;
 use crate::state::{
     EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, Ladder, LoneLadder, Replacement,
 };
@@ -1842,12 +1844,9 @@ fn waiting(view: &ExecutorState, instrument: &InstrumentId) -> Vec<IntentId> {
 /// Re-places the shape the sequence cancelled (§5.4) for the held quantity less what protective
 /// orders still cover: all of it after a marketable sequence, whose cancels are confirmed by then,
 /// and what the exits beside a handed-on passive exit left unsold (#286 round 2, M1′). The shape
-/// is an OCO at its prices, or, with no take-profit, crypto's one GTC stop-limit at stop × (1 −
-/// the mandate's `crypto_stop_limit_offset`) (DEC-36); nothing left to cover places nothing. The
-/// interval ends either way. An equity stop-only placement, or a crypto one with no offset, has no shape to
-/// re-place and answers its stub (slices 2 and 5; unreachable before them, DEC-160 (2)). That
-/// refusal is per-sequence and permanent by design: every input that would end this sequence is
-/// refused, while ticks, the bound's alert and other instruments go on.
+/// is the strongest form the broker's capability profile offers ([`protective_shape`]): an OCO at
+/// its prices, or one GTC stop-limit at stop × (1 − the mandate's `crypto_stop_limit_offset`)
+/// (DEC-36, DEC-838); nothing left to cover places nothing. The interval ends either way.
 fn replace(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -1861,11 +1860,37 @@ fn replace(
     re_place(batch, instrument, &recorded)
 }
 
+/// Ends a re-placement that has shares to cover and nothing to cover them with: the shortfall is
+/// journaled and alerted ([`unprotectable`]), and its `unprotected_end` marked `uncovered`.
+fn uncovered(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+    unprotectable(batch, instrument)?;
+    let uncovered = vec![("uncovered", Value::Bool(true))];
+    changed(batch, instrument, "unprotected_end", uncovered).map(|_| ())
+}
+
+/// The asset class whose row protection reads: the snapshot's, and a US equity's for an
+/// instrument it does not classify, as before B2a, so a position keeps its protection (DEC-841
+/// item 1, `AGENTS.md` rule 13).
+fn protected_class(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> AssetClass {
+    batch
+        .ports
+        .instruments
+        .asset_class(instrument)
+        .unwrap_or(AssetClass::UsEquity)
+}
+
+/// What [`re_place`] hands [`protective_shape`] as the clock's session, which it never reads:
+/// protection reads the protective order's own session (DEC-838 item 4).
+const UNREAD_CLOCK: MarketSession = MarketSession::Regular;
+
 /// [`replace`] for the entry, agent and prices a sequence or a re-placement before expiry
 /// recorded. With shares left to cover and no prices to place at, the shortfall is journaled and
 /// alerted ([`unprotectable`]), and the `unprotected_end` that ends the sequence is marked
 /// `uncovered`: the interval stays open and bounded, since nothing covers the shares (DEC-367
-/// item 4, #468's round-4 review, m2).
+/// item 4, #468's round-4 review, m2). A profile that offers no form for the shares ends the same
+/// way: journaled and alerted, never an error and never a silent skip (DEC-838 item 1, DEC-841
+/// item 2). An instrument the snapshot does not classify is protected as a US equity (DEC-841
+/// item 1).
 fn re_place(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -1880,47 +1905,28 @@ fn re_place(
         changed(batch, instrument, "unprotected_end", Vec::new())?;
         return Ok(());
     }
-    let Some(prices) = sequence.prices else {
-        unprotectable(batch, instrument)?;
-        let uncovered = vec![("uncovered", Value::Bool(true))];
-        changed(batch, instrument, "unprotected_end", uncovered)?;
-        return Ok(());
+    let class = protected_class(batch, instrument);
+    let (Some(prices), Some(profile)) = (sequence.prices, batch.view.profile.as_ref()) else {
+        return uncovered(batch, instrument);
     };
-    let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
     let offset = batch
         .ports
         .mandates
         .crypto_stop_limit_offset(&sequence.agent);
-    let (order_type, limit, oco) = match (prices.take_profit, crypto, offset) {
-        (Some(take_profit), _, _) => {
-            let stop = prices.stop;
-            (
-                OrderType::Limit,
-                None,
-                Some(OcoLegs {
-                    take_profit,
-                    stop,
-                    qty,
-                }),
-            )
-        }
-        (None, true, Some(offset)) => {
-            let limit = prices.stop.collar_bound(offset, Adverse::Down)?;
-            (OrderType::StopLimit, Some(limit), None)
-        }
-        _ => return Err(ExecutorError::Unimplemented { story: "E7-4" }),
+    let Some(shape) = protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)? else {
+        return uncovered(batch, instrument);
     };
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_protection(&sequence.entry, &batch.id_after(2))?,
         instrument: instrument.clone(),
         side: Side::Sell,
         qty,
-        order_type,
-        tif: TimeInForce::Gtc,
-        limit_price: limit,
-        stop_price: oco.is_none().then_some(prices.stop),
+        order_type: shape.order_type,
+        tif: shape.tif,
+        limit_price: shape.limit_price,
+        stop_price: shape.stop_price,
         bracket: None,
-        oco,
+        oco: shape.oco,
         extended_hours: false,
         purpose: Purpose::Protective,
     };
@@ -2802,6 +2808,10 @@ mod sequence_tests {
 
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
+    use mandate_domain::{
+        CapabilityProfile, Cell, Idempotency, MarketSession, OrderType as ProfileOrderType,
+        ProtectionForm, QuantityForm, Retry, Row, TimeInForce as ProfileTif,
+    };
     use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
     use mandate_time::{Date, ExchangeCalendar};
     use proptest::prelude::{Just, ProptestConfig, Strategy, TestCaseError, any, prop};
@@ -5293,11 +5303,57 @@ mod sequence_tests {
             .collect()
     }
 
-    /// #267 round 1, B1 and DEC-160 (2): a stop-only placement with no shape to re-place — an
-    /// equity's (only brackets and OCOs protect equities, slice 2) or crypto's under no offset — is
-    /// never ended silently: its re-placement answers the stub.
+    /// The fill that ends a sequence with nothing the profile lets it place: no order is sent, the
+    /// shortfall is journaled and alerted, and the interval's end is marked `uncovered`.
+    fn left_uncovered(settled: &[Effect]) {
+        assert!(submissions(settled).is_empty(), "{:?}", drafted(settled));
+        assert_eq!(
+            actions(settled),
+            vec!["expiry_unreplaceable", "unprotected_end"]
+        );
+        assert_eq!(alerts(settled), vec!["protection_expiring"]);
+        let end = protection_drafts(settled)
+            .last()
+            .map(|draft| &draft.payload);
+        assert_eq!(
+            end.and_then(|payload| payload.get("uncovered")),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    /// Ten AAPL protected by one resting stop at 140 and nothing else, a risk exit of 4 sent and
+    /// the protection's cancel confirmed: the step that fills the exit re-places the other 6.
+    fn stop_only_exit_filled(
+        ports: &Ports<'_>,
+        profile: Option<CapabilityProfile>,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        let mut executor = held(ports)?;
+        if let Some(profile) = profile {
+            executor.state = executor.state.clone().with_profile(profile);
+        }
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+                ("stop", text("140")),
+            ],
+        )?;
+        executor.run(sell(EXIT, "4", "150", Purpose::RiskExit)?, ports)?;
+        executor.run(cancel_accepted(OCO), ports)?;
+        executor.run(filled(EXIT, "4")?, ports)
+    }
+
+    /// DEC-838 item 1 (#267 round 1, B1, and DEC-160 (2) before it): a stop-only placement the
+    /// profile offers no shape for (an equity's under Alpaca, which protects equities only by OCO,
+    /// or crypto's under no offset) is never ended silently and never answered with an error: it
+    /// is journaled, alerted and left `uncovered`.
     #[test]
-    fn a_stop_only_placement_with_no_shape_answers_the_stub() -> Result<(), ExecutorError> {
+    fn a_stop_only_placement_with_no_shape_is_journaled_alerted_and_left_uncovered()
+    -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let snapshots: [&dyn InstrumentSnapshot; 2] = [&Everything, &Coin];
         for instruments in snapshots {
@@ -5308,22 +5364,145 @@ mod sequence_tests {
                 config: &config,
                 fees: &fees,
             };
-            let mut executor = held(&ports)?;
-            committed(
-                &mut executor,
-                "ProtectionChanged",
-                vec![
-                    ("instrument", text("AAPL")),
-                    ("action", text("placed")),
-                    ("orders", text(OCO)),
-                    ("qty", text("10")),
-                    ("stop", text("140")),
-                ],
-            )?;
-            executor.run(sell(EXIT, "4", "150", Purpose::RiskExit)?, &ports)?;
-            executor.run(cancel_accepted(OCO), &ports)?;
-            assert!(stub(&executor.run(filled(EXIT, "4")?, &ports)));
+            left_uncovered(&stop_only_exit_filled(&ports, None)?);
         }
+        Ok(())
+    }
+
+    /// DEC-838 item 5: the profile `with_profile` sets is the one protection reads. Under a profile
+    /// whose only row is equities', crypto's stop-only placement, which the transitional Alpaca
+    /// profile re-places as one stop-limit, has no shape and is left `uncovered`.
+    #[test]
+    fn the_profile_set_with_with_profile_is_the_one_protection_reads() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Coin,
+            instruments: &Coin,
+            config: &config,
+            fees: &fees,
+        };
+        let cell = Cell {
+            order_type: ProfileOrderType::Limit,
+            quantity_form: QuantityForm::Whole,
+            times_in_force: [ProfileTif::Day, ProfileTif::Gtc].into(),
+            protection_forms: [ProtectionForm::Bracket, ProtectionForm::Oco].into(),
+        };
+        let equities_only = Row {
+            asset_class: AssetClass::UsEquity,
+            session: MarketSession::Regular,
+            cells: vec![cell],
+        };
+        let idempotency = Idempotency {
+            client_order_id: true,
+            retry: Retry::Idempotent,
+            query_by_client_order_id: true,
+        };
+        let profile =
+            CapabilityProfile::new(1, vec![equities_only], idempotency).map_err(|_| {
+                ExecutorError::NotInterpreted {
+                    what: "the equities-only profile".to_owned(),
+                    story: "E7-23",
+                }
+            })?;
+        left_uncovered(&stop_only_exit_filled(&ports, Some(profile))?);
+        let placed = stop_only_exit_filled(&ports, None)?;
+        assert_eq!(actions(&placed), vec!["placed", "unprotected_end"]);
+        Ok(())
+    }
+
+    /// An instrument the snapshot does not classify.
+    struct Unclassified;
+
+    impl InstrumentSnapshot for Unclassified {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            None
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Whole)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    /// The OCO-protected ten AAPL, a risk exit of 4 filled: the step's submissions, re-placing 6.
+    fn oco_exit_filled(ports: &Ports<'_>) -> Result<Vec<Effect>, ExecutorError> {
+        let mut executor = protected(ports)?;
+        executor.run(sell(EXIT, "4", "150", Purpose::RiskExit)?, ports)?;
+        executor.run(cancel_accepted(OCO), ports)?;
+        executor.run(filled(EXIT, "4")?, ports)
+    }
+
+    /// The coordinator's ruling on DEC-841 (`AGENTS.md` rule 13): an instrument the snapshot does
+    /// not classify is protected as a US equity, from the regular row, as before B2a, so a
+    /// position that had protection keeps it: the OCO at its recorded prices for what remains.
+    #[test]
+    fn an_unclassified_instrument_is_re_protected_as_an_equity() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Unclassified,
+            config: &config,
+            fees: &fees,
+        };
+        let settled = oco_exit_filled(&ports)?;
+        assert_eq!(actions(&settled), vec!["placed", "unprotected_end"]);
+        let sent: Vec<_> = submissions(&settled)
+            .into_iter()
+            .map(|order| (order.order_type, order.tif, order.oco.clone()))
+            .collect();
+        assert_eq!(
+            sent,
+            vec![(OrderType::Limit, TimeInForce::Gtc, legs("170", "140", "6")?)]
+        );
+        Ok(())
+    }
+
+    /// §5.2, §5.4 and DEC-36 through the profile (DEC-838): a crypto position whose protection
+    /// recorded a take-profit is re-placed as Alpaca's one GTC stop-limit at stop × (1 − offset),
+    /// never as an OCO, which Alpaca's crypto row does not offer.
+    #[test]
+    fn a_crypto_re_placement_with_a_take_profit_sends_one_stop_limit() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Coin,
+            instruments: &Coin,
+            config: &config,
+            fees: &fees,
+        };
+        let settled = oco_exit_filled(&ports)?;
+        assert_eq!(actions(&settled), vec!["placed", "unprotected_end"]);
+        let sent: Vec<_> = submissions(&settled)
+            .into_iter()
+            .map(|order| {
+                let prices = (order.stop_price, order.limit_price);
+                (
+                    order.order_type,
+                    order.tif,
+                    order.qty,
+                    prices,
+                    order.oco.is_none(),
+                )
+            })
+            .collect();
+        let prices = (Some(Price::parse("140")?), Some(Price::parse("138.6")?));
+        assert_eq!(
+            sent,
+            vec![(
+                OrderType::StopLimit,
+                TimeInForce::Gtc,
+                Qty::parse("6")?,
+                prices,
+                true
+            )]
+        );
         Ok(())
     }
 

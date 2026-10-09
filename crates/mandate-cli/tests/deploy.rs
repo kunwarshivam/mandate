@@ -212,7 +212,6 @@ fn refused(result: Result<Submitted, ControlError>) -> &'static str {
 /// One `AgentDeployed` with exactly §9.2's payload, `config_refs.mandate_version` (rule 22), and
 /// the document and the stored record as its `artifact_refs`; a re-run spends nothing.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_deployment_is_one_agent_deployed_naming_the_version_and_its_record() {
     let mut world = World::confirmed();
     let before = world.appends();
@@ -249,7 +248,6 @@ fn a_deployment_is_one_agent_deployed_naming_the_version_and_its_record() {
 /// What D2b writes, the spec's fold reads as the agent's version in force, and only V-001 and
 /// V-002 remain: the two facts the run supplies (DEC-505 item 3).
 #[test]
-#[ignore = "pending E10-16"]
 fn the_spec_fold_reads_the_deployment_as_the_agents_version() {
     let mut world = World::confirmed();
     world.run(Deploy(AGENT, "v1", None)).unwrap();
@@ -289,7 +287,6 @@ fn the_spec_fold_reads_the_deployment_as_the_agents_version() {
 /// After a stop the agent can be deployed again, and a version confirmed again after another's
 /// confirmation is the latest, so it deploys.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_stopped_agent_deploys_again_and_a_reconfirmed_version_is_the_latest() {
     let mut world = World::confirmed();
     world.run(Deploy(AGENT, "v1", None)).unwrap();
@@ -311,9 +308,10 @@ fn a_stopped_agent_deploys_again_and_a_reconfirmed_version_is_the_latest() {
 }
 
 /// Every refusal carries one of DEC-530 item 9's codes, each case its own, and writes nothing: no
-/// append, no stored object, no assertion.
+/// append, no stored object, no assertion. Where two checks both fail, the earlier in item 9's
+/// order refuses: a superseded version before a wrong code, and a wrong code before an active
+/// deployment.
 #[test]
-#[ignore = "pending E10-16"]
 fn every_refusal_has_its_own_code_and_writes_nothing() {
     let unreadable = MODEL.replace(r#"["fast_periods","slow_periods"]"#, r#""x""#);
     let model = Seed("ConfigSnapshotRegistered", &unreadable);
@@ -326,7 +324,7 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
     let other = Deploy(OTHER_AGENT, "v1", None);
     let other_stop = Seed("AgentStopped", OTHER_STOPPED);
     let codes = [deploy_code(OTHER_AGENT, "v1"), deploy_code(AGENT, "v2")];
-    let cases: [(&str, &[Do<'_>], Do<'_>); 19] = [
+    let cases: [(&str, &[Do<'_>], Do<'_>); 21] = [
         ("paper_only", &[v1, c1, As(Environment::Live)], d1),
         ("paper_only", &[v1, c1, As(Environment::Backtest)], d1),
         ("agent_invalid", &[v1, c1], Deploy("agent a", "v1", None)),
@@ -335,6 +333,16 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
         ("document_corrupt", &[v1, c1, Corrupt], d1),
         ("version_unconfirmed", &[v1], d1),
         ("version_superseded", &[v1, c1, v2, c2], d1),
+        (
+            "version_superseded",
+            &[v1, c1, v2, c2],
+            Deploy(AGENT, "v1", Some("00000000")),
+        ),
+        (
+            "code_mismatch",
+            &[v1, c1, d1, v2, c2],
+            Deploy(AGENT, "v2", Some("00000000")),
+        ),
         (
             "code_mismatch",
             &[v1, c1],
@@ -413,7 +421,6 @@ impl ArtifactStore for Failing {
 
 /// The record is stored before the deployment is committed, so a store that fails commits nothing.
 #[test]
-#[ignore = "pending E10-16"]
 fn a_store_that_fails_commits_nothing() {
     let mut world = World::confirmed();
     let before = world.appends();

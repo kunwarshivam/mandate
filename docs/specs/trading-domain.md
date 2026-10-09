@@ -2,13 +2,34 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23); changes need a decision-log entry (safety-critical) |
-| **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
+| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4); changes need a decision-log entry (safety-critical) |
+| **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.17:** §7.3's `connection_unavailable` row no longer lists a reconnect as lifting the
+  restriction: the connection's condition clears by good probes for `degraded`, by
+  re-authorization for `suspended` ([DEC-800](../project/decisions/DEC-800.md) item 5, journal
+  §9.8 rule 68, DEC-824 item 6), and for contract drift as
+  [DEC-687](../project/decisions/DEC-687.md) item 3 says, then the owner acknowledges. Text only,
+  a tightening under DEC-176: no reference case and no outcome for a broker restriction changes,
+  and no exit, protective order, cancel, or kill switch is held.
+- **v0.16:** §5.2 "Alpaca capability matrix" becomes "Broker capability profiles": each connector
+  declares a profile of its broker's published rules, shared code reads it and never names a
+  broker, and Robinhood's equity profile sits beside Alpaca's
+  ([DEC-531](../project/decisions/DEC-531.md), [ADR-0004](../adr/0004-broker-capability-profiles.md)).
+  Alpaca's rows are unchanged. §5.1 and §5.4 take protection from the profile: on a profile with no
+  OCO or bracket, equities are protected by one GTC stop-limit for the whole position after the
+  entry fills completely (DEC-529 item 7). §4.2 adds the cross-checked broker quote for the
+  founder's one live order (DEC-529 item 12); §7.2 adds Robinhood's account type, 1× and regime
+  rows (DEC-529 item 11; [DEC-620](../project/decisions/DEC-620.md) items 1 and 2). The stop-limit's
+  limit is the mandate's `stop_limit_offset` ([DEC-539](../project/decisions/DEC-539.md)). Founder-reserved under DEC-79 and accepted on 2026-10-08. Every narrowing
+  is for DEC-529's one order; no Alpaca outcome and no reference case changes. §5.7: on a profile
+  with no query by client order id, `Unknown` never returns to `Intent`, so nothing is resubmitted
+  (DEC-529 item 4). No pre-trade alert or quote cross-check refuses an exit or a protective order
+  (`AGENTS.md` rule 13).
 - **v0.15:** §7.3 gains a row for a connection the connector reports `degraded` or `suspended`
   ([connections spec §9.1](connections.md#91-states)): account state `closing_only`, all agents
   `exits_only`. `AccountRestrictionChanged` carries an enumerated `cause` (`broker_reject`,
@@ -269,9 +290,10 @@ the mandate's per-instrument cap, bounded by the organization ceiling.
 
 | Profile | Used for | Rules |
 |---|---|---|
-| `sip` | Backtests; **live equity agents (required)** | Consolidated quotes and trades; standard staleness and spread limits |
+| `sip` | Backtests; **live equity agents (required)**, except DEC-529's one order (row below) | Consolidated quotes and trades; standard staleness and spread limits |
 | `iex` | **Paper trading** | IEX quotes as the reference for collars and risk marks; wider spread limit and longer staleness threshold (configured); an opening order requires a fresh IEX quote |
 | `crypto` | Crypto, paper and live | Alpaca crypto feed |
+| Broker quote, cross-checked | **DEC-529's one founder-run live order only** ([DEC-529](../project/decisions/DEC-529.md) item 12) | Robinhood's own quote (`get_equity_quotes`, re-read by `review_equity_order`) is the reference for the collar and the risk mark. It must agree with the `iex` quote within the collar, or the opening is refused and nothing is sent. The cross-check never refuses an exit or a protective order, which are priced as §5.6 prices them (`AGENTS.md` rule 13). Daily and minute bars stay Alpaca's `iex` (its minute volume understates, so the participation caps only tighten) |
 
 A bar exists only when trades occur: a missing regular-session bar means "no trade", not a data
 gap. `inspect` distinguishes no-trade minutes, session closures, and true gaps.
@@ -308,14 +330,38 @@ used.
 
 | Purpose | Allowed |
 |---|---|
-| Opening or increasing (equities) | Regular session only; **limit orders** within the price collar; plain, or **bracket** (entry + take-profit + stop) |
+| Opening or increasing (equities) | Regular session only; **limit orders** within the price collar; plain, or **bracket** (entry + take-profit + stop) where the connection's profile offers one (§5.2) |
 | Opening or increasing (crypto) | Limit orders within the collar (simple orders only); adds to a protected position are limit IOC (§5.4) |
 | Reducing or closing | Limit orders in any session the instrument allows (marketable exits priced per §5.6); market orders only in the regular session outside auction windows and with current status data |
-| Protective (equities) | **OCO** or bracket legs, whole shares only, TIF GTC ([§5.4](#54-protective-exits-dec-28-dec-36)) |
+| Protective (equities) | The strongest form the connection's profile offers (§5.2): **OCO** or bracket legs, whole shares only, TIF GTC; on a profile with neither, one GTC stop-limit for the whole position ([§5.4](#54-protective-exits-dec-28-dec-36)) |
 | Protective (crypto) | **One simple GTC stop-limit** for the whole position ([DEC-36](../project/04-decision-log.md#decisions)) |
 | Not used in v1 | IOC (except crypto adds), FOK, trailing stops, replace/amend (except broker-initiated), notional market buys, options, short sales |
 
-### 5.2 Alpaca capability matrix
+### 5.2 Broker capability profiles ([DEC-531](../project/decisions/DEC-531.md), [ADR-0004](../adr/0004-broker-capability-profiles.md))
+
+Each connector declares a **capability profile**: a typed, versioned value of what its broker
+accepts, built from the broker's published contract and nothing else. Per asset class and session
+it lists the order types, the quantity forms each type allows (whole, fractional, notional), the
+times in force, the protection forms offered (bracket, OCO, one resting stop-limit, none), and
+idempotency (a client order id, whether a retry with it is idempotent, whether orders can be
+queried by it).
+
+- **Shared code reads the profile and never names a broker**, nor reads the asset class to learn a
+  broker rule. The order builder sizes to the quantity form the profile allows for the order type
+  the policy chose; protection takes the strongest form the profile offers (§5.4); reconciliation
+  queries by client order id when the profile can, and otherwise takes the one shared fallback
+  ([connections spec §6.2](connections.md#62-how-mcp-maps-to-the-connector-interface)); deployment
+  refuses a mandate whose order policy or protection needs something the profile lacks.
+- **Policy is not a profile row.** §5.1 and the gate (§9) are the platform's; the builder
+  intersects them with the profile, and an empty intersection is a refusal before the intent,
+  never a fallback to another order type.
+- **The profile is journaled and pinned:** its canonical hash is registered configuration
+  (`ConfigSnapshotRegistered`, kind `broker_profile`) and, for an MCP broker, tied to the contract
+  hash (connections spec §6.2 rule 3). A changed profile is a new version.
+- **Rows are added when a story needs them** (DEC-531 item 6). A row a profile does not declare is
+  absent.
+
+**Alpaca:**
 
 | Asset / condition | Order types | Time in force |
 |---|---|---|
@@ -326,8 +372,28 @@ used.
 | Crypto | market, limit, stop-limit; **simple orders only** (Mandate uses stop-limit as GTC only) | gtc, ioc |
 | Crypto | maximum 200,000 USD notional per order | — |
 
-GTC equity orders expire 90 days after creation. Orders not eligible for the current session are
-queued by the broker for the next eligible session.
+Protection: bracket and OCO for equities; one resting stop-limit for crypto. Idempotency:
+`client_order_id`, queryable. GTC equity orders expire 90 days after creation. Orders not eligible
+for the current session are queued by the broker for the next eligible session.
+
+**Robinhood** (US equities, regular session; from the
+[published tool contract](../project/tasks/robinhood-contract.md) of 2026-10-08):
+
+| Row | Value | Source |
+|---|---|---|
+| Order types | market, limit, stop-market, stop-limit | `place_equity_order.type` |
+| Quantity forms | market: whole, fractional, notional; every other type: whole shares | `quantity`, `dollar_amount` |
+| Time in force | gfd (day), gtc | `time_in_force` |
+| Protection forms | one resting stop-limit (gtc); **no OCO, no bracket** | Tool list (U-R4) |
+| Idempotency | client order id `ref_id`, deduplicated by the broker; what a retry returns is unknown; **no query by it** | `ref_id`; `get_equity_orders` filters (U-R1, U-R2) |
+| GTC expiry | Not published | — |
+| Pre-trade check | `review_equity_order` | Tool list |
+
+Crypto, extended hours and options are not declared, so no Robinhood mandate may use them. Having
+no extended-hours row is a limit of this profile: every equity exit on it, an owner exit included,
+waits for the regular session, and the owner is told so when the mandate is deployed. With
+§5.1's limit openings, the intersection is limit, whole shares, day, regular session; protection is
+the one stop-limit (DEC-529 item 2).
 
 ### 5.3 Constraints enforced before submission
 
@@ -416,13 +482,33 @@ protective legs are checked against position + entry quantity.
 
 **Crypto (simple orders only):**
 
-- One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `crypto_stop_limit_offset`), the mandate's fraction.
+- One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `stop_limit_offset`), the mandate's fraction (`crypto_stop_limit_offset` in mandate schema version 1; [DEC-539](../project/decisions/DEC-539.md)).
 - Take-profit is managed by the runtime (it watches price and submits a marketable exit when the
   target is reached), not a resting order.
 - **Adds and exits:** cancel the stop-limit → confirm → submit the order → after a terminal state,
   re-place the stop-limit for the new net quantity. **Adds are limit IOC orders within the collar;
   exits are marketable** (§5.6). The unprotected interval is bounded as for equities.
 - A stop-limit may not fill on a gap; disclosed to the owner.
+
+**Equities on a profile with no OCO or bracket** (Robinhood, §5.2; [DEC-529](../project/decisions/DEC-529.md)
+item 7, resolving DEC-441 item 17 for DEC-529's one order):
+
+- One **GTC stop-limit sell** for the whole position, placed once the entry has filled completely,
+  as for crypto. Its stop price is set from `stop_distance` as a bracket's stop leg is, and its
+  limit = stop × (1 − `stop_limit_offset`), the same mandate fraction as crypto's
+  ([DEC-539](../project/decisions/DEC-539.md)); mandate spec V-008 requires it here.
+- Take-profit is managed by the runtime, as for crypto. The entry is a plain limit order; the
+  unprotected interval starts at its first partial fill. If the entry is not complete within
+  `bracket_partial_fill_timeout`, or ends partly filled, the executor cancels the remainder,
+  confirms, and places the stop-limit for the filled quantity, as for a bracket above
+  ([DEC-620](../project/decisions/DEC-620.md) item 3).
+- The interval until the stop-limit rests is bounded by `max_unprotected_s`: if it is not resting
+  by then, the executor exits the held quantity as a `risk_exit` through §5.6 and alerts the
+  owner.
+- A mandate with protection off is refused on such a profile.
+- GTC expiry is not published, so no re-place is scheduled from it; the owner checks the resting
+  stop in the broker's app while the position is held (disclosed). A stop-limit may not fill on a
+  gap; disclosed to the owner.
 
 **Ownership of broker-created legs** ([DEC-160](../project/04-decision-log.md#decisions)):
 
@@ -551,7 +637,7 @@ stateDiagram-v2
     Unknown --> Canceled: found, canceled
     Unknown --> Expired: found, expired
     Unknown --> Rejected: confirmed rejected
-    Unknown --> Intent: confirmed absent after N lookups over T seconds
+    Unknown --> Intent: confirmed absent after N lookups over T seconds (only where the profile can query by client order id)
     Accepted --> PartiallyFilled: fill
     PartiallyFilled --> PartiallyFilled: fill
     Accepted --> Filled: fill completes
@@ -607,6 +693,10 @@ PartiallyFilled); fills during either pending state update filled quantity witho
 - Filled quantity is non-decreasing, ≤ order quantity, and equals the sum of unique fills.
 - `Unknown → Intent` re-runs the gate: if allowed and younger than `max_intent_age`, resubmit
   with the **same** `client_order_id`; otherwise `Abandoned`.
+- **On a profile with no query by client order id** (§5.2: Robinhood), absence cannot be shown, so
+  `Unknown → Intent` never fires and nothing is resubmitted. The order leaves `Unknown` only by the
+  list-and-match adoption of [connections spec §6.2](connections.md#62-how-mcp-maps-to-the-connector-interface),
+  or by the owner reconciling it by hand ([DEC-529](../project/decisions/DEC-529.md) item 4).
 - Per-event fill quantity and price are authoritative; cumulative quantity mismatches trigger
   reconciliation.
 - Every transition is journaled before it takes effect in state.
@@ -705,13 +795,16 @@ source.
 
 | Field | Source |
 |---|---|
-| Account type | Alpaca: always margin; `multiplier` 1, 2, or 4 |
+| Account type | Alpaca: always margin; `multiplier` 1, 2, or 4. Robinhood: not in the contract (connections spec U-R7); for DEC-529's order, the founder's attestation that the agentic account is a cash account or has margin disabled ([DEC-529](../project/decisions/DEC-529.md) item 11) |
 | Equity, cash, `buying_power`, `non_marginable_buying_power`, `last_equity`, status flags | Broker |
 | Settled and unsettled cash, reservations, accrued fees | Model, reconciled to broker |
-| Day-trading regime | Alpaca: `intraday_margin` (§9.2) |
+| Day-trading regime | Alpaca: `intraday_margin` (§9.2). Robinhood: `legacy_pdt` (§9.2), since the contract does not show it has moved to the intraday margin standard; a pattern-day-trading alert from `review_equity_order` also refuses an opening or an increase, never a sell or a protective order, which is placed with the alert journaled (connections spec U-R6; [DEC-620](../project/decisions/DEC-620.md) item 1) |
 
 **1× requirement.** At connect and daily, the platform verifies `multiplier = 1` (or an enforced
-1× cap); otherwise agents are paused and the owner is prompted.
+1× cap); otherwise agents are paused and the owner is prompted. Robinhood shows no margin field,
+so for DEC-529's order only, 1× rests on the founder's attestation and on the gate's buying power
+being the cash-account row below, taken as the lower of it and the broker's figure (DEC-620 item 2); any other
+Robinhood connection is paused and prompted.
 
 **Buying power used by the gate** ([DEC-34](../project/04-decision-log.md#decisions)) is the lower
 of the model and the broker:
@@ -720,7 +813,7 @@ of the model and the broker:
 |---|---|
 | Margin account, equities | settled + Σ unsettled − reservations − round(accrued, 2, ceiling) |
 | Margin account, crypto | min(equity model above, broker `non_marginable_buying_power`) |
-| Cash account (generic brokers) | settled − reservations − round(accrued, 2, ceiling) |
+| Cash account (generic brokers; Robinhood's attested agentic account for DEC-529's order, DEC-620 item 2) | settled − reservations − round(accrued, 2, ceiling) |
 
 **Uncleared deposits are excluded** from model buying power (a returned deposit would otherwise
 create a debit). The fee reservation for crypto buys is 0 (the fee is paid in the asset). The gate
@@ -751,7 +844,7 @@ restriction the broker never imposed is never journaled as the broker's
 |---|---|---|---|
 | `broker_reject` | Rows 2 and 3 (rejects) | Account restricted by the broker | The owner acknowledges and the account is refreshed |
 | `broker_notice` | Rows 1 and 4 (status, flags, notices) | Account restricted by the broker | The owner acknowledges and the account is refreshed |
-| `connection_unavailable` | Row 5 | A distinct alert: the platform cannot reach or use the connection; the broker has not restricted the account | The connection's own condition clears (good probes, a released connector version for contract drift, or a reconnect; connections spec §9.1), **then** the owner acknowledges. An account refresh neither is needed nor lifts it |
+| `connection_unavailable` | Row 5 | A distinct alert: the platform cannot reach or use the connection; the broker has not restricted the account | The connection's own condition clears (good probes for `degraded`, re-authorization for `suspended`, and for contract drift [DEC-687](../project/decisions/DEC-687.md) item 3; connections spec §9.1), **then** the owner acknowledges. A reconnect does not lift it by itself. An account refresh neither is needed nor lifts it |
 
 Causes lift independently: a `connection_unavailable` restriction that clears leaves any broker
 restriction standing, and the reverse.
@@ -1120,6 +1213,8 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 6. Whether Alpaca applies the TAF cap per execution or per order (fee activity check).
 7. Whether pending crypto wash-sale legislation changes what must be recorded now.
 8. The data source and refresh cadence for ETP and ETN classification (§3.2 item 6).
+9. Answered by [DEC-539](../project/decisions/DEC-539.md): an equity stop-limit on a profile with
+   no OCO or bracket takes its limit from the mandate's one `stop_limit_offset` (§5.4).
 
 ## 16. Out of scope for v1
 

@@ -18,37 +18,60 @@ usage: cargo xtask <command>
 commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
-                        spec-guard | refcases | reference | supply-chain | postgres | mutants
+                        spec-guard | refcases | reference | schemas | supply-chain | postgres |
+                        mutants | schema-mutants
+  ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
+  ci schema-mutants K/N run shard K of N of the schema mutation sweep, after its baseline (CI
+                        passes it as MANDATE_SCHEMA_SHARD)
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
-  feature-map           check the verification skill's feature map against the workspace
+  feature-map [--index] check the verification skill's feature map against the workspace, or
+                        list its feature files and titles
   deps                  check every direct dependency against docs/dependencies.md
+  live-feature          check that only the runner may build `live`, and CI only compiles it
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
 /// The two required-check command groups (DEC-76). `pending` follows `test` in `fast` because it
 /// reuses the test binaries that `test` has just built. CI shards `mutants` separately and makes
 /// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
-/// runs every entry in [`PR_JOBS`] once, unsharded.
+/// runs every entry in [`PR_JOBS`] once, unsharded. `schema-mutants` is CI's own job beside them,
+/// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
 const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
-const FULL_JOB: [&str; 4] = ["refcases", "reference", "supply-chain", "postgres"];
-const PR_JOBS: [&str; 9] = [
+const FULL_JOB: [&str; 5] = [
+    "refcases",
+    "reference",
+    "schemas",
+    "supply-chain",
+    "postgres",
+];
+const PR_JOBS: [&str; 11] = [
     "lint",
     "test",
     "pending",
     "refcases",
     "reference",
+    "schemas",
     "supply-chain",
     "spec-guard",
     "postgres",
     "mutants",
+    "schema-mutants",
 ];
+
+/// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
+/// `mutate_schemas.py`, the `schema-mutants` job, runs all three against each mutant (DEC-688).
+const SCHEMA_CHECKERS: [&str; 3] = ["check_examples.py", "check_planned.py", "check_lenient.py"];
+const SCHEMA_DIR: &str = "schemas/workspace-api";
 
 /// The database the Postgres journal tests use, and the switch that makes its absence a failure
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
+/// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
+/// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
+const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -76,8 +99,10 @@ const E77_ATOMIC_PR: u64 = 598;
 const E77_ATOMIC_BRANCH: &str = "cursor/e77-complete-tracer-4832";
 const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
 
-/// The verification skill's map of features to code, tests, and commands (AGENTS.md).
-const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/feature-map.md";
+/// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
+/// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
+/// that feature's file. The directory is the map; `cargo xtask feature-map --index` lists it.
+const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/features";
 /// Top-level entries a feature-map path may start with.
 const REPO_ROOTS: [&str; 11] = [
     ".cargo/",
@@ -119,11 +144,26 @@ fn run() -> Result<()> {
             }
             Ok(())
         }
+        ["ci", "mutants", "--plan"] => {
+            let plan = mutants_plan(Path::new("."), base_ref()?.as_deref())?;
+            eprintln!(
+                "    mutants: {} mutant(s) over {} shard(s)",
+                plan.mutants, plan.shards
+            );
+            print!("{}", plan.outputs());
+            Ok(())
+        }
+        ["ci", "schema-mutants", shard] => {
+            eprintln!("==> ci schema-mutants {shard}");
+            schema_mutants(Some(shard), &mut pinned_python)
+        }
         ["ci", job] => ci(job),
         ["layers"] => layers(),
         ["markers"] => markers(),
         ["feature-map"] => feature_map(),
+        ["feature-map", "--index"] => feature_map_index(),
         ["deps"] => deps(),
+        ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         _ => {
@@ -177,6 +217,11 @@ fn ci(job: &str) -> Result<()> {
                 "reference/journal/generate.py --check failed: a validator or seeded bug check failed, or journal.yaml is not what it generates; run it without --check and commit the result",
             )?;
             mutation_anchors()
+        }
+        "schemas" => schema_checks(&mut pinned_python),
+        "schema-mutants" => {
+            let shard = env::var(SCHEMA_SHARD_ENV).ok().filter(|s| !s.is_empty());
+            schema_mutants(shard.as_deref(), &mut pinned_python)
         }
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
@@ -295,13 +340,15 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
-/// `.github/scripts/` (DEC-329), actionlint over its `.github/workflows/` (DEC-330), then
+/// `.github/scripts/` (DEC-329) and `deploy/` (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
+    shellcheck_scripts(&root.join("deploy"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
+    live_feature_in(root)?;
     workspace_checks()
 }
 
@@ -432,7 +479,8 @@ struct Finding {
 /// so that this source matches no rule. The palette rows prove the "Web palette ramp references"
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
-/// reported too.
+/// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -448,6 +496,11 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let palette = "web/src/lib/palette.ts";
     let ramp = "  \"lapis-soft\": \"ultramarine-100\",";
     let palette_key = format!("  \"api-key\": \"{page}\",");
+    let hex = "CC94B39C77AE7342A68B89628A682D308D4E5E73";
+    let bootstrap = "deploy/bootstrap.sh";
+    let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
+    let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
+    let cloudflare = Some("cloudflare-api-key");
     vec![
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
@@ -470,6 +523,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (palette.to_owned(), ramp.to_owned(), None),
         ("stray-palette.ts".to_owned(), ramp.to_owned(), generic),
         (palette.to_owned(), palette_key, generic),
+        (bootstrap.to_owned(), fingerprint.clone(), None),
+        ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
+        (bootstrap.to_owned(), not_fingerprint, cloudflare),
     ]
 }
 
@@ -560,7 +616,36 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
     let Some((script, rest)) = script_and_args.split_first() else {
         bail!("no reference script given");
     };
-    let path = format!("reference/{script}");
+    pinned_python(&format!("reference/{script}"), rest)
+}
+
+/// How the schema jobs run a script: its repository path and its arguments ([`pinned_python`]).
+type ScriptRunner<'a> = dyn FnMut(&str, &[&str]) -> Result<()> + 'a;
+
+/// The `schemas` job: each of [`SCHEMA_CHECKERS`], by its repository path, through `run`.
+fn schema_checks(run: &mut ScriptRunner) -> Result<()> {
+    for checker in SCHEMA_CHECKERS {
+        run(&format!("{SCHEMA_DIR}/{checker}"), &[])?;
+    }
+    Ok(())
+}
+
+/// The `schema-mutants` job: the sweep counts a mutant caught when any checker fails, so it first
+/// runs [`schema_checks`] on the unmutated tree, and runs no mutant unless all three pass; a
+/// failing baseline would otherwise report every mutant caught (DEC-688). With `shard`, `K/N`, the
+/// sweep runs only that shard (`mutate_schemas.py --shard K/N`, which validates it); every shard
+/// checks the baseline itself, so CI's matrix needs no job of its own for it.
+fn schema_mutants(shard: Option<&str>, run: &mut ScriptRunner) -> Result<()> {
+    schema_checks(run)
+        .context("baseline fails: fix the schemas before mutants mean anything (DEC-688)")?;
+    let args: Vec<&str> = shard.map(|s| vec!["--shard", s]).unwrap_or_default();
+    run(&format!("{SCHEMA_DIR}/mutate_schemas.py"), &args)
+}
+
+/// Runs the Python script at `path`, from the repository root, in the environment
+/// `reference/mandate/requirements.txt` pins: the reference implementations' and the workspace API
+/// schema checkers' (DEC-688).
+fn pinned_python(path: &str, rest: &[&str]) -> Result<()> {
     let mut full = vec![
         "run",
         "--no-project",
@@ -569,7 +654,7 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
         "--with-requirements",
         "reference/mandate/requirements.txt",
         "python",
-        path.as_str(),
+        path,
     ];
     full.extend_from_slice(rest);
     sh("uv", &full)
@@ -613,6 +698,9 @@ struct Package {
     manifest_path: PathBuf,
     dependencies: Vec<Dependency>,
     targets: Vec<Target>,
+    /// The package's `[features]`: each name with what it enables.
+    #[serde(default)]
+    features: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -620,6 +708,9 @@ struct Dependency {
     name: String,
     kind: Option<String>,
     path: Option<PathBuf>,
+    /// The features this dependency turns on in the crate it names.
+    #[serde(default)]
+    features: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -725,6 +816,18 @@ struct CratePolicy {
     /// dependencies, dev-dependencies included, whatever the layers allow (DEC-525).
     #[serde(default)]
     forbidden_internal: Vec<String>,
+    /// When set, the only workspace crates that may depend on this crate, by a dependency of any
+    /// kind: an allowlist, so a crate added later is refused until it is named (DEC-642 item 7).
+    #[serde(default)]
+    allowed_dependents: Option<Vec<String>>,
+    /// Whether every workspace crate that depends on this one must do so as a dev-dependency, as
+    /// test support must (DEC-645).
+    #[serde(default)]
+    dev_only: bool,
+    /// The one crate that may declare a `live` cargo feature: the deployment runner (ES-23 as
+    /// DEC-529 item 3 narrows it). No crate is marked until the runner's G1a slice marks it.
+    #[serde(default)]
+    live_feature: bool,
 }
 
 enum Layer {
@@ -774,6 +877,19 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             )
         }));
     }
+    for (listed, own) in &policy.crates {
+        let unknown = own
+            .allowed_dependents
+            .iter()
+            .flatten()
+            .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name));
+        problems.extend(unknown.map(|name| {
+            format!(
+                "`{listed}` allows `{name}` as a dependent, which is neither a workspace member nor \
+                 in `planned` (DEC-642 item 7)"
+            )
+        }));
+    }
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
@@ -805,6 +921,22 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
                 let Some(dep_policy) = policy.crates.get(&dep.name) else {
                     continue;
                 };
+                if dep_policy.dev_only && dep.kind.as_deref() != Some("dev") {
+                    problems.push(format!(
+                        "`{}` depends on `{}`, which is dev-only in xtask/layers.toml, other than as \
+                         a dev-dependency (DEC-645)",
+                        pkg.name, dep.name
+                    ));
+                }
+                if let Some(allowed) = &dep_policy.allowed_dependents
+                    && !allowed.contains(&pkg.name)
+                {
+                    problems.push(format!(
+                        "`{}` depends on `{}`, whose allowed_dependents in xtask/layers.toml does \
+                         not name it (DEC-642 item 7)",
+                        pkg.name, dep.name
+                    ));
+                }
                 match (&own_layer, layer_of(dep_policy, &dep.name)?) {
                     (Layer::Product(_), Layer::Tool) => {
                         problems.push(format!(
@@ -1253,25 +1385,1348 @@ fn is_pending_reason(reason: &str) -> bool {
 /// The feature map names every crate and reference-case suite, and every path it names exists.
 fn feature_map() -> Result<()> {
     eprintln!("    feature-map: checking {FEATURE_MAP} against the workspace");
-    let text = fs::read_to_string(FEATURE_MAP).with_context(|| format!("reading {FEATURE_MAP}"))?;
+    report(
+        feature_map_problems(Path::new("."), &metadata()?)?,
+        "feature-map",
+    )
+}
+
+/// Every feature file of the map under `root`, sorted by name, with its text: every `.md` file in
+/// [`FEATURE_MAP`] but its README.
+fn feature_files(root: &Path) -> Result<Vec<(String, String)>> {
+    let mut files = Vec::new();
+    for entry in
+        fs::read_dir(root.join(FEATURE_MAP)).with_context(|| format!("reading {FEATURE_MAP}"))?
+    {
+        let path = entry?.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if name.ends_with(".md") && name != "README.md" {
+            let text = fs::read_to_string(&path)
+                .with_context(|| format!("reading {FEATURE_MAP}/{name}"))?;
+            files.push((name, text));
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// The map's drift against the workspace under `root`, the checks the single `feature-map.md` had:
+/// every workspace crate is named in some feature as `` `crate` ``, every reference-case fixture
+/// as its path, and every repository path a feature names exists. Each feature file must also open
+/// with its `# ` title, which is what `--index` lists.
+fn feature_map_problems(root: &Path, meta: &Metadata) -> Result<Vec<String>> {
+    let files = feature_files(root)?;
     let mut problems = Vec::new();
-    for pkg in workspace_packages(&metadata()?) {
+    if files.is_empty() {
+        problems.push(format!("{FEATURE_MAP} has no feature files"));
+    }
+    let text: String = files
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for pkg in workspace_packages(meta) {
         if !text.contains(&format!("`{}`", pkg.name)) {
             problems.push(format!("crate `{}` has no entry", pkg.name));
         }
     }
-    for entry in fs::read_dir("fixtures/refcases")? {
+    for entry in fs::read_dir(root.join("fixtures/refcases"))? {
         let name = entry?.file_name().to_string_lossy().into_owned();
         if !text.contains(&format!("fixtures/refcases/{name}")) {
             problems.push(format!("fixtures/refcases/{name} has no entry"));
         }
     }
-    for path in backticked_paths(&text) {
-        if !Path::new(path).exists() {
-            problems.push(format!("names `{path}`, which does not exist"));
+    for (name, text) in &files {
+        if feature_title(text).is_none() {
+            problems.push(format!(
+                "{FEATURE_MAP}/{name} does not open with a `# ` title"
+            ));
+        }
+        for path in backticked_paths(text) {
+            if !root.join(path).exists() {
+                problems.push(format!("{name} names `{path}`, which does not exist"));
+            }
         }
     }
-    report(problems, "feature-map")
+    Ok(problems)
+}
+
+/// A feature file's title: its first line, when that is a `# ` heading.
+fn feature_title(text: &str) -> Option<&str> {
+    text.lines().next()?.strip_prefix("# ")
+}
+
+/// `cargo xtask feature-map --index`: the map's table of contents, derived from the files, so no
+/// hand-kept list can drift or become a file every feature PR edits.
+fn feature_map_index() -> Result<()> {
+    for (name, text) in feature_files(Path::new("."))? {
+        println!("{name}: {}", feature_title(&text).unwrap_or("(no title)"));
+    }
+    Ok(())
+}
+
+/// One of the [`ci_files`], by its path in the repository, with its text.
+struct CiFile {
+    path: String,
+    text: String,
+}
+
+/// Every file that decides what CI or a release builds, each of which may be absent: workflows,
+/// scripts and actions under `.github`, `deploy`'s scripts, `.cargo/config.toml`, and the
+/// [`build_files`] anywhere in the repository.
+fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
+    let mut files = build_files(root)?;
+    for (dir, extensions) in [
+        (".github/workflows", &["yml", "yaml"][..]),
+        (".github/scripts", &["sh"][..]),
+        (".github/actions", &["yml", "yaml"][..]),
+        ("deploy", &["sh"][..]),
+    ] {
+        let dir = root.join(dir);
+        if dir.is_dir() {
+            files.extend(files_by_extension(&dir, extensions)?);
+        }
+    }
+    let cargo_config = root.join(".cargo/config.toml");
+    if cargo_config.is_file() {
+        files.push(cargo_config);
+    }
+    files.sort();
+    files.dedup();
+    files
+        .into_iter()
+        .map(|file| {
+            let text =
+                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            let path = file
+                .strip_prefix(root)
+                .unwrap_or(&file)
+                .display()
+                .to_string();
+            Ok(CiFile { path, text })
+        })
+        .collect()
+}
+
+/// The build files under `root` (DEC-851, the eleventh-round ruling): `Makefile`, `makefile`,
+/// `GNUmakefile`, `*.mk`, `justfile`, `Justfile`, `Dockerfile*` and `docker-compose*.yml` or
+/// `.yaml`, at any depth. Only what is not the repository's own is skipped: `.git`,
+/// `node_modules`, and a directory a `CACHEDIR.TAG` marks as a cache, as cargo's target is.
+fn build_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+            let entry = entry?;
+            let (path, name) = (entry.path(), entry.file_name());
+            let name = name.to_string_lossy();
+            if entry.file_type()?.is_dir() {
+                if !matches!(name.as_ref(), ".git" | "node_modules")
+                    && !path.join("CACHEDIR.TAG").is_file()
+                {
+                    pending.push(path);
+                }
+            } else if matches!(
+                name.as_ref(),
+                "Makefile" | "makefile" | "GNUmakefile" | "justfile" | "Justfile"
+            ) || name.ends_with(".mk")
+                || name.starts_with("Dockerfile")
+                || (name.starts_with("docker-compose")
+                    && (name.ends_with(".yml") || name.ends_with(".yaml")))
+            {
+                files.push(path);
+            }
+        }
+    }
+    Ok(files)
+}
+
+/// [`live_feature_problems`] over the repository at `root`, as `cargo xtask live-feature` and
+/// the lint job run it.
+fn live_feature_in(root: &Path) -> Result<()> {
+    eprintln!("    live-feature: checking that only the runner may build `live` (ES-23, DEC-529)");
+    let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)
+        .context("parsing xtask/layers.toml")?;
+    let files = ci_files(root)?;
+    report(
+        live_feature_problems(&policy, &metadata_in(root)?, &files)?,
+        "live-feature",
+    )
+}
+
+/// Every way the workspace and its CI break ES-23's ban on a `live` build, as DEC-529 item 3
+/// narrows it for the founder's one live order (E7-26, X1): at most one crate is marked
+/// `live_feature` in `policy`, and only it may declare a `live` feature; no other feature of it
+/// (`default` included) and no dependency or feature of another crate turns `live` on; and CI
+/// never passes `--all-features`, and passes `live` only in at most one `cargo check` of the
+/// marked crate, so the feature compiles but no live build is ever produced or run.
+fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Result<Vec<String>> {
+    let mut problems = Vec::new();
+    let packages = workspace_packages(meta);
+    let names: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    let marked: Vec<&str> = policy
+        .crates
+        .iter()
+        .filter(|(_, crate_policy)| crate_policy.live_feature)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if marked.len() > 1 {
+        let listed: Vec<String> = marked.iter().map(|name| format!("`{name}`")).collect();
+        problems.push(format!(
+            "{} are marked `live_feature`; at most one crate, the runner, may be",
+            listed.join(", ")
+        ));
+    }
+    for name in &marked {
+        if !names.contains(name) {
+            problems.push(format!(
+                "`{name}` is marked `live_feature` but is not a workspace member"
+            ));
+        }
+    }
+    let runner = match marked.as_slice() {
+        [only] if names.contains(only) => Some(*only),
+        _ => None,
+    };
+    for pkg in &packages {
+        let is_runner = runner == Some(pkg.name.as_str());
+        if pkg.features.contains_key(LIVE) && !is_runner {
+            problems.push(format!(
+                "`{}` declares a `{LIVE}` feature; only the crate marked `live_feature` may",
+                pkg.name
+            ));
+        }
+        for (feature, enables) in &pkg.features {
+            for enabled in enables {
+                let turns_on_own = is_runner && feature != LIVE && enabled == LIVE;
+                let turns_on_other = enabled
+                    .rsplit_once('/')
+                    .is_some_and(|(_, feature)| feature == LIVE);
+                if turns_on_own || turns_on_other {
+                    problems.push(format!(
+                        "`{}`'s feature `{feature}` turns on `{enabled}`; only an explicit \
+                         `--features {LIVE}` may",
+                        pkg.name
+                    ));
+                }
+            }
+        }
+        for dep in &pkg.dependencies {
+            if dep.features.iter().any(|f| f == LIVE) {
+                problems.push(format!(
+                    "`{}` turns on `{LIVE}` in its dependency on `{}`",
+                    pkg.name, dep.name
+                ));
+            }
+        }
+    }
+    let mut compile_only_seen = false;
+    for file in ci {
+        let yaml = file.path.ends_with(".yml") || file.path.ends_with(".yaml");
+        let (run_lines, with_lines) = (
+            block_lines(&file.text, "run"),
+            block_lines(&file.text, "with"),
+        );
+        let lines = logical_lines(&file.path, &file.text);
+        let text_lines = text_only_lines(&lines, yaml);
+        let (variables, arrays) = definitions(&lines);
+        for ((number, line), text_only) in lines.iter().zip(text_lines) {
+            let at = format!("{}:{number}", file.path);
+            let ctx = LineContext {
+                runner,
+                cargo_config: file.path.ends_with(".cargo/config.toml"),
+                expression_command: !yaml || run_lines.contains(number),
+                with_value: yaml && with_lines.contains(number),
+                variables: &variables,
+                arrays: &arrays,
+                quoted_reread: false,
+            };
+            let flag = if text_only {
+                text_line_live_flag(line, ctx)
+            } else {
+                live_flag(line, ctx, false)
+            };
+            match flag {
+                LiveFlag::Absent => {}
+                LiveFlag::AllFeatures => problems.push(format!(
+                    "{at}: `--all-features` would build the `{LIVE}` feature"
+                )),
+                LiveFlag::Cfg => problems.push(format!(
+                    "{at}: sets a feature through `--cfg feature=…`, which bypasses `--features`"
+                )),
+                LiveFlag::Unreadable => problems.push(format!(
+                    "{at}: cargo words the shell expands or `xargs` gives cannot be checked"
+                )),
+                LiveFlag::CompileOnly if !compile_only_seen => compile_only_seen = true,
+                LiveFlag::CompileOnly => problems.push(format!(
+                    "{at}: a second compile-only `{LIVE}` job; CI may compile it once"
+                )),
+                LiveFlag::Build => problems.push(format!(
+                    "{at}: passes `{LIVE}` outside the one `cargo check -p <runner>` CI may run"
+                )),
+            }
+        }
+    }
+    Ok(problems)
+}
+
+/// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
+const LIVE: &str = "live";
+
+/// What one line of a workflow, script or cargo configuration does with the `live` feature, worst
+/// first: a line holding several commands takes the worst of theirs.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+enum LiveFlag {
+    /// `live` passed to anything but the one compile-only form.
+    Build,
+    /// `--all-features`, which turns `live` on wherever it is declared.
+    AllFeatures,
+    /// `--cfg feature=…`, which sets a feature without `--features`.
+    Cfg,
+    /// A cargo command whose words the shell expands or `xargs` gives, which cannot be read.
+    Unreadable,
+    /// `cargo check -p <runner>` with `live`: the one form CI may run, which builds nothing it
+    /// could run.
+    CompileOnly,
+    /// The line passes neither `live` nor a way around naming it.
+    Absent,
+}
+
+/// A CI file's commands, each with the line it starts on: a line ending in `\` runs on, and a
+/// workflow's folded (`>`, `>-`) or plain `key: value` runs on into each more-indented line, as
+/// YAML folds it; a literal (`|`) block keeps its lines apart, as the shell's newlines do.
+fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
+    let yaml = path.ends_with(".yml") || path.ends_with(".yaml");
+    let lines: Vec<&str> = text.lines().collect();
+    let mut logical = Vec::new();
+    let mut index = 0;
+    while let Some(first) = lines.get(index) {
+        let start = index.saturating_add(1);
+        index = start;
+        let (mut command, fold_below) = match yaml.then(|| yaml_value(first)).flatten() {
+            Some((_, value)) if value.starts_with('|') => (String::new(), None),
+            Some((column, value)) if value.starts_with('>') => (String::new(), Some(column)),
+            Some((column, value)) if !value.is_empty() => (value.to_owned(), Some(column)),
+            _ => ((*first).to_owned(), None),
+        };
+        while let Some(next) = lines.get(index) {
+            let indent = next.len().saturating_sub(next.trim_start().len());
+            let folds = fold_below.is_some_and(|column| indent > column) && !next.trim().is_empty();
+            if let Some(head) = command.trim_end().strip_suffix('\\') {
+                command = head.to_owned();
+            } else if !folds {
+                break;
+            }
+            command.push(' ');
+            command.push_str(next.trim());
+            index = index.saturating_add(1);
+        }
+        logical.push((start, command));
+    }
+    logical
+}
+
+/// A workflow line `key: value` or `- key: value`: the column its key starts at, and its value.
+fn yaml_value(line: &str) -> Option<(usize, &str)> {
+    let rest = line.trim_start_matches([' ', '-']);
+    let (key, value) = rest.split_once(':')?;
+    let plain_key = !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    (plain_key && value.chars().next().is_none_or(char::is_whitespace))
+        .then(|| (line.len().saturating_sub(rest.len()), value.trim()))
+}
+
+/// Whether `line` sets a feature through `--cfg`: `feature` then `=`, with any spaces, quotes or
+/// backslashes between, wherever it appears (a command, `RUSTFLAGS`, or `rustflags`).
+fn sets_cfg_feature(line: &str) -> bool {
+    let bare = line.replace(['"', '\'', '\\'], "");
+    bare.split("feature")
+        .skip(1)
+        .any(|after| after.trim_start().starts_with('='))
+}
+
+/// One token of a shell command line.
+enum ShellToken {
+    /// A word without its quotes, and whether any of it was quoted or escaped; a `$` or backtick
+    /// in it, however quoted, may expand.
+    Word(String, bool),
+    /// A redirection whose target is the next word (`>`, `>>`, `2>`, `<`, `&>`, `>|`, `<<`, …);
+    /// in a descriptor copy such as `2>&1` the target is the descriptor (`1`).
+    Redirect,
+    /// `<<<`, whose target word is the command's input, read as a command line of its own.
+    HereString,
+    /// `|` or `|&`, which ends a command and feeds its output to the next.
+    Pipe,
+    /// What ends a command otherwise: `||`, `&&`, `&`, `;`, `(`, `)`.
+    End,
+}
+
+/// Splits `line` into tokens as the shell does: quotes group a word, a backslash escapes the next
+/// character, and a word starting with `#` begins a comment. `&&` is two ends, a redirection's
+/// descriptor (the `2` of `2>`) a word of its own, which cargo never reads, and an array
+/// definition `x=( … )` one word. The text of each `$( … )`, backtick, `<( … )` and `>( … )`
+/// substitution is added to `nested` with the position of the token it stands in, because the
+/// shell runs it as a command line of its own; `$(( … ))` is arithmetic and is not.
+fn shell_tokens(line: &str, nested: &mut Vec<(String, usize)>) -> Vec<ShellToken> {
+    let chars: Vec<char> = line.chars().collect();
+    let (mut tokens, mut word, mut quote, mut index) = (Vec::new(), None::<String>, None, 0);
+    let mut quoted = false;
+    while let Some(&c) = chars.get(index) {
+        index = index.saturating_add(1);
+        let next = chars.get(index).copied();
+        let ends = match (quote, c) {
+            (Some(open), _) if c == open => {
+                quote = None;
+                None
+            }
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                quoted = true;
+                word.get_or_insert_with(String::new);
+                None
+            }
+            (None, '(') if word.as_ref().is_some_and(|w| w.ends_with('=')) => {
+                let current = word.get_or_insert_with(String::new);
+                current.push('(');
+                let mut depth = 1_usize;
+                while let Some(&d) = chars.get(index) {
+                    index = index.saturating_add(1);
+                    current.push(d);
+                    depth = match d {
+                        '(' => depth.saturating_add(1),
+                        ')' => depth.saturating_sub(1),
+                        _ => depth,
+                    };
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                None
+            }
+            (None, ' ' | '\t') => Some(None),
+            (None, '#') if word.is_none() => break,
+            (None, '|') if next == Some('|') => {
+                index = index.saturating_add(1);
+                Some(Some(ShellToken::End))
+            }
+            (None, '|') => {
+                index = index.saturating_add(usize::from(next == Some('&')));
+                Some(Some(ShellToken::Pipe))
+            }
+            (None, ';' | '(' | ')') => Some(Some(ShellToken::End)),
+            (None, '<' | '>') if next == Some('(') => {
+                substitution(&chars, '$', &mut index, nested, tokens.len());
+                word.get_or_insert_with(String::new).push(c);
+                None
+            }
+            (None, '&') if next != Some('>') => Some(Some(ShellToken::End)),
+            (None, '<' | '>' | '&') => {
+                let start = index.saturating_sub(1);
+                while chars
+                    .get(index)
+                    .is_some_and(|d| matches!(d, '<' | '>' | '|' | '-'))
+                {
+                    index = index.saturating_add(1);
+                }
+                index = index.saturating_add(usize::from(chars.get(index) == Some(&'&')));
+                let here_string = chars
+                    .get(start..index)
+                    .is_some_and(|op| op.starts_with(&['<'; 3]));
+                Some(Some(if here_string {
+                    ShellToken::HereString
+                } else {
+                    ShellToken::Redirect
+                }))
+            }
+            (_, '\\') if quote != Some('\'') => {
+                quoted = true;
+                word.get_or_insert_with(String::new)
+                    .extend(chars.get(index));
+                index = index.saturating_add(1);
+                None
+            }
+            _ => {
+                let arithmetic =
+                    next == Some('(') && chars.get(index.saturating_add(1)) == Some(&'(');
+                if quote != Some('\'') && matches!(c, '$' | '`') && !arithmetic {
+                    substitution(&chars, c, &mut index, nested, tokens.len());
+                }
+                word.get_or_insert_with(String::new).push(c);
+                None
+            }
+        };
+        if let Some(token) = ends {
+            tokens.extend(word.take().map(|text| ShellToken::Word(text, quoted)));
+            quoted = false;
+            tokens.extend(token);
+        }
+    }
+    tokens.extend(word.map(|text| ShellToken::Word(text, quoted)));
+    tokens
+}
+
+/// After a `$`, an opening backtick, or a `<` or `>` before `(`, reads a `( … )` or backtick
+/// substitution to its close and adds its inner text to `nested` with the token position `at`.
+fn substitution(
+    chars: &[char],
+    start: char,
+    index: &mut usize,
+    nested: &mut Vec<(String, usize)>,
+    at: usize,
+) {
+    let close = match (start, chars.get(*index)) {
+        ('`', _) => '`',
+        (_, Some('(')) => ')',
+        _ => return,
+    };
+    *index = index.saturating_add(usize::from(start == '$'));
+    let mut depth = 0_usize;
+    let inner: String = chars
+        .get(*index..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|&&c| {
+            depth = match c {
+                _ if c == close && depth == 0 => return false,
+                '(' if close == ')' => depth.saturating_add(1),
+                ')' => depth.saturating_sub(1),
+                _ => depth,
+            };
+            true
+        })
+        .collect();
+    *index = index
+        .saturating_add(inner.chars().count())
+        .saturating_add(1);
+    nested.push((inner, at));
+}
+
+/// What a line of a CI file is read with: the runner, and what kind of line it is.
+#[derive(Clone, Copy)]
+struct LineContext<'a> {
+    /// The crate marked `live_feature`, when exactly one workspace member is.
+    runner: Option<&'a str>,
+    /// A line of `.cargo/config.toml`, whose aliases and flags are all cargo's own.
+    cargo_config: bool,
+    /// A line a shell runs: any line of a script, or a workflow's `run:` value. Only there can a
+    /// command word holding `${{ … }}` be cargo; elsewhere it is a job name, an `env:` value, a
+    /// `with:` input or a cache key.
+    expression_command: bool,
+    /// A line inside a workflow's `with:` block: an action's input has no command word, so it
+    /// may be cargo's arguments, and `-F` and a short-flag cluster are feature flags there.
+    with_value: bool,
+    /// The file's scalar variables, each with its definitions concatenated in order, or none when
+    /// a definition expands and cannot be read statically (DEC-851 item 2).
+    variables: &'a BTreeMap<String, Option<String>>,
+    /// The file's arrays, each with the elements of all its definitions (`x=( … )`,
+    /// `x+=( … )`), in order.
+    arrays: &'a BTreeMap<String, String>,
+    /// A quoted argument word or here-string re-read as a command line, where an unreadable
+    /// definition is not refused, only a readable one read through.
+    quoted_reread: bool,
+}
+
+/// The scalar variables `lines` assign (`C=…` resets, `C+=…` appends), each value concatenated
+/// in order, or none once a definition holds `$` or a backtick; and the arrays they define
+/// (`x=( … )`, `x+=( … )`), each with every definition's elements, none reset.
+type Definitions = (BTreeMap<String, Option<String>>, BTreeMap<String, String>);
+
+/// [`Definitions`] of the file whose logical lines are `lines`.
+fn definitions(lines: &[(usize, String)]) -> Definitions {
+    let mut variables: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let mut arrays: BTreeMap<String, String> = BTreeMap::new();
+    for (_, line) in lines {
+        let (mut at_command_start, mut reading) = (true, false);
+        let (mut declaring, mut printing) = (false, false);
+        for token in shell_tokens(line, &mut Vec::new()) {
+            let ShellToken::Word(word, _) = token else {
+                (at_command_start, reading) = (!matches!(token, ShellToken::Redirect), false);
+                (declaring, printing) = (false, false);
+                continue;
+            };
+            if printing {
+                if word == "-v" {
+                    reading = true;
+                }
+                printing = false;
+                continue;
+            }
+            if at_command_start && word == "printf" {
+                (printing, at_command_start) = (true, false);
+                continue;
+            }
+            if at_command_start
+                && matches!(
+                    word.as_str(),
+                    "export" | "declare" | "local" | "readonly" | "typeset"
+                )
+            {
+                declaring = true;
+                continue;
+            }
+            if declaring && !word.contains('=') {
+                continue;
+            }
+            if reading {
+                if !word.starts_with('-') {
+                    variables.insert(word, None);
+                }
+                continue;
+            }
+            if at_command_start && matches!(word.as_str(), "read" | "mapfile" | "readarray") {
+                reading = true;
+                continue;
+            }
+            let assignment = word.split_once('=').filter(|(name, _)| {
+                !name.trim_end_matches('+').is_empty()
+                    && name
+                        .trim_end_matches('+')
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            });
+            match assignment {
+                Some((name, value)) if at_command_start && value.starts_with('(') => {
+                    let text = arrays
+                        .entry(name.trim_end_matches('+').to_owned())
+                        .or_default();
+                    text.push(' ');
+                    text.push_str(value.trim_start_matches('(').trim_end_matches(')'));
+                }
+                Some((name, value)) if at_command_start => {
+                    let append = name.ends_with('+');
+                    let entry = variables
+                        .entry(name.trim_end_matches('+').to_owned())
+                        .or_insert_with(|| Some(String::new()));
+                    if value.contains(['$', '`']) {
+                        *entry = None;
+                    } else if let Some(text) = entry {
+                        if !append {
+                            text.clear();
+                        }
+                        text.push_str(value);
+                    }
+                }
+                _ if at_command_start && is_skipped_word(&word) => {}
+                _ => at_command_start = false,
+            }
+        }
+    }
+    (variables, arrays)
+}
+
+/// The array a word expands whole when it is solely `${NAME[@]}` or `${NAME[*]}`.
+fn sole_array(word: &str) -> Option<&str> {
+    let name = word.strip_prefix("${").and_then(|rest| {
+        rest.strip_suffix("[@]}")
+            .or_else(|| rest.strip_suffix("[*]}"))
+    })?;
+    sole_variable(&format!("${name}")).is_some().then_some(name)
+}
+
+/// The variable a word expands when it is solely `$NAME` or `${NAME}` with `NAME` a name, not a
+/// positional or special parameter.
+fn sole_variable(word: &str) -> Option<&str> {
+    let name = word
+        .strip_prefix("${")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .or_else(|| word.strip_prefix('$'))?;
+    let mut chars = name.chars();
+    let leads = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    (leads && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')).then_some(name)
+}
+
+/// The numbers of a workflow's `key:` lines and of every line below one that is blank or
+/// indented further than the key: a `run:` value, or the inputs of a `with:` block.
+fn block_lines(text: &str, key: &str) -> BTreeSet<usize> {
+    let mut lines = BTreeSet::new();
+    let mut block: Option<usize> = None;
+    for (number, line) in (1_usize..).zip(text.lines()) {
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if block.is_some_and(|column| line.trim().is_empty() || indent > column) {
+            lines.insert(number);
+            continue;
+        }
+        block = yaml_value(line)
+            .filter(|_| line.trim_start_matches([' ', '-']).split(':').next() == Some(key))
+            .map(|(column, _)| column);
+        if block.is_some() {
+            lines.insert(number);
+        }
+    }
+    lines
+}
+
+/// The commands known not to execute their arguments, whose quoted words are text, not command
+/// lines. `gh api` alone joins them (`known_command`), for `merge-approved.sh`'s GraphQL query.
+const NON_EXECUTING: &[&str] = &[
+    "echo", "printf", "cat", "jq", "awk", "sed", "grep", "tr", "cut", "sort", "uniq", "head",
+    "tail", "tee", "wc", "test", "[", "true", "false", "read", "basename", "dirname", "date",
+    "mkdir", "rm", "cp", "mv", "ls", "chmod", "curl", "git",
+];
+
+/// A word skipped when finding a command's command word: an assignment (`A=1`), or a keyword
+/// after which a command follows (`if`, `then`, `else`, `elif`, `do`, `while`, `until`, `!`,
+/// `time`).
+fn is_skipped_word(word: &str) -> bool {
+    matches!(
+        word,
+        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "time" | "{"
+    ) || word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Whether the command whose words are `words`, command word first, is known not to execute:
+/// one of [`NON_EXECUTING`] not in an executing form, or `gh api`. Every other command executes,
+/// unknown ones, shells and wrappers included, so the reading fails closed.
+fn known_command(words: &[&str]) -> bool {
+    match words {
+        ["gh", "api", ..] => true,
+        [command, ..] => NON_EXECUTING.contains(command) && !executing_form(words),
+        [] => false,
+    }
+}
+
+/// Whether a known command runs one anyway: `awk` with `system(` or `getline`, `sed` with an `e`
+/// command or an `/e` flag, or `git` with a `!` alias.
+fn executing_form(words: &[&str]) -> bool {
+    match words.first() {
+        Some(&"awk") => words
+            .iter()
+            .any(|word| word.contains("system(") || word.contains("getline")),
+        Some(&"sed") => words
+            .iter()
+            .skip(1)
+            .filter(|word| !word.starts_with('-'))
+            .any(|script| sed_executes(script)),
+        Some(&"git") => words.iter().enumerate().any(|(index, word)| {
+            word.starts_with("alias.")
+                && (word.contains("=!")
+                    || words
+                        .get(index.saturating_add(1))
+                        .is_some_and(|next| next.starts_with('!')))
+        }),
+        _ => false,
+    }
+}
+
+/// Whether a `sed` script executes: an `s` command with an `e` flag, or an `e` command.
+fn sed_executes(script: &str) -> bool {
+    let substitute = script.strip_prefix('s').and_then(|rest| {
+        let delimiter = rest.chars().next()?;
+        rest.split(delimiter)
+            .nth(3)
+            .map(|flags| flags.contains('e'))
+    });
+    substitute.unwrap_or(false) || script == "e" || script.starts_with("e ")
+}
+
+/// The words of `segment`, a piece of a command line, adding its substitutions to `nested`.
+fn token_words(segment: &str, nested: &mut Vec<(String, usize)>) -> Vec<String> {
+    shell_tokens(segment, nested)
+        .into_iter()
+        .filter_map(|token| match token {
+            ShellToken::Word(text, _) => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The words of `segment`, a piece of a command line, from its command word on.
+fn command_words(segment: &str) -> Vec<String> {
+    let words = token_words(segment, &mut Vec::new());
+    words
+        .into_iter()
+        .skip_while(|word| is_skipped_word(word))
+        .collect()
+}
+
+/// Whether text that a line spanning lines holds, between `before` and `after`, is read as text:
+/// its command is known not to execute, a `$( … )` or `<( … )` it stands in feeds a command
+/// known not to (or a bare assignment), and nothing after it pipes it on to a command that does.
+fn read_as_text(before: &str, after: &str) -> bool {
+    let known = |segment: &str| {
+        let words = command_words(segment);
+        known_command(&words.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    let pieces: Vec<&str> = before.split(['|', ';', '(', '`', '&']).collect();
+    let consumer_known = match pieces.len().checked_sub(2).and_then(|at| pieces.get(at)) {
+        Some(outer) if outer.ends_with(['$', '<']) => {
+            let outer = outer.trim_end_matches(['$', '<']);
+            command_words(outer).is_empty() || known(outer)
+        }
+        _ => true,
+    };
+    let mut nested = Vec::new();
+    let tokens = shell_tokens(after, &mut nested);
+    let piped_on = tokens.iter().enumerate().any(|(at, token)| {
+        matches!(token, ShellToken::Pipe) && {
+            let next: Vec<&str> = tokens
+                .iter()
+                .skip(at.saturating_add(1))
+                .map_while(|token| match token {
+                    ShellToken::Word(text, _) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            !known_command(&next)
+        }
+    });
+    known(pieces.last().copied().unwrap_or_default()) && consumer_known && !piped_on
+}
+
+/// For each of `lines`, whether it is text rather than commands: a here-doc's body, or the later
+/// lines of a script's single-quoted string that spans lines, when [`read_as_text`] reads it so.
+fn text_only_lines(lines: &[(usize, String)], yaml: bool) -> Vec<bool> {
+    let mut text_only = vec![false; lines.len()];
+    let mut index = 0;
+    while let Some((_, line)) = lines.get(index) {
+        let here_doc = line
+            .split_once("<<")
+            .filter(|(_, rest)| !rest.starts_with('<'));
+        let delimiter: String = here_doc
+            .map(|(_, rest)| {
+                rest.trim_start_matches('-')
+                    .trim_start()
+                    .trim_start_matches(['\'', '"'])
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect()
+            })
+            .unwrap_or_default();
+        let span = if let Some((before, rest)) = here_doc.filter(|_| !delimiter.is_empty()) {
+            let after = rest
+                .split_once(delimiter.as_str())
+                .map(|(_, after)| after.trim_start_matches(['\'', '"']))
+                .unwrap_or_default();
+            let end = (index.saturating_add(1)..lines.len())
+                .find(|&at| {
+                    lines
+                        .get(at)
+                        .is_some_and(|(_, body)| body.trim() == delimiter)
+                })
+                .unwrap_or(lines.len());
+            Some((
+                read_as_text(before, after),
+                index.saturating_add(1),
+                end,
+                end.saturating_add(1),
+            ))
+        } else if !yaml && line.matches('\'').count() % 2 == 1 {
+            let before = line
+                .get(..line.rfind('\'').unwrap_or_default())
+                .unwrap_or_default();
+            (index.saturating_add(1)..lines.len())
+                .find(|&at| {
+                    lines
+                        .get(at)
+                        .is_some_and(|(_, l)| l.matches('\'').count() % 2 == 1)
+                })
+                .map(|close| {
+                    let after = lines
+                        .get(close)
+                        .and_then(|(_, l)| l.split_once('\''))
+                        .map(|(_, after)| after)
+                        .unwrap_or_default();
+                    let to = close.saturating_add(1);
+                    (read_as_text(before, after), index.saturating_add(1), to, to)
+                })
+        } else {
+            None
+        };
+        let Some((text, from, to, next)) = span else {
+            index = index.saturating_add(1);
+            continue;
+        };
+        for slot in text_only.get_mut(from..to).unwrap_or_default() {
+            *slot = text;
+        }
+        index = next;
+    }
+    text_only
+}
+
+/// Reads a text line: the live-token backstop, the cargo-word rule and the value rule over each
+/// of its words, and each substitution in it as a command line.
+fn text_line_live_flag(line: &str, ctx: LineContext) -> LiveFlag {
+    let mut nested = Vec::new();
+    let words = token_words(line, &mut nested);
+    let refused =
+        feature_values_refused(&words, ctx) || words.iter().any(|w| cargo_word_refused(w));
+    let verdict = if words.iter().any(|word| holds_live(word)) {
+        LiveFlag::Build
+    } else if refused {
+        LiveFlag::Unreadable
+    } else {
+        LiveFlag::Absent
+    };
+    nested
+        .iter()
+        .map(|(inner, _)| live_flag(inner, ctx, false))
+        .fold(verdict, LiveFlag::min)
+}
+
+/// One command of a pipeline: its words, each with whether it was quoted and its token
+/// position, its here-strings, and the span of token positions it covers.
+#[derive(Default)]
+struct PipelineCommand {
+    words: Vec<(String, bool, usize)>,
+    here_strings: Vec<String>,
+    start: usize,
+    end: usize,
+}
+
+impl PipelineCommand {
+    /// The words from the command word on.
+    fn command(&self) -> Vec<&str> {
+        self.words
+            .iter()
+            .map(|(word, _, _)| word.as_str())
+            .skip_while(|word| is_skipped_word(word))
+            .collect()
+    }
+
+    /// The token position of the command word, or none for a bare assignment.
+    fn command_position(&self) -> Option<usize> {
+        self.words
+            .iter()
+            .find(|(word, _, _)| !is_skipped_word(word))
+            .map(|(_, _, at)| *at)
+    }
+}
+
+/// Judges each command of `line` on its own, a pipeline at a time, and keeps the worst verdict.
+/// Every word, a redirection's target included, is held to the cargo-word rule. A redirection's
+/// one target word is otherwise skipped, so it may hold a `$` (`>> "$GITHUB_OUTPUT"`), and the
+/// words after it are read. [`pipeline_live_flag`] says what else is read as a command line;
+/// `consumer_executes` says that `line` is a substitution whose output a command runs.
+fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag {
+    if sets_cfg_feature(line) {
+        return LiveFlag::Cfg;
+    }
+    let mut substitutions = Vec::new();
+    let tokens = shell_tokens(line, &mut substitutions);
+    let (mut verdict, mut reread, mut pipeline) = (LiveFlag::Absent, Vec::new(), Vec::new());
+    let mut command = PipelineCommand::default();
+    let (mut target_next, mut here_string_next) = (false, false);
+    for (at, token) in tokens.into_iter().chain([ShellToken::End]).enumerate() {
+        if let ShellToken::Word(text, _) = &token
+            && cargo_word_refused(text)
+        {
+            verdict = verdict.min(LiveFlag::Unreadable);
+        }
+        let ends_pipeline = matches!(token, ShellToken::End);
+        match token {
+            ShellToken::Word(..) if target_next => target_next = false,
+            ShellToken::Word(text, _) if here_string_next => {
+                here_string_next = false;
+                command.here_strings.push(text);
+            }
+            ShellToken::Word(text, quoted) => command.words.push((text, quoted, at)),
+            ShellToken::Redirect => target_next = true,
+            ShellToken::HereString => here_string_next = true,
+            ShellToken::Pipe | ShellToken::End => {
+                command.end = at;
+                let next = PipelineCommand {
+                    start: at.saturating_add(1),
+                    ..PipelineCommand::default()
+                };
+                pipeline.push(std::mem::replace(&mut command, next));
+                (target_next, here_string_next) = (false, false);
+                if ends_pipeline {
+                    let flag = pipeline_live_flag(
+                        &pipeline,
+                        (line, &substitutions),
+                        ctx,
+                        consumer_executes,
+                        &mut reread,
+                    );
+                    verdict = verdict.min(flag);
+                    pipeline.clear();
+                }
+            }
+        }
+    }
+    reread
+        .iter()
+        .map(|(inner, executes, quoted)| {
+            let ctx = LineContext {
+                quoted_reread: *quoted,
+                ..ctx
+            };
+            live_flag(inner, ctx, *executes)
+        })
+        .fold(verdict, LiveFlag::min)
+}
+
+/// Judges each command of a pipeline and adds to `reread` what the shell may run as a command
+/// line: a substitution in it, which executes when it is the command word or when its consumer
+/// is not known non-executing; and, unless the command is the compile-only form or text (known
+/// non-executing, with every later stage known too and no consumer that executes), each quoted
+/// word holding a space, `cargo` or a `$` or backtick, and each here-string. An executing `awk`
+/// or `sed` builds a command no reading can follow, so it is refused, and so is a command that
+/// runs an expanding argument as a command line ([`runs_expanding_line`]). A command word that,
+/// after its wrappers, is solely a variable the file defines is read through its value, and
+/// refused when a definition cannot be read; one solely a whole array is refused when the file
+/// defines no such array or a definition holds `cargo`, `live` or an expansion. In a quoted word
+/// re-read, an unreadable variable is let through and an array is refused only for `cargo` or
+/// `live`, its elements staying the outer command's arguments (DEC-851 item 2).
+fn pipeline_live_flag(
+    pipeline: &[PipelineCommand],
+    (line, substitutions): (&str, &[(String, usize)]),
+    ctx: LineContext,
+    consumer_executes: bool,
+    reread: &mut Vec<(String, bool, bool)>,
+) -> LiveFlag {
+    let mut verdict = LiveFlag::Absent;
+    for (index, command) in pipeline.iter().enumerate() {
+        let words: Vec<String> = command
+            .words
+            .iter()
+            .map(|(word, _, _)| word.clone())
+            .collect();
+        let flag = command_live_flag(&words, ctx);
+        let named = command.command();
+        let unwrapped_named = unwrapped(&named);
+        match unwrapped_named
+            .first()
+            .and_then(|word| sole_variable(word))
+            .map(|name| ctx.variables.get(name))
+        {
+            Some(Some(None)) if !ctx.quoted_reread => verdict = verdict.min(LiveFlag::Unreadable),
+            Some(Some(Some(value))) => {
+                let rest = unwrapped_named.get(1..).unwrap_or_default().join(" ");
+                reread.push((format!("{value} {rest}"), false, ctx.quoted_reread));
+            }
+            _ => {}
+        }
+        if let Some(name) = unwrapped_named.first().and_then(|word| sole_array(word)) {
+            let definition = ctx.arrays.get(name);
+            let builds_live =
+                |text: &String| text.to_ascii_lowercase().contains("cargo") || holds_live(text);
+            let refused = if ctx.quoted_reread {
+                definition.is_some_and(builds_live)
+            } else {
+                ctx.variables.get(name) == Some(&None)
+                    || definition.is_none_or(|text| builds_live(text) || text.contains(['$', '`']))
+            };
+            if refused {
+                verdict = verdict.min(LiveFlag::Unreadable);
+            }
+        }
+        let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
+            || runs_expanding_line(
+                &named,
+                &command.here_strings,
+                command.words.iter().any(|(text, _, at)| {
+                    text.starts_with(['<', '>'])
+                        && substitutions
+                            .iter()
+                            .any(|(inner, p)| p == at && inner.contains(['$', '`']))
+                }),
+            );
+        verdict = verdict.min(flag);
+        if builds || (flag != LiveFlag::CompileOnly && feature_values_refused(&words, ctx)) {
+            verdict = verdict.min(LiveFlag::Unreadable);
+        }
+        let later_known = pipeline
+            .iter()
+            .skip(index.saturating_add(1))
+            .all(|later| known_command(&later.command()));
+        let as_text = known_command(&named) && later_known && !consumer_executes;
+        let position = command.command_position();
+        let captured = as_text || (position.is_none() && later_known && !consumer_executes);
+        if flag != LiveFlag::CompileOnly && !as_text {
+            reread.extend(
+                command
+                    .words
+                    .iter()
+                    .filter(|(text, quoted, _)| {
+                        *quoted
+                            && (text.contains([' ', '\t', '$', '`']) || text.contains("cargo"))
+                            && text.len() < line.len()
+                    })
+                    .map(|(text, _, _)| (text.clone(), false, true)),
+            );
+            reread.extend(
+                command
+                    .here_strings
+                    .iter()
+                    .map(|text| (text.clone(), false, true)),
+            );
+        }
+        reread.extend(
+            substitutions
+                .iter()
+                .filter(|(_, at)| (command.start..=command.end).contains(at))
+                .map(|(inner, at)| (inner.clone(), position == Some(*at) || !captured, false)),
+        );
+    }
+    verdict
+}
+
+/// Whether a command, after its [`unwrapped`] wrappers, runs an expanding argument as a command
+/// line: `eval` with an argument holding `$` or a backtick; `sh`, `bash`, `zsh`, `dash`, `ksh` or
+/// `mksh` (matched by basename) given `-c`, alone or in a short-flag cluster, and such an
+/// argument, or such a here-string; or `.` or `source` reading such a here-string or, when
+/// `sourced_expands`, a process substitution whose text expands (DEC-851 item 1).
+fn runs_expanding_line(named: &[&str], here_strings: &[String], sourced_expands: bool) -> bool {
+    let expands = |word: &str| word.contains(['$', '`']);
+    let named = unwrapped(named);
+    let arguments = named.get(1..).unwrap_or_default();
+    match named.first().and_then(|word| word.rsplit('/').next()) {
+        Some("eval") => arguments.iter().any(|word| expands(word)),
+        Some("." | "source") => sourced_expands || here_strings.iter().any(|text| expands(text)),
+        Some("sh" | "bash" | "zsh" | "dash" | "ksh" | "mksh") => {
+            let dash_c = arguments
+                .iter()
+                .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains('c'));
+            (dash_c && arguments.iter().any(|word| expands(word)))
+                || here_strings.iter().any(|text| expands(text))
+        }
+        _ => false,
+    }
+}
+
+/// `named` without its leading wrappers: `env` (its options, `-u X` and `VAR=val`), `command`,
+/// `exec`, `nohup`, `xargs`, `sudo`, `nice` and `stdbuf` (each with its options and their
+/// values), `builtin`, and `timeout` (its options and its duration).
+fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
+    loop {
+        let (with_value, takes_word): (&[&str], bool) = match named.first().copied() {
+            Some("env") => (&["-u", "-C", "-S"], false),
+            Some("command" | "exec" | "nohup") => (&["-a"], false),
+            Some("xargs") => (&["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"], false),
+            Some("sudo") => (
+                &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"],
+                false,
+            ),
+            Some("nice") => (&["-n"], false),
+            Some("stdbuf") => (&["-i", "-o", "-e"], false),
+            Some("builtin") => (&[], false),
+            Some("timeout") => (&["-k", "-s"], true),
+            _ => return named,
+        };
+        let mut rest = named.get(1..).unwrap_or_default();
+        while let Some(word) = rest.first() {
+            let skip = if with_value.contains(word) {
+                2
+            } else if word.starts_with('-') || (named.first() == Some(&"env") && word.contains('='))
+            {
+                1
+            } else {
+                break;
+            };
+            rest = rest.get(skip..).unwrap_or_default();
+        }
+        if takes_word {
+            rest = rest.get(1..).unwrap_or_default();
+        }
+        named = rest;
+    }
+}
+
+/// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
+fn is_cargo(word: &str) -> bool {
+    word == "cargo" || word.ends_with("/cargo")
+}
+
+/// Reads one command's words, if it is a cargo command (a word `cargo` or `…/cargo`, or any line
+/// of the cargo configuration; `-F` is other tools' elsewhere, `gh api -F`), which cannot be read
+/// when the shell expands a word or `xargs` gives the arguments. `--features <list>`,
+/// `--features=<list>`, `-F <list>`, `-F<list>` and a short-flag cluster `-qF<list>` name
+/// features, with items split on commas and spaces, each matched after any `<crate>/` or
+/// `<crate>?/` prefix. A word is read without the brackets and commas of a cargo configuration
+/// array (`["--features", "live"]`). Beside them, the live-token backstop: any word that holds
+/// the token `live` ([`holds_live`]) and is not the feature list of the one compile-only form is
+/// refused, whatever the command. The command is compile-only only when its subcommand, the word
+/// right after its cargo word, is `check`: a `cargo check` after `--`, or a `check` that is an
+/// option's value (`cargo --config check run`), leaves it a build (#923 review).
+fn command_live_flag(words: &[String], ctx: LineContext) -> LiveFlag {
+    let names: Vec<&str> = words
+        .iter()
+        .map(|w| w.trim_matches(['[', ']', ',']))
+        .collect();
+    if names.contains(&"--all-features") {
+        return LiveFlag::AllFeatures;
+    }
+    let command_at = names.iter().position(|word| !is_skipped_word(word));
+    let may_be_cargo = command_at.and_then(|at| names.get(at)).is_some_and(|word| {
+        word.contains(['$', '`']) && (ctx.expression_command || !word.contains("${{"))
+    });
+    let later_expands = names
+        .iter()
+        .skip(command_at.unwrap_or_default().saturating_add(1))
+        .any(|word| word.contains(['$', '`']));
+    if may_be_cargo && later_expands {
+        return LiveFlag::Unreadable;
+    }
+    let any_live = names.iter().any(|word| holds_live(word));
+    let cargo_at = names.iter().position(|word| is_cargo(word));
+    if !ctx.cargo_config && cargo_at.is_none() {
+        return if any_live {
+            LiveFlag::Build
+        } else {
+            LiveFlag::Absent
+        };
+    }
+    let fed = names
+        .get(..cargo_at.unwrap_or_default())
+        .is_some_and(|before| before.contains(&"xargs"));
+    let unreadable = if fed || names.iter().any(|word| word.contains(['$', '`'])) {
+        LiveFlag::Unreadable
+    } else {
+        LiveFlag::Absent
+    };
+    let lists: Vec<(usize, &str)> = names
+        .iter()
+        .enumerate()
+        .filter_map(|(index, word)| match *word {
+            "--features" | "-F" => names
+                .get(index.saturating_add(1))
+                .map(|list| (index.saturating_add(1), *list)),
+            _ => word
+                .strip_prefix("--features=")
+                .or_else(|| cluster_rest(word))
+                .map(|list| (index, list)),
+        })
+        .collect();
+    let passes_live = lists
+        .iter()
+        .flat_map(|(_, list)| list.split([',', ' ']))
+        .any(|item| item.rsplit('/').next() == Some(LIVE));
+    let stray_live = names
+        .iter()
+        .enumerate()
+        .any(|(index, word)| !lists.iter().any(|(at, _)| *at == index) && holds_live(word));
+    if stray_live || (any_live && !passes_live) {
+        return LiveFlag::Build;
+    }
+    if !passes_live {
+        return unreadable;
+    }
+    let checks = cargo_at
+        .and_then(|at| names.get(at.saturating_add(1)))
+        .is_some_and(|subcommand| *subcommand == "check");
+    let packages: Vec<&str> = names
+        .windows(2)
+        .filter(|pair| pair[0] == "-p" || pair[0] == "--package")
+        .map(|pair| pair[1])
+        .collect();
+    let whole_workspace = names.contains(&"--workspace") || names.contains(&"--all");
+    let verdict = match (checks, packages.as_slice(), ctx.runner) {
+        (true, [package], Some(runner)) if *package == runner && !whole_workspace => {
+            LiveFlag::CompileOnly
+        }
+        _ => LiveFlag::Build,
+    };
+    verdict.min(unreadable)
+}
+
+/// The live-token backstop: whether `word`'s items, split on `,`, `=`, `/`, `?`, whitespace and
+/// quotes, hold `live` exactly but in any case, or a short-flag cluster whose list does
+/// (`-qFlive`). So `liveness` is another item, and `the-runner/live` holds it.
+fn holds_live(word: &str) -> bool {
+    word.split([',', '=', '/', '?', ' ', '\t', '"', '\''])
+        .any(|item| item.eq_ignore_ascii_case(LIVE) || cluster_rest(item).is_some_and(holds_live))
+}
+
+/// The list after the first `F` of a short-flag cluster, `-<letters>F<list>` (`-qFlive`, `-Fa`).
+fn cluster_rest(item: &str) -> Option<&str> {
+    let (letters, rest) = item.strip_prefix('-')?.split_once('F')?;
+    letters
+        .chars()
+        .all(|c| c.is_ascii_alphabetic())
+        .then_some(rest)
+}
+
+/// Whether `word` holds the token `cargo`: a run of letters, digits, `_`, `-` and `.` that is
+/// `cargo` in any case, so `!cargo` holds it and `.cargo` and `cargo-nextest` do not.
+fn holds_cargo_token(word: &str) -> bool {
+    word.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+        .any(|item| item.eq_ignore_ascii_case("cargo"))
+}
+
+/// The cargo-word rule: a word holding the token `cargo`, wherever it stands and whatever the
+/// command, is refused when it also holds a `$`, a backtick or a `%` format directive, which can
+/// build a flag no scan reads, or a feature flag whose value [`feature_value_refused`] refuses.
+fn cargo_word_refused(word: &str) -> bool {
+    holds_cargo_token(word)
+        && (word.contains(['$', '`'])
+            || format_directive(word)
+            || flag_refused(word, None, true, false))
+}
+
+/// Whether `word` holds a `printf` format directive, `%` then flags, a width or a precision, and a
+/// letter (`%s`, `%-8.3x`).
+fn format_directive(word: &str) -> bool {
+    word.split('%').skip(1).any(|after| {
+        after
+            .trim_start_matches(|c: char| matches!(c, '-' | '+' | ' ' | '#' | '0'..='9' | '.'))
+            .starts_with(|c: char| c.is_ascii_alphabetic())
+    })
+}
+
+/// The value rule over a command's words, whatever the command: each feature flag's value must
+/// be a complete literal ([`feature_value_refused`]). `-F` is a feature flag only in a cargo
+/// command, the cargo configuration or a `with:` value, or in a word holding the token `cargo`,
+/// so `awk -F:` and `gh api -F owner="$o"` are not; a short-flag cluster is one only in a `with:`
+/// value.
+fn feature_values_refused(words: &[String], ctx: LineContext) -> bool {
+    let command_word = words.iter().find(|word| !is_skipped_word(word));
+    let cargo = ctx.with_value
+        || ctx.cargo_config
+        || words.iter().any(|word| is_cargo(word))
+        || command_word.is_some_and(|word| word.contains(['$', '`']));
+    words.iter().enumerate().any(|(index, word)| {
+        let next = words.get(index.saturating_add(1)).map(String::as_str);
+        flag_refused(word, next, cargo || holds_cargo_token(word), ctx.with_value)
+    })
+}
+
+/// Whether `word`, read piece by piece on whitespace, holds `--all-features` or a feature flag
+/// whose value is refused: `--features`, `--features=`, `FEATURES=`, `-F` and `-F<list>` when
+/// `dash_f`, and a cluster `-qF<list>` when `cluster`. A flag that is the whole word takes `next`
+/// as its value; one that ends the word without a value has the empty value.
+fn flag_refused(word: &str, next: Option<&str>, dash_f: bool, cluster: bool) -> bool {
+    let pieces: Vec<&str> = word.split_whitespace().collect();
+    word.contains("--all-features")
+        || pieces.iter().enumerate().any(|(index, piece)| {
+            let value = if *piece == "--features" || (*piece == "-F" && dash_f) {
+                Some(
+                    pieces
+                        .get(index.saturating_add(1))
+                        .copied()
+                        .or(next.filter(|_| pieces.len() == 1))
+                        .unwrap_or_default(),
+                )
+            } else {
+                piece
+                    .strip_prefix("--features=")
+                    .or_else(|| piece.strip_prefix("-F").filter(|_| dash_f))
+                    .or_else(|| cluster_rest(piece).filter(|_| cluster))
+                    .or_else(|| piece.split_once("FEATURES=").map(|(_, value)| value))
+            };
+            value.is_some_and(feature_value_refused)
+        })
+}
+
+/// A feature value is read only as a complete literal of `[a-z0-9_,-]` without the token `live`;
+/// any other value, an empty one or one holding `$`, a backtick or `${{` included, is refused.
+fn feature_value_refused(value: &str) -> bool {
+    value.is_empty()
+        || !value
+            .chars()
+            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | ',' | '-'))
+        || holds_live(value)
 }
 
 /// Code spans that look like repository paths: no spaces or globs, starting at a known root.
@@ -1291,10 +2746,136 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// is the change's net effect on its base, main's tip on a `pull_request` run (`choose_base`): a
 /// line main already has was mutated when it landed there, so an edit main made independently is
 /// not mutated again.
+///
+/// CI runs it once per shard of the matrix [`mutants_plan`] sized, and passes the plan's count in
+/// [`MUTANTS_PLANNED_ENV`]; [`check_schedule`] refuses a shard whose own listing or shard total
+/// disagrees with that plan (DEC-538).
 fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
+    let shard = env::var(MUTANT_SHARD_ENV)
+        .ok()
+        .map(|value| MutantShard::parse(&value))
+        .transpose()
+        .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
+    let planned = env::var(MUTANTS_PLANNED_ENV)
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .with_context(|| format!("parsing {MUTANTS_PLANNED_ENV}"))?;
+    mutants_scheduled(root, base, shard, planned)
+}
+
+/// [`mutants`] with its schedule passed in rather than read from the environment, which the tests
+/// cannot set (`unsafe` environment mutation is forbidden workspace-wide).
+fn mutants_scheduled(
+    root: &Path,
+    base: Option<&str>,
+    shard: Option<MutantShard>,
+    planned: Option<usize>,
+) -> Result<()> {
+    let Some(diff) = gate_diff(root, base)? else {
+        return check_schedule(0, shard, planned);
+    };
+    let listed = gate_mutants(root, &diff)?;
+    check_schedule(listed.values().sum(), shard, planned)?;
+    if listed.is_empty() {
+        eprintln!("    mutants: the diff generates no mutants");
+        return Ok(());
+    }
+    let mut test_packages: Vec<&str> = diff
+        .crates
+        .iter()
+        .filter(|krate| {
+            diff.touched
+                .iter()
+                .any(|file| file.starts_with(&krate.src_dir()))
+        })
+        .map(|krate| krate.package.as_str())
+        .collect();
+    external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
+    live_tests_judge_every_mutant(root, &listed, &test_packages)?;
+    let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, &listed)?)?;
+    let args = mutants_args(diff.path()?, shard, &test_packages, first.as_ref())?;
+    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
+    eprintln!("    $ cargo {}", args.join(" "));
+    let started = fs::metadata(&diff.file)
+        .and_then(|meta| meta.modified())
+        .context("timing the diff this run reads")?;
+    let unmutated = UnmutatedSource::read(root, &diff.touched)?;
+    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
+        .status()
+        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    unmutated.restored(root)?;
+    mutants_outcome(root, &diff.crates, status?.code(), started)
+}
+
+/// The diff's source files as they were before an [`MUTANTS_IN_PLACE`] run mutated them, so that
+/// a run that ends without reverting its last mutant cannot leave it in the caller's checkout.
+struct UnmutatedSource(Vec<(String, Vec<u8>)>);
+
+impl UnmutatedSource {
+    fn read(root: &Path, touched: &[String]) -> Result<Self> {
+        touched
+            .iter()
+            .filter(|file| root.join(file).is_file())
+            .map(|file| {
+                fs::read(root.join(file))
+                    .map(|bytes| (file.clone(), bytes))
+                    .with_context(|| format!("reading {file} before the run mutates it"))
+            })
+            .collect::<Result<_>>()
+            .map(Self)
+    }
+
+    /// Writes back every file the run left different from what [`Self::read`] saw, and refuses the
+    /// run if there was one: a source file the run did not revert means the run did not finish
+    /// the way its exit status says.
+    fn restored(self, root: &Path) -> Result<()> {
+        let mut left_mutated = Vec::new();
+        for (file, bytes) in self.0 {
+            let path = root.join(&file);
+            if fs::read(&path).ok().as_deref() != Some(bytes.as_slice()) {
+                fs::write(&path, &bytes).with_context(|| format!("restoring {file}"))?;
+                left_mutated.push(file);
+            }
+        }
+        if !left_mutated.is_empty() {
+            bail!(
+                "`cargo mutants` left {} mutated, now restored; its verdict is not evidence \
+                 (DEC-850)",
+                left_mutated.join(", ")
+            );
+        }
+        Ok(())
+    }
+}
+
+/// The source diff the mutation gate judges: the changed `.rs` files of safety-critical crates,
+/// written to a file `cargo mutants --in-diff` reads. Removed when dropped.
+struct GateDiff {
+    crates: Vec<MutatedCrate>,
+    touched: Vec<String>,
+    file: PathBuf,
+}
+
+impl GateDiff {
+    fn path(&self) -> Result<&str> {
+        self.file.to_str().context("non-UTF-8 temp path")
+    }
+}
+
+impl Drop for GateDiff {
+    fn drop(&mut self) {
+        fs::remove_file(&self.file).ok();
+    }
+}
+
+/// The diff [`mutants`] and [`mutants_plan`] both judge, or `None`, saying why, when there is no
+/// base or no safety-critical crate's source changed. One function, so the plan that sizes CI's
+/// matrix and the gate each shard runs cannot select different source (DEC-538).
+fn gate_diff(root: &Path, base: Option<&str>) -> Result<Option<GateDiff>> {
     let Some(base) = base else {
         eprintln!("    mutants: HEAD is the base; nothing to check");
-        return Ok(());
+        return Ok(None);
     };
     let crates = mutated_crates(root)?;
     let changed = output_in(
@@ -1302,65 +2883,120 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         "git",
         &["diff", "--name-only", &format!("{base}...HEAD")],
     )?;
-    let touched: Vec<&str> = changed
+    let touched: Vec<String> = changed
         .lines()
         .filter(|f| f.ends_with(".rs") && crates.iter().any(|c| f.starts_with(&c.src_dir())))
+        .map(str::to_owned)
         .collect();
     if touched.is_empty() {
         eprintln!("    mutants: no safety-critical crate's source changed");
-        return Ok(());
+        return Ok(None);
     }
     let mut args = vec!["diff".to_owned(), format!("{base}...HEAD"), "--".to_owned()];
-    args.extend(touched.iter().map(|f| (*f).to_owned()));
-    let diff = output_in(
+    args.extend(touched.iter().cloned());
+    let text = output_in(
         root,
         "git",
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
-    let diff_file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
-    fs::write(&diff_file, diff)?;
-    let diff_path = diff_file
-        .to_str()
-        .context("non-UTF-8 temp path")?
-        .to_owned();
-    match live_tests_judge_every_mutant(root, &diff_path) {
-        Ok(Listed::Mutants) => {}
-        Ok(Listed::Nothing) => {
-            fs::remove_file(&diff_file).ok();
-            eprintln!("    mutants: the diff generates no mutants");
-            return Ok(());
-        }
-        Err(unjudged) => {
-            fs::remove_file(&diff_file).ok();
-            return Err(unjudged);
+    let file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
+    fs::write(&file, text)?;
+    Ok(Some(GateDiff {
+        crates,
+        touched,
+        file,
+    }))
+}
+
+/// Every mutant the gate tests on `diff`, counted per package: `cargo mutants --list` with the
+/// same `--in-diff` and the same `.cargo/mutants.toml` exclusions as the run, which reads that file
+/// too. DEC-137's stub bodies are not filtered out here or in the run: their mutants are tested,
+/// and only a miss in one is exempted afterwards, so they count toward a shard's load.
+fn gate_mutants(root: &Path, diff: &GateDiff) -> Result<BTreeMap<String, usize>> {
+    let listed = output_in(
+        root,
+        "cargo",
+        &["mutants", "--list", "--json", "--in-diff", diff.path()?],
+    )?;
+    listed_mutant_counts(&listed)
+}
+
+/// The variable CI sets on each mutation shard to the count its plan reported (DEC-538).
+const MUTANTS_PLANNED_ENV: &str = "MANDATE_MUTANTS_PLANNED";
+
+/// The matrix width before DEC-538, and still its ceiling: DEC-498's 192 slice shards.
+const MUTANT_SHARDS: usize = 192;
+
+/// How CI's mutation matrix is sized for one diff (DEC-538): `mutants` is the count the gate tests
+/// and `shards` is `min(MUTANT_SHARDS, mutants)`.
+///
+/// cargo-mutants' `slice` sharding gives shard `k` of `N` the `k`-th run of `ceil(n / N)` listed
+/// mutants. For `n <= 192` that run is one mutant at either width, and for `n > 192` the width is
+/// 192 as before, so shard `k` of the plan tests exactly what shard `k` of 192 tested, and every
+/// shard the plan drops was one that tested nothing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MutantPlan {
+    mutants: usize,
+    shards: usize,
+}
+
+impl MutantPlan {
+    fn for_mutants(mutants: usize) -> Self {
+        Self {
+            mutants,
+            shards: mutants.min(MUTANT_SHARDS),
         }
     }
-    let shard = env::var(MUTANT_SHARD_ENV)
-        .ok()
-        .map(|value| MutantShard::parse(&value))
-        .transpose()
-        .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
-    let mut test_packages: Vec<&str> = crates
-        .iter()
-        .filter(|krate| {
-            touched
-                .iter()
-                .any(|file| file.starts_with(&krate.src_dir()))
-        })
-        .map(|krate| krate.package.as_str())
-        .collect();
-    external_oracles(&mut test_packages, &workspace_closure(&metadata_in(root)?));
-    let args = mutants_args(&diff_path, shard, &test_packages);
-    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
-    eprintln!("    $ cargo {}", args.join(" "));
-    let started = fs::metadata(&diff_file)
-        .and_then(|meta| meta.modified())
-        .context("timing the diff this run reads")?;
-    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
-        .status()
-        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
-    fs::remove_file(&diff_file).ok();
-    mutants_outcome(root, &crates, status?.code(), started)
+
+    /// The plan as `GITHUB_OUTPUT` lines: the count, the matrix's shard indices as a JSON array
+    /// (`[]` for none), and the shard total each shard's `INDEX/TOTAL` names.
+    fn outputs(self) -> String {
+        let indices: Vec<String> = (0..self.shards).map(|k| k.to_string()).collect();
+        format!(
+            "mutants={}\nshards=[{}]\ntotal={}\n",
+            self.mutants,
+            indices.join(","),
+            self.shards
+        )
+    }
+}
+
+/// `cargo xtask ci mutants --plan`: the mutant count the gate would test on this diff and the
+/// matrix it needs, without building anything (DEC-538). It goes through [`gate_diff`] and
+/// [`gate_mutants`], the gate's own selection.
+fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
+    let mutants = match gate_diff(root, base)? {
+        Some(diff) => gate_mutants(root, &diff)?.values().sum(),
+        None => 0,
+    };
+    Ok(MutantPlan::for_mutants(mutants))
+}
+
+/// Refuses a shard whose schedule disagrees with the plan that launched it: a listing of another
+/// size, or a shard total other than the plan's. Either would mean the shards no longer cover the
+/// listing between them. Without a plan (a local run) any schedule is accepted.
+fn check_schedule(listed: usize, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
+    let Some(planned) = planned else {
+        return Ok(());
+    };
+    if listed != planned {
+        bail!(
+            "this shard lists {listed} mutant(s) but the plan that sized the matrix counted \
+             {planned}; the shards would not cover the gate's mutants (DEC-538)"
+        );
+    }
+    if let Some(shard) = shard {
+        let expected = MutantPlan::for_mutants(planned).shards;
+        if shard.total != expected {
+            bail!(
+                "shard {} names a total of {} but a plan of {planned} mutant(s) runs {expected} \
+                 shard(s) (DEC-538)",
+                shard.argument(),
+                shard.total
+            );
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1422,25 +3058,126 @@ fn external_oracles(
     true
 }
 
+/// Mutates, builds and tests in the repository itself rather than in a scratch copy of it, so the
+/// baseline and every mutant build in the target directory [`preflight_args`] has just filled
+/// (DEC-850). A scratch copy starts from an empty target directory, since cargo-mutants does not
+/// copy `target/` by default and a copy it did make would carry new mtimes in an order nobody
+/// controls. The run reverts each mutant as it finishes it; [`UnmutatedSource`] restores and
+/// refuses a run that did not.
+///
+/// It is also what keeps the run to one mutant at a time: one tree holds one mutant, and
+/// cargo-mutants 27.1.0 refuses `--jobs` beside `--in-place`. One, not two, so that a single mutant
+/// stays short (DEC-498 item 2). DEC-498 gives a CI shard at most one mutant, so there is nothing
+/// for a second worker to do there; this governs the unsharded local run, where there is.
+/// Measured on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the
+/// per-mutant test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput
+/// difference between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two —
+/// but two runs each are too few to claim one either way, and none is needed.
+const MUTANTS_IN_PLACE: &str = "--in-place";
+
+/// The packages the run's own mutants are in: for a shard, its slice, as `cargo mutants --list`
+/// selects it with the same `--shard` and `--sharding` the run passes; unsharded, every package
+/// with a mutant (DEC-852).
+fn shard_packages(
+    root: &Path,
+    diff_path: &str,
+    shard: Option<MutantShard>,
+    listed: &BTreeMap<String, usize>,
+) -> Result<Vec<String>> {
+    let Some(shard) = shard else {
+        return Ok(listed.keys().cloned().collect());
+    };
+    let argument = shard.argument();
+    let listing = output_in(
+        root,
+        "cargo",
+        &[
+            "mutants",
+            "--list",
+            "--json",
+            "--in-diff",
+            diff_path,
+            "--shard",
+            &argument,
+            "--sharding",
+            "slice",
+        ],
+    )?;
+    Ok(listed_mutant_counts(&listing)?.into_keys().collect())
+}
+
+/// The nextest configuration that runs the mutated packages' tests before every other tested
+/// package's (DEC-852). Nextest starts tests in the order of their binaries' names, so without it
+/// a `mandate-shell` mutant waited behind `mandate-alpaca`'s, `mandate-executor`'s and
+/// [`REFCASES`]' tests: on #931 the one test that catches `use_profile -> Ok(())` failed in nine
+/// milliseconds as the 1529th of 1749, 213 seconds in, past [`MUTANT_TEST_TIMEOUT`] on a slow
+/// runner. A priority only reorders: it filters out no test, so a mutant the mutated crate's own
+/// tests miss is still judged by every other tested package's, under the same cap.
+fn test_order_config(packages: &[String]) -> String {
+    let filter: Vec<String> = packages
+        .iter()
+        .map(|package| format!("package(={package})"))
+        .collect();
+    format!(
+        "[[profile.default.overrides]]\nfilter = \"{}\"\npriority = 100\n",
+        filter.join(" | ")
+    )
+}
+
+/// The tool name `--tool-config-file` files [`test_order_config`] under.
+const TEST_ORDER_TOOL: &str = "mandate-mutants";
+
+/// A written [`test_order_config`], removed when dropped.
+struct TestOrder(PathBuf);
+
+impl TestOrder {
+    /// `None` for a slice with no mutant, which cargo-mutants ends before it tests anything.
+    fn write(packages: &[String]) -> Result<Option<Self>> {
+        if packages.is_empty() {
+            return Ok(None);
+        }
+        let file =
+            env::temp_dir().join(format!("mandate-mutants-order-{}.toml", std::process::id()));
+        fs::write(&file, test_order_config(packages))?;
+        Ok(Some(Self(file)))
+    }
+
+    /// The two `--cargo-test-arg`s that hand the file to every test phase, the baseline's
+    /// included.
+    fn args(&self) -> Result<[String; 2]> {
+        let path = self.0.to_str().context("non-UTF-8 temp path")?;
+        Ok([
+            "--cargo-test-arg=--tool-config-file".to_owned(),
+            format!("--cargo-test-arg={TEST_ORDER_TOOL}:{path}"),
+        ])
+    }
+}
+
+impl Drop for TestOrder {
+    fn drop(&mut self) {
+        fs::remove_file(&self.0).ok();
+    }
+}
+
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
     test_packages: &[&str],
-) -> Vec<String> {
+    first: Option<&TestOrder>,
+) -> Result<Vec<String>> {
     let mut args = [
         "mutants",
         "--in-diff",
         diff_path,
         "--test-tool",
         "nextest",
-        "--jobs",
-        MUTANT_JOBS,
         "--output",
         "target",
         "--timeout",
         MUTANT_TEST_TIMEOUT,
         "--build-timeout",
         MUTANT_BUILD_TIMEOUT,
+        MUTANTS_IN_PLACE,
     ]
     .into_iter()
     .map(str::to_owned)
@@ -1458,31 +3195,35 @@ fn mutants_args(
             "slice".to_owned(),
         ]);
     }
-    args
+    if let Some(first) = first {
+        args.extend(first.args()?);
+    }
+    Ok(args)
 }
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
 /// that build — the pre-flight's test listing and the mutants run — take it out of their
-/// environment: `cargo mutants` builds its baseline and each of the `--jobs` concurrent mutant
-/// copies in scratch copies of the tree, and every build of the same package from every copy writes
-/// the same artifact basename (`<package>-<metadata hash>`) into the target directory it is given,
-/// so one directory shared by the baseline, the mutant copies, and the pre-flight's build of the
-/// unmutated source can have one build's binary judge another's source and flip either verdict:
-/// #419's review met a caught mutant reported missed, and
-/// `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the opposite, a missed
-/// mutant reported caught, the direction a gate must never fail in (#419 review, nit 3). With the
-/// variable out of the environment each scratch copy builds in a target tree of its own, which is
-/// how the run is judged when no directory is exported.
+/// environment: every build of the same package from every source tree writes the same artifact
+/// basename (`<package>-<metadata hash>`) into the target directory it is given, so one directory
+/// shared with the caller's other checkouts or with scratch copies of this tree can have one
+/// tree's binary judge another's source and flip either verdict: #419's review met a caught mutant
+/// reported missed, and `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the
+/// opposite, a missed mutant reported caught, the direction a gate must never fail in (#419
+/// review, nit 3). With the variable out of the environment the job builds only in the target
+/// tree of the repository it was given, one source tree, which [`MUTANTS_IN_PLACE`] mutates and
+/// reverts in turn, so each build sees its own edit's newer mtime (DEC-850).
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
 /// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
 /// for the `test` profile that inherits it (DEC-519).
 ///
-/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. The baseline builds only the
-/// mutated packages, so a low-layer mutant's first build compiles the rest of its tested packages'
-/// graph from nothing: a `mandate-time` mutant whose tested packages included `mandate-shell` ran
-/// past the cap on CI's runner (#677). Without debuginfo that build took about a quarter less CPU
-/// time from cold, and nearly half less after a one-file change, measured in DEC-519. Debuginfo
+/// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. Before DEC-850 the baseline built
+/// only the mutated packages, so a low-layer mutant's first build compiled the rest of its tested
+/// packages' graph from nothing: a `mandate-time` mutant whose tested packages included
+/// `mandate-shell` ran past the cap on CI's runner (#677). Without debuginfo that build took about
+/// a quarter less CPU time from cold, and nearly half less after a one-file change, measured in
+/// DEC-519. Since DEC-850 the pre-flight builds that graph first, so the setting also has to match
+/// between the pre-flight and the run for the run to reuse it. Debuginfo
 /// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
 /// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
 /// mutants the same way whatever the caller exported.
@@ -1539,36 +3280,52 @@ fn mutants_job_cargo_output(root: &Path, args: &[&str]) -> Result<String> {
 /// workspace-wide test run ever configured, this count could only be stricter than it needs to be,
 /// never looser.
 ///
-/// A diff with no mutants, such as one that touches only `#[cfg(test)]` code, answers
-/// [`Listed::Nothing`], and the job ends there without starting a run that could only test nothing.
-fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<Listed> {
-    let listed = output_in(
-        root,
-        "cargo",
-        &["mutants", "--list", "--json", "--in-diff", diff_path],
-    )?;
-    let mutants = listed_mutant_counts(&listed)?;
-    if mutants.is_empty() {
-        return Ok(Listed::Nothing);
-    }
-    let packages: Vec<String> = mutants
-        .keys()
-        .map(|package| format!("--package={package}"))
-        .collect();
-    let mut args = vec!["nextest", "list", "--locked", "--message-format", "json"];
-    args.extend(packages.iter().map(String::as_str));
+/// The listing is [`gate_mutants`]'s, and it is never empty here: a diff with no mutants, such as one
+/// that touches only `#[cfg(test)]` code, ends the job before this check, without starting a run
+/// that could only test nothing.
+///
+/// The listing also builds: [`preflight_args`] names every package the run tests, so this is the
+/// one build of their whole graph, in the tree the run then mutates in place (DEC-850).
+fn live_tests_judge_every_mutant(
+    root: &Path,
+    mutants: &BTreeMap<String, usize>,
+    test_packages: &[&str],
+) -> Result<()> {
+    let args = preflight_args(mutants, test_packages);
     eprintln!("    $ cargo {}", args.join(" "));
-    let listing = mutants_job_cargo_output(root, &args)?;
+    let listing =
+        mutants_job_cargo_output(root, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     let live = live_test_counts(&listing)?;
-    report(unjudged_mutants(&mutants, &live), "mutants")?;
-    Ok(Listed::Mutants)
+    report(unjudged_mutants(mutants, &live), "mutants")
 }
 
-/// Whether the diff's listing named any mutant for the run to test.
-#[derive(Debug, PartialEq)]
-enum Listed {
-    Mutants,
-    Nothing,
+/// The pre-flight's `cargo nextest list`: every package with a mutant, whose live tests it counts,
+/// and every package the run tests, whose test binaries it builds (DEC-850).
+///
+/// cargo-mutants 27.1.0 builds its unmutated baseline over the packages the run's own mutants are
+/// in, not over `--test-package`, so on its own it leaves the rest of the tested packages' graph to
+/// each mutant's first build, under [`MUTANT_BUILD_TIMEOUT`]: on #931 a `mandate-executor` mutant
+/// whose tested packages added `mandate-alpaca`, `mandate-shell` and [`REFCASES`] ran out of its
+/// sixty seconds on two attempts. Building them here, with the same profile and the same package
+/// set the mutant's build selects, in the tree [`MUTANTS_IN_PLACE`] builds in, leaves the baseline
+/// and each mutant only what their own edit changes.
+fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = ["nextest", "list", "--locked", "--message-format", "json"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let mut packages: Vec<&str> = mutants.keys().map(String::as_str).collect();
+    for package in test_packages {
+        if !packages.contains(package) {
+            packages.push(package);
+        }
+    }
+    args.extend(
+        packages
+            .into_iter()
+            .map(|package| format!("--package={package}")),
+    );
+    args
 }
 
 /// One mutant of `cargo mutants --list --json`. Only its package is read here: that is the package
@@ -1666,17 +3423,6 @@ fn unjudged_mutants(
 const MUTANTS_OUT: &str = "target/mutants.out";
 const REFCASES: &str = "mandate-refcases";
 
-/// How many mutants cargo-mutants tests at once.
-///
-/// One, not two, so that a single mutant stays short. DEC-498 gives a CI shard at most one mutant,
-/// so there is nothing for a second worker to do there; this setting governs the unsharded local
-/// run, where there is. Measured
-/// on `ubuntu-24.04` over four runs of the same nine mutants, two workers contend: the per-mutant
-/// test phase reaches 181 seconds at two and 83 at one. Those runs show no throughput difference
-/// between the settings — 82 and 99 seconds a mutant at one worker, 83 and 108 at two — but two
-/// runs each are too few to claim one either way, and none is needed.
-const MUTANT_JOBS: &str = "1";
-
 /// How long one mutant's tests may run before cargo-mutants calls it a timeout, in seconds.
 ///
 /// Set explicitly because the value cargo-mutants derives is wrong for this gate and wrong in the
@@ -1690,7 +3436,7 @@ const MUTANT_JOBS: &str = "1";
 /// the twenty-second cap.
 ///
 /// Three minutes against the 83 seconds that was the slowest test phase over the two measured
-/// runs at [`MUTANT_JOBS`] workers, so a mutant the harness judges at its ordinary pace is judged
+/// runs at one worker ([`MUTANTS_IN_PLACE`]), so a mutant the harness judges at its ordinary pace is judged
 /// rather than cut off. The margin is the reason the job count is one: at two workers the same
 /// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
@@ -1712,12 +3458,13 @@ const MUTANT_TEST_TIMEOUT: &str = "180";
 /// bounded, and this is the only phase a shard cannot otherwise bound.
 ///
 /// Sixty seconds against the 16 to 27 that mutant builds took over the two measured runs at
-/// [`MUTANT_JOBS`] workers. The flakiness cargo-mutants warns about is contained here because
+/// one worker. The flakiness cargo-mutants warns about is contained here because
 /// this cap, unlike [`MUTANT_TEST_TIMEOUT`], reaches mutants alone: a `--build-timeout` run
 /// leaves the unmutated baseline uncapped, shown by command, so a cold cache compiling the
-/// workspace from scratch is never cut off. A mutant's build is not purely incremental on that
-/// baseline, since it compiles [`REFCASES`] where the baseline may not have, but the measured
-/// range already includes that.
+/// workspace from scratch is never cut off. A mutant's build is incremental: [`preflight_args`]
+/// builds every tested package's graph, [`REFCASES`] included, in the tree [`MUTANTS_IN_PLACE`]
+/// mutates, so the cap judges what the mutant's own edit costs to rebuild and never the rest of
+/// the graph, which on #931 it cut off at sixty seconds (DEC-850).
 const MUTANT_BUILD_TIMEOUT: &str = "60";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
@@ -2078,6 +3825,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
     args.extend(CODE_PATHS);
     let files = output_in(root, "git", &args)?;
     let packages = package_dirs(root)?;
+    let rows = behaviour_only_rows(root)?;
     let mut tests = Vec::new();
     for file in files.lines().filter(|f| f.ends_with(".rs")) {
         let Ok(text) = fs::read_to_string(root.join(file)) else {
@@ -2100,18 +3848,18 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         eprintln!("    pending: no pending tests");
         return Ok(Vec::new());
     }
-    let mut stale: Vec<String> = BEHAVIOUR_ONLY_TESTS
+    let mut stale: Vec<String> = rows
         .iter()
-        .filter(|(file, name)| {
-            root.join(file).exists()
-                && !tests
-                    .iter()
-                    .any(|t| t.file == *file && t.test.path == *name)
+        .filter(|row| {
+            root.join(&row.file).exists() && !tests.iter().any(|t| row.names(&t.file, &t.test.path))
         })
-        .map(|(file, name)| {
+        .map(|row| {
             format!(
-                "BEHAVIOUR_ONLY_TESTS names `{name}` in {file}, which is no longer a pending test \
-                 there; delete the row, which is how the exception expires (DEC-137)"
+                "{BEHAVIOUR_ONLY_DIR}/{} names `{}` in {}, which is no longer a pending test \
+                 there; delete the row, which is how the exception expires (DEC-137)",
+                row.file_name().unwrap_or_default(),
+                row.test,
+                row.file
             )
         })
         .collect();
@@ -2166,7 +3914,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         );
     }
     let outcomes = test_outcomes(&String::from_utf8(out.stdout).context("non-UTF-8 output")?);
-    let mut problems = verdicts(&tests, &outcomes);
+    let mut problems = verdicts(&tests, &outcomes, &rows);
     problems.append(&mut stale);
     if problems.is_empty() {
         eprintln!(
@@ -2264,118 +4012,124 @@ const STUB_MARKERS: [&str; 5] = [
 ];
 
 /// The pending tests that fail on the answer a partly implemented crate gives rather than at a
-/// stub, named one by one so the exception cannot spread. E6-6 and E6-8 (DEC-163) retired the
-/// `mandate-risk` rows with the session rules, §5.3 rule 4 and the pacing that decided them.
-/// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
-/// lands, and the gate names every row it applies (DEC-137).
-///
-/// The 2 protective-sequence rows left (both `hand`) are E7-4's (DEC-140's addendum, the
-/// coordinator's ruling (d) on #174): slice 5's crypto stop-limit cases, which
-/// see no stop-limit or whole-share protection where E7-4's protective sequence belongs, instead of
-/// a stub's report. Each still runs and fails, and the slice that implements it deletes its row
-/// with its `#[ignore]` line; slice 2 deleted the four bracket and partial-fill OCO rows (DEC-346).
-/// The stub check runs first, so a row whose test stops at a stub is reported for deletion rather
-/// than applied (#194 review, round 1, finding 4).
-///
-/// The tracer row is E2-14's wrong-high-print rule. The shell deliberately owns no price-trust
-/// arithmetic (DEC-138 item 3), so the end-to-end test reaches the existing production path and
-/// proves the missing market-data behavior by observing the forbidden submission. E2-14 deletes
-/// both the marker and this row when its founder-gated price-trust rule lands.
-///
-/// The `properties` row is E7-4's too. Since slice 2 places brackets, its minimal failure is a
-/// script that ends while the protected lead's partly filled entry is still inside its interval,
-/// which no implementation can close before the script stops; it waits on a tests correction
-/// (DEC-346 item 7). Slice 2 deleted the other two `properties` rows, whose minimal failure is now
-/// the kill switch's stub (DEC-164; #196 review, round 1, finding 5; #199 review, round 1, finding
-/// 4).
-///
-/// Three more are E7-4's, let past the kill switch's stub by slice 7 (#668; DEC-485 item 17), each
-/// failing on behaviour the slice does not own:
-/// - `protective_sell_quantity_never_exceeds_the_position_in_any_script` (defect E1): an exit is
-///   submitted beside a bracket's just-activated legs, leaving protection of 2 against a position
-///   of 1 (backlog: "E7-4 (stream K), E1 from E7-4 slice 7's tests correction", DEC-506).
-/// - `no_resting_order_is_submitted_inside_an_unprotected_interval` (defect E2): an opening rests
-///   while protection is cancelled for an exit (backlog: "E7-4 (stream K), E2 from E7-4 slice 7's
-///   tests correction", DEC-506 item 8).
-/// - `hand::an_owner_exit_outside_the_session_prices_from_the_confirmed_bid` (DEC-485 item 11):
-///   outside the regular session a confirmed owner's flatten is queued for the session at the
-///   floor rather than sold in extended hours from the confirmed bid. A loud stub there would fail
-///   the whole step that prices the close: the switch's own step where nothing needs cancelling
-///   first, so its mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch
-///   is always available), or the step confirming the protection's cancel, leaving the position
-///   unprotected and unsold. The session slice deletes this row with the extended-hours path.
-///
-/// Two more `properties` rows went back to pending in #668's round 2, failing on executor defects
-/// at random seeds the pinned one missed; each property's scripts now lead with its defect's shape
-/// (`STEP_BESIDE_LEAD`, `AWAITED_LEAD`), so it fails at every seed until the fix lands:
-/// - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` (defect E5b): the exit
-///   ladder steps a rung the broker has not yet acknowledged, asking its cancel, and another exit
-///   goes beside that cancel (backlog: "E7-4 (stream K), E5b from #668's round-2 review").
-/// - `no_interval_exceeds_the_limit_without_an_alert` (defect E4b): while a bracket's OCO awaits
-///   its acknowledgment, a new interval's start ends the first open interval rather than the
-///   awaited one, so the bound alerts late (backlog: "E7-4 (stream K), E4b from E4's fix"). Its
-///   scripts are now either that lead or the wide protected search, so the search stays reachable.
-///
-/// One more `hand` row is defect E4b (backlog: "E7-4 (stream K), E4b from E4's fix"; DEC-521 item
-/// 3): while a second bracket's OCO awaits its acknowledgment, a third bracket's start ends the
-/// first open interval in the instrument rather than the awaited one. It reaches no stub and fails
-/// on that behaviour until E4b's fix deletes the row with its `#[ignore]` line.
-///
-/// The 3 `answer_records` rows are E8-3's (DEC-533 items 3 and 4): the runtime's answer records
-/// already exist, so the tests see the writer omit `quorum`, `separation_of_duties` and `delegation`
-/// and write a text `decided_by_now` for an `auto` or `deny` re-classification, rather than a stub's
-/// report. The runtime writer change deletes the rows with their `#[ignore]` lines.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 13] = [
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity",
-    ),
-    ("crates/mandate-shell/tests/tracer.rs", "outlier_close"),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "protective_sell_quantity_never_exceeds_the_position_in_any_script",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_resting_order_is_submitted_inside_an_unprotected_interval",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_interval_exceeds_the_limit_without_an_alert",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "every_answer_record_the_runtime_writes_passes_the_journals_check",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
-    ),
-    (
-        "crates/mandate-runtime/tests/answer_records.rs",
-        "decided_by_now_is_null_unless_the_reclassification_asks",
-    ),
-];
+/// stub, one TOML file a row, so that two PRs adding or deleting rows never touch the same lines.
+/// What a row is, why each exists, and what the gate refuses are in the directory's README
+/// (DEC-137).
+const BEHAVIOUR_ONLY_DIR: &str = "xtask/behaviour-only";
+
+/// The one file outside `crates/` a behaviour-only row may name: xtask's own unit tests, in its
+/// `tests` module, which `cargo xtask ci pending` finds pending like any crate's.
+const XTASK_OWN_TESTS: &str = "xtask/src/main.rs";
+
+/// One row of [`BEHAVIOUR_ONLY_DIR`]: a pending test, by its file and its path as the pending
+/// marker names it, and why it fails on behaviour rather than at its story's stub.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[serde(deny_unknown_fields)]
+struct BehaviourOnlyRow {
+    file: String,
+    test: String,
+    reason: String,
+}
+
+impl BehaviourOnlyRow {
+    /// The only name this row's file may have: `<crate>__<suite>__<test>.toml`, with `::` in the
+    /// test path written `__`. One name per row is what makes a duplicate a path collision. A row
+    /// of [`XTASK_OWN_TESTS`] is crate `xtask`, suite `main`, and its test must be in `tests`.
+    fn file_name(&self) -> Option<String> {
+        let (krate, suite) = if self.file == XTASK_OWN_TESTS {
+            if !self.test.starts_with("tests::") {
+                return None;
+            }
+            ("xtask", "main")
+        } else {
+            let rest = self.file.strip_prefix("crates/")?;
+            let (krate, _) = rest.split_once('/')?;
+            (krate, Path::new(rest).file_stem()?.to_str()?)
+        };
+        Some(format!(
+            "{krate}__{suite}__{}.toml",
+            self.test.replace("::", "__")
+        ))
+    }
+
+    fn names(&self, file: &str, test: &str) -> bool {
+        self.file == file && self.test == test
+    }
+}
+
+/// Every row in [`BEHAVIOUR_ONLY_DIR`], sorted by file and test; none in a repository without the
+/// directory, which only makes the gate stricter, since a row only excuses. Refuses anything there
+/// but the README and `.toml` rows, a row that does not parse or has an empty field, and a file
+/// whose name is not [`BehaviourOnlyRow::file_name`]. That name is a function of the row, so a
+/// second copy of a row is a second file at the same path, which git refuses to merge.
+fn behaviour_only_rows(root: &Path) -> Result<Vec<BehaviourOnlyRow>> {
+    let dir = root.join(BEHAVIOUR_ONLY_DIR);
+    let mut rows = Vec::new();
+    if !dir.exists() {
+        return Ok(rows);
+    }
+    let mut problems = Vec::new();
+    let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
+        .with_context(|| format!("reading {BEHAVIOUR_ONLY_DIR}"))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<_>>()?;
+    entries.sort();
+    for path in entries {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if name == "README.md" {
+            continue;
+        }
+        if !name.ends_with(".toml") || !path.is_file() {
+            problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} is not a row; the directory holds its README and \
+                 one `.toml` file a row"
+            ));
+            continue;
+        }
+        let row: BehaviourOnlyRow = match fs::read_to_string(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|text| toml::from_str(&text).map_err(anyhow::Error::from))
+        {
+            Ok(row) => row,
+            Err(err) => {
+                problems.push(format!(
+                    "{BEHAVIOUR_ONLY_DIR}/{name} is not a row of `file`, `test` and `reason`: \
+                     {err}"
+                ));
+                continue;
+            }
+        };
+        if [&row.file, &row.test, &row.reason]
+            .iter()
+            .any(|field| field.trim().is_empty())
+        {
+            problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} has an empty field; a row names its file, its test, \
+                 and the reason it fails on behaviour"
+            ));
+            continue;
+        }
+        match row.file_name() {
+            Some(expected) if expected == name => rows.push(row),
+            Some(expected) => problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} names `{}` in {}, so it must be named {expected}",
+                row.test, row.file
+            )),
+            None => problems.push(format!(
+                "{BEHAVIOUR_ONLY_DIR}/{name} names `{}` in {}, which is not a file under \
+                 `crates/<crate>/` nor a test in {XTASK_OWN_TESTS}'s `tests` module",
+                row.test, row.file
+            )),
+        }
+    }
+    rows.sort();
+    report(problems, "behaviour-only")?;
+    Ok(rows)
+}
 
 /// Whether a pending test's failure output shows that it stopped at a stub. A one-word marker
 /// matches as a whole word, so `Unimplemented` is not found in `Unimplementedish`; the phrases
@@ -2445,10 +4199,14 @@ fn first_panic_line(output: &str) -> String {
 }
 
 /// A problem for each pending test that passed in any binary, ran in none, or failed on something
-/// other than its story's stub. The stub check comes first: a `BEHAVIOUR_ONLY_TESTS` row applies
+/// other than its story's stub. The stub check comes first: a [`BEHAVIOUR_ONLY_DIR`] row applies
 /// only to a test that fails it, and a listed test that stops at its stub anyway is a problem too,
 /// naming the row to delete, so the exception can only shrink (#194 review, round 1, finding 4).
-fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
+fn verdicts(
+    tests: &[PendingTestRun],
+    outcomes: &[TestOutcome],
+    rows: &[BehaviourOnlyRow],
+) -> Vec<String> {
     tests
         .iter()
         .filter_map(|t| {
@@ -2470,16 +4228,14 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                      is implemented, so make it assert what the stubs cannot satisfy (DEC-77)"
                 ))
             } else {
-                let listed = BEHAVIOUR_ONLY_TESTS
-                    .iter()
-                    .any(|(file, name)| *file == t.file && *name == t.test.path);
+                let listed = rows.iter().any(|row| row.names(&t.file, &t.test.path));
                 let story = &t.test.story;
                 match runs
                     .iter()
                     .find(|o| !names_a_stub(failure_cause(&o.output)))
                 {
                     None if listed => Some(format!(
-                        "{at} fails at its stub, so its BEHAVIOUR_ONLY_TESTS row is not needed; \
+                        "{at} fails at its stub, so its behaviour-only row is not needed; \
                          delete the row, which is how the exception stays as small as it must \
                          be (DEC-137)"
                     )),
@@ -2487,7 +4243,7 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                     Some(_) if listed => {
                         eprintln!(
                             "    pending: {}:{}: `{}` fails on a partly implemented crate's \
-                             answer, not at a stub; it is named in BEHAVIOUR_ONLY_TESTS until {} \
+                             answer, not at a stub; it is named in {BEHAVIOUR_ONLY_DIR} until {} \
                              lands",
                             t.file, t.test.line, t.test.path, story
                         );
@@ -3224,18 +4980,22 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_TESTS, CARGO_TARGET_DIR, CratePolicy, Dependency, Layers,
-        MUTANT_BUILD_TIMEOUT, MUTANT_TEST_TIMEOUT, MUTANTS_OUT, Metadata, MutantShard,
-        MutatedCrate, Package, PendingTest, PendingTestRun, REFCASES, TestOutcome,
-        actionlint_workflows, backticked_paths, base_ref_in, ci, classify, contains_dec_id,
-        contains_word, external_oracles, failure_cause, files_by_extension, first_panic_line,
-        forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
-        is_stub_function, layer_problems, lint, listed_mutant_counts, live_test_counts,
+        BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
+        FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
+        Package, PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR,
+        SCHEMA_SHARD_ENV, TestOrder, TestOutcome, UnmutatedSource, actionlint_workflows,
+        backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
+        contains_dec_id, contains_word, external_oracles, failure_cause, feature_files,
+        feature_map_problems, files_by_extension, first_panic_line, forbidden_reached,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        layer_problems, lint, listed_mutant_counts, live_feature_problems, live_test_counts,
         metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome,
-        mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, proptest_seeds_in, repo_root, shellcheck_scripts, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_outcomes,
-        unjudged_mutants, verdicts, workspace_closure,
+        mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_problems,
+        pending_tests, plain_comment_lines, preflight_args, proptest_seeds_in, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
+        test_outcomes, unjudged_mutants, verdicts, workspace_closure, workspace_packages,
     };
 
     #[test]
@@ -3354,6 +5114,7 @@ mod tests {
                 name: (*dep).to_owned(),
                 kind: kind.map(str::to_owned),
                 path: Some(PathBuf::from(format!("/nowhere/{dep}"))),
+                features: Vec::new(),
             })
             .collect();
         Package {
@@ -3362,6 +5123,7 @@ mod tests {
             manifest_path: PathBuf::from(format!("/nowhere/{name}/Cargo.toml")),
             dependencies,
             targets: Vec::new(),
+            features: BTreeMap::new(),
         }
     }
 
@@ -3390,6 +5152,9 @@ mod tests {
                     pure: false,
                     allowed_external: Vec::new(),
                     forbidden_internal: banned.unwrap_or_default(),
+                    allowed_dependents: None,
+                    dev_only: false,
+                    live_feature: false,
                 };
                 ((*name).to_owned(), policy)
             })
@@ -3508,6 +5273,66 @@ mod tests {
         let planned: [(&str, &[&str]); 1] = [("mandate-cli", &["mandate-alpaca", "mandate-paper"])];
         let problems = layer_problems(&policy(&layers, &planned, &["mandate-paper"]), &members())?;
         assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A crate with `allowed_dependents` may be depended on, by a normal or a dev-dependency, only
+    /// by the crates it names; one it does not name is a problem, and so is a name that is neither
+    /// a member nor planned (DEC-642 item 7).
+    #[test]
+    fn only_an_allowed_dependent_may_depend_on_a_sealed_crate() -> Result<()> {
+        let layers = [("seal", 0), ("core", 1), ("kit", 11), ("api", 6)];
+        let sealed = |allowed: &[&str]| {
+            let mut p = policy(&layers, &[], &["store"]);
+            if let Some(seal) = p.crates.get_mut("seal") {
+                seal.allowed_dependents = Some(allowed.iter().map(|n| (*n).to_owned()).collect());
+            }
+            p
+        };
+        let meta = |api_kind: Option<&'static str>| {
+            workspace(vec![
+                member("seal", &[]),
+                member("core", &[("seal", None)]),
+                member("kit", &[("seal", None), ("core", None)]),
+                member("api", &[("core", None), ("seal", api_kind)]),
+            ])
+        };
+        for kind in [None, Some("dev")] {
+            let problems = layer_problems(&sealed(&["core", "kit", "store"]), &meta(kind))?;
+            let named = "`api` depends on `seal`, whose allowed_dependents";
+            assert!(
+                problems.iter().any(|p| p.starts_with(named)),
+                "{kind:?}: {problems:?}"
+            );
+            assert_eq!(problems.len(), 1, "{kind:?}: {problems:?}");
+        }
+        let allowed = layer_problems(&sealed(&["core", "kit", "api"]), &meta(None))?;
+        assert_eq!(allowed, Vec::<String>::new());
+        let typo = layer_problems(&sealed(&["core", "kit", "api", "stor"]), &meta(None))?;
+        assert!(
+            typo.iter()
+                .any(|p| p.starts_with("`seal` allows `stor` as a dependent")),
+            "{typo:?}"
+        );
+        Ok(())
+    }
+
+    /// A `dev_only` crate may be depended on only as a dev-dependency (DEC-645).
+    #[test]
+    fn a_dev_only_crate_is_only_a_dev_dependency() -> Result<()> {
+        let layers = [("kit", 11), ("api", 6)];
+        let mut p = policy(&layers, &[], &[]);
+        if let Some(kit) = p.crates.get_mut("kit") {
+            kit.dev_only = true;
+        }
+        for (kind, refused) in [(None, true), (Some("build"), true), (Some("dev"), false)] {
+            let meta = workspace(vec![member("kit", &[]), member("api", &[("kit", kind)])]);
+            let problems = layer_problems(&p, &meta)?;
+            let named = problems
+                .iter()
+                .any(|p| p.starts_with("`api` depends on `kit`, which is dev-only"));
+            assert_eq!(named, refused, "{kind:?}: {problems:?}");
+        }
         Ok(())
     }
 
@@ -3742,10 +5567,164 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-850: the pre-flight builds every package the run tests, not only the ones its mutants
+    /// are in, so no mutant's build under the sixty-second cap compiles the rest of that graph, as
+    /// a `mandate-executor` mutant on #931 did; and it still lists every mutated package, whose
+    /// live tests it counts.
     #[test]
-    fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() {
+    fn the_preflight_builds_every_tested_package_before_the_run_mutates_in_place() {
+        let mutants = BTreeMap::from([
+            ("mandate-executor".to_owned(), 3),
+            ("mandate-shell".to_owned(), 1),
+        ]);
+        let tested = [
+            "mandate-alpaca",
+            "mandate-executor",
+            "mandate-shell",
+            "mandate-refcases",
+        ];
+        let args = preflight_args(&mutants, &tested);
+        assert_eq!(
+            args.get(..2),
+            Some(&["nextest".to_owned(), "list".to_owned()][..]),
+            "the pre-flight is a nextest listing, which builds the test binaries it lists"
+        );
+        let listed: Vec<&str> = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--package="))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "mandate-executor",
+                "mandate-shell",
+                "mandate-alpaca",
+                "mandate-refcases"
+            ],
+            "every mutated package once, then every other tested package once"
+        );
+        let lone = preflight_args(&BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]), &[]);
+        assert!(
+            lone.contains(&"--package=mandate-journal-pg".to_owned()),
+            "a mutated package is listed even if the tested set omits it, so its live tests are \
+             still counted (DEC-139)"
+        );
+    }
+
+    /// DEC-850: an in-place run that ends with a mutant still in the tree has it written back and
+    /// is refused, naming the file, and a run that reverted everything passes untouched.
+    #[test]
+    fn an_in_place_run_that_leaves_a_mutant_behind_is_restored_and_refused() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-unmutated-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        fx.write("crates/a/src/lib.rs", "pub fn f() -> bool { true }\n")?;
+        fx.write("crates/b/src/lib.rs", "pub fn g() -> u8 { 1 }\n")?;
+        let touched = [
+            "crates/a/src/lib.rs".to_owned(),
+            "crates/b/src/lib.rs".to_owned(),
+        ];
+
+        UnmutatedSource::read(&fx.0, &touched)?
+            .restored(&fx.0)
+            .context("a run that reverted every mutant passes")?;
+
+        let unmutated = UnmutatedSource::read(&fx.0, &touched)?;
+        fx.write("crates/b/src/lib.rs", "pub fn g() -> u8 { 0 }\n")?;
+        let refused = unmutated
+            .restored(&fx.0)
+            .expect_err("a mutant left in the tree refuses the run");
+        assert!(
+            refused
+                .to_string()
+                .contains("left crates/b/src/lib.rs mutated"),
+            "{refused}"
+        );
+        assert_eq!(
+            fs::read_to_string(fx.0.join("crates/b/src/lib.rs"))?,
+            "pub fn g() -> u8 { 1 }\n",
+            "and the caller's checkout gets its source back"
+        );
+        assert_eq!(
+            fs::read_to_string(fx.0.join("crates/a/src/lib.rs"))?,
+            "pub fn f() -> bool { true }\n"
+        );
+        Ok(())
+    }
+
+    /// DEC-852: the run's test phases take a nextest configuration that starts the mutated
+    /// packages' tests before every other tested package's, and only reorders: one override, a
+    /// priority and an exact-package filter, and nothing that skips or times a test.
+    #[test]
+    fn a_shard_runs_its_mutated_packages_tests_first() -> Result<()> {
+        let config: toml::Value = toml::from_str(&test_order_config(&[
+            "mandate-executor".to_owned(),
+            "mandate-shell".to_owned(),
+        ]))?;
+        let overrides = config
+            .get("profile")
+            .and_then(|profile| profile.get("default"))
+            .and_then(|default| default.get("overrides"))
+            .and_then(toml::Value::as_array)
+            .context("one `profile.default.overrides` list")?;
+        assert_eq!(overrides.len(), 1);
+        let first = overrides[0].as_table().context("the override is a table")?;
+        assert_eq!(
+            first.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["filter", "priority"],
+            "a priority and the packages it applies to, and no setting that skips, retries or \
+             times a test"
+        );
+        assert_eq!(
+            first.get("filter").and_then(toml::Value::as_str),
+            Some("package(=mandate-executor) | package(=mandate-shell)"),
+            "exactly the mutated packages, by exact name"
+        );
+        assert_eq!(
+            first.get("priority").and_then(toml::Value::as_integer),
+            Some(100),
+            "nextest's highest priority, so they start before every other tested package"
+        );
+
+        let order = TestOrder::write(&["mandate-shell".to_owned()])?
+            .context("a slice with a mutant writes its order")?;
+        let path = order.0.to_str().context("non-UTF-8 temp path")?.to_owned();
+        assert_eq!(
+            fs::read_to_string(&order.0)?,
+            test_order_config(&["mandate-shell".to_owned()])
+        );
+        let args = mutants_args("change.diff", None, &["mandate-shell"], Some(&order))?;
+        assert_eq!(
+            args.windows(2)
+                .filter(|pair| {
+                    pair[0] == "--cargo-test-arg=--tool-config-file"
+                        && pair[1] == format!("--cargo-test-arg=mandate-mutants:{path}")
+                })
+                .count(),
+            1,
+            "every test phase, the baseline's included, reads the order once"
+        );
+        drop(order);
+        assert!(!Path::new(&path).exists(), "and the file goes with the run");
+        assert!(
+            TestOrder::write(&[])?.is_none(),
+            "a slice with no mutant has nothing to order"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() -> Result<()> {
         let packages = ["mandate-journal", "mandate-refcases"];
-        let unsharded = mutants_args("change.diff", None, &packages);
+        let unsharded = mutants_args("change.diff", None, &packages, None)?;
+        assert!(
+            !unsharded
+                .iter()
+                .any(|arg| arg.starts_with("--cargo-test-arg")),
+            "without an order nothing is passed to nextest"
+        );
         assert!(
             !unsharded.iter().any(|arg| arg == "--shard"),
             "a local `cargo xtask check` run must cover the complete diff"
@@ -3776,12 +5755,18 @@ mod tests {
         );
         assert_eq!(
             unsharded
-                .windows(2)
-                .find(|pair| pair[0] == "--jobs")
-                .map(|pair| pair[1].as_str()),
-            Some("1"),
-            "one mutant at a time, so a shard's critical path is its mutants in a row and the \
-             timeout keeps the margin DEC-498 measured"
+                .iter()
+                .filter(|arg| *arg == MUTANTS_IN_PLACE)
+                .count(),
+            1,
+            "the run builds in the tree the pre-flight built, not in a scratch copy whose target \
+             directory starts empty (DEC-850); one tree holds one mutant at a time, so a shard's \
+             critical path is its mutants in a row and the timeout keeps the margin DEC-498 \
+             measured"
+        );
+        assert!(
+            !unsharded.iter().any(|arg| arg == "--jobs"),
+            "cargo-mutants 27.1.0 refuses `--jobs` beside `--in-place`"
         );
 
         let sharded = mutants_args(
@@ -3791,7 +5776,8 @@ mod tests {
                 total: 12,
             }),
             &packages,
-        );
+            None,
+        )?;
         assert_eq!(
             sharded
                 .windows(2)
@@ -3806,6 +5792,7 @@ mod tests {
                 .count(),
             1
         );
+        Ok(())
     }
 
     #[test]
@@ -3826,6 +5813,168 @@ mod tests {
         assert!(!is_pending_marker("#[ignore = \"pending E5\"]"));
         assert!(!is_pending_marker("#[ignore = \"pending E-1\"]"));
         assert!(!is_pending_marker("#[ignore = \"pending E5-x\"]"));
+    }
+
+    /// The single-file check as it was before the map became a directory, as an oracle: every
+    /// crate named as `` `crate` ``, every fixture by its path, every backticked repository path
+    /// existing, all over one text.
+    fn single_file_feature_map_problems(
+        root: &Path,
+        text: &str,
+        meta: &Metadata,
+    ) -> Result<BTreeSet<String>> {
+        let mut problems = BTreeSet::new();
+        for pkg in workspace_packages(meta) {
+            if !text.contains(&format!("`{}`", pkg.name)) {
+                problems.insert(format!("crate `{}` has no entry", pkg.name));
+            }
+        }
+        for entry in fs::read_dir(root.join("fixtures/refcases"))? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            if !text.contains(&format!("fixtures/refcases/{name}")) {
+                problems.insert(format!("fixtures/refcases/{name} has no entry"));
+            }
+        }
+        for path in backticked_paths(text) {
+            if !root.join(path).exists() {
+                problems.insert(format!("`{path}`, which does not exist"));
+            }
+        }
+        Ok(problems)
+    }
+
+    /// The directory's problems in the oracle's terms: a missing path is named with the file it
+    /// is in, which the single file had no need to say, so that prefix is dropped to compare.
+    fn without_file_names(problems: Vec<String>) -> BTreeSet<String> {
+        problems
+            .into_iter()
+            .map(|problem| match problem.split_once(" names `") {
+                Some((_, rest)) if !problem.starts_with("crate ") => format!("`{rest}"),
+                _ => problem,
+            })
+            .collect()
+    }
+
+    /// One way a feature's text drifts from the workspace.
+    type Drift = fn(&str) -> String;
+
+    /// The feature map as a directory catches exactly the drift the single `feature-map.md` did,
+    /// in a fixture workspace: a crate named nowhere, a reference-case suite named nowhere, and a
+    /// path that does not exist, each with the map in one feature file and split across three, and
+    /// nothing when the map is complete. A feature file without its `# ` title is refused too.
+    #[test]
+    fn the_feature_map_directory_catches_the_drift_the_single_file_did() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-feature-map-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        fx.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/alpha\", \"crates/beta\"]\nresolver = \"3\"\n",
+        )?;
+        for name in ["alpha", "beta"] {
+            fx.write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"),
+            )?;
+            fx.write(&format!("crates/{name}/src/lib.rs"), "")?;
+        }
+        fx.write("fixtures/refcases/one.json", "{}")?;
+        fs::copy(
+            repo_root()?.join("rust-toolchain.toml"),
+            fx.0.join("rust-toolchain.toml"),
+        )?;
+        output_in(&fx.0, "cargo", &["generate-lockfile", "--offline"])?;
+        let meta = metadata_in(&fx.0)?;
+
+        let sections = [
+            "# Alpha\n\n- **Code:** `alpha`: `crates/alpha/src/lib.rs`.\n",
+            "# Beta\n\n- **Code:** `beta`: `crates/beta/src/lib.rs`.\n",
+            "# Cases\n\n- **Reference cases:** `fixtures/refcases/one.json`.\n",
+        ];
+        let drifts: [(&str, Drift); 4] = [
+            ("complete", |s| s.to_owned()),
+            ("a crate named nowhere", |s| s.replace("`beta`", "beta")),
+            ("a suite named nowhere", |s| {
+                s.replace("`fixtures/refcases/one.json`", "the suite")
+            }),
+            ("a path that does not exist", |s| {
+                s.replace("crates/alpha/src/lib.rs", "crates/alpha/src/gone.rs")
+            }),
+        ];
+        let features = fx.0.join(FEATURE_MAP);
+        for (drift, apply) in drifts {
+            let drifted: Vec<String> = sections.iter().map(|s| apply(s)).collect();
+            let expected = single_file_feature_map_problems(&fx.0, &drifted.join("\n"), &meta)?;
+            assert_eq!(
+                expected.is_empty(),
+                drift == "complete",
+                "the oracle sees {drift}: {expected:?}"
+            );
+            for split in [false, true] {
+                if features.exists() {
+                    fs::remove_dir_all(&features)?;
+                }
+                fx.write(&format!("{FEATURE_MAP}/README.md"), "# Feature map\n")?;
+                if split {
+                    for (k, text) in drifted.iter().enumerate() {
+                        fx.write(&format!("{FEATURE_MAP}/f{k}.md"), text)?;
+                    }
+                } else {
+                    let joined = drifted
+                        .iter()
+                        .map(|s| s.replacen("# ", "## ", 1))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    fx.write(
+                        &format!("{FEATURE_MAP}/all.md"),
+                        &format!("# All\n\n{joined}"),
+                    )?;
+                }
+                assert_eq!(
+                    without_file_names(feature_map_problems(&fx.0, &meta)?),
+                    expected,
+                    "{drift}, the map {}",
+                    if split {
+                        "split across files"
+                    } else {
+                        "in one file"
+                    }
+                );
+            }
+        }
+
+        fx.write(&format!("{FEATURE_MAP}/untitled.md"), "no title\n")?;
+        let untitled = feature_map_problems(&fx.0, &meta)?;
+        assert!(
+            untitled.contains(&format!(
+                "{FEATURE_MAP}/untitled.md does not open with a `# ` title"
+            )),
+            "a feature file without its title is refused: {untitled:?}"
+        );
+        fs::remove_dir_all(&features)?;
+        fx.write(&format!("{FEATURE_MAP}/README.md"), "# Feature map\n")?;
+        assert!(
+            feature_map_problems(&fx.0, &meta)?
+                .iter()
+                .any(|p| p.ends_with("has no feature files")),
+            "and a map of nothing but its README is refused"
+        );
+        fs::remove_dir_all(&fx.0).ok();
+        Ok(())
+    }
+
+    /// The repository's own map passes, and every feature has a title for the index.
+    #[test]
+    fn the_repository_feature_map_is_complete() -> Result<()> {
+        let root = repo_root()?;
+        assert_eq!(
+            feature_map_problems(&root, &metadata_in(&root)?)?,
+            Vec::<String>::new()
+        );
+        assert!(feature_files(&root)?.len() > 1);
+        Ok(())
     }
 
     #[test]
@@ -4120,7 +6269,7 @@ mod tests {
             new(8, Some("a::fs"), "own_error"),
             new(9, Some("a::fs"), "skipped"),
         ];
-        let verdicts = verdicts(&tests, &outcomes);
+        let verdicts = verdicts(&tests, &outcomes, &[]);
         let problems: Vec<String> = verdicts
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
@@ -4150,10 +6299,13 @@ mod tests {
 
     #[test]
     fn a_behaviour_only_row_is_used_only_where_the_stub_check_fails() {
-        let (file, name) = BEHAVIOUR_ONLY_TESTS
-            .first()
-            .copied()
-            .unwrap_or_else(|| panic!("the list has a row to test with"));
+        let file = "crates/a/tests/hand.rs";
+        let name = "a_listed_test";
+        let rows = [BehaviourOnlyRow {
+            file: file.to_owned(),
+            test: name.to_owned(),
+            reason: "fails on the partial answer".to_owned(),
+        }];
         let run = |path: &str| PendingTestRun {
             file: file.to_owned(),
             package: "a".to_owned(),
@@ -4173,7 +6325,7 @@ mod tests {
         let at_the_stub = "panicked at x.rs:1:1:\nUnimplemented { story: \"E1-1\" }";
         let on_the_answer = "panicked at x.rs:1:1:\nno cancel where the sequence belongs";
 
-        let unneeded = verdicts(&[run(name)], &[failed(name, at_the_stub)]);
+        let unneeded = verdicts(&[run(name)], &[failed(name, at_the_stub)], &rows);
         assert_eq!(
             unneeded.len(),
             1,
@@ -4188,19 +6340,286 @@ mod tests {
         );
 
         assert!(
-            verdicts(&[run(name)], &[failed(name, on_the_answer)]).is_empty(),
+            verdicts(&[run(name)], &[failed(name, on_the_answer)], &rows).is_empty(),
             "a listed test that fails on the partial answer is what the row is for"
         );
         let unlisted = "not_a_row_of_the_list";
-        let away = verdicts(&[run(unlisted)], &[failed(unlisted, on_the_answer)]);
+        let away = verdicts(&[run(unlisted)], &[failed(unlisted, on_the_answer)], &rows);
         assert!(
             away.len() == 1 && away.iter().all(|p| p.contains("fails away from its stub")),
             "and an unlisted one failing the same way is still a problem: {away:?}"
         );
         assert!(
-            verdicts(&[run(unlisted)], &[failed(unlisted, at_the_stub)]).is_empty(),
+            verdicts(&[run(unlisted)], &[failed(unlisted, at_the_stub)], &rows).is_empty(),
             "while an unlisted one at its stub is what every pending test must do"
         );
+    }
+
+    /// The rows the `BEHAVIOUR_ONLY_TESTS` array held when it moved to one file a row. Each is
+    /// still loaded unless its test is no longer pending in its file, the one way a row may go;
+    /// at the migration every one was pending, so the loaded set was exactly this one.
+    const ROWS_BEFORE_THE_DIRECTORY: [(&str, &str); 21] = [
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity",
+        ),
+        ("crates/mandate-shell/tests/tracer.rs", "outlier_close"),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "every_unprotected_interval_has_a_journaled_start_and_end",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "protective_sell_quantity_never_exceeds_the_position_in_any_script",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "no_resting_order_is_submitted_inside_an_unprotected_interval",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding",
+        ),
+        (
+            "crates/mandate-executor/tests/properties.rs",
+            "no_interval_exceeds_the_limit_without_an_alert",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "every_answer_record_the_runtime_writes_passes_the_journals_check",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "a_responded_record_carries_its_quorum_only_where_check_7_was_judged",
+        ),
+        (
+            "crates/mandate-runtime/tests/answer_records.rs",
+            "decided_by_now_is_null_unless_the_reclassification_asks",
+        ),
+        (
+            "crates/mandate-journal/tests/policy_overlay.rs",
+            "every_policy_overlay_valid_draft_parses",
+        ),
+        (
+            "crates/mandate-journal/tests/policy_overlay.rs",
+            "every_policy_overlay_invalid_draft_is_refused_with_its_reason_at_its_path",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "crates/mandate-executor/tests/hand.rs",
+            "a_re_cover_leaves_a_held_brackets_shares_to_its_legs",
+        ),
+        (
+            "xtask/src/main.rs",
+            "tests::ci_files_reads_every_file_that_decides_a_build",
+        ),
+        (
+            "xtask/src/main.rs",
+            "tests::the_lint_job_runs_the_live_feature_check_on_its_repository",
+        ),
+    ];
+
+    #[test]
+    fn every_row_of_the_old_array_is_loaded_until_its_test_stops_being_pending() -> Result<()> {
+        let root = repo_root()?;
+        let rows = behaviour_only_rows(&root)?;
+        for (file, test) in ROWS_BEFORE_THE_DIRECTORY {
+            let pending = fs::read_to_string(root.join(file))
+                .map(|text| pending_tests(&text).iter().any(|t| t.path == test))
+                .unwrap_or(false);
+            let loaded = rows.iter().any(|row| row.names(file, test));
+            assert!(
+                loaded || !pending,
+                "`{test}` in {file} is still pending, so its row must still be in \
+                 {BEHAVIOUR_ONLY_DIR}"
+            );
+        }
+        let mut sorted = rows.clone();
+        sorted.sort();
+        assert_eq!(rows, sorted, "the rows load in file and test order");
+        Ok(())
+    }
+
+    /// A row file the gate cannot trust is refused, naming the file: anything but the README and
+    /// `.toml` rows, an unknown, missing, or empty field, and a name that is not the row's own.
+    #[test]
+    fn a_malformed_or_misnamed_row_is_refused() -> Result<()> {
+        let fx = Fixture(env::temp_dir().join(format!(
+            "mandate-xtask-behaviour-rows-{}",
+            std::process::id()
+        )));
+        if fx.0.exists() {
+            fs::remove_dir_all(&fx.0)?;
+        }
+        assert!(
+            behaviour_only_rows(&fx.0)?.is_empty(),
+            "no directory, no rows: a row only excuses, so none is the stricter gate"
+        );
+        let row = |test: &str| {
+            format!(
+                "file = \"crates/a/tests/hand.rs\"\ntest = \"{test}\"\nreason = \"\"\"\nwhy\n\"\"\"\n"
+            )
+        };
+        let dir = BEHAVIOUR_ONLY_DIR;
+        fx.write(&format!("{dir}/README.md"), "# rows\n")?;
+        fx.write(&format!("{dir}/a__hand__listed.toml"), &row("listed"))?;
+        fx.write(
+            &format!("{dir}/a__hand__inner__nested.toml"),
+            &row("inner::nested"),
+        )?;
+        let rows = behaviour_only_rows(&fx.0)?;
+        assert_eq!(
+            rows.iter().map(|r| r.test.as_str()).collect::<Vec<_>>(),
+            ["inner::nested", "listed"],
+            "two well-formed rows load, sorted"
+        );
+        fx.write(
+            &format!("{dir}/xtask__main__tests__own.toml"),
+            "file = \"xtask/src/main.rs\"\ntest = \"tests::own\"\nreason = \"r\"\n",
+        )?;
+        let rows = behaviour_only_rows(&fx.0)?;
+        assert!(
+            rows.iter()
+                .any(|r| r.names("xtask/src/main.rs", "tests::own")),
+            "a row of xtask's own unit tests loads"
+        );
+        fs::remove_file(fx.0.join(format!("{dir}/xtask__main__tests__own.toml")))?;
+
+        let bad = [
+            (
+                "a__hand__other.toml",
+                row("listed"),
+                "must be named a__hand__listed.toml",
+            ),
+            ("notes.txt", "x".to_owned(), "is not a row"),
+            (
+                "a__hand__extra.toml",
+                row("extra") + "story = \"E1-1\"\n",
+                "is not a row of `file`, `test` and `reason`",
+            ),
+            (
+                "a__hand__short.toml",
+                "file = \"crates/a/tests/hand.rs\"\ntest = \"short\"\n".to_owned(),
+                "is not a row of `file`, `test` and `reason`",
+            ),
+            (
+                "a__hand__empty.toml",
+                "file = \"crates/a/tests/hand.rs\"\ntest = \"empty\"\nreason = \" \"\n".to_owned(),
+                "has an empty field",
+            ),
+            (
+                "outside.toml",
+                "file = \"tests/x.rs\"\ntest = \"t\"\nreason = \"r\"\n".to_owned(),
+                "not a file under `crates/<crate>/`",
+            ),
+            (
+                "web__x__t.toml",
+                "file = \"web/x.ts\"\ntest = \"t\"\nreason = \"r\"\n".to_owned(),
+                "not a file under `crates/<crate>/`",
+            ),
+            (
+                "xtask__other__tests__t.toml",
+                "file = \"xtask/src/other.rs\"\ntest = \"tests::t\"\nreason = \"r\"\n".to_owned(),
+                "not a file under `crates/<crate>/`",
+            ),
+            (
+                "xtask__main__t.toml",
+                "file = \"xtask/src/main.rs\"\ntest = \"t\"\nreason = \"r\"\n".to_owned(),
+                "not a test in xtask's `tests` module",
+            ),
+        ];
+        for (name, text, problem) in bad {
+            let path = format!("{dir}/{name}");
+            fx.write(&path, &text)?;
+            let refused = behaviour_only_rows(&fx.0).expect_err("the row is refused");
+            assert_eq!(
+                format!("{refused:#}"),
+                "behaviour-only: 1 problem(s)",
+                "{name}"
+            );
+            fs::remove_file(fx.0.join(&path))?;
+            assert!(
+                behaviour_only_rows(&fx.0).is_ok(),
+                "and only {name} was the problem ({problem})"
+            );
+        }
+        fs::remove_dir_all(&fx.0).ok();
+        Ok(())
+    }
+
+    /// The gate end to end, in a fixture repository: a row excuses its test's failure on
+    /// behaviour, and once the test is no longer pending the row is named for deletion.
+    #[test]
+    fn a_row_excuses_its_test_and_expires_with_its_marker() -> Result<()> {
+        let fx = Fixture::new("pending-rows")?;
+        let away = concat!(
+            "#[test]\n#[ignore = \"pending E1-1\"]\n",
+            "fn fails_on_behaviour() { assert_eq!(fx::lookup().ok(), Some(42)); }\n",
+        );
+        fx.write("crates/fx/tests/stubs.rs", away)?;
+        fx.commit()?;
+        let problems = pending_problems(&fx.0)?;
+        assert!(
+            problems.len() == 1
+                && problems
+                    .iter()
+                    .all(|p| p.contains("fails away from its stub")),
+            "unlisted, the behaviour failure is a problem: {problems:?}"
+        );
+
+        fx.write(
+            &format!("{BEHAVIOUR_ONLY_DIR}/fx__stubs__fails_on_behaviour.toml"),
+            concat!(
+                "file = \"crates/fx/tests/stubs.rs\"\n",
+                "test = \"fails_on_behaviour\"\n",
+                "reason = \"the fixture's partial answer\"\n",
+            ),
+        )?;
+        fx.commit()?;
+        assert_eq!(
+            pending_problems(&fx.0)?,
+            Vec::<String>::new(),
+            "with its row, it is excused"
+        );
+
+        fx.write(
+            "crates/fx/tests/stubs.rs",
+            &away.replace("fails_on_behaviour", "renamed"),
+        )?;
+        fx.commit()?;
+        let problems = pending_problems(&fx.0)?;
+        assert!(
+            problems.iter().any(|p| p.contains(
+                "xtask/behaviour-only/fx__stubs__fails_on_behaviour.toml names \
+                 `fails_on_behaviour` in crates/fx/tests/stubs.rs, which is no longer a pending \
+                 test there"
+            )),
+            "the row is named for deletion once its test is not pending: {problems:?}"
+        );
+        Ok(())
     }
 
     #[test]
@@ -4675,6 +7094,22 @@ mod tests {
             "with one live test over `code`, the same diff passes: the pre-flight is precise, not a \
              refusal of every crate whose tests are pending",
         )?;
+        let logs: Vec<String> = fs::read_dir(fx.0.join(MUTANTS_OUT).join("log"))?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+            .collect();
+        assert!(
+            !logs.is_empty()
+                && logs.iter().all(|log| {
+                    log.lines().any(|line| {
+                        line.contains("nextest run")
+                            && !line.contains("--no-run")
+                            && line.contains("--tool-config-file mandate-mutants:")
+                    })
+                }),
+            "every scenario's test phase, the baseline's and each mutant's, ran with the order \
+             that starts the mutated packages' tests first (DEC-852)"
+        );
         fx.write(
             "crates/covered/tests/covered.rs",
             "#[test]\nfn the_flag_is_negated() {\n    assert!(covered::negate(false));\n}\n",
@@ -5031,7 +7466,11 @@ mod tests {
             passed: false,
             output: output.to_owned(),
         };
-        let away = verdicts(std::slice::from_ref(&run), &[failed(shrunk_past_the_stub)]);
+        let away = verdicts(
+            std::slice::from_ref(&run),
+            &[failed(shrunk_past_the_stub)],
+            &[],
+        );
         assert!(
             away.len() == 1
                 && away.iter().all(|p| p.contains("fails away from its stub")
@@ -5040,7 +7479,7 @@ mod tests {
                     )),
             "{away:?}"
         );
-        assert!(verdicts(&[run], &[failed(stopped_at_the_stub)]).is_empty());
+        assert!(verdicts(&[run], &[failed(stopped_at_the_stub)], &[]).is_empty());
     }
 
     /// The whole pending gate over real properties, run three times: one whose shrinking passes
@@ -5544,6 +7983,536 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-538: the plan's matrix is `min(192, n)` shards, as `GITHUB_OUTPUT` lines CI reads with
+    /// `fromJSON`, and an empty list when the diff has no mutant, which is what skips the matrix.
+    #[test]
+    fn the_plan_sizes_the_matrix_to_the_diff() -> Result<()> {
+        assert_eq!(
+            MutantPlan::for_mutants(0).outputs(),
+            "mutants=0\nshards=[]\ntotal=0\n",
+            "no mutants, no shards"
+        );
+        assert_eq!(
+            MutantPlan::for_mutants(10).outputs(),
+            "mutants=10\nshards=[0,1,2,3,4,5,6,7,8,9]\ntotal=10\n",
+            "ten mutants, one a shard"
+        );
+        for (mutants, shards) in [(1, 1), (191, 191), (192, 192), (193, 192), (500, 192)] {
+            let plan = MutantPlan::for_mutants(mutants);
+            assert_eq!(plan.shards, shards, "{mutants} mutants");
+            let outputs = plan.outputs();
+            let listed = outputs
+                .lines()
+                .find_map(|line| line.strip_prefix("shards="))
+                .context("the plan names its shards")?;
+            let indices: Vec<usize> = serde_json::from_str(listed)?;
+            assert_eq!(
+                indices,
+                (0..shards).collect::<Vec<_>>(),
+                "the matrix is every index below the plan's total, for {mutants} mutants"
+            );
+            assert!(
+                outputs.contains(&format!("\ntotal={shards}\n")),
+                "and each shard names that total: {outputs}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The slice shards `cargo-mutants` gives a mutant listing, computed the way its `--sharding
+    /// slice` documents them (runs of `ceil(n / N)`), as an oracle independent of the plan.
+    fn slices(n: usize, total: usize) -> Vec<std::ops::Range<usize>> {
+        let run = n.div_ceil(total);
+        (0..total)
+            .map(|k| {
+                let start = k.saturating_mul(run).min(n);
+                start..start.saturating_add(run).min(n)
+            })
+            .collect()
+    }
+
+    /// DEC-538's per-shard load, for every diff size up to well past the ceiling: shard `k` of the
+    /// plan's `N` takes exactly the mutants shard `k` of 192 took, so no shard carries more than it
+    /// did and a diff under 192 mutants still puts one in each; and every shard of 192 the plan
+    /// drops was empty.
+    #[test]
+    fn no_planned_shard_carries_more_than_its_slice_of_192() {
+        for n in 0..=1000 {
+            let plan = MutantPlan::for_mutants(n);
+            let planned = slices(n, plan.shards.max(1));
+            let before = slices(n, MUTANT_SHARDS);
+            for (k, slice) in before.iter().enumerate() {
+                if k < plan.shards {
+                    assert_eq!(
+                        planned.get(k),
+                        Some(slice),
+                        "shard {k} of {} tests what shard {k} of 192 did, for {n} mutants",
+                        plan.shards
+                    );
+                } else {
+                    assert!(
+                        slice.is_empty(),
+                        "shard {k} of 192 the plan drops tested nothing, for {n} mutants"
+                    );
+                }
+            }
+            if n > 0 && n < MUTANT_SHARDS {
+                assert!(planned.iter().all(|slice| slice.len() == 1), "{n} mutants");
+            }
+        }
+    }
+
+    /// `cargo mutants --list --json` over the whole diff from `base`, for one shard or unsharded,
+    /// each mutant as its JSON text. The oracle the plan is compared against: it writes its own
+    /// diff and asks the tool itself which mutants each shard tests.
+    fn listed_by_cargo_mutants(
+        fx: &Fixture,
+        diff: &Path,
+        shard: Option<(usize, usize)>,
+    ) -> Result<Vec<String>> {
+        let diff = diff.to_str().context("non-UTF-8 temp path")?;
+        let argument = shard.map(|(k, total)| format!("{k}/{total}"));
+        let mut args = vec!["mutants", "--list", "--json", "--in-diff", diff];
+        if let Some(argument) = argument.as_deref() {
+            args.extend(["--shard", argument, "--sharding", "slice"]);
+        }
+        let listing = output_in(&fx.0, "cargo", &args)?;
+        if listing.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let listed: Vec<Value> = serde_json::from_str(&listing)?;
+        Ok(listed.iter().map(Value::to_string).collect())
+    }
+
+    /// DEC-538 in a fixture repository, against `cargo mutants` itself: the plan counts the mutants
+    /// the tool lists for the diff; the plan's shards between them test that whole set; shard `k`
+    /// of the plan tests what shard `k` of 192 tests; the shards the plan drops test nothing; and a
+    /// shard is refused when its listing or its total disagrees with the plan that launched it.
+    #[test]
+    fn the_planned_shards_test_the_gates_mutants_and_no_more_per_shard() -> Result<()> {
+        let fx = Fixture::gated("mutants-plan")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
+        let diff =
+            env::temp_dir().join(format!("mandate-xtask-plan-oracle-{}", std::process::id()));
+        fs::write(&diff, fx.git(&["diff", &format!("{base}...HEAD")])? + "\n")?;
+
+        let plan = mutants_plan(&fx.0, Some(base))?;
+        let mut everything = listed_by_cargo_mutants(&fx, &diff, None)?;
+        everything.sort();
+        assert!(
+            plan.mutants > 1,
+            "the fixture's diff has several mutants, so a shard split means something"
+        );
+        assert_eq!(
+            plan,
+            MutantPlan::for_mutants(everything.len()),
+            "the plan counts what `cargo mutants` lists for the diff"
+        );
+
+        let mut union = Vec::new();
+        for k in 0..MUTANT_SHARDS {
+            let before = listed_by_cargo_mutants(&fx, &diff, Some((k, MUTANT_SHARDS)))?;
+            if k < plan.shards {
+                let planned = listed_by_cargo_mutants(&fx, &diff, Some((k, plan.shards)))?;
+                assert_eq!(
+                    planned, before,
+                    "shard {k} of {} tests what shard {k} of 192 tests",
+                    plan.shards
+                );
+                assert_eq!(planned.len(), 1, "one mutant a shard, as under 192");
+                union.extend(planned);
+            } else {
+                assert!(
+                    before.is_empty(),
+                    "shard {k} of 192, which the plan drops, tests nothing: {before:?}"
+                );
+            }
+        }
+        union.sort();
+        assert_eq!(
+            union, everything,
+            "the plan's shards together test every mutant"
+        );
+
+        let listed = listed_mutant_counts(&output_in(
+            &fx.0,
+            "cargo",
+            &[
+                "mutants",
+                "--list",
+                "--json",
+                "--in-diff",
+                diff.to_str().context("non-UTF-8 temp path")?,
+            ],
+        )?)?;
+        let diff_path = diff.to_str().context("non-UTF-8 temp path")?;
+        assert_eq!(
+            shard_packages(&fx.0, diff_path, None, &listed)?,
+            listed.keys().cloned().collect::<Vec<_>>(),
+            "unsharded, every package with a mutant comes first (DEC-852)"
+        );
+        let mut first_by_shard = BTreeSet::new();
+        for k in 0..plan.shards {
+            let shard = MutantShard {
+                index: k,
+                total: plan.shards,
+            };
+            let first = shard_packages(&fx.0, diff_path, Some(shard), &listed)?;
+            assert_eq!(
+                first.len(),
+                1,
+                "shard {k} has one mutant, so one package goes first, not the diff's {listed:?}"
+            );
+            first_by_shard.extend(first);
+        }
+        assert_eq!(
+            first_by_shard,
+            listed.keys().cloned().collect::<BTreeSet<_>>(),
+            "and between them the shards put each mutated package first where its mutants are"
+        );
+        fs::remove_file(&diff).ok();
+
+        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1))
+            .expect_err("a shard whose listing differs from the plan is refused");
+        assert!(wrong_count.to_string().contains("plan"), "{wrong_count}");
+        let wrong_total = mutants_scheduled(
+            &fx.0,
+            Some(base),
+            Some(MutantShard::parse(&format!("0/{MUTANT_SHARDS}"))?),
+            Some(plan.mutants),
+        )
+        .expect_err("a shard total other than the plan's is refused");
+        assert!(wrong_total.to_string().contains("shard"), "{wrong_total}");
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "both refusals come before the run"
+        );
+        Ok(())
+    }
+
+    /// DEC-538: the plan reports zero exactly when the gate would test nothing, for each of the
+    /// gate's three ways of having nothing to do: no base, no safety-critical source changed, and
+    /// changed source that generates no mutant. In each, a shard told the plan's zero passes.
+    #[test]
+    fn the_plan_counts_zero_exactly_when_the_gate_has_nothing_to_test() -> Result<()> {
+        let fx = Fixture::gated("mutants-plan-zero")?;
+        let head = fx.git(&["rev-parse", "HEAD"])?;
+        assert_eq!(mutants_plan(&fx.0, None)?, MutantPlan::for_mutants(0));
+        mutants_scheduled(&fx.0, None, None, Some(0))?;
+
+        fx.write(
+            "crates/covered/tests/more.rs",
+            "#[test]\nfn negates_true() {\n    assert!(!covered::negate(true));\n}\n",
+        )?;
+        fx.commit()?;
+        assert_eq!(
+            mutants_plan(&fx.0, Some(&head))?,
+            MutantPlan::for_mutants(0),
+            "a tests-only change"
+        );
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+
+        fx.write(
+            "crates/covered/src/lib.rs",
+            concat!(
+                "#[must_use]\npub fn negate(flag: bool) -> bool {\n    !flag\n}\n",
+                "\n#[cfg(test)]\nmod unit {\n    #[test]\n    fn negates_false() {\n",
+                "        assert!(super::negate(false));\n    }\n}\n",
+            ),
+        )?;
+        fx.commit()?;
+        assert_eq!(
+            mutants_plan(&fx.0, Some(&head))?,
+            MutantPlan::for_mutants(0),
+            "changed source that generates no mutant"
+        );
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "and the gate never started a run"
+        );
+
+        fx.write(
+            "crates/covered/src/lib.rs",
+            "#[must_use]\npub fn negate(flag: bool) -> bool {\n    flag ^ true\n}\n",
+        )?;
+        fx.commit()?;
+        assert!(
+            mutants_plan(&fx.0, Some(&head))?.mutants > 0,
+            "and a change that does generate a mutant is counted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_shards_schedule_must_match_its_plan() -> Result<()> {
+        check_schedule(5, None, None)?;
+        check_schedule(5, Some(MutantShard::parse("3/192")?), None)?;
+        check_schedule(5, Some(MutantShard::parse("3/5")?), Some(5))?;
+        check_schedule(500, Some(MutantShard::parse("191/192")?), Some(500))?;
+        check_schedule(0, None, Some(0))?;
+        assert!(check_schedule(4, None, Some(5)).is_err(), "fewer listed");
+        assert!(check_schedule(6, None, Some(5)).is_err(), "more listed");
+        assert!(
+            check_schedule(5, Some(MutantShard::parse("3/192")?), Some(5)).is_err(),
+            "a 192-way shard under a plan of five"
+        );
+        assert!(
+            check_schedule(500, Some(MutantShard::parse("3/191")?), Some(500)).is_err(),
+            "a total below the ceiling for a plan above it"
+        );
+        Ok(())
+    }
+
+    /// DEC-538 in `ci.yml`: the plan job runs the plan and exposes its three outputs; the matrix
+    /// comes from it, is skipped only on a zero count, and passes the plan's total and count to
+    /// each shard; and `full` needs all three jobs.
+    #[test]
+    fn ci_sizes_the_mutation_matrix_from_the_plan() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let trimmed = |job: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let plan = trimmed("mutants-plan")?;
+        for line in [
+            "cargo xtask ci mutants --plan >> \"$GITHUB_OUTPUT\"",
+            "mutants: ${{ steps.plan.outputs.mutants }}",
+            "shards: ${{ steps.plan.outputs.shards }}",
+            "total: ${{ steps.plan.outputs.total }}",
+            "printf 'mutants=0\\nshards=[]\\ntotal=0\\n' >> \"$GITHUB_OUTPUT\"",
+        ] {
+            assert!(
+                plan.iter().any(|l| l == line),
+                "`mutants-plan` has `{line}`"
+            );
+        }
+        let matrix = trimmed("mutants")?;
+        for line in [
+            "needs: mutants-plan",
+            "if: needs.mutants-plan.outputs.mutants != '0'",
+            "shard: ${{ fromJSON(needs.mutants-plan.outputs.shards) }}",
+            "MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}",
+            "MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}",
+        ] {
+            assert!(matrix.iter().any(|l| l == line), "`mutants` has `{line}`");
+        }
+        assert!(
+            !workflow.contains("/192"),
+            "no shard total is fixed in the workflow"
+        );
+        let full = trimmed("full")?;
+        assert!(
+            full.iter()
+                .any(|l| l == "needs: [full-checks, mutants-plan, mutants, schema-mutants]"),
+            "`full` needs the plan as well as the matrix"
+        );
+        Ok(())
+    }
+
+    /// The `run:` script of the `full` job, as GitHub runs it.
+    fn full_verdict_script(workflow: &str) -> Result<String> {
+        let lines = workflow_job(workflow, "full").context("ci.yml has a `full` job")?;
+        let start = lines
+            .iter()
+            .position(|line| line.trim() == "run: |")
+            .context("`full` has a `run: |` script")?;
+        let script: Vec<&str> = lines
+            .iter()
+            .skip(start.saturating_add(1))
+            .take_while(|line| line.starts_with("          ") || line.trim().is_empty())
+            .map(|line| line.get(10..).unwrap_or(""))
+            .collect();
+        Ok(script.join("\n") + "\n")
+    }
+
+    /// DEC-538's `full` verdict, run as GitHub runs it (`bash -e`) over every combination of the
+    /// three jobs' results and the plan's count, against a truth table written out here: the
+    /// matrix's skip passes only beside a plan that succeeded and counted zero.
+    #[test]
+    fn full_accepts_a_skipped_matrix_only_beside_a_plan_of_zero() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let script = full_verdict_script(&workflow)?;
+        let results = ["success", "failure", "cancelled", "skipped"];
+        let mut checked = 0usize;
+        for checks in results {
+            for plan in results {
+                for planned in ["0", "1", "10", "500", "", "01", "x", "-1"] {
+                    for matrix in results {
+                        let expected = checks == "success"
+                            && plan == "success"
+                            && match planned {
+                                "0" => matrix == "skipped",
+                                "1" | "10" | "500" => matrix == "success",
+                                _ => false,
+                            };
+                        let status = Command::new("bash")
+                            .args(["-e", "-c", &script])
+                            .env("FULL_CHECKS_RESULT", checks)
+                            .env("PLAN_RESULT", plan)
+                            .env("PLANNED_MUTANTS", planned)
+                            .env("MUTANTS_RESULT", matrix)
+                            .env("SCHEMA_MUTANTS_RESULT", "success")
+                            .status()?;
+                        assert_eq!(
+                            status.success(),
+                            expected,
+                            "full-checks {checks}, plan {plan} counting {planned:?}, mutants {matrix}"
+                        );
+                        checked = checked.saturating_add(1);
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 512);
+        Ok(())
+    }
+
+    /// DEC-688: the workspace API's three schema checkers run inside `full`, and its mutation sweep
+    /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
+    /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
+    /// it but success while every other job passed: the matrix's result, a success only when every
+    /// one of its three shards succeeded. Each shard runs the sweep only after all three checkers
+    /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
+    #[test]
+    fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
+        let sweep = format!("{SCHEMA_DIR}/mutate_schemas.py");
+        let checkers: Vec<String> = SCHEMA_CHECKERS
+            .iter()
+            .map(|c| format!("{SCHEMA_DIR}/{c}"))
+            .collect();
+        for (shard, sweep_args) in [
+            (None, vec![]),
+            (Some("1/3"), vec!["--shard".to_owned(), "1/3".to_owned()]),
+        ] {
+            let mut ran: Vec<(String, Vec<String>)> = Vec::new();
+            schema_mutants(shard, &mut |path, args| {
+                ran.push((
+                    path.to_owned(),
+                    args.iter().map(|a| (*a).to_owned()).collect(),
+                ));
+                Ok(())
+            })?;
+            let mut expected: Vec<(String, Vec<String>)> =
+                checkers.iter().map(|c| (c.clone(), vec![])).collect();
+            expected.push((sweep.clone(), sweep_args));
+            assert_eq!(
+                ran, expected,
+                "the baseline's three checkers, then the sweep with the shard ({shard:?}) passed through"
+            );
+        }
+        for failing in &checkers {
+            let mut ran = Vec::new();
+            let err = schema_mutants(Some("0/3"), &mut |path, _| {
+                ran.push(path.to_owned());
+                if path == failing {
+                    anyhow::bail!("{path} failed");
+                }
+                Ok(())
+            })
+            .err()
+            .with_context(|| format!("a baseline failing {failing} fails the job"))?;
+            assert!(
+                format!("{err:#}")
+                    .contains("baseline fails: fix the schemas before mutants mean anything"),
+                "the failure names the baseline: {err:#}"
+            );
+            assert!(
+                !ran.contains(&sweep),
+                "no mutant runs on a failing baseline ({failing})"
+            );
+        }
+        assert!(FULL_JOB.contains(&"schemas") && !FULL_JOB.contains(&"schema-mutants"));
+        assert!(PR_JOBS.contains(&"schemas") && PR_JOBS.contains(&"schema-mutants"));
+        for checker in SCHEMA_CHECKERS.iter().chain(["mutate_schemas.py"].iter()) {
+            let path = repo_root()?.join(SCHEMA_DIR).join(checker);
+            assert!(path.is_file(), "{} exists", path.display());
+        }
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let job: Vec<String> = workflow_job(&workflow, "schema-mutants")
+            .context("ci.yml has a `schema-mutants` job")?
+            .iter()
+            .map(|line| line.trim().trim_start_matches("- ").to_owned())
+            .collect();
+        let shard_env = format!("{SCHEMA_SHARD_ENV}: ${{{{ matrix.shard }}}}");
+        for line in [
+            "if: ${{ !github.event.pull_request.draft }}",
+            "timeout-minutes: 10",
+            "fail-fast: false",
+            "shard: [\"0/3\", \"1/3\", \"2/3\"]",
+            shard_env.as_str(),
+            "run: cargo xtask ci schema-mutants",
+        ] {
+            assert!(
+                job.iter().any(|l| l == line),
+                "`schema-mutants` has `{line}`"
+            );
+        }
+        let script = full_verdict_script(&workflow)?;
+        for result in ["success", "failure", "cancelled", "skipped", ""] {
+            let status = Command::new("bash")
+                .args(["-e", "-c", &script])
+                .env("FULL_CHECKS_RESULT", "success")
+                .env("PLAN_RESULT", "success")
+                .env("PLANNED_MUTANTS", "0")
+                .env("MUTANTS_RESULT", "skipped")
+                .env("SCHEMA_MUTANTS_RESULT", result)
+                .status()?;
+            assert_eq!(
+                status.success(),
+                result == "success",
+                "`full` with schema-mutants {result:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-610: a draft runs no `ci` job. `fast`, `full-checks` and the mutation plan are skipped
+    /// while the pull request is a draft, the matrix follows its plan, `full` is skipped too rather
+    /// than judging skipped jobs, marking a pull request ready starts its run, and a newer push
+    /// still cancels the older run of the same ref.
+    #[test]
+    fn ci_runs_nothing_on_a_draft() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        assert!(
+            workflow.contains(
+                "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n"
+            ),
+            "marking a pull request ready for review starts the run that judges it"
+        );
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+            ),
+            "a newer run of the same ref cancels the older one"
+        );
+        for (job, guard) in [
+            ("fast", "if: ${{ !github.event.pull_request.draft }}"),
+            ("full-checks", "if: ${{ !github.event.pull_request.draft }}"),
+            (
+                "mutants-plan",
+                "if: ${{ !github.event.pull_request.draft }}",
+            ),
+            (
+                "full",
+                "if: ${{ always() && !github.event.pull_request.draft }}",
+            ),
+            ("mutants", "needs: mutants-plan"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            assert!(
+                lines.iter().any(|line| line.trim() == guard),
+                "`{job}` has `{guard}`, so a draft runs it not at all"
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn ci_leaves_the_base_to_the_event() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -5573,8 +8542,9 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            3,
-            "one checkout in each source-reading job: `fast`, `full-checks`, and the mutants matrix"
+            5,
+            "one checkout in each source-reading job: `fast`, `full-checks`, the mutation plan, \
+             the mutants matrix, and `schema-mutants`"
         );
         for checkout in checkouts {
             assert!(
@@ -5733,7 +8703,8 @@ mod tests {
     /// refuses a workflow-runs query that is not filtered to the pull request's head and to
     /// `pull_request` events, and answers `mergeable: UNKNOWN` while `unknown_reads` counts down.
     /// The label's events and the description's authorship come from `events.json` and
-    /// `graphql.json`.
+    /// `graphql.json`, and the jobs of `ci`'s latest run, the only run it answers them for, from
+    /// `jobs.json`.
     const STUB_GH: &str = r##"#!/usr/bin/env bash
 set -euo pipefail
 dir=$(dirname "$0")
@@ -5775,6 +8746,13 @@ else
   esac
   case "$path" in
     */actions/workflows/ci.yml/runs*) src="$dir/ci.json" ;;
+    */actions/runs/*/jobs*)
+      run=${path#*/actions/runs/}
+      run=${run%%/*}
+      latest=$(jq '.workflow_runs | max_by(.id) | .id' "$dir/ci.json")
+      [ "$run" = "$latest" ] || { echo "jobs asked of run $run, not the latest ci run $latest" >&2; exit 1; }
+      src="$dir/jobs.json"
+      ;;
     */actions/workflows/web.yml/runs*) src="$dir/web.json" ;;
     */files*) src="$dir/files.json" ;;
     */issues/*/events*) src="$dir/events.json" ;;
@@ -5804,6 +8782,8 @@ jq -r "$filter" "$src"
     struct MergeCase {
         view: Value,
         ci: Value,
+        /// The jobs of `ci`'s latest run.
+        jobs: Value,
         web: Value,
         files: Vec<String>,
         unknown_reads: u32,
@@ -5822,6 +8802,14 @@ jq -r "$filter" "$src"
             })
             .collect();
         json!({ "workflow_runs": runs })
+    }
+
+    fn run_jobs(list: &[(&str, &str)]) -> Value {
+        let jobs: Vec<Value> = list
+            .iter()
+            .map(|(name, conclusion)| json!({ "name": name, "conclusion": conclusion }))
+            .collect();
+        json!({ "jobs": jobs })
     }
 
     fn approved_body(approval: &str) -> String {
@@ -5851,6 +8839,13 @@ jq -r "$filter" "$src"
                 ci: workflow_runs(&[
                     (1, "completed", Some("failure")),
                     (2, "completed", Some("success")),
+                ]),
+                jobs: run_jobs(&[
+                    ("fast", "success"),
+                    ("full-checks", "success"),
+                    ("mutants-plan", "success"),
+                    ("mutants", "skipped"),
+                    ("full", "success"),
                 ]),
                 web: workflow_runs(&[]),
                 files: vec!["crates/c/src/lib.rs".to_owned()],
@@ -5882,6 +8877,7 @@ jq -r "$filter" "$src"
                 .collect();
             fs::write(dir.join("view.json"), self.view.to_string())?;
             fs::write(dir.join("ci.json"), self.ci.to_string())?;
+            fs::write(dir.join("jobs.json"), self.jobs.to_string())?;
             fs::write(dir.join("web.json"), self.web.to_string())?;
             fs::write(dir.join("files.json"), Value::from(files).to_string())?;
             fs::write(dir.join("unknown_reads"), self.unknown_reads.to_string())?;
@@ -5965,7 +8961,7 @@ jq -r "$filter" "$src"
     #[test]
     fn the_merge_script_refuses_anything_short_of_an_approved_green_head() -> Result<()> {
         let stale_head = "2".repeat(40);
-        let refusals: [Refusal<'_>; 22] = [
+        let refusals: [Refusal<'_>; 25] = [
             (
                 "closed",
                 &|c| c.view["state"] = json!("CLOSED"),
@@ -6063,6 +9059,29 @@ jq -r "$filter" "$src"
                     ])
                 },
                 "has ci.yml at in_progress",
+            ),
+            (
+                "ci-skipped-on-a-draft",
+                &|c| {
+                    c.jobs = run_jobs(&[
+                        ("fast", "skipped"),
+                        ("full-checks", "skipped"),
+                        ("mutants-plan", "skipped"),
+                        ("mutants", "skipped"),
+                        ("full", "skipped"),
+                    ])
+                },
+                "without fast and full both run and green (fast=skipped full=skipped)",
+            ),
+            (
+                "ci-full-skipped",
+                &|c| c.jobs = run_jobs(&[("fast", "success"), ("full", "skipped")]),
+                "without fast and full both run and green (fast=success full=skipped)",
+            ),
+            (
+                "ci-without-its-required-jobs",
+                &|c| c.jobs = run_jobs(&[("mutants-plan", "success")]),
+                "without fast and full both run and green (neither found)",
             ),
             (
                 "web-red",
@@ -6292,14 +9311,19 @@ jq -r "$filter" "$src"
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
+        fixture_workspace(&root)?;
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
+        let deploy = root.join("deploy");
         fs::create_dir_all(&scripts)?;
         fs::create_dir_all(&workflows)?;
-        fs::write(
-            scripts.join("clean.sh"),
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
-        )?;
+        fs::create_dir_all(&deploy)?;
+        for dir in [&scripts, &deploy] {
+            fs::write(
+                dir.join("clean.sh"),
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
+            )?;
+        }
         fs::write(
             workflows.join("clean.yml"),
             concat!(
@@ -6328,6 +9352,12 @@ jq -r "$filter" "$src"
             .err();
         fs::remove_file(scripts.join("planted.sh"))?;
 
+        fs::write(deploy.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
+        let deploy_shellcheck = lint(&root, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
+        fs::remove_file(deploy.join("planted.sh"))?;
+
         fs::write(
             workflows.join("planted.yml"),
             concat!(
@@ -6350,10 +9380,1594 @@ jq -r "$filter" "$src"
             "a planted SC2086 fails the lint job naming the code, got {shellcheck:?}"
         );
         assert!(
+            deploy_shellcheck
+                .as_deref()
+                .is_some_and(|err| err.contains("SC2086")),
+            "a planted SC2086 under deploy/ fails the lint job too, got {deploy_shellcheck:?}"
+        );
+        assert!(
             actionlint
                 .as_deref()
                 .is_some_and(|err| err.contains("unexpected key \"badopt\"")),
             "a planted unknown workflow key fails the lint job naming it, got {actionlint:?}"
+        );
+        Ok(())
+    }
+
+    /// The runner for the live-feature tests, marked `live_feature` in its policy.
+    const RUNNER: &str = "the-runner";
+
+    /// A policy with `the-runner` at layer 9 marked `live_feature`, and `a-lib` and `a-tool` at
+    /// layers 5 and 6, none marked.
+    fn live_policy() -> Layers {
+        let mut policy = policy(&[(RUNNER, 9), ("a-lib", 5), ("a-tool", 6)], &[], &[]);
+        if let Some(runner) = policy.crates.get_mut(RUNNER) {
+            runner.live_feature = true;
+        }
+        policy
+    }
+
+    /// `pkg` with the `[features]` in `features`.
+    fn with_features(mut pkg: Package, features: &[(&str, &[&str])]) -> Package {
+        pkg.features = features
+            .iter()
+            .map(|(name, on)| {
+                (
+                    (*name).to_owned(),
+                    on.iter().map(|f| (*f).to_owned()).collect(),
+                )
+            })
+            .collect();
+        pkg
+    }
+
+    /// The three crates of [`live_policy`], with no features and no dependencies.
+    fn live_workspace() -> Vec<Package> {
+        vec![
+            member(RUNNER, &[]),
+            member("a-lib", &[]),
+            member("a-tool", &[]),
+        ]
+    }
+
+    fn ci_file(path: &str, text: &str) -> CiFile {
+        CiFile {
+            path: path.to_owned(),
+            text: text.to_owned(),
+        }
+    }
+
+    /// Only the marked runner may declare a `live` feature; any other crate that does is named
+    /// (ES-23 as DEC-529 item 3 narrows it).
+    #[test]
+    fn only_the_marked_runner_may_declare_a_live_feature() -> Result<()> {
+        let marked = live_policy();
+        let mut crates = live_workspace();
+        crates[0] = with_features(member(RUNNER, &[]), &[("live", &[])]);
+        assert_eq!(
+            live_feature_problems(&marked, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "the marked runner's own `live` feature is allowed"
+        );
+        let mut crates = live_workspace();
+        crates[1] = with_features(member("a-lib", &[]), &[("live", &[])]);
+        let problems = live_feature_problems(&marked, &workspace(crates), &[])?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("`a-lib`"), "{problems:?}");
+        let unmarked = policy(&[(RUNNER, 9), ("a-lib", 5), ("a-tool", 6)], &[], &[]);
+        let mut crates = live_workspace();
+        crates[0] = with_features(member(RUNNER, &[]), &[("live", &[])]);
+        let problems = live_feature_problems(&unmarked, &workspace(crates), &[])?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "an unmarked runner is any crate: {problems:?}"
+        );
+        assert!(problems[0].contains(&format!("`{RUNNER}`")), "{problems:?}");
+        Ok(())
+    }
+
+    /// At most one crate is marked, and a marked crate must be a workspace member.
+    #[test]
+    fn at_most_one_member_crate_is_marked() -> Result<()> {
+        let mut two = live_policy();
+        if let Some(lib) = two.crates.get_mut("a-lib") {
+            lib.live_feature = true;
+        }
+        let problems = live_feature_problems(&two, &workspace(live_workspace()), &[])?;
+        assert_eq!(problems.len(), 1, "two marked crates: {problems:?}");
+        assert!(
+            problems[0].contains(&format!("`{RUNNER}`")) && problems[0].contains("`a-lib`"),
+            "both are named: {problems:?}"
+        );
+        let crates = vec![member("a-lib", &[]), member("a-tool", &[])];
+        let problems = live_feature_problems(&live_policy(), &workspace(crates), &[])?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "a marked crate that is no member: {problems:?}"
+        );
+        assert!(problems[0].contains(&format!("`{RUNNER}`")), "{problems:?}");
+        Ok(())
+    }
+
+    /// Nothing else turns `live` on: no other feature of the runner (`default` included), no
+    /// feature of another crate naming `<runner>/live` or `<runner>?/live`, and no dependency
+    /// on the runner listing `live` among its features, whatever the dependency's kind.
+    #[test]
+    fn nothing_but_an_explicit_flag_turns_live_on() -> Result<()> {
+        let policy = live_policy();
+        let runner = |features: &[(&str, &[&str])]| with_features(member(RUNNER, &[]), features);
+        let enabling_live: Vec<Vec<Package>> = vec![
+            vec![
+                runner(&[("live", &[]), ("default", &["live"])]),
+                member("a-lib", &[]),
+            ],
+            vec![
+                runner(&[("live", &[]), ("all", &["live"])]),
+                member("a-lib", &[]),
+            ],
+            vec![
+                runner(&[("live", &[])]),
+                with_features(member("a-lib", &[]), &[("go", &["the-runner/live"])]),
+            ],
+            vec![
+                runner(&[("live", &[])]),
+                with_features(member("a-lib", &[]), &[("go", &["the-runner?/live"])]),
+            ],
+        ];
+        for crates in enabling_live {
+            let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+            assert_eq!(problems.len(), 1, "{problems:?}");
+        }
+        for kind in [None, Some("dev"), Some("build")] {
+            let mut dependent = member("a-tool", &[(RUNNER, kind)]);
+            dependent.dependencies[0].features = vec!["live".to_owned()];
+            let crates = vec![runner(&[("live", &[])]), dependent];
+            let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+            assert_eq!(problems.len(), 1, "a {kind:?} dependency: {problems:?}");
+            assert!(problems[0].contains("`a-tool`"), "{problems:?}");
+        }
+        let mut quiet = member("a-tool", &[(RUNNER, Some("dev"))]);
+        quiet.dependencies[0].features = vec!["other".to_owned()];
+        let crates = vec![runner(&[("live", &[]), ("other", &[])]), quiet];
+        assert_eq!(
+            live_feature_problems(&policy, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "a dependency on the runner without `live` is allowed"
+        );
+        Ok(())
+    }
+
+    /// CI may pass `live` only in one `cargo check` of the marked runner, so the feature
+    /// compiles and nothing live is built, tested or run; `--all-features` is never allowed. Each
+    /// refusal names the file and its line.
+    #[test]
+    fn ci_only_compiles_the_runner_with_live() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let allowed = [
+            "      - run: cargo check -p the-runner --features live",
+            "      - run: cargo check --locked -p the-runner --features=live",
+            "cargo check -p the-runner -F live",
+        ];
+        for line in allowed {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        let refused = [
+            "      - run: cargo build -p the-runner --features live",
+            "      - run: cargo test -p the-runner --features live",
+            "      - run: cargo nextest run -p the-runner --features live",
+            "      - run: cargo run -p the-runner --features a,live",
+            "      - run: cargo clippy -p the-runner -F live",
+            "      - run: cargo check -p a-lib --features live",
+            "      - run: cargo check --workspace --features live",
+            "      - run: cargo check --all-features",
+            "      - run: cargo test --workspace --all-features",
+            "cargo install --path crates/the-runner --features \"live\"",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh") && problems[0].contains(":2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let twice = [
+            ci_file(".github/workflows/a.yml", allowed[0]),
+            ci_file(".github/workflows/b.yml", allowed[0]),
+        ];
+        let problems = live_feature_problems(&policy, &meta(), &twice)?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "at most one compile-only job: {problems:?}"
+        );
+        let harmless = [ci_file(
+            ".github/workflows/ci.yml",
+            "      - run: cargo xtask ci fast\n      # a live host is never compiled here\n",
+        )];
+        assert_eq!(
+            live_feature_problems(&policy, &meta(), &harmless)?,
+            Vec::<String>::new(),
+            "the word in prose or other commands is not a feature flag"
+        );
+        Ok(())
+    }
+
+    /// The repository as it stands: the policy, the workspace and every file the check reads
+    /// pass, with no crate marked and no `live` feature anywhere. Main's files hold the token
+    /// `live` only in comments, so the live-token backstop allows them (#738 review, fourth
+    /// round).
+    #[test]
+    fn the_repository_has_no_live_build() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let problems = live_feature_problems(&policy, &metadata_in(&root)?, &ci_files(&root)?)?;
+        assert_eq!(problems, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// Each way a line can build or run `live` while looking like the compile-only form, or
+    /// without naming `live` the plain way, is refused once, naming the file and line (#738
+    /// review, finding 1): a second command after `&&`, `||`, `;` or `|` is judged on its own; a
+    /// `<crate>/live` or `<crate>?/live` feature; a list split on spaces; `-Flive`; a feature list
+    /// the shell expands (`$` or a backtick), which cannot be read; and `--cfg feature="live"`,
+    /// which sets the feature without `--features`. A flag right after a list, a lone opening
+    /// quote, `--all` and `--workspace` are read too, and a quoted list ends at its closing quote,
+    /// so a flag inside it is not read as a feature (#738's mutants).
+    ///
+    /// A command is read whole, not a physical line at a time (#738 review, second round): a
+    /// backslash continuation, or a YAML folded `>` scalar, that carries `--features live` on a
+    /// later line is refused; so is `--cfg feature = "live"` with spaces or tabs around the
+    /// `=`, in a command, `RUSTFLAGS` or `rustflags`; and so is a cargo command that takes
+    /// arguments from a variable, `${...}`, `$(...)` or a backtick (`cargo build $FLAGS`), which
+    /// cannot be read. A cargo command in a CI file is
+    /// read word by word. Only the separators `|`, `;`, `&&`, `||` and a single `&` end its
+    /// words, and a cargo command after one is judged on its own. A redirection (`>`, `>>`,
+    /// `2>`, `<`, `2>&1`, `>/dev/null`, `&>`) does not end them: the operator and its one target
+    /// word are skipped and the words after it are still checked. A `$` or backtick is allowed
+    /// only inside a redirect target word, so `cargo xtask ci mutants --plan >> "$GITHUB_OUTPUT"`
+    /// and `cargo build 2> "$LOG" -p x` are allowed, and any other word with one is refused,
+    /// because a variable can carry a `--features` or `--cfg` flag past a line-based scan: even
+    /// `--target $TARGET`, `--target "$TARGET"`, `--target ${TARGET}` and `> out $FLAGS` are
+    /// refused (the coordinator's rulings under DEC-176: they only refuse more).
+    ///
+    /// The forms #738 handles, pinned so none can be dropped (#738 review, third round): every
+    /// redirection form skips just its one target (`>|`, `1>`, `2>>`, `&>>`, `>&`, `<<<`, `<>`,
+    /// `>out`, `2>&-`, `>&2`, and a here-doc's `<<EOF`), and a here-doc's body lines are read as
+    /// commands; a command after a newline in a `run: |` block, `|&`, `(`, `{`, `!`, `if`, `then`,
+    /// `do` or `else` is judged on its own; a cargo command wrapped in `env`, `$(...)`, a backtick
+    /// or `bash -c "..."` is read, and one `xargs` feeds cannot be; every `-p` is read; `cargo` is
+    /// also named by its path; a cargo configuration array is read item by item; and `deploy/`'s
+    /// scripts are checked like CI's. A wrapper over a cargo command without `live`, and a
+    /// here-doc without cargo, stay allowed.
+    ///
+    /// The live-token backstop (#738 review, fourth and fifth rounds, the coordinator's rulings
+    /// under DEC-176): beside the word scan, every word of every file the check reads that is not
+    /// in a comment, a YAML scalar value included, is refused when its item list holds the token
+    /// `live`. The word is read lexed, after its quotes and backslashes are removed (`l\ive`,
+    /// `li"ve"`), and a substitution's text is read by the same backstop. Items split on `,`,
+    /// `=`, `/`, `?`, whitespace and quotes, and match `live` exactly but in any case, so
+    /// `liveness` is another item and `the-runner/live` and `the-runner?/live` hold it. In an
+    /// item of the form `-<letters>F<rest>`, a short-flag cluster such as `-qFlive`, the part
+    /// after the first `F` is read as an item list too. The one exemption is per word and per
+    /// command, never per line: only the feature list of the one allowed compile-only command is
+    /// exempt, so another command on its line (`&& make FEATURES=live`) is still read.
+    ///
+    /// A command whose command word holds a `$` or a backtick (`$c`, `"${CARGO:-cargo}"`,
+    /// `$(which cargo)`) may be cargo, so its other words that hold a `$` or a backtick cannot be
+    /// read and are refused (`--features $A$B`, `$'\x6cive'`, `$(echo li)ve`); so are the lines
+    /// of a here-doc fed to `sh`. This closes what a cargo-word scan cannot see: `-F=live`, a
+    /// cluster, a command named through a variable, a `cargo-<tool>` binary, a `with:` input,
+    /// `make FEATURES=live`, `LIVE`, and an assignment such as `FLAGS="--features live"`, which is
+    /// refused on its own line beside the command that expands it. A quoted list holding
+    /// `--features=live` is refused with it. A line is refused once, however many of its words
+    /// hold the token. The pins that need no `cargo` word are listed apart from those with one.
+    ///
+    /// The cargo-word rule closes what a known non-executing command can still run (`awk`'s
+    /// `system` or `getline`, `sed`'s `e` flag, a `git -c alias.x=!…`, `tee >(sh)`, a script
+    /// written and then run, a command held in a scalar; the coordinator's tenth-round ruling
+    /// under DEC-176). In every position, whatever the command, a word, quoted or not, holding
+    /// the token `cargo` (a run of letters, digits, `_`, `-` and `.` that is `cargo`, so
+    /// `!cargo` holds it and `.cargo` and `cargo-nextest` do not) is refused when it also holds
+    /// a `$`, a backtick or a `%`
+    /// format directive; when it holds `--all-features`; or when it holds `--features` or `-F`
+    /// whose value in the same word is not a complete literal of `[a-z0-9_,-]` without the
+    /// token `live` (cut off by a closing quote, empty, or followed by an expansion). A script
+    /// fetched or written at run time (`curl … | sh`, a generated file) cannot be read by a
+    /// static scan; the cargo-word rule is what leaves such a script no way to carry a computed
+    /// feature, and the live-token backstop no way to carry `live` itself.
+    ///
+    /// The final round (the coordinator's eleventh-round rulings under DEC-176). The value rule
+    /// applies to every feature flag, with or
+    /// without `cargo`: `--features`, `--features=`, `FEATURES=` and `--all-features` are feature
+    /// flags in any word, and `-F` only in a command whose command word is `cargo` or may be
+    /// cargo (it holds `$`, a backtick or `${{`, or is a whole-array expansion), or in a re-read
+    /// word holding the token `cargo`, so `awk -F:` and `gh api -F owner="$o"` are no feature
+    /// flags. A YAML `with:` value has no command word, so it may be cargo: `-F` and a short-flag
+    /// cluster holding `F` (`-qF…`) are feature flags there, while `run:` values and scripts keep
+    /// the rule above. Outside the one compile-only form, `--all-features` is refused, and so is
+    /// a value that is not a complete literal of `[a-z0-9_,-]` without the token `live`, which
+    /// any value holding `$`, a backtick or `${{` is not. Out of reach: Rust sources (`xtask/`,
+    /// `build.rs`), which code review and the layers check cover, and scripts that exist only at
+    /// run time. Where a word is read as a command is pinned by
+    /// [`commands_are_read_fail_closed_where_a_word_may_execute`], arrays by
+    /// [`array_expansions_are_read_through_their_definitions`] (X1 tests correction 5).
+    ///
+    /// The backstop's match ignores case, so a bare `LIVE` or `Live` word is refused in a command
+    /// without `cargo`, and an empty feature value (`--features ""`, `--features=` with nothing
+    /// after it) is no complete literal, so it is refused (X1 tests correction 6, #923 review).
+    ///
+    /// A command is compile-only only when its subcommand, the word right after its cargo word
+    /// and before any `--`, is `check` (X1 tests correction 8, #923 review): a `cargo check` or a
+    /// `check` after `--`, which go to the program `run` or `test` builds, and a `check` that is
+    /// the value of an option before the subcommand (`cargo --config check run`) leave the command
+    /// a build, so its `live` is refused, once, at its line. The compile-only form CI runs stays
+    /// allowed.
+    #[test]
+    fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let allowed = [
+            "cargo check -p the-runner -Flive",
+            "cargo check -p the-runner --features the-runner/live",
+            "cargo check -p the-runner --features 'other live'",
+            "cargo check -p the-runner --features \"other\" --target x86_64-unknown-linux-gnu",
+            "            cargo xtask ci mutants --plan >> \"$GITHUB_OUTPUT\"",
+            "cargo build -p x 2> \"$LOG\"",
+            "cargo build -p a-lib < \"$IN\" | tee \"$LOG\"",
+            "cargo build 2> \"$LOG\" -p x",
+            "env RUST_LOG=info cargo test -p x",
+            "bash -c \"cargo test -p x\"",
+            "cargo build --features paper,sim",
+            "echo \"cargo test -p x\"",
+            "      - run: cargo check -p the-runner --features live",
+            "      - run: cargo check --locked -p the-runner --features=live",
+        ];
+        for line in allowed {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        let refused = [
+            "cargo check -p the-runner --features live && cargo run -p the-runner --features live",
+            "cargo check -p the-runner --features live || cargo build -p the-runner -F live",
+            "cargo check -p the-runner --features live; cargo test -p the-runner --features live",
+            "cargo check -p the-runner --features live | cargo run -p the-runner --features=live",
+            "cargo run -p a-lib --features the-runner/live",
+            "cargo check -p a-lib --features the-runner?/live",
+            "cargo build -p the-runner --features \"other live\"",
+            "cargo build -p the-runner -Flive",
+            "cargo check -p the-runner --features $FEATURES",
+            "cargo check -p the-runner --features `cat features.txt`",
+            "RUSTFLAGS=\"--cfg feature=\\\"live\\\"\" cargo build -p the-runner",
+            "cargo rustc -p the-runner -- --cfg 'feature=\"live\"'",
+            "rustflags = [\"--cfg\", 'feature=\"live\"']",
+            "ship = \"run -p the-runner --features live\"",
+            "cargo build -p the-runner --features other -F live",
+            "cargo build -p the-runner --features \" live\"",
+            "cargo check -p the-runner --all --features live",
+            "cargo check -p the-runner --workspace --features live",
+            "ship = [\"run\", \"-p\", \"the-runner\", \"--features\", \"live\"]",
+        ];
+        for line in refused {
+            let files = [ci_file(".cargo/config.toml", &format!("[alias]\n{line}\n"))];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".cargo/config.toml:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let refused_across_lines = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build --release \\\n  --features live\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner \\\n  --features \\\n  live\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo run -p the-runner \\\n  -F live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: |\n      cargo build --release \\\n        --features live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: >\n      cargo build --release\n      --features live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: >-\n      cargo test -p the-runner\n      --features other,live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: cargo build -p the-runner\n      --features live\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner $EXTRA_ARGS\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner \"$@\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner `cat flags.txt`\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner $(cat flags.txt)\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p x > out \\\n  $FLAGS\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo check -p the-runner --target \"$TARGET\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo check -p the-runner --target ${TARGET}\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo check -p the-runner --features \"other\" --target $TARGET\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p x <<EOF $F\nhello\nEOF\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncat <<EOF\ncargo build --features live\nEOF\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: |\n      cargo check -p the-runner --features live\n      cargo build $F\n",
+            ),
+            ("deploy/run.sh", "set -e\ncargo build --features live\n"),
+        ];
+        for (path, text) in refused_across_lines {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(problems[0].contains(path), "names the file: {problems:?}");
+        }
+        let refused_by_words_before_an_operator = [
+            "cargo build $FLAGS >> out",
+            "cargo build --target $T | tee log",
+            "cargo build -p a-lib $FLAGS 2> \"$LOG\"",
+            "cargo build -p a-lib --target \"$T\" < in",
+            "cargo build ; cargo build --features live",
+            "cargo build -p a-lib > \"$OUT\" ; cargo run -p the-runner --features live",
+            "cargo check -p the-runner --features live && cargo build -p the-runner $FLAGS",
+            "cargo check -p the-runner --features live ; cargo build -p the-runner $FLAGS",
+            "cargo build -p a-lib || cargo test -p the-runner --features live",
+            "cargo build -p a-lib >> \"$OUT\" && cargo build -p the-runner --features live",
+            "cargo build -p a-lib > out $FLAGS",
+            "cargo build 2>&1 $FLAGS",
+            "cargo build < in --target \"$T\"",
+            "cargo build >/dev/null $(cat f)",
+            "cargo build & cargo build -p the-runner --features live",
+            "cargo build -p a-lib &> out $FLAGS",
+            "cargo build -p x >| out $F",
+            "cargo build -p x 1> out $F",
+            "cargo build -p x 2>> out $F",
+            "cargo build -p x &>> out $F",
+            "cargo build -p x >& out $F",
+            "cargo build -p x <<< in $F",
+            "cargo build -p x <> f $F",
+            "cargo build -p x >out $F",
+            "cargo build -p x 2>&- $F",
+            "cargo build -p x >&2 $F",
+            "cargo build -p x > $X --features live",
+            "true |& cargo build $F",
+            "( cargo build $F )",
+            "{ cargo build $F; }",
+            "! cargo build $F",
+            "if cargo build $F; then",
+            "if true; then cargo build $F; fi",
+            "for i in 1; do cargo build $F; done",
+            "if true; then :; else cargo build $F; fi",
+            "env VAR=1 cargo build $F",
+            "xargs cargo build",
+            "echo $(cargo build --features live)",
+            "echo `cargo build --features live`",
+            "bash -c \"cargo build -p x $F\"",
+            "cargo build -p a -p b --features live",
+            "cargo check -p the-runner -p a-lib --features live",
+            "/usr/bin/cargo build --features live",
+            "cargo build -p a-lib --features \"other --features=live\"",
+            "cargo run -F=live",
+            "cargo run -qFlive",
+            "cargo run -vFlive",
+            "cargo build -p the-runner --features LIVE",
+            "cargo build --features \"\"",
+            "cargo build --features=",
+            "cargo check -p the-runner --features live && make build FEATURES=live",
+            "cargo check -p the-runner --features live; c=cargo; $c run -Flive",
+        ];
+        let refused_with_no_cargo_word = [
+            "cargo-nextest nextest run --features live",
+            "cargo-mutants mutants --features live",
+            "make build FEATURES=live",
+            "FEATURES=\"a,live\"",
+            "make FEATURES=the-runner/live",
+            "make FLAGS=-qFlive",
+            "l\\ive",
+            "--features=li\"ve\"",
+            "--features $(echo live)",
+            "echo LIVE",
+            "echo Live",
+        ];
+        let refused_through_a_command_word_that_may_be_cargo = [
+            "c=cargo; $c build --features live",
+            "\"${CARGO:-cargo}\" build --features live",
+            "$(which cargo) build --features live",
+            "c=cargo; $c build --features the-runner?/live",
+            "$c build -qFthe-runner/live",
+            "c=cargo; A=li; B=ve; $c build --features $A$B",
+            "$c build --features $'\\x6cive'",
+            "$c build --features $(echo li)ve",
+        ];
+        let refused_by_the_cargo_word_rule = [
+            "awk 'BEGIN{system(\"cargo build --features \" a b)}' a=li b=ve",
+            "awk 'BEGIN{\"cargo build --features \" a b | getline}' a=li b=ve",
+            "sed -e \"s/x/cargo build --features $A$B/e\"",
+            "git -c \"alias.b=!cargo build --features $A$B\" b",
+            "echo \"cargo build --features $A$B\" | tee >(sh)",
+            "printf 'cargo build --features %s%s\\n' $A $B > x.sh; sh x.sh",
+            "echo \"cargo build --features $A$B\" > x.sh; bash x.sh",
+            "cmd=\"cargo build --features $A$B\"; $cmd",
+            "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
+        ];
+        let refused_where_check_is_not_the_subcommand = [
+            "cargo run -p the-runner --features live -- cargo check",
+            "cargo test -p the-runner --features live -- cargo check",
+            "cargo build -p the-runner --features live -- check",
+            "cargo +nightly run -p the-runner --features live -- cargo check",
+            "cargo --locked run -p the-runner --features live -- check",
+            "cargo --locked run -p the-runner --features live -- cargo check",
+            "cargo run --features live -- cargo check -p the-runner",
+            "/usr/bin/cargo run -p the-runner --features live -- /usr/bin/cargo check",
+            "cargo --config check run -p the-runner --features live",
+        ];
+        let refused_at_line_two = refused_with_no_cargo_word
+            .iter()
+            .chain(&refused_through_a_command_word_that_may_be_cargo)
+            .chain(&refused_by_the_cargo_word_rule)
+            .chain(&refused_where_check_is_not_the_subcommand);
+        for line in refused_at_line_two {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        for line in refused_by_words_before_an_operator {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let refused_spaced_cfg = [
+            "cargo rustc -p the-runner -- --cfg 'feature = \"live\"'",
+            "cargo rustc -p the-runner -- --cfg 'feature  =  \"live\"'",
+            "cargo rustc -p the-runner -- --cfg \"feature =\\\"live\\\"\"",
+            "RUSTFLAGS=\"--cfg feature = \\\"live\\\"\" cargo build -p the-runner",
+            "RUSTFLAGS='--cfg feature =\"live\"' cargo build -p the-runner",
+            "rustflags = [\"--cfg\", 'feature = \"live\"']",
+            "rustflags = [\"--cfg\", \"feature = \\\"live\\\"\"]",
+            "rustflags = [\"--cfg\", 'feature\t=\t\"live\"']",
+        ];
+        let allowed_in_a_script = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncat <<EOF\nno build here\nEOF\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\n# the live lane supplies its binary\ncargo build -p a-lib\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  # the live lane supplies its binary\n  - run: cargo build -p a-lib\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncurl -fsS http://localhost/liveness\ncargo test -p a-lib liveness\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - name: liveness\n    run: ./probe.sh --liveness\n",
+            ),
+            (".github/scripts/build.sh", "set -e\nawk -F: '{print $1}'\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ngh api -F owner=\"$o\"\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      key: x-${{ runner.os }}\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      key: x-${{ runner.os }}-${{ steps.v.outputs.version }}\n",
+            ),
+        ];
+        for (path, text) in allowed_in_a_script {
+            let files = [ci_file(path, text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let refused_inputs_with_no_cargo_word = [
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: --features live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      command: build --features live\n",
+            ),
+            (
+                ".github/actions/build/action.yml",
+                "runs:\n  using: composite\n  steps:\n    - uses: an/action@v1\n      with:\n        args: --features live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: --features the-runner/live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: -qFlive\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: --features ${{ matrix.a }}${{ matrix.b }}\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: build -F ${{ matrix.a }}${{ matrix.b }}\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - uses: an/action@v1\n    with:\n      args: -qF${{ matrix.a }}${{ matrix.b }}\n",
+            ),
+        ];
+        for (path, text) in refused_inputs_with_no_cargo_word {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(problems[0].contains(path), "names the file: {problems:?}");
+        }
+        let refused_on_two_lines = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\nFLAGS=\"--features live\"\ncargo build $FLAGS\n",
+                [":2", ":3"],
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nFLAGS='-F live'\ncargo build -p the-runner ${FLAGS}\n",
+                [":2", ":3"],
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "env:\n  FLAGS: --features live\nsteps:\n  - run: cargo build $FLAGS\n",
+                [":2", ":4"],
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nTARGET=\"x86_64-unknown-linux-gnu --features live\"\ncargo check -p the-runner --target $TARGET\n",
+                [":2", ":3"],
+            ),
+        ];
+        for (path, text, lines) in refused_on_two_lines {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 2, "{text}: {problems:?}");
+            for (problem, line) in problems.iter().zip(lines) {
+                assert!(
+                    problem.contains(&format!("{path}{line}")),
+                    "the assignment and the expansion are each refused: {problems:?}"
+                );
+            }
+        }
+        for line in refused_spaced_cfg {
+            let files = [ci_file(".cargo/config.toml", &format!("[build]\n{line}\n"))];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".cargo/config.toml:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Where a word is read as a command fails closed (the coordinator's seventh-round ruling
+    /// under DEC-176), split out of the bypass test so X1's step 3b un-ignores it (X1 tests
+    /// correction 5).
+    ///
+    /// A known non-executing command is one of `echo`, `printf`, `cat`, `jq`, `awk`, `sed`, `grep`,
+    /// `tr`, `cut`, `sort`, `uniq`, `head`, `tail`, `tee`, `wc`, `test`, `[`, `true`, `false`,
+    /// `read`, `basename`, `dirname`, `date`, `mkdir`, `rm`, `cp`, `mv`, `ls`, `chmod`, `curl`,
+    /// `git`, and `gh api` alone, which main's `merge-approved.sh` needs for its multi-line GraphQL
+    /// query; every other command executes, any other `gh` subcommand (`gh alias set --shell`),
+    /// unknown ones, `source`, `.`, `exec`, `watch`, `parallel`, every shell and every wrapper
+    /// included. A quoted word holding a space, `cargo` or a `$` is re-read as a command line
+    /// unless its command is known non-executing, every later stage of its pipeline is too, and it
+    /// is not inside a `$( … )` `<( … )` or `>( … )` whose consumer executes (`echo "…" | sh`,
+    /// `source <(echo "…")`, `tee >(sh)`); a bare assignment captures its `$( … )` and does not
+    /// execute it. A here-doc's lines and a here-string's (`<<<`) target are read as commands
+    /// unless their command is known non-executing, so `cat <<EOF` holding `$F` is allowed.
+    /// `$(( … ))` is arithmetic and `${#x[@]}` a length, neither read as a command; `if`, `then`, `else`,
+    /// `elif`, `do`, `while`, `until`, `!` and `time` are skipped when finding the command word,
+    /// and the word after one is still read (`if cargo build …; then`). The lines inside a
+    /// single-quoted string that spans lines are not read as commands only when its command is
+    /// known non-executing and nothing pipes it onward. A word holding `${{ … }}` in command
+    /// position is possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`),
+    /// and not in a job name, an `env:` value, a `with:` input or a cache key. The live-token
+    /// backstop still reads every word of every line. An `awk` word holding `system(` or `getline`,
+    /// a `sed` word with an `e` command or an `/e` flag, and a `git` with `-c alias.*=!` or a `!`
+    /// alias make that command executing, so its words are re-read; an executing `awk` or `sed`
+    /// program builds a command no static reading can follow, so it is refused outright (round
+    /// eleven).
+    ///
+    /// The pins of `refused_only_by_reading_fail_closed` hold no `cargo` token, no `live` and no
+    /// feature flag, so only this reading refuses them, never the backstop or the cargo-word rule
+    /// (X1 tests correction 7, step 3b's planted bugs).
+    ///
+    /// A here-doc's body, or the lines of a single-quoted string that spans lines, inside a
+    /// `<( … )` or `$( … )` is text only when that substitution's consumer is known non-executing
+    /// or a bare assignment: fed to `bash <( … )` its lines are commands, captured by `x=$( … )`
+    /// they are text (X1 tests correction 9, `read_as_text`'s consumer branch).
+    #[test]
+    fn commands_are_read_fail_closed_where_a_word_may_execute() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused_through_an_executing_command_at_line_two = [
+            "echo \"cargo build --features $A$B\" | sh",
+            "printf '%s' \"c=cargo; $c build --features $A$B\" | bash",
+            "source <(echo \"cargo build --features $A$B\")",
+            ". <(printf '%s\\n' \"cargo build --features $A$B\")",
+            "sh <<< \"cargo build --features $A$B\"",
+            "watch \"cargo build --features $A$B\"",
+            "parallel \"cargo build --features $A$B\" ::: x",
+            "frobnicate \"cargo build $F\"",
+            "if cargo build --features \"$A$B\"; then",
+            "gh alias set --shell x \"cargo build --features $A$B\"",
+            "ssh h \"cargo build $F\"",
+            "sudo sh -c \"cargo build $F\"",
+            "awk 'BEGIN{system(\"c\" \"argo build --features \" a b)}' a=li b=ve",
+            "echo a | sed \"s/a/c&rgo build --features $A$B/e\"",
+            "git -c 'alias.b=!sh -c \"$0\"' b \"$c $A\"",
+            "make build FEATURES=$A$B",
+            "$C build -F \"$A$B\"",
+        ];
+        let refused_only_by_reading_fail_closed = [
+            "awk 'BEGIN{system(c)}' c=\"$RUN\"",
+            "echo \"$X\" | sed e",
+            "sed 's/^/x/e' \"$F\"",
+            "sh <(echo \"$C $A\")",
+            "\"$(printf %s \"$C $A\")\" x",
+            "while $C \"$A\"; do :; done",
+            "until $C \"$A\"; do :; done",
+            "! $C \"$A\"",
+            "time $C \"$A\"",
+            "for i in 1; do $C \"$A\"; done",
+            "echo \"$C $A\" | xargs sh",
+            "echo \"$C $A\" | env sh",
+        ];
+        for line in refused_through_an_executing_command_at_line_two
+            .iter()
+            .chain(&refused_only_by_reading_fail_closed)
+        {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let here_doc_fed_to_sh = [ci_file(
+            ".github/scripts/build.sh",
+            "set -e\nsh <<'EOF'\nc=cargo; A=li; B=ve; $c build --features $A$B\nEOF\n",
+        )];
+        let problems = live_feature_problems(&policy, &meta(), &here_doc_fed_to_sh)?;
+        assert_eq!(problems.len(), 1, "a here-doc fed to sh: {problems:?}");
+        assert!(
+            problems[0].contains(".github/scripts/build.sh:3"),
+            "names the file and the here-doc's line: {problems:?}"
+        );
+        let allowed_in_a_script = [
+            (".github/scripts/build.sh", "set -e\necho \"$a $b\"\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncat <<EOF\ncargo build $F\nEOF\n",
+            ),
+            (".github/scripts/build.sh", "set -e\njq -n '\n$a $b\n'\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nx=$(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nx=$(echo '\n$C \"$A\"\n')\n",
+            ),
+        ];
+        for (path, text) in allowed_in_a_script {
+            let files = [ci_file(path, text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let refused_through_an_executing_command = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\nsetsid sh <<'EOF'\ncargo build --features $A$B\nEOF\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\necho '\ncargo build $F\n' | sh\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash -c '\ncargo build $F\n'\n",
+                ":3",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash <(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash <(echo '\n$C \"$A\"\n')\n",
+                ":3",
+            ),
+        ];
+        for (path, text, line) in refused_through_an_executing_command {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].contains(&format!("{path}{line}")),
+                "names the file and line: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// `eval`, and `sh`, `bash` or `zsh` given `-c` (alone or in a short-flag cluster) or a
+    /// here-string, run their argument as a command line, so one that expands (`$` or a backtick)
+    /// is refused, by any path, after a keyword, and inside a re-read word (DEC-851 item 1, the
+    /// coordinator's ruling under DEC-176; X1 tests correction 9). A shell given a script file,
+    /// and an `eval` or `-c` whose argument expands nothing, stay allowed.
+    #[test]
+    fn eval_and_shells_given_an_expanding_command_line_are_refused() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused = [
+            "eval \"$C\"",
+            "eval \"$(cat x)\"",
+            "sh -c \"$C\"",
+            "bash <<< \"$C\"",
+            "zsh -c \"$X $Y\"",
+            "sh <<<\"$C\"",
+            "/bin/bash -c \"$C\"",
+            "bash -ec \"$C\"",
+            "bash -e -c `cat x`",
+            "if eval \"$C\"; then :; fi",
+            "echo 'eval \"$C\"' | sh",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let allowed = [
+            "bash .github/scripts/docs-only.sh \"$A\"",
+            "sh -c 'exit 0'",
+            "eval 'set -e'",
+            "bash -e .github/scripts/x.sh",
+        ];
+        for line in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Arrays (the coordinator's eighth- and ninth-round rulings under DEC-176).
+    ///
+    /// Defining an array (`x=( … )`, one word) is never refused beyond the live-token backstop and
+    /// the cargo-word rule, so `a=(cargo build --features "$A$B")` is refused on its own line
+    /// beside `run_it "${a[@]}"`; a command word that expands a whole array (`"${x[@]}"`,
+    /// `${x[*]}`) is refused when any definition of that array in the file holds `cargo` or an
+    /// expansion, or the file defines no such array (eighth round). A re-read word that is exactly one whole-array expansion in argument position is
+    /// read as the array's defined elements, which stay arguments of the outer command
+    /// (`parse_flags "${flags[@]}"`), unless a definition of that array, `+=` appends included,
+    /// holds the literal `cargo` or the token `live`, which is refused (ninth round). Split out of
+    /// the bypass test so X1's step 3c un-ignores it (X1 tests correction 5).
+    #[test]
+    fn array_expansions_are_read_through_their_definitions() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused_at_line_two = [
+            "x=(cargo build --features \"$A$B\"); \"${x[@]}\"",
+            "x=($C build --features $A$B); \"${x[@]}\"",
+            "\"${undefined[@]}\" build",
+        ];
+        for line in refused_at_line_two {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let allowed_in_a_script = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\nflags=()\nfor arg in \"$@\"; do flags+=(\"$arg\"); done\nparse_flags \"${flags[@]}\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nshards=(\"$A\" \"$A/tmp\")\n",
+            ),
+        ];
+        for (path, text) in allowed_in_a_script {
+            let files = [ci_file(path, text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let refused_on_two_lines = [(
+            ".github/scripts/build.sh",
+            "set -e\na=(cargo build --features \"$A$B\")\nrun_it \"${a[@]}\"\n",
+            [":2", ":3"],
+        )];
+        for (path, text, lines) in refused_on_two_lines {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 2, "{text}: {problems:?}");
+            for (problem, line) in problems.iter().zip(lines) {
+                assert!(
+                    problem.contains(&format!("{path}{line}")),
+                    "the assignment and the expansion are each refused: {problems:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Every definition of an array is read, and both whole-array forms are (X1 tests correction
+    /// 12, after #979's planted bug A4; DEC-851 item 2). An `x+=( … )` append counts as a
+    /// definition of `x`, so `x=(echo)` then `x+=(cargo build --features live)` is refused at
+    /// the expansion, not only at the append. An array `mapfile` sets beside an `x=( … )` cannot
+    /// be read, so its whole-array command word is refused. The token `live` in a definition
+    /// refuses the expansion as a command word and inside a re-read word, as `cargo` does. And
+    /// `${x[*]}` is read as `${x[@]}` is, for a defined and an undefined array.
+    #[test]
+    fn every_array_definition_and_both_whole_array_forms_are_read() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused = [
+            (
+                "x=(echo)\nx+=(cargo build --features live)\n\"${x[@]}\"",
+                &[3, 4][..],
+            ),
+            ("x=(echo)\nmapfile -t x < f\n\"${x[@]}\"", &[4][..]),
+            ("x=(echo)\nx+=(--features live)\n\"${x[@]}\"", &[4][..]),
+            ("x=(--features live)\nrun_it \"${x[@]}\"", &[3][..]),
+            ("x=(cargo build)\n\"${x[*]}\"", &[3][..]),
+            ("x=(cargo build)\nrun_it \"${x[*]}\"", &[3][..]),
+            ("\"${undefined[*]}\" build", &[2][..]),
+        ];
+        for (text, lines) in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            let expected: Vec<String> = lines
+                .iter()
+                .map(|line| format!(".github/scripts/build.sh:{line}:"))
+                .collect();
+            assert_eq!(problems.len(), expected.len(), "{text}: {problems:?}");
+            for (problem, at) in problems.iter().zip(&expected) {
+                assert!(problem.starts_with(at), "{text}: {problems:?}");
+            }
+        }
+        let allowed = [
+            "x=(echo)\nx+=(hi)\n\"${x[@]}\"",
+            "x=(echo hi)\n\"${x[*]}\"",
+            "mapfile -t x < f\nrun_it \"${x[@]}\"",
+        ];
+        for text in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A command word that is solely the expansion of a scalar variable (`$C`, `"$C"`, `${C}`)
+    /// the file assigns (`C=…`, `C+=…`) is read through those definitions, concatenated in order,
+    /// as arrays are: it is refused when that value builds or runs `live`, and when a definition
+    /// cannot be read statically because it expands (DEC-851 item 2; X1 tests correction 10). A
+    /// quoted word a shell runs (`echo "$C" | sh`) is read through the same definitions. A
+    /// variable `read` sets is a definition whose value cannot be read, so it is refused as a
+    /// command word and allowed as an argument (the coordinator's ruling on #970). `export`,
+    /// `declare`, `local`, `readonly`, `typeset` and `printf -v` define too: a readable value is
+    /// read through and an unreadable one is unreadable, and a wrapper before a bare variable
+    /// command word (`env $C`, `sudo $C`, `xargs $C`) is read as `$C` alone (#970's review; X1
+    /// tests correction 11).
+    /// An expansion of a variable the file never assigns, `"$@"`, a positional parameter or an
+    /// environment input, is not refused by this rule, and a clean definition stays allowed.
+    #[test]
+    fn variable_command_words_are_read_through_their_definitions() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let built_across_lines =
+            "C=ca; C+=rgo; C+=\" build -\"; C+=\"-feat\"; C+=\"ures l\"; C+=ive";
+        let refused_at_the_expansion = [
+            format!("{built_across_lines}\n$C"),
+            format!("{built_across_lines}\n\"$C\""),
+            format!("{built_across_lines}\n${{C}} -p the-runner"),
+            "C=$(cat cmd.txt)\n$C".to_owned(),
+            "C=echo\nC+=\" $X\"\n\"$C\"".to_owned(),
+            "read -r C < f\n$C".to_owned(),
+            "while read -r C; do $C; done < f".to_owned(),
+            format!("{built_across_lines}\necho \"$C\" | sh"),
+            "export C=$(cat f)\n$C".to_owned(),
+            "declare C=$(cat f)\n$C".to_owned(),
+            "local C=$(cat f)\n$C".to_owned(),
+            "readonly C=$(cat f)\n$C".to_owned(),
+            "typeset C=$(cat f)\n$C".to_owned(),
+            "printf -v C %s \"$X\"\n$C".to_owned(),
+            format!("export {built_across_lines}\n$C"),
+            format!("declare -x {built_across_lines}\n$C"),
+            "C=$(cat f)\nenv $C".to_owned(),
+            "C=$(cat f)\nsudo $C".to_owned(),
+            "C=$(cat f)\nxargs $C".to_owned(),
+        ];
+        for text in refused_at_the_expansion {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].contains(&format!(
+                    ".github/scripts/build.sh:{}",
+                    text.lines().count().saturating_add(1)
+                )),
+                "names the file and the expansion's line: {problems:?}"
+            );
+        }
+        let allowed = [
+            "\"$@\"",
+            "$TOOL --version",
+            "C=echo; $C hi",
+            "C=echo\nC+=\" hi\"\n$C",
+            "read -r C < f\necho \"$C\"",
+            "export C=echo\n$C hi",
+            "export PATH=\"$PATH:/opt/bin\"\necho \"$PATH\"",
+            "C=echo\nenv $C hi",
+        ];
+        for text in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-851 item 1 reads through a wrapper: `env` (with `-i`, `-u X` and `VAR=val`),
+    /// `command`, `exec`, `xargs`, `sudo` (each with its options), `nice`, `nohup` and
+    /// `timeout N` are skipped to find the command that runs an expanding command line, and `.`
+    /// or `source` of a process substitution or a here-string that expands is refused too (the
+    /// coordinator's ruling on #962's review, under DEC-176; X1 tests correction 10). A `{` is
+    /// skipped like a keyword, and `dash`, `ksh` and `mksh` are shells too (#969's review).
+    /// `stdbuf` (with its options), `builtin` and `time` are wrappers too, and `env --`,
+    /// `exec -a name`, a bare `nice` and a `-lc` cluster are pinned (#970's review; X1 tests
+    /// correction 11). A wrapped script, and `.` of a file path built by a substitution, stay
+    /// allowed.
+    #[test]
+    fn wrapped_shells_and_sourced_expansions_are_refused() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused = [
+            "env bash -c \"$C\"",
+            "command sh -c \"$C\"",
+            "exec sh -c \"$C\"",
+            "xargs sh -c \"$C\"",
+            "sudo sh -c \"$C\"",
+            ". <(echo \"$C\")",
+            "source /dev/stdin <<< \"$C\"",
+            "env -i PATH=/bin bash -c \"$C\"",
+            "env -u X sh -c \"$C\"",
+            "xargs -r -n 1 sh -c \"$C\"",
+            "sudo -u root -E sh -c \"$C\"",
+            "nice -n 5 bash -c \"$C\"",
+            "nohup sh -c \"$C\"",
+            "timeout 5 bash -c \"$C\"",
+            "command eval \"$C\"",
+            "source <(echo \"$C\")",
+            "{ eval \"$C\"; }",
+            "{ bash -c \"$C\"; }",
+            "dash -c \"$C\"",
+            "ksh -c \"$C\"",
+            "mksh -c \"$C\"",
+            "/bin/dash -c \"$C\"",
+            "stdbuf -o0 sh -c \"$C\"",
+            "builtin eval \"$C\"",
+            "time sh -c \"$C\"",
+            "env -- bash -c \"$C\"",
+            "exec -a name sh -c \"$C\"",
+            "nice sh -c \"$C\"",
+            "bash -lc \"$C\"",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let allowed = [
+            "sudo -u x ./script.sh",
+            ". \"$(dirname \"${BASH_SOURCE[0]}\")/lib.sh\"",
+            "source ./lib.sh",
+            "env FOO=1 bash script.sh \"$A\"",
+            "timeout 5 ./x.sh \"$A\"",
+            "xargs -r sudo rm -f",
+            "stdbuf -o0 ./x.sh \"$A\"",
+        ];
+        for line in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A marked crate that is not a workspace member is no runner, so even the compile-only form
+    /// naming it is refused, beside the membership problem (#738 review, finding 2: the
+    /// membership test of the runner).
+    #[test]
+    fn a_marked_crate_outside_the_workspace_compiles_nothing() -> Result<()> {
+        let crates = vec![member("a-lib", &[]), member("a-tool", &[])];
+        let files = [ci_file(
+            ".github/workflows/ci.yml",
+            "      - run: cargo check -p the-runner --features live",
+        )];
+        let problems = live_feature_problems(&live_policy(), &workspace(crates), &files)?;
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains(".github/workflows/ci.yml:1")),
+            "the compile-only line is refused: {problems:?}"
+        );
+        Ok(())
+    }
+
+    /// Only the runner's own features are read for a feature that turns `live` on: another
+    /// crate's feature naming its own `live` is not counted twice beside its declaration, and a
+    /// runner feature that enables something other than `live` is no problem (#738 review,
+    /// finding 2: the two conditions of the runner's own feature check).
+    #[test]
+    fn only_the_runner_s_own_features_turn_its_live_on() -> Result<()> {
+        let policy = live_policy();
+        let crates = vec![
+            with_features(member(RUNNER, &[]), &[("live", &[])]),
+            with_features(member("a-lib", &[]), &[("live", &[]), ("go", &["live"])]),
+        ];
+        let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+        assert_eq!(problems.len(), 1, "only the declaration: {problems:?}");
+        let crates = vec![with_features(
+            member(RUNNER, &[]),
+            &[("live", &["a-tool/fast"]), ("other", &["a-tool/fast"])],
+        )];
+        assert_eq!(
+            live_feature_problems(&policy, &workspace(crates), &[])?,
+            Vec::<String>::new(),
+            "runner features that enable something else"
+        );
+        Ok(())
+    }
+
+    /// The files the check reads are every file that decides a build: workflows (`.yml` and
+    /// `.yaml`), scripts, composite actions under `.github/actions`, `deploy/`'s shell scripts
+    /// (the demo host's runbook, DEC-822), and `.cargo/config.toml` (aliases and `rustflags`); a
+    /// repository without the optional ones reads the rest (#738 review, finding 4).
+    #[test]
+    fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        let write = |path: &str| -> Result<()> {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+            Ok(())
+        };
+        write(".github/workflows/a.yml")?;
+        let only_workflows = ci_files(&root)
+            .map(|files| files.into_iter().map(|file| file.path).collect::<Vec<_>>());
+        for path in [
+            ".github/workflows/b.yaml",
+            ".github/scripts/c.sh",
+            ".github/actions/d/action.yml",
+            ".github/actions/e/action.yaml",
+            ".cargo/config.toml",
+            ".github/pull_request_template.md",
+            "deploy/f.sh",
+            "deploy/README.md",
+        ] {
+            write(path)?;
+        }
+        let mut read: Vec<String> = ci_files(&root)?.into_iter().map(|file| file.path).collect();
+        fs::remove_dir_all(&root).ok();
+        read.sort();
+        assert_eq!(
+            only_workflows?,
+            [".github/workflows/a.yml"],
+            "the optional directories may be absent"
+        );
+        assert_eq!(
+            read,
+            [
+                ".cargo/config.toml",
+                ".github/actions/d/action.yml",
+                ".github/actions/e/action.yaml",
+                ".github/scripts/c.sh",
+                ".github/workflows/a.yml",
+                ".github/workflows/b.yaml",
+                "deploy/f.sh",
+            ]
+        );
+        Ok(())
+    }
+
+    /// The build files the check reads (the coordinator's eleventh-round ruling under DEC-176):
+    /// `Makefile`, `*.mk`, `justfile`, `Dockerfile*` and `docker-compose*.yml` anywhere in the
+    /// repository, beside every file [`ci_files_reads_every_file_that_decides_a_build`] names.
+    /// Split out so X1's step 3c un-ignores it (X1 tests correction 5).
+    #[test]
+    fn ci_files_reads_the_build_files_anywhere_in_the_repository() -> Result<()> {
+        let root =
+            env::temp_dir().join(format!("mandate-xtask-build-files-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        let write = |path: &str| -> Result<()> {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+            Ok(())
+        };
+        write(".github/workflows/a.yml")?;
+        let only_workflows = ci_files(&root)
+            .map(|files| files.into_iter().map(|file| file.path).collect::<Vec<_>>());
+        for path in [
+            ".github/workflows/b.yaml",
+            ".github/scripts/c.sh",
+            ".github/actions/d/action.yml",
+            ".github/actions/e/action.yaml",
+            ".cargo/config.toml",
+            ".github/pull_request_template.md",
+            "deploy/f.sh",
+            "deploy/README.md",
+            "Makefile",
+            "tools/build.mk",
+            "justfile",
+            "docker/Dockerfile.ci",
+            "docker-compose.ci.yml",
+        ] {
+            write(path)?;
+        }
+        let mut read: Vec<String> = ci_files(&root)?.into_iter().map(|file| file.path).collect();
+        fs::remove_dir_all(&root).ok();
+        read.sort();
+        assert_eq!(
+            only_workflows?,
+            [".github/workflows/a.yml"],
+            "the optional directories may be absent"
+        );
+        assert_eq!(
+            read,
+            [
+                ".cargo/config.toml",
+                ".github/actions/d/action.yml",
+                ".github/actions/e/action.yaml",
+                ".github/scripts/c.sh",
+                ".github/workflows/a.yml",
+                ".github/workflows/b.yaml",
+                "Makefile",
+                "deploy/f.sh",
+                "docker-compose.ci.yml",
+                "docker/Dockerfile.ci",
+                "justfile",
+                "tools/build.mk",
+            ]
+        );
+        Ok(())
+    }
+
+    /// A fixture repository under the temporary directory, named for `name`, with `files` written
+    /// as `(path, text)`, removed first if a run left it behind.
+    fn fixture_repository(name: &str, files: &[(&str, &str)]) -> Result<PathBuf> {
+        let root = env::temp_dir().join(format!("mandate-xtask-{name}-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        for (path, text) in files {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, text)?;
+        }
+        Ok(root)
+    }
+
+    /// Every build-file name the check reads is judged, not only listed (X1 tests correction 12,
+    /// after #979): `makefile`, `GNUmakefile`, `Justfile` and a `docker-compose*.yaml`, each
+    /// holding a live build, are each refused at their own path and line.
+    #[test]
+    fn every_build_file_name_is_judged() -> Result<()> {
+        let build = "build:\n\tcargo build --features live\n";
+        let paths = [
+            "makefile",
+            "tools/GNUmakefile",
+            "Justfile",
+            "docker/docker-compose.ci.yaml",
+        ];
+        let files: Vec<(&str, &str)> = paths.iter().map(|path| (*path, build)).collect();
+        let root = fixture_repository("build-file-names", &files)?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read?)?;
+        assert_eq!(problems.len(), paths.len(), "{problems:?}");
+        for path in paths {
+            assert!(
+                problems
+                    .iter()
+                    .any(|problem| problem.starts_with(&format!("{path}:2:"))),
+                "{path} is refused at its live build: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The build-file walk skips only what is not the repository's own (DEC-851 item 5; X1 tests
+    /// correction 12): a live build in a `Makefile` under `.git`, under `node_modules`, or in a
+    /// directory a `CACHEDIR.TAG` marks as a cache is not read, while one in `tools/` beside them
+    /// is, and a `CACHEDIR.TAG` marks only its own directory.
+    #[test]
+    fn the_build_file_walk_skips_only_git_node_modules_and_caches() -> Result<()> {
+        let build = "build:\n\tcargo build --features live\n";
+        let root = fixture_repository(
+            "build-file-skips",
+            &[
+                (".git/Makefile", build),
+                ("web/node_modules/x/Makefile", build),
+                (
+                    "target/CACHEDIR.TAG",
+                    "Signature: 8a477f597d28d172789f06886806bc55\n",
+                ),
+                ("target/Makefile", build),
+                ("target/debug/Makefile", build),
+                ("cache/Makefile", build),
+                ("tools/Makefile", build),
+            ],
+        )?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let mut read: Vec<String> = read?.into_iter().map(|file| file.path).collect();
+        read.sort();
+        assert_eq!(read, ["cache/Makefile", "tools/Makefile"]);
+        Ok(())
+    }
+
+    /// A file both the `.github` scan and the build-file walk find is read once, so its live
+    /// build is one problem, not two (X1 tests correction 12, after #979).
+    #[test]
+    fn a_file_both_scans_find_is_read_once() -> Result<()> {
+        let root = fixture_repository(
+            "build-file-dedup",
+            &[(
+                ".github/workflows/docker-compose.yml",
+                "jobs:\n  a:\n    steps:\n      - run: cargo build --features live\n",
+            )],
+        )?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let read = read?;
+        let paths: Vec<&str> = read.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
+        let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        Ok(())
+    }
+
+    /// A minimal Cargo workspace with one crate, `a`, and its layering policy, under `root`, so
+    /// the lint job's checks that read the workspace can run there.
+    fn fixture_workspace(root: &Path) -> Result<()> {
+        fs::create_dir_all(root.join("a/src"))?;
+        fs::create_dir_all(root.join("xtask"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"a\"]\nresolver = \"3\"\n",
+        )?;
+        fs::write(
+            root.join("a/Cargo.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )?;
+        fs::write(root.join("a/src/lib.rs"), "//! A fixture crate.\n")?;
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"a\"\nversion = \"0.0.0\"\n",
+        )?;
+        fs::write(
+            root.join("xtask/layers.toml"),
+            concat!(
+                "impure_crates = []\n\n",
+                "[crates.a]\nlayer = 1\nsafety_critical = false\npure = false\n",
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// The lint job runs the live-feature check over its own repository (#738 review, finding
+    /// 2): a fixture workspace with a clean workflow passes, and a workflow that runs `live`
+    /// fails the job naming the check, before the workspace checks run. The fixture has the
+    /// `deploy/` directory main's lint job runs ShellCheck over (#795), with one clean script.
+    #[test]
+    fn the_lint_job_runs_the_live_feature_check_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-lint-live-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        let workflows = root.join(".github/workflows");
+        fs::create_dir_all(&workflows)?;
+        fs::create_dir_all(root.join(".github/scripts"))?;
+        fs::create_dir_all(root.join("deploy"))?;
+        fs::write(
+            root.join("deploy/clean.sh"),
+            "#!/usr/bin/env bash\nset -euo pipefail\necho \"deployed\"\n",
+        )?;
+        let workflow = |run: &str| {
+            format!(
+                "on: push\njobs:\n  check:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: {run}\n"
+            )
+        };
+        fs::write(workflows.join("ci.yml"), workflow("cargo check -p a"))?;
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            workflows.join("ci.yml"),
+            workflow("cargo run -p a --features live"),
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("live-feature")),
+            "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
         );
         Ok(())
     }

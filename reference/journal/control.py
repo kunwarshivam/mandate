@@ -87,7 +87,7 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
-REFUSED_COMMANDS = {"agent": ("resume", "stop"), "acct": ("acknowledge",)}
+REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
 REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method", "not_independent")
 MODEL_KIND = "model_version"
 MODEL_MEMBERS = ("model_id", "model_version", "admits_instruments")
@@ -334,7 +334,74 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("band_bp", INT),
 )
 
-# §9.8 (DEC-670): the records the workspace API commits. `MandateConfirmed` gains its agent link at
+# §9.8 (DEC-800): a connection's history. The control stream's three records and the account
+# stream's three, with `ConnectionEstablished` at version 2 below, and the executor's copies of the
+# establishment and a rotation on the account stream.
+CHECK_REASONS = {
+    "scope": ("scope_mismatch", "fund_movement", "permissions_unreadable"),
+    "environment": ("wrong_environment", "reaches_both"),
+    "account": ("account_unreadable", "account_mismatch", "not_dedicated"),
+    "uniqueness": ("already_connected",),
+    "contract": ("tools_missing", "contract_drift"),
+}
+# A teardown refuses a connect that no check refused (connections spec §5.2 step 6): `check` is null.
+TEARDOWN_REASONS = ("timeout", "restart_past_deadline", "executor_stopped", "start_failed")
+# The control services' fingerprint comparison: never an executor's result (rule 58).
+SERVICES_ONLY_REASONS = ("account_mismatch",)
+ALL_CHECK_REASONS = tuple(r for reasons in CHECK_REASONS.values() for r in reasons)
+REFUSING_CHECKS = tuple(CHECK_REASONS)
+EXECUTOR_CHECKS = ("account", "contract", "environment", "scope")
+REQUIRED_CHECKS = ("account", "environment", "scope")
+# Brokers whose connections are MCP (connections spec §3, `mcp_oauth`): check 7 is always listed.
+MCP_BROKERS = ("robinhood",)
+MARGIN_ATTESTATIONS = ("cash_account", "margin_disabled")
+CONNECTION_STATES = ("active", "degraded", "suspended")
+DEGRADING = ("network_errors", "rate_headroom", "contract_drift")
+SUSPENDING = ("authorization_failed", "credential_expired", "refresh_failed", "check_failed", "lease_expired")
+STATE_REASONS = (*DEGRADING, *SUSPENDING, "condition_cleared", "acknowledged")
+PII_REF = T("pii_ref")
+SCHEMAS[("ctl", "ConnectionRefused")] = rec(
+    ("connection_id", IDENT_T),
+    ("broker", STR),
+    ("environment", one_of("paper", "live")),
+    ("occasion", one_of("connect", "reconnect", "reauthorize")),
+    ("check", opt(one_of(*REFUSING_CHECKS))),
+    ("reason", one_of(*(r for c in REFUSING_CHECKS for r in CHECK_REASONS[c]), *TEARDOWN_REASONS)),
+    ("existing_connection_id", opt(IDENT_T)),
+    ("user", STR),
+    ("step_up", STEP_UP),
+)
+ROTATED_FIELDS = (("connection_id", IDENT_T), ("scopes", list_of(STR)), ("user", STR), ("step_up", STEP_UP))
+SCHEMAS[("ctl", "ConnectionCredentialRotated")] = rec(*ROTATED_FIELDS)
+SCHEMAS[("acct", "ConnectionCredentialRotated")] = rec(*ROTATED_FIELDS, ("risk_clock", RISK_CLOCK))
+SCHEMAS[("acct", "ConnectionChecked")] = rec(
+    ("connection_id", IDENT_T),
+    ("occasion", one_of("connect", "reconnect", "reauthorize", "executor_start", "daily")),
+    (
+        "results",
+        list_of(
+            rec(
+                ("check", one_of(*EXECUTOR_CHECKS)),
+                ("result", one_of("passed", "failed")),
+                ("reason", opt(one_of(*ALL_CHECK_REASONS))),
+            )
+        ),
+    ),
+    ("account_pii_ref", opt(PII_REF)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "ConnectionStateChanged")] = rec(
+    ("connection_id", IDENT_T),
+    ("from", one_of(*CONNECTION_STATES)),
+    ("to", one_of(*CONNECTION_STATES)),
+    ("reason", one_of(*STATE_REASONS)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "ConnectionCredentialRefreshed")] = rec(
+    ("connection_id", IDENT_T), ("scopes", list_of(STR)), ("risk_clock", RISK_CLOCK)
+)
+
+# §9.9 (DEC-670): the records the workspace API commits. `MandateConfirmed` gains its agent link at
 # `schema_version` 2 (registered with the §9.5 versions below); the others close at 1.
 DRAFT_ORIGINS = ("description", "goal_answers", "template", "version", "edit", "compile")
 NEW_DRAFT_ORIGINS = DRAFT_ORIGINS[:4]
@@ -405,7 +472,7 @@ CONFIRMED_V2 = rec(
 )
 REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
 
-# §3 and §9.9 (DEC-671): the `client` actor, `ConnectionRevoked`'s reason, and the client records.
+# §3 and §9.10 (DEC-671): the `client` actor, `ConnectionRevoked`'s reason, and the client records.
 ACTOR_KINDS = ("system", "agent", "user", "broker", "platform_operator", "client")
 CONTROL_ENVELOPE = rec(
     *(
@@ -426,7 +493,7 @@ SCHEMAS[("ctl", "ClientConnected")] = rec(
 REVOCATION_ACTORS = {
     "owner": ("user",),
     "admin": ("user",),
-    "member_deactivated": ("system",),
+    "member_deactivated": ("user", "system"),
     "deprovisioned": ("system",),
     "compromised": ("user", "system"),
 }
@@ -434,7 +501,122 @@ SCHEMAS[("ctl", "ClientRevoked")] = rec(
     ("client_id", IDENT_T), ("user", STR), ("reason", one_of(*REVOCATION_ACTORS))
 )
 
-# §9.10 (DEC-780): the records-access, export, and verification records. Each names what it covers
+# §9.11 (DEC-672): the hold on new openings. `OwnerCommandIssued` is closed for its two hold commands
+# only; the agent stream's two copies gain the hold at `schema_version` 2. `AgentModeChanged` version 1
+# is `generate.py`'s (§9.1), so only version 2 is registered here.
+HOLD_COMMANDS = ("hold_openings", "lift_hold")
+MODE_ORDER = ("normal", "exits_only", "paused", "stopped")
+OWNER_MODE_REASONS = ("owner_pause", "owner_resume", "owner_stop", "owner_hold", "owner_lift_hold")
+# The members, and their order, are the CLI's `OwnerCommandIssued` for every command
+# (`mandate-cli`'s `agent::issued`), so M7 closes the other commands without renaming any.
+SCHEMAS[("ctl", "OwnerCommandIssued")] = rec(
+    ("agent", IDENT_T),
+    ("command", one_of(*HOLD_COMMANDS)),
+    ("scope", one_of("agent")),
+    ("subject", IDENT_T),
+    ("release", NULL),
+    ("warning_shown", NULL),
+    ("bid", NULL),
+    ("bid_size", NULL),
+    ("floor", NULL),
+    ("user", STR),
+    ("submitted_at", INT),
+    ("step_up", opt(rec(("assertion_id", STR), ("authenticated_at", INT), ("method", STR)))),
+)
+MODE_CHANGED_V2 = rec(
+    ("from", one_of(*MODE_ORDER)),
+    ("to", one_of(*MODE_ORDER)),
+    ("reason", one_of("restriction_changed", "awaiting_reconciliation", "kill_switch", *OWNER_MODE_REASONS)),
+    ("lifecycle", one_of("normal", "paused", "stopped")),
+    ("held", BOOL),
+)
+REFUSAL_V2 = rec(
+    ("command", one_of("resume", "stop", "acknowledge", "lift_hold")),
+    ("reason", one_of(*REFUSAL_REASONS)),
+    ("effective_at", TS),
+)
+CLIENT_EVENTS = (*CLIENT_EVENTS, "OwnerCommandIssued")
+
+# §9.12 (DEC-437 item 9, DEC-648): the membership records. Instants are timestamps and step-up evidence
+# is §9.2's `STEP_UP`; a member is a user principal's ULID.
+ROLE = one_of("approver", "auditor", "operator", "viewer", "workspace_admin")
+COOLING_ROLES = ("approver", "operator")
+COOL_OFF_SECONDS = 86400
+WRITERS = {
+    "MemberInvited": "invited_by",
+    "MemberInvitationRevoked": "revoked_by",
+    "MemberRoleChanged": "changed_by",
+    "MemberDeactivated": "by",
+    "MemberReactivated": "by",
+    "MemberRemoved": "by",
+}
+STEP_UP_WINDOW_SECONDS = 300
+INVITATION_DAYS = 7
+OWN_INSTANT = {
+    "MemberInvited": "invited_at",
+    "MemberActivated": "activated_at",
+    "MemberRoleChanged": "changed_at",
+    "MemberReactivated": "reactivated_at",
+}
+SYSTEM_REASONS = ("founding", "deprovisioned", "group_removed", "org_deleted")
+SELF_REASONS = ("admin",)
+SCHEMAS[("ctl", "MemberInvited")] = rec(
+    ("invitation", ULID),
+    ("roles", list_of(ROLE)),
+    ("invited_by", STR),
+    ("step_up", STEP_UP),
+    ("invited_at", TS),
+    ("expires_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberInvitationRevoked")] = rec(
+    ("invitation", ULID), ("revoked_by", STR), ("session_ref", opt(STR))
+)
+SCHEMAS[("ctl", "MemberActivated")] = rec(
+    ("member", ULID),
+    ("invitation", opt(ULID)),
+    ("reason", one_of("invitation_accepted", "founding")),
+    ("roles", list_of(ROLE)),
+    ("method", one_of("passkey", "oidc", "email_link")),
+    ("activated_at", TS),
+    ("independent_approval_required", BOOL),
+    ("cool_off_ends_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberRoleChanged")] = rec(
+    ("member", ULID),
+    ("changed_by", STR),
+    ("added", list_of(rec(("role", ROLE), ("cool_off_ends_at", TS)))),
+    ("removed", list_of(ROLE)),
+    ("changed_at", TS),
+    ("independent_approval_required", BOOL),
+    ("step_up", opt(STEP_UP)),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberDeactivated")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("reason", one_of("admin", "left", "deprovisioned", "group_removed")),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberReactivated")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("step_up", STEP_UP),
+    ("roles", list_of(ROLE)),
+    ("reactivated_at", TS),
+    ("independent_approval_required", BOOL),
+    ("cool_off_ends_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberRemoved")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("reason", one_of("admin", "org_deleted")),
+    ("session_ref", opt(STR)),
+)
+
+# §9.13 (DEC-780): the records-access, export, and verification records. Each names what it covers
 # as stream ranges of its own workspace, bounded by event hashes, never by instrument or content.
 # A `digest` is bare hex, so it names no stored artifact and stays out of `artifact_refs`.
 GENESIS = "0" * 64
@@ -487,7 +669,7 @@ SCHEMAS[("ctl", "VerificationRun")] = rec(
     ("result", one_of("pass", "fail")),
 )
 
-# §9.11 (DEC-783): the anchor and segment records, in the shapes the code already reads (the anchor
+# §9.14 (DEC-783): the anchor and segment records, in the shapes the code already reads (the anchor
 # file of DEC-115 item 6, DEC-263's manifest). Every hash is a bare-hex `digest`.
 SCHEMAS[("ctl", "AnchorComputed")] = rec(
     ("leaves", list_of(rec(("hash", DIGEST_HEX), ("seq", INT), ("stream_id", STREAM_ID)))),
@@ -580,6 +762,13 @@ PROTECTION_CHANGED = rec(
     ("acknowledged", opt(BOOL)),
     ("risk_clock", RISK_CLOCK),
 )
+ESTABLISHED_V2 = rec(
+    *SCHEMAS[("ctl", "ConnectionEstablished")].fields,
+    ("account_ref", ULID),
+    ("user", STR),
+    ("step_up", STEP_UP),
+    ("margin_attestation", opt(one_of(*MARGIN_ATTESTATIONS))),
+)
 VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "StreamOpened"): (1,),
     ("acct", "IntentReceived"): (1, 2),
@@ -587,8 +776,12 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1,),
+    ("ctl", "ConnectionEstablished"): (1, 2),
+    ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
     ("ctl", "ConnectionRevoked"): (1, 2),
+    ("agent", "AgentModeChanged"): (1, 2),
+    ("agent", "OwnerCommandRefused"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -605,8 +798,18 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
+    ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
     ("ctl", "ConnectionRevoked", 2): REVOKED_V2,
+    ("agent", "AgentModeChanged", 1): rec(
+        ("from", one_of(*MODE_ORDER)),
+        ("to", one_of(*MODE_ORDER)),
+        ("reason", one_of("restriction_changed", "awaiting_reconciliation", "kill_switch", *OWNER_MODE_REASONS[:3])),
+        ("lifecycle", one_of("normal", "paused", "stopped")),
+    ),
+    ("agent", "AgentModeChanged", 2): MODE_CHANGED_V2,
+    ("agent", "OwnerCommandRefused", 2): REFUSAL_V2,
 }
 
 
@@ -691,6 +894,11 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if not ok and "types.risk_clock" not in skip:
             return [Violation("types", "non_canonical", path)]
         return []
+    if ty.kind == "pii_ref":
+        if not isinstance(value, str):
+            return [Violation("types", "schema", path)]
+        ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
+        return [] if ok else [Violation("types", "non_canonical", path)]
     if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
@@ -919,9 +1127,74 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
     out += answer_violations(event_type, draft, skip)
+    out += connection_violations(event_type, draft, skip)
     out += workspace_violations(event_type, draft, skip)
+    out += membership_violations(event_type, draft, skip)
     out += audit_violations(event_type, draft, skip)
     out += cold_violations(event_type, draft, skip)
+    return out
+
+
+def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.8's consistency rules 54 to 65 but the copy rules 61 and 63, each reported once."""
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str, reason: str = "schema") -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", reason, path))
+
+    if event_type == "ConnectionRefused":
+        if p["check"] is None:
+            fits = p["reason"] in TEARDOWN_REASONS or "rule.54.teardown" in skip
+        else:
+            fits = p["reason"] in CHECK_REASONS.get(p["check"], ())
+        rule("54", fits, "payload.reason")
+        existing = p["existing_connection_id"]
+        if p["check"] == "uniqueness":
+            named = existing is not None and (existing != p["connection_id"] or "rule.55.self" in skip)
+        else:
+            named = existing is None
+        rule("55", named, "payload.existing_connection_id")
+        rule("65", p["check"] is not None or draft["causation_id"] is None, "causation_id")
+    if event_type in ("ConnectionCredentialRotated", "ConnectionCredentialRefreshed"):
+        scopes = p["scopes"]
+        rule("56", isinstance(scopes, list) and ascending(encoded(scopes)), "payload.scopes", "non_canonical")
+    if event_type == "ConnectionChecked" and isinstance(p["results"], list):
+        checks = encoded([r["check"] for r in p["results"]])
+        rule("57.order", ascending(checks), "payload.results", "non_canonical")
+        listed = {r["check"] for r in p["results"]}
+        rule("57.required", all(c in listed for c in REQUIRED_CHECKS), "payload.results")
+        for i, r in enumerate(p["results"]):
+            failed = r["result"] == "failed"
+            belongs = r["reason"] in CHECK_REASONS.get(r["check"], ()) or "rule.58.belongs" in skip
+            executors = r["reason"] not in SERVICES_ONLY_REASONS or "rule.58.services" in skip
+            fits = (r["reason"] is not None) == failed and (r["reason"] is None or (belongs and executors))
+            rule("58", fits, f"payload.results[{i}].reason")
+            if not fits:
+                break
+        unread = any(r["check"] == "account" and r["reason"] == "account_unreadable" for r in p["results"])
+        reference = p["account_pii_ref"]
+        read_matches = (reference is None) == unread or "rule.62.null" in skip
+        listed = reference is None or reference in draft["pii_refs"] or "rule.62.listed" in skip
+        rule("62", read_matches and listed, "payload.account_pii_ref")
+    if event_type == "ConnectionStateChanged":
+        reason, to, frm = p["reason"], p["to"], p["from"]
+        if reason in DEGRADING:
+            fits = to == "degraded"
+        elif reason in SUSPENDING:
+            fits = to == "suspended"
+        elif reason == "condition_cleared":
+            fits = to == frm and to != "active"
+        else:
+            fits = to == "active"
+        rule("59", fits, "payload.reason")
+        if fits:
+            allowed = {"active": ("degraded", "suspended"), "degraded": ("active", "degraded")}
+            rule("60", frm in allowed.get(to, CONNECTION_STATES), "payload.from")
+    if event_type == "ConnectionEstablished" and draft["schema_version"] == 2:
+        attested = p["margin_attestation"] is not None
+        rule("64", attested == (p["environment"] == "live"), "payload.margin_attestation")
     return out
 
 
@@ -960,7 +1233,7 @@ def answer_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
 
 
 def workspace_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.8's rules 54 to 65, on a well-typed payload, in rule order. A seeded `loose` bug can let a
+    """§9.9's rules 69 to 80, on a well-typed payload, in rule order. A seeded `loose` bug can let a
     member of the wrong kind through; the rules that read it then stop, as the journal's own reader
     would refuse it before them."""
     out: list[Violation] = []
@@ -984,86 +1257,245 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
     if event_type == "MandateDraftSaved":
         new = p["origin"] in NEW_DRAFT_ORIGINS
         (
-            rule("54.base_draft", (p["base_draft"] is None) == new, "payload.base_draft")
-            and rule("54.base_version", (p["base_version"] is not None) == (p["origin"] == "version"), "payload.base_version")
-            and rule("54.compile", p["origin"] != "compile" or draft["causation_id"] is not None, "causation_id")
+            rule("69.base_draft", (p["base_draft"] is None) == new, "payload.base_draft")
+            and rule("69.base_version", (p["base_version"] is not None) == (p["origin"] == "version"), "payload.base_version")
+            and rule("69.compile", p["origin"] != "compile" or draft["causation_id"] is not None, "causation_id")
         )
-        client = actor["kind"] == "client" and (p["origin"] == "version" or "rule.55.client_origin" in skip)
-        rule("55", actor["kind"] == "user" or client, "actor.kind")
+        client = actor["kind"] == "client" and (p["origin"] == "version" or "rule.70.client_origin" in skip)
+        person = actor["kind"] != "system" if "rule.70.not_system_only" in skip else actor["kind"] == "user"
+        rule("70", person or client, "actor.kind")
     if event_type == "ModelInvocationRecorded":
         bound = draft["config_refs"].get("model_version")
         if bound is not None:
-            rule("56", p["model"]["content_hash"] == bound, "payload.model.content_hash")
+            rule("71", p["model"]["content_hash"] == bound, "payload.model.content_hash")
         ok = p["outcome"] == "ok"
         if ok:
             missing = next((m for m in ("response_ref", "reported_identity") if p[m] is None), None)
-            rule("57", missing is None, f"payload.{missing}")
+            rule("72", missing is None, f"payload.{missing}")
         if p["outcome"] in CALL_REFUSALS:
             sent = {
                 "response_ref": p["response_ref"] is not None,
                 "reported_identity": p["reported_identity"] is not None,
                 "provider_request_id": p["provider_request_id"] is not None,
                 "attempts": p["attempts"] != 0,
-                "tokens": any(v != 0 for v in p["tokens"].values()) and "rule.58.tokens" not in skip,
+                "tokens": any(v != 0 for v in p["tokens"].values()) and "rule.73.tokens" not in skip,
                 "cost_usd": Decimal(p["cost_usd"]) != 0,
             }
             first = next((m for m in SENT_NOTHING if sent[m]), None)
-            rule("58", first is None, f"payload.{first}")
+            rule("73", first is None, f"payload.{first}")
         if p["cache_hit"]:
-            if rule("59.hit", ok, "payload.cache_hit"):
+            if rule("74.hit", ok, "payload.cache_hit"):
                 spent = {
                     "attempts": p["attempts"] != 0,
                     "provider_request_id": p["provider_request_id"] is not None,
                     "cost_usd": Decimal(p["cost_usd"]) != 0,
                 }
                 first = next((m for m in spent if spent[m]), None)
-                rule("59.free", first is None, f"payload.{first}")
+                rule("74.free", first is None, f"payload.{first}")
         elif p["outcome"] not in CALL_REFUSALS:
-            floor = 2 if "boundary.rule_59_attempts" in skip else 1
-            rule("59.attempts", p["attempts"] >= floor, "payload.attempts")
-        rule("60.cost", Decimal(p["cost_usd"]) >= 0, "payload.cost_usd")
+            floor = 2 if "boundary.rule_74_attempts" in skip else 1
+            rule("74.attempts", p["attempts"] >= floor, "payload.attempts")
+        rule("75.cost", Decimal(p["cost_usd"]) >= 0, "payload.cost_usd")
         if ok:
             late = instant_nanos(p["completed_at"]) > instant_nanos(p["deadline"])
-            if "boundary.rule_60_strict" in skip:
+            if "boundary.rule_75_strict" in skip:
                 late = instant_nanos(p["completed_at"]) >= instant_nanos(p["deadline"])
-            rule("60.late", not late, "payload.completed_at")
-        rule("61", actor["kind"] == "system", "actor.kind")
+            rule("75.late", not late, "payload.completed_at")
+        services = actor["kind"] != "user" if "rule.76.not_user_only" in skip else actor["kind"] == "system"
+        rule("76", services, "actor.kind")
     if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
         (
-            rule("62.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
-            and rule("62.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
+            rule("77.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
+            and rule("77.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
         )
-        rule("63", actor["kind"] == "user", "actor.kind")
+        confirmer = actor["kind"] != "system" if "rule.78.not_system_only" in skip else actor["kind"] == "user"
+        rule("78", confirmer, "actor.kind")
     if event_type == "OwnerRequestSubmitted":
         expected = {"user": "owner", "client": "client"}.get(actor["kind"])
-        if rule("64.actor", expected is not None, "actor.kind") and rule(
-            "64.requested_by", p["requested_by"] == expected, "payload.requested_by"
+        if "rule.79.not_system_only" in skip and actor["kind"] != "system":
+            expected = expected or "owner"
+        if rule("79.actor", expected is not None, "actor.kind") and rule(
+            "79.requested_by", p["requested_by"] == expected, "payload.requested_by"
         ):
             client_id = actor["id"] if expected == "client" else None
-            rule("64.client_id", p["client_id"] == client_id, "payload.client_id")
+            rule("79.client_id", p["client_id"] == client_id, "payload.client_id")
         if p["quantity"] is not None:
-            positive = Decimal(p["quantity"]) >= 0 if "boundary.rule_65_zero" in skip else Decimal(p["quantity"]) > 0
-            rule("65", positive, "payload.quantity")
+            positive = Decimal(p["quantity"]) >= 0 if "boundary.rule_80_zero" in skip else Decimal(p["quantity"]) > 0
+            rule("80", positive, "payload.quantity")
     if event_type == "ConnectionRevoked" and draft["schema_version"] == 2:
         compromised = p["reason"] == "compromised"
-        rule("69", (draft["causation_id"] is not None) == compromised, "causation_id")
-        rule("70", actor["kind"] == "user", "actor.kind")
+        rule("84", (draft["causation_id"] is not None) == compromised, "causation_id")
+        rule("85", actor["kind"] == "user", "actor.kind")
     if event_type == "ClientConnected":
-        rule("71", bool(p["scopes"]) and bool(p["agents"]), "payload.scopes" if not p["scopes"] else "payload.agents")
-        rule("72.scopes", ascending(encoded(p["scopes"])), "payload.scopes", "non_canonical")
-        rule("72.agents", ascending(encoded(p["agents"])), "payload.agents", "non_canonical")
-        if rule("73.actor", actor["kind"] == "user", "actor.kind"):
-            rule("73.user", p["user"] == actor["id"], "payload.user")
+        rule("86", bool(p["scopes"]) and bool(p["agents"]), "payload.scopes" if not p["scopes"] else "payload.agents")
+        rule("87.scopes", ascending(encoded(p["scopes"])), "payload.scopes", "non_canonical")
+        rule("87.agents", ascending(encoded(p["agents"])), "payload.agents", "non_canonical")
+        if rule("88.actor", actor["kind"] == "user", "actor.kind"):
+            rule("88.user", p["user"] == human(actor), "payload.user")
     if event_type == "ClientRevoked":
-        if rule("74", actor["kind"] in REVOCATION_ACTORS[p["reason"]], "actor.kind"):
+        allowed = REVOCATION_ACTORS[p["reason"]]
+        if "rule.89.user_any" in skip:
+            allowed = (*allowed, "user")
+        if rule("89", actor["kind"] in allowed, "actor.kind"):
             if p["reason"] == "owner":
-                rule("74.owner", p["user"] == actor["id"], "payload.user")
+                rule("89.owner", p["user"] == actor["id"], "payload.user")
             if p["reason"] == "admin":
-                rule("74.admin", p["user"] != actor["id"], "payload.user")
+                rule("89.admin", p["user"] != actor["id"], "payload.user")
+    if event_type == "OwnerCommandIssued":
+        hold = p["command"] == "hold_openings"
+        allowed = ("user", "client") if hold else ("user",)
+        if "rule.90.client_lifts" in skip:
+            allowed = ("user", "client")
+        if rule("90", actor["kind"] in allowed, "actor.kind"):
+            rule("91", p["user"] == human(actor), "payload.user")
+        rule("91.subject", p["subject"] == p["agent"], "payload.subject")
+        if hold:
+            rule("92", p["step_up"] is None, "payload.step_up")
+    if event_type == "AgentModeChanged":
+        reason = p["reason"]
+        held = p.get("held") is True
+        if reason in ("owner_hold", "owner_lift_hold"):
+            rule("93", held == (reason == "owner_hold"), "payload.held")
+        floor = max(MODE_ORDER.index(p["lifecycle"]), 1 if held and "rule.94.held" not in skip else 0)
+        rule("94", MODE_ORDER.index(p["to"]) >= floor, "payload.to")
+
+
+def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.12's rules 96 to 106, on a well-typed payload, in number order and each rule's clauses in
+    the order the spec gives them."""
+    if event_type not in WRITERS and event_type != "MemberActivated":
+        return []
+    p = draft["payload"]
+    actor = draft["actor"]
+    reason = p.get("reason")
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str, why: str = "schema") -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", why, path))
+
+    for member in ("roles", "removed"):
+        if member in p:
+            rule(f"96.{member}", ascending(encoded(listed(p[member]))), f"payload.{member}", "non_canonical")
+    if "added" in p:
+        added_roles = encoded([a.get("role") for a in record_items(p["added"])])
+        rule("96.added", ascending(added_roles), "payload.added", "non_canonical")
+    writer = WRITERS.get(event_type)
+    if writer:
+        rule("97", p[writer] == actor["id"], f"payload.{writer}")
+    system = reason in SYSTEM_REASONS
+    rule("98", actor["kind"] == ("system" if system else "user"), "actor.kind")
+    if event_type == "MemberRoleChanged":
+        rule("99.self", p["changed_by"] != p["member"], "payload.changed_by")
+    if event_type == "MemberReactivated" or (
+        event_type in ("MemberDeactivated", "MemberRemoved") and reason in SELF_REASONS
+    ):
+        rule("99.self", p["by"] != p["member"], "payload.by")
+    if event_type == "MemberDeactivated" and reason == "left":
+        rule("99.left", p["by"] == p["member"], "payload.by")
+    if event_type == "MemberActivated":
+        rule("99.invitation", (p["invitation"] is None) == (reason == "founding"), "payload.invitation")
+        if reason == "invitation_accepted":
+            rule("99.invitee", p["member"] == actor["id"], "payload.member")
+    if event_type in ("MemberInvited", "MemberActivated", "MemberReactivated"):
+        rule("100.empty", bool(listed(p["roles"])), "payload.roles")
+    if event_type == "MemberActivated" and reason == "founding" and listed(p["roles"]):
+        rule("100.founding_admin", "workspace_admin" in listed(p["roles"]), "payload.roles")
+    if event_type == "MemberRoleChanged":
+        rule("100.no_change", bool(listed(p["added"])) or bool(listed(p["removed"])), "payload.added")
+        added = {a.get("role") for a in record_items(p["added"])}
+        removed = {r for r in listed(p["removed"]) if isinstance(r, str)}
+        rule("100.disjoint", not added & removed, "payload.removed")
+        rule("101", (p["step_up"] is not None) == bool(listed(p["added"])), "payload.step_up")
+    step_up = p.get("step_up")
+    if isinstance(step_up, dict):
+        allowed = ("passkey",) if draft["environment"] == "live" else ("passkey", "cli_confirm")
+        rule("102.method", step_up.get("method") in allowed, "payload.step_up.method")
+        at = draft["event_time"]
+        rule("102.window", step_up_fresh(step_up.get("authenticated_at"), at, skip), "payload.step_up.authenticated_at")
+    for end, cooling, path in cool_offs(event_type, p, skip):
+        rule(f"103.{event_type}", cool_off_exact(draft["event_time"], end, cooling, skip), path)
+    if event_type == "MemberInvited":
+        days = gap_nanos(p["invited_at"], p["expires_at"])
+        week = INVITATION_DAYS * 86400 * 10**9
+        lasts = days is not None and days >= week if "boundary.rule_104_at_least" in skip else days == week
+        rule("104", lasts, "payload.expires_at")
+    rule("105", (p["session_ref"] is not None) == (actor["kind"] == "user"), "payload.session_ref")
+    instant = OWN_INSTANT.get(event_type)
+    if instant:
+        rule("106", p[instant] == draft["event_time"], f"payload.{instant}")
+    return out
+
+
+def gap_nanos(start, end) -> int | None:
+    """`end` − `start` in nanoseconds, or `None` for an instant a seeded type bug let through."""
+    if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
+        return None
+    return instant_nanos(end) - instant_nanos(start)
+
+
+def step_up_fresh(authenticated_at, at, skip: frozenset[str]) -> bool:
+    """Mandate spec §6.1: valid at `at` when 0 ≤ `at` − `authenticated_at` ≤ 300 s."""
+    gap = gap_nanos(authenticated_at, at)
+    if gap is None:
+        return False
+    if "boundary.rule_102_after" in skip:
+        gap = abs(gap)
+    limit = STEP_UP_WINDOW_SECONDS * 10**9 + (1 if "boundary.rule_102_window" in skip else 0)
+    return 0 <= gap <= limit
+
+
+def listed(value) -> list:
+    """A list as rules read it: anything else, which only a seeded type bug lets through, is empty."""
+    return value if isinstance(value, list) else []
+
+
+def record_items(value) -> list[dict]:
+    """A list of records as rules read it, so a seeded `loose` bug that lets another kind through
+    leaves the rule nothing to check rather than failing."""
+    return [v for v in listed(value) if isinstance(v, dict)]
+
+
+END = ".cool_off_ends_at"
+
+
+def cool_offs(event_type: str, p: dict, skip: frozenset[str]) -> list[tuple[str, bool, str]]:
+    """Each cool-off a record states: its end, whether identity spec §8.3's 24 hours apply to it, and
+    its path (rule 103). They apply exactly when independence is required and the grant adds operator
+    or approver to an existing workspace."""
+    independent = p.get("independent_approval_required") is True or "boundary.rule_103_ignores_independence" in skip
+    roles = COOLING_ROLES + (("workspace_admin",) if "boundary.rule_103_admin_cools" in skip else ())
+    if event_type == "MemberActivated":
+        cooling = independent and p["reason"] != "founding" and any(r in roles for r in listed(p["roles"]))
+        if "boundary.rule_103_founding_cools" in skip and p["reason"] == "founding":
+            cooling = independent and any(r in roles for r in listed(p["roles"]))
+        return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
+    if event_type == "MemberReactivated":
+        cooling = independent and any(r in roles for r in listed(p["roles"]))
+        return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
+    if event_type == "MemberRoleChanged":
+        return [
+            (a.get(END[1:]), independent and a.get("role") in roles, f"payload.added[{i}]{END}")
+            for i, a in enumerate(record_items(p["added"]))
+        ]
+    return []
+
+
+def cool_off_exact(start: str, end, cooling: bool, skip: frozenset[str]) -> bool:
+    """Rule 103: the end is exactly a day after `start` when the 24 hours apply, and `start` itself
+    otherwise."""
+    gap = gap_nanos(start, end)
+    if gap is None:
+        return False
+    if "boundary.rule_103_either" in skip:
+        return gap in (0, COOL_OFF_SECONDS * 10**9)
+    if "boundary.rule_103_at_least" in skip and cooling:
+        return gap >= COOL_OFF_SECONDS * 10**9
+    return gap == (COOL_OFF_SECONDS * 10**9 if cooling else 0)
 
 
 def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.10's rules 75 to 59, on a well-typed payload, in number order. A seeded `loose` or
+    """§9.13's rules 107 to 112, on a well-typed payload, in number order. A seeded `loose` or
     `nullable` bug can let a mistyped member through; a clause whose inputs are mistyped is not
     judged, so the bug shows as the type violation it hid rather than as a rule at the same path."""
     if event_type not in ("RecordsAccessed", "ExportCreated", "VerificationRun"):
@@ -1078,61 +1510,61 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
 
     ranges = p["ranges"] if isinstance(p["ranges"], list) else None
     items = [r if isinstance(r, dict) else {} for r in ranges or []]
-    rule("75.empty", ranges is None or bool(ranges), "payload.ranges")
+    rule("107.empty", ranges is None or bool(ranges), "payload.ranges")
     workspace = draft["stream_id"].split(":")[1]
     previous = None
     for i, r in enumerate(items):
         at = f"payload.ranges[{i}]"
         stream, first, last, prev = r.get("stream_id"), r.get("from_seq"), r.get("to_seq"), r.get("prev_hash")
         named = isinstance(stream, str)
-        rule("75.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
-        least = 0 if "boundary.rule_75_from_seq" in skip else 1
-        rule("75.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
+        rule("107.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
+        least = 0 if "boundary.rule_107_from_seq" in skip else 1
+        rule("107.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
         seqs = is_integer(first) and is_integer(last)
-        rule("75.to_seq", not seqs or last >= first, f"{at}.to_seq")
+        rule("107.to_seq", not seqs or last >= first, f"{at}.to_seq")
         typed = isinstance(prev, str) and is_integer(first)
-        rule("75.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
+        rule("107.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
         if previous is not None and named and isinstance(previous.get("stream_id"), str):
             here, before = stream.encode(), previous["stream_id"].encode()
-            gap = 0 if "boundary.rule_75_overlap" in skip else 1
+            gap = 0 if "boundary.rule_107_overlap" in skip else 1
             ends = is_integer(first) and is_integer(previous.get("to_seq"))
             disjoint = not ends or first >= previous["to_seq"] + gap
-            rule("75.order", here > before or (here == before and disjoint), f"{at}.stream_id")
+            rule("107.order", here > before or (here == before and disjoint), f"{at}.stream_id")
         previous = r
     if event_type == "RecordsAccessed":
         accessor = p["accessor"]
-        rule("76.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
-        refused = tuple(k for k in ("agent", "broker") if f"kinds.76.{k}" not in skip)
-        rule("76.actor", kind not in refused, "actor.kind")
+        rule("108.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
+        refused = tuple(k for k in ("agent", "broker") if f"kinds.108.{k}" not in skip)
+        rule("108.actor", kind not in refused, "actor.kind")
         approved = kind != "platform_operator" or draft["causation_id"] is not None
-        rule("76.break_glass", approved, "causation_id")
+        rule("108.break_glass", approved, "causation_id")
         resources = p["resources"] if isinstance(p["resources"], list) else []
         named = [r.encode() for r in resources if isinstance(r, str)]
-        rule("76.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
+        rule("108.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
     if event_type == "ExportCreated":
-        widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.77.{k}" in skip)
-        rule("77.actor", kind in ("user", "system", *widened), "actor.kind")
+        widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.109.{k}" in skip)
+        rule("109.actor", kind in ("user", "system", *widened), "actor.kind")
         if p["form"] in ("canonical", *VIEW_FORMS) and (p["view"] is None or isinstance(p["view"], str)):
-            rule("77.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
+            rule("109.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
     if event_type == "VerificationRun":
         if p["trigger"] in TRIGGERS:
             allowed = ("user", "system") if p["trigger"] == "request" else ("system",)
-            widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.78.{k}" in skip)
-            rule("78", kind in (*allowed, *widened), "actor.kind")
+            widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.110.{k}" in skip)
+            rule("110", kind in (*allowed, *widened), "actor.kind")
         for i, r in enumerate(items):
             at = f"payload.ranges[{i}]"
             failure = r.get("failure")
             if isinstance(failure, dict):
                 seq, check = failure.get("seq"), failure.get("check")
                 if check in EVENT_CHECKS or check in RANGE_CHECKS:
-                    rule("79.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
+                    rule("111.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
                 bounds = (r.get("from_seq"), seq, r.get("to_seq"))
                 if all(is_integer(b) for b in bounds):
-                    rule("79.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
-            rule("79.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
+                    rule("111.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
+            rule("111.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
         if p["result"] in ("pass", "fail"):
             passed = all(r.get("failure") is None for r in items)
-            rule("80", (p["result"] == "pass") == passed, "payload.result")
+            rule("112", (p["result"] == "pass") == passed, "payload.result")
     return out
 
 
@@ -1169,7 +1601,7 @@ def manifest_hash(p: dict) -> str:
 
 
 def cold_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.11's rules 81 to 86, on a well-typed payload, in number order. A clause whose inputs a
+    """§9.14's rules 113 to 118, on a well-typed payload, in number order. A clause whose inputs a
     seeded `loose` or `nullable` bug let through mistyped is not judged, so the bug shows."""
     if event_type not in ("AnchorComputed", "SegmentExported"):
         return []
@@ -1188,39 +1620,39 @@ def cold_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
     if event_type == "AnchorComputed":
         leaves = p["leaves"] if isinstance(p["leaves"], list) else None
         items = [leaf if isinstance(leaf, dict) else {} for leaf in leaves or []]
-        rule("81.empty", leaves is None or bool(leaves), "payload.leaves")
+        rule("113.empty", leaves is None or bool(leaves), "payload.leaves")
         previous = None
         for i, leaf in enumerate(items):
             at = f"payload.leaves[{i}]"
             stream, seq = leaf.get("stream_id"), leaf.get("seq")
-            rule("81.workspace", mine(stream), f"{at}.stream_id")
-            rule("81.seq", not is_integer(seq) or seq >= 1, f"{at}.seq")
+            rule("113.workspace", mine(stream), f"{at}.stream_id")
+            rule("113.seq", not is_integer(seq) or seq >= 1, f"{at}.seq")
             if previous is not None and isinstance(stream, str) and isinstance(previous, str):
-                rule("81.order", stream.encode() > previous.encode(), f"{at}.stream_id")
+                rule("113.order", stream.encode() > previous.encode(), f"{at}.stream_id")
             previous = stream
         streams = [leaf.get("stream_id") for leaf in items]
-        rule("81.self", not leaves or draft["stream_id"] in streams, "payload.leaves")
+        rule("113.self", not leaves or draft["stream_id"] in streams, "payload.leaves")
         typed = items and all(
             isinstance(leaf.get("hash"), str) and is_integer(leaf.get("seq")) and isinstance(leaf.get("stream_id"), str)
             for leaf in items
         )
         if typed and isinstance(p["root"], str):
-            rule("82", p["root"] == merkle_root(items, skip), "payload.root")
-        rule("83", kind == "system", "actor.kind")
+            rule("114", p["root"] == merkle_root(items, skip), "payload.root")
+        rule("115", kind == "system", "actor.kind")
     if event_type == "SegmentExported":
         first, last = p["first_seq"], p["last_seq"]
-        rule("84.workspace", mine(p["stream_id"]), "payload.stream_id")
-        least = 0 if "boundary.rule_84_first_seq" in skip else 1
-        rule("84.first_seq", not is_integer(first) or first >= least, "payload.first_seq")
-        rule("84.last_seq", not (is_integer(first) and is_integer(last)) or last >= first, "payload.last_seq")
+        rule("116.workspace", mine(p["stream_id"]), "payload.stream_id")
+        least = 0 if "boundary.rule_116_first_seq" in skip else 1
+        rule("116.first_seq", not is_integer(first) or first >= least, "payload.first_seq")
+        rule("116.last_seq", not (is_integer(first) and is_integer(last)) or last >= first, "payload.last_seq")
         if isinstance(p["first_prev_hash"], str) and is_integer(first):
             genesis = (p["first_prev_hash"] == GENESIS) == (first == 1)
-            rule("84.genesis", genesis, "payload.first_prev_hash")
+            rule("116.genesis", genesis, "payload.first_prev_hash")
         members = ("stream_id", "first_seq", "last_seq", "first_prev_hash", "last_hash", "file_sha256")
         typed = all(p[m] is not None for m in members) and is_integer(first) and is_integer(last)
         if typed and isinstance(p["manifest_hash"], str):
-            rule("85", p["manifest_hash"] == manifest_hash(p), "payload.manifest_hash")
-        rule("86", kind == "system", "actor.kind")
+            rule("117", p["manifest_hash"] == manifest_hash(p), "payload.manifest_hash")
+        rule("118", kind == "system", "actor.kind")
     return out
 
 
@@ -1249,7 +1681,7 @@ def anchor_self_failure(entries: list[dict], skip: frozenset[str] = frozenset())
 def trusted_start(
     records: list[dict], stream: str, from_seq: int, request: dict, skip: frozenset[str] = frozenset()
 ) -> dict | None:
-    """§9.11's "What a verifier reads": the trusted start of a range of `stream` entered at
+    """§9.14's "What a verifier reads": the trusted start of a range of `stream` entered at
     `from_seq`, resolved from `request` among the control-stream `records` of `stream`'s own
     workspace, or `None` when the request names no usable start."""
     workspace = stream.split(":")[1]
@@ -1408,17 +1840,31 @@ def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
     kind = draft["stream_id"].split(":")[0]
     if event_type == "ApprovalResponded" and draft["causation_id"] is None and "rule.50" not in skip:
         return [Violation("rule.50", "schema", "causation_id")]
+    checked_first = event_type == "ConnectionCredentialRotated" or (
+        event_type == "ConnectionEstablished" and draft["schema_version"] == 2
+    )
+    copied = kind == "acct" and event_type in ("ConnectionEstablished", "ConnectionCredentialRotated")
+    if copied and "rule.63.copy" in skip:
+        checked_first = False
+    if checked_first and draft["causation_id"] is None and "rule.63" not in skip:
+        return [Violation("rule.63", "schema", "causation_id")]
+    acknowledged = event_type == "ConnectionStateChanged" and draft["payload"]["reason"] == "acknowledged"
+    if acknowledged and draft["causation_id"] is None and "rule.61" not in skip:
+        return [Violation("rule.61", "schema", "causation_id")]
     if (
         event_type == "OwnerCommandRefused"
         and draft["causation_id"] is None
         and f"rule.27.{kind}" not in skip
     ):
         return [Violation(f"rule.27.{kind}", "schema", "causation_id")]
+    copied = event_type == "AgentModeChanged" and draft["payload"]["reason"] in OWNER_MODE_REASONS
+    if copied and draft["causation_id"] is None and "rule.95" not in skip:
+        return [Violation("rule.95", "schema", "causation_id")]
     return []
 
 
 def envelope_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§3's envelope with the `client` actor (rules 66 and 67): `on_behalf_of` is a member of a
+    """§3's envelope with the `client` actor (rules 81 and 82): `on_behalf_of` is a member of a
     `client` actor only, so no other actor's canonical form changes."""
     actor = draft.get("actor")
     named = isinstance(actor, dict) and "on_behalf_of" in actor
@@ -1427,17 +1873,31 @@ def envelope_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
     if out:
         return out
     client = actor["kind"] == "client"
-    if named and not client and "rule.66.extra" not in skip:
-        return [Violation("rule.66.extra", "schema", "actor.on_behalf_of")]
-    if client and not named and "rule.66.missing" not in skip:
-        return [Violation("rule.66.missing", "schema", "actor.on_behalf_of")]
+    if named and not client and "rule.81.extra" not in skip:
+        return [Violation("rule.81.extra", "schema", "actor.on_behalf_of")]
+    if client and not named and "rule.81.missing" not in skip:
+        return [Violation("rule.81.missing", "schema", "actor.on_behalf_of")]
     if client and named:
         out = type_violations(IDENT_T, actor["on_behalf_of"], "actor.on_behalf_of", skip)
         if out and "loose.actor.on_behalf_of" not in skip:
             return out
-    if client and actor["build"] is not None and "rule.67" not in skip:
-        return [Violation("rule.67", "schema", "actor.build")]
+    if client and actor["build"] is not None and "rule.82" not in skip:
+        return [Violation("rule.82", "schema", "actor.build")]
     return []
+
+
+def open_command_violations(draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.11: an `OwnerCommandIssued` whose command is not a hold command stays open until M7
+    closes it. Its `command` is read, and a client may issue none of them (rule 90); nothing else
+    about it is refused here, so a kill switch from any principal is always recorded."""
+    out = []
+    if not isinstance(draft["payload"].get("command"), str):
+        out.append(Violation("types", "schema", "payload.command"))
+    elif draft["actor"]["kind"] == "client" and "rule.90.client_commands" not in skip:
+        out.append(Violation("rule.90", "schema", "actor.kind"))
+    if "artifact_refs" not in skip and draft["artifact_refs"] != sorted(digest_strings(draft["payload"])):
+        out.append(Violation("artifact_refs", "artifact_refs", "artifact_refs"))
+    return out
 
 
 def human(actor: dict) -> str:
@@ -1463,9 +1923,9 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         return [Violation("stream", "non_canonical", "stream_id")]
     if stream[0] not in kinds:
         return [Violation("stream", "wrong_stream", "event_type")]
-    if draft["actor"]["kind"] == "client" and "rule.68" not in skip:
+    if draft["actor"]["kind"] == "client" and "rule.83" not in skip:
         if stream[0] != "ctl" or event_type not in CLIENT_EVENTS:
-            return [Violation("rule.68", "schema", "actor.kind")]
+            return [Violation("rule.83", "schema", "actor.kind")]
     if draft["actor"]["kind"] in ("system", "agent") and draft["actor"]["build"] is None:
         out.append(Violation("actor", "schema", "actor.build"))
     refs = draft["config_refs"]
@@ -1482,6 +1942,9 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
+    command = draft["payload"].get("command") if isinstance(draft["payload"], dict) else None
+    if event_type == "OwnerCommandIssued" and command not in HOLD_COMMANDS and "closed.owner_commands" not in skip:
+        return out + open_command_violations(draft, skip)
     if (stream[0], event_type) in SCHEMAS and draft["schema_version"] == 1:
         schema = SCHEMAS[(stream[0], event_type)]
     else:

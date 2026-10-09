@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/delegation-preview-request.schema.json",
+  "type": "object",
+  "required": [
+    "shape",
+    "max_orders",
+    "max_order_usd",
+    "max_total_usd",
+    "expires_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "shape": {
+      "enum": [
+        "until_close",
+        "instrument_for_time",
+        "kind_for_time"
+      ]
+    },
+    "max_orders": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "max_order_usd": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "max_total_usd": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expires_at": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /approvals/{approval_id}/delegation-previews (\u00a75.3). The dollar caps and expiry are entered for the timed shapes and derived for until_close; the 30-day bound is the server's.",
+  "if": {
+    "properties": {
+      "shape": {
+        "const": "until_close"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "max_order_usd": {
+        "type": "null"
+      },
+      "max_total_usd": {
+        "type": "null"
+      },
+      "expires_at": {
+        "type": "null"
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "max_order_usd": {
+        "$ref": "../common.schema.json#/$defs/Decimal"
+      },
+      "max_total_usd": {
+        "$ref": "../common.schema.json#/$defs/Decimal"
+      },
+      "expires_at": {
+        "$ref": "../common.schema.json#/$defs/Timestamp"
+      }
+    }
+  }
+}

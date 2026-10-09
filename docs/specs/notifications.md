@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.1, draft)
+# Notifications and Approval Channels Spec (v0.3, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed |
+| **Status** | Draft v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 19 to 26 Proposed for the founder) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -47,7 +47,7 @@ cross-plane attacker list. §8 lists the contracts this spec needs from each.
 | Area | What this spec decides |
 |---|---|
 | Notices | Every outbound notice: approval requests and reminders; alerts for risk limits and tripwires, kill switches, unprotected intervals and stalled exits, reconciliation mismatches, account restrictions, faults that pause an agent; identity and account-security notices (a new credential, a recovery, a role grant, a deactivation, break-glass, a risk-increasing version, a new connection, going live, a new delegation, a newly connected client); spend caps and other information; the daily brief |
-| Channels | Pull channels (`cli_inbox`, `web_inbox`); push channels (email and one chat channel at M7, web push at M10, SMS and phone later under E8-7); native mobile push later ([DEC-19](../project/04-decision-log.md#decisions)) |
+| Channels | Pull channels (`cli_inbox`, `web_inbox`); push channels (email at M7, web push at M10, SMS and phone later under E8-7; chat is not in v1, DEC-824); native mobile push later ([DEC-19](../project/04-decision-log.md#decisions)) |
 | Payloads | The exact bytes that may leave the workspace deployment, and how that is enforced |
 | Delivery | The dispatcher, the provider interface, retries, bounces, receipts, coalescing, rate limits, quiet hours, unsubscribe |
 | Relay | The notification relay in the global control plane ([HLD §4](../HLD.md#global-control-plane-thin)) |
@@ -90,12 +90,12 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1) | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance) |
-| NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the dispatcher's only path to an address is the vault client |
+| NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1). A web push also travels in an envelope the relay and the push service read (§4.6): its `urgency` and TTL are fixed per class, never taken from a deadline or any subject's time, so they reveal at most the class; the push endpoint is an address, under NT-2 | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance); an envelope test that every relayed and direct request's `urgency` and TTL equal its class's fixed pair whatever the subject's deadline, against the three pairs written into the test from DEC-700 item 3, not read from §4.6's table or the code's |
+| NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the only path to an address is the vault client, called by the channel adapter (§5.2), and that the dispatcher holds only the handle |
 | NT-3 | **Approval happens only inside the workspace.** A grant, a skip, an acknowledgment, or any owner command reaches the runtime only as a control-stream event that workspace services write after authenticating the user in the workspace deployment ([mandate spec §6.4](mandate.md#64-approvals) "Responses"). No channel adapter, relay, provider webhook, email reply, or chat message can write one | Layering: the notification crates cannot depend on the control-stream writer (`xtask/layers.toml`); a fuzz test feeds every inbound path (replies, chat messages, button callbacks, provider webhooks) and asserts the control stream is unchanged |
 | NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the notice id, nothing else, so it reveals neither an event reference nor a creation time: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<notice id>`; a property test that two notices about one cause get different ids and no id parses as a ULID of any journaled event; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
-| NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip` | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
-| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound |
+| NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip`. Check 4 is the only effect because only an approval reads delivery, and an approval gates only a risk-adding action: no exit, protective order, risk exit, owner exit, or kill switch is ever gated by an approval (`AGENTS.md` rules 2 and 13). So the claim holds under any later autonomy change that keeps those rules, and one that gated a risk-reducing action on an approval would break rule 13 first | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
+| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels. A notice coalesced with others (§5.4) meets the bound too: a cause not in a window's first message, including one that commits while that message's send is still in flight, either goes at once in its own message or joins a window that ends within 60 seconds of its own commit | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound; the storms include causes that commit while a first message's send hangs at the provider, which must not be dropped or held past their own 60 seconds |
 | NT-7 | **Quiet hours never delay a safety notice.** Quiet hours apply only to `action` push sends (suppressed, as mandate spec §6.4 says) and `info` push sends (deferred to the window's end). Pull channels are never affected, so a request stays listed and grantable | Property test over random quiet-hour windows, including ones spanning midnight and the DST changes (`mandate_approval::deliver_now`'s DST cases extended per class) |
 | NT-8 | **Every send is journaled, and only after its cause.** The dispatcher sends nothing about an event that is not committed, journals `NoticeIssued` before the first send, and journals every attempt's outcome as `NoticeAttempted` (recipient (opaque), channel, attempt, status, provider message id, time), all on the notice stream, of which it is the only writer (journal spec §2). A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send, and a second dispatcher started for the same workspace (the older is `Fenced`, journal spec §5.1, and the newer re-sends); an oracle that reads only the journal finds, for every cause, a terminal outcome per recipient and channel |
 | NT-9 | **The notification path is never in the trade path.** No exit, protective order, risk exit, kill switch, owner exit, or gate decision waits on, is ordered after, or fails because of the dispatcher, a provider, or the relay (rule 13; [OPS-4](../design/infrastructure.md), [OPS-12](../design/infrastructure.md)) | Fault injection: the kill-switch and exit suites pass with the dispatcher hung and the relay unreachable |
@@ -132,9 +132,11 @@ The kind is an internal key. It is journaled and shown inside the workspace, and
 payload carries only the text key (§4.2), so a provider learns at most whether a notice is an
 approval, an alert, an account change, or the brief.
 
-For every kind except the two approval kinds, the trigger is the **subject**: the owner of the
-subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the subject's own batch
-(§5.5), and that record is the notice's cause. The approval kinds' cause is the `ApprovalRequested`.
+For every kind except the two approval kinds and `channel_lost`, the trigger is the **subject**: the
+owner of the subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the subject's
+own batch (§5.5), and that record is the notice's cause. The approval kinds' cause is the
+`ApprovalRequested`. `channel_lost`'s cause is the dispatcher's own `NoticeAttempted` that marks the
+address `unreachable` (§3.4, §5.6), so no other stream is written for it.
 
 | Kind | Trigger (committed subject event) | Class | Text key | Recipients |
 |---|---|---|---|---|
@@ -153,17 +155,18 @@ subject's stream writes an `OwnerAlertSent` naming it, with the kind, in the sub
 | `integrity_incident` | `IntegrityIncidentRecorded` (journal spec §11) | safety | `attention_needed` | Owners and workspace admins |
 | `credential_added` | `CredentialEnrolled` (identity spec §12.1): a new passkey or device | safety | `account_changed` | The member, on every push channel |
 | `new_device` | `SessionOpened` with the first-seen-device flag (identity spec §6.2, §12.1): a sign-in from a device the member has not used, which a synced passkey makes possible with no enrolment | safety | `account_changed` | The member, on every push channel |
+| `notification_address_changed` | `NotificationAddressChanged`, `added` or `removed` (workspace API spec §4.11, §5.7): a member set or removed one of their own push addresses, with step-up ([DEC-795](../project/decisions/DEC-795.md)) | safety | `account_changed` | The member, on every push channel they hold after the change (an address just added included), once more on an address the member removed (never on one a replacement retired), and in the pull channels |
 | `recovery_used` | A sign-in by OIDC or a recovery code that starts an enrolment cool-off (identity spec §10.1) | safety | `account_changed` | The member, on every push channel |
-| `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member |
+| `role_granted` | `MemberActivated` or `MemberRoleChanged` adding a role (identity spec §8.3) | safety | `account_changed` | Every other workspace admin and org owner, and the member. An org owner with no workspace membership receives none in identity spec v0.3 (§4.5, DEC-816 item 2); the identity E9-11 tests owe `every_org_owner_notice_has_a_deliverable_channel` |
 | `member_deactivated` | `MemberDeactivated` or `MemberRemoved` (identity spec §5.2) | safety | `account_changed` | The remaining workspace admins |
 | `deprovisioned` | `SessionRevoked` with reason `deprovisioned` (identity spec §11.1, §12.1): the customer's identity provider ended the member's access | safety | `account_changed` | The remaining workspace admins |
-| `break_glass` | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` (identity spec §10.3) | safety | `account_changed` | Every workspace admin and org owner |
+| `break_glass` | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` (identity spec §10.3) | safety | `account_changed` | Every workspace admin and org owner. An org owner with no workspace membership receives none in identity spec v0.3 (§4.5, DEC-816 item 2); the identity E9-11 tests owe `every_org_owner_notice_has_a_deliverable_channel` |
 | `version_risk_increasing` | `MandateConfirmed` whose classification is risk-increasing ([mandate spec §9.2](mandate.md#92-classification)), a delegation's included | safety | `account_changed` | Owners and workspace admins |
 | `delegation_added` | `MandateConfirmed` that adds a delegation (mandate spec §6.5) and is not already `version_risk_increasing` | safety | `account_changed` | Owners |
 | `connection_added` | `ConnectionEstablished` | safety | `account_changed` | Owners and workspace admins |
 | `went_live` | `AgentDeployed` in a live environment | safety | `account_changed` | Owners and workspace admins |
 | `client_connected` | `ClientConnected` (identity spec §12.1, DEC-141) | safety | `account_changed` | The member and workspace admins |
-| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` (§5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
+| `channel_lost` | A `NoticeAttempted` that marks the member's address `unreachable` or fails it as `address_missing` (§5.1, §5.6); the dispatcher's own record, so no other stream is written | safety | `account_changed` | The member, on their other channels |
 | `daily_brief` | The brief for the risk day is built (D13, DEC-184) | info | `brief_ready` | Owners |
 | `delegation_ended` | A delegation expires, is spent, or is suspended (mandate spec §6.5) | info | none (pull and brief only) | Owners |
 | `model_status` | A pinned model deprecated or withdrawn (inference spec; mandate spec §8.1) | info | none | Owners |
@@ -197,7 +200,7 @@ user with no address on any push channel still has the pull channels.
 
 - A notice answers exactly one cause, and the dispatcher's key for it is the cause's event id. The
   causes are `ApprovalRequested`, `OwnerAlertSent`, and the dispatcher's own `NoticeAttempted`
-  that loses an address (`channel_lost`).
+  that marks an address `unreachable` or fails it as `address_missing` (`channel_lost`).
 - **A user's kill switch is one cause.** Journal spec §2 makes it a command that each stream owner
   journals as `KillSwitchActivated` in its own stream. The command's `OwnerCommandIssued` is the
   cause: the API writes `OwnerAlertSent` (`kill_switch`) with it on the control stream, and the
@@ -219,8 +222,8 @@ user with no address on any push channel still has the pull channels.
 | `cli_inbox` | Pull | The founder's CLI reading the journal | Built (M7, E8-1 to E8-3) | Delivered in the request's own batch, never suppressed (DEC-156 item 6) |
 | `web_inbox` | Pull | The web app's inbox and alerts center (G5) | M9 | Same rule as `cli_inbox`: the list is the journal, read through the workspace API |
 | `email` | Push | From the workspace deployment to a mail provider | M7 | §4.4 |
-| `slack` or `telegram` | Push | From the workspace deployment to the chat provider | M7: one of them (DEC-438 item 20) | §4.5. Outbound only |
-| `web_push` | Push | The workspace deployment, directly or through the relay, to the browser's push service | M10 | §4.6 |
+| `slack` or `telegram` | Push | From the workspace deployment to the chat provider | Not in v1: DEC-438 item 20 is not taken (the founder, 2026-10-08 (DEC-824)); chat is in the backlog, Telegram at M10 a later option | §4.5. Outbound only |
+| `web_push` | Push | The workspace deployment, directly or through the relay, to the browser's push service | M10 (DEC-438 item 19, the founder, 2026-10-08 (DEC-824)) | §4.6. Our own self-hosted relay and VAPID keys, no vendor (DEC-438 item 22); the VAPID subject is `mailto:push@notify.owlhead.ai` |
 | `sms`, `phone` | Push | A messaging provider | E8-7 (P1) | Same payload rule; phone reads the text aloud |
 | Native mobile push | Push | The relay to Apple's and Google's push services | After v1 (DEC-19) | Needs the relay's app credentials |
 
@@ -244,15 +247,19 @@ replaced by a notice id:
 | `account_changed` | "There was a change to your account or workspace access" |
 | `brief_ready` | "Your daily brief is ready" (D13) |
 
-- **The notice id** is 128 bits from the operating system's secure random source, minted by the
-  dispatcher when it issues the notice and journaled on `NoticeIssued` beside the cause. It is
+- **The notice id** is 128 bits from a secure random source, minted by the dispatcher when it
+  issues the notice and journaled on `NoticeIssued` beside the cause. The source is injected: the
+  operating system's CSPRNG in production, a deterministic fixture in tests (DEC-702), and
+  `NoticeId` has no constructor from an event id or any other journal value; parsing one takes
+  exactly 32 lowercase hex digits, which no ULID is. It is
   never a journal event id: a ULID's leading 48 bits are its creation time to the millisecond, so
   an event id in a payload would hand every provider the exact time of an approval or a limit
   breach. Inside the workspace the API resolves the notice id to its cause for an authorized user
   (workspace API spec §3.9, `GET /notices/{notice_id}`).
 - **What changes in code** (E8-9): `ApprovalRef::of_requested_event` stays as the in-workspace
   reference to the request, and stops being what a payload carries; the payload's id type becomes a
-  minted `NoticeId` with no constructor from an event id. M7 v0 sends nothing out of the workspace
+  minted `NoticeId` with no constructor from an event id. This is the one place that sentence
+  lives; workspace API spec §3.9 points here. M7 v0 sends nothing out of the workspace
   (`cli_inbox` only), so nothing has leaked a timestamp so far.
 - The kind, the class, the agent, the workspace, and the cause are not in the payload.
 - The text set is a closed enum. Adding a key is a spec change; no key may name a kind more
@@ -274,25 +281,58 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 
 ### 4.4 Email
 
-- **Sender:** a fixed no-reply address on a sending subdomain of the product domain, with SPF, DKIM,
-  and DMARC `p=reject` (DEC-438 item 23). Replies go to a mailbox that discards them; nothing reads
+- **Sender:** a fixed no-reply address on `notify.owlhead.ai`, with SPF, DKIM, and DMARC `p=reject`
+  (DEC-438 item 23, decided in [DEC-820](../project/decisions/DEC-820.md) item 1). For the demo the mail goes out through the founder's
+  own SMTP submission account, whose credential lives only in the vault (rule 7; DEC-438 item 21,
+  decided in DEC-820 item 3); a transactional vendor comes before any customer mail and is a new
+  decision. Replies go to a mailbox that discards them; nothing reads
   a reply (NT-3).
 - **Subject:** the rendered text. **Body:** the rendered text, the sentence "Open Owlhead to see
   it.", the link, and the footer placeholder `[[EMAIL-FOOTER]]`, whose wording is the founder's and
-  counsel's (DEC-79). Plain text, plus HTML with no remote images, no tracking pixel, and no styling
-  fetched from elsewhere.
+  counsel's (DEC-79). For mail addressed only to the founder's own address it resolves to exactly
+  `Sent by your Mandate workspace to its owner.` (DEC-820 item 4); for every other recipient it is
+  unresolved until counsel supplies the general footer and unsubscribe wording. Plain text, plus
+  HTML with no remote images, no tracking pixel, and no styling fetched from elsewhere.
 - **Provider settings:** open and click tracking off, so the provider never rewrites the link
   through its own domain; message retention at the provider set to the minimum it offers.
 - **No greeting by name** (NT-1). The address is the only personal data the provider receives.
 - **Unsubscribe:** `List-Unsubscribe` appears only on `info` mail (the brief). §5.7.
+- **No mail reaches anyone but the founder while the general footer is unresolved** (DEC-700 item
+  4, DEC-820 item 4, which covers only the founder's own account). Two transports may exist: the
+  recorded-fixture transport, which writes each rendered message to a test capture and sends
+  nothing, and the founder-only SMTP transport. The founder-only transport is bound at construction
+  to a one-address allowlist: the single founder address the deployment's configuration names, read
+  from the vault. It is not bound to each workspace's owner, and its send takes no recipient, so no
+  other address can reach it (rung 1). A notice for any other recipient, a workspace owner who is
+  not the founder included, is refused at the adapter as `permanent { recipient_not_permitted }`
+  before any connection and journaled with no address (NT-2); §5.2 says what that reason does and
+  does not do. E8-11's tests pin both: the founder-only transport sends only to the allowlisted
+  address with exactly DEC-820's footer, and every other recipient is refused.
+- **The check that holds it** (rung 2). E8-11 builds it in the same change as the adapter: an
+  `xtask` check, run by `cargo xtask ci fast`'s lint, that fails while the general footer is still
+  `[[EMAIL-FOOTER]]`. Its primary rule fails on any implementor of the mail transport trait other
+  than those two. Its second rule is a deny-list, kept as the check's configuration, of
+  mail-sending crates (`lettre` and similar SMTP or mail-provider client crates), which may appear
+  only as dependencies of the founder-only transport. The change that supplies counsel's general
+  footer removes the check, and only that change may add a transport that can address anyone else.
+  `AGENTS.md`'s trust ladder lists the check under "Checked" once it exists.
 
 ### 4.5 Chat
+
+**Deferred** (DEC-824): v1 has no chat channel (DEC-438 item 20 is not taken). This section is kept
+as the design for when chat is taken up.
 
 - **Slack:** an incoming webhook into a channel the owner chooses. The webhook URL is a credential:
   it lives in the vault and is never logged (rule 7). Link unfurling is turned off in the message.
 - **Telegram:** the platform's bot posts to the owner's chat. The owner links the chat by sending the
   bot a short-lived code that the web app or CLI shows to the signed-in owner; this is the only
-  inbound message the bot acts on, and it can only record a chat address for that owner.
+  inbound message the bot acts on, and it can only record a chat address for that owner. The
+  **linking code** (DEC-700 item 2) is 128 bits from the same secure random source as the notice id
+  (DEC-702), written as 26 base32 characters; it lives 10 minutes from when it is shown; it is
+  single use, spent by the first message that carries it whether or not the address is then
+  recorded; and showing a new code revokes the owner's earlier one. A code that is unknown,
+  expired, or spent records nothing and gets no reply that tells those cases apart. The residual is
+  §9's: whoever obtains a live code binds their own chat.
 - **Outbound only.** No buttons, no slash commands, no interactive callbacks. Every other inbound
   message, reaction, or callback is discarded unread (NT-3). The message is the rendered text and
   the link.
@@ -305,12 +345,35 @@ one-time code, a query string, or a tracking parameter (NT-4). The product name 
 - **Encryption.** The workspace deployment encrypts the payload to the subscribing browser with Web
   Push message encryption (RFC 8291) and signs with its own application server key (RFC 8292). The
   browser's push service and the relay see only ciphertext, of a payload that is opaque anyway.
+- **Only the browsers' push services** ([DEC-792](../project/decisions/DEC-792.md)).
+  A subscription's endpoint is accepted, stored, and sent to only if it parses as `https`, port 443
+  (none written, or `:443`), with no user information, and a host that is a lowercase ASCII name:
+  an IP literal, a trailing dot, a non-ASCII or `xn--` (IDN) label, or a percent-encoded character
+  is refused, never normalized into a match. The host must then match the deployment's allowlist,
+  whose entries are an exact host or `*.` and a domain; `*.domain` matches a proper subdomain at any
+  depth and never the domain itself. An entry names at least two labels (an exact host of two or
+  more; a wildcard's domain of two or more), and no label of an entry or of an endpoint's host
+  starts or ends with `-` (DEC-722). The default list is `fcm.googleapis.com`,
+  `updates.push.services.mozilla.com`, `*.push.apple.com`, and `*.notify.windows.com`. A send follows
+  no redirect: a `3xx` answer is a permanent failure, `address_rejected`. One parser
+  (`mandate_webpush::PushEndpoint`) serves the workspace API, the dispatcher, and the relay, with one
+  shared table test; the web client checks the same table before it hands a subscription over.
 - **Direct or relayed.** A managed workspace deployment sends to the push service directly. A hybrid
   deployment whose egress allows only the global control plane sends through the relay over its
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
 - **The relay** accepts `{relay_id, endpoint, urgency, ttl_s, ciphertext}`. It checks that the
   ciphertext is at most 512 bytes and `urgency` is `high` (`action`, `safety`) or `normal`
-  (`info`), forwards, and returns the push service's status. It stores no ciphertext after the
+  (`info`), forwards, and returns the push service's status.
+- **The envelope is fixed per class** (NT-1, DEC-700 item 3). `urgency` and `ttl_s` are a pair per
+  class, the same whether the push goes through the relay or straight to the push service:
+  `action` `high` and 3 600 s, `safety` `high` and 86 400 s (its retry window), `info` `normal` and
+  21 600 s (its retry window). Neither is taken from an approval's deadline or any subject's time,
+  which would tell the relay and the push service when a request expires. An `action` TTL shorter
+  than an approval's window is safe: a push the service drops when its TTL ends is only a missed
+  interruption, retries continue per §5.3 until the approval stops being pending, the pull channels
+  list the request throughout, and an ask nobody answers times out to `skip` (NT-5). The `endpoint` is the
+  subscription's push endpoint: an address, held and handled under NT-2, and the relay logs only
+  its `relay_id`. It stores no ciphertext after the
   attempt, logs opaque ids and counts only, and has no route into any workspace deployment. The size
   cap bounds what a compromised deployment could smuggle through it.
 - **The service worker** shows the rendered text and, on a tap, opens the link. It caches no
@@ -346,8 +409,25 @@ The dispatcher **tails the journal**, which is its outbox:
    anywhere else, so a notice can never name an uncommitted event (NT-8, rule 5).
 2. For each new cause it mints a notice id, resolves the recipients (§3.3), and journals
    `NoticeIssued` before any send.
-3. For each recipient and push channel it reads the address from the vault and sends through the
-   channel's adapter (§5.2), then journals the outcome as `NoticeAttempted`.
+3. For each recipient and push channel it calls the channel's adapter (§5.2) with the closed notice
+   and the address handle, never the address; the adapter renders the message itself and
+   dereferences the handle through the vault client (DEC-712). The dispatcher then journals the
+   outcome as `NoticeAttempted`.
+   **An address is sent to only while it is active**, that is, while its last
+   `NotificationAddressChanged` is `added` (workspace API spec §4.11), and only while its host is on
+   the allowlist (§4.6). The single exception is the one last send of a
+   `notification_address_changed` notice to the very address its `removed` event names: opaque like
+   every notice, subject to the allowlist, retried within the safety window (NT-6), and never
+   repeated for a later notice. If the adapter finds the vault entry already gone when that last
+   send is made, the dispatcher journals the attempt `abandoned` with reason `retry_window_ended`
+   (the safety window's reason, from [#763](https://github.com/kunwarshivam/mandate/pull/763)): it
+   is not `address_missing`, marks
+   nothing, and raises no `channel_lost`; once the entry is swept, no exception remains. **An active
+   address whose vault entry is missing** (repaired by the member removing the address and setting it
+   again, workspace API spec §5.7; removing needs no entry) is reported by the adapter as
+   `permanent { address_missing }` (§5.2), and the dispatcher journals a terminal `failed` with
+   that reason: it does not mark the address `unreachable`, and it raises `channel_lost` once
+   (§5.6).
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending.
@@ -368,14 +448,26 @@ Every channel is one adapter behind one interface:
 
 | Operation | Takes | Returns |
 |---|---|---|
-| `send` | A `Notification` (closed), the rendered template for the channel, an address handle, the idempotency key | `accepted { provider_message_id }`, `retryable { reason }`, or `permanent { reason }` |
+| `send` | A `Notification` (closed), which the adapter renders through the channel's fixed templates itself (DEC-712), an address handle, the idempotency key | `accepted { provider_message_id }`, `retryable { reason }`, or `permanent { reason }` |
 | `receipt` (inbound) | A provider callback, verified by the provider's signature | `delivered`, `bounced`, `complained`, or `unsubscribed`, for a `provider_message_id` |
 
 - Adapters take no string from the caller except the address handle, which they dereference
   through the vault client. They cannot read the journal or write the control stream (NT-3).
 - `reason` is a closed enum (`timeout`, `rate_limited`, `provider_error`, `address_rejected`,
-  `auth_failed`, `too_large`); provider error text is never journaled or logged, since a provider
-  may echo the message.
+  `auth_failed`, `too_large`, `recipient_not_permitted`, `address_missing`, `bounced`, `complained`, `unsubscribed`);
+  provider error text is never journaled or logged, since a provider may echo the message. The
+  last three come from a provider `receipt`. `address_rejected`, `auth_failed`, `bounced`,
+  `complained`, and `unsubscribed` are `permanent`, mark the address `unreachable`, and raise
+  `channel_lost` (§5.6) (DEC-700 item 8). The brief's own opt-out is not a receipt and never one of
+  these reasons (§5.7).
+- `address_missing` is the platform's own finding, not a provider verdict: the address is active,
+  so the dispatcher sent to it, but the adapter finds no vault entry for its handle, answers
+  `permanent { address_missing }`, and the dispatcher journals it (§5.1, DEC-712). It is
+  `permanent`, marks no address `unreachable`, and raises `channel_lost` once (§5.6).
+- `recipient_not_permitted` is the platform's own refusal (§4.4: a recipient the founder-only mail
+  transport may not address), not the provider's verdict on the address. It is `permanent` for that
+  notice and channel, is not retried, marks no address `unreachable`, and raises no `channel_lost`
+  (§5.6); the recipient keeps the pull channels and every other push channel.
 - A receipt can only mark an attempt or an address. It never changes an approval or any trading
   state (NT-5).
 
@@ -384,20 +476,36 @@ Every channel is one adapter behind one interface:
 | Class | Attempts | Stops when |
 |---|---|---|
 | `action` | At once; then after 15 s, 60 s, 5 min; then every 15 min | The approval is no longer pending (terminal event, deadline passed, or cancellation), recorded as `abandoned` with reason `not_pending` |
-| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours |
-| `info` | Same schedule | Accepted, a permanent failure, or 6 hours |
+| `safety` | Same schedule | Accepted, a permanent failure, or 24 hours; or at once, for the one last send to a removed address whose vault entry is already gone (§5.1), recorded as `abandoned` with reason `retry_window_ended` |
+| `info` | Same schedule | Accepted, a permanent failure, or 6 hours, recorded as `abandoned` with reason `retry_window_ended` |
 
 A `retryable` result, a timeout, and a provider 429 all retry. `permanent` stops that channel for
-that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6).
+that notice and, for `address_rejected` or `auth_failed`, marks the address (§5.6), as a receipt's
+`bounced`, `complained`, or `unsubscribed` also does (§5.2); `recipient_not_permitted` and
+`address_missing` mark nothing (§5.2).
+`not_pending` is for `action` only and `retry_window_ended` for `safety` and `info` only.
 
 ### 5.4 Coalescing and rate limits
 
-- **Safety notices are coalesced, never dropped.** The first `safety` notice to a recipient on a
-  channel goes at once. Further `safety` notices to the same recipient and channel within the next
-  60 seconds are combined into one message sent at the window's end, whose notice id is the first's
-  and whose link opens the alerts center. Every combined notice gets its own outcome record
-  pointing to the combined message's provider id, so the oracle of NT-6 counts it. No `safety`
-  notice waits more than 60 seconds.
+- **Safety notices are coalesced, never dropped** (DEC-700 item 5). The dispatcher reads causes in
+  passes, and its read watermark, not a send's time, decides which message a cause goes in:
+  - With no window open for a recipient and channel, the `safety` causes read in one pass go at once
+    in one message, the first, and a window opens.
+  - A `safety` cause read in a later pass, including one that committed while the first message's
+    send was still in flight, joins the open window. The window's message is sent when the window
+    ends, which is 60 seconds after the earliest commit among the causes that joined it, and never
+    later than 60 seconds after the window opened. It does not wait on the first message's outcome.
+  - A cause read when its own commit is already 60 seconds old (the dispatcher lagged) goes at once
+    in its own message; the lag alert of §7 fires. The age is the cause's journal commit time
+    against the dispatcher's clock; a skew between the two clocks shows as lag, which the same
+    alert covers.
+
+  So every `safety` notice is sent within 60 seconds of its own commit while the dispatcher keeps
+  up, and none is dropped. The combined message's notice id is the first combined notice's and its
+  link opens the alerts center. Every combined notice gets its own outcome record pointing to the
+  combined message's provider id, so the oracle of NT-6 counts it. While the dispatcher keeps up,
+  a recipient gets at most one message per channel per window; after a lag the windows can be
+  shorter, since the bound wins over the message count.
 - **Action notices** are bounded by the ask budget (10 `ApprovalRequested` per agent per risk day,
   mandate spec §6.4), one pending risk-adding approval per agent, and one reminder each.
 - **Info notices** push only the brief, once per recipient per risk day.
@@ -411,22 +519,52 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 | `ApprovalDelivered` | Agent (the runtime) | The pull channels' `delivered`, in the request's own batch, at every stage. Push outcomes are not copied here: check 4 is met by the pull channel | As journal spec §9: approval, channel, status, message id |
 | `OwnerAlertSent` | The subject's own stream (its owner) | With the subject, in the same batch | Subject event, kind, and for a kill switch the owner command it carries out (journal spec v0.12) |
 | `NoticeIssued` | Notice (the dispatcher) | Before the first send | Notice id, kind, class, cause and its stream, recipients (opaque) |
-| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason`, `provider_message_id`, `coalesced_into` |
+| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, plus the dispatcher's own `not_pending` for `action` and `retry_window_ended` for `safety` and `info`, both only with `abandoned`), `provider_message_id`, `coalesced_into` |
 
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
 earlier `delivered`, and check 4 is satisfied by the pull channel in any case. Journal spec v0.12
 adds the notice stream and these records; E8-9's tests PR closes their payload schemas.
 
+**The stream type in code.** Journal spec v0.12 (its version history, and the stream table of
+journal spec §2) is where the notice stream's type is described. In code, `mandate_journal::StreamType`
+is a closed four-variant type (`Account`, `Agent`, `Control`, `Scheduler`) and `StreamId::parse`
+refuses an `ntf:` id, so E8-10's tests PR extends both first, before any dispatcher record can be
+appended.
+
+**`OwnerAlertSent`'s shape** (DEC-700 item 6). The mandate reference cases still journal a fired
+tripwire as `OwnerAlertSent {subject, text: "tripwire_fired"}`, the shape from before journal spec
+v0.12. This spec reads that record as `{subject, kind: risk_limit}`: `tripwire_fired` is neither a
+kind nor one of §4.2's text keys, a fired tripwire is the `risk_limit` kind (§3.2), and the text key
+`attention_needed` is derived from the kind when a notice is rendered, never journaled on the record.
+The reference cases and the code change to `kind` in E8-9 (slice S4); until then the cases'
+`text` member is read as that kind.
+
 ### 5.6 Bounces, complaints, and lost addresses
 
-- A hard bounce, `address_rejected`, or a complaint marks that user's address on that channel
-  `unreachable` on its `NoticeAttempted`. The dispatcher stops sending to it and issues a
-  `channel_lost` notice, whose cause is that record on its own stream, to the user's other channels
-  and the pull channels.
-- `auth_failed` (a revoked Slack webhook, a removed Telegram bot) does the same, and also raises an
-  operator alert when the credential is the platform's (the Telegram bot token).
+- Exactly five reasons mark that user's address on that channel `unreachable` on its
+  `NoticeAttempted`: `address_rejected`, `auth_failed`, `bounced` (a hard bounce), `complained`,
+  and `unsubscribed` (a provider-level unsubscribe or suppression, from a provider receipt). The dispatcher stops sending to the address and issues a `channel_lost` notice, whose
+  cause is that record on its own stream, to the user's other channels and the pull channels. No
+  other reason marks an address; `recipient_not_permitted` and `address_missing` in particular mark nothing (§5.2).
+- `auth_failed` (a revoked Slack webhook, a removed Telegram bot) also raises an operator alert
+  when the credential is the platform's (the Telegram bot token).
 - An address comes back only when the signed-in user re-verifies it in the workspace.
+- **An allowlist change.** An address whose host leaves the allowlist is no longer sent to: its next
+  attempt is journaled `failed` with `address_rejected`, which marks it `unreachable` and raises
+  `channel_lost` to the member's other channels, as for any rejected address. It stays unreachable,
+  still counts toward the member's limit, and shows its status in the workspace until the member
+  removes it or sets the same endpoint again, which replaces it with a new address in one batch
+  (workspace API spec §4.11, §5.7).
+- **A missing entry is reported once.** The first `address_missing` attempt on an address raises
+  `channel_lost`; later attempts on it are `failed` `address_missing` with no new `channel_lost`.
+  The report resets on the next `delivered` attempt on that address, and a new `address_ref` (the
+  member removing the address and setting it again) starts afresh.
+- **A member's own change is not a loss.** Adding or removing a push address through the workspace
+  API (workspace API spec §4.11) is journaled as `NotificationAddressChanged` on the control
+  stream and raises a `notification_address_changed` notice, not `channel_lost`. Its one last send
+  to a removed address is the only send to that address after the removal, so a member whose address
+  was removed by someone else learns of it there (DEC-795).
 - An owner whose every push address is `unreachable` still has the pull channels. No trading state
   changes (NT-5); whether a live agent should hold openings in that case is Proposed (DEC-438 item
   25).
@@ -435,8 +573,8 @@ adds the notice stream and these records; E8-9's tests PR closes their payload s
 
 | Notice | Can the recipient stop it? |
 |---|---|
-| `info` push (the brief) | Yes, from the email's unsubscribe link or the settings screen; the brief stays readable in the app |
-| `action` and `safety` push | Not by a link. They follow the mandate's `notifications.channels`; removing a channel is a mandate version, risk-increasing, so it is confirmed with step-up (mandate spec §9.2). A provider-level unsubscribe or suppression is honored as a lost address (§5.6), never ignored |
+| `info` push (the brief) | Yes, from the email's unsubscribe link or the settings screen; the brief stays readable in the app. The brief's `List-Unsubscribe` header and link point at the workspace's own one-click endpoint (RFC 8058), keyed by the brief's notice id, never at the provider; a request there stops only the brief for that recipient and channel and marks no address, so it never silences `action` or `safety` mail. It is told apart from a provider suppression by where it arrives: only that endpoint records a brief opt-out, and a provider `unsubscribed` receipt is never read as one. The notice id carries no authority, so whoever holds it can at most stop that recipient's brief push |
+| `action` and `safety` push | Not by a link. They follow the mandate's `notifications.channels`; removing a channel is a mandate version, risk-increasing, so it is confirmed with step-up (mandate spec §9.2). A provider-level unsubscribe or suppression arrives as a provider receipt, is the `unsubscribed` reason, and is honored as a lost address (§5.6), never ignored |
 
 The mandate schema keeps at least one push channel (`minItems: 1`), so an owner always has one
 configured; whether it still works is §5.6's question.
@@ -554,6 +692,7 @@ stateDiagram-v2
 |---|---|---|---|
 | **Phisher** | Sends a lookalike email or chat message ("Approve now") linking to a lookalike origin to harvest a sign-in | Our notices carry only generic text and a link to the fixed origin; DMARC `p=reject` stops spoofing of our exact domain; passkeys are bound to the real origin and fail on a lookalike; no notice ever asks for a reply, a code, or a password, and the app says so on X3 | A user who signs in with a password-based OIDC provider on a lookalike can lose that password; step-up for live grants still needs the passkey |
 | **Someone with the user's email or chat account** | Reads notices; follows links; tries a password reset | They learn that an approval or alert exists, and its timing. A link opens only a sign-in; nothing is approved by reply (NT-3); recovery must not rest on email alone (§8, identity spec) | Activity timing is visible to them |
+| **Someone who obtains a Telegram linking code** (shoulder-surfing, a shared screen, a screenshot) | Sends the code to the bot from their own chat before the owner does | The code lives 10 minutes, is single use, and a new code revokes the old one (§4.5); it can only record a chat address, never act or read content; the owner's own later attempt with that code records nothing | Whoever uses a live code first binds their own chat and receives the opaque notices (generic text and a link that opens only a sign-in) until the owner links their own chat with a new code, which replaces the address |
 | **A leaked Slack webhook** | Posts fake messages into the owner's channel | They can post phishing text but not act; same defences as the phisher | Phishing surface |
 | **Malicious relay operator or push service** | Reads, drops, delays, replays, or forges push | Reads only ciphertext of an opaque payload. Dropping or delaying turns into a `skip` or a later alert, and email and chat do not pass through the relay. A replay is a duplicate. A forged push can only show our generic text or a link to the fixed origin the service worker opens | Traffic analysis: the count and timing of notices per workspace reveal activity levels (§12 item 4) |
 | **Malicious insider at the platform** | Tries to approve through the notification path, or to read content from it | The notification path has no write to the control stream (NT-3); check 3 refuses any actor that is not a listed user; there is no content in the path to read | Insider risks elsewhere belong to the threat model |
@@ -569,16 +708,42 @@ stateDiagram-v2
 
 ## 10. What exists and what is planned
 
+**Where the code goes** ([DEC-701](../project/decisions/DEC-701.md)). Two new crates, both
+safety-critical (notification payloads), each with its `xtask/layers.toml` entry, CODEOWNERS line,
+and lint header in the change that creates it:
+
+- **`mandate-notify`**, a pure layer-1 crate: the notice id and its source trait, the kinds, the
+  classes, the text keys, the payload, the channel templates, the quiet-hours rule by class, the
+  retry schedule, the coalescing fold, and the provider trait. It does no I/O and depends on no
+  impure crate. Quiet hours' window arithmetic stays `mandate_approval::deliver_now`'s (DEC-165
+  item 12): `mandate-notify` maps a class and the window's verdict to send, suppress, or defer, and
+  the dispatcher computes the verdict, so there is one window rule and one time base.
+- **`mandate-dispatcher`**, the process crate: tails the journal, mints notice ids, resolves
+  recipients, drives the adapters, which dereference address handles through the vault client
+  (§5.2), and appends to the
+  notice stream. Its `forbidden_internal` list in `xtask/layers.toml` bars it from reaching, by any
+  chain of dependencies, every crate that writes an agent, account, or control stream
+  (`mandate-runtime`, `mandate-executor`, `mandate-mcp`, `mandate-shell`, `mandate-cli`,
+  `mandate-paper`, and the broker connectors), which is NT-3's layering test. The journal crate it
+  must use also builds control-stream drafts, so its appends go through a writer that takes only an
+  `ntf:` stream id, which E8-10's tests pin.
+
+The notice id's source ([DEC-702](../project/decisions/DEC-702.md)) is a trait in `mandate-notify`;
+`mandate-dispatcher` implements it over the operating system's CSPRNG, and tests inject a
+deterministic fixture, so every id-dependent test replays.
+
 | Piece | Exists today | Planned |
 |---|---|---|
-| Approval payload | `mandate_approval::Notification` with `ApprovalRef` (ULID only) and `GenericText::ApprovalNeeded`; `notification_payload` gives `{"subject", "text"}`, with the event's ULID as subject | E8-9 replaces the subject with a minted notice id (`{"notice", "text"}`) and adds `attention_needed`, `account_changed`, and `brief_ready` |
+| Approval payload | `mandate_approval::Notification` with `ApprovalRef` (ULID only) and `GenericText::ApprovalNeeded`; `notification_payload` gives `{"subject", "text"}`, with the event's ULID as subject | E8-9 moves the payload into `mandate-notify`, replaces the subject with a minted notice id (`{"notice", "text"}`), and adds `attention_needed`, `account_changed`, and `brief_ready`; `ApprovalRef` stays in `mandate-approval` (§4.2) |
+| Notice id | None | `mandate_notify::NoticeId`, minted through the injected source (DEC-702): no constructor from an event id |
+| Notice stream type | `mandate_journal::StreamType` has four closed variants and `StreamId::parse` refuses `ntf:` (§5.5) | E8-10's tests PR adds the notice stream type first (journal spec v0.12) |
 | Alert payload | `NotificationRef { subject_event, message_key: &'static str }` in `mandate-runtime` and `mandate-executor`, emitted as `Effect::Notify` with nine executor keys and one runtime key | E8-9 replaces `message_key` with the closed kind enum (rung 1: a `&'static str` can be any literal) and maps each kind to a text key |
 | Quiet hours | `mandate_approval::deliver_now` (push vs `cli_inbox`, DST-tested) | E8-10 judges by class (§5.8) |
 | Pull channel | `cli_inbox`: `ApprovalDelivered` in the request's own batch; `mandate approvals list` and `show` | `web_inbox` with the web app (E8-13) |
 | Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
-| Dispatcher | None. The shell collects alerts into the tracer report | E8-10, as its own process with its own stream |
+| Dispatcher | None. The shell collects alerts into the tracer report | E8-10: `mandate-dispatcher`, its own process with its own stream, over `mandate-notify`'s pure core |
 | Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
-| Email, chat | None | E8-11, E8-12 (M7) |
+| Email, chat | None | E8-11 (M7); E8-12, chat, is deferred: v1 has no chat channel (the founder, 2026-10-08 (DEC-824)). Email has only the recorded-fixture transport and the founder-only SMTP transport, bound to the one founder address in the deployment's configuration, until counsel's general footer (§4.4, DEC-820) |
 | Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
 | SMS, phone, escalation chain | None | E8-7 |
@@ -589,9 +754,22 @@ stateDiagram-v2
 ## 11. Decisions
 
 [DEC-438](../project/decisions/DEC-438.md) records them. Items 1 to 18 and 27 to 29 are reversible engineering
-readings the agent accepted; most only tighten what the specs already say. Items 19 to 26 are the
-founder's (DEC-79: spending, vendors, legal wording, or a new restriction); until each is decided,
-the most conservative option holds: `cli_inbox` only, no vendor, no spend.
+readings the agent accepted; most only tighten what the specs already say. v0.2's readings are
+[DEC-700](../project/decisions/DEC-700.md), with the code layout in
+[DEC-701](../project/decisions/DEC-701.md) and the notice id's source in
+[DEC-702](../project/decisions/DEC-702.md); each only tightens (DEC-176). Items 19 to 26 are the
+founder's (DEC-79: spending, vendors, legal wording, or a new restriction). The founder decided
+items 21 (the sender is the founder's own SMTP submission account), 23 (`notify.owlhead.ai`, with
+SPF, DKIM, and DMARC `p=reject`), and 24 for mail to the founder's own address only (the footer above) in [DEC-820](../project/decisions/DEC-820.md).
+The founder also decided, on 2026-10-08 (DEC-824): item 19's staging is accepted; item 22 is
+accepted, so web push runs through our own self-hosted relay with our own VAPID keys and no vendor;
+item 20 is not taken, so v1 has no chat channel (its channels are email, `web_inbox`, and web push,
+with `cli_inbox`), chat goes to the backlog, and Telegram at M10 stays a later option; and item 25
+is accepted but built after the demo as its own story, since it needs a mandate spec change. Item
+26, and item 24 for any other recipient, stay Proposed; until each is decided, the most
+conservative option holds. v0.3's readings are DEC-712 (the adapter, not the dispatcher,
+dereferences the address handle and renders the notice) and DEC-722 (an allowlist entry names at
+least two labels, and no host label has an edge hyphen); each only tightens (DEC-176).
 
 ---
 

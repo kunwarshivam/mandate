@@ -59,11 +59,7 @@ pub(crate) fn payload(
         "ApprovalRequested" => approval_requested_rules(view)?,
         "ApprovalResponded" => responded_rules(view)?,
         "ApprovalRevalidated" => revalidated_rules(view)?,
-        "AgentModeChanged" => ensure(
-            strictness(view.text("to")) >= strictness(view.text("lifecycle")),
-            InvalidReason::Schema,
-            "payload.to",
-        )?,
+        "AgentModeChanged" => held_mode_rules(view)?,
         "OwnerExitRequested" => owner_exit_rules(view)?,
         "ModelOutputRecorded" => {
             let thesis = view.is_null("thesis_id");
@@ -172,6 +168,9 @@ pub enum AgentStreamCheck {
     /// A `KillSwitchActivated`'s `mode_event` names no earlier `AgentModeChanged` with reason
     /// `kill_switch`.
     ModeEventMismatch,
+    /// A version-2 `AgentModeChanged` that is not a hold or a lift changes the owner's `held`, or a
+    /// version-1 one follows a version-2 one (journal spec v0.23 §9.11, §11; DEC-672, DEC-673).
+    HeldMismatch,
 }
 
 impl AgentStreamCheck {
@@ -180,6 +179,7 @@ impl AgentStreamCheck {
         match self {
             Self::IntentActionMismatch => "intent_action_mismatch",
             Self::ModeEventMismatch => "mode_event_mismatch",
+            Self::HeldMismatch => "held_mismatch",
         }
     }
 }
@@ -203,6 +203,29 @@ pub fn verify_agent_stream(
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> Result<(), AgentStreamFailure> {
+    verify_agent_stream_anchored(rows, start, HeldAnchor::Unknown)
+}
+
+/// The stored chain's hold before a range, which the caller of [`verify_agent_stream_anchored`]
+/// derives (§11's `held_mismatch`, DEC-673).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldAnchor {
+    /// The caller cannot read the chain before the range.
+    Unknown,
+    /// No version-2 `AgentModeChanged` precedes the range.
+    NoVersionTwo,
+    /// The `held` the last version-2 `AgentModeChanged` before the range carried, at its `seq`.
+    Carried { seq: u64, held: bool },
+}
+
+/// [`verify_agent_stream`] with §11's `held_mismatch` anchored on `anchor`, the stored chain's
+/// hold before the range, which the caller derives (DEC-673). A full chain is anchored on nothing
+/// before it, whatever `anchor` says.
+pub fn verify_agent_stream_anchored(
+    rows: &[StoredEvent],
+    start: TrustedStart,
+    anchor: HeldAnchor,
+) -> Result<(), AgentStreamFailure> {
     let events: Vec<(&StoredEvent, Value)> = rows
         .iter()
         .filter(|row| {
@@ -221,6 +244,7 @@ pub fn verify_agent_stream(
         })
         .collect();
     let mut earlier: BTreeSet<&str> = BTreeSet::new();
+    let mut held = Held::at(start.from_seq, anchor);
     for (row, body) in &events {
         let fail = |check| {
             Err(AgentStreamFailure {
@@ -256,11 +280,64 @@ pub fn verify_agent_stream(
                     return fail(AgentStreamCheck::ModeEventMismatch);
                 }
             }
+            "AgentModeChanged" if !held.carries(row.schema_version, &own) => {
+                return fail(AgentStreamCheck::HeldMismatch);
+            }
             _ => {}
         }
         earlier.insert(row.event_id.as_str());
     }
     Ok(())
+}
+
+/// The owner's hold as a range of `AgentModeChanged` records has carried it so far (§11's
+/// `held_mismatch`, DEC-673): `false` on a full chain, which is anchored on nothing, and on a range
+/// anchored on no version 2; the anchor's `held` on a `Carried` range; and unknown on a later range
+/// whose caller cannot read the chain before it. The check anchors on the stored chain, never on
+/// the range: a version-2 copy read while the hold is unknown fails closed, since only a hold or a
+/// lift sets it without an anchor, and a version-1 record before it is not judged (item 4).
+struct Held {
+    last: Option<bool>,
+    versioned: bool,
+}
+
+impl Held {
+    fn at(from_seq: u64, anchor: HeldAnchor) -> Self {
+        match (from_seq, anchor) {
+            (1, _) | (_, HeldAnchor::NoVersionTwo) => Self {
+                last: Some(false),
+                versioned: false,
+            },
+            (_, HeldAnchor::Carried { held, .. }) => Self {
+                last: Some(held),
+                versioned: true,
+            },
+            (_, HeldAnchor::Unknown) => Self {
+                last: None,
+                versioned: false,
+            },
+        }
+    }
+
+    /// Whether the next record keeps the hold. The hold carried is the expected one: a hold sets
+    /// it, a lift clears it, and every other record keeps it whatever it wrote (DEC-673). A hold
+    /// or lift must write what its reason says; any other version-2 record must write the carried
+    /// hold, and with none known it fails closed; a version-1 record fails after a version-2 one.
+    fn carries(&mut self, schema_version: u64, payload: &Value) -> bool {
+        if schema_version != 2 {
+            return !self.versioned;
+        }
+        self.versioned = true;
+        let written = payload.get("held") == Some(&Value::Bool(true));
+        match Payload(payload).text("reason") {
+            reason @ ("owner_hold" | "owner_lift_hold") => {
+                let expected = reason == "owner_hold";
+                self.last = Some(expected);
+                written == expected
+            }
+            _ => self.last == Some(written),
+        }
+    }
 }
 
 /// The members `IntentProposed` repeats from its `DecisionMade`, in rule 10's order.
@@ -282,7 +359,39 @@ fn first_differing_action(mine: &Value, theirs: &Value) -> Option<&'static str> 
         .find(|member| mine.get(member) != theirs.get(member))
 }
 
-const OWNER_MODE_REASONS: [&str; 3] = ["owner_pause", "owner_resume", "owner_stop"];
+const OWNER_MODE_REASONS: [&str; 5] = [
+    "owner_pause",
+    "owner_resume",
+    "owner_stop",
+    "owner_hold",
+    "owner_lift_hold",
+];
+
+/// Rule 11 and journal spec v0.23 §9.11's rules 93 and 94 (DEC-672): `held` follows a hold's and a
+/// lift's reason, and `to` is at least as strict as the lifecycle and at least `exits_only` while
+/// held, so a resume never clears a hold and a lift never clears a pause. A version-1 record has no
+/// `held` and no hold reason, so for it this is rule 11 alone.
+fn held_mode_rules(view: Payload<'_>) -> Result<(), Invalid> {
+    let held = view.0.get("held") == Some(&Value::Bool(true));
+    let reason = view.text("reason");
+    if reason == "owner_hold" || reason == "owner_lift_hold" {
+        ensure(
+            held == (reason == "owner_hold"),
+            InvalidReason::Schema,
+            "payload.held",
+        )?;
+    }
+    let floor = if held {
+        strictness(view.text("lifecycle")).max(strictness("exits_only"))
+    } else {
+        strictness(view.text("lifecycle"))
+    };
+    ensure(
+        strictness(view.text("to")) >= floor,
+        InvalidReason::Schema,
+        "payload.to",
+    )
+}
 const RISK_ADDING: [&str; 2] = ["open", "increase"];
 const MODES: [&str; 4] = ["normal", "exits_only", "paused", "stopped"];
 const CLIPS: [&str; 6] = [
@@ -415,6 +524,11 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )?;
     ensure(
         decided_by != "client_ceiling" || (client && asked),
+        schema,
+        "payload.decided_by",
+    )?;
+    ensure(
+        decided_by != "policy_overlay" || autonomy != "auto",
         schema,
         "payload.decided_by",
     )?;
@@ -555,6 +669,7 @@ fn is_label(label: &str) -> bool {
         "default",
         "admission_ceiling",
         "client_ceiling",
+        "policy_overlay",
     ]
     .contains(&label)
         || ["rule:", DELEGATION]
@@ -572,6 +687,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         return match event_type {
             "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
             "DecisionMade" => Some(&DECISION_MADE),
+            "AgentModeChanged" => Some(&AGENT_MODE_CHANGED_V2),
             _ => None,
         };
     }
@@ -965,6 +1081,27 @@ static AGENT_MODE_CHANGED: Ty = Ty::Record(&[
         ]),
     ),
     ("lifecycle", Ty::OneOf(&["normal", "paused", "stopped"])),
+]);
+
+/// §9.11's version 2: version 1's members with the hold's two reasons, then `held`.
+static AGENT_MODE_CHANGED_V2: Ty = Ty::Record(&[
+    ("from", MODE),
+    ("to", MODE),
+    (
+        "reason",
+        Ty::OneOf(&[
+            "restriction_changed",
+            "awaiting_reconciliation",
+            "owner_pause",
+            "owner_resume",
+            "owner_stop",
+            "kill_switch",
+            "owner_hold",
+            "owner_lift_hold",
+        ]),
+    ),
+    ("lifecycle", Ty::OneOf(&["normal", "paused", "stopped"])),
+    ("held", Ty::Bool),
 ]);
 
 static KILL_SWITCH_ACTIVATED: Ty = Ty::Record(&[

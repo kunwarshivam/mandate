@@ -1,0 +1,1179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/envelope.schema.json",
+  "title": "Workspace API envelope, problem document, actor, step-up evidence, and record",
+  "description": "Workspace API spec \u00a73.2 (api_version and build), \u00a73.3 item 4 (actor), \u00a73.5 (problem), \u00a75 (step_up, record), \u00a76.1 (as_of). Closed safety enums per \u00a73.2.",
+  "$defs": {
+    "Envelope": {
+      "description": "Members every response carries (\u00a73.2, \u00a76.1). Open: each response adds its own members with allOf and unevaluatedProperties: false. as_of may be empty only for a response that reads no stream; every response that reads or commits on a stream tightens it to common AsOf (minItems 1), and a command's 202 carries the committed control-stream watermark (DEC-682).",
+      "type": "object",
+      "required": [
+        "api_version",
+        "build",
+        "served_at",
+        "as_of"
+      ],
+      "properties": {
+        "api_version": {
+          "const": "v1"
+        },
+        "build": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        },
+        "served_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
+        "as_of": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Watermark"
+          }
+        }
+      }
+    },
+    "ProblemCode": {
+      "description": "\u00a73.5's codes. Closed on the server (DEC-681 item 1); a client handles an unknown code by status and effect (\u00a73.2). A value in x-planned is listed before the code serves it (DEC-683).",
+      "enum": [
+        "unauthenticated",
+        "forbidden",
+        "not_found",
+        "invalid",
+        "idempotency_conflict",
+        "stale_base",
+        "classification_changed",
+        "step_up_required",
+        "step_up_missing",
+        "step_up_stale",
+        "step_up_reused",
+        "step_up_method",
+        "step_up_mismatch",
+        "live_unavailable",
+        "control_stream_frozen",
+        "journal_unavailable",
+        "rate_limited",
+        "own_roles",
+        "owner_role_reserved",
+        "last_owner",
+        "last_admin",
+        "reduction_only",
+        "membership_unavailable",
+        "outcome_unknown",
+        "address_limit",
+        "busy"
+      ],
+      "x-planned": {
+        "outcome_unknown": "E10-10",
+        "step_up_missing": "E10-10",
+        "step_up_stale": "E10-10",
+        "step_up_reused": "E10-10",
+        "step_up_method": "E10-10",
+        "step_up_mismatch": "E10-10",
+        "address_limit": "E8-14",
+        "busy": "E8-14"
+      }
+    },
+    "Effect": {
+      "enum": [
+        "none",
+        "recorded",
+        "unknown"
+      ]
+    },
+    "Violation": {
+      "description": "One finding of a 422 or of validation (\u00a73.5, \u00a74.1 validate), shared with the validate read model. kind schema: the body's shape or canonical form; rule: a mandate V-rule; policy: a value looser than the nearest ancestor that sets it (mandate spec \u00a74.3, FR-1.5).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path",
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "schema"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path",
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "rule"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^V-[0-9]{3}$"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path",
+            "key",
+            "level",
+            "value",
+            "ancestor_level",
+            "ancestor_value",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "policy"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
+            },
+            "key": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "level": {
+              "enum": [
+                "organization",
+                "workspace",
+                "mandate"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PolicyValue"
+            },
+            "ancestor_level": {
+              "enum": [
+                "platform",
+                "organization",
+                "workspace"
+              ]
+            },
+            "ancestor_value": {
+              "$ref": "#/$defs/PolicyValue"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "Problem": {
+      "description": "RFC 9457 problem document (\u00a73.5). Not wrapped in the Envelope (\u00a73.2). event_id is present exactly when effect is recorded or unknown. Each code pins its status, the effects it may carry, retryable, and a fixed title with no content (API-10, DEC-682 item 28); current_base is present exactly for stale_base.",
+      "type": "object",
+      "required": [
+        "type",
+        "status",
+        "code",
+        "title",
+        "effect",
+        "event_id",
+        "retryable",
+        "violations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            401,
+            403,
+            404,
+            409,
+            422,
+            429,
+            503
+          ]
+        },
+        "code": {
+          "$ref": "#/$defs/ProblemCode"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effect": {
+          "$ref": "#/$defs/Effect"
+        },
+        "event_id": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/EventId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          }
+        },
+        "current_base": {
+          "description": "The base now in force, for stale_base only (\u00a73.5, API-19).",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/ContentRef"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/Id"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "effect": {
+                "const": "none"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "event_id": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "event_id": {
+                "$ref": "common.schema.json#/$defs/EventId"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "unauthenticated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Sign in required"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/unauthenticated"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "forbidden"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Not allowed"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/forbidden"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "not_found"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 404
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Not found"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/not_found"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 422
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Invalid request"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/invalid"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "idempotency_conflict"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Key already used"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/idempotency_conflict"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "stale_base"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Changed since loaded"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/stale_base"
+              }
+            },
+            "required": [
+              "current_base"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "classification_changed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Classification changed"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/classification_changed"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation required"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_required"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "live_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Live trading unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/live_unavailable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "control_stream_frozen"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ]
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Changes are frozen"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/control_stream_frozen"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "journal_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Temporarily unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/journal_unavailable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "rate_limited"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 429
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Too many requests"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/rate_limited"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "own_roles"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Cannot change own roles"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/own_roles"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "owner_role_reserved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Owner role reserved"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/owner_role_reserved"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "last_owner"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Owner must remain"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/last_owner"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "last_admin"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Admin must remain"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/last_admin"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "reduction_only"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 403
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Risk reduction only"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/reduction_only"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "membership_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Membership unavailable"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/membership_unavailable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "outcome_unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "unknown"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Result unknown"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/outcome_unknown"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "not": {
+                  "const": "stale_base"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "current_base"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_missing"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation not valid"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_missing"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_stale"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation expired"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_stale"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_reused"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation already used"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_reused"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_method"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation method not allowed"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_method"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "step_up_mismatch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 401
+              },
+              "effect": {
+                "enum": [
+                  "none",
+                  "recorded"
+                ],
+                "description": "`none`, except that a refused revoke on compromise (\u00a75.6) carries `recorded`, because its kill-switch half is committed anyway. The schema cannot tell that call apart."
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Confirmation does not match"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/step_up_mismatch"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "address_limit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Too many notification addresses"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/address_limit"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "busy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Try again"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/busy"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Actor": {
+      "description": "Who an event names (\u00a73.3 item 4). A client is never a user; it names the user it acts for.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "user"
+            },
+            "id": {
+              "$ref": "common.schema.json#/$defs/Id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "id",
+            "on_behalf_of"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "client"
+            },
+            "id": {
+              "$ref": "common.schema.json#/$defs/Id"
+            },
+            "on_behalf_of": {
+              "$ref": "common.schema.json#/$defs/Id"
+            }
+          }
+        }
+      ]
+    },
+    "StepUpEvidence": {
+      "description": "Journal spec \u00a79.2's evidence, mirroring mandate-identity's StepUpEvidence: the challenge's ULID, when the user verified, and how (identity spec \u00a76.1, \u00a77.3; `live` takes `passkey` only).",
+      "type": "object",
+      "required": [
+        "assertion_id",
+        "authenticated_at",
+        "method"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assertion_id": {
+          "$ref": "common.schema.json#/$defs/EventId"
+        },
+        "authenticated_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
+        "method": {
+          "enum": [
+            "passkey",
+            "cli_confirm"
+          ]
+        }
+      }
+    },
+    "StepUpStatus": {
+      "enum": [
+        "bound",
+        "missing",
+        "unbound"
+      ]
+    },
+    "Record": {
+      "description": "The rendered record screen and the build that rendered it (\u00a75, mandate spec \u00a710).",
+      "type": "object",
+      "required": [
+        "artifact",
+        "ui_build"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        },
+        "ui_build": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        }
+      }
+    },
+    "PolicyLevel": {
+      "description": "Mandate spec \u00a74.3's hierarchy, top to bottom.",
+      "enum": [
+        "platform",
+        "organization",
+        "workspace",
+        "mandate"
+      ]
+    },
+    "PolicyValue": {
+      "description": "A policy or mandate value as \u00a74.3 compares it: a number as a Decimal string, a permission or requirement as a boolean, a set as its sorted members.",
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        }
+      ]
+    }
+  }
+}

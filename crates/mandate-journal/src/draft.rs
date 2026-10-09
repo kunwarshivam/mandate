@@ -28,7 +28,14 @@ static ENVELOPE: &[(&str, Ty)] = &[
         Ty::Record(&[
             (
                 "kind",
-                Ty::OneOf(&["system", "agent", "user", "broker", "platform_operator"]),
+                Ty::OneOf(&[
+                    "system",
+                    "agent",
+                    "user",
+                    "broker",
+                    "platform_operator",
+                    "client",
+                ]),
             ),
             ("id", Ty::Str),
             ("version", Ty::Str),
@@ -59,7 +66,9 @@ impl Draft {
         let object = value
             .as_object()
             .ok_or_else(|| Invalid::new(InvalidReason::Schema, ""))?;
-        let mut fields = normalize_record(ENVELOPE, object, "")?;
+        let (object, on_behalf_of) = without_on_behalf_of(object);
+        let mut fields = normalize_record(ENVELOPE, &object, "")?;
+        crate::workspace::client_actor(&mut fields, on_behalf_of)?;
         let text = |name: &str| fields.get(name).and_then(Value::as_str).unwrap_or_default();
         let int = |name: &str| fields.get(name).and_then(Value::as_int).unwrap_or_default();
 
@@ -74,6 +83,7 @@ impl Draft {
         if !entry.streams.contains(&stream_id.stream_type()) {
             return Err(Invalid::new(InvalidReason::WrongStream, "event_type"));
         }
+        crate::workspace::client_writes(&fields, stream_id.stream_type(), event_type)?;
         let environment = Environment::parse(text("environment"))
             .ok_or_else(|| Invalid::new(InvalidReason::Schema, "environment"))?;
 
@@ -107,9 +117,14 @@ impl Draft {
             control::payload(
                 event_type,
                 int("schema_version"),
+                &stream_id,
                 written,
-                fields.get("config_refs"),
-                fields.get("actor"),
+                control::Envelope {
+                    config_refs: fields.get("config_refs"),
+                    actor: fields.get("actor"),
+                    causation_id,
+                    pii_refs: fields.get("pii_refs"),
+                },
             )?
         } else {
             let schema = payload_schema(event_type, int("schema_version"))
@@ -135,6 +150,7 @@ impl Draft {
         if closed {
             agent::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if controlled {
+            crate::connections::copy(event_type, int("schema_version"), &payload, causation_id)?;
             control::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if event_type == "StreamOpened"
             && subject(&stream_id, &payload).as_deref() != Some(stream_id.as_str())
@@ -298,6 +314,19 @@ fn subject(stream_id: &StreamId, payload: &Value) -> Option<String> {
             field("workspace_id")?,
             field("account_ref")?
         )),
-        StreamType::Agent | StreamType::Control | StreamType::Scheduler => None,
+        StreamType::Agent | StreamType::Control | StreamType::Scheduler | StreamType::Notice => {
+            None
+        }
     }
+}
+
+/// The envelope with a `client` actor's `on_behalf_of` taken out, so §3's four-member actor type
+/// reads it, and the member itself, which [`crate::workspace::client_actor`] checks and puts back.
+fn without_on_behalf_of(object: &Object) -> (Object, Option<Value>) {
+    let mut object = object.clone();
+    let taken = match object.get_mut("actor") {
+        Some(Value::Object(actor)) => actor.remove("on_behalf_of"),
+        _ => None,
+    };
+    (object, taken)
 }

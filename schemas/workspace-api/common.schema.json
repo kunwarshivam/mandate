@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/common.schema.json",
+  "title": "Workspace API common value types",
+  "description": "Value types every workspace services API v1 schema shares: docs/specs/workspace-api.md §3.1, §6.1, API-14, API-18; journal spec §2, §3, §4.6, §4.7 (DEC-740). Definitions only; it validates nothing on its own. The envelope and problem types are envelope.schema.json's.",
+  "$defs": {
+    "Decimal": {
+      "description": "Journal spec §4.6 canonical decimal, as a string; never a JSON number. The pattern fixes the form (no exponent, sign, leading zero, trailing fractional zero, or -0; at most 28 fractional digits); the magnitude bound (below 7.9e28) is the parser's.",
+      "type": "string",
+      "pattern": "^(?!-0$)-?(0|[1-9][0-9]{0,28})(\\.[0-9]{0,27}[1-9])?$"
+    },
+    "Timestamp": {
+      "description": "Journal spec §4.7: UTC with nine fractional digits, years 1970 to 9999. The pattern also refuses a day past its month's length (31 only in the 31-day months, February at most 29); whether February 29 falls in a leap year is the parser's refusal (DEC-740 item 3).",
+      "type": "string",
+      "pattern": "^(19[7-9][0-9]|[2-9][0-9]{3})-((0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30)|02-(0[1-9]|1[0-9]|2[0-9]))T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{9}Z$"
+    },
+    "ContentRef": {
+      "description": "A SHA-256 content hash or artifact reference (§3.1).",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Id": {
+      "description": "An opaque id (§3.1, journal spec §2's identifier grammar); it embeds no name, instrument, or personal datum.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "AssetId": {
+      "description": "An instrument's asset id: the mandate schema's `uuid`, lowercase only (mandate spec §3, journal spec §9.3's `asset_id`).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "EventId": {
+      "description": "A journal event id: a ULID in Crockford base32 (journal spec §3). Its time component carries no meaning.",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "Watermark": {
+      "description": "§6.1: the last event of one stream a response reflects. `stream_id` follows journal spec §2; `hash` is that event's hash written as a sha256: ref (§3.1): the journal stores and pages (API-15) the bare 64 lowercase hex digits as `hash` and `prev_hash`, and the API adds the `sha256:` prefix in watermarks.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_id", "seq", "hash", "recorded_at"],
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "description": "Journal spec §2: `acct:{workspace_id}:{account_ref}` and `agent:{workspace_id}:{agent_id}` have two segments; `ctl`, `clock`, and `ntf` have the workspace id alone. Every segment matches [A-Za-z0-9_-]+.",
+          "pattern": "^((acct|agent):[A-Za-z0-9_-]+:[A-Za-z0-9_-]+|(ctl|clock|ntf):[A-Za-z0-9_-]+)$"
+        },
+        "seq": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "hash": { "$ref": "#/$defs/ContentRef" },
+        "recorded_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "AsOf": {
+      "description": "§6.1, API-14: one watermark for each stream a response read.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Watermark" }
+    },
+    "Freshness": {
+      "description": "Per-value staleness (§6.1, API-14, brief §3.1). `observed_at` is when the value was observed; `age_seconds` is whole seconds from then to when the server built the response; `stale` is the server's judgment against the limit `limit_source` names. A stale value is still returned, marked.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "stale", "age_seconds", "limit_source"],
+      "properties": {
+        "observed_at": { "$ref": "#/$defs/Timestamp" },
+        "stale": { "type": "boolean" },
+        "age_seconds": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "limit_source": { "type": "string", "pattern": "^[a-z][a-z0-9_./-]{0,127}$" }
+      }
+    },
+    "QuotedContent": {
+      "description": "API-18: model output (a chat reply, a thesis, a compiler note, a signal model's output), quoted and attributed. It is display text only: no action or control member's type is this one, and nothing in it is an action. `author` is the closed set of authorship labels (journal spec §9's evidence label, mandate spec §6.4 and §8.1): `owner_selected` is shown as \"Output of software you selected\", `platform_authored` as \"Platform-authored\". `event_id` is the journal event that recorded the output; `artifact` the stored output, or null when it is inline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "text", "model_id", "model_version", "produced_at", "event_id", "artifact"],
+      "properties": {
+        "author": { "enum": ["owner_selected", "platform_authored"] },
+        "text": { "type": "string" },
+        "model_id": { "description": "The model registry id, as mandate spec §8.1 writes a signal model's (`quant.momentum`).", "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+        "model_version": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,64}$" },
+        "produced_at": { "$ref": "#/$defs/Timestamp" },
+        "event_id": { "$ref": "#/$defs/EventId" },
+        "artifact": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

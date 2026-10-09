@@ -31,6 +31,20 @@ fn every_error_has_its_stable_code() {
             },
             "rpc_error",
         ),
+        (McpError::ToolNotAllowed, "tool_not_allowed"),
+        (McpError::FundMovementTool, "fund_movement_tool"),
+        (McpError::ContractMissingTool, "contract_missing_tool"),
+        (McpError::ContractDrift, "contract_drift"),
+        (McpError::AuthHostNotPinned, "auth_host_not_pinned"),
+        (McpError::ResourceMismatch, "resource_mismatch"),
+        (McpError::IssuerMismatch, "issuer_mismatch"),
+        (McpError::PkceUnsupported, "pkce_unsupported"),
+        (
+            McpError::RegistrationUnavailable,
+            "registration_unavailable",
+        ),
+        (McpError::ClientSecretIssued, "client_secret_issued"),
+        (McpError::RedirectChanged, "redirect_changed"),
         (McpError::Unimplemented { story: "E7-16" }, "unimplemented"),
     ];
     for (error, code) in cases {

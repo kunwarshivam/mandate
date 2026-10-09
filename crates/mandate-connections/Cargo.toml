@@ -1,0 +1,19 @@
+[package]
+name = "mandate-connections"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Broker connections: the Alpaca OAuth connect core and its guardrails (E10-13, connections spec §5.2, DEC-821)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-domain.workspace = true
+mandate-time.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

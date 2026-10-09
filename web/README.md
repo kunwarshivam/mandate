@@ -23,6 +23,7 @@ npm run dev        # http://127.0.0.1:4317
 npm run lint
 npm run typecheck
 npm test
+npm run pending    # every pending test fails at its stub when un-skipped (DEC-750)
 npm run build && npm start
 npm run shots      # every screen as PNG files with a contact sheet in .shots/, against a running dev server (DEC-516)
 
@@ -38,7 +39,13 @@ Kumo override in `src/app/kumo-theme.css` must hold in the browser (DEC-200). Lo
 server already on port 4317, which may be `npm run dev`. The browser download comes from `cdn.playwright.dev`.
 
 Next.js telemetry is off when `NEXT_TELEMETRY_DISABLED=1` is set; CI sets it. The app ships no
-analytics, no session replay, and no service worker.
+analytics and no session replay. Its one service worker, `public/push-sw.js` (E8-14, DEC-793),
+only shows web push notifications: one of four fixed sentences for a push that carries exactly a
+notice id and a text key, and on a tap it opens `/n/<notice>`. It has no `fetch` handler, so it
+serves and caches nothing, and it uses no storage; `src/lib/push/worker.test.ts` pins that.
+Settings › Notifications turns it on when `NEXT_PUBLIC_OWLHEAD_VAPID_PUBLIC_KEY` holds the
+deployment's VAPID public key (unpadded base64url); until the workspace API takes a subscription,
+the screen uses a labelled fixture sender.
 
 ### Scenarios (development and the e2e build only)
 
@@ -119,6 +126,16 @@ request, an email and an optional use, in one of two places:
   not configured or the table does not exist yet. Git ignores `.data/`.
 
 A repeat address counts as stored, so the form never says whether someone is already on the list.
+
+## The workspace API client (E11-9)
+
+`src/api/` is the typed client for the [workspace API](../docs/specs/workspace-api.md): paths under
+`/v1/workspaces/{ws}`, one `Idempotency-Key` per gesture kept across retries, every failure as
+`{code, effect}` with an unanswered command reported as `effect: "unknown"`, decimals refused as
+JSON numbers, `as_of` watermarks on every read, and no order-placing method (DEC-528).
+`src/api/mock-server.ts` is a fixture-backed `fetch` for tests and `npm run dev`. The typed
+per-route layer comes once `schemas/workspace-api/` lands; until then the screens still read
+`src/fixtures/` directly.
 
 ## The mock-data rule
 

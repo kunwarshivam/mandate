@@ -1,0 +1,17 @@
+[package]
+name = "mandate-notify"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The closed notice: a minted notice id, its fixed text, the payload, and the link (backlog E8-9, notifications spec §3, §4.2, §4.3)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

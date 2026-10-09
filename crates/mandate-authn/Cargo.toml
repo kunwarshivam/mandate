@@ -1,0 +1,23 @@
+[package]
+name = "mandate-authn"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Pure authentication: OIDC token verification against a supplied key set, and sessions (backlog E9-1, identity spec §6)"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+mandate-identity.workspace = true
+mandate-identity-seal.workspace = true
+mandate-time.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

@@ -1,0 +1,20 @@
+[
+  {
+    "label": "step_up null, forwarded to the runtime",
+    "set": {
+      "/step_up": null
+    }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
+  }
+]

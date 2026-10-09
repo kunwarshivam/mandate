@@ -1,0 +1,47 @@
+[
+  {
+    "label": "a new mandate with no step-up",
+    "set": {
+      "/agent_id": null,
+      "/base_version": null,
+      "/classification_shown": "neutral",
+      "/step_up": null
+    }
+  },
+  {
+    "label": "auto: /agent_id null",
+    "set": {
+      "/agent_id": null
+    }
+  },
+  {
+    "label": "auto: /base_version null",
+    "set": {
+      "/base_version": null
+    }
+  },
+  {
+    "label": "auto: /classification_shown = \"risk_increasing\"",
+    "set": {
+      "/classification_shown": "risk_increasing"
+    }
+  },
+  {
+    "label": "auto: /classification_shown = \"risk_reducing\"",
+    "set": {
+      "/classification_shown": "risk_reducing"
+    }
+  },
+  {
+    "label": "auto: /classification_shown = \"neutral\"",
+    "set": {
+      "/classification_shown": "neutral"
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
+  }
+]
