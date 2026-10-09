@@ -664,9 +664,9 @@ fn depths(trace: &Trace) -> Vec<(&str, u16)> {
 /// §4.8.1's fill row, DEC-772 items 4 and 5: a fill links each `OrderSubmitted` of its
 /// `client_order_id` with a lower `seq` on its own account stream, versions 1 and 2 alike, in `seq`
 /// order. A later attempt, another account's, and another order's are no targets; a fill whose
-/// order has only a later submission reads one `not_recorded`. A version-1 submission with no
-/// `causation_id` ends the walk (§4.8.1's version-1 row); a version-2 one leads to its companion, whose
-/// null `intent_id` is no link.
+/// order has only a later submission reads one `not_recorded`. A version-1 submission names no
+/// intent, so it shows one `payload.intent_id` `not_recorded` and nothing further (DEC-761 item 3,
+/// DEC-775 item 1); a version-2 one leads to its companion, whose null `intent_id` is no link.
 #[test]
 #[ignore = "pending E12-1"]
 fn a_fill_links_each_earlier_submission_of_its_order_on_its_account() {
@@ -697,6 +697,7 @@ fn a_fill_links_each_earlier_submission_of_its_order_on_its_account() {
     let expected = [
         shown(&fill, ORDER, &first),
         shown(&fill, ORDER, &second),
+        hop(&first, INTENT, None, HopStatus::NotRecorded),
         shown(&second, "causation_id", &request),
     ];
     let want = [(&fill, 0), (&first, 1), (&second, 1), (&request, 2)];
