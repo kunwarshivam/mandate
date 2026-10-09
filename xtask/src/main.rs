@@ -1741,24 +1741,32 @@ fn resolved_live_problems(
         .flatten()
         .filter_map(|enabled| enabled.strip_prefix("dep:"))
         .collect();
-    let mut builds = vec![("the default build".to_owned(), Vec::new(), false)];
+    let mut builds = vec![("the default build".to_owned(), Vec::new(), true)];
+    let mut problems = Vec::new();
     for file in workflows
         .iter()
         .filter(|file| file.path.starts_with(".github/workflows/"))
     {
-        for invocation in workflow_cargo_invocations(file) {
+        let (invocations, unread) = read_workflow(file);
+        for (number, job, why) in unread {
+            problems.push(format!(
+                "{}:{number}: {job}: {why}, so the line cannot be read and the check cannot judge \
+                 it (DEC-868 item 3)",
+                file.path
+            ));
+        }
+        for invocation in invocations {
             let at = format!(
                 "{}: job `{}`, `cargo {}`",
                 file.path,
                 invocation.job,
                 invocation.words.join(" ")
             );
-            builds.push((at, invocation.words, invocation.moved));
+            builds.push((at, invocation.words, false));
         }
     }
-    let mut problems = Vec::new();
     let mut compile_only_seen = false;
-    for (at, words, moved) in builds {
+    for (at, words, default_build) in builds {
         if words.iter().any(|word| word.contains(['$', '`'])) {
             problems.push(format!("{at}: words the shell expands cannot be resolved"));
             continue;
@@ -1785,7 +1793,10 @@ fn resolved_live_problems(
             ));
         }
         compile_only_seen |= compile_only;
-        let reached = reached_ids(&resolve, &selected_ids(meta, &resolve, &words, moved));
+        let reached = reached_ids(
+            &resolve,
+            &selected_ids(meta, &resolve, &words, default_build),
+        );
         for node in &resolve.nodes {
             let name = node_name(meta, &node.id);
             let runner_allowed = compile_only && runner == Some(name);
@@ -1816,21 +1827,23 @@ fn resolved_live_problems(
 
 /// The ids of `resolve` an invocation's `words` select, which a build starts from: each package
 /// `-p`/`--package` names, every member less each `--exclude` under `--workspace` or `--all`, and
-/// otherwise `meta`'s default members (`[]` is the default build). A selection the check cannot
-/// match to a node, a pattern or an unknown name, selects every member, so it can only refuse more;
-/// so does a build that may run from another directory (`moved`, a `cd` or a `working-directory`)
-/// or names `--manifest-path`, since cargo then builds the package there (#1169 review, major).
+/// otherwise every member. Only the check's own `default_build`, run at the root, selects `meta`'s
+/// default members (DEC-868 item 2): a workflow's cargo may run in any directory (a `cd`, a
+/// `working-directory`, an alias), and cargo then builds the package there, so no directory change
+/// can narrow a selection (#1169 round 2 review, major; DEC-176 tightening). A selection the check
+/// cannot match to a node (a pattern or an unknown name) and `--manifest-path` select every member
+/// too, so each can only refuse more; `cargo install --path` names no package, so it does.
 fn selected_ids<'a>(
     meta: &'a Metadata,
     resolve: &'a Resolve,
     words: &[String],
-    moved: bool,
+    default_build: bool,
 ) -> BTreeSet<&'a str> {
     let (mut named, mut excluded, mut whole) = (Vec::new(), Vec::new(), false);
     let members = || meta.workspace_members.iter().map(String::as_str).collect();
     let elsewhere =
         |word: &String| word == "--manifest-path" || word.starts_with("--manifest-path=");
-    if moved || words.iter().take_while(|word| *word != "--").any(elsewhere) {
+    if words.iter().take_while(|word| *word != "--").any(elsewhere) {
         return members();
     }
     let mut rest = words.iter().map(String::as_str);
@@ -1857,12 +1870,15 @@ fn selected_ids<'a>(
         all.retain(|id| !excluded.contains(&node_name(meta, id)));
         return all;
     }
-    if named.is_empty() {
+    if named.is_empty() && default_build {
         return meta
             .workspace_default_members
             .iter()
             .map(String::as_str)
             .collect();
+    }
+    if named.is_empty() {
+        return members();
     }
     let mut ids = BTreeSet::new();
     for spec in named {
@@ -2009,33 +2025,34 @@ fn is_compile_only(words: &[String], runner: &str) -> bool {
             .all(|item| *item == LIVE || *item == runner_live)
 }
 
-/// The numbers of a workflow's job keys, each with its job: the keys one level inside the
-/// top-level `jobs:`.
-fn workflow_jobs(text: &str) -> BTreeMap<usize, String> {
-    let mut jobs = BTreeMap::new();
-    let (mut inside, mut column) = (false, None);
+/// Each line of a workflow by number, with the top-level key it sits under and, under the
+/// top-level `jobs:`, the job key one level inside it.
+fn workflow_sections(text: &str) -> BTreeMap<usize, (String, Option<String>)> {
+    let mut sections = BTreeMap::new();
+    let (mut top, mut job, mut column) = (String::new(), None::<String>, None);
     for (number, line) in (1_usize..).zip(text.lines()) {
         let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
         let indent = line.len().saturating_sub(trimmed.len());
-        if indent == 0 {
-            inside = trimmed.trim_end() == "jobs:";
-            column = None;
-            continue;
+        let content = !trimmed.is_empty() && !trimmed.starts_with('#');
+        if content && indent == 0 {
+            top = trimmed
+                .split(':')
+                .next()
+                .unwrap_or(trimmed)
+                .trim()
+                .to_owned();
+            (job, column) = (None, None);
+        } else if content && top == "jobs" {
+            let at = *column.get_or_insert(indent);
+            if indent == at
+                && let Some((key, _)) = trimmed.split_once(':')
+            {
+                job = Some(key.trim().to_owned());
+            }
         }
-        if !inside {
-            continue;
-        }
-        let at = *column.get_or_insert(indent);
-        if indent == at
-            && let Some((key, _)) = trimmed.split_once(':')
-        {
-            jobs.insert(number, key.trim().to_owned());
-        }
+        sections.insert(number, (top.clone(), job.clone()));
     }
-    jobs
+    sections
 }
 
 /// One cargo invocation of a workflow's `run:` steps.
@@ -2044,58 +2061,174 @@ struct CargoInvocation {
     job: String,
     /// Its words after `cargo`.
     words: Vec<String>,
-    /// Whether it may run outside the repository root: a `cd` or `pushd` comes before it in its
-    /// job, or a `working-directory:` is set in its job or outside every job.
-    moved: bool,
 }
 
-/// The jobs of `file` (by name) in which a `working-directory:` is set, and whether one is set
-/// outside the top-level `jobs:` (a workflow's `defaults:`), which moves every job.
-fn working_directory_jobs(text: &str, jobs: &BTreeMap<usize, String>) -> (BTreeSet<String>, bool) {
-    let (mut moved, mut everywhere) = (BTreeSet::new(), false);
-    let mut top_level = "";
+/// A line of a workflow the check cannot read: its number, the job it sits in (in backticks, or
+/// the line), and why.
+type UnreadLine = (usize, String, &'static str);
+
+/// `line` up to a comment: a `#` that starts a word outside quotes, as YAML and the shell read it.
+fn uncommented(line: &str) -> &str {
+    let (mut quote, mut escaped, mut word_start) = (None, false, true);
+    for (at, c) in line.char_indices() {
+        match (quote, c) {
+            _ if escaped => escaped = false,
+            (q, '\\') if q != Some('\'') => escaped = true,
+            (None, '#') if word_start => return line.get(..at).unwrap_or(line),
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(open), _) if c == open => quote = None,
+            _ => {}
+        }
+        word_start = quote.is_none() && c.is_whitespace();
+    }
+    line
+}
+
+/// How many words of `line`, outside its comment and split on anything but letters, digits, `_`,
+/// `.`, `/` and `-`, name cargo ([`is_cargo`]).
+fn cargo_words(line: &str) -> usize {
+    uncommented(line)
+        .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-')))
+        .filter(|piece| is_cargo(piece))
+        .count()
+}
+
+/// Whether a cargo invocation's `words` change the directory cargo reads before its subcommand:
+/// `-C <dir>`, glued or after flags that take no value (`-vC`), up to a `--`.
+fn cargo_changes_directory(words: &[String]) -> bool {
+    words.iter().take_while(|word| *word != "--").any(|word| {
+        word.strip_prefix('-')
+            .filter(|rest| !rest.starts_with('-'))
+            .is_some_and(|rest| {
+                rest.trim_start_matches(['v', 'q', 'r', 'h', 'V'])
+                    .starts_with('C')
+            })
+    })
+}
+
+/// Whether a command's wrapper words, those before its command word, change the directory it runs
+/// in: `env -C`/`--chdir` or `sudo -D`/`--chdir`.
+fn wrapper_changes_directory(prefix: &[&str]) -> bool {
+    let mut wrapper = "";
+    prefix.iter().any(|word| {
+        let base = word.rsplit('/').next().unwrap_or(word);
+        if WRAPPERS.iter().any(|(name, ..)| *name == base) {
+            wrapper = base;
+            return false;
+        }
+        word.starts_with("--chdir")
+            || (wrapper == "env" && word.starts_with("-C"))
+            || (wrapper == "sudo" && word.starts_with("-D"))
+    })
+}
+
+/// Whether a flow collection, the text from its `{` or `[`, is one the line reader may read: an
+/// empty one, or a sequence of plain or quoted scalars on one line, which holds no key and so no
+/// `run:` or `working-directory` (the repository's `needs:` and matrix lists).
+fn flow_is_flat(flow: &str) -> bool {
+    let flow = flow.trim_end();
+    flow == "{}"
+        || flow
+            .strip_prefix('[')
+            .and_then(|inner| inner.strip_suffix(']'))
+            .is_some_and(|inner| !inner.contains(['{', '[', ']', ':', '&', '*', '!']))
+}
+
+/// The YAML shapes of `text` the line reader cannot follow, each with its line number and why:
+/// an anchor, alias, explicit tag or merge key anywhere, a quoted mapping key, and a flow
+/// collection under `jobs:` or `defaults:` that is not [`flow_is_flat`]. Block scalars' text is
+/// not YAML and is skipped.
+fn unread_yaml_lines(
+    text: &str,
+    sections: &BTreeMap<usize, (String, Option<String>)>,
+) -> Vec<(usize, &'static str)> {
+    let mut unread = Vec::new();
+    let mut scalar_above = None;
     for (number, line) in (1_usize..).zip(text.lines()) {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        let trimmed = uncommented(line.trim_start()).trim_end();
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if scalar_above.is_some_and(|column| trimmed.is_empty() || indent > column) {
             continue;
         }
-        if line.len() == trimmed.len() {
-            top_level = trimmed.split(':').next().unwrap_or(trimmed).trim();
-            continue;
+        scalar_above = None;
+        let mut node = trimmed;
+        while let Some(after) = node
+            .strip_prefix('-')
+            .filter(|after| after.is_empty() || after.starts_with(' '))
+        {
+            node = after.trim_start();
         }
-        let key = trimmed.trim_start_matches([' ', '-']).split(':').next();
-        if key.map(str::trim) != Some("working-directory") {
-            continue;
+        let quoted_key = node
+            .strip_prefix(['"', '\''])
+            .and_then(|rest| rest.split_once(node.chars().next().unwrap_or('"')))
+            .is_some_and(|(_, after)| after.trim_start().starts_with(':'));
+        let (key, value) = match node.split_once(": ") {
+            Some((key, value)) => (key, value.trim_start()),
+            None => match node.strip_suffix(':') {
+                Some(key) => (key, ""),
+                None => ("", node),
+            },
+        };
+        let in_flow_scope = sections
+            .get(&number)
+            .is_some_and(|(top, _)| top == "jobs" || top == "defaults");
+        if quoted_key {
+            unread.push((number, "a quoted mapping key"));
         }
-        match jobs.range(..=number).next_back() {
-            Some((_, job)) if top_level == "jobs" => {
-                moved.insert(job.clone());
+        if key.trim() == "<<" {
+            unread.push((number, "a YAML merge key `<<`"));
+        }
+        for part in [key, value] {
+            match part.chars().next() {
+                Some('&') => unread.push((number, "a YAML anchor `&`")),
+                Some('*') => unread.push((number, "a YAML alias `*`")),
+                Some('!') => unread.push((number, "an explicit YAML tag `!`")),
+                Some('{' | '[') if in_flow_scope && !flow_is_flat(part) => {
+                    unread.push((number, "a flow mapping or sequence"));
+                }
+                _ => {}
             }
-            _ => everywhere = true,
+        }
+        if value.starts_with(['|', '>']) {
+            scalar_above = Some(indent);
         }
     }
-    (moved, everywhere)
+    unread
 }
 
 /// Each cargo invocation of `file`'s `run:` steps, with its job and its words after `cargo`, each
 /// command read up to a shell operator or redirection, its command word found after its
-/// assignments and [`WRAPPERS`].
-fn workflow_cargo_invocations(file: &CiFile) -> Vec<CargoInvocation> {
+/// assignments and [`WRAPPERS`]; and each line the check cannot read: one holding a cargo word
+/// that is not such an invocation (`bash -c 'cargo …'`, `env -S`, a quoted or anchored `run:`, a
+/// cargo in a substitution or in any other key), an invocation that changes cargo's directory
+/// (`cargo -C`, `env -C`/`--chdir`), and the YAML shapes of [`unread_yaml_lines`] (#1169 round 2
+/// review, major; DEC-176 tightening).
+fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
     let run_lines = block_lines(&file.text, "run");
-    let jobs = workflow_jobs(&file.text);
-    let (mut moved_jobs, everywhere) = working_directory_jobs(&file.text, &jobs);
+    let sections = workflow_sections(&file.text);
+    let job_at = |number: usize| match sections.get(&number) {
+        Some((top, Some(job))) if top == "jobs" => format!("job `{job}`"),
+        _ => format!("line {number}"),
+    };
     let mut invocations = Vec::new();
+    let mut unread: Vec<UnreadLine> = unread_yaml_lines(&file.text, &sections)
+        .into_iter()
+        .map(|(number, why)| (number, job_at(number), why))
+        .collect();
     for (number, line) in logical_lines(&file.path, &file.text) {
-        if !run_lines.contains(&number) {
-            continue;
-        }
-        let job = jobs
-            .range(..=number)
-            .next_back()
-            .map_or_else(|| format!("line {number}"), |(_, job)| job.clone());
+        let job = sections
+            .get(&number)
+            .and_then(|(_, job)| job.clone())
+            .unwrap_or_else(|| format!("line {number}"));
+        let mut judged = 0_usize;
         let mut commands = vec![Vec::new()];
         let mut open = true;
-        for token in shell_tokens(&line, &mut Vec::new()) {
+        let tokens = if run_lines.contains(&number) {
+            shell_tokens(&line, &mut Vec::new())
+        } else {
+            Vec::new()
+        };
+        for token in tokens {
             match token {
                 ShellToken::Word(word, _) if open => {
                     if let Some(command) = commands.last_mut() {
@@ -2116,21 +2249,36 @@ fn workflow_cargo_invocations(file: &CiFile) -> Vec<CargoInvocation> {
                 .map(String::as_str)
                 .skip_while(|word| is_skipped_word(word))
                 .collect();
-            let Some((command_word, args)) = unwrapped(&named).split_first() else {
+            let tail = unwrapped(&named);
+            let Some((command_word, args)) = tail.split_first() else {
                 continue;
             };
-            if matches!(*command_word, "cd" | "pushd") {
-                moved_jobs.insert(job.clone());
-            } else if is_cargo(command_word) {
-                invocations.push(CargoInvocation {
-                    job: job.clone(),
-                    words: args.iter().map(|word| (*word).to_owned()).collect(),
-                    moved: everywhere || moved_jobs.contains(&job),
-                });
+            if !is_cargo(command_word) {
+                continue;
             }
+            judged = judged.saturating_add(1);
+            let words: Vec<String> = args.iter().map(|word| (*word).to_owned()).collect();
+            let prefix = named
+                .get(..named.len().saturating_sub(tail.len()))
+                .unwrap_or_default();
+            if cargo_changes_directory(&words) || wrapper_changes_directory(prefix) {
+                unread.push((number, job_at(number), "cargo runs in another directory"));
+            }
+            invocations.push(CargoInvocation {
+                job: job.clone(),
+                words,
+            });
+        }
+        if cargo_words(&line) > judged {
+            unread.push((
+                number,
+                job_at(number),
+                "a `cargo` word the check does not read as an invocation it judges",
+            ));
         }
     }
-    invocations
+    unread.sort_unstable();
+    (invocations, unread)
 }
 
 /// The [`Resolve`] `cargo metadata --format-version 1 --locked` gives at `root` for the
@@ -11166,7 +11314,6 @@ jq -r "$filter" "$src"
     /// mapping and flat flow sequences of scalars, which hide no key, is not flagged (#1169 round
     /// 2 review; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_plain_block_style_workflow_is_not_flagged() -> Result<()> {
         let flows = [ci_file(
             ".github/workflows/ci.yml",
@@ -11187,7 +11334,6 @@ jq -r "$filter" "$src"
     /// `--path` in either spelling, selects every member too; a `-p` build of another crate
     /// does not.
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_build_naming_no_package_selects_every_member() -> Result<()> {
         let flows = [workflow(&[
             ("bare", "cargo test"),
@@ -11211,7 +11357,6 @@ jq -r "$filter" "$src"
     /// `+toolchain`) change the directory cargo reads, so the build cannot be read, and with no
     /// `-p` it holds the live-only member too (#1169 round 2 review, major; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_directory_change_by_env_or_cargo_cannot_be_read() -> Result<()> {
         let jobs = [
             ("env-c", "env -C crates/rh-host cargo test"),
@@ -11242,7 +11387,6 @@ jq -r "$filter" "$src"
     /// `env --split-string`) hides the invocation from the reader, so it cannot be read (#1169
     /// round 2 review, major; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_shell_string_holding_cargo_cannot_be_read() -> Result<()> {
         let jobs = [
             ("bash-c", "bash -c 'cargo test'"),
@@ -11263,7 +11407,6 @@ jq -r "$filter" "$src"
     /// step, flow `defaults`, an explicit tag) cannot be read, and a build it moves that names no
     /// package holds the live-only member (#1169 round 2 review, major; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_working_directory_in_an_unread_yaml_shape_cannot_be_read() -> Result<()> {
         let flows = [ci_file(
             ".github/workflows/ci.yml",
@@ -11294,7 +11437,6 @@ jq -r "$filter" "$src"
     /// cannot be read, and so is each anchor, one holding no `cargo` (`setup`) as much as one that
     /// does (#1169 round 2 review, major; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_yaml_anchor_alias_or_merge_cannot_be_read() -> Result<()> {
         let flows = [
             ci_file(
@@ -11330,7 +11472,6 @@ jq -r "$filter" "$src"
     /// anchored or tagged value, a quoted `run` key, a flow step) cannot be read (#1169 round 2
     /// review, major; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_run_value_hiding_cargo_cannot_be_read() -> Result<()> {
         let flows = [ci_file(
             ".github/workflows/ci.yml",
