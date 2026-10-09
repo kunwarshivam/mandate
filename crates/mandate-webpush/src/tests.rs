@@ -124,6 +124,7 @@ fn the_closed_tables_are_the_specs() {
         (WebPushError::Signer, "signer"),
         (WebPushError::TooLarge, "too_large"),
         (WebPushError::Clock, "clock"),
+        (WebPushError::InvalidNotice, "invalid_notice"),
     ];
     for (error, code) in codes {
         assert_eq!(error.code(), code);
@@ -748,4 +749,288 @@ fn a_relayed_subject_is_a_role_mailbox_never_a_person() -> Result<(), WebPushErr
         assert_eq!(checked, Err(WebPushError::InvalidSubject), "{uri}");
     }
     Ok(())
+}
+
+/// The bridge from the closed notice (DEC-790 item 7, DEC-713, E8-14). Every expectation is
+/// written here from spec §3.2, §4.2, §4.3 and §4.6 and DEC-790 item 2, never read from the
+/// bridge: the wire shape, the text key per kind, the 128-octet record and the 512-octet cap, and
+/// the fixed origin the service worker opens.
+mod bridge {
+    use super::{
+        ENDPOINT, PADDED_RECORD_LEN, PushPlaintext, encrypt, open, seeded_random, subscription,
+    };
+    use mandate_notify::canary::{CANARIES, scan};
+    use mandate_notify::{
+        Class, NoticeId, NoticeKind, Notification, NotifyError, Origin, SecureRandom, TextKey, link,
+    };
+    use std::error::Error;
+
+    type Checked = Result<(), Box<dyn Error>>;
+
+    /// An address and a person's name, the data NT-2 and NT-1 name beyond [`CANARIES`], each at
+    /// most 16 octets so it fits a notice id's bits, and each holding `z` or `q` so no hex digit,
+    /// key, or fixed text holds one.
+    const PERSONAL: [&str; 2] = ["zqaddr@x.invalid", "zq alice smith"];
+    /// The relay's cap on a ciphertext (spec §4.6).
+    const RELAY_CAP: usize = 512;
+    /// One record of 128 octets less its `0x02` delimiter (DEC-790 item 2).
+    const PLAINTEXT_BOUND: usize = 127;
+    /// The `aes128gcm` header (salt 16, record size 4, key id length 1, key id 65), one padded
+    /// record of 128, and its 16-octet tag: 230 octets for every notice (DEC-790 item 2).
+    const BODY_LEN: usize = 16 + 4 + 1 + 65 + 128 + 16;
+    const APP_ORIGIN: &str = "https://app.example.invalid";
+
+    /// A random source that hands over the bits it holds, so a test plants what a notice id is.
+    struct Planted([u8; 16]);
+
+    impl SecureRandom for Planted {
+        fn fill(&mut self, bytes: &mut [u8; 16]) -> Result<(), NotifyError> {
+            *bytes = self.0;
+            Ok(())
+        }
+    }
+
+    fn bits_of(text: &str) -> [u8; 16] {
+        let mut bits = [0u8; 16];
+        for (slot, byte) in bits.iter_mut().zip(text.bytes()) {
+            *slot = byte;
+        }
+        bits
+    }
+
+    fn notice(bits: [u8; 16]) -> Result<NoticeId, NotifyError> {
+        NoticeId::mint(&mut Planted(bits))
+    }
+
+    fn hex(bits: [u8; 16]) -> String {
+        bits.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn contains(haystack: &[u8], needle: &str) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+    }
+
+    /// Spec §4.2's wire key for each text key, written by hand.
+    fn wire(text: TextKey) -> &'static str {
+        match text {
+            TextKey::ApprovalNeeded => "approval_needed",
+            TextKey::AttentionNeeded => "attention_needed",
+            TextKey::AccountChanged => "account_changed",
+            TextKey::BriefReady => "brief_ready",
+        }
+    }
+
+    /// Spec §3.2's catalogue, written by hand: each kind's class and the text key its push carries,
+    /// or none for an `info` kind that goes only to the pull channels and the brief (§3.1). The
+    /// `match` has no wildcard, so a new kind fails to compile here until its row is written.
+    fn catalogue(kind: NoticeKind) -> (Class, Option<TextKey>) {
+        use NoticeKind as K;
+        match kind {
+            K::ApprovalRequested | K::ApprovalReminder => {
+                (Class::Action, Some(TextKey::ApprovalNeeded))
+            }
+            K::RiskLimit
+            | K::KillSwitch
+            | K::AgentHeld
+            | K::AccountRestriction
+            | K::Protection
+            | K::ExitStalled
+            | K::Reconciliation
+            | K::ExternalActivity
+            | K::AccountState
+            | K::DataFeedDown
+            | K::IntegrityIncident => (Class::Safety, Some(TextKey::AttentionNeeded)),
+            K::CredentialAdded
+            | K::NewDevice
+            | K::NotificationAddressChanged
+            | K::RecoveryUsed
+            | K::RoleGranted
+            | K::MemberDeactivated
+            | K::Deprovisioned
+            | K::BreakGlass
+            | K::VersionRiskIncreasing
+            | K::DelegationAdded
+            | K::ConnectionAdded
+            | K::WentLive
+            | K::ClientConnected
+            | K::ChannelLost => (Class::Safety, Some(TextKey::AccountChanged)),
+            K::DailyBrief => (Class::Info, Some(TextKey::BriefReady)),
+            K::DelegationEnded
+            | K::ModelStatus
+            | K::ResearchStatus
+            | K::SpendCap
+            | K::ApprovalClosed => (Class::Info, None),
+        }
+    }
+
+    /// NT-1, spec §4.2, DEC-790 item 7: the plaintext is the notice id's 32 hex digits and the text
+    /// key, and nothing else. Each canary NT-1 names, and an address and a person's name, is
+    /// planted as the bits of a notice id, the one field through which data could enter, under
+    /// every text key; the oracle is first shown to find each in the planted bits.
+    #[test]
+    #[ignore = "pending E8-14"]
+    fn the_plaintext_carries_only_the_notice_id_and_its_text_key() -> Checked {
+        let kind_keys: Vec<&str> = NoticeKind::ALL
+            .iter()
+            .map(|kind| kind.key())
+            .collect::<Result<_, _>>()?;
+        let planted: Vec<&str> = CANARIES.iter().chain(PERSONAL.iter()).copied().collect();
+        for canary in planted {
+            assert!(canary.len() <= 16, "{canary} fits a notice id");
+            let bits = bits_of(canary);
+            assert!(contains(&bits, canary), "the oracle finds {canary} planted");
+            for text in TextKey::ALL {
+                let plaintext = PushPlaintext::of(&Notification {
+                    notice: notice(bits)?,
+                    text,
+                })?;
+                let bytes = plaintext.as_bytes();
+                assert_eq!(scan(bytes)?, Vec::<&str>::new(), "NT-1: {canary}");
+                assert!(!contains(bytes, canary), "NT-1, NT-2: {canary}");
+                let expected = format!(r#"{{"notice":"{}","text":"{}"}}"#, hex(bits), wire(text));
+                assert_eq!(bytes, expected.as_bytes(), "spec §4.2, DEC-790 item 7");
+                for key in &kind_keys {
+                    assert!(!contains(bytes, key), "spec §4.2: no kind, {key}");
+                }
+                for class in ["action", "safety", "info"] {
+                    assert!(!contains(bytes, class), "spec §4.2: no class, {class}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Spec §3.2, §4.6, DEC-790 item 2: every kind that pushes gives a plaintext within one padded
+    /// record, whose body is 230 octets under the relay's 512, carrying the text key its row names;
+    /// the kinds with no text key are exactly the five pull-only `info` kinds. Every class is met.
+    #[test]
+    #[ignore = "pending E8-14"]
+    fn every_kind_that_pushes_fits_one_record_under_the_relays_cap() -> Checked {
+        assert_eq!(PADDED_RECORD_LEN, PLAINTEXT_BOUND + 1, "DEC-790 item 2");
+        let mut classes = Vec::new();
+        let mut pull_only = Vec::new();
+        for (row, kind) in NoticeKind::ALL.into_iter().enumerate() {
+            let (class, text) = catalogue(kind);
+            let name = kind.key()?;
+            assert_eq!(kind.class()?, class, "spec §3.2: {name}");
+            assert_eq!(kind.text_key()?, text, "spec §3.2: {name}");
+            let Some(text) = text else {
+                pull_only.push(name);
+                continue;
+            };
+            if !classes.contains(&class) {
+                classes.push(class);
+            }
+            let filled = u8::try_from(row)?.wrapping_mul(37).wrapping_add(0xf1);
+            let plaintext = PushPlaintext::of(&Notification {
+                notice: notice([filled; 16])?,
+                text,
+            })?;
+            let bytes = plaintext.as_bytes();
+            assert!(
+                bytes.len() <= PLAINTEXT_BOUND,
+                "DEC-790 item 2: {name} is {} octets",
+                bytes.len()
+            );
+            let suffix = format!(r#"","text":"{}"}}"#, wire(text));
+            assert!(bytes.ends_with(suffix.as_bytes()), "spec §3.2: {name}");
+            let body = encrypt(
+                &subscription(ENDPOINT)?,
+                &plaintext,
+                &mut seeded_random([3; 32]),
+            )?;
+            assert_eq!(body.len(), BODY_LEN, "DEC-790 item 2: {name}");
+            assert!(body.len() <= RELAY_CAP, "spec §4.6: {name}");
+            assert_eq!(open(&body).get(..bytes.len()), Some(bytes), "{name}");
+        }
+        assert_eq!(classes, [Class::Action, Class::Safety, Class::Info]);
+        assert_eq!(
+            pull_only,
+            [
+                "delegation_ended",
+                "model_status",
+                "research_status",
+                "spend_cap",
+                "approval_closed"
+            ],
+            "spec §3.1: of the info kinds only the brief pushes"
+        );
+        Ok(())
+    }
+
+    /// Replay: the same notification gives the same bytes, however often and from whichever copy;
+    /// a different id or text key gives different bytes, so the sameness is not a constant.
+    #[test]
+    #[ignore = "pending E8-14"]
+    fn the_same_notification_gives_the_same_plaintext() -> Checked {
+        for (row, text) in TextKey::ALL.into_iter().enumerate() {
+            let bits = [u8::try_from(row)?.wrapping_add(0x5a); 16];
+            let notification = Notification {
+                notice: notice(bits)?,
+                text,
+            };
+            let first = PushPlaintext::of(&notification)?;
+            let copy = notification;
+            assert_eq!(PushPlaintext::of(&copy)?.as_bytes(), first.as_bytes());
+            assert_eq!(
+                PushPlaintext::of(&notification)?.as_bytes(),
+                first.as_bytes()
+            );
+            let reminted = Notification {
+                notice: notice(bits)?,
+                text,
+            };
+            assert_eq!(PushPlaintext::of(&reminted)?.as_bytes(), first.as_bytes());
+            let mut other = bits;
+            if let Some(last) = other.last_mut() {
+                *last ^= 1;
+            }
+            let moved = Notification {
+                notice: notice(other)?,
+                text,
+            };
+            assert_ne!(PushPlaintext::of(&moved)?.as_bytes(), first.as_bytes());
+            for different in TextKey::ALL.into_iter().filter(|k| *k != text) {
+                let rekeyed = Notification {
+                    notice: notice(bits)?,
+                    text: different,
+                };
+                assert_ne!(PushPlaintext::of(&rekeyed)?.as_bytes(), first.as_bytes());
+            }
+        }
+        Ok(())
+    }
+
+    /// Spec §4.3, §4.6, §9: the plaintext carries no link, so none can be built from data; the one
+    /// link a tap opens is the service worker's, the fixed origin, `/n/`, and the notice id, and
+    /// the id the plaintext carries rebuilds exactly that link.
+    #[test]
+    #[ignore = "pending E8-14"]
+    fn the_only_link_is_the_fixed_origin_and_the_notice_id() -> Checked {
+        let origin = Origin::parse(APP_ORIGIN)?;
+        let prefix = r#"{"notice":""#;
+        for bits in [[0u8; 16], [0xff; 16], bits_of("zqinstrument")] {
+            for text in TextKey::ALL {
+                let notification = Notification {
+                    notice: notice(bits)?,
+                    text,
+                };
+                let plaintext = PushPlaintext::of(&notification)?;
+                let written = std::str::from_utf8(plaintext.as_bytes())?;
+                for marker in ["://", "/", "http", "www.", "?", "#", "@", "%", "\\"] {
+                    assert!(!written.contains(marker), "spec §9: no link, {marker}");
+                }
+                let after = written.strip_prefix(prefix).unwrap_or_default();
+                let (id, rest) = after.split_at_checked(32).unwrap_or_default();
+                let members = format!(r#"","text":"{}"}}"#, wire(text));
+                assert_eq!(rest, members, "the notice and the text key, nothing else");
+                assert_eq!(NoticeId::parse(id)?, notification.notice);
+                let opened = link(&origin, &NoticeId::parse(id)?)?;
+                assert_eq!(opened, format!("{APP_ORIGIN}/n/{}", hex(bits)), "spec §4.3");
+            }
+        }
+        Ok(())
+    }
 }

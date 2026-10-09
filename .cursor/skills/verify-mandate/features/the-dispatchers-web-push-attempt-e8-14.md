@@ -6,7 +6,7 @@
   DEC-727, DEC-724 item 4 (the relay's `address_rejected` marks the address), DEC-728 (a relay
   refusal for a fault in the deployment's own request, and a relayed subject that is not a role
   mailbox, is a permanent `provider_error`), DEC-790 item 4 (`exp` 12 hours after the attempt).
-- **Code:** `mandate-dispatcher` (layer 3, safety-critical, over `mandate-notify`,
+- **Code:** `mandate-dispatcher` (layer 4, safety-critical, over `mandate-notify`,
   `mandate-webpush` and `mandate-push-relay`): `crates/mandate-dispatcher/src/lib.rs` (`prepare`,
   `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, the closed `DispatchError`). A
   relayed attempt checks its subject before it signs; every attempt signs its own header with its
