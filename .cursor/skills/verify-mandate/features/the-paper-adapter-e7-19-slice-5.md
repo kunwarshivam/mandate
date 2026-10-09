@@ -7,6 +7,9 @@
   (`Args`, `Ports`, `Outcome`, `PaperError`, `run`), which hands the model host's output and its
   stored closes to `mandate-shell`'s `ProductionCycle::run_observed`. Pending E7-19.
 - **Tests:** `crates/mandate-paper/tests/run.rs` (one order through the cycle after the closes are
-  stored, a dry run that sends nothing, a `Flat` model that stores and sends nothing), over
-  `crates/mandate-shell/tests/common/mod.rs`'s SPY deployment and recorded broker answers.
+  stored, a dry run that sends nothing and keeps no journal, a `Flat` model, the refusals before
+  any credential, SPY and AAPL from journaled inputs alone, a held position, stale bars, the
+  closing window, and a stop's message), over `crates/mandate-shell/tests/common/mod.rs`'s
+  deployment and recorded broker answers, and `crates/mandate-paper/tests/args.rs` (the
+  arguments).
 - **Run:** `cargo nextest run -p mandate-paper --run-ignored only` (pending until E1a lands).
