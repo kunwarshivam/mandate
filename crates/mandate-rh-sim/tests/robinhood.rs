@@ -820,7 +820,6 @@ fn cancel_answered(bend: Bend) -> (Result<BrokerOutcome, ConnectorError>, String
 /// showing the order still working, part filled or filled is that order, read as §6.2 says, so the
 /// executor keeps the cancel unconfirmed and holds the reservation and the exit behind it.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_answered_with_an_order_not_cancelled_is_that_order_never_cancel_accepted() {
     for (state, filled, status, bend) in NOT_CANCELLED {
         let (outcome, order_id) = cancel_answered(bend);
@@ -849,7 +848,6 @@ fn a_cancel_answered_with_an_order_not_cancelled_is_that_order_never_cancel_acce
 
 /// DEC-867 item 2: the answer that shows the order `cancelled` is the broker's confirmation.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_answered_with_the_order_cancelled_is_cancel_accepted() {
     let (outcome, _) = cancel_answered(|r| showing(r, "cancelled", "0"));
     let id = key("01JOPEN").as_str().to_owned();

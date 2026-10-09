@@ -44,10 +44,10 @@ pub trait Tools {
 pub struct RobinhoodConnector<T> {
     tools: T,
     account_number: String,
-    /// The broker's `order_id` of each order a place answered, by our key, which is what a
-    /// `Cancel` goes by. Held in memory only: its rebuild from the journal at start is C3's
+    /// The order each place answered, by our key: its broker `order_id` is what a `Cancel` goes
+    /// by, and its instrument and side are what a cancel's answer is read against. Held in memory only: its rebuild from the journal at start is C3's
     /// (DEC-860 item 7).
-    order_ids: BTreeMap<ClientOrderId, String>,
+    placed: BTreeMap<ClientOrderId, BrokerOrder>,
     /// The keys whose place went out without a readable answer. One is never placed again, and a
     /// second `Submit` of it is `Unknown` with nothing called (DEC-860 item 4).
     in_doubt: BTreeSet<ClientOrderId>,
@@ -59,7 +59,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         Self {
             tools,
             account_number,
-            order_ids: BTreeMap::new(),
+            placed: BTreeMap::new(),
             in_doubt: BTreeSet::new(),
         }
     }
@@ -94,21 +94,27 @@ impl<T: Tools> RobinhoodConnector<T> {
             .await;
         let placed = placed(order, answer).ok_or(IN_DOUBT)?;
         self.in_doubt.remove(key);
-        self.order_ids
-            .insert(key.clone(), placed.broker_order_id.clone());
+        self.placed.insert(key.clone(), placed.clone());
         Ok(BrokerOutcome::Submitted(placed))
     }
 
     /// `cancel_equity_order` by the broker's `order_id`, on the `RiskReducing` budget. With no
     /// `order_id` recorded the cancel is `NotSent` (`no_order_id`) and nothing is guessed (CN-7).
+    ///
+    /// The answer is the order record. Only one whose `state` reads as cancelled (§6.2) is
+    /// [`BrokerOutcome::CancelAccepted`], the broker's confirmation; any other state is that
+    /// order, as [`BrokerOutcome::Order`], so the executor keeps the cancel unconfirmed and waits
+    /// for the broker's own cancelled state (DEC-867 item 2; trading spec §5.7). A record that
+    /// cannot be read is `Unreadable` (DEC-864).
     async fn cancel(&mut self, key: &ClientOrderId) -> Result<BrokerOutcome, ConnectorError> {
-        let order_id = self
-            .order_ids
+        let placed = self
+            .placed
             .get(key)
             .ok_or(ConnectorError::NotSent {
                 code: "no_order_id",
             })?
             .clone();
+        let order_id = placed.broker_order_id.clone();
         let mut arguments = Map::new();
         arguments.insert(
             "account_number".to_owned(),
@@ -122,7 +128,15 @@ impl<T: Tools> RobinhoodConnector<T> {
             .map_err(|_| IN_DOUBT)?;
         let client_order_id = key.as_str().to_owned();
         match tool_result(&answer).ok_or(ConnectorError::Unreadable { code: "cancel" })? {
-            ToolResult::Content(_) => Ok(BrokerOutcome::CancelAccepted { client_order_id }),
+            ToolResult::Content(record) => {
+                let unreadable = ConnectorError::Unreadable { code: "cancel" };
+                let order = order_record(&record, &placed).ok_or(unreadable)?;
+                if order.status == "canceled" {
+                    Ok(BrokerOutcome::CancelAccepted { client_order_id })
+                } else {
+                    Ok(BrokerOutcome::Order(order))
+                }
+            }
             ToolResult::Refused => Ok(BrokerOutcome::Rejected(BrokerReject {
                 client_order_id: Some(client_order_id),
                 http_status: 0,
@@ -285,6 +299,28 @@ fn placed(order: &SubmitOrder, answer: Result<String, McpError>) -> Option<Broke
     let ToolResult::Content(record) = tool_result(&answer.ok()?)? else {
         return None;
     };
+    let requested = BrokerOrder {
+        broker_order_id: String::new(),
+        client_order_id: Some(order.client_order_id.as_str().to_owned()),
+        instrument: order.instrument.clone(),
+        side: order.side,
+        qty: order.qty,
+        filled_qty: Qty::ZERO,
+        limit_price: order.limit_price,
+        stop_price: order.stop_price,
+        status: String::new(),
+        reject_code: None,
+        replaced_by_broker_order_id: None,
+        legs: Vec::new(),
+        created_on: None,
+    };
+    order_record(&record, &requested)
+}
+
+/// An order record read as an order: no `isError`, an `id`, a `state` of the contract's ten, and
+/// decimal-text numbers (connections spec §6.2 rule 5). Our key, the instrument and the side are
+/// `known`'s, which the record is about; `None` for anything else.
+fn order_record(record: &Map<String, Value>, known: &BrokerOrder) -> Option<BrokerOrder> {
     let text = |field: &str| record.get(field).and_then(Value::as_str);
     let qty = |field: &str| Qty::parse(text(field)?).ok();
     let price = |field: &str| match record.get(field) {
@@ -294,9 +330,9 @@ fn placed(order: &SubmitOrder, answer: Result<String, McpError>) -> Option<Broke
     };
     Some(BrokerOrder {
         broker_order_id: text("id")?.to_owned(),
-        client_order_id: Some(order.client_order_id.as_str().to_owned()),
-        instrument: order.instrument.clone(),
-        side: order.side,
+        client_order_id: known.client_order_id.clone(),
+        instrument: known.instrument.clone(),
+        side: known.side,
         qty: qty("quantity")?,
         filled_qty: qty("filled_quantity")?,
         limit_price: price("limit_price")?,

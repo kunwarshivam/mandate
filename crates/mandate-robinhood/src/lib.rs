@@ -35,14 +35,18 @@ pub enum RobinhoodError {
 /// The `ref_id` for the order with this idempotency key (DEC-860 item 1): a UUID version 8
 /// (RFC 9562 §5.8) whose 122 free bits are the first 16 bytes of the SHA-256 of the key's text,
 /// written in lower case. A restart derives the same value, so a re-sent order carries it.
+///
+/// The version and variant bits are added to the kept bits rather than or-ed in: the two share no
+/// bit, so the sum is the same value and never wraps, but an `|` there could be mutated to `^`
+/// with nothing a test can see, because the bits it sets are the ones the mask has just cleared.
 pub fn ref_id(key: &ClientOrderId) -> Result<String, RobinhoodError> {
     let digest = Digest::of(key.as_str().as_bytes());
     let mut bytes: Vec<u8> = digest.as_bytes().iter().take(16).copied().collect();
     if let Some(version) = bytes.get_mut(6) {
-        *version = (*version & 0x0f) | 0x80;
+        *version = 0x80_u8.wrapping_add(*version & 0x0f);
     }
     if let Some(variant) = bytes.get_mut(8) {
-        *variant = (*variant & 0x3f) | 0x80;
+        *variant = 0x80_u8.wrapping_add(*variant & 0x3f);
     }
     let mut text = String::with_capacity(36);
     for (index, byte) in bytes.iter().enumerate() {
