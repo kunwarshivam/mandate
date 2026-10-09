@@ -212,52 +212,82 @@ fn nothing_that_can_move_funds_out_is_accepted() {
 /// that a lowercase letter follows (`ACHDebit` is `ach`, `debit`); lowercased; and refused when a
 /// token is in DEC-839's set. A name with any character that is not ASCII is refused whatever its
 /// tokens, so a homoglyph cannot spell a fund word past the rule. A word that only contains one,
-/// such as `fundamentals`, is another word.
+/// such as `fundamentals`, is another word. The rule is the same for every kind of grant: a key
+/// permission, an OAuth scope, and an MCP tool.
 #[test]
 #[ignore = "pending E7-12"]
 fn fund_movement_is_judged_by_whole_tokens() {
-    for tool in [
-        "ach_debit",
-        "sendMoney",
-        "initiate-ach-transfer",
-        "get_transfers",
-        "link_ach",
-        "createAchRelationship",
-        "request_payout",
-        "disburse_now",
-        "get_deposits",
-        "add_funds",
-        "ACHDebit",
-        "getACHStatus",
-        "HTTPSend",
-        "v2Transfer",
-        "w\u{456}re",
-    ] {
-        let mut input = robinhood();
-        input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
-        assert_eq!(
-            outcome(&run(&input).unwrap(), Check::Scope),
-            Some(Outcome::Failed(Reason::FundMovement)),
-            "{tool} has a fund-movement token"
-        );
-    }
-    for tool in [
-        "get_fundamentals",
-        "refund_status",
-        "wireless",
-        "resend",
-        "teacher",
-        "URLParser",
-    ] {
-        let mut input = robinhood();
-        input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
-        assert_eq!(
-            outcome(&run(&input).unwrap(), Check::Scope),
-            Some(Outcome::Passed),
-            "{tool} has no fund-movement token"
-        );
+    let kraken_key = |name: &str| CheckInput {
+        broker: Broker::KrakenDerivativesUs,
+        auth_kind: AuthKind::ApiKey,
+        granted: Granted::KeyPermissions(Some(set(&["trade", name]))),
+        ..alpaca()
+    };
+    let alpaca_scope = |name: &str| CheckInput {
+        granted: Granted::OAuth(GrantedScopes(set(&["data", "trading", name]))),
+        ..alpaca()
+    };
+    let robinhood_tool = |name: &str| CheckInput {
+        granted: Granted::Tools(set(&["get_accounts", "place_equity_order", name])),
+        ..robinhood()
+    };
+    type Grant<'a> = &'a dyn Fn(&str) -> CheckInput;
+    let kinds: [(&str, Grant, Outcome); 3] = [
+        ("a key permission", &kraken_key, Outcome::Passed),
+        (
+            "an OAuth scope",
+            &alpaca_scope,
+            Outcome::Failed(Reason::ScopeMismatch),
+        ),
+        ("an MCP tool", &robinhood_tool, Outcome::Passed),
+    ];
+    for (kind, grant, other_word) in kinds {
+        for name in FUND_MOVEMENT_NAMES {
+            assert_eq!(
+                outcome(&run(&grant(name)).unwrap(), Check::Scope),
+                Some(Outcome::Failed(Reason::FundMovement)),
+                "{name} as {kind} has a fund-movement token"
+            );
+        }
+        for name in OTHER_WORDS {
+            assert_eq!(
+                outcome(&run(&grant(name)).unwrap(), Check::Scope),
+                Some(other_word),
+                "{name} as {kind} has no fund-movement token"
+            );
+        }
     }
 }
+
+/// Names with a fund-movement token, one per way a name is split, and a homoglyph.
+const FUND_MOVEMENT_NAMES: [&str; 15] = [
+    "ach_debit",
+    "sendMoney",
+    "initiate-ach-transfer",
+    "get_transfers",
+    "link_ach",
+    "createAchRelationship",
+    "request_payout",
+    "disburse_now",
+    "get_deposits",
+    "add_funds",
+    "ACHDebit",
+    "getACHStatus",
+    "HTTPSend",
+    "v2Transfer",
+    "w\u{456}re",
+];
+
+/// Names that contain a fund word only inside another word: as a scope each is still not
+/// `data` or `trading`, so it is `scope_mismatch`, never `fund_movement`.
+const OTHER_WORDS: [&str; 6] = [
+    "get_fundamentals",
+    "refund_status",
+    "wireless",
+    "resend",
+    "teacher",
+    "URLParser",
+];
 
 /// A pin is made at the first connect only; at every later occasion a missing pin fails closed as
 /// drift (DEC-676 item 2, AGENTS.md rule 3), never as a pass.
