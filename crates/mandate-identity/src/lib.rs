@@ -158,8 +158,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 
+mod matrix;
 mod permission;
 
+use matrix::Column;
 pub use permission::Permission;
 
 /// A principal's opaque ID, a ULID (identity spec §3.1).
@@ -635,8 +637,17 @@ impl OrgContext {
         lookup: &impl MembershipLookup,
         workspace: WorkspaceId,
     ) -> Result<OneWorkspace, Refusal> {
-        let _ = (self, lookup, workspace);
-        Err(Refusal::Unimplemented { story: "E9-2" })
+        let in_org = match &self.workspaces {
+            Some(set) => set.contains(&workspace),
+            None => match lookup.workspace_org(workspace) {
+                Ok(record) => record == Some(self.org),
+                Err(LookupFailed) => return Ok(OneWorkspace::Pending),
+            },
+        };
+        match in_org {
+            true => Ok(OneWorkspace::Context(self.tenant(workspace))),
+            false => Err(Refusal::NoMembership),
+        }
     }
 
     /// The every-workspace way (DEC-832 items 3 and 5): one context per workspace of the enumerated
@@ -644,10 +655,26 @@ impl OrgContext {
     /// names and never part of one. With no enumerated set (built during a membership-store outage)
     /// it is [`EveryWorkspace::NoSetYet`], not a refusal: the caller treats it as pending and
     /// retries, never as a denial. No route calls it until a route story decides it (identity spec
-    /// §4.5); its `Err` is only this stub's.
+    /// §4.5). It never returns `Err` today; the `Result` keeps the signature the route stories use.
     pub fn into_every_workspace(self) -> Result<EveryWorkspace, Refusal> {
-        let _ = self;
-        Err(Refusal::Unimplemented { story: "E9-2" })
+        Ok(match &self.workspaces {
+            Some(set) => EveryWorkspace::Contexts(set.iter().map(|w| self.tenant(*w)).collect()),
+            None => EveryWorkspace::NoSetYet,
+        })
+    }
+
+    /// The context for one of the organization's workspaces, bound to this context's principal,
+    /// session, permission, and flag.
+    fn tenant(&self, workspace: WorkspaceId) -> TenantContext {
+        TenantContext {
+            org: self.org,
+            workspace,
+            principal: self.principal,
+            kind: self.kind,
+            session: self.session,
+            permission: self.permission,
+            membership_unverified: self.membership_unverified,
+        }
     }
 }
 
@@ -1096,8 +1123,195 @@ pub fn authorize(
     permission: Permission,
     now: UtcNanos,
 ) -> Result<Authorized, Refusal> {
-    let _ = (lookup, principal, session, scope, permission, now);
-    Err(Refusal::Unimplemented { story: "E9-2" })
+    if matrix::inactive(permission) {
+        return Err(Refusal::InactivePermission);
+    }
+    let record_unread = match scope {
+        Scope::Workspace { org, workspace } => match lookup.workspace_org(workspace) {
+            Ok(record) if record == Some(org) => false,
+            Ok(_) => return Err(Refusal::NoMembership),
+            Err(LookupFailed) if matrix::risk_reducing(permission) => true,
+            Err(LookupFailed) => return Err(Refusal::MembershipUnavailable),
+        },
+        Scope::Principal | Scope::Org(_) => false,
+    };
+    let grant = Grant {
+        lookup,
+        session,
+        scope,
+        permission,
+        now,
+        record_unread,
+    };
+    let membership_unverified = grant.of(principal)?;
+    if session.kind == SessionKind::ReductionOnly && !matrix::reduction(permission) {
+        return Err(Refusal::ReductionOnly);
+    }
+    let (id, kind) = identity(principal);
+    let step_up = matrix::step_up(permission);
+    if matrix::self_row(permission) || matrix::own_row(permission) {
+        let context = PrincipalContext {
+            principal: id,
+            kind,
+            session: session.reference,
+            permission,
+            scope,
+            membership_unverified,
+        };
+        return Ok(Authorized::Principal { step_up, context });
+    }
+    match scope {
+        Scope::Org(org) => Ok(Authorized::Org {
+            step_up,
+            context: OrgContext {
+                org,
+                principal: id,
+                kind,
+                session: session.reference,
+                permission,
+                membership_unverified,
+                workspaces: lookup.workspaces(org).ok(),
+            },
+        }),
+        Scope::Workspace { org, workspace } => Ok(Authorized::Workspace {
+            step_up,
+            tenant: TenantContext {
+                org,
+                workspace,
+                principal: id,
+                kind,
+                session: session.reference,
+                permission,
+                membership_unverified,
+            },
+        }),
+        Scope::Principal => Err(Refusal::NoMembership),
+    }
+}
+
+/// The authenticated principal's ID and kind, which every context binds.
+fn identity(principal: &Principal) -> (PrincipalId, PrincipalKind) {
+    match principal {
+        Principal::User { id } => (*id, PrincipalKind::User),
+        Principal::Client { id, .. } => (*id, PrincipalKind::Client),
+        Principal::ServiceAccount { id, .. } => (*id, PrincipalKind::ServiceAccount),
+        Principal::Agent { id } => (*id, PrincipalKind::Agent),
+        Principal::Process { id } => (*id, PrincipalKind::Process),
+        Principal::HostCli { id, .. } => (*id, PrincipalKind::HostCli),
+        Principal::PlatformOperator { id, .. } => (*id, PrincipalKind::PlatformOperator),
+    }
+}
+
+/// One authorization past its inactive-row and pair checks: whether the row is granted at the
+/// scope, and if so whether the store's answer was missing (`membership_unverified`).
+struct Grant<'a, L> {
+    lookup: &'a L,
+    session: &'a Session,
+    scope: Scope,
+    permission: Permission,
+    now: UtcNanos,
+    /// The workspace's own record could not be read, on a risk-reducing row.
+    record_unread: bool,
+}
+
+impl<L: MembershipLookup> Grant<'_, L> {
+    /// The principal's column at the scope: users and clients through memberships, the other
+    /// columns through what their own record names, and no column for an agent or a process.
+    fn of(&self, principal: &Principal) -> Result<bool, Refusal> {
+        if self.scope == Scope::Principal {
+            return match (matrix::self_row(self.permission), principal) {
+                (true, Principal::User { .. }) => Ok(false),
+                (true, Principal::Agent { .. } | Principal::Process { .. }) | (false, _) => {
+                    Err(Refusal::NoMembership)
+                }
+                (true, _) => Err(Refusal::Forbidden),
+            };
+        }
+        match principal {
+            Principal::User { id } => self.member(*id),
+            Principal::Client {
+                on_behalf_of,
+                workspace,
+                ..
+            } => {
+                if !self.in_workspace(*workspace) {
+                    return Err(Refusal::NoMembership);
+                }
+                let unverified = self.member(*on_behalf_of)?;
+                self.column(true, Column::Client).map(|_| unverified)
+            }
+            Principal::ServiceAccount { workspaces, .. } => self.column(
+                workspaces.iter().any(|w| self.in_workspace(*w)),
+                Column::ServiceAccount,
+            ),
+            Principal::HostCli { workspace, .. } => {
+                self.column(self.in_workspace(*workspace), Column::HostCli)
+            }
+            Principal::PlatformOperator { window, .. } => self.column(
+                window.is_some_and(|w| self.in_workspace(w)),
+                Column::PlatformOperator,
+            ),
+            Principal::Agent { .. } | Principal::Process { .. } => Err(Refusal::NoMembership),
+        }
+    }
+
+    /// Whether the scope is `workspace`'s.
+    fn in_workspace(&self, workspace: WorkspaceId) -> bool {
+        matches!(self.scope, Scope::Workspace { workspace: w, .. } if w == workspace)
+    }
+
+    /// A non-member column: `no_membership` outside its scope, `forbidden` where its cell is blank.
+    fn column(&self, inside: bool, column: Column) -> Result<bool, Refusal> {
+        match (inside, matrix::grants(self.permission, column)) {
+            (false, _) => Err(Refusal::NoMembership),
+            (true, true) => Ok(self.record_unread),
+            (true, false) => Err(Refusal::Forbidden),
+        }
+    }
+
+    /// The member's own membership at the scope, read live, or from the session's roles snapshot
+    /// when the read fails on a risk-reducing row (DEC-642 item 10) or the workspace's record could
+    /// not be read; only the scope's kind of role acts there (§4.1).
+    fn member(&self, member: PrincipalId) -> Result<bool, Refusal> {
+        let live;
+        let (memberships, unverified): (&[Membership], bool) = match self.record_unread {
+            true => (&self.session.snapshot, true),
+            false => match self.lookup.memberships(&MembershipQuery {
+                member: Some(member),
+                scope: self.scope,
+            }) {
+                Ok(read) => {
+                    live = read;
+                    (&live, false)
+                }
+                Err(LookupFailed) if matrix::risk_reducing(self.permission) => {
+                    (&self.session.snapshot, true)
+                }
+                Err(LookupFailed) => return Err(Refusal::MembershipUnavailable),
+            },
+        };
+        let reaching = memberships
+            .iter()
+            .find(|m| {
+                m.member == member
+                    && m.scope == self.scope
+                    && matches!(
+                        m.state,
+                        MembershipState::Active | MembershipState::CoolingOff
+                    )
+            })
+            .ok_or(Refusal::NoMembership)?;
+        let org_scope = matches!(self.scope, Scope::Org(_));
+        let granted = reaching.roles.iter().any(|(role, from)| {
+            *from <= self.now
+                && matches!(role, Role::OrgOwner | Role::OrgAdmin | Role::BillingAdmin) == org_scope
+                && matrix::grants(self.permission, Column::Member(*role))
+        });
+        match granted {
+            true => Ok(unverified),
+            false => Err(Refusal::Forbidden),
+        }
+    }
 }
 
 /// Checks a role or membership change in `scope` (§4.5): its rows through [`authorize`] (the
