@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, OrderState, Scenario, Workspace } from "@/fixtures/types";
-import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
+import { AGENT_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { IN_FLIGHT, alertLines, attentionText, needsYouLines, stopAttention } from "./attention";
 import { agentLimits, nearLossLimits } from "./limits";
+import { agentHref, orderHref } from "./screens";
 
 function agentIn(ws: Workspace, id: string): Agent {
   const agent = ws.agents.find((a) => a.agent_id === id);
@@ -153,5 +154,83 @@ describe("alert lines", () => {
     expect(alertLines(buildWorkspace("normal"))).toEqual([]);
     expect(needsYouLines(buildWorkspace("stale")).map((a) => a.text), "Needs you: no feed, and one line per agent and condition").toEqual(["Agent 2: stale price (XYZ, QRS)"]);
     expect(needsYouLines(buildWorkspace("normal"))).toEqual([]);
+  });
+});
+
+/**
+ * A loud Stop says why on Home (critique C-25, rule 13, the Control Rule): an order whose state is
+ * unknown turns Stop loud, so Needs you carries it as one condition of its agent, as drawdown and
+ * reconciliation do. The expected rows are read straight off the fixture's orders, not through
+ * `IN_FLIGHT` or `stopAttention`.
+ */
+describe("a loud Stop has its reason in Needs you", () => {
+  /** Each agent holding an order in state `Unknown`, read off the raw fixture. */
+  function unknownOrders(ws: Workspace): Array<{ agentId: string; label: string; ids: string[] }> {
+    return ws.agents
+      .map((a) => ({ agentId: a.agent_id, label: a.label, ids: a.orders.filter((o) => o.state === "Unknown").map((o) => o.client_order_id) }))
+      .filter((a) => a.ids.length > 0);
+  }
+
+  it("in the unknown-order scenario: Agent 2's condition, with no instrument, opening the order's record", () => {
+    const ws = buildWorkspace("unknown-order");
+    expect(stopAttention(ws), "Stop is loud for the order").toEqual(["1 order the broker has not confirmed"]);
+    expect(unknownOrders(ws).map((a) => [a.agentId, a.label, a.ids.length])).toEqual([[AGENT_IDS.swing, "Agent 2", 1]]);
+    const [held] = unknownOrders(ws);
+    expect(needsYouLines(ws).map(({ text, href }) => ({ text, href }))).toEqual([
+      { text: "Agent 2: an order's state is unknown", href: orderHref(AGENT_IDS.swing, held.ids[0]) },
+    ]);
+  });
+
+  it("in every scenario Home shows, a loud Stop has a condition in Needs you, and each unknown order's agent has its line", () => {
+    for (const { id } of SCENARIOS) {
+      const ws = buildWorkspace(id);
+      if (ws.status !== "ready") continue;
+      if (stopAttention(ws).length > 0) expect(needsYouLines(ws).length, `${id}: loud with nothing in Needs you`).toBeGreaterThan(0);
+      for (const { agentId, label } of unknownOrders(ws)) {
+        expect(
+          needsYouLines(ws).filter((l) => l.href.startsWith(`/agents/${agentId}`) && l.text.startsWith(`${label}: `) && /unknown/.test(l.text)),
+          `${id}: ${label}`,
+        ).toHaveLength(1);
+      }
+    }
+  });
+
+  it("for any agent and any of its orders gone unknown, one line for that agent, opening that order", () => {
+    for (const agent of buildWorkspace("normal").agents) {
+      for (let i = 0; i < agent.orders.length; i++) {
+        const ws = buildWorkspace("normal");
+        const order = agentIn(ws, agent.agent_id).orders[i];
+        order.state = "Unknown";
+        expect(stopAttention(ws), `${agent.label} order ${i}`).not.toEqual([]);
+        expect(needsYouLines(ws).map((l) => [l.text, l.href]), `${agent.label} order ${i}`).toEqual([
+          [`${agent.label}: an order's state is unknown`, orderHref(agent.agent_id, order.client_order_id)],
+        ]);
+      }
+    }
+  });
+
+  it("one line for an agent with several unknown orders, opening the agent's orders", () => {
+    const ws = buildWorkspace("normal");
+    const btc = agentIn(ws, AGENT_IDS.btc);
+    expect(btc.orders.length).toBeGreaterThan(1);
+    for (const o of btc.orders) o.state = "Unknown";
+    expect(needsYouLines(ws).map(({ text, href }) => ({ text, href }))).toEqual([
+      { text: `Agent 1: ${btc.orders.length} orders' states are unknown`, href: agentHref(AGENT_IDS.btc, "orders") },
+    ]);
+  });
+
+  it("after the agent's restrictions, as one more of its conditions", () => {
+    const ws = buildWorkspace("unknown-order");
+    agentIn(ws, AGENT_IDS.swing).restrictions = [{ code: "startup_reconciliation", since: ws.now }];
+    expect(needsYouLines(ws).map((l) => l.text)).toEqual(["Agent 2: checking with the broker", "Agent 2: an order's state is unknown"]);
+  });
+
+  it("no such line while every order is in any other state", () => {
+    for (const state of Object.keys(IN_FLIGHT) as OrderState[]) {
+      if (state === "Unknown") continue;
+      const ws = buildWorkspace("normal");
+      agentIn(ws, AGENT_IDS.btc).orders[0].state = state;
+      expect(needsYouLines(ws), state).toEqual([]);
+    }
   });
 });

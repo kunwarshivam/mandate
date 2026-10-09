@@ -668,7 +668,6 @@ fn depths(trace: &Trace) -> Vec<(&str, u16)> {
 /// intent, so it shows one `payload.intent_id` `not_recorded` and nothing further (DEC-761 item 3,
 /// DEC-775 item 1); a version-2 one leads to its companion, whose null `intent_id` is no link.
 #[test]
-#[ignore = "pending E12-1"]
 fn a_fill_links_each_earlier_submission_of_its_order_on_its_account() {
     let mut g = Graph::new();
     let (acct1, acct2) = (account("ACCT1"), account("ACCT2"));
@@ -819,7 +818,6 @@ impl Intents {
 /// its `agent_id`; their own `intent_id`s, the `GateDecided`s' read with the `IntentReceived`'s
 /// `agent_id`, return into the trace.
 #[test]
-#[ignore = "pending E12-1"]
 fn an_order_request_links_its_intent_its_gate_decisions_and_its_proposal() {
     let i = intents();
     let trace = traced(&i.g, WS_A, &i.submit, &[]);
@@ -841,7 +839,6 @@ fn an_order_request_links_its_intent_its_gate_decisions_and_its_proposal() {
 /// stream of its own `agent_id`. One naming `AG2` reads it `not_recorded`, with `AG2`'s stream read
 /// and in `as_of`, while the `IntentReceived` reached from it finds it on `AG1`.
 #[test]
-#[ignore = "pending E12-1"]
 fn a_protection_change_looks_up_its_intent_with_its_own_agent() {
     let i = intents();
     let trace = traced(&i.g, WS_A, &i.guard, &[]);
@@ -863,7 +860,6 @@ fn a_protection_change_looks_up_its_intent_with_its_own_agent() {
 /// to build the agent stream from, its `IntentProposed` is one `not_recorded`, and no agent stream
 /// is read, though the intent's `IntentProposed` is recorded on `AG1`.
 #[test]
-#[ignore = "pending E12-1"]
 fn a_gate_decision_without_its_intent_received_reads_both_not_recorded() {
     let i = intents();
     let trace = traced(&i.g, WS_A, &i.foreign, &[]);
@@ -1085,7 +1081,6 @@ impl Approvals {
 /// is the output of that id on the decision's own agent stream; one on another agent's stream reads
 /// as an absent one, `not_recorded`.
 #[test]
-#[ignore = "pending E12-1"]
 fn a_decision_links_each_output_it_used_on_its_agent_stream() {
     let a = approvals();
     let trace = traced(&a.g, WS_A, &a.decision, &[]);
@@ -1099,7 +1094,6 @@ fn a_decision_links_each_output_it_used_on_its_agent_stream() {
 /// order, is the output of that id on the request's agent stream, after the request's
 /// `causation_id`, here its decision; the decision's own links then return into the trace.
 #[test]
-#[ignore = "pending E12-1"]
 fn an_approval_request_links_each_output_its_content_cites() {
     let a = approvals();
     let trace = traced(&a.g, WS_A, &a.request, &[]);
@@ -1125,7 +1119,6 @@ fn an_approval_request_links_each_output_its_content_cites() {
 /// `not_recorded`), and a response's `causation_id` names an `ApprovalResponseSubmitted`, so one
 /// naming an output is `unexpected_type` (journal spec rule 50).
 #[test]
-#[ignore = "pending E12-1"]
 fn approval_links_name_the_request_on_the_agent_stream_and_the_typed_submission() {
     let mut a = approvals();
     let ag1 = agent(WS_A, "AG1");
@@ -1194,7 +1187,6 @@ fn theses() -> Theses {
 /// `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the output's agent stream, one
 /// target: a thesis recorded only on another agent's stream is one `not_recorded`.
 #[test]
-#[ignore = "pending E12-1"]
 fn an_output_links_its_thesis_on_its_agent_stream() {
     let mut t = theses();
     let ag1 = agent(WS_A, "AG1");
@@ -1223,7 +1215,6 @@ fn an_output_links_its_thesis_on_its_agent_stream() {
 /// autopsy giving none, and the compiler invocation's prompt and response artifacts, with its
 /// nested model's id and version, are quoted, `platform_authored` (DEC-773), in that order.
 #[test]
-#[ignore = "pending E12-1"]
 fn thesis_and_invocation_text_is_only_quoted() {
     let mut t = theses();
     let ag1 = agent(WS_A, "AG1");
@@ -1307,7 +1298,6 @@ fn thesis_and_invocation_text_is_only_quoted() {
 /// (journal spec rule 44), so its `IntentProposed` is one `not_recorded`, with no fallback to the
 /// `IntentReceived`'s agent; the `IntentReceived` it shows still finds it on `AG1`.
 #[test]
-#[ignore = "pending E12-1"]
 fn an_intended_protection_reads_its_proposal_not_recorded_without_a_fallback() {
     let mut i = intents();
     let intended = event_id(810_010);
@@ -1336,7 +1326,6 @@ fn an_intended_protection_reads_its_proposal_not_recorded_without_a_fallback() {
 /// names but of another type as `unexpected_type`, shown and not followed: an approval naming an
 /// output, a decision using an approval request, and a request citing a decision.
 #[test]
-#[ignore = "pending E12-1"]
 fn a_by_id_target_of_another_type_is_unexpected_type() {
     let mut a = approvals();
     let ag1 = agent(WS_A, "AG1");

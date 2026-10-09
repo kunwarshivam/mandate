@@ -299,8 +299,26 @@ pub(crate) fn silence(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for id in in_flight {
         transition(batch, &id, OrderState::Unknown, StateEvidence::default())?;
-        batch.broker(BrokerRequest::GetOrderByClientId(id));
+        query_unknown(batch, id)?;
     }
+    Ok(())
+}
+
+/// Asks what became of an `Unknown` order: by its client order id where the profile can query
+/// by it, and otherwise by DEC-529 item 4's listing, which E7-23 B2b builds (DEC-862).
+pub(crate) fn query_unknown(
+    batch: &mut Batch<'_, '_>,
+    id: ClientOrderId,
+) -> Result<(), ExecutorError> {
+    let queryable = batch
+        .view
+        .profile
+        .as_ref()
+        .is_none_or(|profile| profile.idempotency().query_by_client_order_id);
+    if !queryable {
+        return Err(ExecutorError::Unimplemented { story: "E7-23" });
+    }
+    batch.broker(BrokerRequest::GetOrderByClientId(id));
     Ok(())
 }
 

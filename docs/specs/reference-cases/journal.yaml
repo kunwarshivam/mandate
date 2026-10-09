@@ -10776,7 +10776,7 @@ broker_profile:
     expect:
       reason: non_canonical
 connections:
-  spec: docs/specs/journal.md v0.20 §9.8 (DEC-800)
+  spec: docs/specs/journal.md v0.30 §9.8 and §11 (DEC-800, DEC-696)
   drafts:
     established_v2:
       envelope_version: 1
@@ -13193,7 +13193,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id035
+      - &id046
         path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
@@ -13221,13 +13221,13 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id031
+      - &id036
         path: payload.environment
         value: live
-      - &id032
+      - &id037
         path: environment
         value: live
-      - &id033
+      - &id038
         path: payload.margin_attestation
         value: cash_account
     expect:
@@ -13269,15 +13269,20 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - path: schema_version
+      - &id029
+        path: schema_version
         value: 1
-      - path: payload.account_ref
+      - &id030
+        path: payload.account_ref
         delete: true
-      - path: payload.user
+      - &id031
+        path: payload.user
         delete: true
-      - path: payload.step_up
+      - &id032
+        path: payload.step_up
         delete: true
-      - path: payload.margin_attestation
+      - &id033
+        path: payload.margin_attestation
         delete: true
     - base_draft: rotated
       changes:
@@ -13288,6 +13293,68 @@ connections:
       - path: payload
         value:
           connection_id: conn_alpaca_paper
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '66'
+  - name: version_1_never_reestablished_at_version_1
+    clause: 'rule 66: a version-1 first establishment has no account_ref, so it is never re-established (DEC-696)'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - *id029
+      - *id030
+      - *id031
+      - *id032
+      - *id033
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - *id029
+      - *id030
+      - *id031
+      - *id032
+      - *id033
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '66'
+  - name: revoked_on_another_control_stream
+    clause: 'rule 66: each rule holds on its own stream; another workspace''s revocation revokes nothing here (DEC-696)'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+      - path: stream_id
+        value: ctl:ws_01J8Z3
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13516,7 +13583,7 @@ connections:
   - name: degraded_cleared_acknowledged_then_suspended_and_reauthorized
     clause: 'rule 68: the B1 path: a reauthorize after the suspension, accepted by a rotation, then cleared'
     records:
-    - &id029
+    - &id034
       base_draft: checked_start
       changes:
       - path: event_id
@@ -13534,7 +13601,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id030
+    - &id035
       base_draft: established_copy
       changes:
       - path: event_id
@@ -13651,8 +13718,8 @@ connections:
   - name: executor_start_after_binding
     clause: 'rule 68: checks after the binding'
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13718,12 +13785,12 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - &id034
+      - &id039
         path: payload.broker
         value: robinhood
-      - *id031
-      - *id032
-      - *id033
+      - *id036
+      - *id037
+      - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13775,10 +13842,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id034
-      - *id031
-      - *id032
-      - *id033
+      - *id039
+      - *id036
+      - *id037
+      - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13813,6 +13880,128 @@ connections:
         value: null
     expect:
       outcome: Valid
+  - name: two_account_streams_interleave
+    clause: 'rule 68: each account stream is folded on its own, one connection each (DEC-696)'
+    records:
+    - &id040
+      base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - &id041
+      base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+      - path: stream_id
+        value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+    - &id042
+      base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+    - &id043
+      base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+      - path: stream_id
+        value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+      - path: payload.account_ref
+        value: 01J8Z2ACCT00000000000000B7
+    - &id044
+      base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S05A0000000000000000
+      - path: payload.occasion
+        value: reauthorize
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - &id045
+      base_draft: state_degraded
+      changes:
+      - path: event_id
+        value: 01J8Z4S06A0000000000000000
+      - path: payload.from
+        value: active
+      - path: payload.to
+        value: degraded
+      - path: payload.reason
+        value: network_errors
+      - path: causation_id
+        value: null
+      - path: stream_id
+        value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+    expect:
+      outcome: Valid
+  - name: a_reauthorize_on_another_account_stream_admits_no_rotation
+    clause: 'rule 68: the rotation''s reauthorize check is on its own stream (DEC-696)'
+    records:
+    - *id040
+    - *id041
+    - *id042
+    - *id043
+    - *id044
+    - *id045
+    - base_draft: rotated_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S07A0000000000000000
+      - path: stream_id
+        value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 6
+      rule: '68'
   - name: state_on_an_unbound_stream
     clause: 'rule 68: the stream is connecting until its establishment is copied'
     records:
@@ -13944,7 +14133,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id035
+      - *id046
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -13976,10 +14165,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id034
-      - *id031
-      - *id032
-      - *id033
+      - *id039
+      - *id036
+      - *id037
+      - *id038
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -14014,10 +14203,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id034
-      - *id031
-      - *id032
-      - *id033
+      - *id039
+      - *id036
+      - *id037
+      - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14043,8 +14232,8 @@ connections:
   - name: rotation_copied_without_a_passing_reauthorize
     clause: 'rule 68: a rotation follows a passing reauthorize check'
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14074,9 +14263,9 @@ connections:
   - name: suspension_cleared_without_a_rotation
     clause: 'rule 68: the clearing cause is the copied rotation'
     records:
-    - *id029
-    - *id030
-    - &id036
+    - *id034
+    - *id035
+    - &id047
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -14109,9 +14298,9 @@ connections:
   - name: refused_reauth_check_clears
     clause: 'rule 68: a passing reauthorize the control services refused never clears (no rotation names it)'
     records:
-    - *id029
-    - *id030
-    - *id036
+    - *id034
+    - *id035
+    - *id047
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14149,8 +14338,8 @@ connections:
   - name: stale_check_clears
     clause: 'rule 68: the reauthorize came after the suspension'
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14204,8 +14393,8 @@ connections:
   - name: stale_rotation_clears
     clause: 'rule 68: the rotation came after the suspension'
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14259,8 +14448,8 @@ connections:
   - name: two_connections_on_one_account_stream
     clause: 'rule 68: one account stream, one connection (CN-5)'
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14287,8 +14476,8 @@ connections:
   - name: first_change_not_from_active
     clause: rule 68
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14309,8 +14498,8 @@ connections:
   - name: from_not_the_last_state
     clause: rule 68
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14343,8 +14532,8 @@ connections:
   - name: acknowledged_before_cleared
     clause: 'rule 68: the acknowledgment never lifts a cause that has not cleared'
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14377,8 +14566,8 @@ connections:
   - name: acknowledged_after_the_cause_returned
     clause: rule 68
     records:
-    - *id029
-    - *id030
+    - *id034
+    - *id035
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14436,7 +14625,7 @@ connections:
   - name: connect_then_reauthorize
     clause: '§11: every cause on its stream, for its connection, passing'
     records:
-    - &id042
+    - &id053
       base_draft: checked_start
       changes:
       - path: event_id
@@ -14454,28 +14643,31 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id037
+    - &id048
       base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - &id038
+    - &id049
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4S02A0000000000000000
-    - &id039
+    - &id050
       base_draft: checked_start
       changes:
-      - path: event_id
+      - &id056
+        path: event_id
         value: 01J8Z4S04A0000000000000000
-      - path: payload.occasion
+      - &id057
+        path: payload.occasion
         value: reauthorize
-      - path: payload.results
+      - &id058
+        path: payload.results
         value:
         - check: account
           result: passed
@@ -14486,14 +14678,16 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id040
+    - &id051
       base_draft: rotated
       changes:
-      - path: event_id
+      - &id054
+        path: event_id
         value: 01J8Z4S05A0000000000000000
-      - path: causation_id
+      - &id055
+        path: causation_id
         value: 01J8Z4S04A0000000000000000
-    - &id041
+    - &id052
       base_draft: rotated_copy
       changes:
       - path: event_id
@@ -14522,11 +14716,11 @@ connections:
         - check: scope
           result: failed
           reason: scope_mismatch
-    - *id037
-    - *id038
-    - *id039
-    - *id040
-    - *id041
+    - *id048
+    - *id049
+    - *id050
+    - *id051
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14551,11 +14745,11 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - *id037
-    - *id038
-    - *id039
-    - *id040
-    - *id041
+    - *id048
+    - *id049
+    - *id050
+    - *id051
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14582,11 +14776,11 @@ connections:
           reason: null
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - *id037
-    - *id038
-    - *id039
-    - *id040
-    - *id041
+    - *id048
+    - *id049
+    - *id050
+    - *id051
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14613,11 +14807,11 @@ connections:
           reason: null
       - path: stream_id
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
-    - *id037
-    - *id038
-    - *id039
-    - *id040
-    - *id041
+    - *id048
+    - *id049
+    - *id050
+    - *id051
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14663,17 +14857,17 @@ connections:
   - name: rotated_on_a_connect_check
     clause: '§11: occasion reauthorize'
     records:
-    - *id042
-    - *id037
-    - *id038
-    - *id039
+    - *id053
+    - *id048
+    - *id049
+    - *id050
     - base_draft: rotated
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - *id041
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14681,8 +14875,8 @@ connections:
   - name: copy_differs_from_its_original
     clause: '§11: a copy carries its original''s members'
     records:
-    - *id042
-    - *id037
+    - *id053
+    - *id048
     - base_draft: established_copy
       changes:
       - path: event_id
@@ -14692,9 +14886,9 @@ connections:
       - path: payload.scopes
         value:
         - trading
-    - *id039
-    - *id040
-    - *id041
+    - *id050
+    - *id051
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14702,11 +14896,11 @@ connections:
   - name: copy_of_nothing
     clause: '§11: a copy names its original'
     records:
-    - *id042
-    - *id037
-    - *id038
-    - *id039
-    - *id040
+    - *id053
+    - *id048
+    - *id049
+    - *id050
+    - *id051
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -14717,6 +14911,155 @@ connections:
       outcome: Mismatch
       code: connection_cause_mismatch
       index: 5
+  - name: reconnected_after_version_1
+    clause: '§11: reconnect after an establishment of either version (DEC-696)'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload.account_ref
+        delete: true
+      - path: payload.user
+        delete: true
+      - path: payload.step_up
+        delete: true
+      - path: payload.margin_attestation
+        delete: true
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: reconnect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S03A0000000000000000
+    expect:
+      outcome: Valid
+  - name: connect_check_after_version_1
+    clause: '§11: reconnect after an establishment of either version (DEC-696)'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload.account_ref
+        delete: true
+      - path: payload.user
+        delete: true
+      - path: payload.step_up
+        delete: true
+      - path: payload.margin_attestation
+        delete: true
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: causation_id
+        value: 01J8Z4S03A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 3
+  - name: rotated_on_another_control_stream
+    clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
+    records:
+    - *id053
+    - *id048
+    - *id049
+    - *id050
+    - base_draft: rotated
+      changes:
+      - *id054
+      - *id055
+      - path: stream_id
+        value: ctl:ws_01J8Z3
+    - *id052
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 4
+  - name: rotated_in_another_workspace_on_its_check
+    clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
+    records:
+    - *id053
+    - *id048
+    - *id049
+    - base_draft: checked_start
+      changes:
+      - *id056
+      - *id057
+      - *id058
+      - path: stream_id
+        value: acct:ws_01J8Z3:01J8Z2ACCT00000000000000A1
+    - base_draft: rotated
+      changes:
+      - *id054
+      - *id055
+      - path: stream_id
+        value: ctl:ws_01J8Z3
+    expect:
+      outcome: Mismatch
+      code: connection_cause_mismatch
+      index: 4
 workspace_api:
   spec: docs/specs/journal.md v0.21 §9.9 (DEC-670)
   drafts:
@@ -16865,7 +17208,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: &id043
+      value: &id059
         input: 0
         output: 0
         cached: 0
@@ -16899,7 +17242,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id043
+      value: *id059
     - path: payload.cost_usd
       value: '0'
     - path: payload.cost_usd
@@ -16930,7 +17273,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id043
+      value: *id059
     - path: payload.cost_usd
       value: '0'
     - path: payload.tokens.input
@@ -16961,7 +17304,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id043
+      value: *id059
     - path: payload.cost_usd
       value: '0'
     - path: payload.provider_request_id
@@ -16992,7 +17335,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id043
+      value: *id059
     - path: payload.cost_usd
       value: '0'
     - path: payload.response_ref
@@ -17046,7 +17389,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id043
+      value: *id059
     - path: payload.cost_usd
       value: '0'
     - path: payload.cache_hit
@@ -17402,7 +17745,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id043
+      value: *id059
     - path: payload.cost_usd
       value: '0'
     - path: artifact_refs
@@ -18790,7 +19133,7 @@ client_actor:
       changes:
       - path: causation_id
         value: 01J8Z5C2C000000000000000C7
-    expect: &id044
+    expect: &id060
       outcome: Invalid
       draft_index: 1
       reason: schema
@@ -18804,7 +19147,7 @@ client_actor:
         value: workspace
     - base_draft: revoked_compromised
       changes: []
-    expect: *id044
+    expect: *id060
   - name: a_revocation_after_another_connections_kill_switch
     clause: 'rule 84: the kill switch is this connection''s'
     drafts:
@@ -18814,7 +19157,7 @@ client_actor:
         value: conn_02
     - base_draft: revoked_compromised
       changes: []
-    expect: *id044
+    expect: *id060
   - name: a_revocation_after_a_pause
     clause: 'rule 84: the command is a kill switch'
     drafts:
@@ -18824,7 +19167,7 @@ client_actor:
         value: pause
     - base_draft: revoked_compromised
       changes: []
-    expect: *id044
+    expect: *id060
   - name: a_revocation_alone
     clause: 'rule 84: the kill switch is in the same batch'
     drafts:
@@ -20013,7 +20356,7 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - &id045
+    - &id061
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20036,7 +20379,7 @@ hold:
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id053
+    - &id069
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20045,7 +20388,7 @@ hold:
         reason: owner_resume
         lifecycle: normal
         held: true
-    - &id048
+    - &id064
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20059,11 +20402,11 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id045
+    - *id061
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id049
+    - &id065
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20078,7 +20421,7 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id045
+    - *id061
     - event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20107,8 +20450,8 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id045
-    - &id046
+    - *id061
+    - &id062
       event_type: AgentModeChanged
       schema_version: 1
       payload:
@@ -20122,14 +20465,14 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id046
-    - *id045
+    - *id062
+    - *id061
     expect: []
   - name: a_full_chain_opens_with_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
-    - &id047
+    - &id063
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20143,24 +20486,24 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id047
-    - *id046
+    - *id063
+    - *id062
     expect:
     - 1
   - name: a_lift_then_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
-    - *id045
-    - *id048
-    - *id047
+    - *id061
+    - *id064
+    - *id063
     expect: []
   - name: a_lift_then_a_copy_that_keeps_the_hold
     from_seq: 1
     anchor: null
     events:
-    - *id045
-    - *id048
+    - *id061
+    - *id064
     - event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20175,9 +20518,9 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id045
-    - *id049
-    - &id050
+    - *id061
+    - *id065
+    - &id066
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -20192,9 +20535,9 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id045
-    - *id049
-    - *id049
+    - *id061
+    - *id065
+    - *id065
     expect:
     - 1
     - 2
@@ -20210,30 +20553,30 @@ hold:
         reason: owner_hold
         lifecycle: normal
         held: false
-    - *id050
+    - *id066
     expect:
     - 0
   - name: a_later_range_launders_a_dropped_hold
     from_seq: 40
-    anchor: &id052
+    anchor: &id068
       v2_before: true
       held: true
     events:
-    - *id049
+    - *id065
     expect:
     - 0
   - name: a_later_range_starts_with_version_1_after_a_version_2
     from_seq: 40
-    anchor: &id051
+    anchor: &id067
       v2_before: true
       held: false
     events:
-    - *id046
+    - *id062
     expect:
     - 0
   - name: a_later_range_whose_predecessor_was_not_held
     from_seq: 40
-    anchor: *id051
+    anchor: *id067
     events:
     - event_type: AgentModeChanged
       schema_version: 2
@@ -20246,61 +20589,61 @@ hold:
     expect: []
   - name: a_later_range_carries_the_hold_of_a_copy
     from_seq: 40
-    anchor: *id052
+    anchor: *id068
     events:
-    - *id050
-    - *id053
+    - *id066
+    - *id069
     expect: []
   - name: a_later_range_with_no_version_2_before
     from_seq: 40
     anchor:
       v2_before: false
     events:
-    - *id046
-    - *id047
+    - *id062
+    - *id063
     expect: []
   - name: an_unanchored_range_opens_with_a_hold
     from_seq: 40
     anchor: null
     events:
-    - *id045
-    - *id050
+    - *id061
+    - *id066
     expect: []
   - name: an_unanchored_range_anchors_on_its_own_hold_then_drops_it
     from_seq: 40
     anchor: null
     events:
-    - *id045
-    - *id049
+    - *id061
+    - *id065
     expect:
     - 1
   - name: an_unanchored_range_opens_with_version_1
     from_seq: 40
     anchor: null
     events:
-    - *id046
-    - *id045
+    - *id062
+    - *id061
     expect: []
   - name: an_unanchored_range_opens_with_a_held_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id050
+    - *id066
     expect:
     - 0
   - name: an_unanchored_range_opens_with_a_clear_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id049
+    - *id065
     expect:
     - 0
   - name: an_unanchored_range_with_version_1_after_its_hold
     from_seq: 40
     anchor: null
     events:
-    - *id045
-    - *id046
+    - *id061
+    - *id062
     expect:
     - 1
 membership:
@@ -21771,7 +22114,7 @@ membership:
     base_draft: invited
     changes:
     - path: actor
-      value: &id054
+      value: &id070
         kind: system
         id: control_services
         version: 0.1.0
@@ -22434,7 +22777,7 @@ membership:
     base_draft: deactivated
     changes:
     - path: actor
-      value: *id054
+      value: *id070
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -22448,7 +22791,7 @@ membership:
     base_draft: deactivated
     changes:
     - path: actor
-      value: *id054
+      value: *id070
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -22462,7 +22805,7 @@ membership:
     base_draft: removed
     changes:
     - path: actor
-      value: *id054
+      value: *id070
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -24068,7 +24411,7 @@ membership_fold:
   - name: an_invitation_accepted_twice
     clause: '§9.12: an invitation activates at most once'
     records:
-    - &id055
+    - &id071
       event_type: MemberActivated
       event_time: '2026-10-05T14:00:00.000000000Z'
       actor:
@@ -24089,7 +24432,7 @@ membership_fold:
         independent_approval_required: true
         cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
         session_ref: null
-    - &id056
+    - &id072
       event_type: MemberInvited
       event_time: '2026-10-05T15:00:00.000000000Z'
       actor:
@@ -24109,7 +24452,7 @@ membership_fold:
         invited_at: '2026-10-05T15:00:00.000000000Z'
         expires_at: '2026-10-12T15:00:00.000000000Z'
         session_ref: session_00F1
-    - &id057
+    - &id073
       event_type: MemberActivated
       event_time: '2026-10-05T16:00:00.000000000Z'
       actor:
@@ -24156,9 +24499,9 @@ membership_fold:
   - name: a_second_activation
     clause: '§9.12: a member whose membership is not removed is not activated again'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberInvited
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24273,9 +24616,9 @@ membership_fold:
   - name: removed_while_active
     clause: '§9.12: only a deactivated member is removed'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberRemoved
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24298,9 +24641,9 @@ membership_fold:
   - name: removed_then_reactivated
     clause: '§9.12: removed is terminal'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24355,9 +24698,9 @@ membership_fold:
   - name: reactivated_with_other_roles
     clause: '§9.12: a reactivation restores exactly the kept roles'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24400,9 +24743,9 @@ membership_fold:
   - name: a_role_removed_that_is_not_held
     clause: §9.12
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberRoleChanged
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24430,9 +24773,9 @@ membership_fold:
   - name: a_role_added_that_is_held
     clause: §9.12
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberRoleChanged
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24464,9 +24807,9 @@ membership_fold:
   - name: a_role_change_while_deactivated
     clause: §9.12
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24510,9 +24853,9 @@ membership_fold:
   - name: a_role_granted_while_deactivated
     clause: '§9.12, DEC-654 item 7: a grant never reaches a deactivated member, even with a removal'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24557,9 +24900,9 @@ membership_fold:
   - name: reactivated_with_a_stripped_role
     clause: '§9.12: a kept role removed while deactivated is not restored'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24619,9 +24962,9 @@ membership_fold:
   - name: a_role_change_after_removal
     clause: '§9.12: removed is terminal'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24677,9 +25020,9 @@ membership_fold:
   - name: a_role_removed_that_is_not_kept_while_deactivated
     clause: '§9.12: a deactivated member''s removal names only roles it keeps'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24719,9 +25062,9 @@ membership_fold:
   - name: a_deactivated_member_activated_again
     clause: '§9.12: only a removed membership starts again by an invitation'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -24873,9 +25216,9 @@ membership_fold:
   - name: deactivated_twice
     clause: §9.12
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -25026,9 +25369,9 @@ membership_fold:
   - name: a_revocation_of_an_accepted_invitation
     clause: '§9.12: only an `invited` invitation is revoked'
     records:
-    - *id055
-    - *id056
-    - *id057
+    - *id071
+    - *id072
+    - *id073
     - event_type: MemberInvitationRevoked
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -26584,13 +26927,13 @@ records_access:
     changes:
     - path: payload.ranges
       value:
-      - &id058
+      - &id074
         stream_id: agent:ws_01J8Z2:agent_a
         from_seq: 12
         to_seq: 30
         prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
         to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
-      - *id058
+      - *id074
     - path: artifact_refs
       value: []
     expect:
@@ -26655,7 +26998,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id062
+      value: &id078
         kind: agent
         id: agent_a
         version: 0.1.0
@@ -26710,7 +27053,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id059
+      value: &id075
         kind: client
         id: client_01
         version: '1'
@@ -26729,7 +27072,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id059
+      value: *id075
     - path: artifact_refs
       value: []
     expect:
@@ -26741,7 +27084,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id059
+      value: *id075
     - path: artifact_refs
       value: []
     expect:
@@ -26753,7 +27096,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id060
+      value: &id076
         kind: broker
         id: alpaca
         version: v2
@@ -26771,7 +27114,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id061
+      value: &id077
         kind: platform_operator
         id: operator_01
         version: '1'
@@ -26789,7 +27132,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id060
+      value: *id076
     - path: artifact_refs
       value: []
     expect:
@@ -26801,7 +27144,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id061
+      value: *id077
     - path: artifact_refs
       value: []
     expect:
@@ -26813,7 +27156,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id060
+      value: *id076
     - path: artifact_refs
       value: []
     expect:
@@ -26825,7 +27168,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id061
+      value: *id077
     - path: artifact_refs
       value: []
     expect:
@@ -26837,7 +27180,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id062
+      value: *id078
     - path: artifact_refs
       value: []
     expect:
@@ -26873,7 +27216,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: &id064
+      value: &id080
         kind: user
         id: user_owner_01
         version: '1'
@@ -26889,7 +27232,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id062
+      value: *id078
     - path: artifact_refs
       value: []
     expect:
@@ -27199,7 +27542,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id063
+      value: &id079
         kind: system
         id: control_services
         version: 0.1.0
@@ -27215,7 +27558,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: *id059
+      value: *id075
     - path: payload.accessor
       value: client_01
     - path: payload.operation
@@ -27229,7 +27572,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: *id061
+      value: *id077
     - path: payload.accessor
       value: operator_01
     - path: causation_id
@@ -27297,7 +27640,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id063
+      value: *id079
     - path: artifact_refs
       value: []
     expect:
@@ -27307,7 +27650,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id063
+      value: *id079
     - path: artifact_refs
       value: []
     expect:
@@ -27317,7 +27660,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id064
+      value: *id080
     - path: payload.trigger
       value: request
     - path: artifact_refs
@@ -27329,7 +27672,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id063
+      value: *id079
     - path: payload.trigger
       value: restore_drill
     - path: payload.ranges
@@ -28701,11 +29044,11 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - &id066
+      - &id082
         hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
         seq: 5
         stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      - &id065
+      - &id081
         hash: '8888888888888888888888888888888888888888888888888888888888888888'
         seq: 12
         stream_id: agent:ws_01J8Z2:agent_a
@@ -28789,9 +29132,9 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - *id065
-      - *id066
-      - &id067
+      - *id081
+      - *id082
+      - &id083
         hash: '9999999999999999999999999999999999999999999999999999999999999999'
         seq: 7
         stream_id: ctl:ws_01J8Z2
@@ -28810,8 +29153,8 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - *id067
-      - *id067
+      - *id083
+      - *id083
     - path: payload.root
       value: 00cad8073293949638b66e7c221e4075f6817ae6d3e8ffc6361ea65dd0467d04
     - path: artifact_refs
@@ -28861,7 +29204,7 @@ cold_records:
     base_draft: anchor
     changes:
     - path: actor
-      value: *id064
+      value: *id080
     - path: artifact_refs
       value:
       - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -28968,7 +29311,7 @@ cold_records:
     base_draft: segment
     changes:
     - path: actor
-      value: *id064
+      value: *id080
     - path: artifact_refs
       value: []
     expect:
@@ -28982,7 +29325,7 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - *id067
+      - *id083
     - path: payload.root
       value: 0003c9675ac0c43101293f562cebe3019c5f7a808d0a819c6b7e5ab95c2fe125
     - path: artifact_refs
@@ -29625,7 +29968,7 @@ cold_records:
       clause: '§11: the genesis start'
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       from_seq: 1
-      request: &id068
+      request: &id084
         kind: genesis
       expect:
         from_seq: 1
@@ -29634,13 +29977,13 @@ cold_records:
       clause: '§11: genesis is seq 1 only'
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       from_seq: 2
-      request: *id068
+      request: *id084
       expect: null
     - name: segment_at_its_first_seq
       clause: '§9.14: a SegmentExported''s start'
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       from_seq: 4
-      request: &id069
+      request: &id085
         kind: manifest
         manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
       expect:
@@ -29650,13 +29993,13 @@ cold_records:
       clause: '§9.14: a segment starts at its first_seq'
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       from_seq: 5
-      request: *id069
+      request: *id085
       expect: null
     - name: segment_of_another_stream
       clause: '§9.14: the segment''s own stream'
       stream_id: agent:ws_01J8Z2:agent_a
       from_seq: 4
-      request: *id069
+      request: *id085
       expect: null
     - name: manifest_not_recorded
       clause: '§9.14: an absent manifest'
@@ -29670,7 +30013,7 @@ cold_records:
       clause: '§9.14: a stamped anchor''s leaf at n - 1'
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       from_seq: 10
-      request: &id070
+      request: &id086
         kind: anchor
         anchor_event_id: 01J8Z3C4A000000000000000S1
       expect:
@@ -29680,7 +30023,7 @@ cold_records:
       clause: '§9.14: the leaf is the event before the start'
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       from_seq: 9
-      request: *id070
+      request: *id086
       expect: null
     - name: unstamped_anchor_is_no_start
       clause: '§9.14, DEC-783 item 8: a null token vouches for nothing'
@@ -29694,7 +30037,7 @@ cold_records:
       clause: '§9.14: the anchor has no leaf for the stream'
       stream_id: agent:ws_01J8Z2:agent_a
       from_seq: 10
-      request: *id070
+      request: *id086
       expect: null
     - name: another_workspaces_segment
       clause: '§9.14, DEC-767: only the workspace''s own records'

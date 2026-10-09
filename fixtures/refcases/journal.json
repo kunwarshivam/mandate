@@ -17592,7 +17592,7 @@
   ]
  },
  "connections": {
-  "spec": "docs/specs/journal.md v0.20 §9.8 (DEC-800)",
+  "spec": "docs/specs/journal.md v0.30 §9.8 and §11 (DEC-800, DEC-696)",
   "drafts": {
    "established_v2": {
     "envelope_version": 1,
@@ -21765,6 +21765,148 @@
     }
    },
    {
+    "name": "version_1_never_reestablished_at_version_1",
+    "clause": "rule 66: a version-1 first establishment has no account_ref, so it is never re-established (DEC-696)",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "payload.account_ref",
+        "delete": true
+       },
+       {
+        "path": "payload.user",
+        "delete": true
+       },
+       {
+        "path": "payload.step_up",
+        "delete": true
+       },
+       {
+        "path": "payload.margin_attestation",
+        "delete": true
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "payload.account_ref",
+        "delete": true
+       },
+       {
+        "path": "payload.user",
+        "delete": true
+       },
+       {
+        "path": "payload.step_up",
+        "delete": true
+       },
+       {
+        "path": "payload.margin_attestation",
+        "delete": true
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "66"
+    }
+   },
+   {
+    "name": "revoked_on_another_control_stream",
+    "clause": "rule 66: each rule holds on its own stream; another workspace's revocation revokes nothing here (DEC-696)",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       },
+       {
+        "path": "stream_id",
+        "value": "ctl:ws_01J8Z3"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "66"
+    }
+   },
+   {
     "name": "two_connections_one_account",
     "clause": "rule 66: one account_ref, one connection (CN-5)",
     "records": [
@@ -22832,6 +22974,400 @@
     ],
     "expect": {
      "outcome": "Valid"
+    }
+   },
+   {
+    "name": "two_account_streams_interleave",
+    "clause": "rule 68: each account stream is folded on its own, one connection each (DEC-696)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       },
+       {
+        "path": "payload.account_ref",
+        "value": "01J8Z2ACCT00000000000000B7"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "degraded"
+       },
+       {
+        "path": "payload.reason",
+        "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "a_reauthorize_on_another_account_stream_admits_no_rotation",
+    "clause": "rule 68: the rotation's reauthorize check is on its own stream (DEC-696)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       },
+       {
+        "path": "payload.account_ref",
+        "value": "01J8Z2ACCT00000000000000B7"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "degraded"
+       },
+       {
+        "path": "payload.reason",
+        "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S07A0000000000000000"
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 6,
+     "rule": "68"
     }
    },
    {
@@ -25595,6 +26131,479 @@
      "outcome": "Mismatch",
      "code": "connection_cause_mismatch",
      "index": 5
+    }
+   },
+   {
+    "name": "reconnected_after_version_1",
+    "clause": "§11: reconnect after an establishment of either version (DEC-696)",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload.account_ref",
+        "delete": true
+       },
+       {
+        "path": "payload.user",
+        "delete": true
+       },
+       {
+        "path": "payload.step_up",
+        "delete": true
+       },
+       {
+        "path": "payload.margin_attestation",
+        "delete": true
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reconnect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "connect_check_after_version_1",
+    "clause": "§11: reconnect after an establishment of either version (DEC-696)",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload.account_ref",
+        "delete": true
+       },
+       {
+        "path": "payload.user",
+        "delete": true
+       },
+       {
+        "path": "payload.step_up",
+        "delete": true
+       },
+       {
+        "path": "payload.margin_attestation",
+        "delete": true
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_cause_mismatch",
+     "index": 3
+    }
+   },
+   {
+    "name": "rotated_on_another_control_stream",
+    "clause": "§11: a rotation rests on its own control stream's establishment (DEC-696)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S02A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "stream_id",
+        "value": "ctl:ws_01J8Z3"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_cause_mismatch",
+     "index": 4
+    }
+   },
+   {
+    "name": "rotated_in_another_workspace_on_its_check",
+    "clause": "§11: a rotation rests on its own control stream's establishment (DEC-696)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S02A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       },
+       {
+        "path": "stream_id",
+        "value": "acct:ws_01J8Z3:01J8Z2ACCT00000000000000A1"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "stream_id",
+        "value": "ctl:ws_01J8Z3"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_cause_mismatch",
+     "index": 4
     }
    }
   ]
