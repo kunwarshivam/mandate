@@ -78,11 +78,7 @@ fn an_unreachable_provider_leaves_pause_and_the_kill_switch_until_the_absolute_l
         );
         assert_refused_after(&mut s, 1, at(12 * HOUR + 1), EndReason::Expired);
     }
-    let mut s = open();
-    assert_eq!(
-        s.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
-        Ok(Refreshed::Outage)
-    );
+    let mut s = in_an_outage();
     let restored = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(3), at(900));
     assert_eq!(
         restored,
@@ -240,9 +236,7 @@ fn a_deprovision_signal_closes_route_two_whatever_any_session_is_doing() {
 #[test]
 #[ignore = "pending E9-1"]
 fn an_outage_restores_the_full_session_only_inside_the_idle_timeout() {
-    let mut quiet = open();
-    let outage = quiet.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300));
-    assert_eq!(outage, Ok(Refreshed::Outage));
+    let mut quiet = in_an_outage();
     assert_eq!(
         quiet.authorize(Request::Pause, at(2 * HOUR)),
         Ok(()),
@@ -280,19 +274,20 @@ fn an_outage_restores_the_full_session_only_inside_the_idle_timeout() {
     assert_eq!(active.authorize(Request::Other, at(3_000 + HOUR)), Ok(()));
 }
 
-/// A session whose refresh met an outage at 300 s and whose owner paused at 3 000 s: reduced to
-/// pause and the kill switch, with its idle timer counting from the pause.
-fn active_in_an_outage() -> SessionRecord {
+/// A session whose refresh met an outage at 300 s, reduced to pause and the kill switch.
+fn in_an_outage() -> SessionRecord {
     let mut s = open();
-    assert_eq!(
-        s.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
-        Ok(Refreshed::Outage)
-    );
+    let outage = s.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300));
+    assert_eq!(outage, Ok(Refreshed::Outage));
     assert_eq!(s.reach(), Reach::Outage);
-    assert_eq!(
-        s.authorize(Request::Other, at(301)),
-        Err(SessionRefusal::RiskReductionOnly)
-    );
+    let other = s.authorize(Request::Other, at(301));
+    assert_eq!(other, Err(SessionRefusal::RiskReductionOnly));
+    s
+}
+
+/// [`in_an_outage`] with a pause at 3 000 s, which the idle timer counts from.
+fn active_in_an_outage() -> SessionRecord {
+    let mut s = in_an_outage();
     assert_eq!(
         s.authorize(Request::Pause, at(3_000)),
         Ok(()),
@@ -305,11 +300,7 @@ fn active_in_an_outage() -> SessionRecord {
 #[ignore = "pending E9-1"]
 fn a_lapsed_idle_session_is_not_restored_by_a_granted_refresh() {
     for paused_at in [None, Some(2_000)] {
-        let mut s = open();
-        assert_eq!(
-            s.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
-            Ok(Refreshed::Outage)
-        );
+        let mut s = in_an_outage();
         let last = match paused_at {
             Some(t) => {
                 assert_eq!(s.authorize(Request::Pause, at(t)), Ok(()));
@@ -341,11 +332,7 @@ fn a_lapsed_idle_session_is_not_restored_by_a_granted_refresh() {
         );
         assert_refused_after(&mut s, 1, at(last + 2 * HOUR + 1), EndReason::Expired);
     }
-    let mut edge = open();
-    assert_eq!(
-        edge.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
-        Ok(Refreshed::Outage)
-    );
+    let mut edge = in_an_outage();
     let restore = edge.refresh(&secret(1), ProviderAnswer::Granted, &secret(3), at(HOUR));
     assert_eq!(
         restore,
