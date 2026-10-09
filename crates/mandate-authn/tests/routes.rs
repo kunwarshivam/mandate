@@ -91,10 +91,8 @@ fn an_unreachable_provider_leaves_pause_and_the_kill_switch_until_the_absolute_l
         }),
         "the token stayed current"
     );
-    assert_eq!(
-        (s.reach(), s.authorize(Request::Other, at(901))),
-        (Reach::Full, Ok(()))
-    );
+    assert_eq!(s.reach(), Reach::Full);
+    assert_eq!(s.authorize(Request::Other, at(901)), Ok(()));
     let reused = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(4), at(902));
     assert_eq!(reused, Err(ended(EndReason::RefreshReuse)));
 }
@@ -231,17 +229,12 @@ fn a_deprovision_signal_closes_route_two_whatever_any_session_is_doing() {
         "an expiry is no deprovision signal"
     );
     assert_eq!(reused.ended(), Some(EndReason::RefreshReuse));
-    for name in [
-        "after sign-out",
-        "after an idle lapse",
-        "after an absolute lapse",
-        "after reuse",
-        "with no session at all",
-    ] {
-        let standing = signed_in.saw_deprovision(at(13 * HOUR));
-        let route_two = SessionRecord::open_reduction_only(standing, at(13 * HOUR + 1));
-        assert_eq!(route_two, Err(SessionRefusal::DeprovisionSeen), "{name}");
-    }
+    let standing = signed_in.saw_deprovision(at(13 * HOUR));
+    assert_eq!(
+        SessionRecord::open_reduction_only(standing, at(13 * HOUR + 1)),
+        Err(SessionRefusal::DeprovisionSeen),
+        "the signal reads the subject's standing, not any session"
+    );
 }
 
 #[test]
@@ -255,16 +248,22 @@ fn an_outage_restores_the_full_session_only_inside_the_idle_timeout() {
         Ok(()),
         "no idle limit on pause"
     );
-    let mut active = open();
-    assert_eq!(
-        active.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
-        Ok(Refreshed::Outage)
-    );
-    assert_eq!(
-        active.authorize(Request::Pause, at(3_000)),
-        Ok(()),
-        "a pause counts as activity"
-    );
+    for over_s in [0, 1] {
+        let mut late = active_in_an_outage();
+        let grant = late.refresh(
+            &secret(1),
+            ProviderAnswer::Granted,
+            &secret(3),
+            at(3_000 + HOUR + over_s),
+        );
+        assert_eq!(
+            grant,
+            Err(ended(EndReason::Expired)),
+            "{over_s} s past the hour since the pause"
+        );
+        assert_refused_after(&mut late, 1, at(3_000 + HOUR + over_s), EndReason::Expired);
+    }
+    let mut active = active_in_an_outage();
     let restored = active.refresh(
         &secret(1),
         ProviderAnswer::Granted,
@@ -278,6 +277,28 @@ fn an_outage_restores_the_full_session_only_inside_the_idle_timeout() {
         })
     );
     assert_eq!(active.reach(), Reach::Full);
+    assert_eq!(active.authorize(Request::Other, at(3_000 + HOUR)), Ok(()));
+}
+
+/// A session whose refresh met an outage at 300 s and whose owner paused at 3 000 s: reduced to
+/// pause and the kill switch, with its idle timer counting from the pause.
+fn active_in_an_outage() -> SessionRecord {
+    let mut s = open();
+    assert_eq!(
+        s.refresh(&secret(1), ProviderAnswer::Unreachable, &secret(2), at(300)),
+        Ok(Refreshed::Outage)
+    );
+    assert_eq!(s.reach(), Reach::Outage);
+    assert_eq!(
+        s.authorize(Request::Other, at(301)),
+        Err(SessionRefusal::RiskReductionOnly)
+    );
+    assert_eq!(
+        s.authorize(Request::Pause, at(3_000)),
+        Ok(()),
+        "a pause counts as activity"
+    );
+    s
 }
 
 #[test]
