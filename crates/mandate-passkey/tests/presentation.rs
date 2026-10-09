@@ -106,7 +106,6 @@ fn issue_then_present(
 /// A challenge workspace A's context obtained, presented with workspace B's context by the same
 /// principal, is a mismatch; the same challenge presented with A's context counts.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_step_up_challenge_from_another_workspace_never_counts() {
     let (in_a, in_b) = (context(0, 0), context(1, 0));
     assert_eq!(
@@ -140,7 +139,6 @@ fn case(((iw, ip), (pw, pp)): Draw) -> Result<(), TestCaseError> {
 /// Over every pair of contexts, a challenge counts exactly when it is presented under a context
 /// for the workspace and the principal it was issued to.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_step_up_counts_only_under_the_context_its_challenge_was_issued_to() {
     let pair = (0..WORKSPACES.len(), 0..PRINCIPALS.len());
     let mut config = Config::with_cases(64);
