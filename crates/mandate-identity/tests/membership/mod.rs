@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use mandate_identity::{
     InvitationId, MembershipEvent as Event, MembershipFold, MembershipRecord, PrincipalId, Role,
 };
+use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
 pub const ROLES: [Role; 5] = [
@@ -33,7 +34,7 @@ pub fn set(mask: u8) -> BTreeSet<Role> {
 }
 
 /// Rule 103 as these tests read it: a day when independence is required and the grant adds
-/// operator or approver, and none otherwise.
+/// operator or approver to an existing workspace, and none otherwise.
 pub fn cool(at: i64, independent: bool, roles: &BTreeSet<Role>) -> UtcNanos {
     let cooling = roles.contains(&Role::Operator) || roles.contains(&Role::Approver);
     t(if independent && cooling { at + DAY } else { at })
@@ -58,7 +59,7 @@ pub fn activated(
     let (member, invitation, cool_off_ends_at) = (
         PrincipalId(member),
         inv.map(InvitationId),
-        cool(at, ind, &roles),
+        cool(at, ind && inv.is_some(), &roles),
     );
     let independent_approval_required = ind;
     Event::Activated {
@@ -81,16 +82,34 @@ pub fn reactivated(member: u128, roles: BTreeSet<Role>, ind: bool, at: i64) -> E
     }
 }
 
-/// The founding grant at instant 0: approver, operator, and workspace admin, never cooling off.
-pub fn founding() -> (i64, Event) {
-    (0, activated(FOUNDER, None, set(0b10101), false, 0))
+/// The founding grant at instant 0: approver, operator, and workspace admin, recording `ind`; it
+/// creates the workspace, so it never cools off (rule 103).
+pub fn founded(ind: bool) -> Event {
+    activated(FOUNDER, None, set(0b10101), ind, 0)
 }
 
+pub fn founding() -> (i64, Event) {
+    (0, founded(false))
+}
+
+/// The record at `seq`, committed at instant `at`, built with the seal as the store's adapter is.
+pub fn record(seq: u64, at: i64, event: Event) -> MembershipRecord {
+    MembershipRecord::new(Seal::grant(), seq, t(at), event)
+}
+
+/// The fold of records numbered as given, so a test can put them out of order.
+pub fn sequenced(records: Vec<(u64, i64, Event)>) -> MembershipFold {
+    let records = records.into_iter().map(|(seq, at, e)| record(seq, at, e));
+    MembershipFold::new(Seal::grant(), records.collect())
+}
+
+/// The fold of records numbered from 1.
 pub fn fold(events: Vec<(i64, Event)>) -> MembershipFold {
-    let records = events.into_iter().zip(1..);
-    MembershipFold::new(
-        records
-            .map(|((at, e), seq)| MembershipRecord::new(seq, t(at), e))
+    sequenced(
+        events
+            .into_iter()
+            .zip(1..)
+            .map(|((at, e), seq)| (seq, at, e))
             .collect(),
     )
 }

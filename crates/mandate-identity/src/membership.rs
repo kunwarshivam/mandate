@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
 use crate::{MembershipState, PrincipalId, Role};
@@ -85,8 +86,9 @@ pub struct MembershipRecord {
 }
 
 impl MembershipRecord {
-    /// The record at `seq` on the control stream, committed at `event_time`.
-    pub fn new(seq: u64, event_time: UtcNanos, event: MembershipEvent) -> Self {
+    /// The record at `seq` on the control stream, committed at `event_time`, for the seal's holder.
+    pub fn new(seal: Seal, seq: u64, event_time: UtcNanos, event: MembershipEvent) -> Self {
+        let _: Seal = seal;
         Self {
             seq,
             event_time,
@@ -97,10 +99,10 @@ impl MembershipRecord {
 
 /// A workspace's membership records, folded. A reading at *t* folds, in `seq` order, only the
 /// records whose `event_time` is at or before *t*, and reads each cool-off and expiry against *t*
-/// (§9.12). A record that does not fit the state it finds, or one whose `seq` is not above the
-/// previous record's, makes the fold unreadable from it on; unreadable latches, and
-/// [`Self::workspace_users`] then reads 1 (§5.3, rule 3). Its fields are private, so a count is
-/// only ever what the fold read.
+/// (§9.12). A record that does not fit the state it finds, or is out of order (DEC-657 item 4),
+/// makes it unreadable from that record's `event_time`; unreadable latches, and
+/// [`Self::workspace_users`] then reads 1 (§5.3, rule 3). Only the seal's holders build one
+/// (DEC-642 items 4 and 7), so a count is only ever what the fold read from the store's records.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipFold {
     records: Vec<MembershipRecord>,
@@ -112,8 +114,8 @@ pub struct MembershipFold {
               other form DEC-137 names"
 )]
 impl MembershipFold {
-    /// The fold of `records`, given in `seq` order.
-    pub fn new(_records: Vec<MembershipRecord>) -> Self {
+    /// The fold of `records`, given in `seq` order, for a holder of the seal.
+    pub fn new(_seal: Seal, _records: Vec<MembershipRecord>) -> Self {
         todo!()
     }
 
@@ -173,7 +175,7 @@ pub enum RecordRefusal {
 
 /// The writer's check that a record's `independent_approval_required` equals `effective`, the
 /// workspace's effective policy at the record's `event_time` (mandate spec §4.3), which the caller
-/// reads from the policy fold (DEC-657 item 6). A record with no such member passes.
+/// reads from the policy fold (DEC-657 item 7). A record with no such member passes.
 pub fn check_independence(
     _record: &MembershipRecord,
     _effective: bool,
