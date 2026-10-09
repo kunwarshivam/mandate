@@ -1,7 +1,0 @@
-file = "crates/mandate-mcp/src/tests/auth.rs"
-test = "the_challenge_url_is_read_only_from_a_resource_metadata_parameter"
-reason = """
-E7-24's O1a tests correction 2 (DEC-847 item 8). discover is implemented (#939) and today finds
-resource_metadata as a substring anywhere in the challenge, so the test fails on the URL it
-reads, not at a stub. The implementation PR deletes this file with the #[ignore] line.
-"""

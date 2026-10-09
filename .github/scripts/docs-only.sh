@@ -5,7 +5,8 @@
 # `docs_only=false`.
 #
 # Documentation: Markdown anywhere, `docs/` (except the reference-case YAML, which the fixtures and
-# reference jobs check), `CODEOWNERS`, and `LICENSE*`. The verification skill's feature map, one
+# reference jobs check, and the workspace API spec, which `check_planned.py` reads in the `schemas`
+# job, DEC-688), `CODEOWNERS`, and `LICENSE*`. The verification skill's feature map, one
 # file a feature under `.cursor/skills/verify-mandate/features/`, is code: `cargo xtask feature-map`
 # checks it against the workspace. The web app is everything under `web/`, which
 # `.github/workflows/web.yml` checks (DEC-200).
@@ -25,6 +26,7 @@ while IFS= read -r file; do
   case "$file" in
     .cursor/skills/verify-mandate/features/*) docs_only=false ;;
     docs/specs/reference-cases/*) docs_only=false ;;
+    docs/specs/workspace-api.md) docs_only=false ;;
     *.md | docs/* | CODEOWNERS | LICENSE*) ;;
     web/*) ;;
     *) docs_only=false ;;

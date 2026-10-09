@@ -1,8 +1,0 @@
-file = "crates/mandate-mcp/src/tests/register.rs"
-test = "an_answer_without_the_auth_method_or_with_other_grants_is_refused"
-reason = """
-E7-24's O1a tests correction 2 (DEC-847 item 8). register is implemented (#939) and today
-accepts an answer without token_endpoint_auth_method or with other grant or response types, so
-the test fails on the client it returns, not at a stub. The implementation PR deletes this file
-with the #[ignore] line.
-"""

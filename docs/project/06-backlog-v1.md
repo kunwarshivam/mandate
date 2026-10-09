@@ -752,6 +752,11 @@ after U-A1 to U-A5 are recorded.
   default build contains no Robinhood host (LT-1); the runner built from the
   paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
   (LT-4); and a restart after a run sends no second order (LT-6).
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 5, #976's review):* X1's word scan does not
+  read through `time -p`, the wrappers `setsid`, `flock`, `ionice`, `taskset`, `unbuffer`,
+  `doas`, `su -c` and `runuser`, `env -S`, or a dynamic `printf -v "$N"`. They are disclosed
+  residuals; the build-file and live-feature checks and review stand behind them. Close them with
+  a tests correction that pins each form as refused, then the implementation that refuses it.
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used
@@ -1208,9 +1213,6 @@ story buys a service, and none uses a real identity-provider account in tests (s
   *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
   every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
   no principal changes its own roles (ID-13); and the last-owner and last-admin refusals hold (§5.2).
-  *Owed (tests-correction PR, from #938's review):* a case removing roles from, and one deactivating, a
-  member whose membership is `removed`, `expired`, or `revoked`, each refused `forbidden` (DEC-654
-  item 7); no test pins that exclusion yet.
 - **E9-3 (Must)** As an admin, I want org-level limits that workspaces and agents can only
   tighten.
 - **E9-4 (Must; SC)** As a security-conscious user, I want step-up authentication for sensitive
@@ -1235,6 +1237,19 @@ story buys a service, and none uses a real identity-provider account in tests (s
   removed members, clients, service accounts, and agents counting zero and an unreadable count reading
   as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
   closed within 60 s (ID-3).
+  *Follow-ups* (#789's second review, minors backlogged under the freeze rule):
+  - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
+    which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
+  - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
+    record for it: an invitation's roles are fixed by `MemberInvited`. Until a record exists, the
+    writer maps it to `MemberInvitationRevoked` then `MemberInvited` with the reduced roles (merge
+    coordinator, 2026-10-09); whether to add a record stays open.
+  - Fold vectors (#812's review, access-reducing): a reactivation with a strict subset of the kept
+    roles, an activation with a strict subset of the invitation's roles, and a grant of a role held
+    but still cooling off are each refused, but only disjoint roles are tested; add a valid and a
+    refused history and a fold mutant for each.
+  - Rule 103's non-cooling branch has no vector with a gap under 1 s (#789's delta review); add an
+    invalid 1 ns gap and a mutant.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -4613,3 +4628,12 @@ From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is l
   once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
   `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
   the scope check cannot disagree on a name.
+
+From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
+
+- **Delete the transitional Alpaca profile** (`mandate-executor`'s `shape::transitional_alpaca`,
+  which `ExecutorState::new` starts with, and the default body of the shell's
+  `Connector::profile`) in B3, before the first non-Alpaca executor
+  path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
+  constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
+  2's defensive path goes with it.

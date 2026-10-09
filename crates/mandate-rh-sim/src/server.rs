@@ -35,6 +35,22 @@ pub enum Variant {
     Injection,
 }
 
+/// How the next `tools/call` answer is bent out of shape, after the core has acted on the call
+/// (LT-6: an answer the client cannot read exactly is `Unknown`, never a refusal). A lost answer
+/// is the core's own [`crate::Fault::LoseAnswer`]: the server then closes the connection with
+/// no bytes written ([DEC-849] item 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Garble {
+    /// `structuredContent.state` is a value none of the contract's ten states.
+    UnknownState,
+    /// `structuredContent` carries no `id`.
+    MissingId,
+    /// `structuredContent.quantity` is a JSON number, which may have been through a float.
+    NumberQuantity,
+    /// The body is not JSON, though it says `application/json`.
+    NotJson,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ServerError {
     #[error("{story} has not been implemented yet")]
@@ -67,6 +83,12 @@ impl SimServer {
     /// The name of every `tools/call` received, in order, listed or not, so a test can show a
     /// client never called a tool off its allowlist.
     pub fn calls(&self) -> Result<Vec<String>, ServerError> {
+        Err(ServerError::Unimplemented { story: "E7-25" })
+    }
+
+    /// Bends the next `tools/call` answer, and only that one, by `garble`.
+    pub fn garble_next(&self, garble: Garble) -> Result<(), ServerError> {
+        let _ = garble;
         Err(ServerError::Unimplemented { story: "E7-25" })
     }
 

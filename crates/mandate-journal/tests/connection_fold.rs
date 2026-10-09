@@ -142,7 +142,6 @@ fn judge(
 
 /// Rules 66, 67, and 68 over the 39 `sequences`: each first failing record, and its rule.
 #[test]
-#[ignore = "pending E7-17"]
 fn every_connection_sequence_is_judged_as_its_vector_says() {
     let (failed, answers) = judge("sequences", verify_connection_lifecycle);
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -171,7 +170,6 @@ fn every_connection_sequence_is_judged_as_its_vector_says() {
 
 /// §11's `connection_cause_mismatch` over the 9 `chains`, across both streams.
 #[test]
-#[ignore = "pending E7-17"]
 fn every_connection_chain_is_judged_as_its_vector_says() {
     let (failed, answers) = judge("chains", verify_connection_causes);
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -236,7 +234,6 @@ fn hand_case(records: &[&str]) -> Value {
 /// failed `reauthorize` check, are refused at the copy. The vectors have no such case; the
 /// expected answers are §9.8's text, written by hand.
 #[test]
-#[ignore = "pending E7-17"]
 fn the_latest_check_decides_a_binding_and_a_rotation() {
     let section = section();
     let verdict =
@@ -357,7 +354,6 @@ fn refused(index: usize, rule: ConnectionStreamRule) -> Result<(), ConnectionVer
 /// `suspended` to `suspended` as entering; when §9.8 takes it, the first answer flips to a refusal
 /// at record 6.
 #[test]
-#[ignore = "pending E7-17"]
 fn only_a_record_that_enters_suspended_moves_the_suspension_a_rotation_must_follow() {
     let clears_after = |into_suspended: String, second: String| {
         let records = [
@@ -396,7 +392,6 @@ fn only_a_record_that_enters_suspended_moves_the_suspension_a_rotation_must_foll
 /// re-established", not even by another version 1 whose absent `account_ref` matches it.
 /// `reference/journal/connections.py` admits that one; §9.8's text refuses it.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_version_1_first_establishment_is_never_established_again() {
     let again = |first: (&'static str, String), second: (&'static str, String)| {
         written(&[first, revoked(), second], verify_connection_lifecycle)
@@ -417,7 +412,6 @@ fn a_version_1_first_establishment_is_never_established_again() {
 /// establishment of the same id", whatever the earlier establishment's version.
 /// `reference/journal/connections.py` counts only version 2; §9.8's text counts either.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_later_establishment_after_a_version_1_rests_on_a_reconnect_check() {
     let after_v1 = |occasion: &str| {
         let records = [
@@ -442,7 +436,6 @@ fn a_later_establishment_after_a_version_1_rests_on_a_reconnect_check() {
 /// each binds on its own `connect` check, and one stream's `reauthorize` check never admits the
 /// other stream's rotation.
 #[test]
-#[ignore = "pending E7-17"]
 fn each_account_stream_is_folded_on_its_own() {
     let mut records = vec![
         check("connect"),
@@ -464,7 +457,6 @@ fn each_account_stream_is_folded_on_its_own() {
 /// record of another type naming a never-established id, an account record of another type naming
 /// another connection, and a rotation on an agent stream break no rule.
 #[test]
-#[ignore = "pending E7-17"]
 fn rows_that_are_not_connection_records_are_skipped() {
     let other = |event_type: &str| {
         set("event_type", &format!("\"{event_type}\""))
@@ -487,7 +479,6 @@ fn rows_that_are_not_connection_records_are_skipped() {
 /// Rule 67: a rotation names a connection established and not since revoked, so one naming an id
 /// never established is refused, though another connection is live.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_rotation_of_a_connection_never_established_is_refused() {
     let records = [
         ("established_v2", String::new()),

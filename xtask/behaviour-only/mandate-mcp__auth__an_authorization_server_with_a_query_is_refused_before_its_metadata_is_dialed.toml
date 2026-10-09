@@ -1,7 +1,0 @@
-file = "crates/mandate-mcp/src/tests/auth.rs"
-test = "an_authorization_server_with_a_query_is_refused_before_its_metadata_is_dialed"
-reason = """
-E7-24's O1a tests correction 2 (DEC-847 item 8). discover is implemented (#939) and today
-accepts an issuer carrying a query, so the test fails on the network error of a dial to its
-metadata, not at a stub. The implementation PR deletes this file with the #[ignore] line.
-"""

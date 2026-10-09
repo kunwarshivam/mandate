@@ -284,7 +284,6 @@ impl Drop for Scene {
 /// pinned asset, through the cycle. A dry run sends nothing and reports the order it would place,
 /// and hands the cycle no journal (DEC-846 item 6): its DSN names a port nobody listens on.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_placing_run_stores_the_closes_and_sends_one_order() {
     let mut scene = Scene::new("place", 231..256);
     let outcome = scene.run();
@@ -311,7 +310,6 @@ fn a_placing_run_stores_the_closes_and_sends_one_order() {
 /// FT-4 (DEC-157 item 4): falling closes are the host's `Flat`, so the run stores nothing, hands
 /// the cycle nothing and sends nothing.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_flat_model_stores_and_sends_nothing() {
     let mut scene = Scene::new("flat", (231..256).rev());
     let outcome = scene.run();
@@ -346,7 +344,6 @@ fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
 /// registrations' refusals: agent undeployed or stopped; document missing, corrupt or live; version
 /// unconfirmed; a kind unregistered; a fee schedule not yet in effect; or a configured host.
 #[test]
-#[ignore = "pending E7-19"]
 fn every_refusal_before_the_credentials_reads_none() {
     let host =
         [("ALPACA_API_BASE", "https://api.alpaca.markets")].map(|(k, v)| (k.into(), v.into()));
@@ -374,7 +371,11 @@ fn every_refusal_before_the_credentials_reads_none() {
             "undeployed" => records.retain(|r| r.event_type != "AgentDeployed"),
             "stopped" => push(records, "AgentStopped", r#"{"agent_id":"agent_spy"}"#),
             "missing" => scene.args.store = scene.root.join("empty"),
-            "corrupt" => fs::write(store.object_path(&version), b"{}").unwrap(),
+            "corrupt" => {
+                let object = store.object_path(&version);
+                fs::remove_file(&object).unwrap();
+                fs::write(&object, b"{}").unwrap();
+            }
             "live" => push(records, "AgentDeployed", &deploy),
             "unconfirmed" => records.retain(|r| r.event_type != "MandateConfirmed"),
             "unregistered" => records.retain(|r| r.payload.get("kind") != Some(&rule_set)),
@@ -409,7 +410,6 @@ fn every_refusal_before_the_credentials_reads_none() {
 /// only in the control stream, the store, the bars and the broker, and each sends its own order
 /// and stores its own closes.
 #[test]
-#[ignore = "pending E7-19"]
 fn two_equities_differ_only_in_their_journaled_inputs() {
     for equity in [SPY_ARCA, AAPL_NASDAQ] {
         let Equity(id, symbol, _, _) = equity;
@@ -437,7 +437,6 @@ fn absent(outcome: &Result<Outcome, PaperError>) -> String {
 /// FT-7 (DEC-470 item 1): an account that already holds a position, as after a first run, is
 /// refused with nothing sent, however the model reads.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_held_position_sends_nothing() {
     let mut scene = Scene::new("held", 231..256);
     scene.ports.broker.holds = true;
@@ -450,7 +449,6 @@ fn a_held_position_sends_nothing() {
 /// FT-8 (`AGENTS.md` rule 3): bars that end before the last completed session are refused as
 /// untrusted market data, with nothing stored or sent.
 #[test]
-#[ignore = "pending E7-19"]
 fn stale_bars_store_and_send_nothing() {
     let mut scene = Scene::new("stale", 231..256);
     scene.at(WEDNESDAY);
@@ -467,7 +465,6 @@ fn stale_bars_store_and_send_nothing() {
 /// FT-9 (trading spec §9.6, DEC-509 item 4): from 15:50 New York no opening is placed, so a run
 /// whose quote and minute bars are fresh is refused at the closing window with nothing sent.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_run_in_the_closing_window_sends_nothing() {
     let mut scene = Scene::new("closing", 231..256);
     scene.at(CLOSING);
@@ -481,7 +478,6 @@ fn a_run_in_the_closing_window_sends_nothing() {
 /// with its session, through the shell's trust check: stale bars, or another instrument's, are
 /// untrusted.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_closes_are_the_full_trusted_span_in_order() {
     let scene = Scene::new("closes", 231..256);
     let (spy, aapl) = (
