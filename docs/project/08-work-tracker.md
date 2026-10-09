@@ -110,6 +110,7 @@ it up.
 | `Bps::sqrt_impact` returns `too_precise` past 10 decimal places; bound the coefficient's scale or say so | E4-2 |
 | `mandate journal verify` reports an unreadable path with no `Refusal` code; `mandate inspect` on a quotes dataset with corporate actions and no quoted side prints no split-adjusted line | Next `mandate-cli` touch |
 | The web app's largest chunk is 906 KB and `static/chunks` 4.2 MB; no per-route budget | `web/design/plan.md` G |
+| `web-e2e` run 37888126991: the Stop cross-fade test (`stop-visible.spec.ts`, chromium-dark, 1280 px) counted 3 view transitions over 4 hops, so one hop committed without a cross-fade and Stop went untested in a fade there; every per-hop Stop check passed. The count's message now names each hop and its count (this PR); the next failure says which hop | L4 |
 | `08-work-tracker.md` had lines 7,800 characters long; it is now one page, with the record in the work log, and stays that way | Every session |
 
 ## How the work runs
