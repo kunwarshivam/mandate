@@ -28846,7 +28846,7 @@
    },
    {
     "name": "range_after_an_unseen_request",
-    "clause": "§11: a range checks rule 131's closing requirement only for a request it holds; the full-chain run checks the rest",
+    "clause": "§11: an anchored range closes the request its connection anchor holds (DEC-885)",
     "records": [
      {
       "base_draft": "established_v2",
@@ -28897,7 +28897,45 @@
     "expect": {
      "outcome": "Valid"
     },
-    "scope": "range"
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     }
+    ]
    },
    {
     "name": "full_chain_after_the_same_records",
@@ -30303,6 +30341,2042 @@
      "index": 1,
      "rule": "131"
     }
+   }
+  ],
+  "chains": []
+ },
+ "connection_ranges": {
+  "spec": "docs/specs/journal.md v0.32 §9.8 and §11 (DEC-800, DEC-696, DEC-699)",
+  "drafts": {
+   "established_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C1A000000000000000C1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionEstablished",
+    "schema_version": 2,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C4A000000000000000C4",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "broker": "alpaca",
+     "environment": "paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "account_ref": "01J8Z2ACCT00000000000000A1",
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     },
+     "margin_attestation": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "established_copy": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C7A000000000000000C7",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionEstablished",
+    "schema_version": 2,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C1A000000000000000C1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "broker": "alpaca",
+     "environment": "paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "account_ref": "01J8Z2ACCT00000000000000A1",
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     },
+     "margin_attestation": null,
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "rotated_copy": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C8A000000000000000C8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionCredentialRotated",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C3A000000000000000C3",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     },
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "refused_scope": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C2A000000000000000C2",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionRefused",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper_2",
+     "broker": "alpaca",
+     "environment": "paper",
+     "occasion": "connect",
+     "check": "scope",
+     "reason": "fund_movement",
+     "existing_connection_id": null,
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     }
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "rotated": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C3A000000000000000C3",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionCredentialRotated",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4C4A000000000000000C4",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     }
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "checked_start": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C4A000000000000000C4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionChecked",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "occasion": "connect",
+     "results": [
+      {
+       "check": "account",
+       "result": "passed",
+       "reason": null
+      },
+      {
+       "check": "environment",
+       "result": "passed",
+       "reason": null
+      },
+      {
+       "check": "scope",
+       "result": "passed",
+       "reason": null
+      }
+     ],
+     "account_pii_ref": "pii_01J8Z2PR0000000000000000A1",
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": [
+     "pii_01J8Z2PR0000000000000000A1"
+    ]
+   },
+   "state_degraded": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C5A000000000000000C5",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionStateChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "from": "active",
+     "to": "degraded",
+     "reason": "network_errors",
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "refreshed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C6A000000000000000C6",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ConnectionCredentialRefreshed",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "scopes": [
+      "data",
+      "trading"
+     ],
+     "risk_clock": "2026-09-22T13:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "requested": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4C9A000000000000000C9",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionRequested",
+    "schema_version": 1,
+    "event_time": "2026-09-22T13:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "account_ref": "01J8Z2ACCT00000000000000A1",
+     "broker": "alpaca",
+     "environment": "paper",
+     "user": "user_owner_01",
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+      "method": "cli_confirm"
+     }
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [],
+  "valid_drafts": [],
+  "sequences": [
+   {
+    "name": "anchored_rotation",
+    "clause": "rule 67: the anchor holds the establishment",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_reauthorize_refusal",
+    "clause": "rule 67",
+    "records": [
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_reconnect_refusal",
+    "clause": "rule 67: the anchor holds the revocation",
+    "records": [
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reconnect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_reestablishment",
+    "clause": "rule 66: the anchor holds the first establishment",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_connect_closes_the_anchors_request",
+    "clause": "rule 131: the anchor holds the open request",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_daily_check_after_the_binding",
+    "clause": "rule 68: the anchor holds the binding copy",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "daily"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_state_change_after_the_binding",
+    "clause": "rule 68",
+    "records": [
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "degraded"
+       },
+       {
+        "path": "payload.reason",
+        "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_clear_on_the_anchors_rotation",
+    "clause": "rule 68: the anchor holds the suspension and the rotation",
+    "records": [
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S07A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "active"
+       },
+       {
+        "path": "payload.reason",
+        "value": "acknowledged"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C0A000000000000000K9"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_rotation_widens_the_scopes",
+    "clause": "rule 67: the anchor holds the latest scopes",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "67"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.scopes",
+        "value": [
+         "trading"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_reestablishment_while_live",
+    "clause": "rule 66",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "66"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_account_ref_held",
+    "clause": "rule 66, CN-5: the anchor holds the account_ref's holder",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "66"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_connect_with_no_request",
+    "clause": "rule 131: an anchored range checks the closing existence",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "131"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S90A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper_2",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_request_reuses_an_account_ref",
+    "clause": "rule 131: the anchor holds the requested refs",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S91A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "131"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S90A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper_2",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       },
+       {
+        "path": "payload.check",
+        "value": null
+       },
+       {
+        "path": "payload.reason",
+        "value": "timeout"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_state_from_the_wrong_state",
+    "clause": "rule 68: the anchor holds the state",
+    "records": [
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "68"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "degraded"
+       },
+       {
+        "path": "payload.reason",
+        "value": "network_errors"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "anchored_clear_on_a_rotation_before_the_suspension",
+    "clause": "rule 68: the anchor holds when the suspension began",
+    "records": [
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S06A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "condition_cleared"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4S04A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0,
+     "rule": "68"
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reauthorize"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S05A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "authorization_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "unanchored_rotation",
+    "clause": "§11: no anchor, so the first judged record fails closed",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "unanchored_reconnect_refusal",
+    "clause": "§11",
+    "records": [
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reconnect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "unanchored_request",
+    "clause": "§11: a request's opening clause reads earlier records",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S91A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "unanchored_daily_check",
+    "clause": "§11: every account-stream connection record",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "daily"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "unanchored_revocation_passes",
+    "clause": "§11, §9.8: no rule refuses a revocation",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 1
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "unanchored_revocations_only",
+    "clause": "§11, §9.8",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range",
+    "before": null
+   },
+   {
+    "name": "anchor_on_a_broken_chain",
+    "clause": "§11: a chain that breaks a rule before the range anchors nothing",
+    "records": [
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Unanchored",
+     "code": "connection_lifecycle_mismatch",
+     "index": 0
+    },
+    "scope": "range",
+    "before": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       }
+      ]
+     }
+    ]
    }
   ],
   "chains": []

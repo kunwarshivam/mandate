@@ -10613,6 +10613,7 @@ jq -r "$filter" "$src"
         names(&problems, &["other-manifest", "glued-manifest"], &[]);
         Ok(())
     }
+
     /// The runner, `a-lib` and the live-only `rh-host`, a workspace member outside
     /// `default-members` that nothing depends on: the default build and a `-p a-lib` build do not
     /// reach it (DEC-868 item 2).

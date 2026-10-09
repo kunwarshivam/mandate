@@ -15,5 +15,7 @@
 - **Tests:** `crates/mandate-audit/tests/timeline.rs`: a clock step back, excluded events consumed,
   exact `limit`, the per-stream cap, a merge-oracle fuzz of every walk under appends, foreign and
   unknown agents and cursors as the one `NotFound`, the DEC-764 membership rules, lookups read only
-  the page's snapshot, and version-2-only order links across timeline streams.
+  the page's snapshot and scan it whole past the page's window, version-2-only order links across
+  timeline streams, and (a unit test in `src/timeline.rs`) `agent_id` taking precedence over
+  `agent`.
 - **Run:** `cargo nextest run -p mandate-audit -E 'binary(timeline)'`.

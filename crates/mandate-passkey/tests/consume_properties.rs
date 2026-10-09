@@ -1,7 +1,8 @@
 //! `consume`'s order (DEC-662 item 6) over every combination of failures: injected into a case
 //! every check passes, the refusal is the first of them in the order this file lists, restated
 //! from identity spec §7.3, §7.2 step 4, and DEC-662 item 6's reading of step 6 as
-//! `mandate_passkey::verify`'s order, rather than taken from the crate.
+//! `mandate_passkey::verify`'s order, rather than taken from the crate. E9-11 (ID-4): before the
+//! oracle is trusted, it is shown to disagree with planted bugs wrapped around the real `consume`.
 
 mod common;
 mod stepup;
@@ -9,7 +10,10 @@ mod stepup;
 use mandate_canon::Digest;
 use mandate_identity::StepUpActionKind;
 use mandate_passkey::Refusal;
-use mandate_passkey::stepup::{Action, EnrolledCredential, Environment, Missing, StepUpRefusal};
+use mandate_passkey::stepup::{
+    Action, Consumed, EnrolledCredential, Environment, Missing, StepUpRefusal,
+};
+use mandate_time::UtcNanos;
 
 use common::{Ceremony, OwnedAssertion, UP, UV};
 use stepup::{
@@ -158,8 +162,15 @@ fn arrange(case: &mut Case, chosen: &[Failure], signed: &[OwnedAssertion]) {
     };
 }
 
-#[test]
-fn the_refusal_is_the_first_injected_failure_in_spec_order() {
+/// One answer per combination: `chosen`, what `run` answered, and the oracle's `expected`.
+type Answer = (
+    Vec<Failure>,
+    Result<UtcNanos, StepUpRefusal>,
+    Result<UtcNanos, StepUpRefusal>,
+);
+
+/// The combinations on which `run`, given each arranged case, answers otherwise than the oracle.
+fn disagreements(run: impl Fn(&mut Case) -> Result<Consumed, StepUpRefusal>) -> Vec<Answer> {
     let all = combinations();
     assert_eq!(all.len(), 2 * 3 * 3 * 2 * 2 * 4 * 2 * 2 * 2 * 2 * 2 * 2);
     let mut case = Case::new();
@@ -167,21 +178,93 @@ fn the_refusal_is_the_first_injected_failure_in_spec_order() {
     let mut wrong = Vec::new();
     for chosen in &all {
         arrange(&mut case, chosen, &signed);
-        let result = case.run();
         let expected = match chosen.iter().min() {
             None => Ok(at(stepup::ISSUED)),
             Some(first) => Err(expected(*first)),
         };
-        let got = result.map(|consumed| consumed.evidence().authenticated_at);
+        let got = run(&mut case).map(|consumed| consumed.evidence().authenticated_at);
         if got != expected {
             wrong.push((chosen.clone(), got, expected));
         }
     }
+    wrong
+}
+
+#[test]
+fn the_refusal_is_the_first_injected_failure_in_spec_order() {
+    let wrong = disagreements(|case| case.run());
     assert!(
         wrong.is_empty(),
         "{} of {} combinations answered otherwise; the first (failures, got, expected): {:?}",
         wrong.len(),
-        all.len(),
+        combinations().len(),
         &wrong[..wrong.len().min(5)],
     );
+}
+
+/// The real `consume` run with the presented action's digest (or, without `digest`, its kind)
+/// replaced by the challenge's own, so the action is never checked against it on that field.
+fn unbound(case: &mut Case, digest: bool) -> Result<Consumed, StepUpRefusal> {
+    let (presented, bound) = (case.action, case.record.action());
+    match digest {
+        true => case.action.digest = bound.digest,
+        false => case.action.kind = bound.kind,
+    }
+    let result = case.run();
+    case.action = presented;
+    result
+}
+
+/// The planted bug the oracle must catch before it is trusted: the oracle disagrees with
+/// `planted` on the combination `witness` names, the one the bug lets through or refuses.
+fn assert_caught(
+    bug: &str,
+    witness: &[Failure],
+    planted: impl Fn(&mut Case) -> Result<Consumed, StepUpRefusal>,
+) {
+    let wrong = disagreements(planted);
+    assert!(
+        wrong.iter().any(|(chosen, ..)| chosen == witness),
+        "ID-4's oracle agreed with {bug} on {witness:?} ({} disagreements), so it cannot be trusted",
+        wrong.len(),
+    );
+}
+
+#[test]
+fn id4_oracle_catches_a_challenge_not_bound_to_its_digest() {
+    assert_caught(
+        "a challenge not bound to its digest",
+        &[OtherDigest],
+        |case| unbound(case, true),
+    );
+}
+
+#[test]
+fn id4_oracle_catches_a_challenge_not_bound_to_its_action_kind() {
+    assert_caught(
+        "a challenge not bound to its action kind",
+        &[OtherKind],
+        |case| unbound(case, false),
+    );
+}
+
+#[test]
+fn id4_oracle_catches_a_challenge_that_never_expires() {
+    assert_caught("a challenge that never expires", &[Expired], |case| {
+        let now = case.now;
+        let expires = case.record.expires_at();
+        if now >= expires {
+            case.now = issued_plus(299, 999_999_999);
+        }
+        let result = case.run();
+        case.now = now;
+        result
+    });
+}
+
+#[test]
+fn id4_oracle_catches_a_consume_that_always_refuses() {
+    assert_caught("a consume that refuses everything", &[], |_| {
+        Err(StepUpRefusal::Method)
+    });
 }
