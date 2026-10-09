@@ -1331,9 +1331,10 @@ fn an_empty_anchor_takes_the_stream_of_the_first_judged_record() {
         let start = verified_start(&[], TrustedStart::GENESIS);
         let got = verify_connection_lifecycle_from(start, &chain);
         assert_eq!(got, at(&chain[3], check), "{last}");
-        if check == rotated {
-            let full = located(&chain, verify_connection_lifecycle(&chain));
-            assert_eq!(got, full, "as the full chain judges it");
-        }
+        let full = located(&chain, verify_connection_lifecycle(&chain));
+        assert!(
+            check != rotated || got == full,
+            "as the full chain judges it"
+        );
     }
 }
