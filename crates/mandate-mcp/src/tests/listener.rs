@@ -45,8 +45,7 @@ pub(crate) async fn browse(port: u16, request: &str) -> String {
 
 type Run = (Result<AuthorizationCode, McpError>, String, bool);
 
-/// One login through a fresh listener at `at` on the login's clock: the result, the browser's
-/// answer, and whether the port still took a connection afterwards.
+/// One login at `at` on its clock: the result, the browser's answer, and whether the port reopened.
 pub(crate) async fn run(request: &str, at: Duration) -> Run {
     let (listener, redirect) = CallbackListener::bind().await.unwrap();
     let port = listener.socket.local_addr().unwrap().port();
@@ -120,6 +119,25 @@ async fn a_bad_or_foreign_request_answers_400_and_spends_the_login() {
         assert!(!reopened, "{request:?}");
     }
     let (result, _, reopened) = run(&long, Duration::ZERO).await;
+    assert_eq!(result.unwrap_err().code(), "malformed");
+    assert!(!reopened);
+}
+
+/// A request whose head, blank line included, is exactly `size` bytes.
+fn sized(size: usize) -> String {
+    let line = GOOD.replace('@', STATE).replace("\r\n\r\n", "\r\nx: ");
+    let request = format!("{line}{}\r\n\r\n", "a".repeat(size - line.len() - 4));
+    assert_eq!(request.len(), size);
+    request
+}
+
+#[tokio::test]
+#[ignore = "pending E7-24"]
+async fn the_head_cap_is_exactly_8192_bytes() {
+    let (result, answer, _) = run(&sized(8192), Duration::ZERO).await;
+    assert!(result.is_ok(), "{result:?}");
+    assert!(answer.starts_with("HTTP/1.1 200 "), "{answer}");
+    let (result, _, reopened) = run(&sized(8193), Duration::ZERO).await;
     assert_eq!(result.unwrap_err().code(), "malformed");
     assert!(!reopened);
 }

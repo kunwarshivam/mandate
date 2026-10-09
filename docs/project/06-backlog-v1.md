@@ -4660,10 +4660,8 @@ From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is l
   `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
   the scope check cannot disagree on a name.
 
-From E7-24 O1b ([DEC-855](decisions/DEC-855.md) item 4, #1022's review):
-
 - **E7-24: require `iss` when the server sets `authorization_response_iss_parameter_supported`**
-  (RFC 9207 §3): discovery reads the flag, and a callback without `iss` is then refused.
+  (RFC 9207 §3, [DEC-855](decisions/DEC-855.md) item 4): a callback without `iss` is then refused.
 
 From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
 

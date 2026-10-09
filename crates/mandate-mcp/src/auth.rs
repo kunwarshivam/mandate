@@ -206,9 +206,7 @@ impl CallbackListener {
         Err(McpError::Unimplemented { story: "E7-24" })
     }
 
-    /// One request from one connection, then closed. `clock` started when `login` began; at or
-    /// after [`LOGIN_LIFETIME`] it is [`McpError::LoginExpired`]. Else `GET <target> HTTP/1.1`
-    /// within 8 KiB goes to [`PendingLogin::callback`] (DEC-861 items 1 to 3).
+    /// One request, then closed; `clock` started when `login` began (DEC-861 items 1 to 3).
     pub async fn accept(
         self,
         login: PendingLogin,
@@ -220,8 +218,7 @@ impl CallbackListener {
 }
 
 impl AuthServer {
-    /// The code exchange (RFC 6749 §4.1.3, RFC 7636 §4.5): one form `POST` to the token endpoint;
-    /// only a `200` `Bearer` answer is a token, and no error carries a secret (DEC-861 items 4, 5).
+    /// The code exchange (RFC 6749 §4.1.3, RFC 7636 §4.5; DEC-861 items 4 and 5).
     pub async fn exchange(
         &self,
         code: AuthorizationCode,
@@ -230,9 +227,7 @@ impl AuthServer {
         let _ = (code, config);
         Err(McpError::Unimplemented { story: "E7-24" })
     }
-}
 
-impl AuthServer {
     /// An unauthenticated `POST` of `initialize` to the endpoint, which must answer `401`; the
     /// Bearer challenge's `resource_metadata` URL, or without one the endpoint's RFC 9728 well-known
     /// URL, read from the pinned MCP host only; then the first of its `authorization_servers`,
