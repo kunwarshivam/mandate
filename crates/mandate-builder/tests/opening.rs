@@ -1,19 +1,20 @@
 //! The opening policy intersected with the broker's capability profile (E7-23 B3, LT-3, DEC-529
 //! item 2, DEC-854).
 //!
-//! The profiles are built here, cell by cell, and every expected outcome is worked by hand in the
-//! test's doc comment. No expected value comes from the builder. This is part 1 of B3's tests;
-//! part 2 adds the property over generated profiles (LT-2, LT-3).
+//! The profiles are built here, cell by cell. Every hand test's expected outcome is worked in its
+//! doc comment. The property's own oracle reads the generator's cell masks, not the profile, and
+//! sizes in integer cents. No expected value comes from the builder.
 //!
 //! Every test is pending until B3's implementation PR and fails on `BuilderError::Unimplemented`.
 
 mod common;
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::{
-    NOW, account, at, flat_account, momentum, news, output, price, qty, quiet_risk, swing_market,
-    two_stock_swing, usd,
+    NOW, account, at, crypto_market, flat_account, momentum, news, output, price, qty, quiet_risk,
+    swing_market, two_stock_swing, usd,
 };
 use mandate_builder::{
     AccountSnapshot, Action, BuilderMandate, HoldReason, Market, OrderShape, Venue, deployable,
@@ -27,6 +28,8 @@ use mandate_domain::{AssetClass::Crypto, AssetClass::UsEquity};
 use mandate_domain::{OrderType::Limit, OrderType::Market as MarketOrder};
 use mandate_domain::{QuantityForm::Fractional, QuantityForm::Notional, QuantityForm::Whole};
 use mandate_domain::{TimeInForce::Day, TimeInForce::Gtc, TimeInForce::Ioc};
+use proptest::prelude::*;
+use proptest::test_runner::{Config, TestRunner};
 
 const REGULAR: MarketSession = MarketSession::Regular;
 
@@ -282,4 +285,172 @@ fn deployment_refuses_a_policy_the_profile_cannot_meet() {
         Err(NO),
         "an equity opens in the regular session"
     );
+}
+
+/// DEC-854 item 3: whole shares are one share on a grid finer than a share, and the market's own
+/// increment where that is coarser. At a 20 ask under the 100 cap, 100 ÷ 20 = 5 shares, which a
+/// 2-share grid truncates to 4, worth 80 and above the 75 band. On the 0.0001 grid at an 87.5 ask
+/// it is one share.
+#[test]
+#[ignore = "pending E7-23"]
+fn whole_shares_keep_a_market_grid_coarser_than_one_share() {
+    let mut coarse = swing_market();
+    coarse.bid = price("19.99");
+    coarse.ask = price("20");
+    coarse.increment = qty("2");
+    assert_eq!(bought(&open(&whole_only(), Day, &coarse)), "4 @ 20 = 80");
+    let fine = fractionable("87.49", "87.5");
+    assert_eq!(bought(&open(&whole_only(), Day, &fine)), "1 @ 87.5 = 87.5");
+}
+
+/// Rule 13 and DEC-854 item 4: a profile with whole limits only never cuts an exit down to whole
+/// shares. Holding 2.5 shares at the 87.49 bid, the exit sells all 2.5 (2.5 × 87.49 = 218.725),
+/// while a flat agent on the same profile and market buys one whole share.
+#[test]
+#[ignore = "pending E7-23"]
+fn a_fractional_position_exits_whole_under_a_whole_only_profile() {
+    let market = fractionable("87.49", "87.5");
+    let held = account("2.5", "87.49");
+    let exit = run(&whole_only(), Day, &capped("100"), &held, &market, "-1");
+    let sell = Action::Sell {
+        purpose: mandate_domain::Purpose::DiscretionaryExit,
+        qty: qty("2.5"),
+        limit_price: price("87.49"),
+        order_usd: usd("218.725"),
+        shape: OrderShape::Limit,
+    };
+    assert_eq!(exit, Ok(sell));
+    assert_eq!(
+        bought(&open(&whole_only(), Day, &market)),
+        "1 @ 87.5 = 87.5"
+    );
+}
+
+const ROWS: [(AssetClass, MarketSession); 4] = [
+    (UsEquity, REGULAR),
+    (UsEquity, MarketSession::PreMarket),
+    (UsEquity, MarketSession::AfterHours),
+    (Crypto, MarketSession::Crypto),
+];
+const TYPES: [OrderType; 3] = [MarketOrder, Limit, OrderType::StopLimit];
+const FORMS: [QuantityForm; 3] = [Whole, Fractional, Notional];
+const TIFS: [TimeInForce; 3] = [Day, Gtc, Ioc];
+
+/// A decimal `value` × 10^−`scale`, in canonical text (no trailing zeros).
+fn decimal(value: i128, scale: u32) -> String {
+    let unit = 10i128.pow(scale);
+    let (whole, fraction) = (value / unit, value % unit);
+    if fraction == 0 {
+        return whole.to_string();
+    }
+    let digits = format!("{fraction:0width$}", width = scale as usize);
+    format!("{whole}.{}", digits.trim_end_matches('0'))
+}
+
+static BUYS_WHOLE: AtomicU32 = AtomicU32::new(0);
+static BUYS_FRACTIONAL: AtomicU32 = AtomicU32::new(0);
+static HOLDS: AtomicU32 = AtomicU32::new(0);
+static REFUSALS: AtomicU32 = AtomicU32::new(0);
+
+/// LT-3 and LT-2 over generated profiles: a flat, fully bullish agent buys only in a form both the
+/// policy and the profile allow, sized at that form's grid, and holds when that grid leaves less
+/// than the band; an empty intersection refuses a buy, never a hold. The same profile never changes the exit of a position
+/// (rule 13). The oracle reads the generator's masks: bit i of a cell's mask is `TIFS[i]`, and 0 is
+/// no cell. It sizes the 20 to 1400 USD order cap, the binding limit, in integer cents.
+#[test]
+#[ignore = "pending E7-23"]
+fn every_buy_is_one_the_policy_and_the_generated_profile_both_allow() {
+    let scenario = (
+        proptest::collection::vec(0u8..8, 36),
+        0usize..4,
+        500i128..20_000,
+        prop::sample::select(vec![0u32, 2, 4]),
+        20i128..=1400,
+        0usize..3,
+        1i128..50_000,
+    );
+    let config = Config {
+        cases: 256,
+        failure_persistence: None,
+        ..Config::default()
+    };
+    let result = TestRunner::new(config).run(&scenario, |(masks, r, ask, k, cap, t, held)| {
+        prop_assume!(masks.iter().any(|m| *m != 0));
+        let rows = ROWS
+            .iter()
+            .enumerate()
+            .map(|(ri, (class, session))| {
+                let cells = (0..9)
+                    .filter_map(|i| {
+                        let mask = masks[ri * 9 + i];
+                        let tifs: Vec<TimeInForce> = (0..3)
+                            .filter(|b| mask >> b & 1 == 1)
+                            .map(|b| TIFS[b])
+                            .collect();
+                        (mask != 0).then(|| cell(TYPES[i / 3], FORMS[i % 3], &tifs))
+                    })
+                    .collect::<Vec<_>>();
+                (*class, *session, cells)
+            })
+            .filter(|(_, _, cells)| !cells.is_empty())
+            .collect();
+        let generated = profile(rows);
+        let (class, session) = ROWS[r];
+        let offered = |f: usize| masks[r * 9 + 3 + f] >> t & 1 == 1;
+        let policy_session = class == Crypto || session == REGULAR;
+        let form = [1, 0].into_iter().find(|f| policy_session && offered(*f));
+        let (bid, ask_text) = (decimal(ask - 1, 2), decimal(ask, 2));
+        let increment = decimal(1, k);
+        let mut market = match class {
+            Crypto => crypto_market(&bid, &ask_text, &increment),
+            UsEquity => fractionable(&bid, &ask_text),
+        };
+        market.increment = qty(&increment);
+        market.session = session;
+        let mandate = capped(&cap.to_string());
+        let opening = run(&generated, TIFS[t], &mandate, &flat_account(), &market, "1");
+        let scale = if form == Some(0) { 0 } else { k };
+        let units = cap * 100 * 10i128.pow(scale) / ask;
+        if units * ask < 7500 * 10i128.pow(scale) {
+            HOLDS.fetch_add(1, Ordering::Relaxed);
+            let below = HoldReason::BelowBandAfterClipping;
+            prop_assert_eq!(opening, Ok(Action::Hold { reason: below }));
+        } else if form.is_none() {
+            REFUSALS.fetch_add(1, Ordering::Relaxed);
+            prop_assert_eq!(opening.map(|_| ()), Err(NO));
+        } else {
+            let grid = [&BUYS_WHOLE, &BUYS_FRACTIONAL][usize::from(scale > 0)];
+            grid.fetch_add(1, Ordering::Relaxed);
+            let (n, value) = (decimal(units, scale), decimal(units * ask, scale + 2));
+            prop_assert_eq!(bought(&opening), format!("{n} @ {ask_text} = {value}"));
+        }
+        let position = decimal(held, 2);
+        let held_account = account(&position, &bid);
+        let exit = run(&generated, TIFS[t], &mandate, &held_account, &market, "-1");
+        let shape = OrderShape::Limit;
+        let expected = Action::Sell {
+            purpose: mandate_domain::Purpose::DiscretionaryExit,
+            qty: qty(&position),
+            limit_price: price(&bid),
+            order_usd: usd(&decimal(held * (ask - 1), 4)),
+            shape,
+        };
+        prop_assert_eq!(exit, Ok(expected));
+        Ok(())
+    });
+    if let Err(failure) = result {
+        panic!("{failure}");
+    }
+    for (name, count) in [
+        ("whole buys", &BUYS_WHOLE),
+        ("fractional buys", &BUYS_FRACTIONAL),
+        ("holds", &HOLDS),
+        ("refusals", &REFUSALS),
+    ] {
+        assert_ne!(
+            count.load(Ordering::Relaxed),
+            0,
+            "the generator reached no {name}"
+        );
+    }
 }

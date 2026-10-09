@@ -12,5 +12,6 @@
   `crates/mandate-alpaca/tests/profile.rs` (Alpaca's object by hand, §5.2's fractional rule, the
   connector declaring without a broker call), and `crates/mandate-builder/tests/opening.rs`
   (B3, pending: whole shares or nothing under the cap, the time in force and session in the
-  intersection, an empty intersection refusing a buy and never an exit, deployment).
+  intersection, an empty intersection refusing a buy and never an exit, deployment, and a property
+  over generated profiles).
 - **Run:** `cargo nextest run -p mandate-domain -p mandate-alpaca -p mandate-builder`.
