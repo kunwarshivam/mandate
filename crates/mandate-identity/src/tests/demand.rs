@@ -7,18 +7,26 @@ use std::marker::PhantomData;
 
 use mandate_time::UtcNanos;
 
+use super::matrix::session;
 use super::rows::ROWS;
 use super::{ByMember, O1, O2, W1, W3};
+use crate::Permission as P;
 use crate::demand::{Permitted, ReadRecords, RequiredPermission};
 use crate::{
-    Membership, MembershipState, OrgId, Permission, Principal, PrincipalId, PrincipalKind, Refusal,
-    Role, Scope, Session, SessionKind, SessionRef, Tenant, TenantContext, WorkspaceId, authorize,
+    Membership, MembershipState, OrgId, Principal, PrincipalId, PrincipalKind, Refusal, Role,
+    Scope, SessionKind, Tenant, TenantContext, WorkspaceId, authorize,
 };
 
 /// W1's admin: §4.2 grants it both View agents and Read records.
 const ADMIN: PrincipalId = PrincipalId(0x31);
 /// W1's viewer: View agents only.
 const VIEWER: PrincipalId = PrincipalId(0x32);
+/// W1's operator and approver, a client of the operator's in W1, and a platform operator in a
+/// break-glass window for W1.
+const OPERATOR: PrincipalId = PrincipalId(0x34);
+const APPROVER: PrincipalId = PrincipalId(0x35);
+const CLIENT: PrincipalId = PrincipalId(0x36);
+const PLATFORM: PrincipalId = PrincipalId(0x37);
 /// A service account issued for W3, whose column grants Read records.
 const SERVICE: PrincipalId = PrincipalId(0x33);
 
@@ -32,50 +40,24 @@ fn memberships() -> Vec<Membership> {
     vec![
         member(ADMIN, W1, O1, Role::WorkspaceAdmin),
         member(VIEWER, W1, O1, Role::Viewer),
+        member(OPERATOR, W1, O1, Role::Operator),
+        member(APPROVER, W1, O1, Role::Approver),
     ]
 }
 
-/// The workspace context `authorize` grants `principal` for `permission` in `workspace` of `org`,
-/// or `None` when it grants none.
-fn granted(
-    principal: &Principal,
-    org: OrgId,
-    workspace: WorkspaceId,
-    permission: Permission,
-) -> Option<TenantContext> {
-    let store = memberships();
-    let session = Session {
-        reference: SessionRef(0x41),
-        kind: SessionKind::Full,
-        snapshot: Vec::new(),
-    };
-    let scope = Scope::Workspace { org, workspace };
-    match authorize(
-        &ByMember(&store),
-        principal,
-        &session,
-        scope,
-        permission,
-        UtcNanos::EPOCH,
-    ) {
+/// The workspace context `authorize` grants `who` for `p` in `workspace` of `org`, if any.
+fn granted(who: &Principal, org: OrgId, workspace: WorkspaceId, p: P) -> Option<TenantContext> {
+    let (store, scope) = (memberships(), Scope::Workspace { org, workspace });
+    let full = session(SessionKind::Full, Vec::new());
+    match authorize(&ByMember(&store), who, &full, scope, p, UtcNanos::EPOCH) {
         Ok(crate::Authorized::Workspace { tenant, .. }) => Some(tenant),
         _ => None,
     }
 }
 
 /// As [`granted`], where anything but a workspace context is a fixture error.
-fn context(
-    principal: &Principal,
-    org: OrgId,
-    workspace: WorkspaceId,
-    permission: Permission,
-) -> TenantContext {
-    granted(principal, org, workspace, permission)
-        .unwrap_or_else(|| panic!("fixture: {principal:?} holds {permission:?} in {workspace:?}"))
-}
-
-fn user(id: PrincipalId) -> Principal {
-    Principal::User { id }
+fn context(who: &Principal, org: OrgId, workspace: WorkspaceId, p: P) -> TenantContext {
+    granted(who, org, workspace, p).unwrap_or_else(|| panic!("fixture: {who:?} holds {p:?}"))
 }
 
 fn service() -> Principal {
@@ -85,39 +67,51 @@ fn service() -> Principal {
     }
 }
 
-/// DEC-655 items 2 and 3: a context authorized for any other row of §4.2, whether its principal
-/// could also read records or not, yields no Read records witness; it is refused `forbidden`. The
-/// admin's Read records context yields one.
+/// Every workspace row of §4.2 but Read records, written from the spec. Out of scope, as they
+/// yield an `OrgContext`, a `PrincipalContext`, or nothing, and so no `require`: Kill switch org
+/// scope, Re-enable a halted scope (inactive), one's own passkey, notification addresses, and
+/// memberships, Leave, Org policy, SSO, Create or archive a workspace, Org memberships, Service
+/// accounts, Billing, and Transfer org ownership. The SA column holds only Read records.
+#[rustfmt::skip]
+const OTHER_ROWS: [P; 30] = [
+    P::ViewAgents, P::OwnerRequest, P::DryRun, P::ChatThread, P::DraftVersion,
+    P::ConfirmReducingOrNeutral, P::ConfirmRiskIncreasing, P::Deploy, P::Pause, P::HoldNewOpenings,
+    P::LiftClientHold, P::ResumeOrStop, P::KillSwitchAgent, P::KillSwitchConnectionOrWorkspace,
+    P::KillSwitchPrivileges, P::OwnerExit, P::Acknowledge, P::Approve, P::Skip,
+    P::RemoveOrNarrowDelegation, P::BrokerConnection, P::AcceptDisclosure,
+    P::WorkspacePolicyTighten, P::WorkspacePolicyLoosen, P::WorkspaceMembers, P::WorkspaceRoles,
+    P::ConnectClient, P::RevokeClient, P::ApproveBreakGlass, P::BreakGlassOperational,
+];
+
+/// A principal of each column reaching W1 (WA, Op, Ap, Vi, a client of the operator's, and a
+/// platform operator in a break-glass window); between them they hold every row above.
+#[rustfmt::skip]
+fn columns() -> [Principal; 6] {
+    [Principal::User { id: ADMIN }, Principal::User { id: OPERATOR },
+     Principal::User { id: APPROVER }, Principal::User { id: VIEWER },
+     Principal::Client { id: CLIENT, on_behalf_of: OPERATOR, workspace: W1 },
+     Principal::PlatformOperator { id: PLATFORM, window: Some(W1) }]
+}
+
+/// DEC-655 items 2 and 3: every workspace context `authorize` grants any column in W1, for any
+/// row, is refused `forbidden` unless it is for Read records, which yields a witness; the rows
+/// reached are exactly [`OTHER_ROWS`] and Read records, so no row goes unexercised.
 #[test]
 #[ignore = "pending E9-8"]
 fn a_context_for_another_permission_cannot_read_records() {
-    let mut others: Vec<(Permission, TenantContext)> = ROWS
+    let seen: Vec<_> = ROWS
         .iter()
-        .filter(|(_, p)| *p != Permission::ReadRecords)
-        .filter_map(|(_, p)| granted(&user(ADMIN), O1, W1, *p).map(|c| (*p, c)))
+        .flat_map(|(_, p)| columns().map(|who| (*p, granted(&who, O1, W1, *p))))
+        .filter_map(|(p, c)| c.map(|c| (p, c.require::<ReadRecords>().err())))
         .collect();
-    assert!(
-        others.len() >= 10,
-        "fixture: W1's admin holds {} other workspace rows",
-        others.len()
-    );
-    let viewer = context(&user(VIEWER), O1, W1, Permission::ViewAgents);
-    others.push((Permission::ViewAgents, viewer));
-    let seen: Vec<_> = others
-        .iter()
-        .map(|(p, c)| (*p, c.require::<ReadRecords>().err()))
-        .collect();
-    let refused: Vec<_> = others
-        .iter()
-        .map(|(p, _)| (*p, Some(Refusal::Forbidden)))
-        .collect();
-    assert_eq!(seen, refused);
-    let reading = context(&user(ADMIN), O1, W1, Permission::ReadRecords);
+    let refused = |p: P| (p, (p != P::ReadRecords).then_some(Refusal::Forbidden));
     assert_eq!(
-        reading.require::<ReadRecords>().map(|_| ()),
-        Ok(()),
-        "a Read records context yields its witness"
+        seen,
+        seen.iter().map(|(p, _)| refused(*p)).collect::<Vec<_>>()
     );
+    let reached: BTreeSet<_> = seen.iter().map(|(p, _)| *p).collect();
+    let listed = OTHER_ROWS.into_iter().chain([P::ReadRecords]).collect();
+    assert_eq!(reached, listed, "the rows exercised are the rows listed");
 }
 
 /// DEC-655 items 1 and 2: the witness is a `Tenant` for the very context `require` was called on:
@@ -127,9 +121,9 @@ fn a_context_for_another_permission_cannot_read_records() {
 #[ignore = "pending E9-8"]
 fn require_returns_the_context_it_was_called_on() {
     let contexts = [
-        context(&user(ADMIN), O1, W1, Permission::ReadRecords),
-        context(&service(), O2, W3, Permission::ReadRecords),
-        context(&user(VIEWER), O1, W1, Permission::ViewAgents),
+        context(&Principal::User { id: ADMIN }, O1, W1, P::ReadRecords),
+        context(&service(), O2, W3, P::ReadRecords),
+        context(&Principal::User { id: VIEWER }, O1, W1, P::ViewAgents),
     ];
     let seen: Vec<_> = contexts
         .iter()
@@ -152,11 +146,11 @@ fn require_returns_the_context_it_was_called_on() {
 /// crate, so outside it fails on the private fields alone. The marker names Read records.
 #[test]
 fn the_witness_literal_builds_inside_the_crate() {
-    let reading = context(&user(ADMIN), O1, W1, Permission::ReadRecords);
+    let reading = context(&Principal::User { id: ADMIN }, O1, W1, P::ReadRecords);
     let witness: Permitted<'_, ReadRecords> = Permitted {
         context: &reading,
         demanded: PhantomData,
     };
     assert!(std::ptr::eq(witness.context, &reading));
-    assert_eq!(ReadRecords::PERMISSION, Permission::ReadRecords);
+    assert_eq!(ReadRecords::PERMISSION, P::ReadRecords);
 }

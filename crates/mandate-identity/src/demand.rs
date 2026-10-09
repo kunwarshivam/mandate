@@ -5,7 +5,7 @@
 //! cannot be handed a context authorized for another row of §4.2.
 //!
 //! A witness cannot be built, defaulted, or cloned outside the crate
-//! (`authorized_cannot_be_constructed_outside_require`, DEC-655 item 5), and no other type is a
+//! (`permitted_cannot_be_constructed_outside_require`, DEC-655 item 5), and no other type is a
 //! demanded permission:
 //!
 //! ```compile_fail,E0451

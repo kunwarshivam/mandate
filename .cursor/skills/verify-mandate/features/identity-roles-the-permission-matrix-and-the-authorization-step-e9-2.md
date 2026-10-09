@@ -28,7 +28,7 @@
   `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built, defaulted, or cloned,
   nor `Tenant` implemented, an `OrgContext` or `PrincipalContext` cannot be built, and an
   `OrgContext` is not a `Tenant`, outside the crate), with their in-crate controls;
-  `crates/mandate-identity/src/tests/demand.rs` (pending E9-8: a context for another permission
+  `crates/mandate-identity/src/tests/demand.rs` (pending E9-8: a context for each other workspace row
   is refused `forbidden` by `require::<ReadRecords>()`, and the witness reports the context it
   was called on) and the `compile_fail` doctests in `src/demand.rs` (the witness cannot be built,
   defaulted, or cloned, nor `RequiredPermission` implemented, outside the crate, and a data API
