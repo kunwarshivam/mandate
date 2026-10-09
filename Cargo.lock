@@ -1505,6 +1505,7 @@ dependencies = [
  "mandate-time",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2 0.11.0",
  "thiserror",
 ]
@@ -1625,6 +1626,7 @@ dependencies = [
 name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "mandate-domain",
  "mandate-time",
  "proptest",
@@ -1665,6 +1667,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-identity-seal",
+ "mandate-tenant",
  "mandate-time",
  "proptest",
  "thiserror",
@@ -1673,6 +1676,15 @@ dependencies = [
 [[package]]
 name = "mandate-identity-seal"
 version = "0.0.0"
+
+[[package]]
+name = "mandate-identity-system"
+version = "0.0.0"
+dependencies = [
+ "mandate-identity",
+ "mandate-tenant",
+ "proptest",
+]
 
 [[package]]
 name = "mandate-identity-testkit"
@@ -1889,8 +1901,11 @@ dependencies = [
 name = "mandate-rh-sim"
 version = "0.0.0"
 dependencies = [
+ "mandate-accounting",
+ "mandate-executor",
  "mandate-mcp",
  "mandate-num",
+ "mandate-robinhood",
  "proptest",
  "serde_json",
  "sha2 0.11.0",
@@ -1984,6 +1999,14 @@ dependencies = [
  "mandate-domain",
  "mandate-num",
  "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-tenant"
+version = "0.0.0"
+dependencies = [
  "proptest",
  "thiserror",
 ]
@@ -2717,6 +2740,17 @@ dependencies = [
  "ryu-js",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

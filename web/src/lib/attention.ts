@@ -2,6 +2,7 @@ import type { OrderState, Workspace } from "@/fixtures/types";
 import { MODE_LABEL } from "./labels";
 import { agentLimits, levelNoun, nearLossLimits } from "./limits";
 import { RESTRICTIONS, type RestrictionSource } from "./restrictions";
+import { agentHref, orderHref } from "./screens";
 
 const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
 
@@ -37,7 +38,10 @@ export function alertLines(ws: Workspace): AlertLine[] {
 /**
  * What Needs you lists under the requests (DEC-513): the agents' conditions, one line per agent and
  * condition with every instrument it covers in one pair of brackets, and no feed. A degraded feed is
- * the status strip's and the Alerts screen's to say, and it asks nothing of the owner.
+ * the status strip's and the Alerts screen's to say, and it asks nothing of the owner. An order in
+ * flight (`IN_FLIGHT`, the set `stopAttention` counts) turns Stop loud, so it is one of its agent's
+ * conditions too, with no instrument, opening the order's record, or the agent's orders when there
+ * are several (C-25).
  */
 export function needsYouLines(ws: Workspace): AlertLine[] {
   const lines: AlertLine[] = [];
@@ -56,9 +60,39 @@ export function needsYouLines(ws: Workspace): AlertLine[] {
         source,
       });
     }
+    const inFlight = a.orders.filter((o) => IN_FLIGHT[o.state]);
+    if (inFlight.length === 1) {
+      const [order] = inFlight;
+      lines.push({
+        key: `${a.agent_id}-in-flight-order`,
+        text: `${a.label}: ${IN_FLIGHT_CONDITION[order.state] ?? "an order is in flight"}`,
+        href: orderHref(a.agent_id, order.client_order_id),
+        source: "account",
+      });
+    } else if (inFlight.length > 1) {
+      lines.push({
+        key: `${a.agent_id}-in-flight-order`,
+        text: `${a.label}: ${inFlight.every((o) => o.state === "Unknown") ? `${inFlight.length} orders' states are unknown` : `${inFlight.length} orders are in flight`}`,
+        href: agentHref(a.agent_id, "orders"),
+        source: "account",
+      });
+    }
   }
   return lines;
 }
+
+/**
+ * The words for one order in flight, as its agent's condition: generic, with no instrument, side,
+ * quantity or price. A state `IN_FLIGHT` gains without words here still gets a line, "an order is in
+ * flight", so a loud Stop never loses its reason.
+ */
+const IN_FLIGHT_CONDITION: Partial<Record<OrderState, string>> = {
+  Intent: "an order is being sent",
+  Submitting: "an order is being sent",
+  PendingCancel: "an order is being cancelled",
+  PendingReplace: "an order is being replaced",
+  Unknown: "an order's state is unknown",
+};
 
 /**
  * Orders whose standing the broker has not confirmed (trading-domain spec §5.7): recorded or being

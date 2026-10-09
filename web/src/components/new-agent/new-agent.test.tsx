@@ -2,6 +2,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KEY } from "@/components/kumo/key";
 import { PASSKEY_ANSWER_MS, type Passkey } from "@/components/stop/step-up-dialog";
+import type { Workspace } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { dec, fromInt, mul } from "@/lib/decimal";
 import { mandateVersion } from "@/lib/fixture-journey";
@@ -28,7 +29,12 @@ const deployments = (): Deployment[] => probed().deployments;
 
 const INSTANT = fixtureCompiler({ latencyMs: 0 });
 
-function renderFlow({ role = "owner", passkey, compiler = INSTANT }: { role?: Role; passkey?: Passkey; compiler?: Compiler } = {}) {
+function renderFlow({
+  role = "owner",
+  passkey,
+  compiler = INSTANT,
+  workspace,
+}: { role?: Role; passkey?: Passkey; compiler?: Compiler; workspace?: (ws: Workspace) => Workspace } = {}) {
   setPathname("/agents/new");
   return renderWithRuntime(
     <main>
@@ -36,7 +42,7 @@ function renderFlow({ role = "owner", passkey, compiler = INSTANT }: { role?: Ro
       <RuntimeProbe />
     </main>,
     "normal",
-    { role, ...(passkey ? { passkey } : {}) },
+    { role, ...(passkey ? { passkey } : {}), ...(workspace ? { workspace } : {}) },
   );
 }
 
@@ -538,6 +544,79 @@ describe("creating it", () => {
     await toSummary();
     expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
     expect(main()).toHaveTextContent("Only the workspace owner can create an agent.");
+  });
+});
+
+describe("creating it where the workspace requires independent approval (§4.3, V-047; interim)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const policy =
+    (value: boolean | null | "absent", approverUsers?: number) =>
+    (ws: Workspace): Workspace => {
+      const next: Workspace = { ...ws, approver_users: approverUsers ?? ws.approver_users, independent_approval_required: value === "absent" ? null : value };
+      if (value === "absent") delete (next as Partial<Workspace>).independent_approval_required;
+      return next;
+    };
+  const SECOND_PERSON = "This workspace needs a second person to approve a new agent, and that approval can't be asked for here yet, so a passkey alone can't create it.";
+
+  it.each([
+    [true, 2],
+    [true, 1],
+    [null, 2],
+    ["absent", 2],
+  ] as const)("offers no passkey confirm when the policy is %s with %s approvers, says why, and creates nothing", async (value, approvers) => {
+    renderFlow({ workspace: policy(value, approvers) });
+    await toSummary();
+    expect(summary()).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(main()).not.toHaveTextContent("Uses your passkey.");
+    const refusal = main().querySelector<HTMLElement>("[data-slot=blocked]")!;
+    expect(refusal).toHaveTextContent(SECOND_PERSON);
+    expect(refusal).toHaveAttribute("data-rule", "V-047");
+    expect(main()).not.toHaveTextContent("V-047");
+
+    act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
+    expect(stepUpDialog()).toBeNull();
+    expect(deployments()).toEqual([]);
+    expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
+    expect(main().querySelector("[data-slot=after-confirm]")).toBeNull();
+  });
+
+  it("still refuses after a change is said, since no draft can satisfy it", async () => {
+    renderFlow({ workspace: policy(true) });
+    await toSummary();
+    await send("Make it $2,000");
+    expect(row("Money it may use")).toHaveTextContent("$2,000.00");
+    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(main().querySelector("[data-slot=blocked]")).toHaveAttribute("data-rule", "V-047");
+  });
+
+  it("takes the passkey and creates the agent exactly as before when the policy is off, even with one approver", async () => {
+    renderFlow({ workspace: policy(false, 1) });
+    await toSummary();
+    expect(main().querySelector("[data-slot=blocked]")).toBeNull();
+    createWithPasskey();
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(deployments().map((d) => d.phase)).toEqual(["recorded"]);
+    expect(probed().ws.agents.at(-1)!.label).toBe("Agent 4");
+  });
+
+  it("shows the rule only as an attribute when the runtime refuses a deployment under the policy", async () => {
+    renderFlow({ workspace: policy(false) });
+    await toSummary();
+    fireEvent.click(button("Create agent"));
+    press("Use passkey");
+    act(() => {
+      probed().ws.independent_approval_required = null;
+      vi.advanceTimersByTime(PASSKEY_ANSWER_MS);
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    const rejected = main().querySelector<HTMLElement>("[data-slot=after-confirm] [data-phase=rejected]")!;
+    expect(rejected).toHaveTextContent("Not created. Nothing was confirmed, and version 1 does not exist.");
+    expect(within(rejected).getByText(SECOND_PERSON)).toHaveAttribute("data-rule", "V-047");
+    expect(rejected).not.toHaveTextContent("V-047");
+    expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
   });
 });
 

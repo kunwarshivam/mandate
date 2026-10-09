@@ -5,7 +5,6 @@ mod demand;
 mod matrix;
 mod roles;
 mod rows;
-mod ulid;
 mod wire;
 
 use std::collections::BTreeSet;

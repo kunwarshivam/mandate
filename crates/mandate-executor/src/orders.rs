@@ -13,6 +13,7 @@ use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
+use crate::listing::{query_unknown, queryable};
 use crate::payload::{int, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
@@ -97,7 +98,7 @@ pub(crate) fn legal(from: OrderState, to: OrderState) -> bool {
 }
 
 /// The order a broker id names, if it is one this executor derived and the fold carries.
-fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOrderId> {
+pub(crate) fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOrderId> {
     let id = ClientOrderId::parse(raw?).ok()?;
     batch.view.orders.contains_key(&id).then_some(id)
 }
@@ -299,7 +300,7 @@ pub(crate) fn silence(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for id in in_flight {
         transition(batch, &id, OrderState::Unknown, StateEvidence::default())?;
-        batch.broker(BrokerRequest::GetOrderByClientId(id));
+        query_unknown(batch, id)?;
     }
     Ok(())
 }
@@ -311,8 +312,7 @@ pub(crate) fn duplicate(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         return Ok(());
     };
     transition(batch, &id, OrderState::Unknown, StateEvidence::default())?;
-    batch.broker(BrokerRequest::GetOrderByClientId(id));
-    Ok(())
+    query_unknown(batch, id)
 }
 
 /// One answer that the broker does not have the order. It is counted, never acted on alone: only
@@ -379,6 +379,9 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
 /// up) have passed since it went `Unknown` or since its last absence, so N lookups span the whole
 /// window and no faster.
 pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
+    if !queryable(&batch.view) {
+        return;
+    }
     let config = batch.ports.config;
     let gaps = i64::from(config.unknown_absent_lookups.saturating_sub(1).max(1));
     let spacing = config

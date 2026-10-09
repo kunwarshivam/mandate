@@ -186,7 +186,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
           </Section>
 
           <Section title="Activity" action={<SectionLink href={agentHref(agent.agent_id, "activity")}>View all activity</SectionLink>}>
-            <Timeline events={activity.slice(0, RECENT_ACTIVITY)} today={ws.now.slice(0, 10)} />
+            <Timeline events={activity.slice(0, RECENT_ACTIVITY)} now={now} />
           </Section>
 
           <NewsSection ws={ws} agent={agent} now={now} />
@@ -328,7 +328,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
     case "activity":
       return (
         <Section title="Activity">
-            <Timeline events={ws.timeline[agent.agent_id] ?? []} today={ws.now.slice(0, 10)} />
+            <Timeline events={ws.timeline[agent.agent_id] ?? []} now={now} />
         </Section>
       );
     case "mandate/versions":

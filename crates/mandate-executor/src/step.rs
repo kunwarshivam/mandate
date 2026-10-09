@@ -5,6 +5,7 @@ use crate::error::ExecutorError;
 use crate::ids::{FLATTEN, WATCHDOG};
 use crate::intent::{received, release_held, resume};
 use crate::kill::kill_switch;
+use crate::listing::{listed, query_unknown};
 use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
@@ -16,8 +17,8 @@ use crate::protection::{
 use crate::reconcile::run;
 use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
 use crate::types::{
-    AgentId, BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, FoldedEvent, Input,
-    OrderState, ReconcileReason, WriterEpoch,
+    AgentId, BrokerOutcome, BrokerUpdate, Command, Effect, FoldedEvent, Input, OrderState,
+    ReconcileReason, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -146,7 +147,7 @@ fn started(
             .map(|order| order.client_order_id.clone())
             .collect();
     for id in unresolved {
-        batch.broker(BrokerRequest::GetOrderByClientId(id));
+        query_unknown(&mut batch, id)?;
     }
     resume(&mut batch, true)?;
     batch.request_reconciliation();
@@ -218,6 +219,10 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         | BrokerOutcome::Positions(_)
         | BrokerOutcome::Activities { .. }
         | BrokerOutcome::AccountWideAccepted => later_slice(),
+        BrokerOutcome::Listed {
+            client_order_id,
+            orders,
+        } => listed(batch, &client_order_id, &orders),
     }
 }
 

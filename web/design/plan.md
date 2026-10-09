@@ -22,8 +22,8 @@ the owl, the rules and the record.
       fixes in section J)
 - [x] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
       ten minutes that must be perfect on every release. (spec: #1035,
-      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; left as `fixme`: the request
-      appearing once on Home, which waits on section J's "A request once on Home", C-5)
+      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; the request appearing once on
+      Home was a `fixme` until section J's "A request once on Home", C-5, #1090)
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
 - [ ] **Reference, not inspiration.** Five products and what is taken from each, written down:
       Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
@@ -51,15 +51,6 @@ the owl, the rules and the record.
 - [x] **Landing windows.** Each window now cascades 28px down and right of the one in front,
       so a new one shows the last rather than covering it. "Try it." already had its button on
       the next line, and the windows scroll; the review's capture used overlay scrollbars. (R-30)
-- [x] **The account chart's dark-mode paint.** The first `npm run shots` run found the account
-      chart blank in dark mode on Home at 390 and 1440px (captured 900ms after load) while the
-      agent's chart drew and the same screens in light drew; earlier captures at 1500ms showed it.
-      Find whether the dark-mode redraw (`setChartMode`) races the draw-in, and pin it with a test
-      that reads the canvas after the mode switch. (#1032) Cause: hydration read the chart mode
-      from the server's default, so a dark Home drew a light chart, then tore it down for a dark
-      one, later than light; the blank captures themselves (C-22, both themes) were taken before
-      the dev server hydrated, with no canvas yet, not a sizing or draw-in race. Fix: charts read
-      `<html>` while hydrating, one chart per load; `e2e/chart-paint.spec.ts` reads its pixels.
 - [x] **Set-up replies on a miss.** A second miss in a row says what shape of answer would be
       read, never a value; each model setting's question names its range, so nobody guesses.
       Defaulting a setting would amend DEC-472 and brief A3 ("each setting empty"), so it waits
@@ -70,7 +61,8 @@ the owl, the rules and the record.
       dialog that keeps Tab inside but is not modal, mounted in the frame's sheet layer under the
       dock and the tab bar, like the More sheet. `e2e/stop-visible.spec.ts` pins it at 390 and
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
-      (#1038)
+      (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
+      opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
 
 ## C. The cutting pass (one PR, no new rules)
 
@@ -246,27 +238,42 @@ item above (C-3, C-9) are not repeated.
       [#1047](https://github.com/kunwarshivam/mandate/pull/1047).
 - [ ] **Stop above the palette's scrim.** Check that Stop takes a press with the command palette
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
-- [ ] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
-      reconciliation conditions do. (C-25)
-- [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
-      leaves out its "Asked you" row. (C-5)
-- [ ] **"At the limit:" on the overview card**, so a limit's action never reads as the current
-      mode. (C-7)
-- [ ] **A time from another day carries its date**, through one formatter shared with the
-      timeline. (C-23)
-- [ ] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
-      restriction, keeping its step-up. Safety lane. (C-24)
-- [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
-      pale sliver alone, with no dashed rule. (C-11)
-- [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
-      draw race after load, not the mode. (C-22)
+- [x] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
+      reconciliation conditions do. (C-25, #1057)
+      - Every in-flight order state (`IN_FLIGHT`) now says why too, swept by a test so a state
+        added later can't lose its line. (#1083)
+- [x] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
+      leaves out its "Asked you" row. (C-5, #1090)
+- [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current
+      mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
+- [x] **A time from another day carries its date**, through one formatter shared with the
+      timeline. (C-23) Done in [#1091](https://github.com/kunwarshivam/mandate/pull/1091).
+- [x] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
+      restriction, keeping its step-up. Safety lane. (C-24) Done in
+      [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
+- [x] **Sparklines without the false limit line.** When the limit is below the line's range, the
+      pale sliver alone, with no dashed rule. (C-11, #1093)
+- [x] **The account chart's blank paint**, once section B's "dark-mode paint": blank in light and
+      dark alike, a capture taken after load but before the chart drew, not the mode. (C-22)
+      - Dark drew twice (#1032): hydration read the chart mode from the server's default, so a
+        dark Home drew a light chart, then tore it down for a dark one, later than light. Charts
+        now read `<html>` while hydrating, one chart per load, and `e2e/chart-paint.spec.ts`
+        reads the canvas's pixels after first paint.
+      - The blank captures: the host had no canvas yet, because hydration had not drawn it, not
+        a sizing or draw-in race. On main after #1032, 120 loads of the e2e build (30 per theme
+        at 390 and 1440px) and 80 of the paused and reconciliation Homes all drew the line and
+        none stayed blank; at `networkidle` plus 900ms, the shots timing, 5 had no canvas yet,
+        all at 1440px and in both themes. `npm run shots` now waits for every chart on screen to
+        show its line, and the spec covers the paused and reconciliation Homes.
+        ([#1106](https://github.com/kunwarshivam/mandate/pull/1106))
 - [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
       and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)
 - [ ] **The mode chip in the desktop agent header**, on every tab. (C-8)
-- [ ] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10)
+- [x] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10) Done in
+      [#1103](https://github.com/kunwarshivam/mandate/pull/1103).
 - [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)
 - [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4)

@@ -7,7 +7,7 @@ import { SourceTag } from "@/components/domain/mode";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { Timeline } from "@/components/domain/timeline";
 import type { HealthState, TimelineEvent } from "@/fixtures/types";
-import { clock } from "@/lib/format";
+import { RECORD_ZONE, clock, datedClock } from "@/lib/format";
 import { Age } from "@/components/domain/as-of";
 import { useRuntime } from "@/lib/mock-runtime";
 import { RESTRICTIONS } from "@/lib/restrictions";
@@ -63,7 +63,7 @@ function Alerts() {
                       <ArrowRight className="ml-auto size-6 shrink-0" aria-hidden />
                     </span>
                     <span className="text-sm text-muted-foreground">
-                      Since <span className="font-mono tabular">{clock(r.since)}</span>. Blocks: {text.blocks}. Ends when: {text.endsWhen}.
+                      Since <span className="font-mono tabular">{datedClock(r.since, now, RECORD_ZONE)}</span>. Blocks: {text.blocks}. Ends when: {text.endsWhen}.
                     </span>
                   </Link>
                 </li>
@@ -110,13 +110,13 @@ function Decisions() {
 }
 
 function AllTimeline() {
-  const { ws } = useRuntime();
+  const { ws, now } = useRuntime();
   const events: TimelineEvent[] = ws.agents
     .flatMap((a) => (ws.timeline[a.agent_id] ?? []).map((e) => ({ ...e, text: `${a.label}: ${e.text}` })))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return (
     <Panel>
-      <Timeline events={events} today={ws.now.slice(0, 10)} />
+      <Timeline events={events} now={now} />
     </Panel>
   );
 }

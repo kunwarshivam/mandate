@@ -19,6 +19,7 @@ use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
 use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -718,8 +719,7 @@ pub(crate) fn overdue(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(
             ..StateEvidence::default()
         },
     )?;
-    batch.broker(BrokerRequest::GetOrderByClientId(id.clone()));
-    Ok(())
+    query_unknown(batch, id.clone())
 }
 
 /// The opening orders of `agent` (or every agent) in `instrument` (or every instrument) the broker
@@ -2818,7 +2818,7 @@ mod sequence_tests {
     use proptest::prop_oneof;
     use proptest::test_runner::TestRunner;
 
-    use super::closed_form::{assert_before_sent, assert_closed, ids, named, record};
+    use super::closed_form::{assert_before_sent, assert_closed, ids, named, record, records};
     use super::{fits, long, rests};
     use crate::error::ExecutorError;
     use crate::fold::fold;
@@ -12989,6 +12989,19 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// The members an exit sequence's start names: the OCO it replaces, the exit's intent, the
+    /// entry, the agent and the recorded prices.
+    fn exit_started() -> Vec<(&'static str, Value)> {
+        vec![
+            ("intent_id", text(EXIT)),
+            ("entry", text("md-held-1")),
+            ("agent_id", text("agent-a")),
+            ("orders", ids(&[OCO])),
+            ("stop", text("140")),
+            ("take_profit", text("170")),
+        ]
+    }
+
     /// E7-19 E1b-P ([DEC-859](../../../docs/project/decisions/DEC-859.md)), journal spec §9.5: an
     /// exit sequence's own records are closed. Its start names the resting OCO as a list, the
     /// exit's intent, the entry, its agent as `agent_id`, and the prices; the confirmed cancel
@@ -13002,17 +13015,7 @@ mod sequence_tests {
         let prices = [("stop", text("140")), ("take_profit", text("170"))];
         let started = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
         let start = record(&started, "unprotected_start")?;
-        let exit = [
-            ("intent_id", text(EXIT)),
-            ("entry", text("md-held-1")),
-            ("agent_id", text("agent-a")),
-            ("orders", ids(&[OCO])),
-        ];
-        assert_closed(
-            start,
-            "unprotected_start",
-            &[&exit[..], &prices[..]].concat(),
-        )?;
+        assert_closed(start, "unprotected_start", &exit_started())?;
         let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
         let cancelled = record(&confirmed, "cancelled")?;
         assert_closed(cancelled, "cancelled", &[("orders", ids(&[OCO]))])?;
@@ -13026,6 +13029,86 @@ mod sequence_tests {
         assert_before_sent(&settled, &[placed, ended], &id);
         Ok(())
     }
+
+    /// E7-19 E1b-P (DEC-859), §9.5: a passive exit's records are closed. Its start names what an
+    /// exit's does; its two placements, the exit's OCO and the rest's, name
+    /// each order, its quantity and the sequence's prices; the end of the interval its wait opened
+    /// awaits both, journaled before either is sent (rule 5).
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn a_passive_exits_records_are_closed() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected_with_an_opening(&ports, "agent-a", true)?;
+        let prices = [("stop", text("140")), ("take_profit", text("170"))];
+        let asked = executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        let start = record(&asked, "passive_start")?;
+        assert_closed(start, "passive_start", &exit_started())?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        let sent = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+        let placements: Vec<&EventDraft> = records(&sent)
+            .into_iter()
+            .filter(|draft| draft.payload.get("action").and_then(Value::as_str) == Some("placed"))
+            .collect();
+        let [first, rest] = placements[..] else {
+            return Err(missing("the exit's placement and the rest's"));
+        };
+        let rest_id = format!("md-held-1-p{}", rest.event_id.0);
+        let exit_id = format!("md-{EXIT}");
+        for (placed, id) in [(first, &exit_id), (rest, &rest_id)] {
+            let covers = [("orders", ids(&[id])), ("qty", text("5"))];
+            assert_closed(placed, "placed", &[&covers[..], &prices[..]].concat())?;
+        }
+        let ended = record(&sent, "unprotected_end")?;
+        let awaited = ids(&[&exit_id, &rest_id]);
+        assert_closed(ended, "unprotected_end", &[("awaiting", awaited)])?;
+        assert_before_sent(&sent, &[first, ended], &exit_id);
+        assert_before_sent(&sent, &[rest, ended], &rest_id);
+        Ok(())
+    }
+
+    /// E7-19 E1b-P (DEC-859), §9.5: the alerting records name their instrument and nothing else.
+    /// The watchdog's agent and quantity, an unpriced exit's intent and limit, and the expiring
+    /// protection's orders are no members (rules 41, 42 and 44): the fold reads none of them, and
+    /// the intent the watchdog hands in carries its agent and quantity.
+    #[test]
+    #[ignore = "pending E7-19"]
+    fn the_alerting_records_are_closed() -> Result<(), ExecutorError> {
+        let fees = fees()?;
+        let config = ExecutorConfig {
+            max_unprotected_s: 600,
+            ..executor_config()
+        };
+        let ports = tiered_ports(&config, &fees);
+        let mut watched = protected(&ports)?;
+        watched.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let fired = watched.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert_closed(record(&fired, "watchdog")?, "watchdog", &[])?;
+        let mut unpriceable_exit = protected(&ports)?;
+        unpriceable_exit.run(unpriceable()?, &ports)?;
+        unpriceable_exit.run(sell(EXIT, "5", "150", Purpose::RiskExit)?, &ports)?;
+        let unpriced_sent = unpriceable_exit.run(cancel_accepted(OCO), &ports)?;
+        assert_closed(
+            record(&unpriced_sent, "exit_unpriced")?,
+            "exit_unpriced",
+            &[],
+        )?;
+        let mut laddered = protected(&ports)?;
+        first_rung(&mut laddered, &ports)?;
+        let mut stepped = Vec::new();
+        for step in 1..=5u32 {
+            let at = i64::from(step).saturating_mul(10);
+            laddered.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
+            let rung = rung_id(step.saturating_sub(1));
+            stepped.extend(laddered.run(cancel_accepted(&rung), &ports)?);
+        }
+        assert_closed(record(&stepped, "ladder_floor")?, "ladder_floor", &[])?;
+        let mut expiring = unpriced(&ports)?;
+        let due = trading_day(&mut expiring, &ports, "2026-09-22")?;
+        let expiry = record(&due, "expiry_unreplaceable")?;
+        assert_closed(expiry, "expiry_unreplaceable", &[])?;
+        Ok(())
+    }
 }
 
 /// Journal spec §9.5's closed `ProtectionChanged`, E1b-P's oracle (DEC-859): a draft is compared
@@ -13033,7 +13116,7 @@ mod sequence_tests {
 #[cfg(test)]
 mod closed_form {
     use mandate_canon::{Key, Object, Value, parse, to_canonical};
-    use mandate_journal::Draft;
+    use mandate_journal::{Draft, Invalid, InvalidReason};
 
     use crate::error::ExecutorError;
     use crate::reconcile::tests::missing;
@@ -13154,6 +13237,40 @@ mod closed_form {
                 "{id}: journaled at {journaled:?}, sent at {sent:?} (rule 5)"
             );
         }
+    }
+
+    /// The oracle's own check (#1037 review, minor 1): the journal admits a closed `watchdog`
+    /// naming its instrument alone, and refuses the same record carrying the quantity the
+    /// legacy writer adds, at `payload.qty` (rule 42), so a `Draft::parse` that admits whatever
+    /// it is handed cannot pass the pins.
+    #[test]
+    fn the_journal_refuses_a_watchdog_carrying_its_quantity() -> Result<(), ExecutorError> {
+        let mut closed = Object::new();
+        for member in MEMBERS.split_whitespace() {
+            let value = match member {
+                "instrument_id" => Value::Str("AAPL".to_owned()),
+                "action" => Value::Str("watchdog".to_owned()),
+                "risk_clock" => Value::Str("2026-09-21T14:00:30.000000000Z".to_owned()),
+                "orders" | "awaiting" => Value::Array(Vec::new()),
+                _ => Value::Null,
+            };
+            closed.insert(Key::new(member).map_err(|_| missing(member))?, value);
+        }
+        let judged = |payload: &Object| -> Result<Option<Invalid>, ExecutorError> {
+            let draft = envelope(&Value::Object(payload.clone()))?;
+            Ok(Draft::parse(&to_canonical(&draft)).err())
+        };
+        assert_eq!(judged(&closed)?, None, "the closed watchdog is admitted");
+        closed.insert(
+            Key::new("qty").map_err(|_| missing("qty"))?,
+            Value::Str("15".to_owned()),
+        );
+        let refused = Invalid {
+            reason: InvalidReason::Schema,
+            path: "payload.qty".to_owned(),
+        };
+        assert_eq!(judged(&closed)?, Some(refused), "rule 42 refuses its qty");
+        Ok(())
     }
 
     /// The vectors' `placed` chain event, seq 7 (`fixtures/refcases/journal.json`), less what only

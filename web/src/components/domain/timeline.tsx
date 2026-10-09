@@ -1,5 +1,5 @@
 import type { TimelineEvent } from "@/fixtures/types";
-import { clock, dateLabel } from "@/lib/format";
+import { RECORD_ZONE, datedClock } from "@/lib/format";
 
 export const KIND_LABEL: Record<TimelineEvent["kind"], string> = {
   fill: "Fill",
@@ -12,7 +12,7 @@ export const KIND_LABEL: Record<TimelineEvent["kind"], string> = {
   version: "Version",
 };
 
-export function Timeline({ events, today }: { events: TimelineEvent[]; today: string }) {
+export function Timeline({ events, now }: { events: TimelineEvent[]; now: string }) {
   if (events.length === 0) return <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>;
   return (
     <ol className="grid gap-4 border-l border-border pl-5">
@@ -21,7 +21,7 @@ export function Timeline({ events, today }: { events: TimelineEvent[]; today: st
           <span className="absolute top-1.5 -left-[1.5625rem] size-2 rounded-full bg-muted-foreground ring-4 ring-card" aria-hidden />
           <p className="flex flex-wrap items-baseline gap-x-2 text-caption text-muted-foreground">
             <time dateTime={e.at} className="font-mono tabular">
-              {e.at.slice(0, 10) === today ? clock(e.at) : `${dateLabel(e.at)}, ${clock(e.at).slice(0, 5)}`}
+              {datedClock(e.at, now, RECORD_ZONE)}
             </time>
             <span className="text-label text-foreground">{KIND_LABEL[e.kind]}</span>
           </p>

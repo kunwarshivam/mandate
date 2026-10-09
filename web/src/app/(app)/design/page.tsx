@@ -369,6 +369,7 @@ export default function DesignPage() {
                 { code: "drawdown_exits_only", since: "2026-09-28T14:01:12-04:00" },
                 { code: "reconciliation_mismatch", since: "2026-09-28T13:40:00-04:00" },
               ]}
+              now="2026-09-28T14:05:20-04:00"
             />
           </div>
         </div>

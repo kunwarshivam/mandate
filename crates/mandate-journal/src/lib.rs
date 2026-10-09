@@ -26,8 +26,10 @@ mod catalogue;
 mod connection_fold;
 mod connections;
 mod control;
+mod control_verify;
 mod draft;
 mod merkle;
+mod notices;
 mod records;
 mod schema;
 mod verify;
@@ -39,12 +41,13 @@ pub use agent::{
 };
 
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
-/// account stream (DEC-446 item 3), then §9.10's rule 84 clause on the control stream (DEC-671).
-/// Each draft has already passed `Draft::parse`.
+/// account stream (DEC-446 item 3), §9.10's rule 84 clause on the control stream (DEC-671), then
+/// §9.15's alert rule 130 (DEC-720). Each draft has already passed `Draft::parse`.
 pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     agent::check_batch(drafts)?;
     control::check_batch(drafts)?;
-    workspace::check_batch(drafts)
+    workspace::check_batch(drafts)?;
+    notices::check_batch(drafts)
 }
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
@@ -52,6 +55,10 @@ pub use artifact::{
 pub use connection_fold::{
     ConnectionCheck, ConnectionFailure, ConnectionStreamRule, ConnectionVerifyError,
     verify_connection_causes, verify_connection_lifecycle,
+};
+pub use control_verify::{
+    ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
+    verify_break_glass_causes,
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
@@ -93,13 +100,12 @@ pub enum StreamType {
     Control,
     Scheduler,
     /// `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
-    /// (journal spec v0.12 §2, DEC-720). [`StreamId::parse`] reads it once E8-9's
-    /// slice S2 is implemented.
+    /// (journal spec v0.12 §2, §9.15, DEC-720).
     Notice,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// or `clock:{workspace_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
+/// `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
     text: String,
@@ -114,6 +120,7 @@ impl StreamId {
             ["agent", _, _] => StreamType::Agent,
             ["ctl", _] => StreamType::Control,
             ["clock", _] => StreamType::Scheduler,
+            ["ntf", _] => StreamType::Notice,
             _ => return None,
         };
         parts

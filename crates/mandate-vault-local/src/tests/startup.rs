@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::os::unix::fs::symlink;
+use std::path::{Path, PathBuf};
 
 use secrecy::ExposeSecret;
 
@@ -10,6 +11,7 @@ use super::layout::{Layout, PENDING_KEY, TOKEN_KEY, set_mode};
 use crate::VaultError;
 use crate::startup::{
     FORBIDDEN_KEY_VARIABLES, Ids, PENDING_KEY_CREDENTIAL, Role, TOKEN_KEY_CREDENTIAL, check,
+    load_key, refuse_token_key,
 };
 
 fn refused(layout: &Layout, role: Role) -> VaultError {
@@ -20,7 +22,6 @@ fn refused(layout: &Layout, role: Role) -> VaultError {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_correct_layout_starts_each_role_with_its_keys() {
     let layout = Layout::new();
     let executor = check(&layout.inputs(Role::Executor)).unwrap();
@@ -36,7 +37,6 @@ fn a_correct_layout_starts_each_role_with_its_keys() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_key_variable_in_the_environment_refuses_startup() {
     for name in FORBIDDEN_KEY_VARIABLES {
         for value in [
@@ -60,7 +60,6 @@ fn a_key_variable_in_the_environment_refuses_startup() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_api_process_refuses_the_token_key() {
     let layout = Layout::new();
     assert_eq!(
@@ -70,7 +69,6 @@ fn the_api_process_refuses_the_token_key() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_key_must_be_present_and_exactly_32_bytes() {
     let layout = Layout::new().without_token_key();
     assert_eq!(refused(&layout, Role::Executor), VaultError::KeyMissing);
@@ -102,7 +100,6 @@ fn each_key_must_be_present_and_exactly_32_bytes() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_directory_must_have_its_exact_mode() {
     let cases = [
         ("", "vault", 0o775),
@@ -129,7 +126,6 @@ fn every_directory_must_have_its_exact_mode() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_directory_must_have_its_owner_and_group() {
     type Skew = fn(&mut Ids);
     let cases: [(Skew, &str); 5] = [
@@ -151,7 +147,6 @@ fn every_directory_must_have_its_owner_and_group() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_symlinked_or_missing_directory_is_refused() {
     let layout = Layout::new();
     let real = layout.root.join("elsewhere");
@@ -177,4 +172,52 @@ fn a_symlinked_or_missing_directory_is_refused() {
         refused(&layout, Role::Executor),
         VaultError::DirectoryMismatch { dir: "vault" }
     );
+}
+
+/// A path under a regular file stats with `ENOTDIR`, which is not `NotFound`, as root or not.
+fn under_a_regular_file(layout: &Layout, name: &str) -> PathBuf {
+    let file = layout.root.join("not-a-directory");
+    fs::write(&file, b"").unwrap();
+    file.join(name)
+}
+
+#[test]
+fn the_api_refuses_a_token_key_it_cannot_stat() {
+    let layout = Layout::new();
+    let path = under_a_regular_file(&layout, TOKEN_KEY_CREDENTIAL);
+    assert_eq!(refuse_token_key(&path), Err(VaultError::Io));
+}
+
+#[test]
+fn the_api_starts_only_when_the_token_key_is_absent() {
+    let layout = Layout::new();
+    let path = layout.credentials.join(TOKEN_KEY_CREDENTIAL);
+    assert_eq!(
+        refuse_token_key(&path),
+        Err(VaultError::TokenKeyInApiCredentials)
+    );
+    fs::remove_file(&path).unwrap();
+    assert_eq!(refuse_token_key(&path), Ok(()));
+    symlink(layout.credentials.join(PENDING_KEY_CREDENTIAL), &path).unwrap();
+    assert_eq!(
+        refuse_token_key(&path),
+        Err(VaultError::TokenKeyInApiCredentials),
+        "a symlinked token key"
+    );
+}
+
+#[test]
+fn a_key_whose_stat_fails_is_an_io_error() {
+    let layout = Layout::new();
+    let path = under_a_regular_file(&layout, "k");
+    assert_eq!(load_key(&path).map(|_| ()), Err(VaultError::Io));
+}
+
+/// `/proc/self/mem` stats as a regular file and opens for its own process, but reading at offset
+/// zero fails with `EIO`: a read error that is not a short read.
+#[test]
+fn a_key_that_cannot_be_read_is_an_io_error() {
+    let path = Path::new("/proc/self/mem");
+    assert!(fs::symlink_metadata(path).unwrap().file_type().is_file());
+    assert_eq!(load_key(path).map(|_| ()), Err(VaultError::Io));
 }

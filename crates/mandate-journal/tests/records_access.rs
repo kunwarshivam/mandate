@@ -170,9 +170,9 @@ fn every_verification_run_draft_parses_or_is_refused_as_its_case_says() {
 }
 
 /// §11's per-event checks 1 to 6, `anchor_head_mismatch`, `anchor_self_mismatch`,
-/// `intent_action_mismatch` and `mode_event_mismatch`, then its per-range checks, as rule 111 lists
-/// them.
-const PER_EVENT: [&str; 11] = [
+/// `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, the connection's two, and
+/// `break_glass_cause_mismatch`, then its per-range checks, as rule 111 lists them.
+const PER_EVENT: [&str; 15] = [
     "non_canonical",
     "column_mismatch",
     "seq_gap",
@@ -184,6 +184,10 @@ const PER_EVENT: [&str; 11] = [
     "anchor_self_mismatch",
     "intent_action_mismatch",
     "mode_event_mismatch",
+    "held_mismatch",
+    "connection_lifecycle_mismatch",
+    "connection_cause_mismatch",
+    "break_glass_cause_mismatch",
 ];
 const PER_RANGE: [&str; 4] = [
     "anchor_root_mismatch",
@@ -192,7 +196,7 @@ const PER_RANGE: [&str; 4] = [
     "segment_gap",
 ];
 
-/// Rule 111 for each of §9.13's fifteen check codes, which the vectors exercise only in part: a
+/// Rule 111 for each of §9.13's nineteen check codes, which the vectors exercise only in part: a
 /// failure names its `seq` exactly when its check is reported at an event, and is refused at
 /// `failure.seq` otherwise.
 #[test]
@@ -234,7 +238,6 @@ fn every_check_code_names_its_seq_exactly_when_it_is_reported_at_an_event() {
 /// tenant, `seq`, order, one per stream, its own stream's); rule 114's recomputed root, through one
 /// leaf and five; a `null` token; and rule 115's writer.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_anchor_computed_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(COLD_RECORDS, "AnchorComputed", 3, 30, &[113, 114, 115]);
 }
@@ -242,7 +245,6 @@ fn every_anchor_computed_draft_parses_or_is_refused_as_its_case_says() {
 /// `SegmentExported`: its closed members and types; rule 116's tenant, bounds and genesis; rule
 /// 117's manifest hash over DEC-263's six fields; and rule 118's writer.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_segment_exported_draft_parses_or_is_refused_as_its_case_says() {
     every_case_of(COLD_RECORDS, "SegmentExported", 2, 29, &[116, 117, 118]);
 }
@@ -251,7 +253,6 @@ fn every_segment_exported_draft_parses_or_is_refused_as_its_case_says() {
 /// anchor or a segment by anyone else is refused at `actor.kind`; a client, in §3's one shape, by
 /// rule 83 at the same path.
 #[test]
-#[ignore = "pending E12-3"]
 fn only_a_system_actor_writes_an_anchor_or_a_segment() {
     let section = section(COLD_RECORDS);
     let build = format!("sha256:{}", "c".repeat(64));

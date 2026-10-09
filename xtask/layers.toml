@@ -21,7 +21,10 @@
 #
 # Planned crates and layers, created only when a story needs them:
 #   0  mandate-num, mandate-time, mandate-canon, mandate-identity-seal (DEC-642 item 7: its
-#      allowed_dependents list is the only thing that may build an identity session or membership)
+#      allowed_dependents list is the only thing that may build an identity session or membership),
+#      and mandate-tenant (DEC-642 item 7, DEC-668): the sealed `Tenant` trait and the ID values it
+#      returns, below mandate-identity, which re-exports them; its allowed_dependents list is the
+#      only thing that may implement `Tenant`
 #   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
@@ -32,7 +35,10 @@
 #      (E9-1, DEC-660), which verifies and never signs, and mandate-authn (E9-1, DEC-650, DEC-652):
 #      token verification and sessions as pure functions, with the issuer's keys and the clock
 #      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
-#      session it builds
+#      session it builds; and mandate-identity-system (E9-8, DEC-642 items 5 to 8, DEC-668): the
+#      background processes' SystemContext, above mandate-identity, whose permissions and witness it
+#      uses; its allowed_dependents list names only the bootstrap crates of the agent runtime, the
+#      executor and the scheduler, and is empty until E9-8 creates them
 #   3  mandate-spec, mandate-audit (read-only audit reads over the journal, scoped to one
 #      workspace; E12-6)
 #   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
@@ -66,8 +72,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-identity-system",
-    "mandate-tenant",
     "mandate-identity-seal",
     "mandate-identity-testkit",
 ]
@@ -149,6 +153,20 @@ pure = true
 allowed_external = []
 allowed_dependents = ["mandate-authn", "mandate-identity", "mandate-identity-testkit"]
 
+[crates.mandate-tenant]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+allowed_dependents = ["mandate-identity", "mandate-identity-system"]
+
+[crates.mandate-identity-system]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = []
+allowed_dependents = []
+
 [crates.mandate-identity-testkit]
 layer = 11
 safety_critical = false
@@ -201,7 +219,7 @@ allowed_external = ["thiserror"]
 layer = 4
 safety_critical = true
 pure = true
-allowed_external = ["serde", "serde_json", "sha2", "thiserror"]
+allowed_external = ["serde", "serde_json", "serde_path_to_error", "sha2", "thiserror"]
 # The identity system crate holds sessions and credentials; the contract never reaches it
 # (DEC-642 item 6).
 forbidden_internal = ["mandate-identity-system"]

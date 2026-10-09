@@ -10,6 +10,7 @@ import { SquareAlert } from "pixelarticons/react/SquareAlert.js";
 import { StopOctagon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import { ModeBadge, SourceTag } from "@/components/domain/mode";
+import { AgentOwl } from "@/components/domain/owl";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Agent } from "@/fixtures/types";
 import { quantity } from "@/lib/format";
@@ -212,7 +213,8 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                 {ws.agents.map((agent) => (
                   <Collapsible.Root key={agent.agent_id} className="border-b border-border/70 last:border-b-0">
                     <Collapsible.Trigger className="group -mx-2 flex min-h-14 w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring">
-                      <span className="grid">
+                      <AgentOwl agent={agent} className="size-8 shrink-0" />
+                      <span className="grid grow">
                         <span className="font-medium">{agent.label}</span>
                         <span className="text-caption text-muted-foreground" translate="no">
                           {agent.mandate.name}

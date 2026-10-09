@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Agent, Mandate, Scenario, Workspace } from "@/fixtures/types";
-import { AGENT_IDS, APPROVAL_IDS, NOW, buildWorkspace, findAgent } from "@/fixtures/workspace";
+import { AGENT_IDS, APPROVAL_IDS, NOW, SCENARIOS, buildWorkspace, findAgent } from "@/fixtures/workspace";
 import { type VersionCase, oracle, overall, versionInvariants } from "@/test/version-invariants";
 import { dec, mul, sub } from "./decimal";
 import { addMs, mandateVersion } from "./fixture-journey";
@@ -301,6 +301,81 @@ describe("applying a version (§2.2)", () => {
   });
 });
 
+/** The workspace's policy as a deployment could state it: on, off, not known, or not stated at all. */
+type PolicyValue = boolean | null | "absent";
+
+function withPolicy(ws: Workspace, value: PolicyValue, approverUsers = ws.approver_users): Workspace {
+  const next: Workspace = { ...ws, approver_users: approverUsers, independent_approval_required: value === "absent" ? null : value };
+  if (value === "absent") delete (next as Partial<Workspace>).independent_approval_required;
+  return next;
+}
+
+const SECOND_PERSON =
+  "This workspace needs a second person to approve a change that raises risk, and that approval can't be asked for here yet, so a passkey alone can't confirm it.";
+const NO_SECOND_PERSON =
+  "This workspace needs a second person to approve any change that doesn't lower risk, and no second person can approve in it, so only a change that lowers risk can be confirmed.";
+
+describe("independent approval (mandate spec §4.3, V-047, DEC-444; interim until a second user can approve)", () => {
+  const raise = { "/capital/max_loss_from_allocation": "0.15" } satisfies Edits;
+  const lower = { "/risk/max_order_usd": "800" } satisfies Edits;
+  const neutral = { "/notifications/quiet_hours/start": "22:00" } satisfies Edits;
+  const swingIn = (ws: Workspace) => agentIn(ws, AGENT_IDS.swing);
+
+  it.each([true, null, "absent"] as const)("refuses a risk-increasing version when the policy is %s, and records it as rejected, never waiting or applied", (value) => {
+    const ws = withPolicy(buildWorkspace("normal"), value);
+    const p = propose(ws, swingIn(ws), raise);
+    expect(p.classification).toBe("risk_increasing");
+    expect(p.refusals).toEqual([{ rule: "V-047", text: SECOND_PERSON }]);
+    const { ws: next, recorded } = recordChange(ws, p, FORM, later(1));
+    expect(recorded.result).toBe("rejected");
+    const after = swingIn(next);
+    expect(after.mandate.capital.max_loss_from_allocation).toBe("0.1");
+    expect(after.mandate_version).toBe(swingIn(ws).mandate_version);
+    expect(after.versions.at(-1)?.application).toMatchObject({ result: "rejected", at: later(1) });
+    expect(after.versions.some((v) => v.application.result === "pending")).toBe(false);
+  });
+
+  it.each([true, null, "absent"] as const)("lets a risk-reducing or a neutral version apply as before when the policy is %s and two people can approve", (value) => {
+    const ws = withPolicy(buildWorkspace("normal"), value);
+    for (const edits of [lower, neutral]) {
+      const p = propose(ws, swingIn(ws), edits);
+      expect(p.refusals).toEqual([]);
+      expect(recordChange(ws, p, FORM, later(1)).recorded).toEqual({ result: "applied" });
+    }
+  });
+
+  it("changes nothing when the policy is off: a risk-increasing version takes the passkey and waits for its safe point", () => {
+    const ws = withPolicy(buildWorkspace("normal"), false);
+    const p = propose(ws, swingIn(ws), raise);
+    expect(p).toMatchObject({ classification: "risk_increasing", stepUp: true, refusals: [] });
+    expect(recordChange(ws, p, FORM, later(1)).recorded).toEqual({ result: "pending" });
+  });
+
+  it("is off in every fixture scenario, as the app behaved before it knew the policy", () => {
+    for (const { id } of SCENARIOS) expect(buildWorkspace(id).independent_approval_required, id).toBe(false);
+  });
+
+  it("in a workspace with fewer than two people who can approve, lets only a risk-reducing version through (DEC-444)", () => {
+    const ws = withPolicy(buildWorkspace("normal"), true, 1);
+    expect(propose(ws, swingIn(ws), lower).refusals).toEqual([]);
+    for (const edits of [raise, neutral]) {
+      const p = propose(ws, swingIn(ws), edits);
+      expect(p.refusals).toEqual([{ rule: "V-047", text: NO_SECOND_PERSON }]);
+      expect(recordChange(ws, p, FORM, later(1)).recorded.result).toBe("rejected");
+    }
+  });
+
+  it("rejects a waiting risk-increasing version at application once the policy requires independent approval", () => {
+    const ws = withPolicy(buildWorkspace("normal"), false);
+    const p = propose(ws, swingIn(ws), raise);
+    const held = recordChange(ws, p, FORM, later(1));
+    expect(held.recorded).toEqual({ result: "pending" });
+    const applied = reachSafePoint(withPolicy(held.ws, true), AGENT_IDS.swing, p.version, FORM, later(2));
+    expect(applied?.recorded).toEqual({ result: "rejected", reason: SECOND_PERSON });
+    expect(swingIn(applied?.ws ?? ws).mandate.capital.max_loss_from_allocation).toBe("0.1");
+  });
+});
+
 /** mulberry32: a fixed sequence per seed, so a failure names its seed and replays. */
 function random(seed: number) {
   let s = seed >>> 0;
@@ -397,3 +472,45 @@ describe("random change sequences", () => {
 });
 
 versionInvariants(runs.flatMap((r) => r.cases));
+
+const POLICY_POOL: readonly PolicyValue[] = [true, false, null, "absent"];
+
+/**
+ * Random edits under a random policy and approver count. The expected outcome is read off the
+ * independent §9.2 oracle's class and the stated policy alone: only a stated `false` turns the
+ * policy off, and with it on a version passes only if it lowers risk, or is neutral where two
+ * people can approve.
+ */
+describe("random changes under independent approval", () => {
+  const outcomes = Array.from({ length: 400 }, (_, i) => {
+    const seed = 1000 + i;
+    const rand = random(seed);
+    const value = POLICY_POOL[i % POLICY_POOL.length];
+    const approvers = rand() < 0.5 ? 1 : 2;
+    const ws = withPolicy(buildWorkspace("normal"), value, approvers);
+    const agent = ws.agents[Math.floor(rand() * ws.agents.length)];
+    const fields = editableFields(agent.mandate);
+    const edits: Edits = {};
+    for (let n = 1 + Math.floor(rand() * 2); n > 0; n--) {
+      const f = fields[Math.floor(rand() * fields.length)];
+      edits[f.path] = randomValue(rand, agent.mandate, f.path);
+    }
+    const p = propose(ws, agent, edits);
+    return { label: `seed ${seed}, policy ${String(value)}, ${approvers} approvers`, value, approvers, p, recorded: recordChange(ws, p, FORM, later(1)).recorded };
+  }).filter((o) => o.p.changes.length > 0);
+
+  it("see every class under every policy value", () => {
+    for (const value of POLICY_POOL) {
+      expect(new Set(outcomes.filter((o) => o.value === value).map((o) => overall(o.p.changes))), String(value)).toEqual(new Set(["risk_increasing", "risk_reducing", "neutral"]));
+    }
+  });
+
+  it("never let a version the policy holds back wait or apply", () => {
+    for (const { label, value, approvers, p, recorded } of outcomes) {
+      const cls = overall(p.changes);
+      const held = value !== false && (cls === "risk_increasing" || (cls === "neutral" && approvers < 2));
+      expect(p.refusals.some((r) => r.rule === "V-047"), label).toBe(held);
+      if (held) expect(recorded.result, label).toBe("rejected");
+    }
+  });
+});

@@ -5,8 +5,10 @@ import type { Point } from "@/fixtures/market";
  * Today's equity as one line, scaled to its own range so a quiet day still shows its shape, with
  * the daily loss limit as the pale volt region below it (DEC-515): the region rises into view as the
  * agent nears its limit, and sits as a sliver at the foot while the limit is far below. A line
- * drawn far above a distant dashed rule read as broken. It stretches to its column and keeps its
- * strokes hairline-true. Decoration: `label` says it.
+ * drawn far above a distant dashed rule read as broken. The dashed rule marks the limit only once it
+ * is inside the line's range: below it, a rule under the lowest point read as the agent touching its
+ * limit (critique C-11). It stretches to its column and keeps its strokes hairline-true.
+ * Decoration: `label` says it.
  */
 export function Sparkline({
   points,
@@ -35,6 +37,7 @@ export function Sparkline({
   const path = points.map((p) => `${x(p.time).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   const SLIVER = 2;
   const limitTop = limit === null ? null : Math.min(Math.max(y(limit), 0), height - SLIVER);
+  const limitBelowRange = limit !== null && limit < lo;
   return (
     <svg
       data-slot="sparkline"
@@ -47,7 +50,9 @@ export function Sparkline({
       {limitTop !== null ? (
         <>
           <rect data-slot="sparkline-limit-band" x={0} y={limitTop} width={width} height={height - limitTop} className="fill-mandate" />
-          <line data-slot="sparkline-limit" x1={0} x2={width} y1={limitTop} y2={limitTop} className="stroke-mandate-marker" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+          {limitBelowRange ? null : (
+            <line data-slot="sparkline-limit" x1={0} x2={width} y1={limitTop} y2={limitTop} className="stroke-mandate-marker" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+          )}
         </>
       ) : null}
       <polyline points={path} fill="none" className="stroke-foreground" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />

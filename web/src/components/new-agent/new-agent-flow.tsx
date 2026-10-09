@@ -16,7 +16,9 @@ const FIXTURE_COMPILER = fixtureCompiler();
  * Setting up an agent on the fixture workspace (brief A0 to A2 and A5, DEC-476, DEC-477): one
  * conversation gathers the owner's values, shows the whole agent once, and creates it with a
  * passkey. Everything stays in this component's state until then; only the deployment reaches the
- * runtime, which repeats V-002 and V-006 when it applies it. Words handed over from Messages or the
+ * runtime, which repeats V-047, V-002 and V-006 when it applies it. Under the workspace's
+ * independent-approval policy the summary offers no passkey confirm at all (V-047, interim until a
+ * second user can approve). Words handed over from Messages or the
  * copilot wait in the message field; nothing is read until the owner sends them.
  */
 export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compiler }) {

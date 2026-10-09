@@ -1,10 +1,11 @@
 import { type ReactElement, useEffect } from "react";
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
 import { DECISION_KEY } from "@/components/kumo/key";
 import { AppShell } from "@/components/shell/app-shell";
+import type { Workspace } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
 import { PURPOSE_LABEL } from "@/lib/labels";
@@ -14,6 +15,7 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
+import { AlertsScreen } from "./account-screens";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
 import { ApprovalsInboxScreen, askSentence } from "./approvals-inbox";
@@ -109,9 +111,11 @@ describe("D1 dashboard", () => {
     const rail = main().querySelector<HTMLElement>("[data-layout=rail]")!;
     const region = rail.querySelector<HTMLElement>("section[aria-labelledby=rail-decisions-title]")!;
     const entries = [...region.querySelectorAll<HTMLElement>("[data-slot=timeline-entry]")];
-    expect(entries).toHaveLength(Math.min(4, ws.decisions.length));
+    const openRequest = (id: string | undefined) => !!id && approvalAt(findApproval(ws, id)!, ws.now).status === "delivered";
+    const shown = ws.decisions.filter((d) => !openRequest(d.approval_id));
+    expect(entries).toHaveLength(Math.min(4, shown.length));
     entries.forEach((entry, i) => {
-      const d = ws.decisions[i];
+      const d = shown[i];
       expect(entry).toHaveAttribute("data-verdict", d.verdict);
       expect(entry.querySelector("svg[data-slot=owl]")).not.toBeNull();
       expect(within(entry).getByRole("link")).toHaveAttribute("href", decisionHref(d.agent_id, d.event_id));
@@ -124,6 +128,62 @@ describe("D1 dashboard", () => {
     });
     expect(region.querySelector("[data-slot=decision-tally]")).toHaveTextContent(/^The latest 4 decisions: \d+ allowed(, \d+ (asked you|not allowed|held|waiting))+\.$/);
     expect(within(region).getByRole("link", { name: /All decisions/ })).toHaveAttribute("href", "/audit/decisions");
+  });
+
+  describe("a request appears once on Home (DESIGN.md, Needs you; critique C-5)", () => {
+    const ws = buildWorkspace("normal");
+    const asked = ws.decisions.find((d) => d.approval_id === APPROVAL_IDS.swingXyz)!;
+    const askedHref = decisionHref(asked.agent_id, asked.event_id);
+    const others = ws.decisions.filter((d) => d.event_id !== asked.event_id);
+    const decisionRegions = () => [...main().querySelectorAll<HTMLElement>("section[aria-labelledby$=decisions-title]")];
+    const shownHrefs = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => within(li).getByRole("link").getAttribute("href"));
+    const closed = (status: "acted" | "expired") => (w: Workspace) => ({
+      ...w,
+      approvals: w.approvals.map((a) => (a.approval_id === APPROVAL_IDS.swingXyz ? { ...a, status } : a)),
+    });
+
+    it("shows an open request once, under Needs you, and leaves its Asked you row out of the Decisions rail", () => {
+      renderScreen("/", <DashboardScreen />);
+      expect(findApproval(ws, APPROVAL_IDS.swingXyz)?.status, "the request is open").toBe("delivered");
+      const links = within(main()).getAllByRole("link", { name: /buy 2 XYZ at/i });
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute("href", `/approvals/${APPROVAL_IDS.swingXyz}`);
+      expect(within(main()).getByRole("region", { name: /^Needs you/ }).contains(links[0])).toBe(true);
+      const regions = decisionRegions();
+      expect(regions).toHaveLength(2);
+      const [rail, phone] = regions;
+      expect(shownHrefs(rail)).toEqual(others.slice(0, 4).map((d) => decisionHref(d.agent_id, d.event_id)));
+      expect(shownHrefs(phone)).toEqual(others.slice(0, 3).map((d) => decisionHref(d.agent_id, d.event_id)));
+      for (const r of regions) expect(r.querySelector(`a[href="${askedHref}"]`)).toBeNull();
+    });
+
+    it.each(["acted", "expired"] as const)("shows the request's decision row in the rail again once it is %s", (status) => {
+      renderWithRuntime(<AppShell>{<DashboardScreen />}</AppShell>, "normal", { workspace: closed(status) });
+      expect(within(within(main()).getByRole("region", { name: /^Needs you/ })).queryByRole("link", { name: /buy 2 XYZ at/i })).toBeNull();
+      for (const region of decisionRegions()) {
+        const row = within(region).getByRole("link", { name: "Buy 2 XYZ at $141.30" });
+        expect(row).toHaveAttribute("href", askedHref);
+        expect(row.closest("li")?.querySelector("[data-slot=verdict]")).toHaveTextContent("Asked you");
+      }
+      const [rail, phone] = decisionRegions();
+      expect(shownHrefs(rail)).toEqual(ws.decisions.slice(0, 4).map((d) => decisionHref(d.agent_id, d.event_id)));
+      expect(shownHrefs(phone)).toEqual(ws.decisions.slice(0, 3).map((d) => decisionHref(d.agent_id, d.event_id)));
+    });
+
+    it("shows the row again once the owner answers the request", () => {
+      vi.useFakeTimers();
+      try {
+        const view = renderScreen(`/approvals/${APPROVAL_IDS.swingXyz}`, <ApprovalRequestScreen approvalId={APPROVAL_IDS.swingXyz} />);
+        fireEvent.click(within(main()).getByRole("button", { name: "Approve" }));
+        act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
+        setPathname("/");
+        view.rerender(<AppShell>{<DashboardScreen />}</AppShell>);
+        expect(within(within(main()).getByRole("region", { name: /^Needs you/ })).queryByRole("link", { name: /buy 2 XYZ at/i })).toBeNull();
+        for (const region of decisionRegions()) expect(region.querySelector(`a[href="${askedHref}"]`)).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("keeps news off Home: it is read on each agent's page, beside its decisions", () => {
@@ -169,6 +229,27 @@ describe("D2 agent detail", () => {
     expect(card.querySelector("[role=progressbar]")).toBeNull();
     expect(within(card).getByRole("link", { name: "View full mandate" })).toHaveAttribute("href", `/agents/${AGENT_IDS.swing}/mandate`);
     expect(main().querySelector("[data-slot=mandate-fields]")).toBeNull();
+  });
+
+  it("labels what the next level does 'At the limit:', so it never reads as the mode the chip shows (C-7)", () => {
+    for (const agentId of Object.values(AGENT_IDS)) {
+      cleanup();
+      renderScreen(`/agents/${agentId}`, <AgentDetailScreen agentId={agentId} />);
+      const card = within(main()).getByRole("region", { name: "Your mandate" });
+      const next = card.querySelector("[data-slot=next-level]");
+      if (!next) continue;
+      const lines = [...next.querySelectorAll("p")].map((p) => p.textContent ?? "");
+      const said = lines.find((line) => /equity now\./.test(line));
+      expect(said, `${agentId}: ${lines.join(" | ")}`).toMatch(/equity now\. At the limit: [a-z][^.]*\.$/);
+      expect(within(card).getByRole("group", { name: "Mode" })).toBeVisible();
+    }
+    cleanup();
+    renderScreen(`/agents/${AGENT_IDS.btc}`, <AgentDetailScreen agentId={AGENT_IDS.btc} />);
+    const card = within(main()).getByRole("region", { name: "Your mandate" });
+    const daily = card.querySelector("[data-slot=next-level][data-level=daily]");
+    expect(daily).not.toBeNull();
+    expect(daily).toHaveTextContent(/below equity now\. At the limit: selling only until a new risk day\./);
+    expect(daily).not.toHaveTextContent(/now\. Selling only/);
   });
 
   it("tells the story in the main column, with a recent slice of activity and a link to all of it", () => {
@@ -276,6 +357,51 @@ describe("D2 agent detail", () => {
     renderScreen(`/agents/${AGENT_IDS.swing}`, <AgentDetailScreen agentId={AGENT_IDS.swing} />, "reconciliation");
     expect(main().querySelector("[data-slot=reconciling]")).toHaveTextContent("Checking with the broker. Nothing is needed from you.");
     expect(main().querySelector("[data-slot=mode-banner]")).not.toBeNull();
+  });
+
+  it("dates a restriction that began on an earlier day on Home's agent card, and leaves today's as a time (C-23)", () => {
+    renderScreen("/", <DashboardScreen />, "drawdown");
+    const card = within(within(main()).getByRole("region", { name: "Agents" })).getAllByRole("article").find((a) => a.textContent?.includes("Agent 1")) as HTMLElement;
+    const restrictions = within(card).getByLabelText("Restrictions");
+    expect(restrictions).toHaveTextContent("Drawdown: sizes scaled since Sep 26, 2026, 15:12");
+    expect(restrictions).toHaveTextContent("Drawdown: selling only since 14:01:12");
+    expect(restrictions).not.toHaveTextContent("since 15:12:40");
+  });
+
+  it("dates a restriction that began on an earlier day in the agent's mode banner, and leaves today's as a time (C-23)", () => {
+    renderScreen(`/agents/${AGENT_IDS.btc}`, <AgentDetailScreen agentId={AGENT_IDS.btc} />, "drawdown");
+    const banner = main().querySelector("[data-slot=mode-banner]") as HTMLElement;
+    const item = (title: string) => within(banner).getByText(title).closest("li") as HTMLElement;
+    expect(item("Drawdown: sizes scaled")).toHaveTextContent("since Sep 26, 2026, 15:12");
+    expect(item("Drawdown: selling only")).toHaveTextContent("since 14:01:12");
+    expect(banner).not.toHaveTextContent("since 15:12:40");
+  });
+
+  it("dates a restriction on the Alerts screen when it began on an earlier day (C-23)", () => {
+    renderScreen("/alerts", <AlertsScreen />, "drawdown");
+    const scaled = within(main()).getByRole("link", { name: /Agent 1: Drawdown: sizes scaled/ });
+    expect(scaled).toHaveTextContent("Since Sep 26, 2026, 15:12.");
+    expect(within(main()).getByRole("link", { name: /Agent 1: Drawdown: selling only/ })).toHaveTextContent("Since 14:01:12.");
+  });
+
+  it("dates an older timeline entry through the same formatter, by the day in Eastern time, not the offset it is written in (C-23)", () => {
+    setPathname(`/agents/${AGENT_IDS.btc}`);
+    renderWithRuntime(<AppShell><AgentDetailScreen agentId={AGENT_IDS.btc} /></AppShell>, "normal", {
+      workspace: (ws) => ({
+        ...ws,
+        timeline: {
+          ...ws.timeline,
+          [AGENT_IDS.btc]: [
+            { event_id: "c23-today", at: "2026-09-28T13:10:00-04:00", kind: "order", text: "An order today." },
+            { event_id: "c23-late", at: "2026-09-28T03:59:00Z", kind: "order", text: "An order late the evening before, written in UTC." },
+          ],
+        },
+      }),
+    });
+    const today = within(main()).getAllByText("An order today.")[0].parentElement as HTMLElement;
+    const late = within(main()).getAllByText("An order late the evening before, written in UTC.")[0].parentElement as HTMLElement;
+    expect(today.querySelector("time")).toHaveTextContent(/^13:10:00$/);
+    expect(late.querySelector("time")).toHaveTextContent(/^Sep 27, 2026, 23:59$/);
   });
 
   it("shows the mode banner with what is blocked, when it ends, and who acts", () => {

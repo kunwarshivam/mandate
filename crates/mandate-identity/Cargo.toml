@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 mandate-identity-seal.workspace = true
+mandate-tenant.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
 

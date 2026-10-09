@@ -2,7 +2,7 @@ import type { Agent, Iso, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { CHANGE_EXAMPLE, asksForChange, namesLimit, readChange } from "./change-request";
 import { gateRule, verdictLabel } from "./gate-reasons";
-import { clock, price, quantity, usd } from "./format";
+import { RECORD_ZONE, clock, datedClock, price, quantity, usd } from "./format";
 import { MODE_LABEL, MODE_MEANING } from "./labels";
 import { agentLimits, headroomLine, headroomRows } from "./limits";
 import { type EditPath, type Edits, diffMandate, editableFields } from "./mandate-change";
@@ -186,10 +186,10 @@ function happened(ctx: AskContext, agents: Agent[]): Reply {
   );
 }
 
-function status(agents: Agent[]): Reply {
+function status(agents: Agent[], now: Iso): Reply {
   if (agents.length === 0) return answer(["You have no agents yet."]);
   return answer(
-    agents.flatMap((a) => [`${a.label} is ${MODE_LABEL[a.mode].toLowerCase()}. ${MODE_MEANING[a.mode]}`, ...a.restrictions.map((r) => `Since ${clock(r.since)}: ${RESTRICTIONS[r.code].label}.`)]),
+    agents.flatMap((a) => [`${a.label} is ${MODE_LABEL[a.mode].toLowerCase()}. ${MODE_MEANING[a.mode]}`, ...a.restrictions.map((r) => `Since ${datedClock(r.since, now, RECORD_ZONE)}: ${RESTRICTIONS[r.code].label}.`)]),
     agents.map((a) => ({ href: agentHref(a.agent_id, "overview"), label: a.label })),
   );
 }
@@ -290,7 +290,7 @@ export function interpret(said: string, ctx: AskContext): Reply {
   if (/\b(limit|headroom|how close|loss today|budget|room)/.test(text)) return limits(agents);
   if (/\b(hold|position|own)/.test(text)) return holdings(agents, ctx.now);
   if (/\b(happen|today|recent|activity|activities|latest|update|doing)/.test(text)) return happened(ctx, agents);
-  if (/\b(status|mode|running|state)\b|\bis it (paused|running|stopped|on)\b/.test(text)) return status(agents);
+  if (/\b(status|mode|running|state)\b|\bis it (paused|running|stopped|on)\b/.test(text)) return status(agents, ctx.now);
   if (/\b(help|what can you|how do i|what do you)\b/.test(text)) {
     return answer(
       [
