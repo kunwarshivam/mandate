@@ -3,8 +3,12 @@
 //! randomness drew, and journals what each transition returns.
 
 use core::fmt;
+use std::collections::BTreeSet;
 
-use mandate_identity::{Membership, Session, SessionRef};
+use ring::digest::{SHA256, digest};
+
+use mandate_identity::{Membership, Session, SessionKind, SessionRef};
+use mandate_identity_seal::Seal;
 
 use crate::UtcNanos;
 
@@ -13,6 +17,11 @@ pub const ACCESS_TOKEN_LIFETIME_S: i64 = 300;
 
 /// How long a reduction-only session (§6.4 route 2) lasts, in seconds, from its opening.
 pub const REDUCTION_ONLY_LIFETIME_S: i64 = 900;
+
+const INDIVIDUAL_IDLE_S: i64 = 86_400;
+const INDIVIDUAL_ABSOLUTE_S: i64 = 604_800;
+const BUSINESS_IDLE_S: i64 = 3_600;
+const BUSINESS_ABSOLUTE_S: i64 = 43_200;
 
 /// The kind of organization a workspace belongs to, which sets its session defaults (§6.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,29 +42,46 @@ pub struct SessionPolicy {
 /// The idle and absolute limits a session runs under, never longer than its org kind's defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionLimits {
-    stub: (),
+    idle_s: i64,
+    absolute_s: i64,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
+/// One limit: the org's setting when it is positive and no longer than the default.
+fn shortened(default_s: i64, setting: Option<i64>) -> Result<i64, SessionRefusal> {
+    match setting {
+        None => Ok(default_s),
+        Some(s) if s > 0 && s <= default_s => Ok(s),
+        Some(_) => Err(SessionRefusal::LimitNotShortened),
+    }
+}
+
 impl SessionLimits {
     /// The limits for `kind` under `policy`. A setting longer than the default, or not positive,
     /// is refused: an organization may only shorten (§6.2). So is an idle timeout longer than the
     /// absolute lifetime it would run inside (DEC-652 item 2).
-    pub fn resolve(_kind: OrgKind, _policy: SessionPolicy) -> Result<Self, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+    pub fn resolve(kind: OrgKind, policy: SessionPolicy) -> Result<Self, SessionRefusal> {
+        let (idle_s, absolute_s) = match kind {
+            OrgKind::Individual => (INDIVIDUAL_IDLE_S, INDIVIDUAL_ABSOLUTE_S),
+            OrgKind::Business => (BUSINESS_IDLE_S, BUSINESS_ABSOLUTE_S),
+        };
+        let limits = Self {
+            idle_s: shortened(idle_s, policy.idle_s)?,
+            absolute_s: shortened(absolute_s, policy.absolute_s)?,
+        };
+        if limits.idle_s > limits.absolute_s {
+            return Err(SessionRefusal::IdleLongerThanAbsolute);
+        }
+        Ok(limits)
     }
 
     /// The idle timeout, in seconds.
     pub fn idle_s(&self) -> i64 {
-        todo!()
+        self.idle_s
     }
 
     /// The absolute lifetime, in seconds.
     pub fn absolute_s(&self) -> i64 {
-        todo!()
+        self.absolute_s
     }
 }
 
@@ -163,17 +189,17 @@ pub struct SubjectStanding {
     pub last_deprovision: Option<UtcNanos>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "this method has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl SubjectStanding {
     /// The standing after the workspace saw a deprovision signal for this subject at `now`
     /// (`invalid_grant`, a disabled or revoked subject, a back-channel logout), whatever state
     /// any session of it is in, or with none open at all (§11.1, DEC-652 item 7). The latest
     /// signal is kept, so an older one arriving late moves nothing back.
-    pub fn saw_deprovision(self, _now: UtcNanos) -> Self {
-        todo!()
+    pub fn saw_deprovision(self, now: UtcNanos) -> Self {
+        let latest = self.last_deprovision.map_or(now, |seen| seen.max(now));
+        Self {
+            last_deprovision: Some(latest),
+            ..self
+        }
     }
 }
 
@@ -224,61 +250,163 @@ pub enum SessionRefusal {
     DeprovisionSeen,
 }
 
+type Digest = RefreshDigest;
+
+fn digest_of(secret: &RefreshSecret) -> Digest {
+    let mut out = [0; 32];
+    out.copy_from_slice(digest(&SHA256, &secret.0).as_ref());
+    out
+}
+
+/// `now` plus `secs` seconds, but never past `cap`: a deadline inside a session's absolute
+/// lifetime, so the end of the clock's range never overflows it (rule 13).
+fn capped(now: UtcNanos, secs: i64, cap: UtcNanos) -> UtcNanos {
+    plus(now, secs).map_or(cap, |t| t.min(cap))
+}
+
+/// `t` plus `secs` seconds, or a refusal when the clock cannot hold it.
+fn plus(t: UtcNanos, secs: i64) -> Result<UtcNanos, SessionRefusal> {
+    t.secs()
+        .checked_add(secs)
+        .and_then(|s| UtcNanos::from_parts(s, t.nanos()).ok())
+        .ok_or(SessionRefusal::Unrepresentable)
+}
+
+/// An access token's deadline from `now`; past the clock's range, the absolute lifetime `cap`,
+/// which ends the session first anyway.
+fn access_deadline(now: UtcNanos, cap: UtcNanos) -> UtcNanos {
+    plus(now, ACCESS_TOKEN_LIFETIME_S).unwrap_or(cap)
+}
+
 /// One session's server-side record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
-    stub: (),
+    reach: Reach,
+    ended: Option<EndReason>,
+    idle_s: i64,
+    /// The opening, then the last admitted request or granted refresh: the idle timer runs from
+    /// it, and a `now` before it is a clock gone backwards.
+    last_activity: UtcNanos,
+    absolute_until: UtcNanos,
+    idle_until: UtcNanos,
+    access_until: UtcNanos,
+    /// The current refresh token's digest; `None` for a reduction-only session.
+    current: Option<Digest>,
+    /// Every digest rotated away, so presenting one again is detected as reuse.
+    rotated: BTreeSet<Digest>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
-)]
 impl SessionRecord {
     /// Opens a full session at `now` after a sign-in, holding `refresh`'s digest as the current
     /// refresh token, with an access token lasting [`ACCESS_TOKEN_LIFETIME_S`].
     pub fn open(
-        _limits: SessionLimits,
-        _refresh: &RefreshSecret,
-        _now: UtcNanos,
+        limits: SessionLimits,
+        refresh: &RefreshSecret,
+        now: UtcNanos,
     ) -> Result<Self, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        let absolute_until = plus(now, limits.absolute_s)?;
+        Ok(Self {
+            reach: Reach::Full,
+            ended: None,
+            idle_s: limits.idle_s,
+            last_activity: now,
+            absolute_until,
+            idle_until: capped(now, limits.idle_s, absolute_until),
+            access_until: access_deadline(now, absolute_until),
+            current: Some(digest_of(refresh)),
+            rotated: BTreeSet::new(),
+        })
     }
 
     /// Opens a reduction-only session (§6.4 route 2) after the caller verified a fresh passkey
     /// assertion locally, unless a deprovision signal for the subject came at or after its last
     /// successful sign-in.
     pub fn open_reduction_only(
-        _standing: SubjectStanding,
-        _now: UtcNanos,
+        standing: SubjectStanding,
+        now: UtcNanos,
     ) -> Result<Self, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        if let Some(refusal) = standing.last_deprovision
+            && standing
+                .last_sign_in
+                .is_none_or(|sign_in| refusal >= sign_in)
+        {
+            return Err(SessionRefusal::DeprovisionSeen);
+        }
+        let until = plus(now, REDUCTION_ONLY_LIFETIME_S)?;
+        Ok(Self {
+            reach: Reach::ReductionOnly,
+            ended: None,
+            idle_s: REDUCTION_ONLY_LIFETIME_S,
+            last_activity: now,
+            absolute_until: until,
+            idle_until: until,
+            access_until: until,
+            current: None,
+            rotated: BTreeSet::new(),
+        })
     }
 
     /// How far the session reaches now.
     pub fn reach(&self) -> Reach {
-        todo!()
+        self.reach
     }
 
     /// The SHA-256 digest of the current refresh token, the only form the record keeps of it;
     /// `None` for a reduction-only session, which has none.
     pub fn refresh_digest(&self) -> Option<RefreshDigest> {
-        todo!()
+        self.current
     }
 
     /// The digests of every refresh token rotated away, in byte order, kept to detect reuse.
     pub fn rotated_digests(&self) -> Vec<RefreshDigest> {
-        todo!()
+        self.rotated.iter().copied().collect()
     }
 
     /// Why the session ended, if it has.
     pub fn ended(&self) -> Option<EndReason> {
-        todo!()
+        self.ended
     }
 
-    /// Whether a step-up may be presented through this session: only a full one (§7.3).
+    /// Whether a step-up may be presented through this session: only a full one (§7.3), and an
+    /// ended session presents none.
     pub fn can_present_step_up(&self) -> bool {
-        todo!()
+        self.reach == Reach::Full && self.ended.is_none()
+    }
+
+    /// Ends the session for `reason` and returns the refusal that call and every later one gets.
+    fn revoke(&mut self, reason: EndReason) -> SessionRefusal {
+        self.ended = Some(reason);
+        SessionRefusal::Ended { reason }
+    }
+
+    /// Ends the session as [`EndReason::Expired`] (DEC-816 item 8).
+    fn expire(&mut self) -> SessionRefusal {
+        self.revoke(EndReason::Expired)
+    }
+
+    /// The refusal an ended session gives every call.
+    fn still_open(&self) -> Result<(), SessionRefusal> {
+        match self.ended {
+            Some(reason) => Err(SessionRefusal::Ended { reason }),
+            None => Ok(()),
+        }
+    }
+
+    /// Ends the session at `at` if any session's absolute lifetime, or a full session's idle
+    /// timeout, has passed.
+    fn lapse(&mut self, at: UtcNanos) -> Result<(), SessionRefusal> {
+        let idle_lapsed = self.reach == Reach::Full && at >= self.idle_until;
+        if at >= self.absolute_until || idle_lapsed {
+            return Err(self.expire());
+        }
+        Ok(())
+    }
+
+    /// Counts an admitted request or a granted refresh at `now` as activity, restarting the idle
+    /// timer, which never runs past the absolute lifetime.
+    fn active_at(&mut self, now: UtcNanos) {
+        self.last_activity = now;
+        self.idle_until = capped(now, self.idle_s, self.absolute_until);
     }
 
     /// Admits `request` at `now`, and on success counts it as activity for the idle timeout. A
@@ -288,8 +416,25 @@ impl SessionRecord {
     /// activity instead of `now`, never [`SessionRefusal::ClockBehind`], and moves no timer; every
     /// other rule still applies at that instant. A live session refuses any other request at such
     /// a `now` with [`SessionRefusal::ClockBehind`], whatever its reach (DEC-652 item 5).
-    pub fn authorize(&mut self, _request: Request, _now: UtcNanos) -> Result<(), SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+    pub fn authorize(&mut self, request: Request, now: UtcNanos) -> Result<(), SessionRefusal> {
+        self.still_open()?;
+        let judged_at = if now >= self.last_activity {
+            now
+        } else if request == Request::Other {
+            return Err(SessionRefusal::ClockBehind);
+        } else {
+            self.last_activity
+        };
+        self.lapse(judged_at)?;
+        if self.reach == Reach::Full {
+            if judged_at >= self.access_until {
+                return Err(SessionRefusal::AccessExpired);
+            }
+        } else if request == Request::Other {
+            return Err(SessionRefusal::RiskReductionOnly);
+        }
+        self.active_at(judged_at);
+        Ok(())
     }
 
     /// Refreshes with the `presented` refresh token, given the provider's `answer`, rotating to
@@ -302,35 +447,82 @@ impl SessionRecord {
     /// refused [`SessionRefusal::ClockBehind`] and changes nothing.
     pub fn refresh(
         &mut self,
-        _presented: &RefreshSecret,
-        _answer: ProviderAnswer,
-        _next: &RefreshSecret,
-        _now: UtcNanos,
+        presented: &RefreshSecret,
+        answer: ProviderAnswer,
+        next: &RefreshSecret,
+        now: UtcNanos,
     ) -> Result<Refreshed, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        self.still_open()?;
+        if now < self.last_activity {
+            return Err(SessionRefusal::ClockBehind);
+        }
+        self.lapse(now)?;
+        let Some(current) = self.current else {
+            return Err(SessionRefusal::NotRefreshable);
+        };
+        let presented = digest_of(presented);
+        if presented != current {
+            if self.rotated.contains(&presented) {
+                return Err(self.revoke(EndReason::RefreshReuse));
+            }
+            return Err(SessionRefusal::UnknownRefreshToken);
+        }
+        let next = digest_of(next);
+        if next == current || self.rotated.contains(&next) {
+            return Err(SessionRefusal::RefreshSecretReused);
+        }
+        match answer {
+            ProviderAnswer::Granted if now >= self.idle_until => Err(self.expire()),
+            ProviderAnswer::Granted => {
+                let access_until = access_deadline(now, self.absolute_until);
+                self.access_until = access_until;
+                self.rotated.insert(current);
+                self.current = Some(next);
+                self.reach = Reach::Full;
+                self.active_at(now);
+                Ok(Refreshed::Rotated {
+                    access_expires_at: access_until,
+                })
+            }
+            ProviderAnswer::Unreachable | ProviderAnswer::Status(500..=599) => {
+                self.reach = Reach::Outage;
+                Ok(Refreshed::Outage)
+            }
+            ProviderAnswer::Status(_) => Err(self.revoke(EndReason::RefreshFailed)),
+            ProviderAnswer::Deprovision => Err(self.revoke(EndReason::Deprovisioned)),
+        }
     }
 
     /// Admits `request` at `now` as [`SessionRecord::authorize`] does, and on success builds the
     /// identity session `authorize` in `mandate-identity` reads: the `reference` the caller's store
     /// keeps for this record, its kind
-    /// ([`Reach::Full`] is `SessionKind::Full`; an outage and a reduction-only session are
-    /// `SessionKind::ReductionOnly`), and the roles snapshot the caller read for this request,
+    /// ([`Reach::Full`] is [`SessionKind::Full`]; an outage and a reduction-only session are
+    /// [`SessionKind::ReductionOnly`]), and the roles snapshot the caller read for this request,
     /// passed through as read: the caller (H1) builds it, for route 2 from every workspace where
     /// the verified credential has an unsuspended row. A refusal builds nothing, so the request
     /// gets no session (DEC-652 item 9).
     pub fn admit(
         &mut self,
-        _request: Request,
-        _now: UtcNanos,
-        _reference: SessionRef,
-        _snapshot: Vec<Membership>,
+        request: Request,
+        now: UtcNanos,
+        reference: SessionRef,
+        snapshot: Vec<Membership>,
     ) -> Result<Session, SessionRefusal> {
-        Err(SessionRefusal::Unimplemented { story: "E9-1" })
+        self.authorize(request, now)?;
+        let kind = match self.reach {
+            Reach::Full => SessionKind::Full,
+            Reach::Outage | Reach::ReductionOnly => SessionKind::ReductionOnly,
+        };
+        Ok(Session::new(Seal::grant(), reference, kind, snapshot))
     }
 
     /// Ends the session for `reason`: sign-out, deactivation, a back-channel logout, or an admin.
     /// Returns the reason to journal, or `None` when it had already ended, so it is journaled once.
-    pub fn end(&mut self, _reason: EndReason) -> Option<EndReason> {
-        todo!()
+    pub fn end(&mut self, reason: EndReason) -> Option<EndReason> {
+        if self.ended.is_some() {
+            return None;
+        }
+        self.ended = Some(reason);
+        Some(reason)
     }
 }

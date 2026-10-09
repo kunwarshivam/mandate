@@ -26,6 +26,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "time"] }
 
 [dev-dependencies]
+mandate-executor.workspace = true
 mandate-marketdata.workspace = true
 proptest.workspace = true
 sqlx.workspace = true

@@ -14,6 +14,8 @@
   any credential, SPY and AAPL from journaled inputs alone, a held position, stale bars, the
   closing window, and a stop's message), over `crates/mandate-shell/tests/common/mod.rs`'s
   deployment and recorded broker answers; `crates/mandate-paper/tests/args.rs` (the arguments);
-  and `crates/mandate-paper/tests/binary.rs` (the binary's refusals on stderr, none naming a DSN or
-  a key, and the control stream read from Postgres when `MANDATE_PG_URL` is set).
+  `crates/mandate-paper/tests/binary.rs` (the binary's refusals on stderr, none naming a DSN or
+  a key, a variable that is not Unicode, and the control stream read from Postgres when
+  `MANDATE_PG_URL` is set); and `crates/mandate-paper/tests/lines.rs` (the lines a run that
+  refused nothing prints).
 - **Run:** `cargo nextest run -p mandate-paper`.

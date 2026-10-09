@@ -48,7 +48,6 @@ fn expected(kind: SessionKind) -> Session {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_full_record_admits_a_full_session_with_its_snapshot_as_read() {
     let mut record = open();
     let session = record.admit(Request::Other, at(10), REFERENCE, snapshot());
@@ -69,7 +68,6 @@ fn a_full_record_admits_a_full_session_with_its_snapshot_as_read() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_outage_or_a_local_passkey_admits_a_reduction_only_session() {
     let mut outage = open();
     let answer = ProviderAnswer::Unreachable;
@@ -103,7 +101,6 @@ fn an_outage_or_a_local_passkey_admits_a_reduction_only_session() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_refused_record_builds_no_session() {
     let mut ended = open();
     assert_eq!(
@@ -135,7 +132,6 @@ fn a_refused_record_builds_no_session() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_clock_behind_refuses_only_other_and_builds_no_session_for_it() {
     let mut record = open();
     let first = record.admit(Request::Other, at(200), REFERENCE, snapshot());
@@ -207,7 +203,6 @@ fn wide_snapshot() -> Vec<Membership> {
 const DAY_S: i64 = 86_400;
 
 #[test]
-#[ignore = "pending E9-1"]
 fn every_reach_passes_a_wide_snapshot_through_whole_and_in_order() {
     let mut full = open();
     let mut outage = open();

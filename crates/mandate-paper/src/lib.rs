@@ -19,6 +19,7 @@
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed`], the one door (FT-1,
 //! FT-6). No product value is a constant here (FT-2).
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use std::rc::Rc;
@@ -413,27 +414,41 @@ impl Pause for SystemClock {
 /// each submitted order, or the model's `Flat` or `Undecided`. The binary prints an error's message
 /// alone on stderr and exits non-zero; no line or message names a DSN or a key (rule 7).
 ///
+/// The environment is the process's own, as `std::env::vars_os` gives it, so a variable that is
+/// not Unicode never panics the binary: each name and value is read lossily, so one the run does
+/// not read changes nothing, and an Alpaca variable holding a URL is still refused by the host
+/// check, naming the variable only.
+///
 /// # Errors
 /// Every [`PaperError`] of [`parse`] and [`run`].
 pub fn process<A, V>(args: A, vars: V) -> Result<Vec<String>, PaperError>
 where
     A: IntoIterator<Item = String>,
-    V: IntoIterator<Item = (String, String)>,
+    V: IntoIterator<Item = (OsString, OsString)>,
 {
     let args = parse(args)?;
-    let vars: Vec<(String, String)> = vars.into_iter().collect();
+    let vars: Vec<(String, String)> = vars
+        .into_iter()
+        .map(|(name, value)| {
+            let name = name.to_string_lossy().into_owned();
+            (name, value.to_string_lossy().into_owned())
+        })
+        .collect();
     let mut ports = Production {
         journal: args.journal.clone(),
     };
-    Ok(lines(&run(&args, &vars, &mut ports)?))
+    lines(&run(&args, &vars, &mut ports)?)
 }
 
-/// What a run that refused nothing prints, one line each: the order a dry run would place, each
-/// submitted order, or the model's `Flat` or `Undecided`. Ids and the signal only, never a value
-/// (rule 7).
-#[must_use]
-pub fn lines(outcome: &Outcome) -> Vec<String> {
-    match outcome {
+/// What a run that refused nothing prints, one line each: the order a dry run would place
+/// (`would place <client_order_id> (nothing sent; pass --place-one-order)`), each submitted order
+/// (`submitted <client_order_id>`), or the model's `Flat` or `Undecided` (`the model output
+/// <signal>; nothing sent`). Ids and the signal only, never a value (rule 7).
+///
+/// # Errors
+/// None: every outcome has its lines.
+pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
+    Ok(match outcome {
         Outcome::NoOutput(signal) => vec![format!("the model output {signal:?}; nothing sent")],
         Outcome::Cycle(report) => {
             let would_place = report.would_place.iter().map(|order| {
@@ -445,5 +460,5 @@ pub fn lines(outcome: &Outcome) -> Vec<String> {
             let submitted = report.submitted.iter().map(|id| format!("submitted {id}"));
             would_place.chain(submitted).collect()
         }
-    }
+    })
 }

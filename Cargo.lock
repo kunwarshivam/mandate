@@ -1803,6 +1803,7 @@ dependencies = [
  "mandate-alpaca",
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-executor",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-marketdata",
@@ -1830,6 +1831,16 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-push-relay"
+version = "0.0.0"
+dependencies = [
+ "mandate-notify",
+ "mandate-webpush",
+ "proptest",
  "thiserror",
 ]
 
