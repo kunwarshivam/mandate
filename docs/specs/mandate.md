@@ -96,6 +96,12 @@ builder, versioning, change classification, and the records kept.
   `open_sell_qty`, which the seven trim cases state as `'0'` with no expectation changed. MC-B36
   (a 1-share remainder beside 2 resting, at a 3-share minimum the whole excess would meet, is
   withheld) and MC-B37 (the same remainder at a 1-share minimum is the trim) are added (§11).
+- **v0.6, amended ([DEC-672](../project/decisions/DEC-672.md); carries the accepted
+  [DEC-191](../project/04-decision-log.md#decisions), DEC-176):** §6.1's owner controls gain two
+  rows. Holding new openings needs no step-up and always applies; the owner or a client with the
+  `hold` scope may issue it. Lifting a hold needs step-up, is the owner's alone, and lifts only the
+  hold, never a pause or a latched limit (MI-3). Journal spec §9.11 records both. No rule loosens;
+  no case or fixture changes.
 - **v0.6, amended ([DEC-436](../project/decisions/DEC-436.md) items 9 and 19, the workspace API
   spec; tightening only, DEC-176):** §6.4's check 7 counts an owner-connected client as the user it
   acts for (`on_behalf_of`): a version proposed through a client has that user as its author, and a
@@ -822,6 +828,8 @@ stream with `causation_id` and judges it there; nothing the owner's client check
 |---|---|---|---|
 | Pause | None | — | Always applies |
 | Resume | Required | When the runtime processes it | Refused. A resume lifts only the owner's own pause, never a latched limit or a hold (MI-3) |
+| Hold new openings ([DEC-191](../project/04-decision-log.md#decisions)) | None | — | Always applies: the agent goes to `exits_only` and every exit keeps running. The owner or a client with the `hold` scope may issue it (journal spec §9.11) |
+| Lift a hold | Required | When the runtime processes it | Refused. Only the owner lifts, never a client. A lift lifts only the hold, never a pause or a latched limit (MI-3) |
 | Stop (DEC-136) | Required | When the runtime processes it | Refused |
 | Acknowledge (§5.8, §6.7, trading spec §11) | Required | When the runtime processes it | Refused |
 | Owner exit | Required | When the owner committed it | Refused **as an owner exit**: it loses only the owner-exit privilege (selling equities outside the regular session at the confirmed bid, DEC-58, DEC-66). The exit is still routed, and never dropped: in the regular session, or at once for crypto; an equity sale outside the session waits for it unless the owner commits it again with a freshly confirmed bid and fresh step-up |

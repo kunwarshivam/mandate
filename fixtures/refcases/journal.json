@@ -31968,5 +31968,2576 @@
     }
    }
   ]
+ },
+ "hold": {
+  "spec": "docs/specs/journal.md v0.23 §9.11 (DEC-672)",
+  "drafts": {
+   "hold": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z6H0A000000000000000H1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "OwnerCommandIssued",
+    "schema_version": 1,
+    "event_time": "2026-10-08T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_owner_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "agent": "agent_a",
+     "command": "hold_openings",
+     "scope": "agent",
+     "subject": "agent_a",
+     "release": null,
+     "warning_shown": null,
+     "bid": null,
+     "bid_size": null,
+     "floor": null,
+     "user": "user_owner_01",
+     "submitted_at": 1791475200,
+     "step_up": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "lift": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z6H1A000000000000000H2",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "OwnerCommandIssued",
+    "schema_version": 1,
+    "event_time": "2026-10-08T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_owner_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "agent": "agent_a",
+     "command": "lift_hold",
+     "scope": "agent",
+     "subject": "agent_a",
+     "release": null,
+     "warning_shown": null,
+     "bid": null,
+     "bid_size": null,
+     "floor": null,
+     "user": "user_owner_01",
+     "submitted_at": 1791475260,
+     "step_up": {
+      "assertion_id": "assert_owner_09",
+      "authenticated_at": 1791475190,
+      "method": "cli_confirm"
+     }
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "held": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z6H2A000000000000000H3",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "AgentModeChanged",
+    "schema_version": 2,
+    "event_time": "2026-10-08T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z6H0A000000000000000H1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {},
+    "payload": {
+     "from": "normal",
+     "to": "exits_only",
+     "reason": "owner_hold",
+     "lifecycle": "normal",
+     "held": true
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "lifted": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z6H3A000000000000000H4",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "AgentModeChanged",
+    "schema_version": 2,
+    "event_time": "2026-10-08T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z6H1A000000000000000H2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {},
+    "payload": {
+     "from": "exits_only",
+     "to": "normal",
+     "reason": "owner_lift_hold",
+     "lifecycle": "normal",
+     "held": false
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "lift_refused": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z6H4A000000000000000H5",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "OwnerCommandRefused",
+    "schema_version": 2,
+    "event_time": "2026-10-08T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z6H1B000000000000000H6",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {},
+    "payload": {
+     "command": "lift_hold",
+     "reason": "step_up_stale",
+     "effective_at": "2026-10-08T16:06:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "hold.agent.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.agent",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent"
+    }
+   },
+   {
+    "name": "hold.agent.form",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.agent",
+      "value": "agent a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.agent"
+    }
+   },
+   {
+    "name": "hold.command.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "hold.scope.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.scope",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.scope"
+    }
+   },
+   {
+    "name": "hold.scope.form",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.scope",
+      "value": "connection"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.scope"
+    }
+   },
+   {
+    "name": "hold.subject.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "hold.subject.form",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "agent a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "hold.release.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.release",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.release"
+    }
+   },
+   {
+    "name": "hold.bid.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "101.5"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "hold.submitted_at.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.submitted_at",
+      "value": "2026-10-08T16:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.submitted_at"
+    }
+   },
+   {
+    "name": "hold.step_up.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": "cli_confirm"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "hold.user.kind",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.user",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "hold.user.form",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.user",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "hold.agent.null",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.agent",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent"
+    }
+   },
+   {
+    "name": "hold.command.null",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "hold.scope.null",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.scope",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.scope"
+    }
+   },
+   {
+    "name": "hold.subject.null",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "hold.submitted_at.null",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.submitted_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.submitted_at"
+    }
+   },
+   {
+    "name": "hold.user.null",
+    "clause": "§9.11 types",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.user",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "hold.missing",
+    "clause": "§9.11 closed",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.agent",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent"
+    }
+   },
+   {
+    "name": "hold.extra",
+    "clause": "§9.11 closed",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "held.from.kind",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "held.from.form",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "halted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "held.to.kind",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "held.to.form",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "held"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "held.reason.kind",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "held.reason.form",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "owner_halt"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "held.lifecycle.kind",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.lifecycle",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.lifecycle"
+    }
+   },
+   {
+    "name": "held.lifecycle.form",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.lifecycle",
+      "value": "exits_only"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.lifecycle"
+    }
+   },
+   {
+    "name": "held.held.kind",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.held",
+      "value": "true"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.held"
+    }
+   },
+   {
+    "name": "held.from.null",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "held.to.null",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "held.reason.null",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "held.lifecycle.null",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.lifecycle",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.lifecycle"
+    }
+   },
+   {
+    "name": "held.held.null",
+    "clause": "§9.11 types",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.held",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.held"
+    }
+   },
+   {
+    "name": "held.missing",
+    "clause": "§9.11 closed",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "held.extra",
+    "clause": "§9.11 closed",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "lift_refused.command.kind",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "lift_refused.command.form",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "pause"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "lift_refused.reason.kind",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "lift_refused.reason.form",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "late"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "lift_refused.effective_at.kind",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.effective_at",
+      "value": 1791475560
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.effective_at"
+    }
+   },
+   {
+    "name": "lift_refused.effective_at.form",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.effective_at",
+      "value": "2026-10-08T16:06:00Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.effective_at"
+    }
+   },
+   {
+    "name": "lift_refused.command.null",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "lift_refused.reason.null",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "lift_refused.effective_at.null",
+    "clause": "§9.11 types",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.effective_at",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.effective_at"
+    }
+   },
+   {
+    "name": "lift_refused.missing",
+    "clause": "§9.11 closed",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.command",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "lift_refused.extra",
+    "clause": "§9.11 closed",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "lift_step_up_as_a_timestamp",
+    "clause": "§9.11: times are integer risk-clock seconds, as §9.7's",
+    "base_draft": "lift",
+    "changes": [
+     {
+      "path": "payload.step_up.authenticated_at",
+      "value": "2026-10-08T15:59:50.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.authenticated_at"
+    }
+   },
+   {
+    "name": "mode_changed_unknown_version",
+    "clause": "§9.11: version 2 is registered here; version 1 is §9.1's",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 3
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "refused_v1_lift",
+    "clause": "§9.11: version 1's command list stays closed",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "refused_lift_on_the_account_stream",
+    "clause": "rule 26: the runtime judges a lift, so version 2 is the agent stream's",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "lift_refused_not_independent",
+    "clause": "rule 28: a lift is refused only for its step-up",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "not_independent"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "stream_mismatch",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "client_lifts_a_hold",
+    "clause": "rule 90: lifting is the owner's alone (DEC-191)",
+    "base_draft": "lift",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "client_pauses",
+    "clause": "rule 90: a client issues no command but a hold (DEC-191)",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "payload.command",
+      "value": "pause"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "client_kill_switch",
+    "clause": "rule 90: the kill switch stays the human's (DEC-141 item 3)",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "payload.command",
+      "value": "kill_switch"
+     },
+     {
+      "path": "payload.scope",
+      "value": "connection"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01"
+     },
+     {
+      "path": "payload.agent",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "open_command_without_a_command",
+    "clause": "§9.11: every command names itself",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.command"
+    }
+   },
+   {
+    "name": "lift_by_the_system",
+    "clause": "rule 90: only a user lifts a hold",
+    "base_draft": "lift",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "lift_by_an_agent",
+    "clause": "rule 90: only a user lifts a hold",
+    "base_draft": "lift",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "lift_by_a_broker",
+    "clause": "rule 90: only a user lifts a hold",
+    "base_draft": "lift",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "hold_by_an_agent",
+    "clause": "rule 90: a hold is a user's or a client's",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "hold_by_a_broker",
+    "clause": "rule 90: a hold is a user's or a client's",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "broker_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "client_hold_with_a_build",
+    "clause": "rule 82: a client is external, so it has no build digest",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+       "on_behalf_of": "user_owner_01"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.build"
+    }
+   },
+   {
+    "name": "version_1_mode_change_with_a_hold",
+    "clause": "§9.11: version 1's reasons stay closed; a hold is version 2's",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     },
+     {
+      "path": "payload.held",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "hold_by_the_system",
+    "clause": "rule 90: a hold is a person's command",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "client_holds_on_an_agent_stream",
+    "clause": "rule 83: a client writes only to the control stream",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "hold_names_another_user",
+    "clause": "rule 91: the command names its human",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.user",
+      "value": "user_owner_02"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "client_hold_names_its_own_id",
+    "clause": "rule 91: a client's command names the user it acts for",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "payload.user",
+      "value": "client_01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user"
+    }
+   },
+   {
+    "name": "hold_for_another_agent",
+    "clause": "rule 91: an agent-scope command's subject is its agent",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "agent_b"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "hold_with_step_up",
+    "clause": "rule 92: a hold needs no step-up and carries none",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": {
+       "assertion_id": "assert_owner_09",
+       "authenticated_at": 1791475190,
+       "method": "cli_confirm"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "hold_copied_as_not_held",
+    "clause": "rule 93",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.held",
+      "value": false
+     },
+     {
+      "path": "payload.to",
+      "value": "normal"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.held"
+    }
+   },
+   {
+    "name": "lift_copied_as_held",
+    "clause": "rule 93",
+    "base_draft": "lifted",
+    "changes": [
+     {
+      "path": "payload.held",
+      "value": true
+     },
+     {
+      "path": "payload.to",
+      "value": "exits_only"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.held"
+    }
+   },
+   {
+    "name": "resume_clears_the_hold",
+    "clause": "rule 94: a resume lifts only the pause, never the hold (MI-3)",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "payload.to",
+      "value": "normal"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_resume"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "lift_clears_the_pause",
+    "clause": "rule 94: a lift lifts only the hold",
+    "base_draft": "lifted",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "hold_copied_without_its_command",
+    "clause": "rule 95",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "lift_copied_without_its_command",
+    "clause": "rule 95: a lift's copy names its command",
+    "base_draft": "lifted",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "copy_with_a_null_hold",
+    "clause": "§9.11 types: `held` is a boolean on every version-2 copy",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "restriction_changed"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     },
+     {
+      "path": "payload.held",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.held"
+    }
+   },
+   {
+    "name": "resume_copied_without_its_command",
+    "clause": "rule 95: every owner copy at version 2",
+    "base_draft": "lifted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "owner_resume"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "version_1_mode_change_unchanged",
+    "clause": "§9.11: version 1 stays registered",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     },
+     {
+      "path": "payload.held",
+      "delete": true
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_pause"
+     },
+     {
+      "path": "payload.to",
+      "value": "paused"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "kill_switch_stays_open",
+    "clause": "§9.11: other commands are not closed here, and a kill switch is always recorded",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.command",
+      "value": "kill_switch"
+     },
+     {
+      "path": "payload.scope",
+      "value": "connection"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01"
+     },
+     {
+      "path": "payload.agent",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "host_cli_kill_switch",
+    "clause": "§9.11, rule 90: the host CLI's `system` kill switch is never refused (rule 13)",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.command",
+      "value": "kill_switch"
+     },
+     {
+      "path": "payload.scope",
+      "value": "connection"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01"
+     },
+     {
+      "path": "payload.agent",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "pause_with_any_members",
+    "clause": "§9.11: an open command's other members are not judged here",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "payload.command",
+      "value": "pause"
+     },
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "client_holds",
+    "clause": "rules 83, 90 and 91: a client may hold (DEC-191)",
+    "base_draft": "hold",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "lift_without_step_up",
+    "clause": "§9.11: the runtime refuses it as step_up_missing; the journal accepts it",
+    "base_draft": "lift",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "lift_while_a_limit_is_latched",
+    "clause": "rule 94: a lift never clears a latched limit, so the mode may stay exits_only",
+    "base_draft": "lifted",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "exits_only"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "resume_while_held",
+    "clause": "rule 94: the resume leaves the hold",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "payload.reason",
+      "value": "owner_resume"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "hold_while_paused",
+    "clause": "rule 94: the mode stays paused and the hold is recorded",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "payload.to",
+      "value": "paused"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "hold_after_stop",
+    "clause": "rule 94: a stopped agent records the hold and stays stopped",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "stopped"
+     },
+     {
+      "path": "payload.to",
+      "value": "stopped"
+     },
+     {
+      "path": "payload.lifecycle",
+      "value": "stopped"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "restriction_lifts_under_a_hold",
+    "clause": "rules 94 and 95: not an owner copy, and the hold keeps exits_only",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "restriction_changed"
+     },
+     {
+      "path": "payload.from",
+      "value": "paused"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "lift_refused_for_no_step_up",
+    "clause": "rule 26: a lift's refusal is the agent stream's",
+    "base_draft": "lift_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "step_up_missing"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "range_verification": [
+   {
+    "name": "the_hold_carried_through_a_pause_a_resume_and_other_events",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "KillSwitchActivated",
+      "schema_version": 1,
+      "payload": {}
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused",
+       "held": true
+      }
+     },
+     {
+      "event_type": "IntentProposed",
+      "schema_version": 1,
+      "payload": {}
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "paused",
+       "to": "exits_only",
+       "reason": "owner_resume",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "normal",
+       "reason": "owner_lift_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_restriction_drops_the_hold",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "IntentProposed",
+      "schema_version": 1,
+      "payload": {}
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
+     2
+    ]
+   },
+   {
+    "name": "a_kill_switch_drops_the_hold",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "stopped",
+       "reason": "kill_switch",
+       "lifecycle": "stopped",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_reconciliation_sets_a_hold_nobody_asked_for",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "awaiting_reconciliation",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "a_version_1_record_after_a_version_2_one",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "version_1_records_before_the_first_hold",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_full_chain_opens_with_a_copy_that_holds_nothing",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_version_1_record_after_a_first_copy",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_lift_then_a_copy_that_holds_nothing",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "normal",
+       "reason": "owner_lift_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_lift_then_a_copy_that_keeps_the_hold",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "normal",
+       "reason": "owner_lift_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     2
+    ]
+   },
+   {
+    "name": "the_carried_hold_is_the_expected_one_not_the_written_one",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "two_violations_and_only_the_first_reported",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
+     1,
+     2
+    ]
+   },
+   {
+    "name": "a_hold_whose_held_contradicts_its_reason",
+    "from_seq": 1,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": false
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "a_later_range_launders_a_dropped_hold",
+    "from_seq": 40,
+    "anchor": {
+     "v2_before": true,
+     "held": true
+    },
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "a_later_range_starts_with_version_1_after_a_version_2",
+    "from_seq": 40,
+    "anchor": {
+     "v2_before": true,
+     "held": false
+    },
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "a_later_range_whose_predecessor_was_not_held",
+    "from_seq": 40,
+    "anchor": {
+     "v2_before": true,
+     "held": false
+    },
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "normal",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_later_range_carries_the_hold_of_a_copy",
+    "from_seq": 40,
+    "anchor": {
+     "v2_before": true,
+     "held": true
+    },
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "paused",
+       "to": "exits_only",
+       "reason": "owner_resume",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_later_range_with_no_version_2_before",
+    "from_seq": 40,
+    "anchor": {
+     "v2_before": false
+    },
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "an_unanchored_range_opens_with_a_hold",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "an_unanchored_range_anchors_on_its_own_hold_then_drops_it",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "an_unanchored_range_opens_with_version_1",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "an_unanchored_range_opens_with_a_held_copy_and_fails_closed",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": true
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "an_unanchored_range_opens_with_a_clear_copy_and_fails_closed",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "exits_only",
+       "to": "exits_only",
+       "reason": "restriction_changed",
+       "lifecycle": "normal",
+       "held": false
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "an_unanchored_range_with_version_1_after_its_hold",
+    "from_seq": 40,
+    "anchor": null,
+    "events": [
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 2,
+      "payload": {
+       "from": "normal",
+       "to": "exits_only",
+       "reason": "owner_hold",
+       "lifecycle": "normal",
+       "held": true
+      }
+     },
+     {
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "payload": {
+       "from": "normal",
+       "to": "paused",
+       "reason": "owner_pause",
+       "lifecycle": "paused"
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   }
+  ]
  }
 }
