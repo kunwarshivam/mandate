@@ -13732,7 +13732,6 @@ jq -r "$filter" "$src"
     /// dropping `{`, `` ` `` or `$` from it is caught; a literal path to cargo is read (DEC-873
     /// item 1).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_computed_path_to_cargo_cannot_be_read() -> Result<()> {
         let flows = [yaml_lines(&[
             "on: push",
