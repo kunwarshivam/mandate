@@ -164,16 +164,6 @@ pub(crate) struct Session<'s> {
 }
 
 impl<'s> Session<'s> {
-    /// [`open_governed`](Self::open_governed) for a run nothing governs.
-    #[cfg(test)]
-    pub(crate) fn open(
-        stages: &'s mut Stages,
-        setup: &'s Setup,
-        view: &'s MandateView,
-    ) -> Result<Self, ShellError> {
-        Self::open_governed(stages, setup, view, None)
-    }
-
     /// Takes both streams and replays them, the agent stream first (journal spec §8). A run that
     /// `governed` governs writes its `ModelOutputRecorded` and `DecisionMade` at schema version 2
     /// with their registered references.

@@ -1907,7 +1907,6 @@ fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
 /// asserts what is absent, never the refusal's cause, so D4c's fail-closed stop and D4d's
 /// `policy_overlay` deny both pass it, and D4d's own tests pin the cause.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_nonconforming_mandate_places_no_opening_order() {
     let no_auto = PolicyLevel {
         name: LevelName::Workspace,
