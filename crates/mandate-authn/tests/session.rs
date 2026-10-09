@@ -33,7 +33,6 @@ fn ended(reason: EndReason) -> SessionRefusal {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn limits_default_by_org_kind_and_an_org_may_only_shorten_them() {
     let defaults = |kind| SessionLimits::resolve(kind, SessionPolicy::default()).unwrap();
     let retail = defaults(OrgKind::Individual);
@@ -63,7 +62,6 @@ fn limits_default_by_org_kind_and_an_org_may_only_shorten_them() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_access_token_lasts_five_minutes_and_a_granted_refresh_rotates_it() {
     assert_eq!(ACCESS_TOKEN_LIFETIME_S, 300);
     let mut s = open();
@@ -89,7 +87,6 @@ fn an_access_token_lasts_five_minutes_and_a_granted_refresh_rotates_it() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_idle_timeout_counts_from_the_last_admitted_request_and_the_absolute_from_the_opening() {
     let mut s = open();
     let mut token = 1;
@@ -172,7 +169,6 @@ fn assert_refused_after(s: &mut SessionRecord, token: u8, now: UtcNanos, reason:
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_rotated_refresh_token_presented_again_revokes_the_whole_family() {
     let mut s = open();
     let first = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(300));
@@ -207,7 +203,6 @@ fn a_rotated_refresh_token_presented_again_revokes_the_whole_family() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_idle_timeout_longer_than_the_absolute_lifetime_is_refused() {
     let policy = |idle_s, absolute_s| SessionPolicy { idle_s, absolute_s };
     let short_life = SessionLimits::resolve(OrgKind::Business, policy(None, Some(600)));
@@ -223,7 +218,6 @@ fn an_idle_timeout_longer_than_the_absolute_lifetime_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_refresh_never_rotates_to_a_secret_used_before() {
     let mut s = open();
     let same = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(1), at(60));
@@ -250,7 +244,6 @@ fn a_refresh_never_rotates_to_a_secret_used_before() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_clock_behind_the_session_fails_closed() {
     let mut s = open();
     assert_eq!(
@@ -300,7 +293,6 @@ fn a_clock_behind_the_session_fails_closed() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_record_holds_sha256_digests_and_never_a_raw_secret() {
     let sha = |n: u8| {
         let mut out = [0u8; 32];
@@ -331,7 +323,6 @@ fn the_record_holds_sha256_digests_and_never_a_raw_secret() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_idle_timer_never_runs_past_the_absolute_lifetime_at_the_clock_s_end() {
     const MAX_SECS: i64 = 253_402_300_799;
     let limits = SessionLimits::resolve(
