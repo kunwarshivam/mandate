@@ -260,8 +260,8 @@ item above (C-3, C-9) are not repeated.
 - [x] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
       restriction, keeping its step-up. Safety lane. (C-24) Done in
       [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
-- [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
-      pale sliver alone, with no dashed rule. (C-11)
+- [x] **Sparklines without the false limit line.** When the limit is below the line's range, the
+      pale sliver alone, with no dashed rule. (C-11, #1093)
 - [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
       draw race after load, not the mode. (C-22)
 - [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
