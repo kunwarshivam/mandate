@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use crate::ConnectError;
-use crate::grant::GrantedScopes;
+use crate::grant::{GrantedScopes, REQUESTED_SCOPES_SORTED};
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
 
 /// Whether an Alpaca OAuth grant requested with `env=paper` counts as reaching paper only
@@ -130,8 +130,121 @@ pub struct CheckReport {
 ///    `Some(true)`);
 /// 7. contract (MCP only): the allowlisted tools are present and the hash equals the pinned one.
 pub fn run(input: &CheckInput) -> Result<CheckReport, ConnectError> {
-    let _ = input;
-    Err(ConnectError::Unimplemented { story: "E7-12" })
+    let (account, account_pii_ref) = account_check(input);
+    let mut results = vec![(Check::Account, account)];
+    if input.broker == Broker::Robinhood {
+        results.push((Check::Contract, contract_check(input)));
+    }
+    results.push((Check::Environment, environment_check(input)));
+    results.push((Check::Scope, scope_check(input)));
+    Ok(CheckReport {
+        connection_id: input.connection_id.clone(),
+        occasion: input.occasion,
+        results,
+        account_pii_ref,
+    })
+}
+
+/// Lowercase stems of a name that can move funds or assets out (CN-2). A name is refused when it
+/// contains any of them in any case, so `Withdraw`, `withdrawal`, and `create_ach_transfer` all
+/// are. The match is deliberately wide: a false refusal asks the owner for a trading-only
+/// credential, while a miss would hold a fund-movement permission (`AGENTS.md` rule 3).
+const FUND_MOVEMENT_STEMS: [&str; 8] = [
+    "withdraw", "transfer", "deposit", "fund", "wire", "send", "payout", "disburs",
+];
+
+fn moves_funds(name: &str) -> bool {
+    let lowered = name.to_lowercase();
+    FUND_MOVEMENT_STEMS
+        .iter()
+        .any(|stem| lowered.contains(stem))
+}
+
+fn any_moves_funds(names: &BTreeSet<String>) -> bool {
+    names.iter().any(|name| moves_funds(name))
+}
+
+/// Check 1. A fund-movement name is reported as one before any mismatch (CN-2). An unreadable
+/// key is refused only for live: a paper or demo key is recorded and disclosed, and an empty set
+/// that was read shows no fund movement (DEC-441 item 4). The MCP allowlist is check 7's.
+fn scope_check(input: &CheckInput) -> Outcome {
+    match &input.granted {
+        Granted::OAuth(GrantedScopes(scopes)) => {
+            if any_moves_funds(scopes) {
+                Outcome::Failed(Reason::FundMovement)
+            } else if !scopes
+                .iter()
+                .map(String::as_str)
+                .eq(REQUESTED_SCOPES_SORTED)
+            {
+                Outcome::Failed(Reason::ScopeMismatch)
+            } else {
+                Outcome::Passed
+            }
+        }
+        Granted::KeyPermissions(Some(names)) | Granted::Tools(names) => {
+            if any_moves_funds(names) {
+                Outcome::Failed(Reason::FundMovement)
+            } else {
+                Outcome::Passed
+            }
+        }
+        Granted::KeyPermissions(None) => match input.environment {
+            Environment::Live => Outcome::Failed(Reason::PermissionsUnreadable),
+            Environment::Paper => Outcome::Passed,
+        },
+    }
+}
+
+/// Check 2, from what each broker documents and never from a request (CN-3): a key is issued
+/// for one environment's host; Robinhood has only live (DEC-124); an Alpaca OAuth grant reaches
+/// paper only when requested with `env=paper` while DEC-821 holds. Any other pairing is not
+/// documented to stay in its environment, so it may reach both (DEC-441 item 21).
+fn environment_check(input: &CheckInput) -> Outcome {
+    match (input.broker, input.auth_kind) {
+        (Broker::Alpaca | Broker::KrakenDerivativesUs, AuthKind::ApiKey) => Outcome::Passed,
+        (Broker::Alpaca, AuthKind::Oauth) => {
+            if input.environment == Environment::Paper && ALPACA_PAPER_OAUTH_REACHES_PAPER_ONLY {
+                Outcome::Passed
+            } else {
+                Outcome::Failed(Reason::ReachesBoth)
+            }
+        }
+        (Broker::Robinhood, AuthKind::McpOauth) => match input.environment {
+            Environment::Live => Outcome::Passed,
+            Environment::Paper => Outcome::Failed(Reason::WrongEnvironment),
+        },
+        _ => Outcome::Failed(Reason::ReachesBoth),
+    }
+}
+
+/// Check 3, and the reference journal rule 62 records: present exactly when the account was read.
+/// The fingerprint comparison is the control services' (rule 58), never the executor's.
+fn account_check(input: &CheckInput) -> (Outcome, Option<AccountPiiRef>) {
+    match &input.account {
+        AccountRead::Unreadable => (Outcome::Failed(Reason::AccountUnreadable), None),
+        AccountRead::Read { pii_ref, dedicated } => {
+            let outcome = if input.broker == Broker::Robinhood && *dedicated != Some(true) {
+                Outcome::Failed(Reason::NotDedicated)
+            } else {
+                Outcome::Passed
+            };
+            (outcome, Some(pii_ref.clone()))
+        }
+    }
+}
+
+/// Check 7 (connections spec §6.2 rule 3): the allowlisted tools must be present, which is
+/// reported over drift, and the hash must equal the pinned one. With nothing pinned yet (the
+/// first connect), the hash seen is the one the record pins.
+fn contract_check(input: &CheckInput) -> Outcome {
+    match &input.contract {
+        Some(seen) if seen.allowlisted_tools_present => match &input.pinned_contract {
+            Some(pinned) if *pinned != seen.hash => Outcome::Failed(Reason::ContractDrift),
+            _ => Outcome::Passed,
+        },
+        _ => Outcome::Failed(Reason::ToolsMissing),
+    }
 }
 
 /// §8.1's order: checks 1, 2, 3, and 7.

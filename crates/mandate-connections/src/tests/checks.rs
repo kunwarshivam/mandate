@@ -92,7 +92,6 @@ fn each_reason_has_its_journal_code() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn a_clean_connect_reports_every_check_passed() {
     let report = run(&alpaca()).unwrap();
     assert_eq!(
@@ -125,7 +124,6 @@ fn a_clean_connect_reports_every_check_passed() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn scopes_must_be_exactly_trading_and_data() {
     for granted in [
         &["trading"][..],
@@ -146,7 +144,6 @@ fn scopes_must_be_exactly_trading_and_data() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn nothing_that_can_move_funds_out_is_accepted() {
     for permissions in [
         &["trade", "withdraw"][..],
@@ -207,7 +204,6 @@ fn nothing_that_can_move_funds_out_is_accepted() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
     let key = |broker, environment| CheckInput {
         broker,
@@ -245,7 +241,6 @@ fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn the_environment_is_judged_from_documentation_without_a_request() {
     let mut live_oauth = alpaca();
     live_oauth.environment = Environment::Live;
@@ -295,7 +290,6 @@ fn the_environment_is_judged_from_documentation_without_a_request() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn the_account_is_read_and_for_robinhood_dedicated() {
     let mut unreadable = alpaca();
     unreadable.account = AccountRead::Unreadable;
@@ -332,7 +326,6 @@ fn the_account_is_read_and_for_robinhood_dedicated() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn an_mcp_contract_is_pinned_then_held() {
     let mut pinned = robinhood();
     pinned.occasion = Occasion::Daily;
@@ -367,7 +360,6 @@ fn an_mcp_contract_is_pinned_then_held() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn the_refusal_is_the_first_failed_check_in_section_8_1_order() {
     let mut everything = robinhood();
     everything.environment = Environment::Paper;
@@ -389,7 +381,6 @@ fn the_refusal_is_the_first_failed_check_in_section_8_1_order() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn a_refused_credential_is_never_stored() {
     let stores = Cell::new(0);
     let store = || {
@@ -408,7 +399,6 @@ fn a_refused_credential_is_never_stored() {
 }
 
 #[test]
-#[ignore = "pending E7-12"]
 fn a_later_failure_suspends_and_drift_degrades() {
     for occasion in [Occasion::ExecutorStart, Occasion::Daily] {
         let mut failed = alpaca();
