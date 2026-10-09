@@ -12,7 +12,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::pin;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::task::{Context, Poll, Waker};
+use std::thread;
+use std::time::Duration;
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::parse;
@@ -603,37 +606,53 @@ fn a_successor_with_its_own_submit_keeps_its_own_instrument_and_side() {
 
 /// DEC-874 item 1: a `broker_order_id` that is present and neither `null` nor non-empty text
 /// (§9.16) leaves its key in doubt, whatever readable id its other records carry, so no cancel goes
-/// out with `order_id: ""` or by an id the odd record may contradict. A key with one unshared
-/// non-empty text id and its own instrument and side still cancels by it (`AGENTS.md` rule 13).
+/// out with `order_id: ""` or by an id the odd record may contradict. Each form is restored in a
+/// stream of its own and checked on its own, and every form that leaves its key placeable is named
+/// before the test fails. Beside each, a key with one unshared non-empty text id and its own
+/// instrument and side still cancels by it (`AGENTS.md` rule 13).
 #[test]
 #[ignore = "pending E7-6"]
 fn a_key_with_a_broker_order_id_that_is_not_non_empty_text_is_in_doubt() {
-    let mut s = Stream::default();
-    beside_a_known_order(&mut s);
-    let empty = key("01JEMPTYID");
-    s.submitted(&empty, "SPY", "buy");
-    s.changed(&empty, "accepted", Some(Some("")), NONE);
-    let mut keys = vec![empty];
     let odd = [
-        ("01JNUMBERID", json!(7)),
-        ("01JARRAYID", json!(["rh-array"])),
-        ("01JOBJECTID", json!({"id": "rh-object"})),
-        ("01JBOOLID", json!(true)),
+        ("01JEMPTYID", json!(""), false),
+        ("01JNUMBERID", json!(7), true),
+        ("01JARRAYID", json!(["rh-array"]), true),
+        ("01JOBJECTID", json!({"id": "rh-object"}), true),
+        ("01JBOOLID", json!(true), true),
     ];
-    for (intent, value) in odd {
-        let k = key(intent);
-        s.submitted(&k, "SPY", "buy");
-        let id = format!("rh-{intent}");
-        s.changed(&k, "accepted", Some(Some(&id)), NONE);
-        s.changed(&k, "accepted", None, json!({ "broker_order_id": value }));
-        keys.push(k);
-    }
-    never_placed_again_nor_guessed(&s.0, &keys.iter().collect::<Vec<_>>());
-    let (mut c, calls) = restored(&s.0, "confirmed");
+    let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
     let known = key("01JKNOWN");
-    let expected = order(&known, "rh-known", "SPY", Side::Buy);
-    assert_eq!(cancel(&mut c, &known), Ok(BrokerOutcome::Order(expected)));
-    assert_eq!(*calls.borrow(), [cancelled_by("rh-known")]);
+    let mut placeable = Vec::new();
+    for (intent, value, with_a_readable_id) in odd {
+        let k = key(intent);
+        let mut s = Stream::default();
+        beside_a_known_order(&mut s);
+        s.submitted(&k, "SPY", "buy");
+        if with_a_readable_id {
+            let id = format!("rh-{intent}");
+            s.changed(&k, "accepted", Some(Some(&id)), NONE);
+        }
+        s.changed(&k, "accepted", None, json!({ "broker_order_id": value }));
+        let (mut c, calls) = restored(&s.0, "confirmed");
+        let submit = call(&mut c, &protective_stop(&k));
+        let cancelled = cancel(&mut c, &k);
+        if submit != Err(in_doubt) || cancelled != Err(NO_ORDER_ID) || !calls.borrow().is_empty() {
+            let called = calls.borrow().clone();
+            placeable.push(format!(
+                "{intent}: submit {submit:?}, cancel {cancelled:?}, calls {called:?}"
+            ));
+        }
+        calls.borrow_mut().clear();
+        let expected = order(&known, "rh-known", "SPY", Side::Buy);
+        let outcome = cancel(&mut c, &known);
+        assert_eq!(outcome, Ok(BrokerOutcome::Order(expected)), "{intent}");
+        assert_eq!(*calls.borrow(), [cancelled_by("rh-known")], "{intent}");
+    }
+    assert!(
+        placeable.is_empty(),
+        "DEC-874 item 1: a key whose broker_order_id is neither null nor non-empty text must be in \
+         doubt: {placeable:#?}"
+    );
 }
 
 /// DEC-874 item 2: a successor's inherited instrument and side are those its origin has once the
@@ -714,6 +733,7 @@ fn a_successors_own_submit_wins_wherever_it_falls_in_the_stream() {
         let link = json!({"replaces": back.as_str()});
         s.changed(k, "accepted", Some(Some(id)), link);
     }
+    rebuilt_within_seconds(&s.0);
     never_placed_again_nor_guessed(&s.0, &[&bad_new, &ring_a, &ring_b]);
     let (mut c, calls) = restored(&s.0, "confirmed");
     for (k, id, symbol, side) in [
@@ -734,6 +754,36 @@ fn a_successors_own_submit_wins_wherever_it_falls_in_the_stream() {
         cancelled_by("rh-old"),
     ];
     assert_eq!(*calls.borrow(), expected);
+}
+
+/// A tool double for a rebuild alone, which calls no tool, and which can cross to another thread.
+struct NoTools;
+
+impl Tools for NoTools {
+    async fn call_tool(
+        &self,
+        _class: CallClass,
+        tool: &'static str,
+        _arguments: &Value,
+    ) -> Result<String, McpError> {
+        panic!("a rebuild calls no tool, but called {tool}")
+    }
+}
+
+/// DEC-874 item 2: `restore` of `records` finishes within seconds, run on a thread of its own so a
+/// rebuild that loops on a `replaces` cycle fails this assertion rather than hanging the test.
+fn rebuilt_within_seconds(records: &[FoldedEvent]) {
+    let records = records.to_vec();
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        let rebuilt = RobinhoodConnector::restore(NoTools, ACCOUNT.to_owned(), &records).is_ok();
+        done.send(rebuilt).unwrap();
+    });
+    assert_eq!(
+        finished.recv_timeout(Duration::from_secs(5)),
+        Ok(true),
+        "DEC-874 item 2: the rebuild must finish on a `replaces` cycle and hold its keys in doubt"
+    );
 }
 
 /// What one generated record of a key in the shuffle property is, from its choice: an
