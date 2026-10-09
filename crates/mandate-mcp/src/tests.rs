@@ -9,5 +9,6 @@ mod contract;
 mod drift;
 mod endpoint;
 mod errors;
+mod login;
 mod register;
 mod server;
