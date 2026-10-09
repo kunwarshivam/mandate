@@ -65,9 +65,13 @@ pub use control_verify::{
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
-pub use start::{StartRequest, TrustedStartError, resolve_trusted_start};
+pub use start::{
+    AnchorRecord, AnchorRecordError, StartRequest, TrustedStartError, anchor_record,
+    resolve_trusted_start,
+};
 pub use verify::{
-    EventCheck, EventFailure, RangeCheck, TrustedStart, Verified, verify_anchor, verify_events,
+    EventCheck, EventFailure, RangeCheck, RangeWalk, RangeWalkError, TrustedStart, Verified,
+    verify_anchor, verify_events, walk_range,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

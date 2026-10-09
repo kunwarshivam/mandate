@@ -275,8 +275,8 @@ item above (C-3, C-9) are not repeated.
       and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6) Done
       in [#1118](https://github.com/kunwarshivam/mandate/pull/1118).
 - [x] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14) Done in [#1171](https://github.com/kunwarshivam/mandate/pull/1171).
-- [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
-      Tooling. (C-27, C-28)
+- [x] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
+      Tooling. (C-27, C-28) Done in [#1214](https://github.com/kunwarshivam/mandate/pull/1214).
 - [x] **The mode chip in the desktop agent header**, on every tab. (C-8) Done in #1166.
 - [x] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10) Done in
       [#1103](https://github.com/kunwarshivam/mandate/pull/1103).
@@ -284,12 +284,12 @@ item above (C-3, C-9) are not repeated.
 - [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
       (C-4)
 - [x] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13) Done in [#1167](https://github.com/kunwarshivam/mandate/pull/1167).
-- [ ] **Day headings on the timeline.** (C-19)
+- [x] **Day headings on the timeline.** (C-19) Done in [#1191](https://github.com/kunwarshivam/mandate/pull/1191).
 - [ ] **The status strip's state chips outlined**, not ink. (C-26)
 - [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
       subtitle drops "Rules". (C-20)
 - [ ] **One left edge across densities** on the audit screens. (C-17)
-- [ ] **One paragraph per set of shared rules** on the Approvals rail. (C-12)
+- [x] **One paragraph per set of shared rules** on the Approvals rail. (C-12) Done in [#1189](https://github.com/kunwarshivam/mandate/pull/1189).
 - [ ] **The phone thread header without the slug.** (C-16)
 - [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
 - [x] **The brand owl never wears an agent's colour.** The founder decided it on 2026-10-09
