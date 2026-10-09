@@ -26,7 +26,9 @@
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
-#   2  mandate-journal, mandate-accounting, mandate-passkey, the WebAuthn relying party
+#   2  mandate-push-relay, the web-push relay's pure core (E8-14 S8b, DEC-724): above mandate-notify,
+#      whose canary scan its tests use, and kept off the journal and every trading crate (NT-3, NT-9);
+#      mandate-journal, mandate-accounting, mandate-passkey, the WebAuthn relying party
 #      (E9-1, DEC-660), which verifies and never signs, and mandate-authn (E9-1, DEC-650, DEC-652):
 #      token verification and sessions as pure functions, with the issuer's keys and the clock
 #      handed in, so it never fetches a key or reads a clock; above mandate-identity, whose sealed
@@ -132,6 +134,13 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-push-relay]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-risk", "mandate-approval"]
 
 [crates.mandate-identity-seal]
 layer = 0
@@ -321,4 +330,4 @@ allowed_external = ["thiserror"]
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["thiserror"]
+allowed_external = ["thiserror", "tokio"]

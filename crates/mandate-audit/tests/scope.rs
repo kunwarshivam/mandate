@@ -5,11 +5,13 @@
 mod common;
 
 use common::{
-    ACCOUNTS, Fixture, T, WS_A, WS_B, acct, ctl, event_id, limit, tenant, text, workspaces,
+    ACCOUNTS, Fixture, T, WS_A, WS_B, acct, context, ctl, event_id, limit, permitted, tenant, text,
+    workspaces,
 };
 use mandate_audit::{AuditError, JournalRead, MemoryRead, PageLimit, StreamType};
 use mandate_canon::Digest;
-use mandate_identity::WorkspaceId;
+use mandate_identity::demand::ReadRecords;
+use mandate_identity::{Permission, Refusal, Role, WorkspaceId};
 use mandate_journal::StreamId;
 use proptest::prelude::*;
 
@@ -34,7 +36,9 @@ fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
     let read = MemoryRead::new(&fx.journal);
     let all = PageLimit::new(None).unwrap();
     for workspace in TENANTS {
-        let entries = read.streams(&tenant(workspace), None, all).unwrap();
+        let entries = read
+            .streams(&permitted(&tenant(workspace)), None, all)
+            .unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.stream_id.as_str()).collect();
         assert_eq!(names, fx.streams_of(&text(workspace)), "{workspace:?}");
         for entry in &entries {
@@ -56,7 +60,11 @@ fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
             assert_eq!(entry.head.recorded_at, T);
         }
     }
-    assert_eq!(read.streams(&tenant(WS_EMPTY), None, all).unwrap(), []);
+    assert_eq!(
+        read.streams(&permitted(&tenant(WS_EMPTY)), None, all)
+            .unwrap(),
+        []
+    );
 }
 
 /// DEC-760 item 6: the list pages by `after` and `limit` in byte order. `after` is a cursor, not
@@ -65,7 +73,8 @@ fn streams_lists_only_the_workspaces_written_streams_with_their_heads() {
 fn the_stream_list_pages_by_after_and_limit() {
     let fx = Fixture::new(1);
     let read = MemoryRead::new(&fx.journal);
-    let me = tenant(WS_A);
+    let context = tenant(WS_A);
+    let me = permitted(&context);
     let expected = fx.streams_of(&text(WS_A));
     let mut after: Option<String> = None;
     let mut listed = Vec::new();
@@ -98,6 +107,18 @@ fn the_stream_list_pages_by_after_and_limit() {
     assert_eq!(names("zzz"), Vec::<String>::new());
 }
 
+/// DEC-655, DEC-770 item 4: the reads take only the `ReadRecords` witness, and a context
+/// authorized for another permission, here a Viewer's `ViewAgents`, is refused it, so it reaches
+/// no read. That every other row is refused is identity's own test.
+#[test]
+fn a_context_for_another_permission_reaches_no_read() {
+    let viewer = context(WS_A, Role::Viewer, Permission::ViewAgents);
+    assert_eq!(
+        viewer.require::<ReadRecords>().err(),
+        Some(Refusal::Forbidden)
+    );
+}
+
 #[test]
 fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
     let mut fx = Fixture::new(1);
@@ -105,7 +126,8 @@ fn foreign_malformed_and_absent_ids_all_read_as_not_found() {
     fx.journal
         .take_ownership(&StreamId::parse(&acct(&a, "EMPTY")).unwrap());
     let read = MemoryRead::new(&fx.journal);
-    let me = tenant(WS_A);
+    let context = tenant(WS_A);
+    let me = permitted(&context);
     for stream in [
         acct(&prefixed(), "ACCT1"),
         acct(&text(WS_B), "ACCT2"),
@@ -164,7 +186,7 @@ fn an_event_of_the_workspace_is_served_with_its_body_and_link() {
             let stream = acct(&text(workspace), account);
             let rows = fx.journal.rows(&StreamId::parse(&stream).unwrap());
             for (i, id) in fx.appended[&stream].event_ids.iter().enumerate() {
-                let event = read.event(&tenant(workspace), id).unwrap();
+                let event = read.event(&permitted(&tenant(workspace)), id).unwrap();
                 assert_eq!(event.event_id, *id);
                 assert_eq!(event.stream_id, stream);
                 assert_eq!(event.seq, i as u64 + 1);
@@ -197,7 +219,8 @@ proptest! {
         let fx = Fixture::new(marks);
         let read = MemoryRead::new(&fx.journal);
         let mine_text = text(TENANTS[reader]);
-        let me = tenant(TENANTS[reader]);
+        let context = tenant(TENANTS[reader]);
+        let me = permitted(&context);
         let absent_page = read.page(&me, &acct(&mine_text, &format!("A{absent}")), after, limit(l));
         let absent_event = read.event(&me, &event_id(absent * 1_000));
         prop_assert_eq!(&absent_page, &Err(AuditError::NotFound));

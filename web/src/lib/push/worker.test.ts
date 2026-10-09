@@ -94,7 +94,7 @@ describe("the push service worker", () => {
     expect(SOURCE).not.toMatch(/\bcaches\b|indexedDB|localStorage|sessionStorage|importScripts|fetch\(/);
   });
 
-  it.skip("pending E8-14: shows the fixed sentence for each of the four text keys, and nothing of the payload but the notice as tag", () => {
+  it("shows the fixed sentence for each of the four text keys, and nothing of the payload but the notice as tag", () => {
     for (const [key, text] of Object.entries(TEXTS)) {
       const { shown, waits, shownPromises, tripped, push } = load();
       push(JSON.stringify({ notice: HEX, text: key }));
@@ -104,7 +104,7 @@ describe("the push service worker", () => {
     }
   });
 
-  it.skip("pending E8-14: drops every payload that is not exactly the closed pair, and shows nothing (NT-1)", () => {
+  it("drops every payload that is not exactly the closed pair, and shows nothing (NT-1)", () => {
     const canary = "CANARY-AAPL-buy-100@187.25";
     const refused = [
       null,
@@ -144,7 +144,7 @@ describe("the push service worker", () => {
     }
   });
 
-  it.skip("pending E8-14: shows only the four sentences whatever arrives (NT-1, fuzzed)", () => {
+  it("shows only the four sentences whatever arrives (NT-1, fuzzed)", () => {
     const allowed = new Set(Object.values(TEXTS));
     const { shown, tripped, push } = load();
     let seed = 20261008;
@@ -165,7 +165,7 @@ describe("the push service worker", () => {
     }
   });
 
-  it.skip("pending E8-14: opens only <origin>/n/<notice> on a tap, and nothing for a notification without a valid notice (NT-4)", () => {
+  it("opens only <origin>/n/<notice> on a tap, and nothing for a notification without a valid notice (NT-4)", () => {
     const { opened, waits, openPromises, tripped, click } = load();
     expect(click({ notice: HEX, url: "https://evil.example/", href: "/x", origin: "https://evil.example" })).toBe(true);
     expect(opened).toEqual([`${ORIGIN}/n/${HEX}`]);
