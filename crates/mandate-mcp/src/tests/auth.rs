@@ -303,7 +303,6 @@ async fn an_unquoted_challenge_url_falls_back_to_the_well_known_path() {
 
 /// RFC 8414 §2: the issuer identifier has no query or fragment components.
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn an_authorization_server_with_a_query_is_refused_before_its_metadata_is_dialed() {
     for named in ["@BASE@/as?canary", "@BASE@/as?"] {
         let answers = vec![challenge(CHALLENGE), resource("@BASE@/mcp", &[named])];
@@ -316,7 +315,6 @@ async fn an_authorization_server_with_a_query_is_refused_before_its_metadata_is_
 /// `resource_metadata` is an auth-param name only where a parameter starts, never inside another
 /// name or another parameter's quoted value.
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_challenge_url_is_read_only_from_a_resource_metadata_parameter() {
     let well_known = "get /.well-known/oauth-protected-resource/mcp http/1.1";
     let cases = [

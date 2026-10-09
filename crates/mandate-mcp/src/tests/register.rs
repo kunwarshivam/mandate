@@ -177,7 +177,6 @@ async fn an_answer_that_echoes_every_member_sent_registers_the_client() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn an_answer_without_the_auth_method_or_with_other_grants_is_refused() {
     let none = || json!({"client_id": "c-1", "token_endpoint_auth_method": "none"});
     let with = |key: &str, value: Value| {
