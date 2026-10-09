@@ -262,3 +262,37 @@ pub fn verify_anchor(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::Digest;
+
+    use super::VerifiedPrefix;
+    use crate::StoredEvent;
+
+    fn row(seq: u64) -> StoredEvent {
+        StoredEvent {
+            stream_id: "agent:ws_01:ag_01".to_owned(),
+            seq,
+            event_id: format!("ev_{seq}"),
+            event_type: "AgentModeChanged".to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: "2026-10-09T00:00:00.000000000Z".to_owned(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::ZERO,
+            body: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_verified_prefix_hands_its_folds_exactly_the_rows_it_bound() {
+        let rows = vec![row(1), row(2)];
+        let prefix = VerifiedPrefix { rows: &rows };
+        assert_eq!(
+            prefix.rows(),
+            rows.as_slice(),
+            "a fold reads the bound rows, never fewer or others (DEC-892 item 2)"
+        );
+    }
+}
