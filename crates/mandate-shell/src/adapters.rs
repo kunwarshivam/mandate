@@ -1400,10 +1400,16 @@ fn action_order_matches(
     Ok(action_order_usd == proposal_qty.notional(proposal_limit)?)
 }
 
+/// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;
+/// journal spec §9.1).
+const POLICY_OVERLAY: &str = "policy_overlay";
+
 impl Classifier for BuilderPlan {
-    /// An opening or an increase while the confirmed mandate is nonconforming (DEC-534) fails
-    /// closed at D4d's stub. An exit never reads the governance, so nothing here denies it
-    /// (`AGENTS.md` rule 13).
+    /// Mandate spec §6.2 step 5c (DEC-534 item 2, DEC-536): an opening or an increase while the
+    /// confirmed mandate is nonconforming is denied, applied last so it only tightens. The overlay
+    /// names itself (`policy_overlay`) only when it changed the decision, so a `deny` the rules
+    /// already decided keeps their label. An exit never reads the governance, so nothing here
+    /// denies it (`AGENTS.md` rule 13).
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
@@ -1424,14 +1430,11 @@ impl Classifier for BuilderPlan {
                 what: "classification facts for the proposed action",
             });
         }
-        if proposal.purpose.adds_risk()
+        let policy_nonconforming = proposal.purpose.adds_risk()
             && context
                 .governance
                 .as_ref()
-                .is_some_and(|governance| !governance.violations.is_empty())
-        {
-            return Err(Cause::Unimplemented { story: "E7-19" });
-        }
+                .is_some_and(|governance| !governance.violations.is_empty());
         let classification =
             mandate_builder::classify(mandate_builder::autonomy_policy(&validated), action)?;
         let autonomy = match classification.decision {
@@ -1439,6 +1442,12 @@ impl Classifier for BuilderPlan {
             AutonomyDecision::Ask => Autonomy::Ask,
             AutonomyDecision::Deny => Autonomy::Deny,
         };
+        if policy_nonconforming && autonomy != Autonomy::Deny {
+            return Ok(Classified {
+                autonomy: Autonomy::Deny,
+                decided_by: Some(POLICY_OVERLAY.to_owned()),
+            });
+        }
         Ok(Classified {
             autonomy,
             decided_by: Some(classification.by.label()),
