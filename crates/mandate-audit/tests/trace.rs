@@ -496,7 +496,6 @@ fn intent_links_are_scoped_to_the_named_streams_and_typed() {
 /// its `IntentProposed` `already_shown` when that event is a node and `beyond_bound` when not, and a
 /// bound that kept the agent stream from being looked up adds no watermark for it.
 #[test]
-#[ignore = "pending E12-1"]
 fn the_intent_row_at_a_bound_reads_no_agent_stream() {
     let mut g = Graph::new();
     let (account, outputs) = (format!("acct:{}:ACCT1", text(WS_A)), agent(WS_A, "AG2"));

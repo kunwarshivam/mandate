@@ -177,10 +177,12 @@ enum Link {
 }
 
 /// One target of a link: named by id and not yet resolved, found by a lookup on the stream the row
-/// names, or a target the row names with no match there (DEC-772 item 5).
+/// names, an `intent_id`'s `IntentProposed` on the agent stream of `agent` not yet looked up, or a
+/// target the row names with no match there (DEC-772 item 5).
 enum Target {
     Id(String),
     Found(JournalEvent),
+    Proposed { id: String, agent: Option<String> },
     Missing,
 }
 
@@ -247,16 +249,27 @@ impl Walk<'_, '_, '_> {
                         self.hop(&from.event_id, depth, INTENT, Target::Found(event), None)?;
                     }
                 }
-                let proposed = agent
-                    .and_then(|agent| self.on_agent_stream(&agent, &id))
-                    .map_or(Target::Missing, Target::Found);
+                let proposed = Target::Proposed { id, agent };
                 self.hop(&from.event_id, depth, INTENT, proposed, Some(PROPOSED))
             }
         }
     }
 
+    /// The node that is the event `id` on `agent:{ws}:{agent}`, decided from the trace alone, so a
+    /// link a bound stops reads no stream and adds no watermark (DEC-772 items 2 and 6).
+    fn node_on_agent_stream(&self, agent: &str, id: &str) -> Option<&str> {
+        let stream = format!("agent:{}:{agent}", self.segment);
+        self.nodes
+            .iter()
+            .map(|walked| &walked.node.event)
+            .find(|event| event.event_id == id)
+            .filter(|event| event.stream_id == stream)
+            .map(|event| event.event_id.as_str())
+    }
+
     /// The event `id` on `agent:{ws}:{agent}`, built with the path's workspace segment; a stream
-    /// that exists in the workspace is read, so it joins `as_of` (DEC-772 item 6).
+    /// that exists in the workspace is read, so it joins `as_of` (DEC-772 item 6). Called only for
+    /// a target no bound stopped and the trace does not hold.
     fn on_agent_stream(&mut self, agent: &str, id: &str) -> Option<JournalEvent> {
         let stream = StreamId::parse(&format!("agent:{}:{agent}", self.segment))?;
         let read = self.read;
@@ -283,6 +296,9 @@ impl Walk<'_, '_, '_> {
         let named = match &target {
             Target::Id(id) => Some(id.as_str()),
             Target::Found(event) => Some(event.event_id.as_str()),
+            Target::Proposed { id, agent } => agent
+                .as_deref()
+                .and_then(|agent| self.node_on_agent_stream(agent, id)),
             Target::Missing => None,
         };
         let (to, status) = if let Some(id) = named.filter(|id| self.shown(id)) {
@@ -294,6 +310,9 @@ impl Walk<'_, '_, '_> {
             let event = match target {
                 Target::Id(id) => self.read.event(self.tenant, &id).ok(),
                 Target::Found(event) => Some(event),
+                Target::Proposed { id, agent } => {
+                    agent.and_then(|agent| self.on_agent_stream(&agent, &id))
+                }
                 Target::Missing => None,
             };
             match event {
