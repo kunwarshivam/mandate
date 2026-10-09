@@ -689,6 +689,11 @@ fn repo_root() -> Result<PathBuf> {
 struct Metadata {
     packages: Vec<Package>,
     workspace_members: Vec<String>,
+    /// The members a cargo invocation selects when it names no package: `default-members`, or
+    /// every member when the workspace sets none. A live-only package counts in a build only
+    /// when the build's selected packages reach it (DEC-868 item 2).
+    #[cfg_attr(not(test), expect(dead_code, reason = "E7-28 reads it"))]
+    workspace_default_members: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -5688,9 +5693,10 @@ mod tests {
     }
 
     fn workspace(members: Vec<Package>) -> Metadata {
-        let workspace_members = members.iter().map(|p| p.id.clone()).collect();
+        let workspace_members: Vec<String> = members.iter().map(|p| p.id.clone()).collect();
         Metadata {
             packages: members,
+            workspace_default_members: workspace_members.clone(),
             workspace_members,
         }
     }
@@ -10528,6 +10534,83 @@ jq -r "$filter" "$src"
             })?;
             names(&problems, &["rh-host", "a-lib"], &[RUNNER]);
         }
+        Ok(())
+    }
+
+    /// A live-only crate that is a workspace member counts in a build only when the build's
+    /// selected packages reach it through the resolved graph (DEC-868 item 2, "through a
+    /// dependency"). `cargo metadata` lists every member in `resolve.nodes`, reachable or not, so
+    /// a member outside `default-members` that nothing depends on passes the default build and a
+    /// `-p` build of another crate; a `--workspace` build selects it and is named, and so is a
+    /// build whose selected crate depends on it.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_live_only_workspace_member_nothing_selected_reaches_passes() -> Result<()> {
+        let crates = || {
+            let runner = member(RUNNER, &[("rh-host", None)]);
+            vec![
+                with_features(runner, &[("live", &["dep:rh-host"])]),
+                member("a-lib", &[]),
+                member("rh-host", &[]),
+            ]
+        };
+        let meta = || {
+            let mut meta = workspace(crates());
+            meta.workspace_default_members
+                .retain(|id| id != "rh-host 0.0.0");
+            meta
+        };
+        let unreached = |_: &[String]| {
+            resolved(&[
+                (RUNNER, &[], &[]),
+                ("a-lib", &[], &[]),
+                ("rh-host", &[], &[]),
+            ])
+        };
+        let flows = [workflow(&[
+            ("lib-tests", "cargo test -p a-lib"),
+            ("runner-tests", "cargo test -p the-runner"),
+        ])];
+        let quiet = resolved_live_problems(&live_policy(), &meta(), &flows, &|w| Ok(unreached(w)))?;
+        assert_eq!(quiet, Vec::<String>::new());
+        let whole = [workflow(&[("everything", "cargo test --workspace")])];
+        let selected =
+            resolved_live_problems(&live_policy(), &meta(), &whole, &|w| Ok(unreached(w)))?;
+        names(&selected, &["rh-host", "everything"], &[]);
+        let reaching = [workflow(&[("lib-tests", "cargo test -p a-lib")])];
+        let through = resolved_live_problems(&live_policy(), &meta(), &reaching, &|w| {
+            Ok(match w {
+                [] => unreached(w),
+                _ => resolved(&[
+                    (RUNNER, &[], &[]),
+                    ("a-lib", &[], &["rh-host"]),
+                    ("rh-host", &[], &[]),
+                ]),
+            })
+        })?;
+        names(&through, &["rh-host", "a-lib", "lib-tests"], &[]);
+        Ok(())
+    }
+
+    /// The compile-only exception holds only for the repository's own runner: a
+    /// `cargo check -p <runner> --features live` that also passes `--manifest-path`, in either
+    /// form, builds another manifest's workspace and is named like any other job resolving
+    /// `live` (#1140 review, minor; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_compile_only_form_with_a_manifest_path_is_refused() -> Result<()> {
+        let flows = [workflow(&[
+            (
+                "other-manifest",
+                "cargo check -p the-runner --features live --manifest-path other/Cargo.toml",
+            ),
+            (
+                "glued-manifest",
+                "cargo check --manifest-path=other/Cargo.toml -p the-runner --features live",
+            ),
+        ])];
+        let problems = check(&live_policy(), with_runner(vec![]), &flows, by_flags)?;
+        names(&problems, &["other-manifest", "glued-manifest"], &[]);
         Ok(())
     }
 
