@@ -43,6 +43,7 @@ export const PAIRS: Pair[] = [
   { fg: "muted-foreground", bg: "card", kind: "body", use: "Secondary text on a card field" },
   { fg: "muted-foreground", bg: "muted", kind: "body", use: "Secondary text on a quiet field" },
   { fg: "muted-foreground", bg: "lapis-soft", kind: "body", use: "Secondary text on the account's pale azure" },
+  { fg: "muted-foreground", bg: "background", kind: "body", use: "The Allowed verdict chip's label on its well fill" },
   { fg: "muted-foreground", bg: "mandate-soft", kind: "body", use: "Secondary text in a mandate notice" },
   { fg: "muted-foreground", bg: "info-soft", kind: "body", use: "Secondary text on an info tint" },
   { fg: "muted-foreground", bg: "gain-soft", kind: "body", use: "The time on the hero's change pill, for a gain" },
@@ -101,6 +102,8 @@ export const PAIRS: Pair[] = [
   { fg: "ink", bg: "card", kind: "mark", use: "The quiet Stop control's outline on the dock and the tab bar, the exits-only ring on a card field, a proposal's dashed line on a chart" },
   { fg: "lapis", bg: "card", kind: "mark", use: "Paper badge border, the account's marker on the equity ladder" },
   { fg: "lapis", bg: "mandate", kind: "mark", use: "The account's marker on the mandate field" },
+  { fg: "muted-foreground", bg: "background", kind: "mark", use: "The Allowed verdict chip's hairline against its own well fill, and against the page on a hovered row" },
+  { fg: "muted-foreground", bg: "card", kind: "mark", use: "The Allowed verdict chip's hairline against the card field around it" },
   { fg: "crimson-edge", bg: "card", kind: "mark", use: "The kill switch's edge against the Stop sheet" },
   { fg: "crimson-edge", bg: "background", kind: "mark", use: "The kill switch's edge against the page" },
 ];
