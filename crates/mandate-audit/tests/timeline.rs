@@ -1,13 +1,21 @@
-//! E12-2 slice T1a: the per-agent timeline's core read (workspace API §4.8.1 "Timeline", AU-5,
-//! DEC-764, DEC-777): the merge, the filters that still consume, `limit`, and the 10,000-event cap.
-//! Each expectation is written from the fixture's own appends, never from the code under test.
+//! E12-2 slices T1a and T1b: the per-agent timeline's core read (workspace API §4.8.1 "Timeline",
+//! AU-1, AU-5, DEC-760, DEC-764, DEC-777): the merge, the filters that still consume, `limit`, the
+//! 10,000-event cap, paging under appends, and the one `NotFound`. Each expectation is written from
+//! the fixture's own appends, never from the code under test.
 
 mod common;
 
+use std::collections::BTreeMap;
+
 use common::{ACCOUNTS, Fixture, T, WS_A, acct, actor, event_id, limit, permitted, tenant, text};
-use mandate_audit::{MAX_CONSUMED_PER_STREAM, MemoryRead, StreamCursor, Timeline};
+use common::{ctl, workspaces};
+use mandate_audit::{AuditError, MAX_CONSUMED_PER_STREAM, MemoryRead, StreamCursor, Timeline};
 use mandate_audit::{TimelineQuery, TimelineRead};
+use mandate_canon::Digest;
+use mandate_journal::StreamId;
 use mandate_time::UtcNanos;
+use proptest::prelude::*;
+use proptest::test_runner::{TestCaseError, TestRunner};
 
 const ME: &str = "AG1";
 const OBS: &str = r#"{"source":"bars","instrument_id":null,"as_of":"2026-09-21T14:00:00.000000000Z","data_ref":"sha256:7777777777777777777777777777777777777777777777777777777777777777"}"#;
@@ -269,4 +277,304 @@ fn one_page_consumes_at_most_ten_thousand_events_per_stream() {
         false,
     );
     assert_eq!((ids(&rest), rest.next, rest.more), expected);
+}
+
+impl Journal {
+    /// Opens `name`'s agent stream in the workspace segment `ws`.
+    fn open_agent(&mut self, ws: &str, name: &str) {
+        let opened =
+            format!(r#"{{"stream_type":"agent","workspace_id":"{ws}","agent_id":"{name}"}}"#);
+        self.fx.open(&format!("agent:{ws}:{name}"), &opened);
+    }
+
+    fn read(&self, q: &TimelineQuery<'_>) -> Result<Timeline, AuditError> {
+        MemoryRead::new(&self.fx.journal).timeline(&permitted(&tenant(WS_A)), q)
+    }
+}
+
+/// `WS_A`'s timeline streams for `ME`, in ascending `stream_id`.
+fn timeline() -> [String; 3] {
+    [stream(Some("ACCT1")), stream(Some("ACCT2")), stream(None)]
+}
+
+/// One appended event as the test recorded it: its `recorded_at`, its type, and whether it is the
+/// agent's (on its own stream, or an `AgentModeApplied` naming it; never a mark, DEC-764 item 2).
+type Seen = (String, &'static str, bool);
+
+/// A [`Journal`] and the test's own record of every event appended to it, which [`expect`] reads.
+struct Model {
+    j: Journal,
+    seen: BTreeMap<String, Seen>,
+}
+
+impl Model {
+    /// [`Journal::new`], and `ME`'s agent stream in each other workspace of [`workspaces`]: one
+    /// whose segment has `WS_A`'s as a prefix, and `WS_B`.
+    fn new() -> Self {
+        let mut j = Journal::new();
+        for ws in &workspaces()[1..] {
+            j.open_agent(ws, ME);
+        }
+        let seen = timeline()
+            .map(|s| {
+                (
+                    j.opened(&s),
+                    (T.to_owned(), "StreamOpened", s.starts_with("agent:")),
+                )
+            })
+            .into();
+        Self { j, seen }
+    }
+
+    /// Appends at `at(s)`, in every workspace alike, an observation to the agent's stream
+    /// (`which` 0) or to ACCT1 or ACCT2 (`which` 1 or 2) a mark or an `AgentModeApplied`.
+    fn put(&mut self, which: usize, mark: bool, s: u64) {
+        for ws in &workspaces() {
+            let account = || acct(ws, ACCOUNTS[which - 1]);
+            let (to, typed, payload, mine) = match (which, mark) {
+                (0, _) => (
+                    format!("agent:{ws}:{ME}"),
+                    "ObservationRecorded",
+                    OBS.into(),
+                    true,
+                ),
+                (_, true) => (account(), "MarkUpdated", MARK.to_owned(), false),
+                (_, false) => (account(), "AgentModeApplied", mode(), true),
+            };
+            let id = self.j.put(&to, &at(s), typed, &payload, 1).remove(0);
+            self.seen.insert(id, (at(s), typed, mine));
+        }
+    }
+}
+
+/// Whether `q` serves the event `seen` records: the agent's, and passing `types`, `from`, `to`.
+fn matches(q: &TimelineQuery<'_>, (at, typed, mine): &Seen) -> bool {
+    let at = UtcNanos::parse(at).unwrap();
+    *mine
+        && q.types.is_none_or(|t| t.contains(typed))
+        && q.from.is_none_or(|f| at >= f)
+        && q.to.is_none_or(|t| at < t)
+}
+
+/// One page as the test's record gives it now: `(events, next, more, as_of)`.
+type Page = (
+    Vec<String>,
+    Vec<StreamCursor>,
+    bool,
+    Vec<(String, u64, Digest, String)>,
+);
+
+/// The page `q` must give, `n` its `limit`, from the test's record alone. The merge over the raw
+/// heads from `q.after` (DEC-777 item 1) is computed as a sort, not a merge: each remaining event's
+/// key is the latest `recorded_at` its stream holds from the cursor through that event, then the
+/// `stream_id`, then the `seq`. Taking the least head at each step yields exactly that order, clocks
+/// that step back included, since no event leaves before an earlier one of its stream. The walk
+/// consumes in that order, serves what [`matches`], and stops after the `n`-th served event (item 2)
+/// or the 10,000th consumed from one stream (item 3). `next` names all three streams (item 5),
+/// `more` is whether any holds an event past it (item 4), and `as_of` is each stream's last event,
+/// hashed here from the journal's stored body.
+fn expect(m: &Model, q: &TimelineQuery<'_>, n: u64) -> Page {
+    let streams = timeline();
+    let ids = streams
+        .clone()
+        .map(|s| m.j.fx.appended[&s].event_ids.clone());
+    let start = streams.clone().map(|s| {
+        let cursor = q.after.iter().find(|c| c.stream_id == s);
+        cursor.map_or(0, |c| c.seq as usize)
+    });
+    let mut order = Vec::new();
+    for (i, list) in ids.iter().enumerate() {
+        let mut latest = String::new();
+        for (k, id) in list.iter().enumerate().skip(start[i]) {
+            latest = latest.max(m.seen[id].0.clone());
+            order.push((latest.clone(), i, k));
+        }
+    }
+    order.sort();
+    let (mut pos, mut taken, mut events) = (start.map(|p| p as u64), [0; 3], Vec::new());
+    for (_, i, k) in order {
+        pos[i] = k as u64 + 1;
+        taken[i] += 1;
+        let id = &ids[i][k];
+        events.extend(matches(q, &m.seen[id]).then(|| id.clone()));
+        if events.len() as u64 == n || taken[i] == MAX_CONSUMED_PER_STREAM {
+            break;
+        }
+    }
+    let more = (0..3).any(|i| pos[i] < ids[i].len() as u64);
+    let as_of = streams
+        .iter()
+        .zip(&ids)
+        .map(|(s, list)| {
+            let rows = m.j.fx.journal.rows(&StreamId::parse(s).unwrap());
+            let last = Digest::of(&rows.last().unwrap().body);
+            let at = m.seen[list.last().unwrap()].0.clone();
+            (s.clone(), list.len() as u64, last, at)
+        })
+        .collect();
+    (events, cursors(&pos), more, as_of)
+}
+
+/// Pages `q` from `after`, at most `bound` pages and while `more`, each checked whole against
+/// [`expect`] in the journal's state at its read; the ids served, the last `next`, and `more`.
+fn pages(
+    m: &Model,
+    q: &TimelineQuery<'_>,
+    n: u64,
+    mut after: Vec<StreamCursor>,
+    bound: usize,
+) -> Result<(Vec<String>, Vec<StreamCursor>, bool), TestCaseError> {
+    let (mut served, mut more) = (Vec::new(), true);
+    for _ in 0..bound {
+        let q = TimelineQuery {
+            after: &after,
+            ..q.clone()
+        };
+        let page = m.j.page(&q);
+        let mut as_of: Vec<_> = (page.as_of.iter())
+            .map(|w| (w.stream_id.clone(), w.seq, w.hash, w.recorded_at.clone()))
+            .collect();
+        as_of.sort();
+        let got = (ids(&page), page.next.clone(), page.more, as_of);
+        prop_assert_eq!(got, expect(m, &q, n), "the page from {:?}", q.after);
+        served.extend(ids(&page));
+        (after, more) = (page.next, page.more);
+        if !more {
+            break;
+        }
+    }
+    Ok((served, after, more))
+}
+
+/// One random append: the stream (`which` of [`Model::put`]), a mark or not, the clock's step
+/// forward, and how far this event's `recorded_at` steps back from the clock.
+type Step = (usize, bool, u64, u64);
+
+/// One random case: the appends, the `types` mask with `from` and `to` in seconds, the `limit`,
+/// and the append before which the first two pages are read.
+type Case = (Vec<Step>, (usize, (Option<u64>, Option<u64>)), u64, usize);
+
+const TYPES: [&str; 4] = [
+    "StreamOpened",
+    "ObservationRecorded",
+    "AgentModeApplied",
+    "MarkUpdated",
+];
+
+/// AU-5, AU-1, and DEC-777 items 1 to 5: random journals in three workspaces (`WS_A`, one whose
+/// segment has `WS_A`'s as a prefix, and `WS_B`, each given the same appends), clocks that often
+/// step back by up to 3 s, random `types`, `from`, `to`, and `limit`, and appends between pages.
+/// Every page is [`expect`]'s exactly: events, `next`, `more`, and `as_of`. Over the whole walk
+/// each stream's matching events come once each in `seq` order, nothing else comes, and the walk
+/// ends at every head; a fresh walk serves the one unbounded merge, filtered.
+#[test]
+#[ignore = "pending E12-2"]
+fn every_walk_serves_each_matching_event_once_in_merge_order() {
+    let event = (0..3_usize, any::<bool>(), 0..2_u64, 0..4_u64);
+    let bounds = (
+        proptest::option::of(0..34_u64),
+        proptest::option::of(0..34_u64),
+    );
+    let strategy = (
+        proptest::collection::vec(event, 1..30),
+        (0..16_usize, bounds),
+        1..5_u64,
+        0..30_usize,
+    );
+    let config = ProptestConfig {
+        cases: 48,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    };
+    let body = |(events, (mask, (from, to)), n, split): Case| -> Result<(), TestCaseError> {
+        let mut m = Model::new();
+        let types: Vec<&str> = (TYPES.iter().enumerate())
+            .filter(|(i, _)| mask >> i & 1 == 1)
+            .map(|(_, t)| *t)
+            .collect();
+        let time = |s: Option<u64>| s.map(|s| UtcNanos::parse(&at(s)).unwrap());
+        let q = TimelineQuery {
+            types: (mask != 0).then_some(&types[..]),
+            from: time(from),
+            to: time(to),
+            ..query(&[], n)
+        };
+        let (mut served, mut after, mut clock) = (Vec::new(), Vec::new(), 3);
+        for (i, &(which, mark, step, back)) in events.iter().enumerate() {
+            if i == split.min(events.len() - 1) {
+                let (early, next, _) = pages(&m, &q, n, after, 2)?;
+                (served, after) = (early, next);
+            }
+            clock += step;
+            m.put(which, mark, clock - back);
+        }
+        let (rest, last, more) = pages(&m, &q, n, after, 200)?;
+        served.extend(rest);
+        prop_assert!(!more, "the walk ends within 200 pages");
+        let heads = timeline().map(|s| m.j.fx.appended[&s].event_ids.len() as u64);
+        prop_assert_eq!(last, cursors(&heads), "the last page is at every head");
+        let mut matching = 0;
+        for s in timeline() {
+            let list = &m.j.fx.appended[&s].event_ids;
+            let want: Vec<&String> = list.iter().filter(|id| matches(&q, &m.seen[*id])).collect();
+            let got: Vec<&String> = served.iter().filter(|id| list.contains(id)).collect();
+            prop_assert_eq!(&got, &want, "{} once each, in seq order", s);
+            matching += want.len();
+        }
+        prop_assert_eq!(served.len(), matching, "nothing else is served");
+        let (fresh, _, _) = pages(&m, &q, n, Vec::new(), 200)?;
+        prop_assert_eq!(fresh, expect(&m, &q, u64::MAX).0, "pages are one merge");
+        Ok(())
+    };
+    if let Err(failure) = TestRunner::new(config).run(&strategy, body) {
+        panic!("{failure}");
+    }
+}
+
+/// AU-1 and DEC-760 item 4: an unknown agent, one only another workspace holds (`WS_B`, or one whose
+/// segment has `WS_A`'s as a prefix), and a cursor naming any stream that is not one of this
+/// timeline's, alone or beside a valid one, are the one `NotFound`; a valid cursor is not.
+#[test]
+#[ignore = "pending E12-2"]
+fn foreign_and_unknown_ids_are_the_one_not_found() {
+    let mut j = Journal::new();
+    let [a, trap, b] = workspaces();
+    for (ws, name) in [
+        (&a, "AG2"),
+        (&trap, ME),
+        (&trap, "AGP"),
+        (&b, ME),
+        (&b, "AGB"),
+    ] {
+        j.open_agent(ws, name);
+    }
+    for agent_id in ["AG9", "AGP", "AGB", "", "AG1x", "agent:x"] {
+        let q = TimelineQuery {
+            agent_id,
+            ..query(&[], 10)
+        };
+        assert_eq!(j.read(&q), Err(AuditError::NotFound), "agent {agent_id:?}");
+    }
+    let own = StreamCursor {
+        stream_id: stream(Some("ACCT2")),
+        seq: 1,
+    };
+    for stream_id in [
+        ctl(&a),
+        format!("agent:{a}:AG2"),
+        format!("agent:{trap}:{ME}"),
+        acct(&trap, "ACCT1"),
+        format!("agent:{b}:{ME}"),
+        acct(&b, "ACCT1"),
+        acct(&a, "ACCT3"),
+        format!("{}x", stream(None)),
+        "garbage".to_owned(),
+    ] {
+        let foreign = StreamCursor { stream_id, seq: 0 };
+        for after in [vec![foreign.clone()], vec![own.clone(), foreign.clone()]] {
+            let q = query(&after, 10);
+            assert_eq!(j.read(&q), Err(AuditError::NotFound), "{after:?}");
+        }
+    }
+    assert!(j.read(&query(&[own], 10)).is_ok());
 }
