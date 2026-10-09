@@ -27,10 +27,19 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
+interface HeroLayout {
+  figure: { top: number; left: number; width: number; height: number };
+  pill: { top: number; left: number; height: number };
+  line: number;
+  chart: { top: number; left: number; width: number; height: number };
+}
+
 declare global {
   interface Window {
     /** What a Number Flow figure draws: its shadow text, less the digits rolled out of view. */
     drawnFigure(host: Element): string;
+    /** Where the figure, the pill, the pill's line and the chart sit, in page coordinates. */
+    heroLayout(value: string): HeroLayout;
   }
 }
 
@@ -42,6 +51,19 @@ async function open(page: Page, path: string, width: number) {
       for (let n = walk.nextNode(); n; n = walk.nextNode()) if (!n.parentElement!.closest("style, [inert]")) text += n.textContent;
       return text;
     };
+    window.heroLayout = (value) => {
+      const figure = document.querySelector(value)!;
+      const section = figure.closest("section")!;
+      const box = figure.getBoundingClientRect();
+      const pill = document.querySelector("[data-slot=hero-change]")!.getBoundingClientRect();
+      const chart = section.querySelector("[data-slot=chart-canvas]")!.getBoundingClientRect();
+      return {
+        figure: { top: box.top + window.scrollY, left: box.left, width: box.width, height: box.height },
+        pill: { top: pill.top + window.scrollY, left: pill.left, height: pill.height },
+        line: document.querySelector("[data-slot=hero-change]")!.parentElement!.getBoundingClientRect().height,
+        chart: { top: chart.top + window.scrollY, left: chart.left, width: chart.width, height: chart.height },
+      };
+    };
   });
   await page.setViewportSize({ width, height: 900 });
   await page.goto(path, { waitUntil: "networkidle" });
@@ -49,26 +71,18 @@ async function open(page: Page, path: string, width: number) {
   await expect(page.locator("[part~=fraction]").first()).toBeVisible();
 }
 
-/** Hovers the hero chart at a fraction of its width and returns what the figure reads then. */
-async function scrubAt(page: Page, canvas: Locator, fraction: number) {
-  const box = (await canvas.boundingBox())!;
+type Box = NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>;
+
+/**
+ * Hovers the hero chart at a fraction of its width. The chart's box is read once per page by the
+ * caller: nothing on the page moves while it is scrubbed, which the scrub test asserts.
+ */
+async function scrubAt(page: Page, box: Box, fraction: number) {
   await page.mouse.move(box.x + Math.max(1, box.width * fraction), box.y + box.height / 2);
 }
 
 async function layout(page: Page, value: string) {
-  return page.evaluate((value) => {
-    const figure = document.querySelector(value)!;
-    const section = figure.closest("section")!;
-    const box = figure.getBoundingClientRect();
-    const pill = document.querySelector("[data-slot=hero-change]")!.getBoundingClientRect();
-    const chart = section.querySelector("[data-slot=chart-canvas]")!.getBoundingClientRect();
-    return {
-      figure: { top: box.top + window.scrollY, left: box.left, width: box.width, height: box.height },
-      pill: { top: pill.top + window.scrollY, left: pill.left, height: pill.height },
-      line: document.querySelector("[data-slot=hero-change]")!.parentElement!.getBoundingClientRect().height,
-      chart: { top: chart.top + window.scrollY, left: chart.left, width: chart.width, height: chart.height },
-    };
-  }, value);
+  return page.evaluate((value) => window.heroLayout(value), value);
 }
 
 for (const { name, path, value } of HEROES) {
@@ -114,7 +128,7 @@ for (const { name, path, value } of HEROES) {
     expect(text).toMatch(/^−?\$[\d,]+\.\d{2}$/);
     await expect(figure).toMatchAriaSnapshot(`- paragraph: "${text}"`);
     const canvas = page.locator(`section:has(${value}) [data-slot=chart-canvas]`);
-    await scrubAt(page, canvas, 0.4);
+    await scrubAt(page, (await canvas.boundingBox())!, 0.4);
     await expect(figure.locator("[data-instant]")).toHaveCount(1);
     const scrubbed = (await figure.locator(".sr-only").textContent())!;
     await expect(figure).toMatchAriaSnapshot(`- paragraph: "${scrubbed}"`);
@@ -129,17 +143,22 @@ for (const { name, path, value } of HEROES) {
       await canvas.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
       const now = (await figure.locator(".sr-only").textContent())!;
       const still = await layout(page, value);
+      const box = (await canvas.boundingBox())!;
       const seen = new Set<string>();
       for (let i = 0; i <= 24; i++) {
-        await scrubAt(page, canvas, PLOT * (i / 24));
+        await scrubAt(page, box, PLOT * (i / 24));
         await expect(figure.locator("[data-instant]"), `${width} px at ${i}/24`).toHaveCount(1);
-        const read = await figure.evaluate((el) => ({
-          spoken: el.querySelector(".sr-only")!.textContent,
-          drawn: window.drawnFigure(el.querySelector("number-flow-react")!),
-        }));
+        const read = await figure.evaluate(
+          (el, value) => ({
+            spoken: el.querySelector(".sr-only")!.textContent,
+            drawn: window.drawnFigure(el.querySelector("number-flow-react")!),
+            layout: window.heroLayout(value),
+          }),
+          value,
+        );
         expect(read.drawn, `${width} px at ${i}/24`).toBe(read.spoken);
         seen.add(read.spoken!);
-        expect(await layout(page, value), `${width} px at ${i}/24`).toEqual(still);
+        expect(read.layout, `${width} px at ${i}/24`).toEqual(still);
       }
       expect(seen.size, `${width} px`).toBeGreaterThan(5);
       await page.mouse.move(0, 0);
@@ -163,20 +182,31 @@ test("the change sits on a pill tinted by its sign, and colour-blind friendly wh
       loss: { bg: await tokenColor(page, cvd ? "--loss-cvd-soft" : "--loss-soft"), fg: await tokenColor(page, cvd ? "--loss-cvd" : "--loss"), word: "loss" },
       flat: { bg: await tokenColor(page, "--muted"), fg: await tokenColor(page, "--foreground"), word: "no change" },
     };
+    const box = (await canvas.boundingBox())!;
     const seen = new Set<string>();
     for (const fraction of Array.from({ length: 41 }, (_, i) => PLOT * (i / 40))) {
-      await scrubAt(page, canvas, fraction);
-      const tone = (await pill.getAttribute("data-tone")) as keyof typeof want;
-      seen.add(tone);
+      await scrubAt(page, box, fraction);
+      /** The tone, its paint and its word, read together so all three come from the same render. */
       const paint = await pill.evaluate((el) => {
         const s = getComputedStyle(el);
-        return { bg: s.backgroundColor, fg: s.color, radius: parseFloat(s.borderTopLeftRadius), height: el.getBoundingClientRect().height, image: s.backgroundImage };
+        return {
+          tone: el.getAttribute("data-tone"),
+          bg: s.backgroundColor,
+          fg: s.color,
+          radius: parseFloat(s.borderTopLeftRadius),
+          height: el.getBoundingClientRect().height,
+          image: s.backgroundImage,
+          direction: (el.querySelector("[data-direction]")?.textContent ?? "").replace(/\s+/g, " "),
+        };
       });
+      const tone = paint.tone as keyof typeof want;
+      seen.add(tone);
+      expect(Object.keys(want), `the tone at ${fraction}`).toContain(tone);
       expect(paint.bg, `${tone} at ${fraction}`).toBe(want[tone].bg);
       expect(paint.fg, `${tone} at ${fraction}`).toBe(want[tone].fg);
       expect(paint.image).toBe("none");
       expect(paint.radius).toBeGreaterThanOrEqual(paint.height / 2);
-      await expect(pill.locator("[data-direction]")).toContainText(want[tone].word);
+      expect(paint.direction, `${tone} at ${fraction}`).toContain(want[tone].word);
     }
     expect(seen).toContain("gain");
     expect(seen).toContain("loss");
