@@ -3951,10 +3951,10 @@ mod tests {
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency,
         FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
         MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package,
-        PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR, TestOutcome,
-        actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
-        ci, ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
-        feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV,
+        TestOutcome, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
+        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
+        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
         forbidden_reached, generated_pending_markers, has_pending_tests, is_pending_marker,
         is_stub_function, layer_problems, lint, listed_mutant_counts, live_feature_problems,
         live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo,
@@ -7190,12 +7190,13 @@ mod tests {
             .iter()
             .map(|line| line.trim().trim_start_matches("- ").to_owned())
             .collect();
+        let shard_env = format!("{SCHEMA_SHARD_ENV}: ${{{{ matrix.shard }}}}");
         for line in [
             "if: ${{ !github.event.pull_request.draft }}",
             "timeout-minutes: 10",
             "fail-fast: false",
             "shard: [\"0/3\", \"1/3\", \"2/3\"]",
-            "MANDATE_SCHEMA_SHARD: ${{ matrix.shard }}",
+            shard_env.as_str(),
             "run: cargo xtask ci schema-mutants",
         ] {
             assert!(
