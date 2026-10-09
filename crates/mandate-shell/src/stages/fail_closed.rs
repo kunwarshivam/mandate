@@ -7,11 +7,16 @@
 //!
 //! These cases pass today and carry no pending marker: today every stage really does refuse.
 
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use mandate_backtest::Signal;
 use mandate_canon::Value;
+use mandate_domain::{CapabilityProfile, ProfileError};
+use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError, FoldedEvent};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_risk::{Check, CheckOutcome, Verdict};
 use mandate_runtime::{
@@ -22,9 +27,9 @@ use mandate_runtime::{
 use super::doubles::{
     FixedClassifier, FixedGate, FixedReconciler, FixedSignal, FixtureMandate, LedgerJournal,
     OneShare, PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World,
-    account_stream, agent_stream, passed_checks, setup, stub,
+    account_stream, agent_stream, equities_only, passed_checks, setup, stub,
 };
-use super::{ExitPath, JournalWriter, MandateSource, Protection, Stage};
+use super::{Connector, Executor, ExitPath, JournalWriter, MandateSource, Protection, Stage};
 use crate::adapters::{Disconnected, Sources, over};
 use crate::error::{Cause, ShellError};
 use crate::tracer::{Report, Session, run};
@@ -1088,5 +1093,103 @@ fn no_defaulting_combinator_or_wildcard_arm_in_the_crate() -> Result<(), String>
             );
         }
     }
+    Ok(())
+}
+
+/// The scripted broker, declaring `profile` as its capability profile.
+struct Declaring {
+    inner: ScriptedConnector,
+    profile: CapabilityProfile,
+}
+
+impl Connector for Declaring {
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        Ok(self.profile.clone())
+    }
+
+    fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+        self.inner.call(request)
+    }
+}
+
+/// The paper executor, logging each reset, fold, profile handed over, and start.
+struct Recording {
+    inner: PaperExecutor,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl Executor for Recording {
+    fn reset(&mut self) -> Result<(), Cause> {
+        self.log.borrow_mut().push("reset".to_owned());
+        self.inner.reset()
+    }
+
+    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
+        let entry = format!("profile {}", profile.content_hash().to_hex());
+        self.log.borrow_mut().push(entry);
+        Ok(())
+    }
+
+    fn step(
+        &mut self,
+        input: mandate_executor::Input,
+    ) -> Result<Vec<mandate_executor::Effect>, Cause> {
+        if matches!(input, mandate_executor::Input::Started(_)) {
+            self.log.borrow_mut().push("started".to_owned());
+        }
+        self.inner.step(input)
+    }
+
+    fn committed(&mut self, event: &FoldedEvent) -> Result<(), Cause> {
+        self.log.borrow_mut().push("fold".to_owned());
+        self.inner.committed(event)
+    }
+}
+
+/// DEC-838 item 5: every start, the first run's and a restart's alike, hands the executor the
+/// connector's own capability profile once, after the replay's fold and before `Started`, so
+/// protection never reads a profile the broker did not declare.
+#[test]
+#[ignore = "pending E7-23"]
+fn every_start_hands_the_executor_the_connectors_profile_after_the_fold() -> Result<(), String> {
+    let world = World::default();
+    let profile = equities_only()?;
+    let log = Rc::new(RefCell::new(Vec::new()));
+    for _ in 0..2 {
+        let mut stages = world.stages();
+        stages.connector = Box::new(Declaring {
+            inner: ScriptedConnector {
+                world: world.clone(),
+                script: Script::Accept,
+            },
+            profile: profile.clone(),
+        });
+        stages.executor = Box::new(Recording {
+            inner: PaperExecutor {
+                world: world.clone(),
+                seen: BTreeSet::new(),
+                inverted: false,
+                last_client_order_id: None,
+            },
+            log: Rc::clone(&log),
+        });
+        let _ = run_with(&mut stages)?;
+    }
+    let log = log.borrow();
+    let handed = format!("profile {}", profile.content_hash().to_hex());
+    let starts: Vec<&str> = log
+        .iter()
+        .map(String::as_str)
+        .filter(|entry| *entry != "fold")
+        .collect();
+    let one_start = ["reset", handed.as_str(), "started"];
+    assert_eq!(starts, [one_start, one_start].concat(), "{log:?}");
+    let folded_after = log
+        .windows(2)
+        .any(|pair| matches!(pair, [first, next] if *first == handed && next != "started"));
+    assert!(
+        !folded_after,
+        "nothing is folded between the profile and the start: {log:?}"
+    );
     Ok(())
 }
