@@ -11,7 +11,6 @@ use mandate_time::UtcNanos;
 use serde::de::{DeserializeOwned, Error as _, IgnoredAny, Unexpected};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::Unimplemented;
 use crate::problem::Violation;
 
 /// The request body `body` as `T`, or every way it fails, each as one [`Violation::Schema`] with a
@@ -185,8 +184,8 @@ pub trait Validate {
     fn validate(&self) -> Result<(), Refused>;
 }
 
-/// [`Validate`] for shapes: `none` whose serde types enforce every rule, `checked` whose
-/// [`Rules`] hold the rest, and `pending` stubbed until E10-10.
+/// [`Validate`] for shapes: `none` whose serde types enforce every rule, and `checked` whose
+/// [`Rules`] hold the rest.
 macro_rules! rules {
     (none: $($shape:ty),+) => {
         $(impl $crate::wire::Validate for $shape {
@@ -201,14 +200,6 @@ macro_rules! rules {
                 let mut check = $crate::wire::Check::default();
                 $crate::wire::Rules::rules(self, "", &mut check);
                 check.done()
-            }
-        })+
-    };
-    (pending: $($shape:ty),+) => {
-        $(impl $crate::wire::Validate for $shape {
-            fn validate(&self) -> Result<(), $crate::wire::Refused> {
-                let _ = self;
-                Err($crate::wire::Refused::Unimplemented($crate::Unimplemented))
             }
         })+
     };
@@ -242,14 +233,14 @@ impl Check {
     }
 }
 
-/// A JSON pointer (RFC 6901), the root `""` among them, whose segments hold no control character
-/// `U+0000` to `U+001F`.
-pub(crate) fn is_pointer(text: &str) -> bool {
+/// A JSON pointer (RFC 6901) whose segments hold no control character `U+0000` to `U+001F`; the
+/// root `""` is one only where `root` allows it.
+pub(crate) fn is_pointer(text: &str, root: bool) -> bool {
     let escapes = text
         .split('~')
         .skip(1)
         .all(|after| after.starts_with(['0', '1']));
-    let shaped = text.is_empty() || text.starts_with('/');
+    let shaped = (root && text.is_empty()) || text.starts_with('/');
     shaped && escapes && !text.chars().any(|c| c < ' ')
 }
 
@@ -324,8 +315,6 @@ pub struct EncodeError;
 /// Why [`decode`] refused a body.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refused {
-    #[error(transparent)]
-    Unimplemented(Unimplemented),
     #[error("the body is invalid")]
     Invalid { violations: Vec<Violation> },
 }

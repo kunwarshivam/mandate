@@ -13,6 +13,8 @@
 //! - **One callback per login** (O1b, DEC-855): fresh PKCE and an exact single-use `state`;
 //!   secrets are [`SecretString`]s only, never printed or in an error (LT-9).
 
+use std::time::Duration;
+
 use reqwest::header::{ACCEPT, CONTENT_TYPE, WWW_AUTHENTICATE};
 use reqwest::{RequestBuilder, Response, StatusCode, Url};
 use secrecy::SecretString;
@@ -24,7 +26,8 @@ use crate::endpoint::{Build, PinnedEndpoint, scheme_allowed};
 use crate::error::McpError;
 use crate::frame;
 use crate::transport::{
-    PROTOCOL_VERSION, TransportConfig, classify, http_client, is_visible_ascii, read_capped,
+    Monotonic, PROTOCOL_VERSION, TransportConfig, classify, http_client, is_visible_ascii,
+    read_capped,
 };
 
 /// The JSON-RPC id of the unauthenticated `initialize` that draws the challenge.
@@ -158,7 +161,7 @@ pub struct PendingLogin {
 
 /// The code the callback carried, with the verifier and client that redeem it once at the token
 /// endpoint (O1b part 2).
-#[cfg_attr(not(test), allow(dead_code, reason = "O1b part 2 reads them"))]
+#[cfg_attr(not(test), allow(dead_code, reason = "the exchange reads them"))]
 #[derive(Debug)]
 pub struct AuthorizationCode {
     pub(crate) code: SecretString,
@@ -180,7 +183,51 @@ impl PendingLogin {
     }
 }
 
+/// A login's lifetime from when it began; a callback at or after it is spent (DEC-691 item 6).
+pub const LOGIN_LIFETIME: Duration = Duration::from_secs(600);
+
+/// The token, a [`SecretString`] only: never printed, displayed or written (LT-9, DEC-861).
+#[cfg_attr(not(test), allow(dead_code, reason = "the MCP session (O2) reads it"))]
+#[derive(Debug)]
+pub struct AccessToken {
+    pub(crate) secret: SecretString,
+}
+
+/// The listener on the loopback redirect: `127.0.0.1` only, on a port the system picks.
+#[cfg_attr(not(test), allow(dead_code, reason = "O1b's implementation reads it"))]
+#[derive(Debug)]
+pub struct CallbackListener {
+    pub(crate) socket: tokio::net::TcpListener,
+}
+
+impl CallbackListener {
+    /// Binds `127.0.0.1:0`, never another address, and returns the redirect naming its port.
+    pub async fn bind() -> Result<(Self, LoopbackRedirect), McpError> {
+        Err(McpError::Unimplemented { story: "E7-24" })
+    }
+
+    /// One request, then closed; `clock` started when `login` began (DEC-861 items 1 to 3).
+    pub async fn accept(
+        self,
+        login: PendingLogin,
+        clock: &dyn Monotonic,
+    ) -> Result<AuthorizationCode, McpError> {
+        let _ = (login, clock);
+        Err(McpError::Unimplemented { story: "E7-24" })
+    }
+}
+
 impl AuthServer {
+    /// The code exchange (RFC 6749 §4.1.3, RFC 7636 §4.5; DEC-861 items 4 and 5).
+    pub async fn exchange(
+        &self,
+        code: AuthorizationCode,
+        config: &TransportConfig,
+    ) -> Result<AccessToken, McpError> {
+        let _ = (code, config);
+        Err(McpError::Unimplemented { story: "E7-24" })
+    }
+
     /// An unauthenticated `POST` of `initialize` to the endpoint, which must answer `401`; the
     /// Bearer challenge's `resource_metadata` URL, or without one the endpoint's RFC 9728 well-known
     /// URL, read from the pinned MCP host only; then the first of its `authorization_servers`,

@@ -25,7 +25,7 @@ use mandate_shell::adapters::{Sources, production};
 use mandate_shell::paper::load_contexts;
 use mandate_shell::stages::Stages;
 use mandate_shell::{Cause, Report, Setup, ShellError, Watch, close_window_bound};
-use mandate_shell::{poll_interval, run_observed_watched};
+use mandate_shell::{poll_interval, production_cycle, run_observed_watched};
 use mandate_spec::validate::RegisteredModel;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
@@ -66,11 +66,20 @@ impl Pause for Clock {
     }
 
     async fn pause(&self, duration: Duration) {
+        let taken = self.pauses.borrow().len();
+        assert!(
+            taken < PAUSE_BUDGET,
+            "the watch paused more than its budget of {PAUSE_BUDGET} pauses: a loop that never ends"
+        );
         self.pauses.borrow_mut().push(duration);
         let step = i64::try_from(duration.as_secs()).unwrap();
         self.secs.set(self.secs.get() + step);
     }
 }
+
+/// More pauses than any case here needs (the longest takes four), so a watch that never ends
+/// fails at once rather than running until the harness times it out (#1041 review).
+const PAUSE_BUDGET: usize = 20;
 
 /// A paper broker that accepts the one submission and then reads it back as `accepted`, or as
 /// `canceled` once deleted. It logs every request after the submission with the clock's second.
@@ -200,12 +209,25 @@ fn observed(now: &str) -> (Observation, ModelOutput, BTreeMap<Digest, Vec<u8>>) 
 /// One watched run at `now`, bounded at 15:50, at the reviewed five-second interval.
 struct Watched {
     outcome: Result<Report, ShellError>,
-    stages: Stages,
+    /// The run's stages, which only the free function hands back: the production door keeps its
+    /// own (DEC-475).
+    stages: Option<Stages>,
     broker: Broker,
     clock: Clock,
 }
 
+/// The two ways into the watch: the free function and the production door.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Door {
+    Function,
+    Cycle,
+}
+
 fn watched(now: &str, place: bool) -> Watched {
+    watched_through(now, place, Door::Function)
+}
+
+fn watched_through(now: &str, place: bool, door: Door) -> Watched {
     let day = Date::parse(&now[..10]).unwrap();
     let artifacts = stream().artifacts_on(day).unwrap();
     let deployed = artifacts.deployment("ws_spy".into(), "agent_spy".into(), "acct_spy".into());
@@ -256,8 +278,20 @@ fn watched(now: &str, place: bool) -> Watched {
         bound: at(BOUND),
         interval: Duration::from_secs(5),
     };
-    let mut stages = production(sources);
-    let outcome = run_observed_watched(&mut stages, &setup, observation, output, &watch);
+    let (outcome, stages) = match door {
+        Door::Function => {
+            let mut stages = production(sources);
+            let outcome = run_observed_watched(&mut stages, &setup, observation, output, &watch);
+            (outcome, Some(stages))
+        }
+        Door::Cycle => {
+            let mut cycle = production_cycle(sources, setup);
+            (
+                cycle.run_observed_watched(observation, output, &watch),
+                None,
+            )
+        }
+    };
     Watched {
         outcome,
         stages,
@@ -279,7 +313,8 @@ impl Watched {
     /// Whether the account stream records the entry's `pending_cancel`.
     fn cancel_journaled(&self) -> bool {
         let id = self.broker.submitted.borrow().clone().unwrap();
-        let rows: Vec<StoredEvent> = self.stages.journal.read("acct:ws_spy:acct_spy").unwrap();
+        let stages = self.stages.as_ref().unwrap();
+        let rows: Vec<StoredEvent> = stages.journal.read("acct:ws_spy:acct_spy").unwrap();
         rows.iter().any(|row| {
             let body = String::from_utf8_lossy(&row.body);
             row.event_type == "OrderStateChanged"
@@ -431,6 +466,28 @@ fn a_working_entry_is_cancelled_at_the_bound_through_the_executor() {
         reads.last(),
         Some(&(bound + 5)),
         "the next wake reads it canceled: {reads:?}"
+    );
+    let other = run.at(|m, path| !read(m, path) && !delete(m, path));
+    assert!(other.is_empty(), "only reads and the cancel: {other:?}");
+}
+
+/// The same watch through the paper adapter's one door, `ProductionCycle::run_observed_watched`
+/// (FT-1, #1041 review): one submission, the one `DELETE` at the bound, the first read five
+/// seconds in, the last read the wake after the cancel, and nothing else sent. The door keeps its
+/// stages, so the journal is the free function's test's to read.
+#[test]
+#[ignore = "pending E7-19"]
+fn the_production_door_watches_as_the_function_does() {
+    let run = watched_through(LATE, true, Door::Cycle);
+    assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
+    let bound = at(BOUND).secs();
+    assert_eq!(run.at(delete), [bound], "one cancel, at the bound");
+    let reads = run.at(read);
+    assert_eq!(reads.first(), Some(&(bound - 15)), "the first wake");
+    assert_eq!(
+        reads.last(),
+        Some(&(bound + 5)),
+        "the wake after the cancel: {reads:?}"
     );
     let other = run.at(|m, path| !read(m, path) && !delete(m, path));
     assert!(other.is_empty(), "only reads and the cancel: {other:?}");

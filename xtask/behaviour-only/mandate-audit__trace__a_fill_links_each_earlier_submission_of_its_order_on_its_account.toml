@@ -1,0 +1,8 @@
+file = "crates/mandate-audit/tests/trace.rs"
+test = "a_fill_links_each_earlier_submission_of_its_order_on_its_account"
+reason = """
+E12-1 slice A2b (DEC-761, DEC-772, DEC-775). The causal trace is already implemented for A2's link
+rows (#1003), so there is no stub to stop at: until A2b's implementation, `TraceRead::trace` does
+not follow this row, which is the behaviour the test fails on. A2b's implementation deletes this
+file with the test's `#[ignore]` line.
+"""

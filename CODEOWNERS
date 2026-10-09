@@ -53,6 +53,7 @@
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-mcp/        @kunwarshivam
+/crates/mandate-robinhood/  @kunwarshivam
 /crates/mandate-connections/ @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
