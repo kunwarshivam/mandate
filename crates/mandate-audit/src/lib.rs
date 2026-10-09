@@ -21,6 +21,13 @@ use mandate_canon::Digest;
 use mandate_identity::Tenant;
 use mandate_journal::{MemoryJournal, StoredEvent, StreamId};
 
+mod trace;
+
+pub use trace::{
+    Author, Hop, HopStatus, MAX_DEPTH, MAX_HOPS, MAX_NODES, Quoted, QuotedContent, Trace,
+    TraceNode, TraceRead, Watermark,
+};
+
 /// The largest page (DEC-760 item 1).
 const MAX_LIMIT: u16 = 1000;
 
@@ -31,10 +38,14 @@ const DEFAULT_LIMIT: u16 = 100;
 const MAX_AFTER_SEQ: u64 = 9_007_199_254_740_991;
 
 /// Why an audit read returned nothing. `NotFound` carries no detail, so a foreign id and an absent
-/// one cannot be told apart by their error (API-9). The other variants are the 422 `invalid` of a
-/// query member that is not an id, which a read checks before it resolves any id (DEC-760 item 5).
+/// one cannot be told apart by their error (API-9). The two out-of-range variants are the 422
+/// `invalid` of a query member that is not an id, which a read checks before it resolves any id
+/// (DEC-760 item 5).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuditError {
+    /// The body of every stub in a tests PR (DEC-77).
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
     /// The stream or event is absent, malformed, or in another workspace (API-9).
     #[error("not found")]
     NotFound,
