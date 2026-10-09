@@ -1552,7 +1552,6 @@ fn found_showing(
 /// looks it up by our id first; an accepted `DELETE` is only a request taken, so the client reads
 /// the order back once, and the recorded `canceled` it reads is the confirmation.
 #[tokio::test]
-#[ignore = "pending E7-4"]
 async fn a_cancel_looks_the_order_up_then_deletes_it_by_the_broker_id() {
     for deleted in [204, 200] {
         let (client, transport) = serving(vec![
@@ -1580,7 +1579,6 @@ async fn a_cancel_looks_the_order_up_then_deletes_it_by_the_broker_id() {
 /// so the executor keeps the cancel unconfirmed (§5.4) and waits for Alpaca's own `canceled`. An
 /// order in `pending_cancel` can still fill.
 #[tokio::test]
-#[ignore = "pending E7-4"]
 async fn an_accepted_cancel_whose_order_is_not_yet_canceled_answers_the_order_read_back() {
     let shown = [
         ("pending_cancel", "0"),
@@ -1627,7 +1625,6 @@ async fn an_accepted_cancel_whose_order_is_not_yet_canceled_answers_the_order_re
 /// failing broker says nothing about the order, so the cancel's outcome is unknown, never
 /// `CancelAccepted`, and nothing is deleted again.
 #[tokio::test]
-#[ignore = "pending E7-4"]
 async fn a_failed_read_back_after_an_accepted_cancel_is_unknown_never_confirmed() {
     let failed = [
         ("timeout", Err(mandate_alpaca::TransportError::Timeout)),

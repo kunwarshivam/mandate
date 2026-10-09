@@ -24,7 +24,7 @@ import type {
 } from "@/fixtures/types";
 import { LOSS_CEILING } from "@/components/new-agent/draft";
 import { type Dec, ONE, ZERO, abs, add, dec, div, fromInt, mul, sub, toDecimalString } from "./decimal";
-import { mandateVersion, unallocatedUsd } from "./fixture-journey";
+import { INDEPENDENT_APPROVAL_RULE, independentApprovalRequired, mandateVersion, unallocatedUsd } from "./fixture-journey";
 import { fixtureUlid } from "./fixture-ids";
 import { percent, price, quantity, seconds, usd } from "./format";
 import { changeLabel, changeValue } from "./mandate-paths";
@@ -519,12 +519,46 @@ export interface Proposal extends Diff {
   refusals: Refusal[];
 }
 
-/** Everything that stops a version from applying now, from validation and §5.1. */
+export { INDEPENDENT_APPROVAL_RULE, independentApprovalRequired };
+
+/**
+ * §4.3 and V-047: under `independent_approval_required` a version that is not risk-reducing needs a
+ * user other than the requester, and nothing here can ask one yet, so it is refused rather than
+ * confirmed with a passkey alone. With fewer than two people who can approve, V-047 refuses a
+ * neutral version too and lets only a risk-reducing one through (DEC-444). The approver count is a
+ * lower bound on the workspace's users; with two or more, a neutral version needs no second user.
+ *
+ * `approver_users` stands in for V-047's user count as a lower bound on the workspace's active
+ * members. That holds only if the served count is of active approver members alone: V-047 counts no
+ * pending invitation and no deactivated account, so a count that included either could let a
+ * neutral version through in a workspace with one real user. Fewer than two approvers refuses even
+ * where other active members exist, which only adds refusals.
+ */
+function independentApproval(ws: Workspace, classification: ChangeClass | null): Refusal | null {
+  if (!independentApprovalRequired(ws) || classification === null || classification === "risk_reducing") return null;
+  if (ws.approver_users < 2) {
+    return {
+      rule: INDEPENDENT_APPROVAL_RULE,
+      text: "This workspace needs a second person to approve any change that doesn't lower risk, and no second person can approve in it, so only a change that lowers risk can be confirmed.",
+    };
+  }
+  if (classification === "risk_increasing") {
+    return {
+      rule: INDEPENDENT_APPROVAL_RULE,
+      text: "This workspace needs a second person to approve a change that raises risk, and that approval can't be asked for here yet, so a passkey alone can't confirm it.",
+    };
+  }
+  return null;
+}
+
+/** Everything that stops a version from applying now, from validation, §4.3's independent approval and §5.1. */
 function refusalsFor(ws: Workspace, agent: Agent, d: Diff): Refusal[] {
   if (agent.mode === "stopped") return [{ rule: "stopped", text: `${agent.label} is stopped, and a stopped agent's mandate does not change.` }];
   if (d.changes.length === 0) return [];
   const room = add(unallocatedUsd(ws), dec(agent.mandate.capital.allocation_usd));
   const out = validate(d.mandate, { roomUsd: room, approverUsers: ws.approver_users });
+  const independence = independentApproval(ws, d.classification);
+  if (independence) out.push(independence);
   const scaled = allocationChange(agent, d.mandate);
   if (scaled && !scaled.ok) out.push({ rule: "§5.1", text: scaled.reason });
   return out;

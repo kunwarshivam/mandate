@@ -114,6 +114,24 @@ for (const width of [390, 1440]) {
   });
 }
 
+/**
+ * Critique C-22 found the chart blank in light and dark alike, on the normal, paused and
+ * reconciliation Homes at 1440px: captures taken before hydration drew the canvas, not a paint that
+ * stayed blank. Each of those Homes must show its line once the page has loaded.
+ */
+for (const scenario of ["paused", "reconciliation"]) {
+  test(`Home's account chart paints on the theme's card under the ${scenario} scenario at 1440px`, async ({ page }, testInfo) => {
+    const scheme = schemeOf(testInfo.project);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await watch(page);
+    await page.goto(`/?scenario=${scenario}`);
+    const paint = await painted(page);
+    expect(paint.mode).toBe(scheme);
+    expect(paint.made, "one chart drawn on load").toBe(1);
+    expect(paint.wrongTheme, "no frame painted on the other theme's card").toBe(0);
+  });
+}
+
 test("switching the theme just after the chart appears redraws it, painted, in the other theme", async ({ page }, testInfo) => {
   const scheme = schemeOf(testInfo.project);
   const other: Scheme = scheme === "dark" ? "light" : "dark";

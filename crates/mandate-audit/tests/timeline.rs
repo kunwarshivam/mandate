@@ -168,7 +168,6 @@ fn walk(j: &Journal, q: &TimelineQuery<'_>, bound: usize) -> Vec<String> {
 /// excluded heads still take their turn, so the served order is the same order, filtered; a merge
 /// over filtered heads would serve the agent's 15:00:01 before ACCT1's 15:00:03.
 #[test]
-#[ignore = "pending E12-2"]
 fn a_clock_step_back_keeps_each_stream_in_seq_order() {
     let mut j = Journal::new();
     let (agent, mode) = (stream(None), mode());
@@ -194,7 +193,6 @@ fn a_clock_step_back_keeps_each_stream_in_seq_order() {
 /// nothing still reaches every head, `more` false (DEC-777 item 4), and `next` names every stream
 /// in ascending `stream_id` (DEC-777 item 5).
 #[test]
-#[ignore = "pending E12-2"]
 fn excluded_events_are_still_consumed() {
     let mut j = Journal::new();
     for s in 1..4 {
@@ -234,7 +232,6 @@ fn excluded_events_are_still_consumed() {
 /// next page resumes there. Merge: the three `StreamOpened` at 14:00 (ACCT1, ACCT2, agent), then
 /// each second ACCT1's mark (not the agent's) before the agent's observation.
 #[test]
-#[ignore = "pending E12-2"]
 fn a_page_holds_exactly_limit_events_while_more_match() {
     let mut j = Journal::new();
     let mut mine = vec![j.opened(&stream(None))];
@@ -255,7 +252,6 @@ fn a_page_holds_exactly_limit_events_while_more_match() {
 /// serving nothing, `more` true, ACCT2 and the agent's stream named at 0. The next page resumes
 /// the same merge: ACCT1's last mark and the agent's event behind it, then the `StreamOpened`s.
 #[test]
-#[ignore = "pending E12-2"]
 fn one_page_consumes_at_most_ten_thousand_events_per_stream() {
     let mut j = Journal::new();
     let acct1 = stream(Some("ACCT1"));
@@ -468,7 +464,6 @@ const TYPES: [&str; 4] = [
 /// each stream's matching events come once each in `seq` order, nothing else comes, and the walk
 /// ends at every head; a fresh walk serves the one unbounded merge, filtered.
 #[test]
-#[ignore = "pending E12-2"]
 fn every_walk_serves_each_matching_event_once_in_merge_order() {
     let event = (0..3_usize, any::<bool>(), 0..2_u64, 0..4_u64);
     let bounds = (
@@ -535,7 +530,6 @@ fn every_walk_serves_each_matching_event_once_in_merge_order() {
 /// segment has `WS_A`'s as a prefix), and a cursor naming any stream that is not one of this
 /// timeline's, alone or beside a valid one, are the one `NotFound`; a valid cursor is not.
 #[test]
-#[ignore = "pending E12-2"]
 fn foreign_and_unknown_ids_are_the_one_not_found() {
     let mut j = Journal::new();
     let [a, trap, b] = workspaces();
@@ -683,7 +677,6 @@ fn served(j: &Journal) -> (Vec<String>, Vec<StreamCursor>) {
 /// make nothing the agent's. A causation link counts only into the agent's own stream. Everything
 /// else, marks among them, is consumed unserved, so `next` ends at every head.
 #[test]
-#[ignore = "pending E12-2"]
 fn account_events_are_the_agents_by_dec_764() {
     let mut j = Journal::new();
     let [a, trap, _] = workspaces();
@@ -747,7 +740,6 @@ fn account_events_are_the_agents_by_dec_764() {
 /// after that page, never bring them back: the next page serves only the new records. A fresh walk,
 /// whose snapshot holds those records, serves both, though their links come later in `seq`.
 #[test]
-#[ignore = "pending E12-2"]
 fn membership_lookups_read_only_the_pages_snapshot() {
     let mut j = Journal::new();
     let s1 = stream(Some("ACCT1"));
@@ -785,7 +777,6 @@ fn submitted_v1(order: &str) -> String {
 /// and each `causation_id` is null or names an account-stream event, so only the `client_order_id`
 /// rule is in play: a version-1 order is no one's, and neither it nor its fill is served.
 #[test]
-#[ignore = "pending E12-2"]
 fn order_links_are_version_two_and_read_every_timeline_stream() {
     let mut j = Journal::new();
     let s1 = stream(Some("ACCT1"));

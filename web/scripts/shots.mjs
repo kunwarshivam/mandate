@@ -57,8 +57,44 @@ const SCREENS = [
 /** Home and the agent under each stress scenario, desktop and light only. */
 const SCENARIOS = ["stale", "drawdown", "paused", "unreachable", "empty", "reconciliation", "unknown-order"];
 
+/**
+ * Waits until every chart on screen shows its line. The canvas is drawn on the client only, after
+ * hydration, which can finish seconds after `networkidle` on the dev server; a capture taken before
+ * then shows an empty chart host in either theme (critique C-22). The test is the one
+ * `e2e/chart-paint.spec.ts` uses: the plot's first pixel is its background, and more than 200
+ * pixels differ from it. A chart that never draws is captured as it is, with a warning.
+ */
+async function chartsDrawn(page, file) {
+  try {
+    await page.waitForFunction(
+      () => {
+        const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 3);
+        const hosts = [...document.querySelectorAll("[data-slot=chart-canvas]")].filter((el) => {
+          const box = el.getBoundingClientRect();
+          return box.width > 0 && box.height > 0;
+        });
+        return hosts.every((host) => {
+          const canvas = [...host.querySelectorAll("canvas")].find((c) => c.width > 0 && c.height > 0);
+          if (!canvas) return false;
+          const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+          if (d[3] !== 255) return false;
+          const background = [d[0], d[1], d[2]];
+          let marks = 0;
+          for (let p = 0; p < d.length && marks <= 200; p += 4) if (d[p + 3] === 255 && !near([d[p], d[p + 1], d[p + 2]], background)) marks++;
+          return marks > 200;
+        });
+      },
+      undefined,
+      { timeout: 30_000, polling: 100 },
+    );
+  } catch {
+    process.stdout.write(`${file}: a chart had not drawn its line after 30s; captured as it is\n`);
+  }
+}
+
 async function shoot(page, { path: url, overlay }, file) {
   await page.goto(`${BASE}${url}`, { waitUntil: "networkidle", timeout: 60_000 });
+  await chartsDrawn(page, path.basename(file));
   await page.waitForTimeout(900);
   if (overlay === "stop") {
     await page.getByRole("button", { name: /^Stop$/ }).first().click();

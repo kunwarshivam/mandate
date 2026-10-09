@@ -51,15 +51,6 @@ the owl, the rules and the record.
 - [x] **Landing windows.** Each window now cascades 28px down and right of the one in front,
       so a new one shows the last rather than covering it. "Try it." already had its button on
       the next line, and the windows scroll; the review's capture used overlay scrollbars. (R-30)
-- [x] **The account chart's dark-mode paint.** The first `npm run shots` run found the account
-      chart blank in dark mode on Home at 390 and 1440px (captured 900ms after load) while the
-      agent's chart drew and the same screens in light drew; earlier captures at 1500ms showed it.
-      Find whether the dark-mode redraw (`setChartMode`) races the draw-in, and pin it with a test
-      that reads the canvas after the mode switch. (#1032) Cause: hydration read the chart mode
-      from the server's default, so a dark Home drew a light chart, then tore it down for a dark
-      one, later than light; the blank captures themselves (C-22, both themes) were taken before
-      the dev server hydrated, with no canvas yet, not a sizing or draw-in race. Fix: charts read
-      `<html>` while hydrating, one chart per load; `e2e/chart-paint.spec.ts` reads its pixels.
 - [x] **Set-up replies on a miss.** A second miss in a row says what shape of answer would be
       read, never a value; each model setting's question names its range, so nobody guesses.
       Defaulting a setting would amend DEC-472 and brief A3 ("each setting empty"), so it waits
@@ -262,8 +253,19 @@ item above (C-3, C-9) are not repeated.
       [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
 - [x] **Sparklines without the false limit line.** When the limit is below the line's range, the
       pale sliver alone, with no dashed rule. (C-11, #1093)
-- [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
-      draw race after load, not the mode. (C-22)
+- [x] **The account chart's blank paint**, once section B's "dark-mode paint": blank in light and
+      dark alike, a capture taken after load but before the chart drew, not the mode. (C-22)
+      - Dark drew twice (#1032): hydration read the chart mode from the server's default, so a
+        dark Home drew a light chart, then tore it down for a dark one, later than light. Charts
+        now read `<html>` while hydrating, one chart per load, and `e2e/chart-paint.spec.ts`
+        reads the canvas's pixels after first paint.
+      - The blank captures: the host had no canvas yet, because hydration had not drawn it, not
+        a sizing or draw-in race. On main after #1032, 120 loads of the e2e build (30 per theme
+        at 390 and 1440px) and 80 of the paused and reconciliation Homes all drew the line and
+        none stayed blank; at `networkidle` plus 900ms, the shots timing, 5 had no canvas yet,
+        all at 1440px and in both themes. `npm run shots` now waits for every chart on screen to
+        show its line, and the spec covers the paused and reconciliation Homes.
+        ([#1106](https://github.com/kunwarshivam/mandate/pull/1106))
 - [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
       and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)

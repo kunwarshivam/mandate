@@ -70,7 +70,7 @@ export interface DeployRecord {
 export interface Deployment {
   id: string;
   /**
-   * `rejected`: the checks repeated when it applied failed (V-002, V-006), and `reason` says which.
+   * `rejected`: the checks repeated when it applied failed (V-047, V-002, V-006), and `reason` says which.
    * `unknown`: the deployment took it but no journal entry came back.
    */
   phase: "sent" | "recorded" | "rejected" | "undelivered" | "unknown";
@@ -79,6 +79,8 @@ export interface Deployment {
   agentId: string;
   version: ContentRef;
   reason?: string;
+  /** The rule a rejection falls under, for the record and never the sentence (C-6); set for V-047 only. */
+  rule?: string;
   record: DeployRecord;
 }
 
@@ -369,7 +371,7 @@ export function RuntimeProvider({
         if (!reachable) return update({ phase: "undelivered" });
         if (silent) return update({ phase: "unknown" });
         const check = checkDeploy(wsRef.current, request.mandate);
-        if (!check.ok) return update({ phase: "rejected", recordedAt: at, reason: check.reason });
+        if (!check.ok) return update({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
         change((current) => deployAgent(current, request, at, seed).ws);
         update({ phase: "recorded", recordedAt: at });
         window.setTimeout(() => change((current) => firstProposal(current, deployment.agentId, nowRef.current, seed)), recordAfterMs * 2);
