@@ -57,7 +57,6 @@ fn the_canaries_are_fourteen_distinct_lowercase_markers_no_fixed_text_or_hex_hol
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_scan_finds_a_canary_at_the_start_in_the_middle_and_at_the_end() {
     for canary in CANARIES {
         for captured in [
@@ -72,7 +71,6 @@ fn the_scan_finds_a_canary_at_the_start_in_the_middle_and_at_the_end() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_scan_ignores_ascii_case() {
     for captured in ["ZQPRICE", "zQpRiCe", "Your daily brief is ready: ZqPrice."] {
         assert_eq!(found(captured.as_bytes()), ["zqprice"], "{captured}");
@@ -80,7 +78,6 @@ fn the_scan_ignores_ascii_case() {
 }
 
 #[test]
-#[ignore = "pending E8-9"]
 fn the_scan_names_each_canary_present_once_in_canary_order() {
     let mut planted: Vec<&str> = CANARIES.into_iter().rev().collect();
     planted.extend(CANARIES);
@@ -94,7 +91,6 @@ fn the_scan_names_each_canary_present_once_in_canary_order() {
 /// A clean capture names nothing, a near miss is not a canary, and a canary between bytes that are
 /// not UTF-8 is still found.
 #[test]
-#[ignore = "pending E8-9"]
 fn a_clean_capture_names_nothing_and_a_canary_in_any_bytes_is_found() {
     for clean in [
         "",

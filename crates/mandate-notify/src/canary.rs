@@ -17,8 +17,14 @@ pub const CANARIES: [&str; 14] = [
 /// [`CANARIES`]; empty for a clean capture.
 ///
 /// # Errors
-/// Never once implemented: any bytes can be scanned.
+/// Never: any bytes can be scanned.
 pub fn scan(captured: &[u8]) -> Result<Vec<&'static str>, NotifyError> {
-    let _ = captured;
-    Err(NotifyError::Unimplemented { story: "E8-9" })
+    Ok(CANARIES
+        .into_iter()
+        .filter(|canary| {
+            captured
+                .windows(canary.len())
+                .any(|window| window.eq_ignore_ascii_case(canary.as_bytes()))
+        })
+        .collect())
 }
