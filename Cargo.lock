@@ -1625,6 +1625,7 @@ dependencies = [
 name = "mandate-connections"
 version = "0.0.0"
 dependencies = [
+ "mandate-domain",
  "mandate-time",
  "proptest",
  "secrecy",

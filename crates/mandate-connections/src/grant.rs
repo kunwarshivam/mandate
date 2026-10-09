@@ -8,7 +8,7 @@ use crate::ConnectError;
 
 /// The requested scopes, sorted, each exactly once. The grant is split on single spaces only, so
 /// any other separator, a doubled space, or an edge space leaves a part that matches nothing here.
-const REQUESTED_SCOPES_SORTED: [&str; 2] = ["data", "trading"];
+pub(crate) const REQUESTED_SCOPES_SORTED: [&str; 2] = ["data", "trading"];
 
 /// The scopes Alpaca granted, once they equal the request (`trading` and `data`).
 #[derive(Debug, Clone, PartialEq, Eq)]
