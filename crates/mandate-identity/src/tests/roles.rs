@@ -1,17 +1,23 @@
-//! ID-13, ID-4 and §5.2 for `change_roles` (E9-2, identity spec §4.2, §4.5, §5.2; DEC-643,
-//! DEC-654). Every expected outcome is written from the spec's text, never from the crate's own
-//! checks. Each case runs on a store answering the query and on one
+//! ID-13, ID-4 and §5.2 for `change_roles`, and DEC-832 item 7 for `PrincipalContext::into_tenant`
+//! (E9-2, identity spec §4.2, §4.5, §5.2; DEC-643, DEC-654). Every expected outcome is written from
+//! the spec's text, or in the two properties computed by a fold of the change written here, never
+//! from the crate's own checks. Each case runs on a store answering the query and on one
 //! answering every membership of every scope, so the change must pick its scope and members itself.
+
+use proptest::prelude::*;
+use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
 use mandate_time::UtcNanos;
 
-use crate::MembershipState::{Active, CoolingOff, Deactivated};
+use crate::MembershipState::{Active, CoolingOff, Deactivated, Invited, Removed};
 use crate::Role::{
-    Approver, BillingAdmin, Operator as Op, OrgAdmin, OrgOwner, Viewer, WorkspaceAdmin as Wa,
+    Approver, Auditor, BillingAdmin, Operator as Op, OrgAdmin, OrgOwner, Viewer,
+    WorkspaceAdmin as Wa,
 };
 use crate::{
-    Membership, MembershipState, Principal, PrincipalId, Refusal, Role, RoleChange, Scope, Session,
-    SessionKind, SessionRef, StepUp, change_roles,
+    Authorized, Membership, MembershipState, OrgId, Permission, Principal, PrincipalContext,
+    PrincipalId, PrincipalKind, Refusal, Role, RoleChange, Scope, Session, SessionKind, SessionRef,
+    StepUp, WorkspaceId, authorize, change_roles,
 };
 
 use super::{ByMember, Everything, O1, O2, W1, W3};
@@ -316,4 +322,249 @@ fn only_an_org_owner_changes_the_owner_role() {
             Err(Refusal::NoMembership),
         ),
     ]);
+}
+
+/// The scope, its kind's roles, and its admin role.
+fn kind(org: bool) -> (Scope, &'static [Role], Role) {
+    match org {
+        true => (ORG, &[OrgOwner, OrgAdmin, BillingAdmin], OrgOwner),
+        false => (WS, &[Wa, Op, Approver, Viewer, Auditor], Wa),
+    }
+}
+
+fn property<S: Strategy>(strategy: S, test: impl Fn(S::Value) -> Result<(), TestCaseError>) {
+    let config = Config {
+        failure_persistence: None,
+        ..Config::default()
+    };
+    if let Err(failure) = TestRunner::new(config).run(&strategy, test) {
+        panic!("{failure}");
+    }
+}
+
+/// Org scope or not; the author's entries, grants or removals; one entry per other member.
+type OwnDraw = (bool, bool, Vec<usize>, Vec<(u8, usize)>);
+
+/// ID-13 as a property: an admin's change naming itself in a grant or a removal is refused
+/// `own_roles`, whatever else it holds; without those entries it passes, with step-up for a grant
+/// at a workspace and for any change at an org (§4.2).
+#[test]
+#[ignore = "pending E9-2"]
+fn no_change_naming_its_author_passes_and_the_rest_of_it_does() {
+    let own = prop::collection::vec(0usize..5, 1..4);
+    let others = prop::collection::vec((0u8..3, 0usize..5), 1..5);
+    property(
+        (any::<bool>(), any::<bool>(), own, others),
+        |(org, grant, own, others): OwnDraw| {
+            let (scope, roles, admin) = kind(org);
+            let (author, role) = (PrincipalId(0x100), |r: usize| roles[r % roles.len()]);
+            let mut store = vec![m(author, scope, Active, &[admin])];
+            let mut rest = RoleChange::default();
+            for (i, (action, r)) in others.into_iter().enumerate() {
+                let id = PrincipalId(0x200 + i as u128);
+                store.push(m(id, scope, Active, &[role(i)]));
+                match action {
+                    0 => rest.grants.insert((id, role(r))),
+                    1 => rest.removals.insert((id, role(r))),
+                    _ => rest.deactivations.insert(id),
+                };
+            }
+            let mut named = rest.clone();
+            let mine = own.into_iter().map(|r| (author, role(r)));
+            match grant {
+                true => named.grants.extend(mine),
+                false => named.removals.extend(mine),
+            }
+            prop_assert_eq!(
+                run_in(SessionKind::Full, &store, author, scope, &named),
+                Err(Refusal::OwnRoles)
+            );
+            let step = match org || !rest.grants.is_empty() {
+                true => StepUp::Required,
+                false => StepUp::NotRequired,
+            };
+            prop_assert_eq!(
+                run_in(SessionKind::Full, &store, author, scope, &rest),
+                Ok(step)
+            );
+            Ok(())
+        },
+    );
+}
+
+/// Org scope or not; per other member its state, whether it holds the admin role, and its action;
+/// whether the author leaves.
+type LastDraw = (bool, Vec<(usize, bool, u8)>, bool);
+
+/// §5.2 as a property: a change by an admin is refused `last_owner` (`last_admin`) exactly when
+/// this fold leaves no member `active` holding the admin role: the author unless it leaves, a
+/// successor granted it in the change, never a suspended, invited, cooling-off, or removed holder,
+/// nor one of another scope. Only a membership that reaches its scope is changed.
+#[test]
+#[ignore = "pending E9-2"]
+fn no_change_leaves_a_scope_without_an_active_owner_or_admin() {
+    let members = prop::collection::vec((0usize..5, any::<bool>(), 0u8..4), 1..5);
+    property(
+        (any::<bool>(), members, any::<bool>()),
+        |(org, members, leave): LastDraw| {
+            let (scope, _, admin) = kind(org);
+            let states = [Active, CoolingOff, Deactivated, Invited, Removed];
+            let author = PrincipalId(0x100);
+            let elsewhere = if org { Scope::Org(O2) } else { WS3 };
+            let mut store = vec![
+                m(author, scope, Active, &[admin]),
+                m(ELSEWHERE, elsewhere, Active, &[admin]),
+            ];
+            let mut change = RoleChange::default();
+            let mut left = 0usize;
+            for (i, (state, holds, action)) in members.into_iter().enumerate() {
+                let id = PrincipalId(0x200 + i as u128);
+                let held = [admin];
+                let roles = if holds { &held[..] } else { &[] };
+                store.push(m(id, scope, states[state], roles));
+                let acts = matches!(states[state], Active | CoolingOff);
+                let (grant, removal, off) = (
+                    acts && !holds && action == 0,
+                    acts && holds && action == 1,
+                    acts && action == 2,
+                );
+                if grant {
+                    change.grants.insert((id, admin));
+                }
+                if removal {
+                    change.removals.insert((id, admin));
+                }
+                if off {
+                    change.deactivations.insert(id);
+                }
+                left +=
+                    usize::from(states[state] == Active && !off && ((holds && !removal) || grant));
+            }
+            if leave || change == RoleChange::default() {
+                change.deactivations.insert(author);
+            } else {
+                left += 1;
+            }
+            let others = change.deactivations.iter().any(|d| *d != author);
+            let step = match (org && (others || !change.removals.is_empty()))
+                || !change.grants.is_empty()
+            {
+                true => StepUp::Required,
+                false => StepUp::NotRequired,
+            };
+            let expected = match (left, org) {
+                (0, true) => Err(Refusal::LastOwner),
+                (0, false) => Err(Refusal::LastAdmin),
+                _ => Ok(step),
+            };
+            prop_assert_eq!(
+                run_in(SessionKind::Full, &store, author, scope, &change),
+                expected
+            );
+            Ok(())
+        },
+    );
+}
+
+/// The context an `own`, leave, or `self` row yields to `who` at `scope`, from the live `authorize`.
+fn own(who: PrincipalId, scope: Scope, permission: Permission) -> PrincipalContext {
+    let session = Session {
+        reference: SESSION,
+        kind: SessionKind::Full,
+        snapshot: Vec::new(),
+    };
+    match authorize(
+        &ByMember(&store(&[])),
+        &Principal::User { id: who },
+        &session,
+        scope,
+        permission,
+        at(0),
+    ) {
+        Ok(Authorized::Principal { context, .. }) => context,
+        other => panic!("{permission:?} at {scope:?} for {who:?}: {other:?}"),
+    }
+}
+
+type Seen = (
+    OrgId,
+    WorkspaceId,
+    PrincipalId,
+    PrincipalKind,
+    SessionRef,
+    Permission,
+    bool,
+);
+
+fn into_tenant(context: PrincipalContext) -> Result<Seen, Refusal> {
+    let tenant = context.into_tenant()?;
+    Ok((
+        tenant.org(),
+        tenant.workspace(),
+        tenant.principal(),
+        tenant.kind(),
+        tenant.session(),
+        tenant.permission(),
+        tenant.membership_unverified(),
+    ))
+}
+
+/// DEC-832 item 7: a `PrincipalContext` becomes the context of exactly the workspace its membership
+/// reached, with the same principal, session, permission, and flag; at an organization's or the
+/// principal's own scope it is `no_membership`. A workspace the member does not reach, or a pair
+/// the store does not hold, yields no `PrincipalContext` to begin with.
+#[test]
+#[ignore = "pending E9-2"]
+fn into_tenant_yields_only_the_workspace_its_membership_reached() {
+    let (user, leave, passkey) = (
+        PrincipalKind::User,
+        Permission::Leave,
+        Permission::OwnPasskey,
+    );
+    assert_eq!(
+        into_tenant(own(VIEW, WS, leave)),
+        Ok((O1, W1, VIEW, user, SESSION, leave, false))
+    );
+    assert_eq!(
+        into_tenant(own(VIEW, WS3, passkey)),
+        Ok((O2, W3, VIEW, user, SESSION, passkey, false))
+    );
+    assert_eq!(
+        into_tenant(own(OO1, ORG, passkey)),
+        Err(Refusal::NoMembership)
+    );
+    let principal = own(VIEW, Scope::Principal, Permission::ListOwnMemberships);
+    assert_eq!(into_tenant(principal), Err(Refusal::NoMembership));
+    let flagged = PrincipalContext {
+        principal: OPR,
+        kind: user,
+        session: SessionRef(0x42),
+        permission: leave,
+        scope: WS3,
+        membership_unverified: true,
+    };
+    assert_eq!(
+        into_tenant(flagged),
+        Ok((O2, W3, OPR, user, SessionRef(0x42), leave, true))
+    );
+    let session = Session {
+        reference: SESSION,
+        kind: SessionKind::Full,
+        snapshot: Vec::new(),
+    };
+    let foreign = Scope::Workspace {
+        org: O2,
+        workspace: W1,
+    };
+    for scope in [foreign, WS3] {
+        let asked = authorize(
+            &ByMember(&store(&[])),
+            &Principal::User { id: OPR },
+            &session,
+            scope,
+            leave,
+            at(0),
+        );
+        assert_eq!(asked, Err(Refusal::NoMembership), "{scope:?}");
+    }
 }
