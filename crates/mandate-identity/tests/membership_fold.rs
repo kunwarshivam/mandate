@@ -124,7 +124,6 @@ fn spelled(state: impl std::fmt::Debug) -> String {
 /// §9.12's fold, §5.1's states, §5.3 and ID-7's count, and §8.3's per-role cool-off: every probe of
 /// every history, its unreadable latch, and the record it refuses.
 #[test]
-#[ignore = "pending E9-7"]
 fn the_fold_reproduces_every_membership_fold_vector() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
