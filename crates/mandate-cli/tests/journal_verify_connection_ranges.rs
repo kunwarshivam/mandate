@@ -1,15 +1,13 @@
 //! E12-3 W3 (journal spec §9.8, §11; DEC-782, DEC-885, DEC-890): `connection_lifecycle_mismatch`
-//! through `journal verify` and `verify-cold` on a control or account stream, after checks 1 to 6,
-//! lowest `seq` first with the control checks, before the anchor and token. A one-stream export
-//! from `seq` 1 is that stream's full chain; a tail has no anchor and fails closed. The cause check
-//! never runs on one stream, and DEC-890's [`NOT_RUN`] line says so just before `result:`.
+//! through `journal verify` and `verify-cold` on a control or account stream, in DEC-782's order.
+//! A one-stream export from `seq` 1 is that stream's full chain; a tail has no anchor and fails
+//! closed. The cause check never runs on one stream; DEC-890's [`NOT_RUN`] line says so.
 //!
-//! Oracles: the single-stream `connections`, `connection_requests` and `connection_ranges`
-//! sequences of `fixtures/refcases/journal.json`: a full chain answers its `expect`, an anchored
-//! range's prefix plus records its `expect` moved past the prefix (DEC-885 I1), and a tail an
-//! independent scan of §11's "No anchor" list, checked against every unanchored vector.
+//! Oracles: the single-stream `connection*` sequences of `fixtures/refcases/journal.json`: a full
+//! chain answers its `expect`, an anchored range's prefix plus records its `expect` moved past the
+//! prefix (DEC-885 I1), and a tail a scan of §11's "No anchor" list, checked against the vectors.
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use clap::Parser;
@@ -29,14 +27,18 @@ const TAIL: u64 = 40;
 const NO_TOKEN: &[u8] = b"no imprint";
 const OPERATOR_READ: &str = "operator_read_fails_until_dec_261_item_9";
 const NOT_RUN: &str = "not run: connection_cause_mismatch (needs the control stream and its account streams together)";
-/// The one §9.8 connection record no rule judges (I6).
-const NEVER_JUDGED: &str = "ConnectionRevoked";
+/// §11's "No anchor" list (journal spec lines 3382-3384): what rules 66, 67 and 131 judge on a
+/// control stream. A `ConnectionRevoked` is never judged (I6).
+const CONTROL_JUDGED: &str = "ConnectionRequested ConnectionEstablished \
+    ConnectionCredentialRotated ConnectionRefused";
+/// "Any connection record on an account stream" (same lines), as §9.8's "Who writes what" lists
+/// them (lines 2005-2008): checks, state, refreshes, and the two copies; rule 68 judges each.
+const ACCOUNT_JUDGED: &str = "ConnectionChecked ConnectionStateChanged \
+    ConnectionCredentialRefreshed ConnectionEstablished ConnectionCredentialRotated";
 
 fn vectors() -> Json {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/refcases/journal.json"
-    );
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
 }
 
@@ -106,7 +108,6 @@ fn genesis() -> Vec<(String, Range, Want)> {
 }
 
 /// A range: its trusted start's `seq` and its bodies in `seq` order.
-#[derive(Debug, Clone)]
 struct Range {
     from_seq: u64,
     bodies: Vec<Json>,
@@ -128,13 +129,15 @@ impl Range {
         self
     }
 
-    /// The `seq` of the first record §11's "No anchor" list judges: a §9.8 connection record
-    /// (every event type named `Connection…`) but a revocation, on a control or account stream.
+    /// The `seq` of the first record §11's "No anchor" list judges, by its stream type's list.
     fn first_judged(&self) -> Option<u64> {
         let judged = |b: &Json| {
-            let (stream, kind) = (b["stream_id"].as_str().unwrap(), &b["event_type"]);
-            let typed = stream.starts_with("ctl:") || stream.starts_with("acct:");
-            typed && kind.as_str().unwrap().starts_with("Connection") && *kind != NEVER_JUDGED
+            let listed = match b["stream_id"].as_str().unwrap().split(':').next() {
+                Some("ctl") => CONTROL_JUDGED,
+                Some("acct") => ACCOUNT_JUDGED,
+                _ => "",
+            };
+            listed.split(' ').any(|kind| b["event_type"] == kind)
         };
         let index = self.bodies.iter().position(judged);
         index.map(|i| self.from_seq + i as u64)
@@ -184,7 +187,6 @@ impl Range {
 /// What a run answered: its report's lines, its code, and whether it exits non-zero.
 type Ran = (Vec<String>, Option<&'static str>, bool);
 
-/// The report's `result:` text.
 fn result(ran: &Ran) -> &str {
     ran.0.last().unwrap().strip_prefix("result: ").unwrap()
 }
@@ -256,9 +258,8 @@ fn run(command: &str, range: &Range, files: &[(&str, &[u8])]) -> Ran {
     (report.lines().map(str::to_owned).collect(), code, failed)
 }
 
-/// Runs both commands over `range`, each answering `want`: a failure at `(seq, code)` printed as
-/// DEC-782 item 3's line with a non-zero exit, or, with `None`, the range verified; and each
-/// report in [`assert_form`]'s form with DEC-890's line exactly when `line`.
+/// Runs both commands over `range`, each answering `want` (a failure at `(seq, code)`, or `None`
+/// for verified) with its exit status, in [`assert_form`]'s form with DEC-890's line when `line`.
 #[track_caller]
 fn expect(range: &Range, want: Option<(u64, &str)>, line: bool, what: &str) {
     let (stream, first, end) = (range.stream(), range.from_seq, range.last_seq());
@@ -303,29 +304,29 @@ fn the_single_stream_chains_answer_their_vectors_from_seq_1() {
     }
 }
 
-/// The scan agrees with every unanchored vector; then every sequence's records, and every full
-/// chain (the valid ones too), moved to a tail fail closed where the scan says.
+/// The scan agrees with every unanchored vector; every sequence's records and full chain (valid
+/// ones too), moved to `seq` 2, the first tail, and to [`TAIL`], fail closed where it says.
 #[test]
 #[ignore = "pending E12-3"]
 fn a_tail_range_fails_closed_at_its_first_judged_record() {
     let sequences = single_stream();
     for s in (sequences.iter()).filter(|s| s.3["outcome"] == "Unanchored") {
-        let range = Range::from(TAIL, s.2.clone());
-        let index = s.3["index"].as_u64().unwrap();
-        assert_eq!(range.first_judged(), Some(TAIL + index), "{}", s.0);
+        let (range, index) = (Range::from(TAIL, s.2.clone()), s.3["index"].as_u64());
+        assert_eq!(range.first_judged(), Some(TAIL + index.unwrap()), "{}", s.0);
     }
     let tails = sequences.iter().flat_map(|s| {
         let chain = s.genesis().map(|g| g.0.bodies);
         [Some(s.2.clone()), chain].into_iter().flatten()
     });
     let mut closed = 0;
-    for (n, bodies) in tails.enumerate() {
-        let range = Range::from(TAIL, bodies);
+    for (n, (from, bodies)) in tails.flat_map(|b| [(2, b.clone()), (TAIL, b)]).enumerate() {
+        let range = Range::from(from, bodies);
         let want = range.first_judged().map(|seq| (seq, CODE));
         closed += usize::from(want.is_some());
-        expect(&range, want, want.is_some(), &format!("tail {n}"));
+        let what = format!("tail {n} from {from}");
+        expect(&range, want, want.is_some(), &what);
     }
-    assert!(closed >= 100, "{closed} tails fail closed");
+    assert!(closed >= 200, "{closed} tails fail closed");
 }
 
 /// The control checks judge `AnchorComputed` and `RecordsAccessed`, the connection check only
