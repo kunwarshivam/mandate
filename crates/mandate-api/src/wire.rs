@@ -185,13 +185,22 @@ pub trait Validate {
     fn validate(&self) -> Result<(), Refused>;
 }
 
-/// [`Validate`] for shapes: `none` whose serde types enforce every rule, `pending` with rules
-/// serde cannot express, stubbed until E10-10.
+/// [`Validate`] for shapes: `none` whose serde types enforce every rule, `checked` whose
+/// [`Rules`] hold the rest, and `pending` stubbed until E10-10.
 macro_rules! rules {
     (none: $($shape:ty),+) => {
         $(impl $crate::wire::Validate for $shape {
             fn validate(&self) -> Result<(), $crate::wire::Refused> {
                 Ok(())
+            }
+        })+
+    };
+    (checked: $($shape:ty),+) => {
+        $(impl $crate::wire::Validate for $shape {
+            fn validate(&self) -> Result<(), $crate::wire::Refused> {
+                let mut check = $crate::wire::Check::default();
+                $crate::wire::Rules::rules(self, "", &mut check);
+                check.done()
             }
         })+
     };
@@ -206,6 +215,64 @@ macro_rules! rules {
 }
 pub(crate) use rules;
 rules!(none: Decimal, Ref, Timestamp, Asset, Id, EventId);
+
+/// A shape's rules beyond serde's, each broken one reported at its pointer under `at`.
+pub(crate) trait Rules {
+    fn rules(&self, at: &str, check: &mut Check);
+}
+
+/// The violations a shape's [`Rules`] found.
+#[derive(Debug, Default)]
+pub(crate) struct Check(Vec<Violation>);
+
+impl Check {
+    /// Records `code` at `path` unless `holds`.
+    pub(crate) fn rule(&mut self, holds: bool, path: &str, code: &str) {
+        if !holds {
+            self.0.push(violation(path.to_owned(), code));
+        }
+    }
+
+    pub(crate) fn done(self) -> Result<(), Refused> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(Refused::Invalid { violations: self.0 })
+        }
+    }
+}
+
+/// A JSON pointer (RFC 6901), the root `""` among them, whose segments hold no control character
+/// `U+0000` to `U+001F`.
+pub(crate) fn is_pointer(text: &str) -> bool {
+    let escapes = text
+        .split('~')
+        .skip(1)
+        .all(|after| after.starts_with(['0', '1']));
+    let shaped = text.is_empty() || text.starts_with('/');
+    shaped && escapes && !text.chars().any(|c| c < ' ')
+}
+
+/// `^[a-z][a-z0-9_]*$`: a wire code, a policy key, a refusal reason.
+pub(crate) fn is_word(text: &str) -> bool {
+    let mut chars = text.chars();
+    let first = chars.next().is_some_and(|c| c.is_ascii_lowercase());
+    first && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// A journal stream id (journal spec §2): `acct` and `agent` with two segments, and each of
+/// `single` with the workspace id alone.
+pub(crate) fn is_stream_id(text: &str, single: &[&str]) -> bool {
+    let mut parts = text.split(':');
+    let kind = parts.next().unwrap_or_default();
+    let segments: Vec<&str> = parts.collect();
+    let arity = match kind {
+        "acct" | "agent" => 2,
+        other if single.contains(&other) => 1,
+        _ => 0,
+    };
+    segments.len() == arity && segments.iter().all(|s| is_segment(s))
+}
 
 /// `^[A-Za-z0-9_-]+$`, journal spec §2's identifier segment.
 pub(crate) fn is_segment(text: &str) -> bool {

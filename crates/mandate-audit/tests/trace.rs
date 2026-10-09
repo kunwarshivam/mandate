@@ -213,7 +213,6 @@ fn walked(g: &Graph, workspace: WorkspaceId, start: &str) -> Trace {
 /// AU-3 and AU-1: random graphs over both workspaces, every link naming one of the outputs, a
 /// `StreamOpened` of any of the three segments, or an absent id, self-links and cycles included.
 #[test]
-#[ignore = "pending E12-1"]
 fn every_trace_is_the_independent_breadth_first_walk() {
     let target = 0..40_usize;
     let node = (0..4_usize, proptest::option::of(target.clone()));
@@ -259,7 +258,6 @@ fn every_trace_is_the_independent_breadth_first_walk() {
 
 /// DEC-762 item 3: a self-link, a two-cycle and a three-cycle each end at `already_shown`.
 #[test]
-#[ignore = "pending E12-1"]
 fn cycles_and_self_links_end_at_already_shown() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG1");
@@ -295,7 +293,6 @@ fn cycles_and_self_links_end_at_already_shown() {
 /// AU-1: links forged to name another workspace's events, the prefixed segment's, and absent ids
 /// all read `not_recorded` with no `to`; a start outside the workspace is the one `NotFound`.
 #[test]
-#[ignore = "pending E12-1"]
 fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
     let mut g = Graph::new();
     let (mine, theirs) = (event_id(710_001), event_id(710_002));
@@ -319,7 +316,6 @@ fn forged_links_read_as_absent_ones_and_a_foreign_start_is_not_found() {
 /// DEC-762 item 2: 16 hops deep is shown whole; one more is `beyond_bound` and truncates, an absent
 /// target too. A link from depth 16 to a shown event is still `already_shown` (DEC-772 item 2).
 #[test]
-#[ignore = "pending E12-1"]
 fn the_depth_bound_is_sixteen_hops() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG2");
@@ -347,7 +343,6 @@ fn the_depth_bound_is_sixteen_hops() {
 /// DEC-762 item 2: 256 events, the start included, are shown whole; a 257th is `beyond_bound`,
 /// one of an unexpected type too (DEC-772 item 2).
 #[test]
-#[ignore = "pending E12-1"]
 fn the_node_bound_is_256_events() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG1");
@@ -387,7 +382,6 @@ fn the_node_bound_is_256_events() {
 /// DEC-762 item 2, DEC-772 item 3: 1,024 hops are recorded whole; at a 1,025th the walk stops and
 /// the trace is truncated.
 #[test]
-#[ignore = "pending E12-1"]
 fn the_hop_bound_is_1024_hops() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG2");
@@ -403,7 +397,6 @@ fn the_hop_bound_is_1024_hops() {
 /// AU-4, API-18, DEC-772 item 7, DEC-773: an output's injected text and thesis artifact are served only as
 /// quoted, attributed items, in §4.8.1's order, and an event id written in that text is not a link.
 #[test]
-#[ignore = "pending E12-1"]
 fn model_text_is_only_quoted_and_never_followed() {
     let mut g = Graph::new();
     let stream = agent(WS_A, "AG1");
@@ -444,7 +437,6 @@ fn model_text_is_only_quoted_and_never_followed() {
 /// stream, is `not_recorded`, as is "every `GateDecided`" with none; an `IntentProposed` whose
 /// `causation_id` names an output is `unexpected_type`, shown, not followed.
 #[test]
-#[ignore = "pending E12-1"]
 fn intent_links_are_scoped_to_the_named_streams_and_typed() {
     let mut g = Graph::new();
     let account = format!("acct:{}:ACCT1", text(WS_A));
@@ -498,4 +490,63 @@ fn intent_links_are_scoped_to_the_named_streams_and_typed() {
     ];
     let depths: Vec<u16> = trace.nodes.iter().map(|n| n.depth).collect();
     assert_eq!((depths, trace.hops), (vec![0, 1, 2], expected.to_vec()));
+}
+
+/// DEC-772 items 2 and 6: an `IntentReceived` at depth 16, or once the trace holds 256 events, reads
+/// its `IntentProposed` `already_shown` when that event is a node and `beyond_bound` when not, and a
+/// bound that kept the agent stream from being looked up adds no watermark for it.
+#[test]
+fn the_intent_row_at_a_bound_reads_no_agent_stream() {
+    let mut g = Graph::new();
+    let (account, outputs) = (format!("acct:{}:ACCT1", text(WS_A)), agent(WS_A, "AG2"));
+    let [received, proposed, wide, named] = [1, 2, 3, 4].map(|n| event_id(790_000 + n));
+    let event = draft(
+        &proposed,
+        &agent(WS_A, "AG1"),
+        "IntentProposed",
+        Some(&named),
+        PROPOSED,
+    );
+    g.fx.append_draft(&agent(WS_A, "AG1"), proposed.clone(), &event);
+    let payload = format!(
+        r#"{{"intent_id":"{proposed}","agent_id":"AG1","instrument_id":"inst","side":"buy",
+        "type":"limit","tif":"day","qty":"1","limit_price":"10","purpose":"open"}}"#
+    );
+    let event = draft(&received, &account, "IntentReceived", None, &payload);
+    g.fx.append_draft(&account, received.clone(), &event);
+    let chain: Vec<String> = (0..16).map(|i| event_id(791_000 + i)).collect();
+    for pair in chain.windows(2) {
+        g.add(&outputs, &pair[0], Some(&pair[1]), &[]);
+    }
+    g.add(&outputs, &chain[15], None, from_ref(&received));
+    let leaves: Vec<String> = (0..254).map(|i| event_id(792_000 + i)).collect();
+    for leaf in &leaves {
+        g.add(&outputs, leaf, None, &[]);
+    }
+    let cited: Vec<String> = leaves.iter().chain([&received]).cloned().collect();
+    g.add(&outputs, &wide, None, &cited);
+    let cited = [&proposed]
+        .into_iter()
+        .chain(&leaves[1..])
+        .chain([&received]);
+    let cited: Vec<String> = cited.cloned().collect();
+    g.add(&outputs, &named, None, &cited);
+    let link = "payload.intent_id";
+    let again = hop(&received, link, Some(&received), HopStatus::AlreadyShown);
+    let beyond = hop(&received, link, None, HopStatus::BeyondBound);
+    let shown = hop(&received, link, Some(&proposed), HopStatus::AlreadyShown);
+    for (start, nodes, last) in [
+        (&chain[0], 17, &beyond),
+        (&wide, 256, &beyond),
+        (&named, 256, &shown),
+    ] {
+        let trace = traced(&g, WS_A, start, &[]);
+        let tail = [again.clone(), beyond.clone(), last.clone()];
+        let received_at = trace.nodes.last().map(|n| n.event.event_id.as_str());
+        assert_eq!(
+            (trace.nodes.len(), received_at, trace.truncated),
+            (nodes, Some(received.as_str()), true)
+        );
+        assert_eq!(&trace.hops[trace.hops.len() - 3..], &tail[..]);
+    }
 }

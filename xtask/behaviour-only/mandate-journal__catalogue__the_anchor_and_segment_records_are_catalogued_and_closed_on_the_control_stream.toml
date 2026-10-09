@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/catalogue.rs"
+test = "the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_stream"
+reason = """
+E12-3's (DEC-783, journal spec v0.27 §9.14). It checks `Draft::parse`, the journal's existing
+check, so there is no stub to stop at: until E12-3's implementation, the journal refuses
+`AnchorComputed` and `SegmentExported` as `unknown_schema`, which is the behaviour it fails on.
+E12-3's implementation deletes this file with the test's `#[ignore]` line.
+"""

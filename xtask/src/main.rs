@@ -1469,6 +1469,10 @@ fn feature_map_index() -> Result<()> {
     Ok(())
 }
 
+/// The text a [`CiFile`] holds when its file cannot be read as UTF-8 (a dangling symlink, a
+/// non-UTF-8 build file), which [`live_feature_problems`] refuses rather than aborting on it.
+const UNREADABLE: &str = "\0";
+
 /// One of the [`ci_files`], by its path in the repository, with its text.
 struct CiFile {
     path: String,
@@ -1500,8 +1504,7 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
     files
         .into_iter()
         .map(|file| {
-            let text =
-                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            let text = fs::read_to_string(&file).unwrap_or_else(|_| UNREADABLE.to_owned());
             let path = file
                 .strip_prefix(root)
                 .unwrap_or(&file)
@@ -1626,6 +1629,13 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
     }
     let mut compile_only_seen = false;
     for file in ci {
+        if file.text.contains('\0') {
+            problems.push(format!(
+                "{}: cannot be read as text, so the check cannot judge it",
+                file.path
+            ));
+            continue;
+        }
         let yaml = file.path.ends_with(".yml") || file.path.ends_with(".yaml");
         let (run_lines, with_lines) = (
             block_lines(&file.text, "run"),
@@ -1633,7 +1643,11 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
         );
         let lines = logical_lines(&file.path, &file.text);
         let text_lines = text_only_lines(&lines, yaml);
-        let (variables, arrays) = definitions(&lines);
+        let Definitions {
+            variables,
+            arrays,
+            runs_positional,
+        } = definitions(&lines);
         for ((number, line), text_only) in lines.iter().zip(text_lines) {
             let at = format!("{}:{number}", file.path);
             let ctx = LineContext {
@@ -1643,6 +1657,9 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                 with_value: yaml && with_lines.contains(number),
                 variables: &variables,
                 arrays: &arrays,
+                runs_positional,
+                path: &file.path,
+                exact_line: PARSER_LIMITED_LINES.contains(&(file.path.as_str(), line.trim())),
                 quoted_reread: false,
             };
             let flag = if text_only {
@@ -1718,7 +1735,7 @@ fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
             let folds = fold_below.is_some_and(|column| indent > column) && !next.trim().is_empty();
             if let Some(head) = command.trim_end().strip_suffix('\\') {
                 command = head.to_owned();
-            } else if !folds {
+            } else if !folds && !runs_on(&command) {
                 break;
             }
             command.push(' ');
@@ -1728,6 +1745,30 @@ fn logical_lines(path: &str, text: &str) -> Vec<(usize, String)> {
         logical.push((start, command));
     }
     logical
+}
+
+/// Whether the shell runs `command` on into the next line: it ends inside a double-quoted string,
+/// or its code, before any comment, ends with `|`, `|&` or `||` (an `&&` ends a command, so the
+/// next line is judged on its own either way). Quotes are read as the shell reads them, a
+/// backslash escaping the next character outside single quotes, and a `#` that starts a word
+/// outside quotes begins a comment.
+fn runs_on(command: &str) -> bool {
+    let (mut quote, mut escaped, mut word_start) = (None, false, true);
+    let mut code = String::new();
+    for c in command.chars() {
+        match (quote, c) {
+            _ if escaped => escaped = false,
+            (q, '\\') if q != Some('\'') => escaped = true,
+            (None, '#') if word_start => break,
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(open), _) if c == open => quote = None,
+            _ => {}
+        }
+        code.push(c);
+        word_start = quote.is_none() && c.is_whitespace();
+    }
+    let code = code.trim_end();
+    quote == Some('"') || (quote.is_none() && (code.ends_with('|') || code.ends_with("|&")))
 }
 
 /// A workflow line `key: value` or `- key: value`: the column its key starts at, and its value.
@@ -1846,18 +1887,44 @@ fn shell_tokens(line: &str, nested: &mut Vec<(String, usize)>) -> Vec<ShellToken
             }
             (_, '\\') if quote != Some('\'') => {
                 quoted = true;
-                word.get_or_insert_with(String::new)
-                    .extend(chars.get(index));
+                let current = word.get_or_insert_with(String::new);
+                if matches!(next, Some('$' | '`')) {
+                    current.push('\\');
+                }
+                current.extend(chars.get(index));
                 index = index.saturating_add(1);
                 None
             }
             _ => {
-                let arithmetic =
-                    next == Some('(') && chars.get(index.saturating_add(1)) == Some(&'(');
-                if quote != Some('\'') && matches!(c, '$' | '`') && !arithmetic {
+                let arithmetic = c == '$'
+                    && next == Some('(')
+                    && chars.get(index.saturating_add(1)) == Some(&'(');
+                let current = word.get_or_insert_with(String::new);
+                current.push(c);
+                if quote != Some('\'') && arithmetic {
+                    let mut depth = 0_usize;
+                    while let Some(&d) = chars.get(index) {
+                        let opens = chars.get(index.saturating_add(1)) == Some(&'(');
+                        if d == '$' && opens && chars.get(index.saturating_add(2)) != Some(&'(') {
+                            index = index.saturating_add(1);
+                            substitution(&chars, '$', &mut index, nested, tokens.len());
+                            current.push('$');
+                            continue;
+                        }
+                        index = index.saturating_add(1);
+                        current.push(d);
+                        depth = match d {
+                            '(' => depth.saturating_add(1),
+                            ')' => depth.saturating_sub(1),
+                            _ => depth,
+                        };
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                } else if quote != Some('\'') && matches!(c, '$' | '`') {
                     substitution(&chars, c, &mut index, nested, tokens.len());
                 }
-                word.get_or_insert_with(String::new).push(c);
                 None
             }
         };
@@ -1927,6 +1994,12 @@ struct LineContext<'a> {
     /// The file's arrays, each with the elements of all its definitions (`x=( … )`,
     /// `x+=( … )`), in order.
     arrays: &'a BTreeMap<String, String>,
+    /// Whether the file runs `"$@"` as a command word ([`Definitions`]).
+    runs_positional: bool,
+    /// The file's path in the repository.
+    path: &'a str,
+    /// A line of [`PARSER_LIMITED_LINES`], which rule 2's sink allowlist does not judge.
+    exact_line: bool,
     /// A quoted argument word or here-string re-read as a command line, where an unreadable
     /// definition is not refused, only a readable one read through.
     quoted_reread: bool,
@@ -1935,21 +2008,32 @@ struct LineContext<'a> {
 /// The scalar variables `lines` assign (`C=…` resets, `C+=…` appends), each value concatenated
 /// in order, or none once a definition holds `$` or a backtick; and the arrays they define
 /// (`x=( … )`, `x+=( … )`), each with every definition's elements, none reset.
-type Definitions = (BTreeMap<String, Option<String>>, BTreeMap<String, String>);
+/// Beside them, whether the file runs `"$@"` as a command word, which makes a `set` that
+/// expands a way to build that command.
+struct Definitions {
+    variables: BTreeMap<String, Option<String>>,
+    arrays: BTreeMap<String, String>,
+    runs_positional: bool,
+}
 
 /// [`Definitions`] of the file whose logical lines are `lines`.
 fn definitions(lines: &[(usize, String)]) -> Definitions {
     let mut variables: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut arrays: BTreeMap<String, String> = BTreeMap::new();
+    let mut runs_positional = false;
     for (_, line) in lines {
         let (mut at_command_start, mut reading) = (true, false);
-        let (mut declaring, mut printing) = (false, false);
+        let (mut declaring, mut printing) = (None::<String>, false);
+        let mut command: Vec<String> = Vec::new();
         for token in shell_tokens(line, &mut Vec::new()) {
             let ShellToken::Word(word, _) = token else {
                 (at_command_start, reading) = (!matches!(token, ShellToken::Redirect), false);
-                (declaring, printing) = (false, false);
+                (declaring, printing) = (None, false);
+                runs_positional |= runs_positional_command(&command);
+                command.clear();
                 continue;
             };
+            command.push(word.clone());
             if printing {
                 if word == "-v" {
                     reading = true;
@@ -1967,11 +2051,23 @@ fn definitions(lines: &[(usize, String)]) -> Definitions {
                     "export" | "declare" | "local" | "readonly" | "typeset"
                 )
             {
-                declaring = true;
+                declaring = Some(word);
                 continue;
             }
-            if declaring && !word.contains('=') {
-                continue;
+            if let Some(builtin) = &declaring {
+                let names = matches!(builtin.as_str(), "declare" | "local" | "typeset");
+                if names && word.starts_with('-') && word.contains('n') {
+                    reading = true;
+                    continue;
+                }
+                if reading {
+                    let name = word.split_once('=').map_or(word.as_str(), |(name, _)| name);
+                    variables.insert(name.to_owned(), None);
+                    continue;
+                }
+                if !word.contains('=') {
+                    continue;
+                }
             }
             if reading {
                 if !word.starts_with('-') {
@@ -2016,8 +2112,67 @@ fn definitions(lines: &[(usize, String)]) -> Definitions {
                 _ => at_command_start = false,
             }
         }
+        runs_positional |= runs_positional_command(&command);
     }
-    (variables, arrays)
+    Definitions {
+        variables,
+        arrays,
+        runs_positional,
+    }
+}
+
+/// Whether `words`, one command's, run `"$@"` as the command word, after keywords and wrappers.
+fn runs_positional_command(words: &[String]) -> bool {
+    let named: Vec<&str> = words
+        .iter()
+        .map(String::as_str)
+        .skip_while(|word| is_skipped_word(word))
+        .collect();
+    unwrapped(&named).first() == Some(&"$@")
+}
+
+/// Whether a definition's text is clean: it holds no expansion, no `cargo` and no `live`.
+fn clean_definition(text: &str) -> bool {
+    !text.contains(['$', '`']) && !text.to_ascii_lowercase().contains("cargo") && !holds_live(text)
+}
+
+/// Whether a command word that starts with an expansion is one of the few DEC-851 item 6 lets
+/// through: `"$@"`; a sole `$C` or `${C}`, or a whole array, whose definitions are all readable
+/// and clean; `"$(dirname "$0")/<literal path>"` with no `..` segment, given the substitution at
+/// the command word's position; or `"${ARR[<literal index>]}"` of an array whose definitions are
+/// all clean.
+fn allowlisted_command_word(word: &str, substitution: Option<&str>, ctx: LineContext) -> bool {
+    let clean_variable = |name: &str| {
+        ctx.variables
+            .get(name)
+            .is_some_and(|value| value.as_deref().is_some_and(clean_definition))
+    };
+    let clean_array = |name: &str| {
+        ctx.variables.get(name) != Some(&None)
+            && ctx
+                .arrays
+                .get(name)
+                .is_some_and(|text| clean_definition(text))
+    };
+    let clean_element = || {
+        let (name, index) = word
+            .strip_prefix("${")?
+            .strip_suffix("]}")?
+            .split_once('[')?;
+        let literal = !index.is_empty() && index.chars().all(|c| c.is_ascii_digit());
+        Some(literal && clean_array(name))
+    };
+    let script_beside = word.strip_prefix("$/").is_some_and(|path| {
+        !path.is_empty()
+            && !path.contains(['$', '`'])
+            && !path.split('/').any(|segment| segment == "..")
+            && matches!(substitution, Some("dirname \"$0\"" | "dirname $0"))
+    });
+    word == "$@"
+        || sole_variable(word).is_some_and(clean_variable)
+        || sole_array(word).is_some_and(clean_array)
+        || script_beside
+        || clean_element().unwrap_or(false)
 }
 
 /// The array a word expands whole when it is solely `${NAME[@]}` or `${NAME[*]}`.
@@ -2047,15 +2202,24 @@ fn sole_variable(word: &str) -> Option<&str> {
 /// indented further than the key: a `run:` value, or the inputs of a `with:` block.
 fn block_lines(text: &str, key: &str) -> BTreeSet<usize> {
     let mut lines = BTreeSet::new();
-    let mut block: Option<usize> = None;
+    let (mut block, mut outputs): (Option<usize>, Option<usize>) = (None, None);
     for (number, line) in (1_usize..).zip(text.lines()) {
         let indent = line.len().saturating_sub(line.trim_start().len());
         if block.is_some_and(|column| line.trim().is_empty() || indent > column) {
             lines.insert(number);
             continue;
         }
+        if outputs.is_some_and(|column| !line.trim().is_empty() && indent <= column) {
+            outputs = None;
+        }
+        let named =
+            |name: &str| line.trim_start_matches([' ', '-']).split(':').next() == Some(name);
+        if outputs.is_none() && named("outputs") {
+            outputs = yaml_value(line).map(|(column, _)| column);
+            continue;
+        }
         block = yaml_value(line)
-            .filter(|_| line.trim_start_matches([' ', '-']).split(':').next() == Some(key))
+            .filter(|_| outputs.is_none() && named(key))
             .map(|(column, _)| column);
         if block.is_some() {
             lines.insert(number);
@@ -2074,11 +2238,11 @@ const NON_EXECUTING: &[&str] = &[
 
 /// A word skipped when finding a command's command word: an assignment (`A=1`), or a keyword
 /// after which a command follows (`if`, `then`, `else`, `elif`, `do`, `while`, `until`, `!`,
-/// `time`).
+/// `{`). `time` is a wrapper ([`unwrap`]), so its options are read.
 fn is_skipped_word(word: &str) -> bool {
     matches!(
         word,
-        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "time" | "{"
+        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{"
     ) || word.split_once('=').is_some_and(|(name, _)| {
         !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     })
@@ -2280,26 +2444,48 @@ fn text_line_live_flag(line: &str, ctx: LineContext) -> LiveFlag {
 struct PipelineCommand {
     words: Vec<(String, bool, usize)>,
     here_strings: Vec<String>,
+    redirects: Vec<usize>,
     start: usize,
     end: usize,
 }
 
 impl PipelineCommand {
-    /// The words from the command word on.
+    /// The words from the command word on, without the words of a redirection.
     fn command(&self) -> Vec<&str> {
         self.words
             .iter()
+            .skip(self.command_index())
+            .filter(|(word, quoted, at)| !self.redirection_word(word, *quoted, *at))
             .map(|(word, _, _)| word.as_str())
-            .skip_while(|word| is_skipped_word(word))
             .collect()
+    }
+
+    /// Whether a word belongs to a redirection rather than the command: unquoted, and holding
+    /// `<` or `>`, or a descriptor (`2`, `{fd}`) right before a redirection's operator.
+    fn redirection_word(&self, word: &str, quoted: bool, at: usize) -> bool {
+        let descriptor = (!word.is_empty() && word.chars().all(|c| c.is_ascii_digit()))
+            || word
+                .strip_prefix('{')
+                .and_then(|rest| rest.strip_suffix('}'))
+                .is_some_and(|name| sole_variable(&format!("${name}")).is_some());
+        !quoted
+            && (word.contains(['<', '>'])
+                || (descriptor && self.redirects.contains(&at.saturating_add(1))))
     }
 
     /// The token position of the command word, or none for a bare assignment.
     fn command_position(&self) -> Option<usize> {
+        self.words.get(self.command_index()).map(|(_, _, at)| *at)
+    }
+
+    /// The index of the command word: past the [`is_skipped_word`]s and redirections.
+    fn command_index(&self) -> usize {
         self.words
             .iter()
-            .find(|(word, _, _)| !is_skipped_word(word))
-            .map(|(_, _, at)| *at)
+            .position(|(word, quoted, at)| {
+                !is_skipped_word(word) && !self.redirection_word(word, *quoted, *at)
+            })
+            .unwrap_or(self.words.len())
     }
 }
 
@@ -2314,6 +2500,16 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
     }
     let mut substitutions = Vec::new();
     let tokens = shell_tokens(line, &mut substitutions);
+    let runs_shell = tokens.iter().any(|token| {
+        matches!(token, ShellToken::Word(word, _)
+            if is_shell(word.rsplit('/').next().unwrap_or(word)))
+    });
+    if (line.contains("<(") || line.contains(">("))
+        && !ctx.exact_line
+        && (line.contains(['$', '`']) || runs_shell)
+    {
+        return LiveFlag::Unreadable;
+    }
     let (mut verdict, mut reread, mut pipeline) = (LiveFlag::Absent, Vec::new(), Vec::new());
     let mut command = PipelineCommand::default();
     let (mut target_next, mut here_string_next) = (false, false);
@@ -2331,7 +2527,10 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
                 command.here_strings.push(text);
             }
             ShellToken::Word(text, quoted) => command.words.push((text, quoted, at)),
-            ShellToken::Redirect => target_next = true,
+            ShellToken::Redirect => {
+                command.redirects.push(at);
+                target_next = true;
+            }
             ShellToken::HereString => here_string_next = true,
             ShellToken::Pipe | ShellToken::End => {
                 command.end = at;
@@ -2412,15 +2611,49 @@ fn pipeline_live_flag(
             let definition = ctx.arrays.get(name);
             let builds_live =
                 |text: &String| text.to_ascii_lowercase().contains("cargo") || holds_live(text);
-            let refused = if ctx.quoted_reread {
-                definition.is_some_and(builds_live)
-            } else {
-                ctx.variables.get(name) == Some(&None)
-                    || definition.is_none_or(|text| builds_live(text) || text.contains(['$', '`']))
-            };
-            if refused {
+            if ctx.quoted_reread && definition.is_some_and(builds_live) {
                 verdict = verdict.min(LiveFlag::Unreadable);
             }
+        }
+        let command_at = command
+            .words
+            .iter()
+            .filter(|(word, _, _)| !is_skipped_word(word))
+            .nth(named.len().saturating_sub(unwrapped_named.len()))
+            .map(|(_, _, at)| *at);
+        let expanding_command_word = !ctx.quoted_reread
+            && unwrapped_named.first().is_some_and(|word| {
+                word.starts_with(['$', '`'])
+                    && (ctx.expression_command || !word.contains("${{"))
+                    && !allowlisted_command_word(
+                        word,
+                        substitutions
+                            .iter()
+                            .find(|(_, at)| Some(*at) == command_at)
+                            .map(|(inner, _)| inner.as_str()),
+                        ctx,
+                    )
+            });
+        let unknown_wrapper_option = unwrap(&named).1;
+        let compound_sink = command.words.iter().any(|(word, quoted, _)| {
+            !quoted
+                && matches!(
+                    word.as_str(),
+                    "{" | "while" | "until" | "if" | "for" | "case" | "select"
+                )
+        });
+        let sink_refused = index > 0
+            && !ctx.exact_line
+            && line.contains(['$', '`'])
+            && (compound_sink || !allowed_sink(unwrapped_named, ctx));
+        let sets_positional = ctx.runs_positional
+            && unwrapped_named.first() == Some(&"set")
+            && unwrapped_named
+                .iter()
+                .skip(1)
+                .any(|word| word.contains(['$', '`']));
+        if expanding_command_word || unknown_wrapper_option || sink_refused || sets_positional {
+            verdict = verdict.min(LiveFlag::Unreadable);
         }
         let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
             || runs_expanding_line(
@@ -2496,42 +2729,233 @@ fn runs_expanding_line(named: &[&str], here_strings: &[String], sourced_expands:
     }
 }
 
-/// `named` without its leading wrappers: `env` (its options, `-u X` and `VAR=val`), `command`,
-/// `exec`, `nohup`, `xargs`, `sudo`, `nice` and `stdbuf` (each with its options and their
-/// values), `builtin`, and `timeout` (its options and its duration).
-fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
-    loop {
-        let (with_value, takes_word): (&[&str], bool) = match named.first().copied() {
-            Some("env") => (&["-u", "-C", "-S"], false),
-            Some("command" | "exec" | "nohup") => (&["-a"], false),
-            Some("xargs") => (&["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"], false),
-            Some("sudo") => (
-                &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"],
-                false,
-            ),
-            Some("nice") => (&["-n"], false),
-            Some("stdbuf") => (&["-i", "-o", "-e"], false),
-            Some("builtin") => (&[], false),
-            Some("timeout") => (&["-k", "-s"], true),
-            _ => return named,
-        };
+/// The wrappers [`unwrap`] reads through, by basename: each with the options that take a value,
+/// the options that take none, and whether a positional word (`timeout`'s duration) follows.
+const WRAPPERS: &[(&str, &[&str], &[&str], bool)] = &[
+    (
+        "env",
+        &["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
+        &[
+            "-i",
+            "-0",
+            "-v",
+            "-",
+            "--ignore-environment",
+            "--null",
+            "--debug",
+        ],
+        false,
+    ),
+    ("command", &[], &["-p", "-v", "-V"], false),
+    ("exec", &["-a"], &["-c", "-l"], false),
+    ("nohup", &[], &[], false),
+    (
+        "xargs",
+        &["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"],
+        &[
+            "-0",
+            "-r",
+            "-t",
+            "-p",
+            "-x",
+            "-o",
+            "--null",
+            "--no-run-if-empty",
+            "--verbose",
+        ],
+        false,
+    ),
+    (
+        "sudo",
+        &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-R"],
+        &[
+            "-E", "-H", "-n", "-S", "-i", "-s", "-k", "-K", "-b", "-P", "-A", "-e", "-l", "-v",
+        ],
+        false,
+    ),
+    ("nice", &["-n"], &[], false),
+    ("stdbuf", &["-i", "-o", "-e"], &[], false),
+    ("builtin", &[], &[], false),
+    (
+        "timeout",
+        &["-k", "-s"],
+        &["-v", "--foreground", "--preserve-status", "--verbose"],
+        true,
+    ),
+    (
+        "time",
+        &["-f", "-o"],
+        &[
+            "-p",
+            "-a",
+            "-q",
+            "-v",
+            "--portability",
+            "--append",
+            "--quiet",
+        ],
+        false,
+    ),
+];
+
+/// `named` without its leading [`WRAPPERS`]: each wrapper's options (`--` ends them; a value
+/// glued to its option, `-o0`, and a `--long=value` are one word), `env`'s `VAR=val`, and
+/// `timeout`'s duration. The flag says that a wrapper had an option whose arity is not known, so
+/// the command it wraps cannot be found (DEC-851 item 6, the structural skip).
+fn unwrap<'w>(mut named: &'w [&'w str]) -> (&'w [&'w str], bool) {
+    while let Some((wrapper, with_value, without, takes_word)) = named.first().and_then(|word| {
+        let base = word.rsplit('/').next().unwrap_or(word);
+        WRAPPERS.iter().find(|(name, ..)| *name == base)
+    }) {
         let mut rest = named.get(1..).unwrap_or_default();
-        while let Some(word) = rest.first() {
-            let skip = if with_value.contains(word) {
+        while let Some(word) = rest.first().filter(|word| word.starts_with('-')) {
+            let short = word.get(..2).filter(|_| !word.starts_with("--"));
+            let skip = if *word == "--" {
+                rest = rest.get(1..).unwrap_or_default();
+                break;
+            } else if with_value.contains(word) {
                 2
-            } else if word.starts_with('-') || (named.first() == Some(&"env") && word.contains('='))
+            } else if without.contains(word)
+                || (word.starts_with("--") && word.contains('='))
+                || short.is_some_and(|option| with_value.contains(&option))
+                || word
+                    .get(1..)
+                    .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+                || (short.is_some()
+                    && word
+                        .chars()
+                        .skip(1)
+                        .all(|c| without.contains(&format!("-{c}").as_str())))
             {
                 1
             } else {
-                break;
+                return (rest, true);
             };
             rest = rest.get(skip..).unwrap_or_default();
         }
-        if takes_word {
+        while *wrapper == "env" && rest.first().is_some_and(|word| is_skipped_word(word)) {
+            rest = rest.get(1..).unwrap_or_default();
+        }
+        if *takes_word {
             rest = rest.get(1..).unwrap_or_default();
         }
         named = rest;
     }
+    (named, false)
+}
+
+/// `named` without its leading wrappers ([`unwrap`]).
+fn unwrapped<'w>(named: &'w [&'w str]) -> &'w [&'w str] {
+    unwrap(named).0
+}
+
+/// The filters a pipeline whose line expands may feed (DEC-851 item 6, rule 2's sink allowlist):
+/// the sinks the repository's own scripts use, none of which runs its input as code. `awk` and
+/// `sed` can, in more forms than a scan reads, so the repository's own lines feeding them are on
+/// [`PARSER_LIMITED_LINES`] instead (DEC-851 item 6, the fourteenth round).
+const FILTER_SINKS: &[&str] = &[
+    "sha256sum",
+    "tee",
+    "tr",
+    "sort",
+    "grep",
+    "cut",
+    "tail",
+    "paste",
+    "cat",
+    "head",
+    "uniq",
+    "wc",
+    "read",
+];
+
+/// The repository's logical lines, each by its file and trimmed text, that rule 2's sink rules
+/// and the process-substitution rule refuse but a person has read: lines the scan's shell reading
+/// gets wrong, and the lines feeding `awk`, `sed`, a `while read` loop or a `done < <( … )`. A
+/// line not listed is refused until a person adds it (DEC-851 item 6, an interim list).
+const PARSER_LIMITED_LINES: &[(&str, &str)] = &[
+    (
+        "deploy/set-secrets.sh",
+        concat!(
+            "printf '%s' \"$answer\" | systemd-run --quiet --wait --pipe --collect  ",
+            "-p User=owlhead_exec -p Group=owlhead_exec -p UMask=0077  ",
+            "-p LoadCredential=vault-pending-key:\"$CREDENTIALS/vault-pending-key\"  ",
+            "-p LoadCredential=vault-token-key:\"$CREDENTIALS/vault-token-key\"  ",
+            "-p EnvironmentFile=\"$EXEC_ENV\"  \"${VAULT_IMPORT[@]}\"",
+        ),
+    ),
+    (
+        "deploy/set-secrets.sh",
+        "if [[ \"${line%%=*}\" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then",
+    ),
+    (
+        ".github/scripts/docs-checks.sh",
+        r##"done < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' "$merge_base..HEAD")"##,
+    ),
+    (
+        ".github/scripts/docs-only.sh",
+        r##"done < <(git diff --name-only "$merge_base" HEAD)"##,
+    ),
+    (
+        ".github/scripts/merge-approved.sh",
+        r##"approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<"$body" | sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\2/p' | tr 'A-F' 'a-f')"##,
+    ),
+    (
+        "deploy/allow-egress.sh",
+        r##"found="$(getent ahosts "$host" | awk '{ print $1 }' | sort -u)""##,
+    ),
+    (
+        "deploy/allow-egress.sh",
+        r##"printf '%s\n' "$allow" | sort -u | while read -r address; do"##,
+    ),
+    (
+        "deploy/backup.sh",
+        r##"free_kb="$(df -Pk "$DEST" | awk 'NR == 2 { print $4 }')""##,
+    ),
+    (
+        "deploy/bootstrap.sh",
+        r##"found="$(gpg --show-keys --with-colons "$PGDG_KEY" | awk -F: '$1 == "fpr" { print $10; exit }')""##,
+    ),
+    (
+        "deploy/install-cloudflared.sh",
+        r##"gpg --show-keys --with-colons "$1" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }'"##,
+    ),
+    (
+        "deploy/lib.sh",
+        r##"sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'"##,
+    ),
+];
+
+/// Whether `named`, a pipeline stage after its wrappers, is a sink a line that expands may feed:
+/// one of [`FILTER_SINKS`] (`sort` without `--compress-program`), or `deploy/`'s own `put_file`
+/// and `sql`. An empty stage, such as one a comment swallowed, is not, and a compound command
+/// (`{ … }`, a loop, `if`, `case`), whose body may run anything, is refused before this.
+fn allowed_sink(named: &[&str], ctx: LineContext) -> bool {
+    match named.first().copied() {
+        Some("sort") => !named
+            .iter()
+            .any(|word| word.starts_with("--compress-program")),
+        Some(word) if FILTER_SINKS.contains(&word) => true,
+        Some("put_file" | "sql") => ctx.path.starts_with("deploy/"),
+        _ => false,
+    }
+}
+
+/// Whether `word`, a basename, names a shell: item 1's shells and their kin.
+fn is_shell(word: &str) -> bool {
+    matches!(
+        word,
+        "sh" | "bash"
+            | "dash"
+            | "ksh"
+            | "zsh"
+            | "mksh"
+            | "ash"
+            | "rbash"
+            | "ksh93"
+            | "fish"
+            | "csh"
+    )
 }
 
 /// Whether `word` names cargo: a word `cargo`, or a path ending `/cargo`.
@@ -10264,16 +10688,6 @@ jq -r "$filter" "$src"
                 "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
                 ":2",
             ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nbash <(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
-                ":3",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nbash <(echo '\n$C \"$A\"\n')\n",
-                ":3",
-            ),
         ];
         for (path, text, line) in refused_through_an_executing_command {
             let files = [ci_file(path, text)];
@@ -10916,7 +11330,6 @@ jq -r "$filter" "$src"
     /// `${ARR[1x]}` are not literal indexes; a `set` with a backtick expands; a nameref needs an
     /// option holding `n`; an escaped backtick expands nothing; and `...` is not `..`.
     #[test]
-    #[ignore = "pending E7-26"]
     fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -11056,12 +11469,253 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A pipeline whose line expands may feed only a simple filter, and a wrapper's options are
+    /// read by arity (DEC-851 item 6, the coordinator's thirteenth- and fourteenth-round rulings;
+    /// X1 tests correction 12e, after the reviews of #994 and #1015). On a logical line holding
+    /// `$` or a backtick, every pipeline sink after its wrappers must be one simple command:
+    /// `sha256sum`, `tee`, `tr`, `sort` (without `--compress-program`), `grep`, `cut`, `tail`,
+    /// `paste`, `cat`, `head`, `uniq`, `wc` or `read`, or, in `deploy/` only, `put_file` or `sql`.
+    /// Any other sink (a shell, `awk`, `sed`, a variable), a compound sink (`{ … }`, a loop) and
+    /// an empty one (a comment swallowed it) are refused, unless the line is on the interim
+    /// exact-line list, which names the repository's own `awk`, `sed`, `while read`,
+    /// `done < <( … )` and parser-limited lines by file and text. A process substitution (`<(`,
+    /// `>(`) is refused on a line that expands or runs a shell. Finding the command word skips
+    /// every unquoted word of a redirection (`2>&1`, `{fd}>&1`) wherever it stands before it, and
+    /// each wrapper's options by their arity, `/usr/bin/time -f FMT` and `--` included; an option
+    /// of unknown arity is refused. A `#` starts a comment only at a word's start, and a backslash
+    /// escapes nothing inside single quotes, so those lines still run on.
+    #[test]
+    fn pipeline_sinks_and_wrapper_options_fail_closed() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let built_across_lines =
+            "C=ca; C+=rgo; C+=\" build -\"; C+=\"-feat\"; C+=\"ures l\"; C+=ive";
+        let refused_at = [
+            (format!("{built_across_lines}\necho $C | # c\nsh"), 3),
+            (format!("{built_across_lines}\necho $C |\n# comment\nsh"), 3),
+            (format!("{built_across_lines}\necho $C | # c \\\nsh"), 3),
+            (format!("{built_across_lines}\ntime -p 2>&1 $C"), 3),
+            (format!("{built_across_lines}\n{{fd}}>&1 $C"), 3),
+            (format!("{built_across_lines}\necho $C | {{fd}}>&1 sh"), 3),
+            (format!("{built_across_lines}\ntime -p -- $C"), 3),
+            (format!("{built_across_lines}\n/usr/bin/time -f %e $C"), 3),
+            (format!("{built_across_lines}\n{{ echo $C; }} | sh"), 3),
+            (format!("{built_across_lines}\n( echo $C ) | sh"), 3),
+            (
+                format!("{built_across_lines}\nif true; then echo $C; fi | sh"),
+                3,
+            ),
+            (
+                format!("{built_across_lines}\n{{ echo $C; }} | cat | sh"),
+                3,
+            ),
+            (
+                format!("{built_across_lines}\nfor x in a; do echo $C; done | sh"),
+                3,
+            ),
+            (format!("{built_across_lines}\necho $C | rbash"), 3),
+            (format!("{built_across_lines}\necho $C | ksh93"), 3),
+            ("sudo --bogus echo $X".to_owned(), 2),
+            ("timeout --weird 5 echo $X".to_owned(), 2),
+            ("echo a#b |\nsh -c \"$C\"".to_owned(), 2),
+            ("echo 'a\\' |\nsh -c \"$C\"".to_owned(), 2),
+            ("echo \"$X\" | awk '{ system($0) }'".to_owned(), 2),
+            ("echo \"$X\" | sed 's/x/y/e'".to_owned(), 2),
+            ("echo \"$X\" | python3".to_owned(), 2),
+            ("echo \"$X\" | xargs echo".to_owned(), 2),
+            ("echo \"$X\" | env".to_owned(), 2),
+            ("echo \"$X\" | put_file /tmp/f 0600 root:root".to_owned(), 2),
+            ("echo \"$X\" | sql db".to_owned(), 2),
+            ("echo $X | { read x; sh; }".to_owned(), 2),
+            ("echo $X | { head -n 0; sh -s; }".to_owned(), 2),
+            (
+                "printf '%s\\n' \"$X\" | while read -r a; do echo \"$a\"; done".to_owned(),
+                2,
+            ),
+            ("echo \"$X\" | sed 's/a/b/'".to_owned(), 2),
+            ("echo \"$X\" | sed 1e".to_owned(), 2),
+            ("echo \"$X\" | sed \"/x/e\"".to_owned(), 2),
+            ("echo \"$X\" | sed \"e;\"".to_owned(), 2),
+            ("echo \"$X\" | sed -n \"p;e\"".to_owned(), 2),
+            ("echo \"$X\" | sed \"s/a/b/;s/y/z/e\"".to_owned(), 2),
+            ("echo \"$X\" | sed --expression=e".to_owned(), 2),
+            ("echo \"$X\" | sed -f /dev/stdin".to_owned(), 2),
+            ("echo \"$X\" | awk '{ print $1 }'".to_owned(), 2),
+            ("echo \"$X\" | awk '{ system ($0) }'".to_owned(), 2),
+            ("echo \"$X\" | awk -f /dev/stdin".to_owned(), 2),
+            (
+                "echo \"$X\" | awk '{ printf \"%s\", $0 | \"sh\" }'".to_owned(),
+                2,
+            ),
+            ("echo \"$X\" | awk '{ print |& \"sh\" }'".to_owned(), 2),
+            ("echo \"$X\" | tee >(sh)".to_owned(), 2),
+            ("echo \"$X\" > >(sh)".to_owned(), 2),
+            ("echo \"$X\" 3> >(sh)".to_owned(), 2),
+            ("echo \"$X\" | sort -o >(sh)".to_owned(), 2),
+            ("sh <(echo $X)".to_owned(), 2),
+            ("sh < <(echo $X)".to_owned(), 2),
+            ("exec 3< <(echo $X); sh <&3".to_owned(), 2),
+            ("sh <(echo hi)".to_owned(), 2),
+            ("echo \"$X\" | sort --compress-program=sh".to_owned(), 2),
+        ];
+        for (text, line) in refused_at {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(&format!(".github/scripts/build.sh:{line}:")),
+                "{text}: {problems:?}"
+            );
+        }
+        let allowed = [
+            "echo \"$X\" | sha256sum",
+            "echo \"$X\" | tee out.txt",
+            "echo \"$X\" | tr a b",
+            "echo \"$X\" | sort -u",
+            "echo \"$X\" | grep x",
+            "echo \"$X\" | cut -f1",
+            "echo \"$X\" | tail -1",
+            "echo \"$X\" | sort | paste -sd ' ' -",
+            "echo \"$X\" | cat",
+            "echo \"$X\" | head -1",
+            "echo \"$X\" | uniq",
+            "echo \"$X\" | wc -l",
+            "diff <(echo a) <(echo b)",
+            "\"2\">&1 $X",
+            "2a>&1 $X",
+            "export -n R=echo\n$R hi",
+            "echo hi | sh",
+            "time -p -- echo hi",
+            "/usr/bin/time -f %e echo hi",
+        ];
+        for text in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let systemd_run = concat!(
+            "printf '%s' \"$answer\" | systemd-run --quiet --wait --pipe --collect \\\n",
+            "  -p User=owlhead_exec -p Group=owlhead_exec -p UMask=0077 \\\n",
+            "  -p LoadCredential=vault-pending-key:\"$CREDENTIALS/vault-pending-key\" \\\n",
+            "  -p LoadCredential=vault-token-key:\"$CREDENTIALS/vault-token-key\" \\\n",
+            "  -p EnvironmentFile=\"$EXEC_ENV\" \\\n",
+            "  \"${VAULT_IMPORT[@]}\"\n",
+        );
+        let regex = "if [[ \"${line%%=*}\" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then\n  echo x\nfi\n";
+        let deploy_only = [
+            "echo \"$X\" | put_file /tmp/f 0600 root:root\n",
+            "openssl rand -base64 32 | put_file \"$C/$key\" 0600 root:root\n",
+            "{ echo \"$X\"; } | sql \"$DB\"\n",
+            systemd_run,
+            regex,
+        ];
+        for text in deploy_only {
+            let files = [ci_file("deploy/set-secrets.sh", text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "deploy/'s own sinks and its exact parser-limited lines: {text}"
+            );
+        }
+        for text in [systemd_run, regex] {
+            let files = [ci_file("deploy/other.sh", text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?.len(),
+                1,
+                "an exact line is allowed only in its own file: {text}"
+            );
+        }
+        let exact = [
+            (
+                "deploy/allow-egress.sh",
+                "found=\"$(getent ahosts \"$host\" | awk '{ print $1 }' | sort -u)\"\n",
+            ),
+            (
+                "deploy/allow-egress.sh",
+                "printf '%s\\n' \"$allow\" | sort -u | while read -r address; do\n  echo \"$address\"\ndone\n",
+            ),
+            (
+                "deploy/backup.sh",
+                "free_kb=\"$(df -Pk \"$DEST\" | awk 'NR == 2 { print $4 }')\"\n",
+            ),
+            (
+                "deploy/bootstrap.sh",
+                "found=\"$(gpg --show-keys --with-colons \"$PGDG_KEY\" | awk -F: '$1 == \"fpr\" { print $10; exit }')\"\n",
+            ),
+            (
+                "deploy/install-cloudflared.sh",
+                "gpg --show-keys --with-colons \"$1\" 2>/dev/null | awk -F: '$1 == \"fpr\" { print $10; exit }'\n",
+            ),
+            (
+                "deploy/lib.sh",
+                "sed -n '2,/^set -euo/p' \"$0\" | sed '$d; s/^# \\{0,1\\}//'\n",
+            ),
+            (
+                ".github/scripts/docs-only.sh",
+                "while read -r f; do\n  echo \"$f\"\ndone < <(git diff --name-only \"$merge_base\" HEAD)\n",
+            ),
+            (
+                ".github/scripts/docs-checks.sh",
+                "while read -r c; do\n  echo \"$c\"\ndone < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' \"$merge_base..HEAD\")\n",
+            ),
+            (
+                ".github/scripts/merge-approved.sh",
+                "approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<\"$body\" | sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\\2/p' | tr 'A-F' 'a-f')\n",
+            ),
+        ];
+        for (path, text) in exact {
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &[ci_file(path, text)])?,
+                Vec::<String>::new(),
+                "{path}'s exact line: {text}"
+            );
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &[ci_file("deploy/other.sh", text)])?.len(),
+                1,
+                "the same line in another file is judged: {text}"
+            );
+        }
+        for text_into_a_shell in [
+            "set -e\nbash <(cat <<EOF\n$C \"$A\"\nEOF\n)\n",
+            "set -e\nbash <(echo '\n$C \"$A\"\n')\n",
+        ] {
+            let problems = live_feature_problems(
+                &policy,
+                &meta(),
+                &[ci_file(".github/scripts/build.sh", text_into_a_shell)],
+            )?;
+            assert_eq!(problems.len(), 2, "{text_into_a_shell}: {problems:?}");
+            for (problem, line) in problems.iter().zip([":2:", ":3:"]) {
+                assert!(
+                    problem.starts_with(&format!(".github/scripts/build.sh{line}")),
+                    "the process substitution into a shell, and the line it runs: {problems:?}"
+                );
+            }
+        }
+        let edited = systemd_run.replace("--collect", "--collect sh");
+        let files = [ci_file("deploy/set-secrets.sh", &edited)];
+        assert_eq!(
+            live_feature_problems(&policy, &meta(), &files)?.len(),
+            1,
+            "an edited exact line is judged again"
+        );
+        Ok(())
+    }
+
     /// A build file the check cannot read as text, a dangling symlink or a file that is not
     /// UTF-8, is reported as a problem naming its path, not an error that aborts the check (X1
     /// tests correction 12b, after #979's review; DEC-851 item 6), and so is one holding a NUL
     /// byte (X1 tests correction 12c, after #994's planted NUL).
     #[test]
-    #[ignore = "pending E7-26"]
     fn an_unreadable_build_file_is_refused_by_path() -> Result<()> {
         let root = fixture_repository(
             "build-file-unreadable",

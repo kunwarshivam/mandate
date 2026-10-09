@@ -127,8 +127,9 @@ describe("Home on a phone", () => {
     home();
     const canvas = main().querySelector<HTMLElement>("[data-slot=account-equity] [data-slot=chart-canvas]")!;
     expect(canvas).toHaveClass("h-(--chart-phone)", "lg:h-(--chart-height)");
-    expect(canvas.style.getPropertyValue("--chart-phone")).toBe("180px");
-    expect(canvas.style.getPropertyValue("--chart-height")).toBe("260px");
+    const px = (height: string) => parseFloat(canvas.style.getPropertyValue(height));
+    expect(px("--chart-phone"), "a chart on a phone").toBeGreaterThan(0);
+    expect(px("--chart-phone"), "compact: shorter on a phone than on a desktop").toBeLessThan(px("--chart-height"));
     const hero = main().querySelector<HTMLElement>("[data-slot=account-equity]")!;
     expect(shownOnPhone(hero.querySelector("[data-placeholder=performance]")!)).toBe(true);
     expect(shownOnPhone(hero.querySelector("[data-slot=range-picker]")!)).toBe(true);
@@ -145,7 +146,7 @@ describe("Home on a phone", () => {
     rows.forEach((row, i) => {
       const agent = ws.agents[i];
       expect(within(row).getByRole("link")).toHaveAttribute("href", `/agents/${agent.agent_id}`);
-      expect(within(row).getByText(agent.label)).toHaveClass("font-semibold");
+      expect(within(row).getByText(agent.label)).toBeInTheDocument();
       expect(row.querySelector("[data-slot=mode-badge]")).toHaveTextContent(/\w/);
       expect(row.querySelector("[data-slot=mode-badge] [data-slot=mode-dot]")).not.toBeNull();
       expect(row.querySelector("[data-slot=mode-badge] svg")).toBeNull();

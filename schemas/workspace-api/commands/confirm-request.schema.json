@@ -38,7 +38,8 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)*$"
+        "description": "A JSON pointer naming one confirmed path: one or more reference tokens, never the empty root pointer (journal spec \u00a79.2, rule 18; DEC-303 items 13 and 17).",
+        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)+$"
       }
     },
     "warnings_acknowledged": {

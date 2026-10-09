@@ -212,6 +212,39 @@ fn an_authorized_principal_obtains_a_challenge_bound_to_its_action() {
     assert_bound(&issued, K::OwnerExit, true);
 }
 
+/// Identity spec §7.2 step 1: a service account and the host CLI are blank on every **S** row of
+/// §4.2, so neither is authorized for any action kind's row and no context exists to obtain a
+/// challenge with, even under an id that holds every role the user does; the user, with the same
+/// roles, is authorized for each.
+#[test]
+fn a_service_account_or_the_host_cli_never_holds_a_context_for_a_challenge() {
+    let day_ago = at(NOW_SECS - 86_400);
+    let roles = [Role::WorkspaceAdmin, Role::Operator, Role::Approver].map(|r| (r, day_ago));
+    let bundle = membership(USER, ws(W1), Active, &roles);
+    let live = StaticLookup(vec![bundle.clone()]);
+    let full = session(SESSION, Full, vec![bundle]);
+    let service = Principal::ServiceAccount {
+        id: USER,
+        workspaces: [W1].into(),
+    };
+    let host_cli = Principal::HostCli {
+        id: USER,
+        workspace: W1,
+        on_behalf_of: USER,
+    };
+    for kind in K::ALL {
+        let row = row_of(kind).1;
+        for machine in [&service, &host_cli] {
+            let got = tenant(authorize(&live, machine, &full, ws(W1), row, now()));
+            assert!(got.is_none(), "{machine:?} {kind:?}");
+        }
+        assert!(
+            tenant(auth(&live, USER, &full, W1, row)).is_some(),
+            "{kind:?}"
+        );
+    }
+}
+
 /// When a role becomes effective: drawn 1, a second ago; drawn 2, still cooling off.
 fn effective_from(drawn: u8) -> UtcNanos {
     at(NOW_SECS - 3 + 2 * i64::from(drawn))

@@ -40,6 +40,10 @@ pub(crate) enum Ty {
     Null,
     /// A personal-data vault reference: `pii_` followed by a ULID (journal spec §9.8, §6.4).
     PiiRef,
+    /// §2's form of a stream's identifier, any of the five stream types (journal spec §9.13).
+    StreamName,
+    /// 64 lowercase hex characters: a SHA-256 the journal does not store (journal spec §9.13).
+    Digest,
 }
 
 pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
@@ -89,6 +93,8 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
         }
         Ty::OpenObject => value.as_object().map(|_| value.clone()).ok_or_else(schema),
         Ty::PiiRef => checked(text()?.strip_prefix("pii_").is_some_and(is_ulid)),
+        Ty::StreamName => checked(is_stream_name(text()?)),
+        Ty::Digest => checked(Digest::from_hex(text()?).is_some()),
         Ty::Null => match value {
             Value::Null => Ok(Value::Null),
             _ => Err(schema()),
@@ -149,6 +155,18 @@ fn is_asset_id(s: &str) -> bool {
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
     }) && groups.next().is_none()
+}
+
+/// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
+/// `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment an identifier (journal spec §2).
+fn is_stream_name(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    let segments = match parts.first() {
+        Some(&("acct" | "agent")) => 3,
+        Some(&("ctl" | "clock" | "ntf")) => 2,
+        _ => return false,
+    };
+    parts.len() == segments && parts.iter().skip(1).all(|segment| is_ident(segment))
 }
 
 pub(crate) fn is_ident(s: &str) -> bool {

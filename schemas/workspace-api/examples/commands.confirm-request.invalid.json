@@ -30,6 +30,14 @@
     }
   },
   {
+    "label": "the empty root pointer as a confirmed path",
+    "set": {
+      "/confirmed_paths": [
+        ""
+      ]
+    }
+  },
+  {
     "label": "auto: no /agent_id",
     "remove": [
       "/agent_id"

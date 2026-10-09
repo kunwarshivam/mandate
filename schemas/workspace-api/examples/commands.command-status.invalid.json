@@ -48,6 +48,36 @@
     }
   },
   {
+    "label": "a step event type starting lowercase",
+    "set": {
+      "/steps/0/event_type": "connectionChecked"
+    }
+  },
+  {
+    "label": "a one-letter step event type",
+    "set": {
+      "/steps/0/event_type": "A"
+    }
+  },
+  {
+    "label": "a step event type with a digit",
+    "set": {
+      "/steps/0/event_type": "Ab1"
+    }
+  },
+  {
+    "label": "a step on a notification stream",
+    "set": {
+      "/steps/0/stream_id": "ntf:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y"
+    }
+  },
+  {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
     "label": "auto: no /command_id",
     "remove": [
       "/command_id"

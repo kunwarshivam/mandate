@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.29 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.29 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -38,6 +38,26 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     with its `seq`, an invalid run naming none for each, and `range_checks`, control-stream chains
     the reference verifier and an oracle of its own judge, the first of them failing the operator
     read `read_by_an_operator` (still valid at `append`). The vectors stay version 3.
+- **v0.28 ([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md) items 5 to 7):**
+  §9.15 closes the records of v0.12's notice stream at schema version 1, with rules 119 to 130:
+  the subject stream owner's `OwnerAlertSent` and the dispatcher's notice-stream `StreamOpened`,
+  `NoticeIssued`, and `NoticeAttempted` ([notifications spec §5.5](notifications.md#55-records)).
+  Three types join §9.1's: `notice_id` (32 lowercase hex digits, never an event id), `stream_id`
+  (§2's form), and `opaque` (a provider's message id, with no space). The kinds are notifications
+  spec §3.2's 33, each with its class, and the attempt reasons are §5.2's closed enum with the
+  dispatcher's `not_pending` and `retry_window_ended`; `notification_address_changed` and
+  `address_missing` are DEC-795's (items 6 and 7). None of the four records holds free text. Three
+  readings only refuse more (DEC-720 item 8, DEC-176): `OwnerAlertSent` is on the agent, account,
+  or control stream, not "any stream type", since no kind has a scheduler subject; a `NoticeIssued`'s
+  cause is an `OwnerAlertSent`, an `ApprovalRequested`, or for `channel_lost` a `NoticeAttempted`,
+  never an owner command, which its alert's `owner_command` names; and notifications spec §3.4 says
+  so for a user's kill switch. §9's control-stream table gains the `NotificationAddressChanged` row
+  the workspace API's push-address routes write (DEC-795 item 5); its payload schema closes with
+  E8-14. The vectors are unchanged: `crates/mandate-journal/tests/notices.rs` pins §9.15 (DEC-720
+  item 7), and its pending tests list DEC-720's 32 kinds and 12 reasons, which DEC-795's two
+  additions extend without a test refusing either.
+  - **Order of the changes (ES-22).** The tests PR merged before this spec text; E8-9's
+    implementation PR registers the four schemas and deletes only the tests' `#[ignore]` lines.
 - **v0.27 ([DEC-783](../project/decisions/DEC-783.md)):** §9.14 closes the control stream's
   `AnchorComputed` and `SegmentExported` at schema version 1, with rules 113 to 118, from their §9
   rows, §6.2 and §10, using the shapes the code already reads: the anchor file of DEC-115 item 6
@@ -733,7 +753,8 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ConnectionRefused`, `ConnectionCredentialRotated` | — | A connect, reconnect, or credential replacement the permission checks refused, with the check and reason, or the teardown that ended it; a credential replaced on a connection that is not revoked; closed in §9.8 |
 | `ClientConnected`, `ClientRevoked` | — | An owner-connected client issued or revoked ([identity spec §12.1](identity.md)): client, user, scopes, agents, step-up; closed in §9.10 |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
-| `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
+| `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on the agent, account, or control stream ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's. Closed in §9.15 |
+| `NotificationAddressChanged` | — | A member set or removed one of their own push addresses ([workspace API spec §4.11, §5.7](workspace-api.md), [DEC-795](../project/decisions/DEC-795.md) item 5): member (opaque), channel (`web_push`), action (`added`, `removed`), `address_ref` (the `added` event's own id, listed in `pii_refs`), and step-up evidence (assertion ID, authentication time, method), `null` only for a `removed` that rides a deactivation's commit; written with its `OwnerAlertSent` (`notification_address_changed`) in one batch. The endpoint and keys stay in the vault. Payload schema closed with E8-14 |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.9 |
@@ -770,8 +791,9 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
-| `NoticeIssued` | — | notice id (random, notifications spec §4.2), kind, class, cause (the `OwnerAlertSent`, `ApprovalRequested`, or owner command it answers, with its stream), recipients (opaque) |
-| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into` |
+| `StreamOpened` | — | stream type, workspace; closed in §9.15 |
+| `NoticeIssued` | — | notice id (random, notifications spec §4.2), kind, class, cause (the `OwnerAlertSent`, `ApprovalRequested`, or (for `channel_lost`) `NoticeAttempted` it answers, with its stream), recipients (opaque); closed in §9.15 |
+| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into`; closed in §9.15 |
 
 ### 9.1 Agent-stream payload schemas ([DEC-177](../project/04-decision-log.md#decisions))
 
@@ -2733,6 +2755,136 @@ so a record that is absent and one of another workspace give the same refusal (w
     first_prev_hash, last_hash, file_sha256}` with `stream` its `stream_id` and every hash as 64
     lowercase hex (`payload.manifest_hash`), so the record and its manifest cannot disagree.
 118. `SegmentExported`: `actor.kind` is `system` (`actor.kind`).
+
+### 9.15 Alert and notice records ([DEC-720](../project/decisions/DEC-720.md))
+
+The notice stream of §2 and v0.12, and the records that feed it ([notifications spec §5.5](notifications.md#55-records)):
+the subject stream owner's `OwnerAlertSent`, and the dispatcher's `StreamOpened`, `NoticeIssued`,
+and `NoticeAttempted` on `ntf:{workspace_id}`. Each is closed at schema version 1, as §9.6 closes
+its records: every listed member is present, `null` only where the type is nullable, and any other
+member is `schema` at that member. §9.1's types and report order apply. None of the four holds free
+text: every string is an identifier, a closed vocabulary, or a provider's opaque token, so nothing
+about an order, a position, a mandate, or an address can reach them (`AGENTS.md` rule 6,
+notifications spec NT-1 and NT-2).
+
+**Streams.** `OwnerAlertSent` is catalogued on the agent, account, and control streams, written by
+that stream's owner in the subject's own batch (notifications spec §3.2, §5.1); on the scheduler and
+notice streams it is `wrong_stream` at `event_type`. It names no configuration and is not a risk
+input, so it carries no `risk_clock`. The notice stream admits only its `StreamOpened`,
+`NoticeIssued`, and `NoticeAttempted`; every other catalogued type is `wrong_stream` there, so no
+stream owner copies a fact from it and the dispatcher writes nothing else.
+
+**Types**, beside §9.1's:
+
+| Type | Values | Refused as |
+|---|---|---|
+| `notice_id` | Exactly 32 lowercase hexadecimal digits: notifications spec §4.2's random notice id. Never an event id, which is a `ulid` and carries its creation time | As `id` |
+| `stream_id` | A stream id in §2's grammar, of one of the five stream types | As `id` |
+| `opaque` | 1 to 256 characters, each U+0021 to U+007E: a provider's message id, which has no space and so cannot carry a sentence | As `id` |
+| `kind` | Notifications spec §3.2's closed set of 33 kinds, below | As `id` |
+
+**Kinds and their classes** (notifications spec §3.2, in its order):
+
+| Class | Kinds |
+|---|---|
+| `action` | `approval_requested`, `approval_reminder` |
+| `safety` | `risk_limit`, `kill_switch`, `agent_held`, `account_restriction`, `protection`, `exit_stalled`, `reconciliation`, `external_activity`, `account_state`, `data_feed_down`, `integrity_incident`, `credential_added`, `new_device`, `notification_address_changed`, `recovery_used`, `role_granted`, `member_deactivated`, `deprovisioned`, `break_glass`, `version_risk_increasing`, `delegation_added`, `connection_added`, `went_live`, `client_connected`, `channel_lost` |
+| `info` | `daily_brief`, `delegation_ended`, `model_status`, `research_status`, `spend_cap`, `approval_closed` |
+
+**`OwnerAlertSent`** (agent, account, or control stream)
+
+| Member | Type | Meaning |
+|---|---|---|
+| `subject` | `ulid` | The subject event: rules 119 and 130 |
+| `kind` | `kind`, except `approval_requested`, `approval_reminder`, and `channel_lost` | No alert causes those three (notifications spec §3.4); any of them is `non_canonical` at `payload.kind` |
+| `owner_command` | `ulid?` | For a user's kill switch, the `OwnerCommandIssued` it carries out, on which the dispatcher de-duplicates (notifications spec §3.4): rule 120 |
+
+**`StreamOpened`** on the notice stream. As on the agent stream (§9.1), the schema is chosen by the
+stream type of `stream_id`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `stream_type` | `notice` | |
+| `workspace_id` | `id` | The subject: rule 121 |
+
+**`NoticeIssued`** (notice stream, before the first send)
+
+| Member | Type | Meaning |
+|---|---|---|
+| `notice` | `notice_id` | The id the payload and the link carry |
+| `kind` | `kind` | |
+| `class` | `action` \| `safety` \| `info` | Rule 122 |
+| `cause` | `ulid` | The event the notice answers: an `OwnerAlertSent`, an `ApprovalRequested`, or for `channel_lost` this stream's own `NoticeAttempted` (notifications spec §3.4). A kill switch's owner command is reached through its alert's `owner_command`, never named as a cause. Rule 124 |
+| `cause_stream` | `stream_id` | The stream `cause` is on: rule 125 |
+| `recipients` | `[id]` | Opaque user ids (NT-2): rule 123 |
+
+**`NoticeAttempted`** (notice stream, one attempt's outcome on one push channel)
+
+| Member | Type | Meaning |
+|---|---|---|
+| `notice` | `notice_id` | |
+| `recipient` | `id` | The opaque user id; never an address (NT-2) |
+| `channel` | `email` \| `phone` \| `slack` \| `sms` \| `telegram` \| `web_push` | The mandate schema's push channels (notifications spec §4.1). The pull channels are never attempted: `ApprovalDelivered` and the journal itself are their record |
+| `attempt` | `integer` | 1 for the first attempt on the channel: rule 126 |
+| `status` | `delivered` \| `failed` \| `suppressed_quiet_hours` \| `deferred_quiet_hours` \| `abandoned` | `delivered` means the provider accepted the message, not that anyone read it |
+| `reason` | `timeout` \| `rate_limited` \| `provider_error` \| `address_rejected` \| `auth_failed` \| `too_large` \| `recipient_not_permitted` \| `address_missing` \| `bounced` \| `complained` \| `unsubscribed` \| `not_pending` \| `retry_window_ended` (nullable) | Notifications spec §5.2's closed enum, with the receipts `bounced`, `complained`, and `unsubscribed` (§5.6) and the dispatcher's own `address_missing` (§5.1, [DEC-795](../project/decisions/DEC-795.md) item 7), then §5.3's two stops: rule 127 |
+| `provider_message_id` | `opaque?` | The provider's id for the accepted message, which a later receipt names: rule 128 |
+| `coalesced_into` | `opaque?` | For a notice combined into one message (notifications spec §5.4), that message's provider id: rule 129 |
+
+A `NoticeAttempted` whose `reason` is `address_rejected`, `auth_failed`, `bounced`, `complained`, or
+`unsubscribed` is the record that marks the address on that channel `unreachable` (notifications
+spec §5.6) and causes its `channel_lost` notice; one whose `reason` is `address_missing` causes a
+`channel_lost` notice once per address and marks nothing. Neither needs a member of its own, since a
+separate flag could only disagree with the reason. `recipient_not_permitted` marks nothing and
+causes nothing (§5.2).
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+119. `OwnerAlertSent`: `causation_id` equals `subject` (`causation_id`).
+120. `OwnerAlertSent`: `owner_command` is `null` unless `kind` is `kill_switch`
+     (`payload.owner_command`). It is allowed on every alert stream: the v0.12 row lets a stream
+     owner's alert name the command ("if any"), and refusing it would refuse the batch that holds
+     the `KillSwitchActivated` beside it (`AGENTS.md` rule 13).
+121. Notice-stream `StreamOpened`: `stream_id` equals `ntf:{workspace_id}` (`stream_mismatch` at
+     `stream_id`).
+122. `NoticeIssued`: `class` is the class of `kind` in the table above (`payload.class`).
+123. `NoticeIssued`: `recipients` is strictly ascending by bytes, so none is listed twice
+     (`payload.recipients`). It may be empty: a recipient with no push address keeps the pull
+     channels.
+124. `NoticeIssued`: `causation_id` equals `cause` (`causation_id`).
+125. `NoticeIssued`: `cause_stream` is a stream of this stream's workspace: an agent stream for
+     `approval_requested` and `approval_reminder`, this notice stream for `channel_lost`, and an
+     agent, account, or control stream for every other kind (`stream_mismatch` at
+     `payload.cause_stream`), so a notice never answers another workspace's event (NT-10).
+126. `NoticeAttempted`: `attempt` is at least 1 (`payload.attempt`).
+127. `NoticeAttempted`: `reason` is non-null exactly when `status` is `failed` or `abandoned`. An
+     `abandoned` attempt's reason is a stop: `not_pending` (an `action` notice whose approval
+     stopped being pending) or `retry_window_ended` (a `safety` notice's 24 hours or an `info`
+     notice's 6 hours ran out, or the one last send to a removed address whose vault entry is
+     gone; notifications spec §5.1, §5.3); a `failed` one's is any other (`payload.reason`).
+128. `NoticeAttempted`: `provider_message_id` is non-null exactly when `status` is `delivered` or
+     `reason` is a receipt, `bounced`, `complained`, or `unsubscribed`
+     (`payload.provider_message_id`).
+129. `NoticeAttempted`: `coalesced_into` is `null` when `status` is `suppressed_quiet_hours` or
+     `deferred_quiet_hours`, since nothing was sent (`payload.coalesced_into`). A combined message
+     that failed or was abandoned keeps the link, so NT-6's oracle attributes every joined notice's
+     outcome to its cause, recipient, and channel.
+130. **Batch rule.** An `OwnerAlertSent`'s `subject` is the `event_id` of an earlier draft in the
+     same `append` batch that is not itself an `OwnerAlertSent`, and no other `OwnerAlertSent` in
+     the batch names the same subject (`payload.subject`, at the first alert that breaks it):
+     notifications spec §3.2's "in the subject's own batch" and §3.4's "one subject, one kind",
+     checked at append.
+
+The first violation is reported in §9.1's order: unlisted members, the listed members in the order
+given, then rules 119, 120, 122 to 124, and 126 to 129 (only on a well-typed payload), then
+`artifact_refs` and `pii_refs`, then the subject rules 121 and 125. Rule 130 spans a batch, so it is
+checked once every draft in the batch passes these, as rule 10's second clause is.
+
+**Lifecycle.** A cause is issued once: a cause that already has a `NoticeIssued` is skipped, and on
+restart the dispatcher issues every cause without one and attempts again every notice that has no
+terminal attempt (notifications spec §5.1). A later receipt for a delivered message is a new
+`NoticeAttempted` naming the same `provider_message_id`; it never retracts the earlier `delivered`
+(notifications spec §5.5). Nothing on the notice stream is a risk input, and no trading path waits on it (NT-9).
 
 ## 10. Anchoring
 
