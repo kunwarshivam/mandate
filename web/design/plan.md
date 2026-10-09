@@ -257,8 +257,9 @@ item above (C-3, C-9) are not repeated.
       mode. (C-7) Done in [#1067](https://github.com/kunwarshivam/mandate/pull/1067).
 - [ ] **A time from another day carries its date**, through one formatter shared with the
       timeline. (C-23)
-- [ ] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
-      restriction, keeping its step-up. Safety lane. (C-24)
+- [x] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
+      restriction, keeping its step-up. Safety lane. (C-24) Done in
+      [#1095](https://github.com/kunwarshivam/mandate/pull/1095).
 - [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
       pale sliver alone, with no dashed rule. (C-11)
 - [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
