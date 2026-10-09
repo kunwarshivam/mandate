@@ -1083,15 +1083,17 @@ def unclosed(f: dict, p: dict, kind: str, skip: frozenset[str], full_chain: bool
     request = f["open"].get(cid) if "stream.131.once" in skip else f["open"].pop(cid, None)
     if request is None:
         started = bool(f["requested"]) or "stream.131.forward" in skip
-        judged = full_chain or "stream.131.range" in skip
-        return started and judged and "stream.131.exempt" not in skip and "stream.131.requested" not in skip
+        return started and full_chain and "stream.131.exempt" not in skip and "stream.131.requested" not in skip
     return any(p[m] != request[m] and f"stream.131.{m}" not in skip for m in CLOSING[kind])
 
 
-def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full_chain: bool = True) -> tuple[int, str] | None:
+def stream_mismatch(
+    drafts: list[dict], skip: frozenset[str] = frozenset(), full_chain: bool = True, folds: dict | None = None, start: int = 0
+) -> tuple[int, str] | None:
     """The first record that breaks rule 66, 67, 68, or 131. Each rule holds on its own stream
-    (§9.8), so each stream has its own fold."""
-    folds: dict[str, dict] = {}
+    (§9.8), so each stream has its own fold. `folds` is the connection anchor a range starts from
+    and `start` its records' count (DEC-885); a full chain starts from nothing."""
+    folds = {} if folds is None else folds
     for i, d in enumerate(drafts):
         p, kind = d["payload"], d["event_type"]
         cid = p.get("connection_id")
@@ -1171,8 +1173,8 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full
                 return i, "68"
             if mcp and "contract" not in {r["check"] for r in p["results"]} and "stream.68.mcp" not in skip:
                 return i, "68"
-            last_check[p["occasion"]] = (i, all_passed(p, False))
-            last_check[f"{p['occasion']}.listed"] = (i, "contract" in {r["check"] for r in p["results"]})
+            last_check[p["occasion"]] = (start + i, all_passed(p, False))
+            last_check[f"{p['occasion']}.listed"] = (start + i, "contract" in {r["check"] for r in p["results"]})
             continue
         if kind == "ConnectionEstablished":
             stream_ref = d["stream_id"].split(":")[2]
@@ -1209,10 +1211,123 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full
             if check_at is not None and check_at < f["suspended_at"] and "stream.68.after" not in skip:
                 return i, "68"
         if p["to"] == "suspended" and p["from"] != "suspended":
-            f["suspended_at"] = i
+            f["suspended_at"] = start + i
         f["cleared"] = p["reason"] == "condition_cleared"
         f["current"] = p["to"]
     return None
+
+
+# --------------------------------------------------------------------------- ranges (DEC-885)
+
+# The records rules 66, 67, 68, and 131 judge. Each can be broken by a record before the range, so a
+# range with no connection anchor fails closed at its first; a revocation no rule refuses.
+JUDGED = {"ctl": ("ConnectionRequested", "ConnectionEstablished", "ConnectionCredentialRotated", "ConnectionRefused")}
+
+
+def judged(d: dict, skip: frozenset[str]) -> bool:
+    kind = d["event_type"]
+    if d["stream_id"].startswith("ctl:"):
+        return kind in JUDGED["ctl"] or (kind == "ConnectionRevoked" and "range.revoke_judged" in skip)
+    return kind.startswith("Connection")
+
+
+def connection_anchor(before: list[dict] | None, skip: frozenset[str]) -> dict | None:
+    """The connection anchor (DEC-885): each stream's fold over the stored chain before the range's
+    trusted start, folded from seq 1 as the full-chain run folds it. A caller that cannot read that
+    chain has none, and neither has one whose chain breaks a rule before the range."""
+    if before is None:
+        return None
+    folds: dict[str, dict] = {}
+    if stream_mismatch(before, skip, True, folds) is not None and "range.broken_prefix" not in skip:
+        return None
+    return folds
+
+
+def range_mismatch(before: list[dict] | None, drafts: list[dict], skip: frozenset[str] = frozenset()) -> tuple[int, str] | None:
+    """§11's `connection_lifecycle_mismatch` on a range (DEC-885). Anchored, it is the full chain's
+    run continued from the anchor, rule 131's closing existence included. Unanchored, it fails
+    closed, cause `unanchored`, at its first record a rule judges, and reports no rule."""
+    folds = connection_anchor(before, skip)
+    if "range.anchor_ignored" in skip and folds is not None:
+        return stream_mismatch(drafts, skip, False)
+    if folds is not None:
+        return stream_mismatch(drafts, skip, "range.existence_skipped" not in skip, folds, len(before or ()))
+    if "range.unanchored_empty" in skip:
+        return stream_mismatch(drafts, skip, False)
+    return next(((i, "unanchored") for i, d in enumerate(drafts) if judged(d, skip)), None)
+
+
+def range_case(name: str, clause: str, before: list[dict] | None, records: list[dict], mismatch: tuple[int, str] | None = None) -> dict:
+    records, before = copy.deepcopy(records), copy.deepcopy(before)
+    case = {**sequence(name, clause, records, None if mismatch is None or mismatch[1] == "unanchored" else mismatch),
+            "scope": "range", "before": before}
+    if mismatch is not None and mismatch[1] == "unanchored":
+        case["expect"] = {"outcome": "Unanchored", "code": "connection_lifecycle_mismatch", "index": mismatch[0]}
+    return case
+
+
+def range_cases() -> list[dict]:
+    """Ranges that begin after the records their rules read, each with the stored chain `before`
+    its trusted start, or `null` when the caller cannot read it."""
+    a, b = ACCOUNT_STREAM_REF, OTHER_ACCOUNT_REF
+    live = [REQUESTED, established(1)]
+    gone = [*live, revoked(2)]
+    torn_down = (change("payload.check", None), change("payload.reason", "timeout"))
+    suspended = [*BOUND, moved(3, "active", "suspended", "authorization_failed"), checked(4), rotation_copy(5)]
+    return [
+        range_case("anchored_rotation", "rule 67: the anchor holds the establishment", live, [record("rotated", 3)]),
+        range_case("anchored_reauthorize_refusal", "rule 67", live, [refused(3, "reauthorize")]),
+        range_case("anchored_reconnect_refusal", "rule 67: the anchor holds the revocation", gone, [refused(3, "reconnect")]),
+        range_case("anchored_reestablishment", "rule 66: the anchor holds the first establishment", gone, [established(3)]),
+        range_case("anchored_connect_closes_the_anchors_request", "rule 131: the anchor holds the open request",
+                   [REQUESTED], [established(1)]),
+        range_case("anchored_daily_check_after_the_binding", "rule 68: the anchor holds the binding copy",
+                   list(BOUND), [checked(3, "daily")]),
+        range_case("anchored_state_change_after_the_binding", "rule 68", list(BOUND), [moved(3, "active", "degraded", "network_errors")]),
+        range_case("anchored_clear_on_the_anchors_rotation", "rule 68: the anchor holds the suspension and the rotation",
+                   suspended, [moved(6, "suspended", "suspended", "condition_cleared", record_id(5)), moved(7, "suspended", "active", "acknowledged")]),
+        range_case("anchored_rotation_widens_the_scopes", "rule 67: the anchor holds the latest scopes",
+                   [*live, record("rotated", 2, change("payload.scopes", ["trading"]))], [record("rotated", 3)], (0, "67")),
+        range_case("anchored_reestablishment_while_live", "rule 66", live, [established(3)], (0, "66")),
+        range_case("anchored_account_ref_held", "rule 66, CN-5: the anchor holds the account_ref's holder",
+                   live, [established(3, change("payload.connection_id", OTHER_CONNECTION))], (0, "66")),
+        range_case("anchored_connect_with_no_request", "rule 131: an anchored range checks the closing existence",
+                   [requested(90, OTHER_CONNECTION, b)], [established(1)], (0, "131")),
+        range_case("anchored_request_reuses_an_account_ref", "rule 131: the anchor holds the requested refs",
+                   [requested(90, OTHER_CONNECTION, b), refused(1, "connect", OTHER_CONNECTION, *torn_down)], [requested(91, CONNECTION, b)], (0, "131")),
+        range_case("anchored_state_from_the_wrong_state", "rule 68: the anchor holds the state",
+                   [*BOUND, moved(3, "active", "degraded", "network_errors")], [moved(4, "active", "suspended", "authorization_failed")], (0, "68")),
+        range_case("anchored_clear_on_a_rotation_before_the_suspension", "rule 68: the anchor holds when the suspension began",
+                   [*BOUND, checked(3), rotation_copy(4), moved(5, "active", "suspended", "authorization_failed")],
+                   [moved(6, "suspended", "suspended", "condition_cleared", record_id(4))], (0, "68")),
+        range_case("unanchored_rotation", "§11: no anchor, so the first judged record fails closed", None, [record("rotated", 3)], (0, "unanchored")),
+        range_case("unanchored_reconnect_refusal", "§11", None, [refused(3, "reconnect")], (0, "unanchored")),
+        range_case("unanchored_request", "§11: a request's opening clause reads earlier records", None, [requested(91, CONNECTION, a)], (0, "unanchored")),
+        range_case("unanchored_daily_check", "§11: every account-stream connection record", None, [checked(3, "daily")], (0, "unanchored")),
+        range_case("unanchored_revocation_passes", "§11, §9.8: no rule refuses a revocation", None, [revoked(3), REQUESTED], (1, "unanchored")),
+        range_case("unanchored_revocations_only", "§11, §9.8", None, [revoked(3)]),
+        range_case("anchor_on_a_broken_chain", "§11: a chain that breaks a rule before the range anchors nothing",
+                   [*live, established(2)], [record("rotated", 3)], (0, "unanchored")),
+    ]
+
+
+RANGE_MUTANTS = ("range.anchor_ignored", "range.unanchored_empty", "range.existence_skipped", "range.revoke_judged", "range.broken_prefix")
+
+
+def range_agreement(drafts: list[dict], skip: frozenset[str]) -> list[str]:
+    """DEC-885's invariants on every split of a full chain, against the full-chain run and an
+    independent scan: an anchored range agrees with the full chain on every record in it, and an
+    unanchored range reports no rule, failing closed exactly at its first judged record."""
+    problems, full = [], stream_mismatch(drafts)
+    for k in range(1, len(drafts)):
+        clean = full is None or full[0] >= k
+        want = (full[0] - k, full[1]) if full is not None and clean else None
+        if clean and range_mismatch(drafts[:k], drafts[k:], skip) != want:
+            problems.append(found("ranges.agree", f"split at {k}: expected {want}"))
+        first = next((i for i, d in enumerate(drafts[k:]) if d["event_type"] in JUDGED["ctl"] or d["stream_id"].startswith("acct:")), None)
+        if range_mismatch(None, drafts[k:], skip) != (None if first is None else (first, "unanchored")):
+            problems.append(found("ranges.unanchored", f"split at {k}: expected fail-closed at {first}"))
+    return problems
 
 
 # --------------------------------------------------------------------------- §11's cause chain
@@ -1361,10 +1476,13 @@ ORACLE_CHECKS = (
     "chains.drafts",
     "chains",
 )
+# DEC-885's invariants over the range run's own code: the range mutants, not vector mutants, show
+# them able to fail.
+INVARIANT_CHECKS = ("ranges.agree", "ranges.unanchored")
 
 
 def found(check: str, message: str) -> str:
-    if check not in ORACLE_CHECKS:
+    if check not in ORACLE_CHECKS + INVARIANT_CHECKS:
         raise ValueError(f"unregistered check {check}")
     return f"{check}: {message}"
 
@@ -1404,7 +1522,7 @@ def check_section(section: dict) -> list[str]:
         for i, d in enumerate(drafts):
             if violations(d):
                 problems.append(found("sequences.drafts", f"{case['name']}[{i}]: {violations(d)}"))
-        problems += sequence_problems(case, drafts, frozenset())
+        problems += sequence_problems(section, case, frozenset())
     for case in section["chains"]:
         drafts = sequence_drafts(section, case)
         for i, d in enumerate(drafts):
@@ -1414,10 +1532,18 @@ def check_section(section: dict) -> list[str]:
     return problems
 
 
-def sequence_problems(case: dict, drafts: list[dict], skip: frozenset[str]) -> list[str]:
-    got = stream_mismatch(drafts, skip, case.get("scope") != "range")
+def sequence_problems(section: dict, case: dict, skip: frozenset[str]) -> list[str]:
+    drafts = sequence_drafts(section, case)
+    if case.get("scope") == "range":
+        before = None if case["before"] is None else [draft_for(section, r) for r in case["before"]]
+        got = range_mismatch(before, drafts, skip)
+    else:
+        got = stream_mismatch(drafts, skip)
+        problems = range_agreement(drafts, skip)
+        if problems:
+            return problems
     want = case["expect"]
-    expected = None if want["outcome"] == "Valid" else (want["index"], want["rule"])
+    expected = {"Valid": None, "Mismatch": (want.get("index"), want.get("rule")), "Unanchored": (want.get("index"), "unanchored")}[want["outcome"]]
     if got != expected:
         return [found("sequences", f"{case['name']}: expected {expected}, got {got}")]
     return []
@@ -1581,7 +1707,7 @@ def run_mutants(section: dict) -> list[str]:
             escaped.append(f"connections validator mutant {mutant}")
     for mutant in STREAM_MUTANTS:
         skip = frozenset([mutant])
-        if not any(sequence_problems(c, sequence_drafts(section, c), skip) for c in section["sequences"]):
+        if not any(sequence_problems(section, c, skip) for c in section["sequences"]):
             escaped.append(f"connections stream mutant {mutant}")
     for mutant in CHAIN_MUTANTS:
         skip = frozenset([mutant])
@@ -1631,7 +1757,6 @@ REQUEST_STREAM_MUTANTS = (
     "stream.131.forward",
     "stream.131.exempt",
     "stream.131.revoke",
-    "stream.131.range",
     "stream.67.pending_revoke",
     "stream.67.discard",
     "stream.131.version_1",
@@ -1702,9 +1827,8 @@ def request_sequences() -> list[dict]:
                  (2, "131")),
         sequence("refused_without_a_request", "rule 131: from the stream's first request on",
                  [requested(90, OTHER_CONNECTION, b), refused(1, "connect", CONNECTION, *torn_down)], (1, "131")),
-        {**sequence("range_after_an_unseen_request", "§11: a range checks rule 131's closing requirement only for a "
-                    "request it holds; the full-chain run checks the rest",
-                    [requested(90, OTHER_CONNECTION, b), established(1)]), "scope": "range"},
+        range_case("range_after_an_unseen_request", "§11: an anchored range closes the request its connection anchor "
+                   "holds (DEC-885)", [REQUESTED], [requested(90, OTHER_CONNECTION, b), established(1)]),
         sequence("full_chain_after_the_same_records", "rule 131: the full-chain run flags the connect with no request",
                  [requested(90, OTHER_CONNECTION, b), established(1)], (1, "131")),
         sequence("revoked_while_connecting", "rule 131: a revocation closes the open request and is never refused",
@@ -1759,7 +1883,7 @@ def run_request_mutants(section: dict) -> list[str]:
             escaped.append(f"connection_requests validator mutant {mutant}")
     for mutant in REQUEST_STREAM_MUTANTS:
         skip = frozenset([mutant])
-        if not any(sequence_problems(c, sequence_drafts(section, c), skip) for c in section["sequences"]):
+        if not any(sequence_problems(section, c, skip) for c in section["sequences"]):
             escaped.append(f"connection_requests stream mutant {mutant}")
 
     def mutated(fn) -> dict:
@@ -1789,6 +1913,21 @@ def run_request_mutants(section: dict) -> list[str]:
         if check not in {check_of(problem) for problem in check_section(bad)}:
             escaped.append(f"connection_requests vector mutant: {name} (not caught by {check})")
     return escaped
+
+
+def build_range_section() -> dict:
+    """The `connection_ranges` section (DEC-885): a section of its own, as `connection_requests`
+    is, so the fold's tests keep their answers until the range run's code change reads it (ES-22)."""
+    drafts = {**base_drafts(), "requested": request_drafts()["requested"]}
+    return {"spec": SPEC, "drafts": drafts, "invalid_drafts": [], "valid_drafts": [], "sequences": range_cases(), "chains": []}
+
+
+def run_range_mutants(section: dict, request_section: dict) -> list[str]:
+    """Every seeded bug in the range run caught by a range vector or by DEC-885's split invariants
+    over the full-chain sequences."""
+    cases = [(section, c) for c in section["sequences"]] + [(request_section, c) for c in request_section["sequences"]]
+    return [f"connection_ranges mutant {m}" for m in RANGE_MUTANTS
+            if not any(sequence_problems(s, c, frozenset([m])) for s, c in cases)]
 
 
 # --------------------------------------------------------------------------- output
