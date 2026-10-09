@@ -43044,5 +43044,3359 @@
     ]
    }
   ]
+ },
+ "records_access": {
+  "spec": "docs/specs/journal.md v0.26 §9.13 (DEC-780)",
+  "drafts": {
+   "records_read": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3R1A000000000000000R1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "RecordsAccessed",
+    "schema_version": 1,
+    "event_time": "2026-09-21T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_auditor_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "accessor": "user_auditor_01",
+     "operation": "journal_events",
+     "ranges": [
+      {
+       "stream_id": "agent:ws_01J8Z2:agent_a",
+       "from_seq": 12,
+       "to_seq": 30,
+       "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+       "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+     ],
+     "resources": [],
+     "result": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "export_canonical": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3R2A000000000000000R2",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ExportCreated",
+    "schema_version": 1,
+    "event_time": "2026-09-21T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_auditor_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "form": "canonical",
+     "ranges": [
+      {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "from_seq": 1,
+       "to_seq": 40,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+       "stream_id": "agent:ws_01J8Z2:agent_a",
+       "from_seq": 12,
+       "to_seq": 30,
+       "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+       "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+       "stream_id": "ctl:ws_01J8Z2",
+       "from_seq": 1,
+       "to_seq": 9,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "4444444444444444444444444444444444444444444444444444444444444444"
+      }
+     ],
+     "verifier_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "view": null
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "export_view": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3R3A000000000000000R3",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ExportCreated",
+    "schema_version": 1,
+    "event_time": "2026-09-21T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3R2A000000000000000R2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_auditor_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "form": "csv",
+     "ranges": [
+      {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "from_seq": 1,
+       "to_seq": 40,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+     ],
+     "verifier_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "view": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "verification_pass": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3R4A000000000000000R4",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "VerificationRun",
+    "schema_version": 1,
+    "event_time": "2026-09-21T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "trigger": "weekly",
+     "ranges": [
+      {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "from_seq": 1,
+       "to_seq": 40,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+       "failure": null
+      },
+      {
+       "stream_id": "agent:ws_01J8Z2:agent_a",
+       "from_seq": 12,
+       "to_seq": 30,
+       "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+       "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+       "failure": null
+      },
+      {
+       "stream_id": "ctl:ws_01J8Z2",
+       "from_seq": 1,
+       "to_seq": 9,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+       "failure": null
+      }
+     ],
+     "result": "pass"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "verification_fail": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3R5A000000000000000R5",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "VerificationRun",
+    "schema_version": 1,
+    "event_time": "2026-09-21T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3R2A000000000000000R2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_owner_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "trigger": "request",
+     "ranges": [
+      {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "from_seq": 1,
+       "to_seq": 40,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": null,
+       "failure": {
+        "check": "rehash_mismatch",
+        "seq": 17
+       }
+      },
+      {
+       "stream_id": "ctl:ws_01J8Z2",
+       "from_seq": 1,
+       "to_seq": 9,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+       "failure": null
+      }
+     ],
+     "result": "fail"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "records_read.accessor.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.accessor",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.accessor"
+    }
+   },
+   {
+    "name": "records_read.accessor.form",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.accessor",
+      "value": ""
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.accessor"
+    }
+   },
+   {
+    "name": "records_read.operation.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.operation",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.operation"
+    }
+   },
+   {
+    "name": "records_read.operation.form",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.operation",
+      "value": "journal events"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.operation"
+    }
+   },
+   {
+    "name": "records_read.ranges.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": "all"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges"
+    }
+   },
+   {
+    "name": "records_read.resources.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": "agent_a"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
+    "name": "records_read.result.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "records_read.result.form",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].stream_id.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": 7,
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].stream_id"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].stream_id.form",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:only_one_segment",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].stream_id"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].from_seq.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": "12",
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].from_seq"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].to_seq.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": "30",
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_seq"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].prev_hash.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": 7,
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].prev_hash"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].prev_hash.form",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].prev_hash"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].to_hash.kind",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": 7
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].to_hash.form",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "export_canonical.form.kind",
+    "clause": "§9.13 types",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.form",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.form"
+    }
+   },
+   {
+    "name": "export_canonical.form.form",
+    "clause": "§9.13 types",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.form",
+      "value": "examination_bundle"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.form"
+    }
+   },
+   {
+    "name": "export_canonical.verifier_digest.kind",
+    "clause": "§9.13 types",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.verifier_digest",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.verifier_digest"
+    }
+   },
+   {
+    "name": "export_canonical.verifier_digest.form",
+    "clause": "§9.13 types",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.verifier_digest",
+      "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.verifier_digest"
+    }
+   },
+   {
+    "name": "export_view.view.kind",
+    "clause": "§9.13 types",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "payload.view",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.view"
+    }
+   },
+   {
+    "name": "export_view.view.form",
+    "clause": "§9.13 types",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "payload.view",
+      "value": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.view"
+    }
+   },
+   {
+    "name": "verification_fail.trigger.kind",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.trigger",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.trigger"
+    }
+   },
+   {
+    "name": "verification_fail.trigger.form",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.trigger",
+      "value": "hourly"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.trigger"
+    }
+   },
+   {
+    "name": "verification_fail.result.kind",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "verification_fail.result.form",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "failed"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].to_hash.kind",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": 7,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].to_hash.form",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444\n",
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].failure.kind",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": "rehash_mismatch"
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].failure.check.kind",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": 7,
+         "seq": 17
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.check"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].failure.check.form",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "chain_broken",
+         "seq": 17
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].failure.check"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].failure.seq.kind",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": "17"
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.seq"
+    }
+   },
+   {
+    "name": "records_read.accessor.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.accessor",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.accessor"
+    }
+   },
+   {
+    "name": "records_read.operation.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.operation",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.operation"
+    }
+   },
+   {
+    "name": "records_read.ranges.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges"
+    }
+   },
+   {
+    "name": "records_read.resources.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].stream_id.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": null,
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].stream_id"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].from_seq.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": null,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].from_seq"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].to_seq.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": null,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_seq"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].prev_hash.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": null,
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].prev_hash"
+    }
+   },
+   {
+    "name": "records_read.ranges[0].to_hash.null",
+    "clause": "§9.13 types",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "export_canonical.form.null",
+    "clause": "§9.13 types",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.form",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.form"
+    }
+   },
+   {
+    "name": "export_canonical.verifier_digest.null",
+    "clause": "§9.13 types",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.verifier_digest",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.verifier_digest"
+    }
+   },
+   {
+    "name": "verification_fail.trigger.null",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.trigger",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.trigger"
+    }
+   },
+   {
+    "name": "verification_fail.result.null",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "verification_fail.ranges[0].failure.check.null",
+    "clause": "§9.13 types",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": null,
+         "seq": 17
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.check"
+    }
+   },
+   {
+    "name": "records_read.missing",
+    "clause": "§9.13 closed",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.accessor",
+      "delete": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.accessor"
+    }
+   },
+   {
+    "name": "records_read.extra",
+    "clause": "§9.13 closed",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "x"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "export_canonical.missing",
+    "clause": "§9.13 closed",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.form",
+      "delete": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.form"
+    }
+   },
+   {
+    "name": "export_canonical.extra",
+    "clause": "§9.13 closed",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "x"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "export_view.missing",
+    "clause": "§9.13 closed",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "payload.form",
+      "delete": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.form"
+    }
+   },
+   {
+    "name": "export_view.extra",
+    "clause": "§9.13 closed",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "x"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "verification_pass.missing",
+    "clause": "§9.13 closed",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "payload.trigger",
+      "delete": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.trigger"
+    }
+   },
+   {
+    "name": "verification_pass.extra",
+    "clause": "§9.13 closed",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "x"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "verification_fail.missing",
+    "clause": "§9.13 closed",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.trigger",
+      "delete": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.trigger"
+    }
+   },
+   {
+    "name": "verification_fail.extra",
+    "clause": "§9.13 closed",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "x"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "range_missing_member",
+    "clause": "§9.13 closed",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "range_extra_member",
+    "clause": "§9.13 closed",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "quantity": "1"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].quantity"
+    }
+   },
+   {
+    "name": "failure_extra_member",
+    "clause": "§9.13 closed",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17,
+         "detail": "x"
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.detail"
+    }
+   },
+   {
+    "name": "read_wrong_stream",
+    "clause": "§9.13: the records are control-stream records",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "export_digest_listed_as_an_artifact",
+    "clause": "§9.13 types: a `digest` names no stored artifact, so `artifact_refs` does not list it",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "artifact_refs",
+     "path": "artifact_refs"
+    }
+   },
+   {
+    "name": "read_result_not_listed",
+    "clause": "§3: `artifact_refs` lists the stored result",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "artifact_refs",
+     "path": "artifact_refs"
+    }
+   },
+   {
+    "name": "read_nothing",
+    "clause": "rule 107: at least one range",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": []
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges"
+    }
+   },
+   {
+    "name": "read_another_workspace",
+    "clause": "rule 107: tenant isolation (workspace API API-9)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].stream_id"
+    }
+   },
+   {
+    "name": "export_another_workspace_second",
+    "clause": "rule 107: every range, not only the first",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "stream_id": "agent:ws_01J8Z9:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].stream_id"
+    }
+   },
+   {
+    "name": "verify_another_workspace_control",
+    "clause": "rule 107: the control stream of another workspace",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "failure": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "failure": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z9",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[2].stream_id"
+    }
+   },
+   {
+    "name": "range_from_seq_zero",
+    "clause": "rule 107: seq starts at 1",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 0,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].from_seq",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.ranges[0].prev_hash"
+      }
+     ]
+    }
+   },
+   {
+    "name": "range_reversed",
+    "clause": "rule 107: `to_seq` is at least `from_seq`",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 11,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_seq"
+    }
+   },
+   {
+    "name": "range_from_one_not_genesis",
+    "clause": "rule 107: seq 1 follows 64 zeros",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].prev_hash"
+    }
+   },
+   {
+    "name": "range_genesis_not_from_one",
+    "clause": "rule 107: only seq 1 follows 64 zeros",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].prev_hash"
+    }
+   },
+   {
+    "name": "ranges_out_of_order",
+    "clause": "rule 107: ranges sort by stream",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+       },
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A0",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].stream_id"
+    }
+   },
+   {
+    "name": "ranges_overlap",
+    "clause": "rule 107: two ranges of one stream never overlap",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 30,
+        "to_seq": 31,
+        "prev_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "to_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].stream_id"
+    }
+   },
+   {
+    "name": "ranges_repeat",
+    "clause": "rule 107: one range listed twice",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].stream_id"
+    }
+   },
+   {
+    "name": "read_accessor_not_the_reader",
+    "clause": "rule 108: the accessor is the actor",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.accessor",
+      "value": "user_owner_01"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.accessor"
+    }
+   },
+   {
+    "name": "read_resource_not_an_id",
+    "clause": "§9.13 types: a resource is an opaque `id`",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": [
+       "agent a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.resources[0]"
+    }
+   },
+   {
+    "name": "read_resources_unsorted",
+    "clause": "rule 108: resources sort by bytes",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": [
+       "notice_01",
+       "agent_a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
+    "name": "read_resource_twice",
+    "clause": "rule 108: each resource once",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.resources",
+      "value": [
+       "agent_a",
+       "agent_a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.resources"
+    }
+   },
+   {
+    "name": "read_by_an_agent",
+    "clause": "rule 108: an agent runtime reads no records outside the product views",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "agent_a"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "client_read_for_no_one",
+    "clause": "§3 rule 81: a client actor names the user it acts for",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "client_01"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.on_behalf_of"
+    }
+   },
+   {
+    "name": "client_read_with_a_build",
+    "clause": "§3 rule 82: a client's read uses the one client actor shape, external, with no build",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "client_01"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.build"
+    }
+   },
+   {
+    "name": "client_read_recorded_as_its_human",
+    "clause": "rule 108: a client is its own accessor, never the user it acts for",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "user_owner_01"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.accessor"
+    }
+   },
+   {
+    "name": "client_exports",
+    "clause": "§3 rule 83: a client never exports (workspace API §3.8)",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "client_verifies",
+    "clause": "§3 rule 83: a client never verifies",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "read_by_a_broker",
+    "clause": "rule 108: a broker reads no records",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "alpaca",
+       "version": "v2",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "alpaca"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "operator_read_without_its_break_glass",
+    "clause": "rule 108: platform staff read only under an approved break-glass action (§7)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "operator_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "operator_01"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "export_by_a_broker",
+    "clause": "rule 109: a user or a service account exports",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "alpaca",
+       "version": "v2",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "export_by_an_operator",
+    "clause": "rule 109: platform staff do not export; a break-glass export fails closed (§9.13)",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "operator_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "scheduled_run_by_a_broker",
+    "clause": "rule 110: a scheduled run is the verifier's own",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "broker",
+       "id": "alpaca",
+       "version": "v2",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "requested_run_by_an_operator",
+    "clause": "rule 110: platform staff do not run a verification; it fails closed (§9.13)",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "operator_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "export_by_an_agent",
+    "clause": "rule 109: a user or a service account exports",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "canonical_with_a_view",
+    "clause": "rule 109: a view exactly for a view form",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "payload.view",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.view"
+    }
+   },
+   {
+    "name": "view_without_its_bytes",
+    "clause": "rule 109",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "payload.view",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.view"
+    }
+   },
+   {
+    "name": "scheduled_run_by_a_user",
+    "clause": "rule 110: a scheduled run is the verifier's own",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "requested_run_by_an_agent",
+    "clause": "rule 110",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "event_check_without_its_seq",
+    "clause": "rule 111: a per-event check names its seq",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": null
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.seq"
+    }
+   },
+   {
+    "name": "range_check_with_a_seq",
+    "clause": "rule 111: a range check names no seq",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "anchor_root_mismatch",
+         "seq": 17
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.seq"
+    }
+   },
+   {
+    "name": "failure_after_the_range",
+    "clause": "rule 111: the seq lies in the range",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 41
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.seq"
+    }
+   },
+   {
+    "name": "failure_before_the_range",
+    "clause": "rule 111: the seq lies in the range",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 0
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.seq"
+    }
+   },
+   {
+    "name": "passed_range_without_its_head",
+    "clause": "rule 111: a passed range names the head it verified",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "failure": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": null,
+        "failure": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].to_hash"
+    }
+   },
+   {
+    "name": "fail_reported_as_pass",
+    "clause": "rule 112",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "pass"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "pass_reported_as_fail",
+    "clause": "rule 112",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "fail"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "read_one_event",
+    "clause": "rule 107: a range of one event",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 12,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "read_two_ranges_of_one_stream",
+    "clause": "rule 107: disjoint ranges of one stream, adjacent included",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 31,
+        "to_seq": 31,
+        "prev_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "to_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "read_by_a_service_account",
+    "clause": "rule 108: a service account is a `system` actor (identity spec §3.1)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "control_services"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "client_reads_its_own_records",
+    "clause": "rule 108 and §3 rule 83: a client records its own read, as its own accessor (workspace API §3.8)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "client_01"
+     },
+     {
+      "path": "payload.operation",
+      "value": "agent_status"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "read_by_an_operator",
+    "clause": "rule 108 and §7: platform staff's break-glass reads are journaled where the customer reads them",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "operator_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.accessor",
+      "value": "operator_01"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8Z3R9A000000000000000B1"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "read_scheduler_and_notice_streams",
+    "clause": "§9.13 types: every stream type of §2",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "clock:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 3,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+       },
+       {
+        "stream_id": "ntf:ws_01J8Z2",
+        "from_seq": 4,
+        "to_seq": 5,
+        "prev_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+        "to_hash": "8888888888888888888888888888888888888888888888888888888888888888"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "notice_resolved_with_resources_and_result",
+    "clause": "rule 108: resources and a stored result (workspace API §3.9)",
+    "base_draft": "records_read",
+    "changes": [
+     {
+      "path": "payload.operation",
+      "value": "resolve_notice"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "ntf:ws_01J8Z2",
+        "from_seq": 4,
+        "to_seq": 5,
+        "prev_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+        "to_hash": "8888888888888888888888888888888888888888888888888888888888888888"
+       }
+      ]
+     },
+     {
+      "path": "payload.resources",
+      "value": [
+       "agent_a",
+       "notice_01J8Z3"
+      ]
+     },
+     {
+      "path": "payload.result",
+      "value": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "json_view",
+    "clause": "rule 109",
+    "base_draft": "export_view",
+    "changes": [
+     {
+      "path": "payload.form",
+      "value": "json"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "export_by_a_service_account",
+    "clause": "rule 109",
+    "base_draft": "export_canonical",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "requested_run_by_a_service_account",
+    "clause": "rule 110",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "requested_run_passed",
+    "clause": "rules 110 and 112",
+    "base_draft": "verification_pass",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "payload.trigger",
+      "value": "request"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "restore_drill_failed_on_a_range_check",
+    "clause": "rules 111 and 112: a range check names no seq and may keep its head",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.trigger",
+      "value": "restore_drill"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "failure": {
+         "check": "anchor_root_mismatch",
+         "seq": null
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "failure_at_the_first_event",
+    "clause": "rule 111: the range's own bounds are inside",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "prev_hash_mismatch",
+         "seq": 1
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "failure_at_the_last_event",
+    "clause": "rule 111",
+    "base_draft": "verification_fail",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "failure": {
+         "check": "seq_gap",
+         "seq": 40
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }

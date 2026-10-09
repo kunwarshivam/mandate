@@ -33,6 +33,7 @@ from pathlib import Path
 
 import account
 import approval
+import audit
 import connections
 import clients
 import control
@@ -3827,6 +3828,7 @@ def render(
     hold_section: dict,
     membership_section: dict,
     fold_section: dict,
+    audit_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3846,6 +3848,7 @@ def render(
             "hold": hold_section,
             "membership": membership_section,
             "membership_fold": fold_section,
+            "records_access": audit_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3896,6 +3899,7 @@ def main(argv: list[str] | None = None) -> int:
     hold_section = holds.build_section()
     membership_section = membership.build_section()
     fold_section = membership_fold.build_section()
+    audit_section = audit.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3927,6 +3931,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += membership.run_mutants(membership_section)
     problems += membership_fold.check_section(fold_section)
     problems += membership_fold.run_mutants(fold_section)
+    problems += audit.check_section(audit_section)
+    problems += audit.run_mutants(audit_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3949,6 +3955,7 @@ def main(argv: list[str] | None = None) -> int:
         hold_section,
         membership_section,
         fold_section,
+        audit_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -3967,6 +3974,7 @@ def main(argv: list[str] | None = None) -> int:
         or holds.check_section(reread["hold"])
         or membership.check_section(reread["membership"])
         or membership_fold.check_section(reread["membership_fold"])
+        or audit.check_section(reread["records_access"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4031,7 +4039,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(membership_section['valid_drafts'])} valid; {len(membership.VALIDATOR_MUTANTS)} validator and "
         f"{len(membership.vector_mutants(membership_section))} vector mutants caught; "
         f"{len(fold_section['histories'])} membership histories; {len(membership_fold.FOLD_MUTANTS)} fold and "
-        f"{len(membership_fold.vector_mutants(fold_section))} vector mutants caught"
+        f"{len(membership_fold.vector_mutants(fold_section))} vector mutants caught; "
+        f"{len(audit_section['drafts'])} records-access drafts, {len(audit_section['invalid_drafts'])} invalid and "
+        f"{len(audit_section['valid_drafts'])} valid; {len(audit.VALIDATOR_MUTANTS)} validator and "
+        f"{len(audit.vector_mutants(audit_section))} vector mutants caught"
     )
     return 0
 
