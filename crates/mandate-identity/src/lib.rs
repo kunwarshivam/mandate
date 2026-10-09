@@ -46,7 +46,7 @@
 //! ```
 //!
 //! **A sensitive data API can demand the permission too** (DEC-655): it takes a
-//! [`demand::Authorized`] witness, which only [`TenantContext::require`] yields, and only for a
+//! [`demand::Permitted`] witness, which only [`TenantContext::require`] yields, and only for a
 //! context authorized for the witness's permission ([`demand`]).
 //!
 //! **Org scope and one's own data get sealed contexts too** (DEC-832). An org-scope authorization
@@ -549,7 +549,7 @@ impl TenantContext {
     /// borrows this context, so it reports this context's workspace, organization, and principal.
     pub fn require<P: demand::RequiredPermission>(
         &self,
-    ) -> Result<demand::Authorized<'_, P>, Refusal> {
+    ) -> Result<demand::Permitted<'_, P>, Refusal> {
         let _ = self;
         Err(Refusal::Unimplemented { story: "E9-8" })
     }
@@ -583,7 +583,7 @@ pub trait Tenant: sealed::Sealed {
 mod sealed {
     pub trait Sealed {}
     impl Sealed for super::TenantContext {}
-    impl<P: super::demand::RequiredPermission> Sealed for super::demand::Authorized<'_, P> {}
+    impl<P: super::demand::RequiredPermission> Sealed for super::demand::Permitted<'_, P> {}
 }
 
 /// What an authorization at an organization's scope yields (identity spec §4.5, DEC-832 items 1 to
@@ -791,7 +791,7 @@ impl Tenant for TenantContext {
     clippy::todo,
     reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
 )]
-impl<P: demand::RequiredPermission> Tenant for demand::Authorized<'_, P> {
+impl<P: demand::RequiredPermission> Tenant for demand::Permitted<'_, P> {
     fn workspace(&self) -> WorkspaceId {
         todo!()
     }

@@ -9,7 +9,7 @@ use mandate_time::UtcNanos;
 
 use super::rows::ROWS;
 use super::{ByMember, O1, O2, W1, W3};
-use crate::demand::{Authorized, ReadRecords, RequiredPermission};
+use crate::demand::{Permitted, ReadRecords, RequiredPermission};
 use crate::{
     Membership, MembershipState, OrgId, Permission, Principal, PrincipalId, PrincipalKind, Refusal,
     Role, Scope, Session, SessionKind, SessionRef, Tenant, TenantContext, WorkspaceId, authorize,
@@ -153,7 +153,7 @@ fn require_returns_the_context_it_was_called_on() {
 #[test]
 fn the_witness_literal_builds_inside_the_crate() {
     let reading = context(&user(ADMIN), O1, W1, Permission::ReadRecords);
-    let witness: Authorized<'_, ReadRecords> = Authorized {
+    let witness: Permitted<'_, ReadRecords> = Permitted {
         context: &reading,
         demanded: PhantomData,
     };

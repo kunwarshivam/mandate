@@ -9,7 +9,7 @@
   and `MembershipLookup`, `MembershipQuery`, `Session`, `Membership`, `Refusal`, `ClientScope`,
   `StepUpActionKind`, `StepUpEvidence`) and `src/permission.rs` (one `Permission` per §4.2 row).
   `src/demand.rs` holds what a sensitive data API demands (DEC-655, E9-8): the sealed
-  `RequiredPermission`, its one marker `ReadRecords`, and the `Authorized<'a, P>` witness, which
+  `RequiredPermission`, its one marker `ReadRecords`, and the `Permitted<'a, P>` witness, which
   only `TenantContext::require` yields and which is a `Tenant`.
   `change_roles` (which yields the change's resolved step-up, DEC-654),
   `PrincipalContext::into_tenant`, `TenantContext::require`, and the witness's `Tenant` methods
