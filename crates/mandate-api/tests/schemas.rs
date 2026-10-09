@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use mandate_api::envelope::{
     Actor, ApiVersion, Record, StepUpEvidence, StepUpMethod, StepUpStatus, Watermark,
 };
+use mandate_api::problem::{Problem, Violation};
 use mandate_api::requests::{
     AcknowledgeRequest, ApprovalResponseRequest, BidConfirmation, ConfirmRequest, DelegationChosen,
     DelegationPreviewRequest, EndDelegationRequest, Environment, HoldRequest, KillSwitchRequest,
@@ -345,6 +346,49 @@ fn the_envelope_shapes_accept_their_examples_and_refuse_the_invalid() {
     let common = [file!("workspace-api/examples/common.json"), valid];
     let invalid = [file!("workspace-api/examples/common.invalid.json")];
     check::<Watermark>(&of("Watermark", &common), &of("Watermark", &invalid));
+}
+
+/// The codes `envelope.schema.json` marks planned under a story not in flight (DEC-683 item 5): no
+/// variant serves them yet, so their examples wait for that story.
+fn planned_elsewhere() -> BTreeSet<String> {
+    let codes = &file!("workspace-api/envelope.schema.json")["$defs"]["ProblemCode"];
+    let planned = codes["x-planned"].as_object().cloned().unwrap_or_default();
+    let in_flight = |story: &Value| story.as_str().is_some_and(|s| IN_FLIGHT.contains(&s));
+    let waiting = planned.into_iter().filter(|(_, story)| !in_flight(story));
+    waiting.map(|(code, _)| code).collect()
+}
+
+/// §3.5's problem and its violations (§4.3, DEC-682 items 22 and 28) against their examples: each
+/// valid one decodes and encodes back, and each invalid one is refused, but a problem whose code
+/// waits for a story not in flight.
+#[test]
+#[ignore = "pending E10-10"]
+fn the_problem_and_its_violations_accept_their_examples_and_refuse_the_invalid() {
+    let good = [file!("workspace-api/examples/envelope.json")];
+    let bad = [file!("workspace-api/examples/envelope.invalid.json")];
+    let waiting = planned_elsewhere();
+    let served = |p: &Value| !p["code"].as_str().is_some_and(|c| waiting.contains(c));
+    let problems = |files: &[Value]| -> Vec<Value> {
+        of("Problem", files).into_iter().filter(served).collect()
+    };
+    check::<Problem>(&problems(&good), &problems(&bad));
+    check::<Violation>(&of("Violation", &good), &of("Violation", &bad));
+}
+
+/// A pointer's segment may hold any character but a control character (the schemas' pointer
+/// pattern, DEC-682 items 22 and 27): a space is one, `U+001F` is not, in a violation's `path`
+/// and in a `202`'s `dropped`.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_pointer_may_hold_a_space_but_never_a_control_character() {
+    let examples = file!("workspace-api/examples/envelope.json");
+    let finding = examples.pointer("/Violation/0").expect("a schema finding");
+    let accepted = file!("workspace-api/examples/commands.command-accepted.json");
+    let [space, control] = ["/a b", "/a\u{1f}b"];
+    let path = |p: &str| apply(finding, &json!({"set": {"/path": p}}));
+    check::<Violation>(&[path(space)], &[path(control)]);
+    let dropped = |p: &str| apply(&accepted, &json!({"set": {"/dropped": [p]}}));
+    check::<CommandAccepted>(&[dropped(space)], &[dropped(control)]);
 }
 
 /// A shape's example with its `.valid` cases applied, and its `.invalid` cases applied.
