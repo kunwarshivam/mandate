@@ -44,6 +44,18 @@ fn an_ed25519_passkey_enrols_with_its_counter_and_backup_eligibility() {
 }
 
 #[test]
+fn backup_eligibility_is_read_from_be_not_from_bs() {
+    let authenticator = Authenticator::new(Alg::Es256);
+    let mut ceremony = Ceremony::create(&CHALLENGE);
+    ceremony.flags |= BE;
+    let expected = Credential {
+        backup_eligible: true,
+        ..authenticator.credential(0)
+    };
+    assert_eq!(enrol_with(&authenticator.register(&ceremony)), Ok(expected));
+}
+
+#[test]
 fn a_get_ceremony_is_not_an_enrolment() {
     let result = refused(|c| c.kind = "webauthn.get".to_owned());
     assert_eq!(result, Err(Refusal::ClientDataType));
@@ -137,6 +149,10 @@ fn bytes_after_the_public_key_need_the_extension_flag_and_a_map() {
     );
     assert_eq!(
         enrol_with(&register(ED, &cbor_int(2))),
+        Err(Refusal::AuthenticatorDataMalformed)
+    );
+    assert_eq!(
+        enrol_with(&register(ED, &[extensions.clone(), cbor_int(0)].concat())),
         Err(Refusal::AuthenticatorDataMalformed)
     );
     assert_eq!(

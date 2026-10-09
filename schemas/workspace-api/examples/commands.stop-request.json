@@ -1,0 +1,13 @@
+{
+  "release": true,
+  "warning_shown": "sha256:abababababababababababababababababababababababababababababababab",
+  "record": {
+    "artifact": "sha256:abababababababababababababababababababababababababababababababab",
+    "ui_build": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  },
+  "step_up": {
+    "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+    "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+    "method": "passkey"
+  }
+}
