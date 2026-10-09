@@ -11,6 +11,12 @@
   provider: a writer refuses every stream but `ntf:`; only committed alerts are causes, no other
   stream is written, and each send finds its `NoticeIssued` committed and its attempt not yet
   recorded, with exactly one `delivered` record after it; one user kill switch is one notice and a
-  second step issues and sends nothing; a dispatcher fenced by a newer epoch sends nothing and
-  the live one sends.
+  second step issues and sends nothing, and its cause is the API's control-stream alert whose
+  subject is the `OwnerCommandIssued`; a dispatcher fenced by a newer epoch sends nothing and
+  the live one sends. The tests correction adds DEC-704 items 2 and 3: a step's new
+  `NoticeIssued` are one append, opened by `StreamOpened` on a fresh stream, then one append per
+  send; recipients are sorted and unique; a `retryable` or `permanent` answer is journaled
+  `failed` with its reason before the next send; and an append that does not commit
+  (`Unavailable` on the issue batch, `Ambiguous` on an attempt) returns `NotCommitted` with no
+  send or append after it.
 - **Run:** `cargo nextest run -p mandate-dispatcher`; `cargo xtask ci pending`.

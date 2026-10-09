@@ -8,7 +8,7 @@ use mandate_canon::{Value, parse};
 use mandate_journal::{AppendOutcome, Environment, MemoryJournal, StoredEvent, StreamId};
 use mandate_notify::{
     AddressHandle, FixtureProvider, IdempotencyKey, Notification, NotifyError, Origin, Outcome,
-    Provider, PushChannel, Recipient, SecureRandom,
+    Provider, PushChannel, Reason, Recipient, SecureRandom,
 };
 use mandate_time::UtcNanos;
 use std::cell::RefCell;
@@ -21,6 +21,7 @@ type Stepped = Result<Result<(), DispatchError>, Box<dyn Error>>;
 const NTF: &str = "ntf:ws_1";
 const A1: &str = "acct:ws_1:A1";
 const A2: &str = "acct:ws_1:A2";
+const CTL: &str = "ctl:ws_1";
 const T: &str = "2026-10-09T14:00:00.000000000Z";
 const BUILD: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 const AUDIENCE: [(&str, PushChannel); 2] = [
@@ -52,12 +53,47 @@ impl Journal for Shared {
     }
 }
 
+/// The shared journal, recording the event types of each notice-stream append and answering
+/// `refuse`'s outcome, without writing, in place of the append it numbers (from 0).
+struct Gate {
+    journal: Shared,
+    refuse: Option<(usize, AppendOutcome)>,
+    batches: Vec<Vec<String>>,
+}
+
+impl Journal for Gate {
+    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
+        self.journal.committed(stream)
+    }
+    fn append_notices(
+        &mut self,
+        writer: &NoticeWriter,
+        head: u64,
+        at: UtcNanos,
+        drafts: &[&[u8]],
+    ) -> AppendOutcome {
+        let event_type = |d: &&[u8]| parse(d).ok().map(|v| text(&v, "event_type"));
+        let call = self.batches.len();
+        self.batches
+            .push(drafts.iter().filter_map(event_type).collect());
+        match &self.refuse {
+            Some((refused, outcome)) if *refused == call => outcome.clone(),
+            _ => self.journal.append_notices(writer, head, at, drafts),
+        }
+    }
+}
+
 /// The fixture provider, recording at each send whether the notice stream then held the notice's
-/// `NoticeIssued`, and an attempt of it on that channel.
+/// `NoticeIssued`, and an attempt of it on that channel, and how many `NoticeAttempted` it held.
+/// A channel in `script` gets its scripted answer in place of the fixture's. `draws` carries the
+/// random source across steps, so no step repeats an earlier one's ids.
 struct Watching {
     journal: Shared,
     fx: FixtureProvider,
     seen: Vec<(String, String, (bool, bool))>,
+    before: Vec<usize>,
+    script: Vec<(PushChannel, Outcome)>,
+    draws: u8,
 }
 
 impl Provider for Watching {
@@ -77,7 +113,12 @@ impl Provider for Watching {
         };
         let state = (held("NoticeIssued", false), held("NoticeAttempted", true));
         self.seen.push((notice, channel, state));
-        self.fx.send(origin, notification, address, key)
+        self.before
+            .push(payloads(&self.journal, "NoticeAttempted").len());
+        match self.script.iter().find(|(c, _)| *c == address.channel) {
+            Some((_, scripted)) => Ok(scripted.clone()),
+            None => self.fx.send(origin, notification, address, key),
+        }
     }
 }
 
@@ -153,6 +194,26 @@ fn alerts(journal: &Shared, stream: &str, epoch: u64, alerts: &[(u64, &str)]) ->
     Ok(())
 }
 
+/// Opens the control stream and commits, as the API does, the user's kill switch `id(9, 0)` with
+/// its `OwnerAlertSent` `id(9, 1)`, whose `subject` and `owner_command` both name the command
+/// (spec §3.4).
+fn kill_switch(journal: &Shared) -> Checked {
+    let (sid, command) = (StreamId::parse(CTL).ok_or(CTL)?, id(9, 0));
+    let opened = r#"{"stream_type":"control","workspace_id":"ws_1"}"#;
+    let opened = draft(CTL, &id(8, 0), "StreamOpened", "null", opened);
+    let issued = r#"{"command":"kill_switch"}"#;
+    let issued = draft(CTL, &command, "OwnerCommandIssued", "null", issued);
+    let alert =
+        format!(r#"{{"subject":"{command}","kind":"kill_switch","owner_command":"{command}"}}"#);
+    let cause = format!("\"{command}\"");
+    let alert = draft(CTL, &id(9, 1), "OwnerAlertSent", &cause, &alert);
+    let mut j = journal.0.borrow_mut();
+    let owner = j.take_ownership(&sid);
+    let appended = j.append(&sid, 0, owner, now()?, &[&opened, &issued, &alert]);
+    assert_eq!(appended.name(), "Committed");
+    Ok(())
+}
+
 fn now() -> Result<UtcNanos, Box<dyn Error>> {
     Ok(UtcNanos::parse(T)?)
 }
@@ -171,8 +232,15 @@ fn text(payload: &Value, member: &str) -> String {
 }
 
 fn provider(journal: &Shared) -> Result<Watching, NotifyError> {
+    provider_for(journal, &AUDIENCE)
+}
+
+fn provider_for(
+    journal: &Shared,
+    audience: &[(&str, PushChannel)],
+) -> Result<Watching, NotifyError> {
     let mut vault = Vec::new();
-    for (recipient, channel) in AUDIENCE {
+    for &(recipient, channel) in audience {
         let recipient = Recipient::parse(recipient)?;
         vault.push((AddressHandle { recipient, channel }, "address".to_owned()));
     }
@@ -181,6 +249,9 @@ fn provider(journal: &Shared) -> Result<Watching, NotifyError> {
         journal: journal.clone(),
         fx,
         seen: Vec::new(),
+        before: Vec::new(),
+        script: Vec::new(),
+        draws: 0,
     })
 }
 
@@ -193,9 +264,20 @@ fn writer(journal: &Shared) -> Result<NoticeWriter, DispatchError> {
 
 /// One step by `writer` over `subjects` through `sends`, with the step's own answer inside.
 fn run(j: &Shared, writer: &NoticeWriter, subjects: &[&str], sends: &mut Watching) -> Stepped {
+    run_over(&mut j.clone(), writer, subjects, &AUDIENCE, sends)
+}
+
+/// One step through `journal` to `audience`, with the step's own answer inside.
+fn run_over(
+    journal: &mut dyn Journal,
+    writer: &NoticeWriter,
+    subjects: &[&str],
+    audience: &[(&str, PushChannel)],
+    sends: &mut Watching,
+) -> Stepped {
     let subjects: Vec<StreamId> = subjects.iter().filter_map(|s| StreamId::parse(s)).collect();
     let origin = Origin::parse("https://app.example.invalid")?;
-    let (audience, environment) = (&AUDIENCE[..], Environment::Paper);
+    let environment = Environment::Paper;
     let config = Config {
         writer,
         subjects: &subjects,
@@ -204,8 +286,10 @@ fn run(j: &Shared, writer: &NoticeWriter, subjects: &[&str], sends: &mut Watchin
         environment,
         build: BUILD,
     };
-    let (at, mut random) = (now()?, Counter(0));
-    Ok(step(&config, &mut j.clone(), &mut random, sends, at))
+    let (at, mut random) = (now()?, Counter(sends.draws));
+    let stepped = step(&config, journal, &mut random, sends, at);
+    sends.draws = random.0;
+    Ok(stepped)
 }
 
 #[test]
@@ -259,15 +343,29 @@ fn only_committed_alerts_are_causes_and_each_send_follows_its_notice() -> Checke
 #[ignore = "pending E8-10"]
 fn one_user_kill_switch_is_one_notice_and_a_cause_is_issued_once() -> Checked {
     let journal = world()?;
+    kill_switch(&journal)?;
     alerts(&journal, A1, 1, &[(1, "kill_switch"), (2, "risk_limit")])?;
     alerts(&journal, A2, 1, &[(3, "kill_switch")])?;
     let (writer, mut sends) = (writer(&journal)?, provider(&journal)?);
-    run(&journal, &writer, &[A1, A2], &mut sends)??;
-    run(&journal, &writer, &[A1, A2], &mut sends)??;
+    run(&journal, &writer, &[CTL, A1, A2], &mut sends)??;
+    run(&journal, &writer, &[CTL, A1, A2], &mut sends)??;
     let issued = payloads(&journal, "NoticeIssued");
     let kinds: Vec<String> = issued.iter().map(|p| text(p, "kind")).collect();
     assert_eq!(kinds, ["kill_switch", "risk_limit"]);
     assert_eq!(sends.fx.sent()?.len(), 4, "the second step sent nothing");
+    let cause = issued
+        .first()
+        .map(|p| (text(p, "cause"), text(p, "cause_stream")));
+    assert_eq!(cause, Some((id(9, 1), CTL.to_owned())), "the API's alert");
+    let j = journal.0.borrow();
+    let body = |event: &str| j.event(event).and_then(|r| parse(&r.body).ok());
+    let subject = body(&id(9, 1)).and_then(|b| b.get("payload").map(|p| text(p, "subject")));
+    let command = subject.and_then(|s| j.event(&s).map(|r| r.event_type.clone()));
+    assert_eq!(
+        command.as_deref(),
+        Some("OwnerCommandIssued"),
+        "it answers the command"
+    );
     Ok(())
 }
 
@@ -284,5 +382,153 @@ fn a_fenced_dispatcher_sends_nothing_and_the_live_one_sends() -> Checked {
     assert!(payloads(&journal, "NoticeIssued").is_empty());
     run(&journal, &live, &[A1], &mut live_sends)??;
     assert_eq!(live_sends.fx.sent()?.len(), 2);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E8-10"]
+fn a_steps_notices_are_one_batch_that_opens_a_fresh_stream() -> Checked {
+    let journal = world()?;
+    alerts(&journal, A1, 1, &[(1, "risk_limit"), (2, "agent_held")])?;
+    let (writer, mut sends) = (writer(&journal)?, provider(&journal)?);
+    let mut gate = Gate {
+        journal: journal.clone(),
+        refuse: None,
+        batches: Vec::new(),
+    };
+    run_over(&mut gate, &writer, &[A1], &AUDIENCE, &mut sends)??;
+    alerts(&journal, A1, 1, &[(3, "risk_limit")])?;
+    run_over(&mut gate, &writer, &[A1], &AUDIENCE, &mut sends)??;
+    let attempted = vec!["NoticeAttempted"];
+    let mut want = vec![vec!["StreamOpened", "NoticeIssued", "NoticeIssued"]];
+    want.extend([attempted.clone(), attempted.clone(), attempted.clone()]);
+    want.extend([
+        attempted.clone(),
+        vec!["NoticeIssued"],
+        attempted.clone(),
+        attempted,
+    ]);
+    assert_eq!(
+        gate.batches, want,
+        "one issue batch per step, then one append per send"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E8-10"]
+fn recipients_are_sorted_and_unique_and_each_gets_its_own_channels() -> Checked {
+    use PushChannel::{Email, WebPush};
+    let journal = world()?;
+    alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
+    let audience = [
+        ("u_2", Email),
+        ("u_1", WebPush),
+        ("u_2", WebPush),
+        ("u_1", Email),
+    ];
+    let (writer, mut sends) = (writer(&journal)?, provider_for(&journal, &audience)?);
+    run_over(&mut journal.clone(), &writer, &[A1], &audience, &mut sends)??;
+    let issued = payloads(&journal, "NoticeIssued");
+    let listed = issued
+        .iter()
+        .filter_map(|p| p.get("recipients")?.as_array());
+    let recipients: Vec<&str> = listed.flatten().filter_map(Value::as_str).collect();
+    assert_eq!(recipients, ["u_1", "u_2"]);
+    let pairs = sends
+        .fx
+        .sent()?
+        .iter()
+        .map(|s| (s.address.recipient.clone(), s.address.channel));
+    let mut sent: Vec<(Recipient, PushChannel)> = pairs.collect();
+    sent.sort();
+    let (u_1, u_2) = (Recipient::parse("u_1")?, Recipient::parse("u_2")?);
+    let want = [
+        (u_1.clone(), Email),
+        (u_1, WebPush),
+        (u_2.clone(), Email),
+        (u_2, WebPush),
+    ];
+    assert_eq!(sent, want);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E8-10"]
+fn a_send_that_does_not_go_through_is_journaled_failed_with_its_reason() -> Checked {
+    let journal = world()?;
+    alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
+    let (writer, mut sends) = (writer(&journal)?, provider(&journal)?);
+    sends.script = vec![
+        (
+            PushChannel::Email,
+            Outcome::Retryable {
+                reason: Reason::RateLimited,
+            },
+        ),
+        (
+            PushChannel::WebPush,
+            Outcome::Permanent {
+                reason: Reason::TooLarge,
+            },
+        ),
+    ];
+    run(&journal, &writer, &[A1], &mut sends)??;
+    assert_eq!(
+        sends.before,
+        [0, 1],
+        "each send is journaled before the next"
+    );
+    let attempts = payloads(&journal, "NoticeAttempted");
+    let outcome = |p: &Value| {
+        let (attempt, id) = (p.get("attempt")?.as_int()?, p.get("provider_message_id")?);
+        let fields = ["channel", "status", "reason"].map(|m| text(p, m));
+        Some((fields, attempt, *id == Value::Null))
+    };
+    let mut got: Vec<_> = attempts.iter().filter_map(outcome).collect();
+    got.sort();
+    let want = [
+        (
+            ["email", "failed", "rate_limited"].map(String::from),
+            1,
+            true,
+        ),
+        (
+            ["web_push", "failed", "too_large"].map(String::from),
+            1,
+            true,
+        ),
+    ];
+    assert_eq!(got, want);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E8-10"]
+fn an_append_that_does_not_commit_stops_the_step_before_its_next_send() -> Checked {
+    let cases = [
+        (0, AppendOutcome::Unavailable, "Unavailable"),
+        (1, AppendOutcome::Ambiguous, "Ambiguous"),
+    ];
+    for (refused, outcome, name) in cases {
+        let journal = world()?;
+        alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
+        let (writer, mut sends) = (writer(&journal)?, provider(&journal)?);
+        let mut gate = Gate {
+            journal: journal.clone(),
+            refuse: Some((refused, outcome)),
+            batches: Vec::new(),
+        };
+        let stepped = run_over(&mut gate, &writer, &[A1], &AUDIENCE, &mut sends)?;
+        assert_eq!(stepped, Err(DispatchError::NotCommitted { outcome: name }));
+        assert_eq!(sends.seen.len(), refused, "{name}: no send after it");
+        assert_eq!(
+            gate.batches.len(),
+            refused + 1,
+            "{name}: no append after it"
+        );
+        assert_eq!(payloads(&journal, "NoticeIssued").len(), refused, "{name}");
+        assert!(payloads(&journal, "NoticeAttempted").is_empty(), "{name}");
+    }
     Ok(())
 }
