@@ -536,6 +536,15 @@ impl MemoryJournal {
         }
     }
 
+    /// The id of every stream that holds at least one event, in `stream_id` byte order. A stream
+    /// whose ownership was taken but that holds no event is not listed.
+    pub fn stream_ids(&self) -> impl Iterator<Item = &str> {
+        self.streams
+            .iter()
+            .filter(|(_, state)| !state.rows.is_empty())
+            .map(|(id, _)| id.as_str())
+    }
+
     pub fn rows(&self, stream: &StreamId) -> &[StoredEvent] {
         self.streams
             .get(stream.as_str())

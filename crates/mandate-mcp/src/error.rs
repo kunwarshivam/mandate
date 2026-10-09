@@ -80,6 +80,10 @@ pub enum McpError {
     PkceUnsupported,
     #[error("the authorization server offers no client registration")]
     RegistrationUnavailable,
+    #[error("the registration would need a client secret")]
+    ClientSecretIssued,
+    #[error("the registration does not keep the one loopback redirect sent")]
+    RedirectChanged,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -114,6 +118,8 @@ impl McpError {
             Self::IssuerMismatch => "issuer_mismatch",
             Self::PkceUnsupported => "pkce_unsupported",
             Self::RegistrationUnavailable => "registration_unavailable",
+            Self::ClientSecretIssued => "client_secret_issued",
+            Self::RedirectChanged => "redirect_changed",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

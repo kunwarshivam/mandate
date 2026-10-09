@@ -43,6 +43,8 @@ fn every_error_has_its_stable_code() {
             McpError::RegistrationUnavailable,
             "registration_unavailable",
         ),
+        (McpError::ClientSecretIssued, "client_secret_issued"),
+        (McpError::RedirectChanged, "redirect_changed"),
         (McpError::Unimplemented { story: "E7-16" }, "unimplemented"),
     ];
     for (error, code) in cases {
