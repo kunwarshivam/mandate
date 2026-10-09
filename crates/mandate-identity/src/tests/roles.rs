@@ -148,7 +148,6 @@ fn check(cases: &[Case]) {
 /// `own_roles`, raising or lowering, with another owner left, and before `owner_role_reserved`
 /// (§4.5's order); the same change naming another member passes.
 #[test]
-#[ignore = "pending E9-2"]
 fn no_principal_changes_its_own_roles_up_or_down() {
     let (s, two) = (store(&[]), store(&[m(OO4, ORG, Active, &[OrgOwner])]));
     let own = Err(Refusal::OwnRoles);
@@ -172,7 +171,6 @@ fn no_principal_changes_its_own_roles_up_or_down() {
 /// The way down is the leave row (DEC-641 item 5): no step-up, and §5.2 still holds on it; a
 /// suspended, cooling-off, or other scope's holder is not an active owner or admin (DEC-654 item 2).
 #[test]
-#[ignore = "pending E9-2"]
 fn leaving_needs_no_step_up_and_never_leaves_no_active_owner_or_admin() {
     let s = store(&[]);
     check(&[
@@ -188,7 +186,6 @@ fn leaving_needs_no_step_up_and_never_leaves_no_active_owner_or_admin() {
 /// adds an active successor in the same command (a cooling-off one is not); a role counts once
 /// effective at `now`, the boundary included (DEC-654 item 2).
 #[test]
-#[ignore = "pending E9-2"]
 fn the_last_active_owner_or_admin_is_never_removed_or_demoted() {
     let s = store(&[]);
     let newcomer = store(&[m(OO4, ORG, CoolingOff, &[BillingAdmin])]);
@@ -232,7 +229,6 @@ fn the_last_active_owner_or_admin_is_never_removed_or_demoted() {
 /// is `forbidden` (DEC-654 item 3); a suspended admin, another workspace, a pair the store does not
 /// hold, and a reduction-only session reach nothing.
 #[test]
-#[ignore = "pending E9-2"]
 fn only_a_workspace_admin_changes_workspace_roles() {
     let s = store(&[]);
     let grant = || ch(&[(VIEW, Op)], &[], &[]);
@@ -274,7 +270,6 @@ fn only_a_workspace_admin_changes_workspace_roles() {
 /// owner grants, removes, or (by deactivating its holder) takes the org owner role, which is
 /// refused before the last-owner rule (§4.5's order).
 #[test]
-#[ignore = "pending E9-2"]
 fn only_an_org_owner_changes_the_owner_role() {
     let s = store(&[]);
     let reserved = Err(Refusal::OwnerRoleReserved);
@@ -349,7 +344,6 @@ type OwnDraw = (bool, bool, Vec<usize>, Vec<(u8, usize)>);
 /// `own_roles`, whatever else it holds; without those entries it passes, with step-up for a grant
 /// at a workspace and for any change at an org (§4.2).
 #[test]
-#[ignore = "pending E9-2"]
 fn no_change_naming_its_author_passes_and_the_rest_of_it_does() {
     let own = prop::collection::vec(0usize..5, 1..4);
     let others = prop::collection::vec((0u8..3, 0usize..5), 1..5);
@@ -401,7 +395,6 @@ type LastDraw = (bool, Vec<(usize, bool, u8)>, bool);
 /// successor granted it in the change, never a suspended, invited, cooling-off, or removed holder,
 /// nor one of another scope. Only a membership that reaches its scope is changed.
 #[test]
-#[ignore = "pending E9-2"]
 fn no_change_leaves_a_scope_without_an_active_owner_or_admin() {
     let members = prop::collection::vec((0usize..5, any::<bool>(), 0u8..4), 1..5);
     property(
@@ -514,7 +507,6 @@ fn into_tenant(context: PrincipalContext) -> Result<Seen, Refusal> {
 /// principal's own scope it is `no_membership`. A workspace the member does not reach, or a pair
 /// the store does not hold, yields no `PrincipalContext` to begin with.
 #[test]
-#[ignore = "pending E9-2"]
 fn into_tenant_yields_only_the_workspace_its_membership_reached() {
     let (user, leave, passkey) = (
         PrincipalKind::User,
