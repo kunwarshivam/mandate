@@ -252,7 +252,7 @@ async fn with_a_stored_pin_a_fund_tool_or_a_missing_tool_halts_openings_and_neve
         let (server, client) =
             session(vec![listing(&tools), reply(OK), reply(OK)], pin, roomy()).await;
         let client = client.unwrap();
-        assert!(client.openings_halted(), "{label}");
+        assert!(client.openings_halted().unwrap(), "{label}");
         let opening = client
             .call_tool(CallClass::Ordinary, "place_equity_order", &json!({}))
             .await;
@@ -292,4 +292,15 @@ async fn a_benign_extra_tool_connects_and_is_never_called() {
         "{refused:?}"
     );
     assert_eq!(server.seen().len(), 3);
+}
+
+#[test]
+fn a_contract_hash_keeps_its_bytes_and_prints_them_as_hex() {
+    let ascending: [u8; 32] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+    for bytes in [[0xab; 32], ascending] {
+        let hash = ContractHash::from_bytes(bytes);
+        assert_eq!(hash.as_bytes(), &bytes);
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(format!("{hash:?}"), format!("ContractHash({hex})"));
+    }
 }

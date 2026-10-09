@@ -36,9 +36,14 @@ impl ContractHash {
     }
 }
 
+/// The digest is not server text, so it prints as `ContractHash(` and 64 lower-case hex digits.
 impl std::fmt::Debug for ContractHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ContractHash({:02x?})", self.0)
+        f.write_str("ContractHash(")?;
+        for byte in self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        f.write_str(")")
     }
 }
 
@@ -67,14 +72,16 @@ impl McpClient {
     }
 
     /// The hash of the contract the server listed at connect or at the last check.
-    pub fn contract(&self) -> &ContractHash {
-        &self.observed
+    pub fn contract(&self) -> Result<&ContractHash, McpError> {
+        let _ = &self.observed;
+        Err(McpError::Unimplemented { story: "E7-16" })
     }
 
     /// Whether openings are halted: a drift, a missing allowlisted tool, or a fund-movement tool
     /// was seen. Only a new connection with a new pin clears it.
-    pub fn openings_halted(&self) -> bool {
-        self.halted
+    pub fn openings_halted(&self) -> Result<bool, McpError> {
+        let _ = self.halted;
+        Err(McpError::Unimplemented { story: "E7-16" })
     }
 
     /// A health check: lists the tools again. A drift from the pin is [`McpError::ContractDrift`],
