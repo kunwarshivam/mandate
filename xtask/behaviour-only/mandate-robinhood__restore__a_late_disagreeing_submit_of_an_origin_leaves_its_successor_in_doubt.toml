@@ -1,0 +1,9 @@
+file = "crates/mandate-robinhood/tests/restore.rs"
+test = "a_late_disagreeing_submit_of_an_origin_leaves_its_successor_in_doubt"
+reason = """
+DEC-874 item 2: main gives a successor its origin's instrument and side as they were when the
+successor's record arrived, so a later disagreeing `OrderSubmitted` of the origin leaves the
+successor placed. `RobinhoodConnector::restore` is implemented on main (E7-6, #1200), so there is
+no stub to stop at: the test fails on the answer the implementation gives. The E7-6 change that
+adopts DEC-874 deletes the marker and this file.
+"""

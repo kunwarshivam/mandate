@@ -1,7 +1,7 @@
 //! The one plaintext a push may carry: `{"notice":"<32 lowercase hex>","text":"<key>"}` (spec
 //! §4.2, DEC-438 item 1).
 
-use mandate_notify::Notification;
+use mandate_notify::{Notification, TextKey};
 
 use crate::WebPushError;
 
@@ -39,10 +39,6 @@ impl std::fmt::Debug for PushPlaintext {
 }
 
 impl PushPlaintext {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "S1's Notification is the caller")
-    )]
     pub(crate) fn new(notice: [u8; 16], text: PushText) -> Self {
         let mut out = String::from(r#"{"notice":""#);
         for byte in notice {
@@ -65,12 +61,27 @@ impl PushPlaintext {
     /// [`WebPushError::InvalidNotice`] if the notice id cannot be written as its 32 digits, which
     /// no minted id fails.
     pub fn of(notification: &Notification) -> Result<Self, WebPushError> {
-        let _ = notification;
-        Err(WebPushError::Unimplemented { story: "E8-14" })
+        let digits = notification
+            .notice
+            .hex()
+            .map_err(|_| WebPushError::InvalidNotice)?;
+        let bits = u128::from_str_radix(&digits, 16).map_err(|_| WebPushError::InvalidNotice)?;
+        Ok(Self::new(bits.to_be_bytes(), push_text(notification.text)))
     }
 
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+}
+
+/// The push text of each closed text key, one for one (spec §4.2). The match names every key, so a
+/// new key fails to compile until it has its push text.
+fn push_text(text: TextKey) -> PushText {
+    match text {
+        TextKey::ApprovalNeeded => PushText::ApprovalNeeded,
+        TextKey::AttentionNeeded => PushText::AttentionNeeded,
+        TextKey::AccountChanged => PushText::AccountChanged,
+        TextKey::BriefReady => PushText::BriefReady,
     }
 }
