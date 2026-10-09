@@ -1383,9 +1383,11 @@ impl<L: MembershipLookup> Grant<'_, L> {
 ///
 /// The rows it uses (DEC-654 item 4): the roles row for a grant or a removal, and for an empty
 /// change, so nothing answers a principal the row would refuse; the members row for deactivating
-/// another member; the leave row for the author's own deactivation. An active owner or admin is
-/// a member `active` in the scope with the role effective at `now`, or granted it in the change
-/// (DEC-654 item 2).
+/// another member; the leave row for the author's own deactivation. A grant to a principal with no
+/// membership reaching the scope, or a removal from or a deactivation of one with no membership in
+/// the scope (none, or one `removed`, `expired`, or `revoked`), is `forbidden`, before `own_roles`
+/// (DEC-654 item 7). An active owner or admin is a member `active` in the scope with the role
+/// effective at `now`, or granted it in the change (DEC-654 item 2).
 pub fn change_roles(
     lookup: &impl MembershipLookup,
     author: &Principal,
@@ -1434,9 +1436,6 @@ pub fn change_roles(
     if entries().any(|(_, role)| role.is_org() != org_scope) {
         return Err(Refusal::Forbidden);
     }
-    if entries().any(|(who, _)| *who == me) {
-        return Err(Refusal::OwnRoles);
-    }
     let memberships: Vec<Membership> = lookup
         .memberships(&MembershipQuery {
             member: None,
@@ -1446,6 +1445,32 @@ pub fn change_roles(
         .into_iter()
         .filter(|m| m.scope == scope)
         .collect();
+    let mut reduced = change
+        .removals
+        .iter()
+        .map(|(who, _)| who)
+        .chain(&change.deactivations);
+    if change
+        .grants
+        .iter()
+        .any(|(who, _)| reaching(&memberships, *who, scope).is_none())
+        || reduced.any(|who| {
+            !memberships.iter().any(|m| {
+                m.member == *who
+                    && !matches!(
+                        m.state,
+                        MembershipState::Removed
+                            | MembershipState::Expired
+                            | MembershipState::Revoked
+                    )
+            })
+        })
+    {
+        return Err(Refusal::Forbidden);
+    }
+    if entries().any(|(who, _)| *who == me) {
+        return Err(Refusal::OwnRoles);
+    }
     let takes_owner = entries().any(|(_, role)| *role == Role::OrgOwner)
         || memberships.iter().any(|m| {
             m.member != me
