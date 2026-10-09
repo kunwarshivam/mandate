@@ -31,6 +31,10 @@ fn every_error_has_its_stable_code() {
             },
             "rpc_error",
         ),
+        (McpError::ToolNotAllowed, "tool_not_allowed"),
+        (McpError::FundMovementTool, "fund_movement_tool"),
+        (McpError::ContractMissingTool, "contract_missing_tool"),
+        (McpError::ContractDrift, "contract_drift"),
         (McpError::Unimplemented { story: "E7-16" }, "unimplemented"),
     ];
     for (error, code) in cases {
