@@ -395,22 +395,94 @@ fn a_workspace_member_is_dropped_and_listed_and_never_applied() -> Result<(), St
             assert_kept(&label, nested, &["/record"], outcome)?;
         }
     }
-    for (kind, id) in [("agent", json!("agt_1")), ("workspace", json!(null))] {
-        for name in WORKSPACE_MEMBERS {
-            let body = json!({"scope": {"kind": kind, "id": id, name: "ws_other"}});
-            let label = format!("kill switch {kind} scope naming {name}");
-            let (kept, listed) = lenient("kill_switch", body.to_string().as_bytes())
-                .map_err(|e| format!("{label}: {e:?}"))?;
-            assert_eq!(listed, [format!("/scope/{name}")], "{label}: dropped");
-            let scope = without_nulls(json!({"kind": kind, "id": id}));
-            assert_eq!(
-                without_nulls(kept)["scope"],
-                scope,
-                "{label}: the stop never moves"
-            );
-        }
+    for name in WORKSPACE_MEMBERS {
+        scope_member_is_dropped_and_the_scope_kept(name)?;
     }
     Ok(())
+}
+
+/// The scope kinds, each with a valid id.
+fn scopes() -> [(&'static str, Value); 3] {
+    [
+        ("agent", json!("agt_1")),
+        ("connection", json!("con_1")),
+        ("workspace", json!(null)),
+    ]
+}
+
+/// DEC-886 item 1: `name` inside the hard `scope` of each kind is dropped and listed at
+/// `/scope/<name>`, and the kept scope is the scope without it, so the stop never moves.
+fn scope_member_is_dropped_and_the_scope_kept(name: &str) -> Result<(), String> {
+    for (kind, id) in scopes() {
+        let body = json!({"scope": {"kind": kind, "id": id, name: "ws_other"}});
+        let label = format!("kill switch {kind} scope naming {name}");
+        let (kept, listed) = lenient("kill_switch", body.to_string().as_bytes())
+            .map_err(|e| format!("{label}: {e:?}"))?;
+        assert_eq!(listed, [format!("/scope/{name}")], "{label}: dropped");
+        let scope = without_nulls(json!({"kind": kind, "id": id}));
+        assert_eq!(
+            without_nulls(kept)["scope"],
+            scope,
+            "{label}: the stop never moves"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn any_unknown_member_inside_the_scope_is_dropped_and_the_scope_kept() -> Result<(), String> {
+    for name in ["zz", "label", "org"] {
+        scope_member_is_dropped_and_the_scope_kept(name)?;
+    }
+    Ok(())
+}
+
+/// `names` as pointers, in the order `text` first names each of them: body order, read from the
+/// text sent rather than from `Value`'s member order (DEC-886 item 11).
+fn in_text_order(text: &str, names: &[&str]) -> Vec<String> {
+    let mut found: Vec<(usize, String)> = names
+        .iter()
+        .map(|n| {
+            (
+                text.find(&format!("\"{n}\"")).unwrap_or(usize::MAX),
+                format!("/{n}"),
+            )
+        })
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, pointer)| pointer).collect()
+}
+
+/// `text` decoded and checked against the pointers `dropped` lists, in text order.
+fn assert_text_kept(operation: &str, text: &str, dropped: &[&str]) -> Result<(), String> {
+    let body: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let order = in_text_order(text, dropped);
+    let order: Vec<&str> = order.iter().map(String::as_str).collect();
+    assert_kept(text, body, &order, lenient(operation, text.as_bytes()))
+}
+
+#[test]
+#[ignore = "pending E10-10"]
+fn a_duplicate_inside_the_scope_is_refused_and_a_duplicate_bid_drops_the_group()
+-> Result<(), String> {
+    for scope in [
+        r#"{"kind": "agent", "id": "agt_1", "id": "agt_2"}"#,
+        r#"{"kind": "workspace", "kind": "agent", "id": "agt_1"}"#,
+        r#"{"kind": "workspace", "id": null, "id": null}"#,
+    ] {
+        let body = format!(r#"{{"scope": {scope}}}"#);
+        let code = first_code(lenient("kill_switch", body.as_bytes()));
+        assert_eq!(code, "duplicate_member", "{body}");
+    }
+    let at = "2026-10-08T14:30:00.000000000Z";
+    let text = format!(
+        r#"{{"floor": "99.5", "instrument": "{ASSET}", "bid": "101.5", "quoted_at": "{at}",
+        "bid_size": "10", "bid": "102"}}"#
+    );
+    assert_text_kept("owner_exit", &text, &BID)?;
+    let text = format!(r#"{{"instrument": "{ASSET}", "bid": "1", "bid": "2"}}"#);
+    assert_text_kept("owner_exit", &text, &["bid"])
 }
 
 /// The first violation's code, or what the decoder answered instead.
@@ -484,15 +556,11 @@ fn the_open_bodies_are_read_as_dec_886_says() -> Result<(), String> {
         &[],
         lenient("kill_switch", workspace.to_string().as_bytes()),
     )?;
-    let mixed = json!({"instrument": ASSET, "bid": "101.5", "bid_size": null, "quoted_at": at,
-        "floor": "99.5"});
-    let all = ["/bid", "/bid_size", "/floor", "/quoted_at"];
-    assert_kept(
-        "item 4",
-        mixed.clone(),
-        &all,
-        lenient("owner_exit", mixed.to_string().as_bytes()),
-    )?;
+    let mixed = format!(
+        r#"{{"instrument": "{ASSET}", "quoted_at": "{at}", "bid": "101.5", "floor": "99.5",
+        "bid_size": null}}"#
+    );
+    assert_text_kept("owner_exit", &mixed, &BID)?;
     let nulls = json!({"instrument": ASSET, "bid": null, "bid_size": null, "quoted_at": null,
         "floor": null});
     assert_kept(
