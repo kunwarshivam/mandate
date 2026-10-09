@@ -47,7 +47,6 @@ async fn exchange(answer: Answer) -> (Result<AccessToken, McpError>, Loopback) {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn the_exchange_posts_exactly_the_pkce_form_and_keeps_only_the_token() {
     let answers = [
         json!({"access_token": "canary-token", "token_type": "Bearer"}),
@@ -82,7 +81,6 @@ async fn the_exchange_posts_exactly_the_pkce_form_and_keeps_only_the_token() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_refused_or_unreadable_token_answer_gives_no_token_and_no_secret() {
     let mut moved = with_type(302, "text/plain", "canary-token");
     moved.headers.push(("location", "@BASE@/x".to_owned()));
@@ -127,7 +125,6 @@ fn a_token_never_prints() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-24"]
 async fn a_whole_login_leaves_no_secret_in_any_output() {
     let (granted, browser, _) = run(GOOD, Duration::ZERO).await;
     let granted = granted.unwrap();
