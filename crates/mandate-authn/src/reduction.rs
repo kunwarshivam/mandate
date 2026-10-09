@@ -6,6 +6,7 @@
 
 use core::fmt;
 use core::num::NonZeroU32;
+use std::collections::BTreeMap;
 
 use crate::UtcNanos;
 
@@ -68,21 +69,99 @@ pub struct Challenge {
 }
 
 /// The outstanding challenges and the recent failures, per address and per device.
+///
+/// **Memory.** Every call that changes the gate first forgets the challenges that expired and the
+/// failures that lapsed by its `now`, so nothing older than [`CHALLENGE_LIFETIME_S`] is held. An
+/// address holds at most `challenges_per_address` outstanding challenges and a device at most
+/// `challenges_per_device`; an address keeps at most its `failures_per_address` latest failures and
+/// a device its `failures_per_device` latest, since older ones can no longer change what
+/// [`ReductionGate::failure_limit_reached`] answers. A flood from one address or one device
+/// therefore holds a bounded state however fast it sends. The bound is per key, not across keys:
+/// the state grows with the number of distinct addresses and devices seen in the last 300 s, at
+/// most `challenges_per_address + failures_per_address` entries per address plus
+/// `failures_per_device` per device. Both keys come from the client, so H1 must cap how many
+/// distinct keys reach the gate (for example by aggregating addresses into prefixes and holding a
+/// global ceiling). The gate expects `now` never to run backwards across calls.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReductionGate {
-    stub: (),
+    limits: ReductionLimits,
+    outstanding: BTreeMap<[u8; 32], Outstanding>,
+    failures_by_address: BTreeMap<String, Vec<UtcNanos>>,
+    failures_by_device: BTreeMap<String, Vec<UtcNanos>>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the gate's refusal is one opaque value with no Unimplemented variant (DEC-816 item 6) \
-              and its constructor has no error, so these stubs are todo!(), the other form DEC-137 \
-              names"
-)]
+/// An issued challenge not yet consumed: when it expires and which client's slots it holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Outstanding {
+    expires_at: UtcNanos,
+    issuer: ClientKey,
+}
+
+/// `at` plus [`CHALLENGE_LIFETIME_S`], or `None` past the last instant [`UtcNanos`] holds.
+fn lifetime_after(at: UtcNanos) -> Option<UtcNanos> {
+    let secs = at.secs().checked_add(CHALLENGE_LIFETIME_S)?;
+    UtcNanos::from_parts(secs, at.nanos()).ok()
+}
+
+/// Whether a failure at `failed_at` still counts at `now`: for [`CHALLENGE_LIFETIME_S`] after it,
+/// and for good when that end is past the last instant [`UtcNanos`] holds, so an overflow never
+/// drops a failure early.
+fn counts_at(failed_at: UtcNanos, now: UtcNanos) -> bool {
+    lifetime_after(failed_at).is_none_or(|lapses_at| now < lapses_at)
+}
+
+/// Whether `held` entries fill `limit`.
+fn fills(held: usize, limit: NonZeroU32) -> bool {
+    usize::try_from(limit.get()).is_ok_and(|limit| held >= limit)
+}
+
+/// Records a failure at `now` against `key`, keeping only the `limit` latest failures of that key.
+fn record_failure(
+    failures: &mut BTreeMap<String, Vec<UtcNanos>>,
+    key: &str,
+    now: UtcNanos,
+    limit: NonZeroU32,
+) {
+    let times = failures.entry(key.to_owned()).or_default();
+    times.push(now);
+    times.sort_unstable();
+    let surplus = times
+        .len()
+        .saturating_sub(usize::try_from(limit.get()).unwrap_or(usize::MAX));
+    times.drain(..surplus);
+}
+
+/// How many failures of `key` count at `now`.
+fn failures_at(failures: &BTreeMap<String, Vec<UtcNanos>>, key: &str, now: UtcNanos) -> usize {
+    failures.get(key).map_or(0, |times| {
+        times
+            .iter()
+            .filter(|failed_at| counts_at(**failed_at, now))
+            .count()
+    })
+}
+
 impl ReductionGate {
     /// A gate with no outstanding challenge and no failure.
-    pub fn new(_limits: ReductionLimits) -> Self {
-        todo!()
+    pub fn new(limits: ReductionLimits) -> Self {
+        Self {
+            limits,
+            outstanding: BTreeMap::new(),
+            failures_by_address: BTreeMap::new(),
+            failures_by_device: BTreeMap::new(),
+        }
+    }
+
+    /// Forgets every challenge expired and every failure lapsed at `now`, and every key left with
+    /// no failure.
+    fn forget_before(&mut self, now: UtcNanos) {
+        self.outstanding.retain(|_, held| now < held.expires_at);
+        for failures in [&mut self.failures_by_address, &mut self.failures_by_device] {
+            failures.retain(|_, times| {
+                times.retain(|failed_at| counts_at(*failed_at, now));
+                !times.is_empty()
+            });
+        }
     }
 
     /// Issues `random` as a challenge for `client`, outstanding until `now` plus
@@ -91,11 +170,35 @@ impl ReductionGate {
     /// an outstanding challenge's bytes.
     pub fn issue(
         &mut self,
-        _client: &ClientKey,
-        _random: [u8; 32],
-        _now: UtcNanos,
+        client: &ClientKey,
+        random: [u8; 32],
+        now: UtcNanos,
     ) -> Result<Challenge, Unauthenticated> {
-        todo!()
+        self.forget_before(now);
+        let issuers = || self.outstanding.values().map(|held| &held.issuer);
+        let address_full = fills(
+            issuers()
+                .filter(|issuer| issuer.address == client.address)
+                .count(),
+            self.limits.challenges_per_address,
+        );
+        let device_full = fills(
+            issuers()
+                .filter(|issuer| issuer.device == client.device)
+                .count(),
+            self.limits.challenges_per_device,
+        );
+        if address_full || device_full || self.outstanding.contains_key(&random) {
+            return Err(Unauthenticated);
+        }
+        let expires_at = lifetime_after(now).ok_or(Unauthenticated)?;
+        let issuer = client.clone();
+        self.outstanding
+            .insert(random, Outstanding { expires_at, issuer });
+        Ok(Challenge {
+            bytes: random,
+            expires_at,
+        })
     }
 
     /// Takes an assertion over `challenge`. The challenge is looked up and consumed first, whoever
@@ -106,18 +209,47 @@ impl ReductionGate {
     /// against `client`.
     pub fn present<V>(
         &mut self,
-        _client: &ClientKey,
-        _challenge: &[u8; 32],
-        _now: UtcNanos,
-        _verify: impl FnOnce(&Challenge) -> Option<V>,
+        client: &ClientKey,
+        challenge: &[u8; 32],
+        now: UtcNanos,
+        verify: impl FnOnce(&Challenge) -> Option<V>,
     ) -> Result<V, Unauthenticated> {
-        todo!()
+        self.forget_before(now);
+        let verified = self.outstanding.remove(challenge).and_then(|held| {
+            verify(&Challenge {
+                bytes: *challenge,
+                expires_at: held.expires_at,
+            })
+        });
+        if let Some(verified) = verified {
+            return Ok(verified);
+        }
+        let limits = self.limits;
+        record_failure(
+            &mut self.failures_by_address,
+            &client.address,
+            now,
+            limits.failures_per_address,
+        );
+        record_failure(
+            &mut self.failures_by_device,
+            &client.device,
+            now,
+            limits.failures_per_device,
+        );
+        Err(Unauthenticated)
     }
 
     /// Whether `client`'s address or device has reached its failure limit at `now`. No answer of
     /// either route depends on it, since every failure is already [`Unauthenticated`] and a
     /// verified assertion is never refused; the HTTP layer reads it to record abuse.
-    pub fn failure_limit_reached(&self, _client: &ClientKey, _now: UtcNanos) -> bool {
-        todo!()
+    pub fn failure_limit_reached(&self, client: &ClientKey, now: UtcNanos) -> bool {
+        fills(
+            failures_at(&self.failures_by_address, &client.address, now),
+            self.limits.failures_per_address,
+        ) || fills(
+            failures_at(&self.failures_by_device, &client.device, now),
+            self.limits.failures_per_device,
+        )
     }
 }
