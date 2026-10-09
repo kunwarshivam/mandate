@@ -184,7 +184,6 @@ fn carried(seq: u64, held: bool) -> HeldAnchor {
 /// A sound prefix carries the expected hold at its last version 2 (DEC-892 item 4); one whose hold
 /// breaks (item 5), or that is not one agent stream's (item 6), binds and anchors nothing.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_prefix_anchors_the_hold_section_11_carries_or_nothing() {
     let (hold, lift) = (
         mode(2, "owner_hold", true),
@@ -228,7 +227,6 @@ fn a_prefix_anchors_the_hold_section_11_carries_or_nothing() {
 /// trusted start, so the caller passes `Unknown`. Unverified, the forged lift below would anchor
 /// `held: false` and pass a range that drops the hold.
 #[test]
-#[ignore = "pending E12-3"]
 fn bind_refuses_a_forged_truncated_or_unbound_prefix() {
     use EventCheck::{PrevHashMismatch, RehashMismatch};
     use PrefixError::{Unbound, Unverified};
@@ -262,7 +260,6 @@ fn bind_refuses_a_forged_truncated_or_unbound_prefix() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn every_split_of_every_vector_chain_agrees_with_the_full_chain() {
     let hold = section("hold");
     let mut chains: Vec<Vec<StoredEvent>> = list(&hold, "range_verification")
@@ -290,7 +287,6 @@ fn every_split_of_every_vector_chain_agrees_with_the_full_chain() {
 /// Random chains of mode changes and other events, each record writing the hold the carried one
 /// asks for unless its draw flips it, so sound and broken prefixes both occur.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_split_of_a_random_chain_agrees_with_the_oracle_and_the_full_chain() {
     let reasons: Vec<&str> =
         "owner_hold owner_lift_hold owner_pause restriction_changed kill_switch"

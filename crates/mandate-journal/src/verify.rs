@@ -118,7 +118,8 @@ pub enum PrefixError {
     /// The rows do not end just before the trusted start: not empty for `from_seq` 1, or else a
     /// last `seq` that is not `from_seq − 1` or a last `hash` that is not `start.prev_hash`.
     Unbound,
-    /// `bind` is a DEC-77 stub until `story` lands.
+    /// Never returned now that E12-3 built `bind`; kept, as `RangeWalkError` keeps its own, so a
+    /// caller's match stays the same across the crate's stubs (DEC-77).
     Unimplemented { story: &'static str },
 }
 
@@ -132,8 +133,12 @@ impl<'a> VerifiedPrefix<'a> {
         start: TrustedStart,
         artifacts: &dyn ArtifactSource,
     ) -> Result<Self, PrefixError> {
-        let _ = (rows, start, artifacts);
-        Err(PrefixError::Unimplemented { story: "E12-3" })
+        let verified = verify_events(rows, TrustedStart::GENESIS, artifacts)
+            .map_err(PrefixError::Unverified)?;
+        if verified.next_seq != start.from_seq || verified.last_hash != start.prev_hash {
+            return Err(PrefixError::Unbound);
+        }
+        Ok(Self { rows })
     }
 
     pub fn rows(&self) -> &'a [StoredEvent] {
