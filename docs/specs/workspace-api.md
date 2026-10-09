@@ -1127,8 +1127,11 @@ ask, a live environment, or a client principal. Otherwise it builds the new mand
 deterministically from the version in force plus the delegation, validates it (V-041 to V-045), and
 returns `{preview_id, mandate_version, delegation: {every §6.5 field}, unasked_usd_after,
 classification: "risk_increasing", step_up_digest}`, where `step_up_digest` is SHA-256 of
-`{content_hash, mandate_version}`. One step-up over that digest approves the action and confirms the
-version, as §6.5 requires. The response call then commits one batch: `MandateVersionCreated`,
+`{content_hash, mandate_version}`. `unasked_usd_after` is mandate spec §4.2's unasked dollars for
+that version at the agent's current state, a decimal string rounded up to the cent, or `null` when
+an input is not known, which the card shows as "not known", never as 0
+([DEC-695](../project/decisions/DEC-695.md), Proposed). One step-up over that digest approves the
+action and confirms the version, as §6.5 requires. The response call then commits one batch: `MandateVersionCreated`,
 `MandateConfirmed`, and `ApprovalResponseSubmitted` naming the shape; the new delegation's
 `source_approval_id` is this approval.
 All or nothing (journal spec §5.1). The version applies at the next safe point after this action

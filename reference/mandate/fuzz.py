@@ -2222,6 +2222,165 @@ def fuzz_independence_floor(n):
         check([e for e in errs if e != "V-047"] == without, "V-047 changes no other verdict",
               (required, users, shape, errs, without))
 
+UNASKED_CANDIDATES = ["0.01", "1", "99.99", "100", "300", "450.5", "500", "899.99", "900", "950", "1000", "5000"]
+
+def rand_order_cond():
+    leaf = lambda: {"field": "order_usd", "op": rng.choice(["lt", "lte", "eq", "gt", "gte", "ne"]),
+                    "value": rng.choice(["100", "300", "500", "900"])}
+    other = lambda: {"field": "purpose", "op": "in", "value": ["increase", "open"]}
+    shape = rng.choice(["leaf", "other", "all", "any", "not"])
+    if shape == "leaf":
+        return leaf()
+    if shape == "other":
+        return other()
+    if shape == "not":
+        return {"not": leaf()}
+    return {shape: [rng.choice([leaf, other])() for _ in range(rng.randint(1, 3))]}
+
+def rand_unasked_mandate():
+    """A delegated mandate whose conditions also bound `order_usd` through `all`, `any`, and `not`, with a small
+    daily order count, a gross limit that binds, and sometimes a review date already passed."""
+    m = rand_delegated_mandate()
+    if m is None:
+        return None
+    for x in m["autonomy"]["rules"] + m["autonomy"]["delegations"]:
+        if rng.random() < 0.5:
+            x["when"] = rand_order_cond()
+    m["risk"]["max_orders_per_day"] = rng.randint(2, 8)
+    m["risk"]["max_gross_exposure_usd"] = rng.choice(["2500", "4000.5", "10000"])
+    rb = rng.choice([None, None, None, risk_day(fmt(DELEG_NOW))["risk_day"], "2026-09-21"])
+    if rb is not None:
+        m["autonomy"]["review_by"] = rb
+    V.validate(m)
+    return m
+
+def rand_unasked_state(m):
+    usage = {}
+    for d in m["autonomy"]["delegations"]:
+        if rng.random() < 0.5:
+            usage[d["id"]] = {"orders": rng.randint(0, d["max_orders"]),
+                              "total_usd": rng.choice(["0", "100", "899.5", d["max_total_usd"]])}
+    return {"now": fmt(DELEG_NOW + timedelta(seconds=rng.choice([0, 600, 3600 * 9]))), "usage": usage,
+            "agent_equity": rng.choice(["10000", "10000", "3000.1234", "800", "-5"]),
+            "gross_usd": rng.choice(["0", "0", "250.0001", "1999.99", "12000"]), "orders_today": rng.randint(0, 3)}
+
+def own_unasked_run(m, st0, pick, times):
+    """The independent oracle: the real §6.2 decision (`autonomy`) over a day of opening orders, with its own
+    accumulators for the gate's order size, order count, and gross exposure (§5.3) and for delegation usage. `pick`
+    offers each order's values, given the gross headroom and usage left. Returns the order value decided `auto`."""
+    r = m["risk"]
+    left_orders = r["max_orders_per_day"] - st0["orders_today"]
+    gross_left = min(D(r["max_gross_exposure_usd"]), D(st0["agent_equity"])) - D(st0["gross_usd"])
+    usage = copy.deepcopy(st0["usage"])
+    total = D(0)
+    for t in times:
+        if left_orders <= 0 or gross_left <= 0:
+            break
+        st = {"now": fmt(t), "usage": usage}
+        for v in pick(gross_left, usage):
+            a = rand_autonomy_action()
+            a.update({"order_usd": norm(v), "new_instrument": False, "requested_by": "agent"})
+            if v <= 0 or v > gross_left or v > D(r["max_order_usd"]):
+                continue
+            res = autonomy(m, a, st)
+            if res["decision"] != "auto":
+                continue
+            total, gross_left, left_orders = total + v, gross_left - v, left_orders - 1
+            did = res.get("delegation_id")
+            if did is not None:
+                u = usage.setdefault(did, {"orders": 0, "total_usd": "0"})
+                u["orders"] += 1
+                u["total_usd"] = norm(D(u["total_usd"]) + v)
+            break
+    return total
+
+def fuzz_unasked(n):
+    """§4.2's unasked dollars (DEC-189, DEC-695). Sound: no day of opening orders runs more unasked than the
+    figure, whatever their values, times, and conditions. Unknown is never 0. Tight: where every condition is a
+    catch-all or an `order_usd` bound and rules come before no ask, a greedy day reaches the figure exactly."""
+    for _ in range(n):
+        m = rand_unasked_mandate()
+        if m is None:
+            continue
+        st = rand_unasked_state(m)
+        fig = unasked_usd(m, st)
+        gone = rng.choice(UNASKED_STATE)
+        check(unasked_usd(m, {k: v for k, v in st.items() if k != gone}) is None,
+              "unasked: a missing journal input is unknown, never 0", (st,))
+        check(unasked_usd(m, st, {"auto_allowed": False}) == "0" and unasked_usd(m, st, {"nonconforming": True}) == "0",
+              "unasked: a policy that allows no auto leaves nothing unasked", (st,))
+        end = T(risk_day(st["now"])["ends_at"])
+        span = int((end - T(st["now"])).total_seconds())
+        for _ in range(3):
+            times = sorted(T(st["now"]) + timedelta(seconds=rng.randint(0, span - 1)) for _ in range(12))
+            ran = own_unasked_run(m, st, lambda g, _: [D(rng.choice(UNASKED_CANDIDATES + [norm(g)])) for _ in range(6)], times)
+            check(ran <= D(fig), "unasked: no day runs more unasked than the figure", (m["autonomy"], st, fig, norm(ran)))
+    for _ in range(n):
+        m = copy.deepcopy(base.btc)
+        au = m["autonomy"]
+        lte = lambda: {"field": "order_usd", "op": "lte", "value": rng.choice(["300", "500", "900"])}
+        bound = lambda: rng.choice([{"field": "purpose", "op": "in", "value": ["increase", "open"]}, lte(),
+                                    {rng.choice(["all", "any"]): [lte(), lte()]}])
+        if rng.random() < 0.5:
+            au["rules"] = [{"id": f"r{i}", "when": bound(), "then": "auto"} for i in range(rng.randint(0, 2))]
+            au["default"], lifts = "ask", "default"
+        else:
+            au["rules"] = [{"id": "r0", "when": bound(), "then": "ask"}]
+            au["default"], lifts = "deny", "rule:r0"
+        au["delegations"] = []
+        for i in range(rng.randint(0, 3)):
+            d = rand_delegation(i, {lifts})
+            d["when"] = bound()
+            d["starts_at"] = fmt(DELEG_NOW - timedelta(hours=1))
+            d["expires_at"] = fmt(DELEG_NOW + timedelta(seconds=rng.choice([-60, 1, 86400])))
+            au["delegations"].append(d)
+        if rng.random() < 0.2:
+            au["review_by"] = "2026-09-21"
+        m["risk"]["max_orders_per_day"] = rng.randint(1, 6)
+        m["risk"]["max_gross_exposure_usd"] = rng.choice(["2500", "4000.5", "10000"])
+        V.validate(m)
+        st = rand_unasked_state(m)
+        st["now"] = fmt(DELEG_NOW)
+        fig = unasked_usd(m, st)
+        def greedy(g, usage):
+            caps = {D("1000"), g} | {D(d["max_order_usd"]) for d in au["delegations"]}
+            caps |= {D(c["value"]) for x in au["rules"] + au["delegations"] for c, _ in comparisons(x["when"])
+                     if c["field"] == "order_usd"}
+            for d in au["delegations"]:
+                u = usage.get(d["id"], {"total_usd": "0"})
+                caps.add(D(d["max_total_usd"]) - D(u["total_usd"]))
+            return sorted({min(c, g) for c in caps if c > 0}, reverse=True)
+        best = own_unasked_run(m, st, greedy, [DELEG_NOW] * 20)
+        check(norm(best.quantize(D("0.01"), rounding=ROUND_CEILING)) == fig, "unasked: the figure is reached exactly",
+              (au, st, fig, norm(best)))
+
+def fuzz_loss_answer(n):
+    """DEC-695 item 6: the loss answer's three fields are valid, never looser than the words, and keep V-014 and the
+    floor above the drawdown above the daily loss. The oracle works in exact fractions."""
+    for _ in range(n):
+        a = rng.choice(["1000", "2500", "10000", "33333.33"])
+        ans = rng.choice([("fraction", rng.choice(["0.1", "0.05", "0.12345", "0.00009", "0.9999", "1"])),
+                          ("usd", rng.choice(["0", "1", "250", "999.99", "1000", "5000.55", "40000"]))])
+        out = loss_answer_fields(ans, a)
+        said = Fraction(ans[1]) / (Fraction(a) if ans[0] == "usd" else 1)
+        own = Fraction(int(said * 10000), 10000)
+        if not 0 < own < 1:
+            check(out is None, "loss answer: no loss or the whole allocation is asked again", (ans, a, out))
+            continue
+        check(out is not None, "loss answer: a loss below the allocation maps", (ans, a))
+        if out is None:
+            continue
+        floor, dd, day = (Fraction(out[p][1]) for p in ("/capital/max_loss_from_allocation", "/risk/max_drawdown",
+                                                         "/risk/max_daily_loss"))
+        check(floor == own and floor <= said and dd == own * Fraction(4, 5) and day == own / 5,
+              "loss answer: the fields follow the stated loss, rounded down to basis points", (ans, a, out))
+        m = copy.deepcopy(base.btc)
+        m["capital"]["max_loss_from_allocation"], m["risk"]["max_drawdown"] = out["/capital/max_loss_from_allocation"][1], out["/risk/max_drawdown"][1]
+        m["risk"]["max_daily_loss"] = out["/risk/max_daily_loss"][1]
+        check(V.is_valid(m) and floor >= dd > day > 0, "loss answer: schema-valid and V-014", (ans, out))
+        check([out[p][0] for p in sorted(out)] == ["user_stated", "platform_proposed", "platform_proposed"],
+              "loss answer: only the floor is the owner's words", (out,))
+
 if __name__ == "__main__":
     fuzz_ladder_precision(300)
     fuzz_risk(400)
@@ -2255,6 +2414,8 @@ if __name__ == "__main__":
     fuzz_owner_controls(600)
     fuzz_content(200)
     fuzz_stop_limit_offset(600)
+    fuzz_unasked(400)
+    fuzz_loss_answer(400)
     print("failures:", len(FAIL), Counter(f[0] for f in FAIL))
     for name, ctx in FAIL[:3]:
         print("EXAMPLE", name, str(ctx)[:1500])

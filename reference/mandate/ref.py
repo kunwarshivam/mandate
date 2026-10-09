@@ -1171,6 +1171,82 @@ def autonomy(m, a, st=None):
         res["on_timeout"] = "skip"
     return res
 
+# ------------------------------------------------------------------ unasked dollars (§4.2; DEC-189, DEC-695)
+UNASKED_STATE = ("now", "agent_equity", "gross_usd", "orders_today", "usage")
+
+def order_usd_bound(c):
+    """The largest `order_usd` an order matching condition `c` can have, or None when `c` does not bound it (§4.2).
+    Sound by construction: `all` takes the tightest bound of its members, `any` the loosest and only when every member
+    bounds it, and `not` or any other field bounds nothing."""
+    if "all" in c:
+        bs = [b for b in (order_usd_bound(x) for x in c["all"]) if b is not None]
+        return min(bs) if bs else None
+    if "any" in c:
+        bs = [order_usd_bound(x) for x in c["any"]]
+        return max(bs) if bs and None not in bs else None
+    if c.get("field") == "order_usd" and c.get("op") in ("lt", "lte", "eq"):
+        return D(c["value"])
+    return None
+
+def capped(*xs):
+    return min(x for x in xs if x is not None)
+
+def unasked_usd(m, st, policy=None):
+    """§4.2's unasked dollars (DEC-189, DEC-695): an upper bound, rounded up to the cent, on the order value the
+    agent could submit without an ask from the risk clock `st["now"]` to the end of its risk day, before any exit,
+    new risk day, or version raises it. None when a journal input is missing: unknown is never shown as 0."""
+    if st is None or any(k not in st for k in UNASKED_STATE):
+        return None
+    policy = policy or {}
+    if review_passed(m, st) or policy.get("nonconforming", False) or not policy.get("auto_allowed", True):
+        return "0"
+    au, r = m["autonomy"], m["risk"]
+    per_order = D(r["max_order_usd"])
+    slices = []
+    auto_caps = [capped(per_order, order_usd_bound(x["when"])) for x in au["rules"] if x["then"] == "auto"]
+    if au["default"] == "auto":
+        auto_caps.append(per_order)
+    if auto_caps and max(auto_caps) > 0:
+        slices.append((max(auto_caps), None))
+    rules = {f"rule:{x['id']}": x["when"] for x in au["rules"]}
+    day_end = T(risk_day(st["now"])["ends_at"])
+    for d in au.get("delegations", []):
+        if not (T(d["starts_at"]) < day_end and T(st["now"]) < T(d["expires_at"])):
+            continue
+        used = st["usage"].get(d["id"], {"orders": 0, "total_usd": "0"})
+        c = capped(per_order, D(d["max_order_usd"]), order_usd_bound(d["when"]),
+                   order_usd_bound(rules[d["lifts"]]) if d["lifts"] in rules else None)
+        k = max(0, d["max_orders"] - used["orders"])
+        rest = max(D(0), D(d["max_total_usd"]) - D(used["total_usd"]))
+        if c <= 0 or k == 0 or rest == 0:
+            continue
+        full = min(k, int(rest // c))
+        slices.append((c, full))
+        if full < k and rest - full * c > 0:
+            slices.append((rest - full * c, 1))
+    n = max(0, r["max_orders_per_day"] - st["orders_today"])
+    total = D(0)
+    for size, count in sorted(slices, key=lambda s: s[0], reverse=True):
+        take = n if count is None else min(n, count)
+        total += size * take
+        n -= take
+    headroom = max(D(0), min(D(r["max_gross_exposure_usd"]), D(st["agent_equity"])) - D(st["gross_usd"]))
+    return norm(min(total, headroom).quantize(D("0.01"), rounding=ROUND_CEILING))
+
+def loss_answer_fields(answer, allocation_usd):
+    """DEC-695 item 6, a proposal: the onboarding loss answer (DEC-182), `("fraction" | "usd", value)`, as the three
+    fields it alone maps to. Dollars become a fraction of the allocation; either is rounded down to whole basis points,
+    so the limit is never looser than the words. No loss, or the whole allocation or more, is refused (None) and asked
+    again. `max_drawdown` and `max_daily_loss` are `platform_proposed`, at the base mandates' ratios to the floor."""
+    kind, value = answer
+    f = D(value) if kind == "fraction" else D(value) / D(allocation_usd)
+    f = f.quantize(D("0.0001"), rounding=ROUND_DOWN)
+    if not D(0) < f < D(1):
+        return None
+    return {"/capital/max_loss_from_allocation": ("user_stated", norm(f)),
+            "/risk/max_drawdown": ("platform_proposed", norm(f * D("0.8"))),
+            "/risk/max_daily_loss": ("platform_proposed", norm(f * D("0.2")))}
+
 # ------------------------------------------------------------------ tripwires (§6.7; MI-31; DEC-187, DEC-350, DEC-351)
 TRIPWIRE_ALERT_TEXT = "tripwire_fired"
 TW_AGENT_INSTRUMENT = "agent_instrument"   # the risk state's one instrument, as the tripwire fold names it

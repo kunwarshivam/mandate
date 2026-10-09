@@ -20,6 +20,13 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.7, amended ([DEC-695](../project/decisions/DEC-695.md), Proposed, waiting for the
+  founder):** §4.2 states the unasked-dollars figure of [DEC-189](../project/04-decision-log.md#decisions)
+  as a formula: its inputs, an unknown that is never shown as 0, its zero cases, each `auto` path's
+  slices under the order count, the gross headroom, and rounding up to the cent; `unasked_usd` in
+  the reference model computes it, and its fuzz checks it against the decisions §6.2 actually makes.
+  §7 states how the loss answer of goal-first onboarding (DEC-182) maps to the three loss fields.
+  No reference case, decision, or limit changes.
 - **v0.7 ([DEC-539](../project/decisions/DEC-539.md), the founder's decision of 2026-10-08):** mandate
   schema version 2 renames `protection.crypto_stop_limit_offset` to `protection.stop_limit_offset`,
   one offset for every protective stop-limit the platform places, whatever the asset class. V-008
@@ -544,6 +551,55 @@ plain language ("limits new buys only" or "sells down to the scaled size"). With
 configured it also states, in plain language, that the platform chooses which instruments to
 propose within the envelope, that each admission is decided by `autonomy.admission`, and that the
 agent's own confidence is self-reported and uncalibrated (DEC-126).
+
+**Unasked dollars** ([DEC-189](../project/04-decision-log.md#decisions),
+[DEC-695](../project/decisions/DEC-695.md), Proposed). One figure, shown on this screen, the
+contract card, D6's delegation variant, the daily brief (D13), and D15: an upper bound on the order
+value of opening and increasing orders the agent could have decided `auto` (§6.2) from the risk
+clock *t* to the end of its risk day (§5.4), before any exit, new risk day, or version raises it.
+It is display only, changes no decision, and is computed by `unasked_usd` in the reference model
+from these inputs and nothing else:
+
+| Input | From |
+|---|---|
+| The mandate *m* | The version in force; for a confirmation screen or a delegation preview, the version being confirmed |
+| The risk clock *t* | The journaled risk clock (§5.2); for an agent not yet deployed, the validation instant |
+| Agent equity E, gross exposure G | §5.1 and §5.3: G is Σ \|MV\| of the agent's positions plus the max cost of its working opening orders; an agent not yet deployed has E = A and G = 0 |
+| `orders_today` | §5.3's count of opening and increasing orders submitted in the risk day |
+| Usage per delegation | §6.5 condition 4's journaled count and total; a delegation with no entry has used nothing |
+| Effective policy | §4.3's `auto_allowed` and whether the version is `policy_nonconforming`; not known reads as allowed and conforming, the larger figure |
+
+1. **Unknown.** If any input but the policy is missing, the figure is *unknown* and is shown as "not
+   known", never as 0 or as anything that reads as 0 (`AGENTS.md` rule 3).
+2. **Zero.** It is 0 when §6.2 step 5b would apply at *t* (the review date has passed), when the
+   version is `policy_nonconforming`, or when the effective `auto_allowed` is false (step 5c).
+3. **Order bound of a condition.** b(c) is the largest `order_usd` an order matching c can have:
+   `order_usd` with `lt`, `lte`, or `eq` gives its value; `all` gives the smallest bound among its
+   members that have one; `any` gives the largest, only when every member has one; anything else,
+   `not` included, gives none.
+4. **Slices.** With M = `risk.max_order_usd`: if `autonomy.default` is `auto` or any rule has
+   `then: auto`, one unlimited slice of size c₀, which is M for an `auto` default and otherwise the
+   largest over those rules of min(M, b(`when`)). Each delegation whose [`starts_at`, `expires_at`)
+   meets [*t*, the end of the risk day) gives, with c = min(M, its `max_order_usd`, b(its `when`),
+   b(the `when` of the rule it lifts)), k = max(0, `max_orders` − orders used), and R = max(0,
+   `max_total_usd` − total used): q = min(k, ⌊R ÷ c⌋) slices of size c, and one more of size
+   R − q × c when q < k and that is above 0. A bound that is absent is left out of the minimum, and
+   a slice of size 0 or less is dropped.
+5. **Count.** n = max(0, `max_orders_per_day` − `orders_today`). P is the sum of the n largest
+   slices, the unlimited slice counting as many times as it is taken.
+6. **Headroom.** H = max(0, min(`max_gross_exposure_usd`, E) − G).
+7. **The figure** is min(P, H), rounded **up** to the cent. Every step is exact decimal arithmetic,
+   never floating point.
+
+It is an upper bound by construction: it leaves out which rule matches first, the admission and
+client ceilings, every condition but an order bound, the position cap, cooldowns, sessions, marks,
+the agent's mode, and delegation suspension (§6.5 condition 5), each of which can only lower what
+runs unasked; the agent's state is shown beside it. It is reached exactly by the agent's own
+orders when every condition is an order bound or a catch-all, no `ask` rule comes before an `auto`
+one, every delegation it counts is already live, and the position cap does not bind. A drafted mandate holds no
+`auto` and no delegation (V-022), so the contract card shows 0 until the owner enters one.
+Workspace API §5.3's `unasked_usd_after` is this figure for the preview's version at the agent's
+current state.
 
 ### 4.3 Policy hierarchy (DEC-51, DEC-98)
 
@@ -1359,6 +1415,14 @@ until the owner confirms them, §7), because they only reduce risk.
 - **What the platform proposes by default,** when the user has not stated it:
   `universe.max_instruments` 5 (DEC-117) and `behavior.research.max_revisions_per_lineage` 3
   (DEC-111). Both are shown as proposed and both need confirmation.
+- **The loss answer** of goal-first onboarding ([DEC-182](../project/04-decision-log.md#decisions);
+  [DEC-695](../project/decisions/DEC-695.md) item 6, Proposed) maps to three fields and no others.
+  A fraction, or a dollar amount divided by `capital.allocation_usd`, is rounded **down** to whole
+  basis points to give F; F of 0, or of 1 or more, is asked again. `capital.max_loss_from_allocation`
+  is F (`user_stated`, with the quoted span); `risk.max_drawdown` is 0.8 × F and
+  `risk.max_daily_loss` is 0.2 × F (`platform_proposed`, the base mandates' ratios), so V-014 holds
+  and the flatten rung's `at` follows `max_drawdown` (V-011). `loss_answer_fields` in the reference
+  model computes them.
 - **Unenforced constraints:** if the description contains a constraint the mandate cannot express
   (for example, "avoid trading around macro releases"), the compiler flags it on the review screen
   as **not enforced**. It reaches LLM models only as description text.
@@ -1709,7 +1773,8 @@ reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. Th
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
 `fuzz.py` asserts the invariants of §1.1 against independent oracles, and `mutants.py` confirms
-the fuzz catches seeded bugs. Delegations (§6.5) are in the reference model and its fuzz (MI-26 to
+the fuzz catches seeded bugs. The unasked dollars (§4.2) and the loss answer (§7) are in the
+reference model and its fuzz, with no case family yet. Delegations (§6.5) are in the reference model and its fuzz (MI-26 to
 MI-29) already; their family, **MC-U**, is still to come. A new family needs no change to the
 shared harness, which counts only the families it owns, by case-ID prefix.
 
