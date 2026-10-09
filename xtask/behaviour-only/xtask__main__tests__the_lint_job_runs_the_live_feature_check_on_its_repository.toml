@@ -1,9 +1,0 @@
-file = "xtask/src/main.rs"
-test = "tests::the_lint_job_runs_the_live_feature_check_on_its_repository"
-reason = """
-X1's (E7-26; #738 review, findings 2 and 4). The two xtask rows drive the lint job and
-`ci_files` over fixture repositories, which the live-feature check's stub is not on the path of,
-so they fail on what today's code does: the lint job does not yet run the check, and `ci_files`
-neither reads `.github/actions` and `.cargo/config.toml` nor tolerates an absent directory.
-X1's implementation deletes both rows with their `#[ignore]` lines.
-"""

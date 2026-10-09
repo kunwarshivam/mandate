@@ -1,9 +1,0 @@
-file = "crates/mandate-journal/tests/workspace_records.rs"
-test = "a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch"
-reason = """
-E10-15's (DEC-671, journal spec v0.22 §9.10, rule 84). It checks `Draft::parse` and
-`check_batch`, the journal's existing checks, so there is no stub to stop at: until E10-15's
-implementation, the journal answers `unknown_event_type` for `ClientConnected` and
-`unknown_schema` for `ConnectionRevoked` version 2, which is the behaviour it fails on. E10-15's
-implementation deletes this file with the test's `#[ignore]` line.
-"""

@@ -10,6 +10,7 @@ description = "The Model Context Protocol client a broker connector uses inside 
 workspace = true
 
 [dependencies]
+mandate-canon.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true
@@ -18,4 +19,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "test-util", "time"] }

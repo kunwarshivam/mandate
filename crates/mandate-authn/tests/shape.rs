@@ -13,7 +13,6 @@ use proptest::prelude::*;
 use serde_json::{Value, json};
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_malformed_or_critical_token_is_refused_by_the_part_it_breaks() {
     let issuer = TestIssuer::new();
     let good = issuer.token(Signer::Es256, &claims());
@@ -89,7 +88,6 @@ fn token_of_length(issuer: &TestIssuer, len: usize) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_token_of_the_largest_size_verifies_and_one_byte_more_is_refused() {
     let issuer = TestIssuer::new();
     assert_eq!(MAX_TOKEN_BYTES, 16 * 1024, "DEC-650 item 3");
@@ -103,7 +101,6 @@ fn a_token_of_the_largest_size_verifies_and_one_byte_more_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_key_set_keeps_only_usable_signing_keys_and_refuses_ambiguity() {
     let issuer = TestIssuer::new();
     let parse = |keys: Value| Jwks::parse(&json!({ "keys": keys }).to_string());
@@ -173,7 +170,6 @@ fn the_key_set_keeps_only_usable_signing_keys_and_refuses_ambiguity() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_key_of_another_curve_or_a_weak_rsa_modulus_is_never_used() {
     let issuer = TestIssuer::new();
     let es = issuer.jwk(Signer::Es256);
@@ -212,7 +208,6 @@ fn a_key_of_another_curve_or_a_weak_rsa_modulus_is_never_used() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_issuer_config_needs_an_issuer_an_audience_and_an_algorithm() {
     let es = [Algorithm::Es256];
     assert_eq!(
@@ -235,7 +230,6 @@ fn an_issuer_config_needs_an_issuer_an_audience_and_an_algorithm() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_header_in_any_but_strict_base64url_is_malformed() {
     let issuer = TestIssuer::new();
     let header = "eyJhbGciOiJFUzI1NiIsImtpZCI6ImVzMjU2LTEifQ";
@@ -263,7 +257,6 @@ fn a_header_in_any_but_strict_base64url_is_malformed() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_rs256_or_eddsa_signature_of_another_length_is_refused() {
     let issuer = TestIssuer::new();
     for signer in [Signer::Rs256, Signer::EdDsa] {
@@ -284,7 +277,6 @@ fn an_rs256_or_eddsa_signature_of_another_length_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_signed_payload_or_a_signature_in_any_but_strict_base64url_is_malformed() {
     let issuer = TestIssuer::new();
     let header = "eyJhbGciOiJFUzI1NiIsImtpZCI6ImVzMjU2LTEifQ";
@@ -331,7 +323,6 @@ fn a_signed_payload_or_a_signature_in_any_but_strict_base64url_is_malformed() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_segment_with_nonzero_trailing_bits_is_refused() {
     let issuer = TestIssuer::new();
     for signer in Signer::ALLOWED {
@@ -355,7 +346,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
-    #[ignore = "pending E9-1"]
     fn any_single_byte_change_is_refused(
         signer in 0..3usize,
         at in any::<prop::sample::Index>(),
@@ -384,7 +374,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn no_refusal_or_subject_prints_the_token_nonce_subject_or_a_key() {
     let issuer = TestIssuer::new();
     let good = issuer.token(Signer::Es256, &claims());

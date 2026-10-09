@@ -8,7 +8,8 @@
   run, since `cargo mutants` would report every one of them caught, DEC-139; the job takes its
   repository as a parameter, so `Fixture::gated` drives the whole of it and neither it nor the
   pre-flight can be deleted without a test failing; `mutated_crates`, which gates every
-  `safety_critical = true` crate whatever its layer, DEC-253),
+  `safety_critical = true` crate whatever its layer, DEC-253; `live_feature_problems`, which
+  reads each CI command word by word as the shell does, DEC-529 item 3),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.

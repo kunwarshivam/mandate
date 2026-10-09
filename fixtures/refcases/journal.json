@@ -20840,6 +20840,45 @@
     }
    },
    {
+    "name": "checked_daily_with_tools_missing",
+    "clause": "rules 57 and 58: a later contract check finds an allowlisted tool absent (DEC-674)",
+    "base_draft": "checked_start",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": "daily"
+     },
+     {
+      "path": "payload.results",
+      "value": [
+       {
+        "check": "account",
+        "result": "passed",
+        "reason": null
+       },
+       {
+        "check": "contract",
+        "result": "failed",
+        "reason": "tools_missing"
+       },
+       {
+        "check": "environment",
+        "result": "passed",
+        "reason": null
+       },
+       {
+        "check": "scope",
+        "result": "passed",
+        "reason": null
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "unreadable_account_without_a_reference",
     "clause": "rule 62",
     "base_draft": "checked_start",
@@ -21053,6 +21092,28 @@
      {
       "path": "payload.reason",
       "value": "lease_expired"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "suspended_on_a_failed_check",
+    "clause": "rule 59: a later tools_missing suspends with check_failed (DEC-674)",
+    "base_draft": "state_degraded",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "active"
+     },
+     {
+      "path": "payload.to",
+      "value": "suspended"
+     },
+     {
+      "path": "payload.reason",
+      "value": "check_failed"
      }
     ],
     "expect": {
@@ -22626,6 +22687,145 @@
           "reason": null
          }
         ]
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "mcp_later_tools_missing_suspends",
+    "clause": "rules 59, 60, and 68: a later contract check failing with tools_missing suspends with check_failed (DEC-674)",
+    "records": [
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "contract",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "established_copy",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "causation_id",
+        "value": "01J8Z4C1A000000000000000C1"
+       },
+       {
+        "path": "payload.broker",
+        "value": "robinhood"
+       },
+       {
+        "path": "payload.environment",
+        "value": "live"
+       },
+       {
+        "path": "environment",
+        "value": "live"
+       },
+       {
+        "path": "payload.margin_attestation",
+        "value": "cash_account"
+       }
+      ]
+     },
+     {
+      "base_draft": "checked_start",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "daily"
+       },
+       {
+        "path": "payload.results",
+        "value": [
+         {
+          "check": "account",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "contract",
+          "result": "failed",
+          "reason": "tools_missing"
+         },
+         {
+          "check": "environment",
+          "result": "passed",
+          "reason": null
+         },
+         {
+          "check": "scope",
+          "result": "passed",
+          "reason": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "base_draft": "state_degraded",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       },
+       {
+        "path": "payload.from",
+        "value": "active"
+       },
+       {
+        "path": "payload.to",
+        "value": "suspended"
+       },
+       {
+        "path": "payload.reason",
+        "value": "check_failed"
+       },
+       {
+        "path": "causation_id",
+        "value": null
        }
       ]
      }
