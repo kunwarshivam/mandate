@@ -90,13 +90,16 @@ type Rungs = (&'static str, &'static str, &'static str, &'static str);
 /// `ref.py`'s `loss_answer_fields` over each answer and allocation, as (F, D, daily loss), or the
 /// reason it is asked again (`ref.py` gives `None`; the reason is F's, from DEC-695 items 6 and 7).
 #[rustfmt::skip]
-const LOSS: [(Kind, &str, &str, Expected<Fields>); 19] = [
+const LOSS: [(Kind, &str, &str, Expected<Fields>); 22] = [
         (Kind::Fraction, "0.1", "10000", Ok(("0.1", "0.08", "0.02"))),
         (Kind::Fraction, "0.05", "10000", Ok(("0.05", "0.04", "0.01"))),
         (Kind::Fraction, "0.2", "2500", Ok(("0.2", "0.16", "0.04"))),
         (Kind::Fraction, "0.12", "1000", Ok(("0.12", "0.096", "0.024"))),
         (Kind::Fraction, "0.12345", "10000", Ok(("0.1234", "0.09872", "0.02468"))),
         (Kind::Fraction, "0.002", "10000", Ok(("0.002", "0.0016", "0.0004"))),
+        (Kind::Fraction, "0.0002", "10000", Err(LadderCollapses)),
+        (Kind::Fraction, "0.0003", "10000", Err(LadderCollapses)),
+        (Kind::Fraction, "0.0004", "10000", Err(LadderCollapses)),
         (Kind::Fraction, "0.0009", "10000", Err(LadderCollapses)),
         (Kind::Fraction, "0.00009", "10000", Err(NoLoss)),
         (Kind::Fraction, "0.9999", "1000", Ok(("0.9999", "0.79992", "0.19998"))),
@@ -114,7 +117,7 @@ const LOSS: [(Kind, &str, &str, Expected<Fields>); 19] = [
 
 /// `ref.py`'s `proposed_ladder` over each drawdown D, as the three rungs' `at` and the hysteresis.
 #[rustfmt::skip]
-const LADDER: [(&str, Expected<Rungs>); 11] = [
+const LADDER: [(&str, Expected<Rungs>); 14] = [
         ("0.08", Ok(("0.03", "0.06", "0.08", "0.01"))),
         ("0.096", Ok(("0.036", "0.072", "0.096", "0.012"))),
         ("0.04", Ok(("0.015", "0.03", "0.04", "0.005"))),
@@ -122,7 +125,10 @@ const LADDER: [(&str, Expected<Rungs>); 11] = [
         ("0.09872", Ok(("0.037", "0.074", "0.09872", "0.0123"))),
         ("0.0016", Ok(("0.0006", "0.0012", "0.0016", "0.0002"))),
         ("0.0008", Ok(("0.0003", "0.0006", "0.0008", "0.0001"))),
+        ("0.00079", Err(LadderCollapses)),
         ("0.0007", Err(LadderCollapses)),
+        ("0.00024", Err(LadderCollapses)),
+        ("0.00016", Err(LadderCollapses)),
         ("0.00072", Err(LadderCollapses)),
         ("0.0001", Err(LadderCollapses)),
         ("0.79992", Ok(("0.2999", "0.5999", "0.79992", "0.0999"))),
@@ -238,26 +244,25 @@ fn drafted_mandate(f: &LossFields, l: &ProposedLadder) -> (Mandate, ProvenanceMa
     (mandate, ProvenanceMap::new(provenance.collect()))
 }
 
-/// DEC-695 items 6 and 7 over random answers, as fractions to six places and as dollars of four
-/// allocations: each is asked again exactly when its oracle says so, otherwise its fields and ladder
-/// are the oracle's, and the drafted mandate breaks no V-rule (V-010 to V-014 and V-020 among them).
+/// DEC-695 items 6 and 7 over random answers (fractions to 6 places, dollars of four allocations;
+/// half with F at most 20 bp, where ladders collapse): each is asked again exactly when the oracle
+/// says so, else its fields and ladder are the oracle's and the draft breaks no V-rule.
 #[test]
 #[ignore = "pending E10-7"]
 fn a_drafted_loss_answer_and_its_ladder_validate() {
-    let config = ProptestConfig {
-        cases: 1024,
-        failure_persistence: None,
-        ..ProptestConfig::default()
-    };
-    let draw = (any::<bool>(), 0u64..1_000_000_000, 0usize..4, 1u32..7);
-    let outcome = TestRunner::new(config).run(&draw, |(in_dollars, n, a, places)| {
+    let mut config = ProptestConfig::with_cases(1024);
+    config.failure_persistence = None;
+    let draw = (
+        any::<(bool, bool)>(),
+        0u64..1_000_000_000,
+        0usize..4,
+        1u32..7,
+    );
+    let outcome = TestRunner::new(config).run(&draw, |((in_dollars, small), n, a, places)| {
         let allocation = [100_000, 250_000, 1_000_000, 3_333_333][a];
-        let scale = if in_dollars {
-            allocation
-        } else {
-            10u64.pow(places)
-        };
-        let units = n % (scale * 6 / 5 + 1);
+        let places = [places, 6][usize::from(small)];
+        let scale = [10u64.pow(places), allocation][usize::from(in_dollars)];
+        let units = n % ([scale * 6 / 5, scale / 500][usize::from(small)] + 1);
         let said = match in_dollars {
             true => LossAnswer::Usd(dollars(&decimal(units, 2))),
             false => answer(Kind::Fraction, &decimal(units, places)),
