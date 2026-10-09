@@ -34,4 +34,5 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "time"] }
 
 [dev-dependencies]
+mandate-modelhost.workspace = true
 proptest.workspace = true

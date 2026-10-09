@@ -16,8 +16,9 @@
 //! at a workspace's scope and workspace roles never at an org's (§4.1, no inheritance).
 //!
 //! **The only way to name a workspace below the API.** A [`TenantContext`] comes only out of an
-//! [`Authorized`] for a workspace's scope; its fields are private and it has no other constructor
-//! (ID-8, DEC-642). None of these compile outside the crate:
+//! [`Authorized`] for a workspace's scope, or from consuming an [`OrgContext`] or a
+//! [`PrincipalContext`] that [`authorize`] built; its fields are private and it has no other
+//! constructor (ID-8, DEC-642, DEC-832). None of these compile outside the crate:
 //!
 //! ```compile_fail,E0451
 //! use mandate_identity::{
@@ -43,6 +44,64 @@
 //!     context.clone()
 //! }
 //! ```
+//!
+//! **Org scope and one's own data get sealed contexts too** (DEC-832). An org-scope authorization
+//! yields an [`OrgContext`], carrying the organization's workspaces as the store enumerated them,
+//! never a caller's list; it is not a [`Tenant`], so no data API takes it, and it reaches a
+//! workspace only through [`OrgContext::into_workspace`] or [`OrgContext::into_every_workspace`].
+//! An `own` row, the leave row, or a `self` row yields a [`PrincipalContext`] bound to the
+//! authenticated principal. Neither can be built outside the crate, and an `OrgContext` is not a
+//! `Tenant`:
+//!
+//! ```compile_fail,E0451
+//! use mandate_identity::{OrgContext, OrgId, Permission, PrincipalId, PrincipalKind, SessionRef};
+//! let _ = OrgContext {
+//!     org: OrgId(1),
+//!     principal: PrincipalId(3),
+//!     kind: PrincipalKind::User,
+//!     session: SessionRef(4),
+//!     permission: Permission::KillSwitchOrg,
+//!     membership_unverified: false,
+//!     workspaces: Some(std::collections::BTreeSet::new()),
+//! };
+//! ```
+//!
+//! ```compile_fail,E0451
+//! use mandate_identity::{
+//!     Permission, PrincipalContext, PrincipalId, PrincipalKind, Scope, SessionRef,
+//! };
+//! let _ = PrincipalContext {
+//!     principal: PrincipalId(3),
+//!     kind: PrincipalKind::User,
+//!     session: SessionRef(4),
+//!     permission: Permission::OwnPasskey,
+//!     scope: Scope::Principal,
+//!     membership_unverified: false,
+//! };
+//! ```
+//!
+//! ```compile_fail,E0277
+//! fn data_api(_: &impl mandate_identity::Tenant) {}
+//! fn org_scope(context: &mandate_identity::OrgContext) {
+//!     data_api(context)
+//! }
+//! ```
+//!
+//! The control: the same data API takes a `TenantContext`.
+//!
+//! ```
+//! fn data_api(_: &impl mandate_identity::Tenant) {}
+//! fn workspace_scope(context: &mandate_identity::TenantContext) {
+//!     data_api(context)
+//! }
+//! ```
+//!
+//! **A member deactivated before an outage stays refused through it** (DEC-642 item 10's pin, the
+//! test `a_deactivated_member_is_refused_through_an_outage`). This crate does not owe it:
+//! `MemberDeactivated` revokes the member's sessions and client tokens and suspends their passkey
+//! credentials in the workspace store's transaction (E9-7), so the session-record read of §6.2
+//! (`mandate-authn`, E9-7) finds no live session and no [`Session`] reaches [`authorize`]; E9-7 owes
+//! the test, over the store and the session read, and E9-8 its isolation run with a route-2 attempt.
 //!
 //! **Sessions, memberships, and the membership lookup are sealed** (DEC-642 items 4, 7, 9): their
 //! fields are private and the lookup's supertrait is unreachable, so none of these compile either:
@@ -72,6 +131,18 @@
 //! impl MembershipLookup for Forged {
 //!     fn memberships(&self, _: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
 //!         Ok(Vec::new())
+//!     }
+//!     fn workspaces(
+//!         &self,
+//!         _: mandate_identity::OrgId,
+//!     ) -> Result<std::collections::BTreeSet<mandate_identity::WorkspaceId>, LookupFailed> {
+//!         Ok(std::collections::BTreeSet::new())
+//!     }
+//!     fn workspace_org(
+//!         &self,
+//!         _: mandate_identity::WorkspaceId,
+//!     ) -> Result<Option<mandate_identity::OrgId>, LookupFailed> {
+//!         Ok(None)
 //!     }
 //! }
 //! ```
@@ -115,67 +186,90 @@ pub enum UlidTextError {
     /// Not 26 characters of uppercase Crockford base32 whose first is at most `7`.
     #[error("not 26 characters of uppercase Crockford base32 whose first is at most 7")]
     Invalid,
-    /// The stub of a story not yet implemented; it goes when E9-2 is implemented.
-    #[error("{story} has not been implemented yet")]
-    Unimplemented {
-        /// The story.
-        story: &'static str,
-    },
+}
+
+const ULID_LEN: usize = 26;
+const CROCKFORD: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// The 26 uppercase Crockford base32 digits of `value`, most significant first. The first digit is
+/// at most `7` because 128 bits leave 3 for it.
+fn encode_ulid(mut value: u128) -> Result<String, UlidTextError> {
+    let mut reversed = String::with_capacity(ULID_LEN);
+    for _ in 0..ULID_LEN {
+        let digit = usize::try_from(value % 32).map_err(|_| UlidTextError::Invalid)?;
+        let ch = CROCKFORD.chars().nth(digit).ok_or(UlidTextError::Invalid)?;
+        reversed.push(ch);
+        value /= 32;
+    }
+    Ok(reversed.chars().rev().collect())
+}
+
+/// The value of a canonical ULID text: exactly 26 characters of the uppercase Crockford alphabet,
+/// the first at most `7`; anything else, such as lowercase, `I`, `L`, `O`, `U` or a space, is
+/// [`UlidTextError::Invalid`].
+fn decode_ulid(text: &str) -> Result<u128, UlidTextError> {
+    if text.chars().count() != ULID_LEN
+        || !text.starts_with(['0', '1', '2', '3', '4', '5', '6', '7'])
+    {
+        return Err(UlidTextError::Invalid);
+    }
+    text.chars().try_fold(0u128, |acc, ch| {
+        let digit = CROCKFORD
+            .chars()
+            .position(|c| c == ch)
+            .and_then(|d| u128::try_from(d).ok())
+            .ok_or(UlidTextError::Invalid)?;
+        acc.checked_mul(32)
+            .and_then(|shifted| shifted.checked_add(digit))
+            .ok_or(UlidTextError::Invalid)
+    })
 }
 
 impl PrincipalId {
     /// The principal's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The principal a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
 impl OrgId {
     /// The organization's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The organization a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
 impl WorkspaceId {
     /// The workspace's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The workspace a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
 impl SessionRef {
     /// The session reference's ULID as the journal spells it: 26 characters of uppercase Crockford base32.
     pub fn to_ulid_text(self) -> Result<String, UlidTextError> {
-        let _ = self;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        encode_ulid(self.0)
     }
 
     /// The session reference a ULID's text names, or [`UlidTextError::Invalid`].
     pub fn from_ulid_text(text: &str) -> Result<Self, UlidTextError> {
-        let _ = text;
-        Err(UlidTextError::Unimplemented { story: "E9-2" })
+        decode_ulid(text).map(Self)
     }
 }
 
@@ -306,7 +400,13 @@ pub enum Scope {
     Principal,
     /// An organization's scope, where only org roles act.
     Org(OrgId),
-    /// A workspace's scope, where only workspace roles and the non-member columns act.
+    /// A workspace's scope, where only workspace roles and the non-member columns act. The pair is
+    /// the route's, so [`authorize`] checks it against the workspace's own record in the store
+    /// ([`MembershipLookup::workspace_org`]) before anything else but an inactive row: a workspace
+    /// this deployment does not host, or one under another organization, is refused
+    /// `no_membership` for every principal kind (ID-8, DEC-832 item 2), and a context only ever
+    /// carries the pair the store holds, unless the record could not be read; then only a
+    /// risk-reducing row is granted, its context flagged `membership_unverified` ([`authorize`]).
     Workspace {
         /// The workspace's organization.
         org: OrgId,
@@ -423,8 +523,10 @@ impl TenantContext {
         self.session
     }
 
-    /// Whether this risk-reducing row was authorized from the session's roles snapshot because the
-    /// membership read failed (identity spec §4.5, DEC-642 item 10); the committed event records it.
+    /// Whether this risk-reducing row was authorized without the store's answer: from the session's
+    /// roles snapshot because the membership read failed (identity spec §4.5, DEC-642 item 10), or,
+    /// when the workspace's own record could not be read, with its pair unchecked by the record
+    /// ([`authorize`]); the committed event records it.
     pub fn membership_unverified(&self) -> bool {
         self.membership_unverified
     }
@@ -465,6 +567,167 @@ mod sealed {
     impl Sealed for super::TenantContext {}
 }
 
+/// What an authorization at an organization's scope yields (identity spec §4.5, DEC-832 items 1 to
+/// 3). Sealed as [`TenantContext`] is: private fields, built only by [`authorize`], no `Default`,
+/// no `Clone`, never stored or serialized. It is not a [`Tenant`], so no data API takes it; it
+/// reaches workspace data only by being consumed, through [`Self::into_workspace`] or
+/// [`Self::into_every_workspace`], into `TenantContext`s carrying the same principal, permission,
+/// `session_ref`, and `membership_unverified`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct OrgContext {
+    org: OrgId,
+    principal: PrincipalId,
+    kind: PrincipalKind,
+    session: SessionRef,
+    permission: Permission,
+    membership_unverified: bool,
+    workspaces: Option<BTreeSet<WorkspaceId>>,
+}
+
+impl OrgContext {
+    /// The organization authorized.
+    pub fn org(&self) -> OrgId {
+        self.org
+    }
+
+    /// The authenticated principal.
+    pub fn principal(&self) -> PrincipalId {
+        self.principal
+    }
+
+    /// The authenticated principal's kind.
+    pub fn kind(&self) -> PrincipalKind {
+        self.kind
+    }
+
+    /// The session the request came through.
+    pub fn session(&self) -> SessionRef {
+        self.session
+    }
+
+    /// The one permission authorized.
+    pub fn permission(&self) -> Permission {
+        self.permission
+    }
+
+    /// Whether this risk-reducing row was authorized from the session's roles snapshot because the
+    /// membership read failed (DEC-642 item 10).
+    pub fn membership_unverified(&self) -> bool {
+        self.membership_unverified
+    }
+
+    /// The organization's workspaces as [`MembershipLookup::workspaces`] enumerated them at
+    /// authorization time, never named by the caller; `None` when the membership store could not
+    /// answer, so the route's workspace is checked against its own record instead (DEC-832 item 4).
+    pub fn workspaces(&self) -> Option<&BTreeSet<WorkspaceId>> {
+        self.workspaces.as_ref()
+    }
+
+    /// The one-workspace way (DEC-832 item 3): the context for the route's `workspace`, only when it
+    /// is in the enumerated set, or, with no set, when its own record names this organization;
+    /// otherwise `no_membership`. With no set and the record unreadable too, it is
+    /// [`OneWorkspace::Pending`], never a refusal: nothing establishes the route's workspace as this
+    /// organization's, and granting it unchecked would let one organization's kill switch reach
+    /// another's workspace, so the client retries it with the same idempotency key, showing it
+    /// pending, as DEC-832 item 4 retries a workspace not yet committed (identity spec §4.5).
+    pub fn into_workspace(
+        self,
+        lookup: &impl MembershipLookup,
+        workspace: WorkspaceId,
+    ) -> Result<OneWorkspace, Refusal> {
+        let _ = (self, lookup, workspace);
+        Err(Refusal::Unimplemented { story: "E9-2" })
+    }
+
+    /// The every-workspace way (DEC-832 items 3 and 5): one context per workspace of the enumerated
+    /// set, in the set's order, for a write one request makes to all of them; never a set the caller
+    /// names and never part of one. With no enumerated set (built during a membership-store outage)
+    /// it is [`EveryWorkspace::NoSetYet`], not a refusal: the caller treats it as pending and
+    /// retries, never as a denial. No route calls it until a route story decides it (identity spec
+    /// §4.5); its `Err` is only this stub's.
+    pub fn into_every_workspace(self) -> Result<EveryWorkspace, Refusal> {
+        let _ = self;
+        Err(Refusal::Unimplemented { story: "E9-2" })
+    }
+}
+
+/// What [`OrgContext::into_workspace`] yields when it refuses nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OneWorkspace {
+    /// The route's workspace, which the enumerated set or its own record places in the organization.
+    Context(TenantContext),
+    /// Neither the enumerated set nor the workspace's own record could be read: not a refusal and
+    /// not a grant. The caller retries with the same idempotency key and reports the workspace
+    /// pending (DEC-832 item 4).
+    Pending,
+}
+
+/// What [`OrgContext::into_every_workspace`] yields when it refuses nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EveryWorkspace {
+    /// One context per workspace of the set the store enumerated, in the set's order.
+    Contexts(Vec<TenantContext>),
+    /// The context was built during a membership-store outage, so no set was enumerated: never a
+    /// caller-named or partial set, and never a denial; the caller retries until a set is read.
+    NoSetYet,
+}
+
+/// What an authorization of one's own data yields (identity spec §4.5, DEC-832 item 7): an `own`
+/// row (enrolling or removing one's own passkey), the leave row, or a `self` row at the principal's
+/// scope. Sealed as [`TenantContext`] is. It binds the authenticated principal and the scope of the
+/// membership the row is used through ([`Scope::Principal`] for a `self` row); the credential-store
+/// APIs for one's own passkeys and the leave operation take only it and read the subject from it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PrincipalContext {
+    principal: PrincipalId,
+    kind: PrincipalKind,
+    session: SessionRef,
+    permission: Permission,
+    scope: Scope,
+    membership_unverified: bool,
+}
+
+impl PrincipalContext {
+    /// The authenticated principal, the only subject the context reaches.
+    pub fn principal(&self) -> PrincipalId {
+        self.principal
+    }
+
+    /// The authenticated principal's kind.
+    pub fn kind(&self) -> PrincipalKind {
+        self.kind
+    }
+
+    /// The session the request came through.
+    pub fn session(&self) -> SessionRef {
+        self.session
+    }
+
+    /// The one permission authorized.
+    pub fn permission(&self) -> Permission {
+        self.permission
+    }
+
+    /// The scope of the membership the row is used through.
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
+
+    /// Whether the membership read failed and the session's roles snapshot answered (DEC-642 item
+    /// 10).
+    pub fn membership_unverified(&self) -> bool {
+        self.membership_unverified
+    }
+
+    /// The context for its control-stream writes: its workspace's, bound to the same principal and
+    /// permission (DEC-832 item 7); `no_membership` at an organization's or the principal's scope,
+    /// whose writes are not the request path's.
+    pub fn into_tenant(self) -> Result<TenantContext, Refusal> {
+        let _ = self;
+        Err(Refusal::Unimplemented { story: "E9-2" })
+    }
+}
+
 impl Tenant for TenantContext {
     fn workspace(&self) -> WorkspaceId {
         self.workspace
@@ -500,6 +763,18 @@ pub struct MembershipQuery {
 pub trait MembershipLookup: LookupSeal {
     /// The memberships the query names.
     fn memberships(&self, query: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed>;
+
+    /// The organization's workspaces (those not archived) that this deployment hosts, from the fold
+    /// of the organization's events in its store: the set an [`OrgContext`] carries (DEC-832 item
+    /// 2). It fails when the membership store does.
+    fn workspaces(&self, org: OrgId) -> Result<BTreeSet<WorkspaceId>, LookupFailed>;
+
+    /// The workspace's own record: the organization it names, or `None` when this deployment hosts
+    /// no such workspace. [`authorize`] checks a [`Scope::Workspace`] pair with it, and an
+    /// [`OrgContext`] built during a membership-store outage checks the route's workspace with it
+    /// (identity spec §4.5, DEC-832 item 4). What a failure of it yields is [`authorize`]'s and
+    /// [`OrgContext::into_workspace`]'s to say; neither refuses a risk-reducing row for it.
+    fn workspace_org(&self, workspace: WorkspaceId) -> Result<Option<OrgId>, LookupFailed>;
 }
 
 /// The lookup could not answer; the step grants nothing on it (`membership_unavailable`).
@@ -547,21 +822,26 @@ impl Session {
     }
 }
 
-/// A granted authorization. Only a workspace's scope carries a [`TenantContext`], which nobody
-/// outside this crate can build, so a hand-made `Authorized` reaches no workspace data.
+/// A granted authorization. Each arm carries a sealed context nobody outside this crate can build,
+/// so a hand-made `Authorized` reaches no data.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Authorized {
-    /// At the principal's own scope (a `self` row): its own data only, no context.
+    /// One's own data: a `self` row at the principal's scope, or an `own` row or the leave row at
+    /// the scope of the membership it is used through (DEC-832 item 7).
     Principal {
         /// What the row's **S** cell asks.
         step_up: StepUp,
+        /// The context bound to the authenticated principal.
+        context: PrincipalContext,
     },
-    /// At an organization's scope.
+    /// Any other row at an organization's scope (DEC-832 items 1 to 3).
     Org {
         /// What the row's **S** cell asks.
         step_up: StepUp,
+        /// The context carrying the organization's workspaces from the store.
+        context: OrgContext,
     },
-    /// At a workspace's scope.
+    /// Any other row at a workspace's scope.
     Workspace {
         /// What the row's **S** cell asks.
         step_up: StepUp,
@@ -574,8 +854,8 @@ impl Authorized {
     /// What the row's **S** cell asks.
     pub fn step_up(&self) -> StepUp {
         match self {
-            Self::Principal { step_up }
-            | Self::Org { step_up }
+            Self::Principal { step_up, .. }
+            | Self::Org { step_up, .. }
             | Self::Workspace { step_up, .. } => *step_up,
         }
     }
@@ -793,6 +1073,21 @@ impl Refusal {
 /// Applies identity spec §4.2 by its grammar (ID-2, §4.5) at `now`, reading the principal's (or a
 /// client's user's) memberships through `lookup` itself; a role counts once its effective-from
 /// instant is at or before `now`.
+///
+/// What it yields is sealed (DEC-642, DEC-832): a [`TenantContext`] for a workspace's scope, an
+/// [`OrgContext`] for an organization's, with the organization's workspaces read through `lookup`
+/// at this call, and a [`PrincipalContext`] for an `own`, leave, or `self` row. A
+/// [`Scope::Workspace`] whose pair the store does not hold is refused `no_membership`, after an
+/// inactive row and before anything else.
+///
+/// When the workspace's own record cannot be read ([`MembershipLookup::workspace_org`] fails), the
+/// pair cannot be checked: a row that is not risk-reducing is refused `membership_unavailable` for
+/// every principal kind, and a risk-reducing row is never refused for it (`AGENTS.md` rule 13). A
+/// user or a client is then authorized from its session's roles snapshot as DEC-642 item 10 says,
+/// the snapshot entry's own pair, which the store folded, standing in for the record; a service
+/// account, the host CLI, or a platform operator by its column, whose workspace its own
+/// registration, issuance, or window names; each context flagged `membership_unverified`
+/// (identity spec §4.5).
 pub fn authorize(
     lookup: &impl MembershipLookup,
     principal: &Principal,

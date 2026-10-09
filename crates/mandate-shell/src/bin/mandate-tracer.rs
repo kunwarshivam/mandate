@@ -125,6 +125,7 @@ fn tracer() -> Result<Report, ShellError> {
         account_ref: deployment_input.account_ref().to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
+        artifacts: None,
         transport,
     });
     run(&mut stages, &setup)

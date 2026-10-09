@@ -1,0 +1,7 @@
+{
+  "shape": "instrument_for_time",
+  "max_orders": 3,
+  "max_order_usd": "300",
+  "max_total_usd": "900",
+  "expires_at": "2026-10-08T14:30:00.000000000Z"
+}

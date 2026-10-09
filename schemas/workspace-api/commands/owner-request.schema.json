@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/owner-request.schema.json",
+  "type": "object",
+  "required": [
+    "instrument",
+    "side"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "instrument": {
+      "$ref": "../common.schema.json#/$defs/AssetId"
+    },
+    "side": {
+      "enum": [
+        "buy",
+        "sell"
+      ]
+    },
+    "size": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /agents/{agent_id}/requests (\u00a74.6). requested_by is never a member: it comes from the channel (API-6)."
+}

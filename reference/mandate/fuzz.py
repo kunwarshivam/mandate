@@ -2046,6 +2046,63 @@ def fuzz_owner_controls(n):
                 check((p["instrument"] in sold) == ks_privileged,
                       "MI-23 only valid evidence as committed sells equities outside the session", (ev, ks_session, confirmed, ks))
 
+def fuzz_stop_limit_offset(n):
+    """V-008 and W-002 under DEC-539: the offset is required when protection is enabled and any allowed asset class is
+    one the connection's profile protects with a stop-limit (`stop_limit_asset_classes`; absent or null, every allowed
+    class, so validation fails closed), and the worst case adds it exactly then. A version may move from schema version
+    1 to 2 but never back (V-031). A version-1 document reads `crypto_stop_limit_offset` as the offset, so the same
+    mandate written at either version validates alike, a move between versions with the same offset is neutral and
+    changes no path, and a larger offset across the move is increasing on `/protection/stop_limit_offset` alone. The
+    oracle computes the required set and the figure itself, and builds the version-2 document by hand."""
+    for _ in range(n):
+        m = copy.deepcopy(rng.choice([base.btc, base.swing]))
+        m["universe"]["asset_classes"] = rng.choice([["us_equity"], ["crypto"], ["crypto", "us_equity"]])
+        p = m["protection"]
+        p["enabled"] = rng.random() < 0.8
+        if not p["enabled"] and rng.random() < 0.5:
+            p["stop_distance"] = p["take_profit_distance"] = None
+        offset = rng.choice([None, "0.005", "0.01"])
+        p["crypto_stop_limit_offset"] = offset
+        ctx = dict(base.CTX)
+        classes = rng.choice(["absent", None, [], ["crypto"], ["us_equity"], ["crypto", "us_equity"]])
+        if classes == "absent":
+            del ctx["stop_limit_asset_classes"]
+        else:
+            ctx["stop_limit_asset_classes"] = classes
+        protected = set(m["universe"]["asset_classes"]) if classes in ("absent", None) else set(classes)
+        needed = bool(set(m["universe"]["asset_classes"]) & protected)
+        v2 = copy.deepcopy(m)
+        v2["mandate_schema_version"] = 2
+        v2["protection"] = {"enabled": p["enabled"], "stop_distance": p["stop_distance"],
+                            "take_profit_distance": p["take_profit_distance"], "stop_limit_offset": offset}
+        if not (V.is_valid(m) and V.is_valid(v2)):
+            continue
+        if p["enabled"]:
+            v008 = needed and offset is None
+            pos = min(D(m["risk"]["max_position_usd"]), D(m["risk"]["max_position_fraction"]) * D(m["capital"]["allocation_usd"]))
+            figure = pos * (D(p["stop_distance"]) + (D(offset) if needed and offset else D(0)))
+        else:
+            v008 = any(x is not None for x in (p["stop_distance"], p["take_profit_distance"], offset))
+            figure = None
+        for doc in (m, v2):
+            errs, _ = semantic(doc, ctx)
+            check(("V-008" in errs) == v008, "V-008 requires the offset exactly where a stop-limit protects",
+                  (doc["mandate_schema_version"], m["universe"]["asset_classes"], classes, p["enabled"], offset, errs))
+            got = worst_case(doc, ctx)["one_position_at_stop_usd"]
+            check((got is None and figure is None) or (got is not None and figure is not None and D(got) == figure),
+                  "W-002's figure adds the offset exactly where a stop-limit protects", (doc["protection"], classes, got, figure))
+        check(classify(m, v2) == ("neutral", []), "moving to version 2 with the same offset changes nothing",
+              (m["protection"], classify(m, v2)))
+        check("V-031" in semantic(m, dict(ctx, previous_version=v2))[0], "V-031 refuses a move back to version 1",
+              (m["protection"], classes))
+        check("V-031" not in semantic(v2, dict(ctx, previous_version=m))[0], "V-031 allows the move to version 2",
+              (m["protection"], classes))
+        if p["enabled"] and offset is not None:
+            raised = copy.deepcopy(v2)
+            raised["protection"]["stop_limit_offset"] = norm(D(offset) + D("0.005"))
+            check(classify(m, raised) == ("risk_increasing", ["/protection/stop_limit_offset"]),
+                  "a larger offset across the move is increasing on the one path", (offset, classify(m, raised)))
+
 def fuzz_content(n):
     """§6.4 content and rule 6: exactly the nine keys; the trigger's rule is the owner's confirmed rule verbatim, or
     null for the default and the three ceilings; the trigger names who asked and the client (DEC-185); the choices end
@@ -2197,6 +2254,7 @@ if __name__ == "__main__":
     fuzz_quiet_hours(600)
     fuzz_owner_controls(600)
     fuzz_content(200)
+    fuzz_stop_limit_offset(600)
     print("failures:", len(FAIL), Counter(f[0] for f in FAIL))
     for name, ctx in FAIL[:3]:
         print("EXAMPLE", name, str(ctx)[:1500])

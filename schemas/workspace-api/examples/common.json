@@ -1,0 +1,56 @@
+{
+  "Decimal": ["0", "123.45", "-24.56", "10050", "0.000000000000000000000000001"],
+  "Timestamp": ["2026-09-28T18:05:18.000000000Z", "2026-09-21T13:30:00.123456789Z"],
+  "ContentRef": ["sha256:516967c342c510b904903fb8494951bbafa61c9ef0a16fc7b2e62426c0daedee"],
+  "Id": ["agt_01JB3K8Y4N7QW2M6R9T5V0XZAC", "7b4a1c2e-1111-4a2b-9c3d-000000000001"],
+  "AssetId": ["7b4a1c2e-1111-4a2b-9c3d-000000000001"],
+  "EventId": ["01JBH3BTZ8K2M4N6P8R0S2T4V6"],
+  "Watermark": [
+    {
+      "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K8Y4N7QW2M6R9T5V0XZAC",
+      "seq": 1842,
+      "hash": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "recorded_at": "2026-09-28T18:05:19.000000000Z"
+    }
+  ],
+  "AsOf": [
+    [
+      {
+        "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acc_01JB3K7N2P4R6T8V0X2Z4B6D8F",
+        "seq": 977,
+        "hash": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "recorded_at": "2026-09-28T18:05:18.000000000Z"
+      },
+      {
+        "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+        "seq": 312,
+        "hash": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "recorded_at": "2026-09-28T17:12:09.000000000Z"
+      }
+    ]
+  ],
+  "Freshness": [
+    {"observed_at": "2026-09-28T18:05:18.000000000Z", "stale": false, "age_seconds": 2, "limit_source": "data_profile.max_mark_age_s"},
+    {"observed_at": "2026-09-28T17:51:02.000000000Z", "stale": true, "age_seconds": 858, "limit_source": "account_snapshot.max_age_s"}
+  ],
+  "QuotedContent": [
+    {
+      "author": "owner_selected",
+      "text": "score: 0.71 (weight 0.6)\nlookback_bars: 50\nclose above its 50-bar average for 6 bars",
+      "model_id": "quant.momentum",
+      "model_version": "1.0.0",
+      "produced_at": "2026-09-28T18:04:58.000000000Z",
+      "event_id": "01JBM9S2Y4N7QW2M6R9T5V0XZA",
+      "artifact": null
+    },
+    {
+      "author": "platform_authored",
+      "text": "two news items about XYZ in the last hour\ntone of the items: mixed",
+      "model_id": "llm.news_research",
+      "model_version": "0.3.0",
+      "produced_at": "2026-09-28T18:04:59.000000000Z",
+      "event_id": "01JBM9S31H6SD4F8G1E3W7XYZB",
+      "artifact": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    }
+  ]
+}

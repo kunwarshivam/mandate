@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/profile_protection.rs"
+test = "re_place_no_longer_reads_the_asset_class_and_asks_the_profile"
+reason = """
+E7-23 B2a's. It reads the source of `re_place` in `protection.rs`, which still names the asset class,
+so it fails on that source and not at the stub: no stub is reachable until the implementation
+wires `protective_shape` into `re_place`. The implementation PR deletes this file with the
+`#[ignore]` line.
+"""

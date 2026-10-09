@@ -54,14 +54,17 @@
 //! as raw text and is parsed by `mandate-num`. A JSON number, an exponent, or more places than
 //! the increment allows is a typed [`error::WireError`] with a stable code.
 
+pub mod account_rules;
 pub mod client;
 pub mod data;
 pub mod error;
 pub mod http;
+pub mod profile;
 pub mod read;
 pub mod record;
 pub mod wire;
 
+pub use account_rules::{AccountRules, DeclaredRegime, alpaca as alpaca_account_rules};
 pub use client::{Pause, RetryPolicy, TokioPause, TradingClient};
 pub use data::{BarsRequest, DATA_HOST, DataClient, DataTransport, MAX_BARS_WINDOW, QuoteRequest};
 pub use error::{
@@ -71,5 +74,6 @@ pub use http::{
     AlpacaPaperHttp, Credentials, ENDPOINTS, Endpoint, HttpRequest, KEY_ID_VAR, Method, PAPER_HOST,
     Response, SECRET_VAR, TradingTransport, endpoint_for, is_paper_trading_path,
 };
+pub use profile::alpaca as alpaca_profile;
 pub use read::{Asset, AssetSnapshot, Exchange, Feed, LatestQuote, MinuteBar, MinuteBars};
 pub use record::{Direction, INLINE_LIMIT, RecordedBody, RecordedExchange};

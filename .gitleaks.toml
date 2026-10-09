@@ -67,3 +67,27 @@ condition = "AND"
 paths = ['''^web/src/lib/palette\.ts$''']
 regexTarget = "match"
 regexes = ['''^"?lapis[a-z-]*": "[a-z]+(?:-[a-z]+)*-[0-9]{1,3}"$''']
+
+# The pinned GPG key fingerprints of the package repositories the deploy scripts trust
+# (DEC-822 item 3): a fingerprint is a public identifier of a public key, and the scripts stop if
+# the downloaded key differs from it. Allowed only in the scripts that pin one and the test that
+# checks the pin, and only in the `NAME_FINGERPRINT=<40 hex>` shape, so any other 40-hex string in
+# those files, and the same text anywhere else, is still reported.
+[[allowlists]]
+description = "Pinned GPG key fingerprints in the deploy scripts"
+targetRules = ["cloudflare-api-key", "generic-api-key"]
+condition = "AND"
+paths = ['''^deploy/(?:bootstrap\.sh|install-cloudflared\.sh|tests/test_invariants\.py)$''']
+regexTarget = "match"
+regexes = ['''^[A-Z_]*FINGERPRINT=[0-9A-F]{40}"?$''']
+
+# The deploy invariant test names systemd unit files beside their settings (`owlhead-api.service`
+# contains "api"), which the generic key heuristic reads as a key assignment. Allowed only in that
+# test file and only in the `<unit>.service", "<Setting>=<word>` shape.
+[[allowlists]]
+description = "Systemd setting assertions in the deploy invariant test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^deploy/tests/test_invariants\.py$''']
+regexTarget = "match"
+regexes = ['''^[a-z-]+\.service", "[A-Za-z]+=(?:[A-Za-z0-9]*"|\\n)$''']
