@@ -150,6 +150,96 @@ impl NoticeClass {
     }
 }
 
+/// The default push-service allowlist (DEC-792 item 2): Chrome's, Firefox's, Safari's and Edge's
+/// push services. A deployment may configure a shorter list; adding a host is a reviewed change.
+pub const DEFAULT_PUSH_ALLOWLIST: [&str; 4] = [
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "*.push.apple.com",
+    "*.notify.windows.com",
+];
+
+/// The deployment's push-service allowlist (DEC-792 item 2, spec §4.6). Each entry is one exact
+/// host, or `*.` and a domain, which matches a proper subdomain at any depth and never the domain
+/// itself. The host or domain names at least two labels (DEC-722 item 1).
+#[derive(Debug, Clone)]
+pub struct PushAllowlist {
+    entries: Vec<String>,
+}
+
+impl PushAllowlist {
+    /// From the deployment's configured entries, such as [`DEFAULT_PUSH_ALLOWLIST`]. An entry no
+    /// accepted endpoint could match is refused with [`WebPushError::InvalidEndpoint`]: a host or
+    /// domain that is not lowercase ASCII labels of letters, digits and hyphens, one of a single
+    /// label (`com`, `*.com`; DEC-722 item 1), one with an empty label, a label that starts or ends
+    /// with a hyphen (DEC-722 item 2), a trailing dot, an `xn--` label, or an all-digit last label
+    /// (an IPv4 literal), a port, a scheme, or a `*` anywhere but a leading `*.`. One such entry
+    /// refuses the whole list.
+    pub fn parse(entries: &[&str]) -> Result<Self, WebPushError> {
+        entries
+            .iter()
+            .map(|entry| {
+                let host = entry.strip_prefix(WILDCARD).unwrap_or(entry);
+                if is_allowable_host(host) {
+                    Ok((*entry).to_owned())
+                } else {
+                    Err(WebPushError::InvalidEndpoint)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|entries| Self { entries })
+    }
+
+    /// Whether `host` is an exact entry, or a proper subdomain of a wildcard entry's domain: the
+    /// domain must follow a dot that something precedes, so the domain itself never matches.
+    fn allows(&self, host: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| match entry.strip_prefix(WILDCARD) {
+                Some(domain) => host
+                    .strip_suffix(domain)
+                    .and_then(|sub| sub.strip_suffix('.'))
+                    .is_some_and(|sub| !sub.is_empty()),
+                None => host == entry,
+            })
+    }
+}
+
+/// A wildcard entry's prefix (DEC-792 item 2).
+const WILDCARD: &str = "*.";
+
+/// A host DEC-792 item 1 lets through, as DEC-722 tightens it: at least two labels (DEC-722
+/// item 1), each non-empty, of lowercase ASCII letters, digits and hyphens, none starting or ending
+/// with a hyphen (DEC-722 item 2, RFC 1123), none an `xn--` (IDN) label, and a last label that is
+/// not all digits (an IPv4 literal). A hyphen inside a label, as in `a--b`, stays allowed. A
+/// trailing dot is an empty last label; a bracketed IPv6 literal, a percent-encoded or non-ASCII
+/// character, a port, a scheme, user information and a `*` are all outside the label characters.
+/// The one host check for both an allowlist entry's host or wildcard domain and an endpoint's host.
+fn is_allowable_host(host: &str) -> bool {
+    let two_labels = host.contains('.');
+    let labels_ok = host.split('.').all(|label| {
+        !label.is_empty()
+            && label.bytes().all(|b| HOST_CHARS.contains(&b))
+            && !label.starts_with(HYPHEN)
+            && !label.ends_with(HYPHEN)
+            && !label.starts_with(IDN_PREFIX)
+    });
+    let ipv4 = host
+        .rsplit('.')
+        .next()
+        .is_some_and(|last| last.bytes().all(|b| b.is_ascii_digit()));
+    two_labels && labels_ok && !ipv4
+}
+
+/// The character no host label may start or end with (DEC-722 item 2, RFC 1123 §2.1).
+const HYPHEN: char = '-';
+
+/// The ACE prefix of an internationalized label (RFC 5890 §2.3.2.5), refused, never decoded.
+const IDN_PREFIX: &str = "xn--";
+
+/// The one port a push endpoint may name (DEC-792 item 1), and the default the origin omits.
+const DEFAULT_PORT_SUFFIX: &str = ":443";
+
 /// A push endpoint: `https://<host>[:port]/...`, with no user information. An address (NT-2).
 #[derive(Clone, PartialEq, Eq)]
 pub struct PushEndpoint {
@@ -168,7 +258,10 @@ impl PushEndpoint {
     /// `https`, a host of lowercase letters, digits, dots and hyphens in non-empty labels, an
     /// optional port written as a nonzero number with no sign or leading zero, and a path, query
     /// and fragment of URI characters only: no user information, space, quote, or backslash.
-    pub fn parse(url: &str) -> Result<Self, WebPushError> {
+    ///
+    /// Syntax only, with no allowlist, so it is private to this crate: consumers use
+    /// [`PushEndpoint::parse_allowed`], the one parser DEC-792 item 3 names.
+    pub(crate) fn parse(url: &str) -> Result<Self, WebPushError> {
         let rest = url
             .strip_prefix(HTTPS)
             .ok_or(WebPushError::InvalidEndpoint)?;
@@ -199,11 +292,36 @@ impl PushEndpoint {
         })
     }
 
-    /// `https://<host>[:port]`, the VAPID audience (RFC 8292 §2).
+    /// The one parser the workspace API, the dispatcher and the relay use (DEC-792, spec §4.6):
+    /// `https`, port 443 (none written, or `:443`), no user information, and a host of lowercase
+    /// ASCII labels on `allowlist`. An IP literal, a trailing dot, a non-ASCII or `xn--` label, a
+    /// label that starts or ends with a hyphen (DEC-722 item 2), even under a wildcard entry that
+    /// would match it, or a percent-encoded character is refused, never normalized into a match;
+    /// an accepted endpoint keeps its address exactly as given. Every refusal is [`WebPushError::InvalidEndpoint`].
+    pub fn parse_allowed(url: &str, allowlist: &PushAllowlist) -> Result<Self, WebPushError> {
+        let endpoint = Self::parse(url)?;
+        let authority = endpoint
+            .url
+            .get(HTTPS.len()..endpoint.origin_len)
+            .ok_or(WebPushError::InvalidEndpoint)?;
+        let host = authority
+            .strip_suffix(DEFAULT_PORT_SUFFIX)
+            .unwrap_or(authority);
+        if is_allowable_host(host) && allowlist.allows(host) {
+            Ok(endpoint)
+        } else {
+            Err(WebPushError::InvalidEndpoint)
+        }
+    }
+
+    /// `https://<host>[:port]`, the VAPID audience (RFC 8292 §2), serialized as RFC 6454 §6.2
+    /// says: a written default port, `:443`, is omitted, though the stored address keeps it.
     fn origin(&self) -> Result<&str, WebPushError> {
-        self.url
+        let origin = self
+            .url
             .get(..self.origin_len)
-            .ok_or(WebPushError::InvalidEndpoint)
+            .ok_or(WebPushError::InvalidEndpoint)?;
+        Ok(origin.strip_suffix(DEFAULT_PORT_SUFFIX).unwrap_or(origin))
     }
 }
 

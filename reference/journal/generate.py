@@ -38,6 +38,8 @@ import connections
 import clients
 import control
 import holds
+import membership
+import membership_fold
 import research
 import risk_state
 import workspace
@@ -3824,6 +3826,8 @@ def render(
     workspace_section: dict,
     client_section: dict,
     hold_section: dict,
+    membership_section: dict,
+    fold_section: dict,
     audit_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
@@ -3842,6 +3846,8 @@ def render(
             "workspace_api": workspace_section,
             "client_actor": client_section,
             "hold": hold_section,
+            "membership": membership_section,
+            "membership_fold": fold_section,
             "records_access": audit_section,
         },
         Dumper=Dumper,
@@ -3891,6 +3897,8 @@ def main(argv: list[str] | None = None) -> int:
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
     hold_section = holds.build_section()
+    membership_section = membership.build_section()
+    fold_section = membership_fold.build_section()
     audit_section = audit.build_section()
 
     problems = check_chain(section, v3)
@@ -3919,6 +3927,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += clients.run_mutants(client_section)
     problems += holds.check_section(hold_section)
     problems += holds.run_mutants(hold_section)
+    problems += membership.check_section(membership_section)
+    problems += membership.run_mutants(membership_section)
+    problems += membership_fold.check_section(fold_section)
+    problems += membership_fold.run_mutants(fold_section)
     problems += audit.check_section(audit_section)
     problems += audit.run_mutants(audit_section)
     for problem in problems:
@@ -3941,6 +3953,8 @@ def main(argv: list[str] | None = None) -> int:
         workspace_section,
         client_section,
         hold_section,
+        membership_section,
+        fold_section,
         audit_section,
     )
     reread = yaml.safe_load(rendered)
@@ -3958,6 +3972,8 @@ def main(argv: list[str] | None = None) -> int:
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
         or holds.check_section(reread["hold"])
+        or membership.check_section(reread["membership"])
+        or membership_fold.check_section(reread["membership_fold"])
         or audit.check_section(reread["records_access"])
     ):
         print(
@@ -4019,6 +4035,11 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(hold_section['drafts'])} hold drafts, {len(hold_section['invalid_drafts'])} invalid and "
         f"{len(hold_section['valid_drafts'])} valid; {len(holds.VALIDATOR_MUTANTS)} validator and "
         f"{len(holds.vector_mutants(hold_section))} vector mutants caught; "
+        f"{len(membership_section['drafts'])} membership drafts, {len(membership_section['invalid_drafts'])} invalid and "
+        f"{len(membership_section['valid_drafts'])} valid; {len(membership.VALIDATOR_MUTANTS)} validator and "
+        f"{len(membership.vector_mutants(membership_section))} vector mutants caught; "
+        f"{len(fold_section['histories'])} membership histories; {len(membership_fold.FOLD_MUTANTS)} fold and "
+        f"{len(membership_fold.vector_mutants(fold_section))} vector mutants caught; "
         f"{len(audit_section['drafts'])} records-access drafts, {len(audit_section['invalid_drafts'])} invalid and "
         f"{len(audit_section['valid_drafts'])} valid; {len(audit.VALIDATOR_MUTANTS)} validator and "
         f"{len(audit.vector_mutants(audit_section))} vector mutants caught"

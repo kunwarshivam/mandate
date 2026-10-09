@@ -1,0 +1,10 @@
+file = "xtask/src/main.rs"
+test = "tests::array_expansions_are_read_through_their_definitions"
+reason = """
+X1's (E7-26; split out by X1 tests correction 5, #914). #738's step 1 implements the live-feature
+check's word scan, so the check has no stub left, and this test fails on what the word scan
+answers: it does not read an array expansion through the array's definitions, so `x=($C build
+--features $A$B); "${x[@]}"` is not refused. A row is how DEC-845 lets an implementation PR turn a
+stub failure into a behaviour failure. X1's step 3c deletes this row with the test's `#[ignore]`
+line.
+"""

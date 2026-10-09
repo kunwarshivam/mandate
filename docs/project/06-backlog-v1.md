@@ -104,6 +104,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runner is slower; the same 691 tests run, so the saving comes from the harness and not from
   running fewer cases; and DEC-498's 180-second cap and its 192 shards are re-derived from a
   fresh `ubuntu-24.04` measurement, or a successor decision records that they stand.
+- **E1-7 (Should)** As an engineer, I want `xtask`'s own checks under the mutants gate, so that a
+  safety check written in `xtask`, such as X1's live-feature check (E7-26, DEC-529 item 3), cannot
+  lose a rule without a test failing. `xtask/layers.toml` marks `xtask` `safety_critical = false`,
+  so `cargo xtask ci mutants` never mutates it today; X1's mutants were run by hand on its diff
+  (#738 review, finding 3).
+  *Accepted when:* CI runs `cargo mutants -p xtask` on the diff of every PR that changes
+  `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
+  mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
+  in a follow-up story, so the job starts green.
 
 ### E2 Market data
 
@@ -1223,6 +1232,19 @@ story buys a service, and none uses a real identity-provider account in tests (s
   removed members, clients, service accounts, and agents counting zero and an unreadable count reading
   as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
   closed within 60 s (ID-3).
+  *Follow-ups* (#789's second review, minors backlogged under the freeze rule):
+  - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
+    which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
+  - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
+    record for it: an invitation's roles are fixed by `MemberInvited`. Until a record exists, the
+    writer maps it to `MemberInvitationRevoked` then `MemberInvited` with the reduced roles (merge
+    coordinator, 2026-10-09); whether to add a record stays open.
+  - Fold vectors (#812's review, access-reducing): a reactivation with a strict subset of the kept
+    roles, an activation with a strict subset of the invitation's roles, and a grant of a role held
+    but still cooling off are each refused, but only disjoint roles are tested; add a valid and a
+    refused history and a fold mutant for each.
+  - Rule 103's non-cooling branch has no vector with a gap under 1 s (#789's delta review); add an
+    invalid 1 ns gap and a mutant.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -1529,6 +1551,13 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
 ### E12 Audit explorer
 
 - **E12-1 (Must)** As an auditor, I want a causal trace from any fill back to its causes.
+  *Follow-ups (A2 review):* the quoted items' `author` reads `owner_selected` for an owner-selected
+  signal model's output through `config_refs.mandate_version`, with the founder's label, once
+  [DEC-773](decisions/DEC-773.md) is decided. Slice A2b tests: `payload.client_order_id` with its
+  lower-`seq` filter, `OrderRequestRecorded`, `payload.approval`, `payload.outputs_used[]`, the
+  approval's `outputs[]`, `payload.thesis_id`, `OrderSubmitted` version 1, the quoted members of
+  `ThesisProposed` and `ModelInvocationRecorded`, a missing singular `IntentReceived`, and
+  [DEC-772](decisions/DEC-772.md) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
@@ -1551,6 +1580,11 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `ExportCreated` before it is served, its canonical form passes the journal verifier, and derived
   JSON and CSV name their manifest hash (API-16); a viewer can read none of it and an auditor can act
   on nothing (API-2).
+  *Follow-up (#797 review; [DEC-770](decisions/DEC-770.md) item 5):* journal spec §2 defines the
+  notice stream `ntf:{workspace_id}`, but `mandate_journal::StreamId::parse` does not parse `ntf:`,
+  so `mandate-audit`'s `StreamType::Notice` is unreachable and an `ntf:` id reads as absent. Owed:
+  `StreamId` parses notice streams (journal, E5), then the audit reads list and page them, with a
+  case in `crates/mandate-audit/tests/scope.rs`.
 
 ### E13 Hybrid deployment
 
@@ -4582,3 +4616,19 @@ From the independent reviews of three CI and xtask conflict-and-queue fixes ([#7
   - Refuse two feature files with the same `# ` title, which `--index` would list twice.
   - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
     the README is never read as a feature.
+
+From E7-16's M2 implementation (`mandate-mcp`, claim #859; the shared check is lane L2's):
+
+- **E7-16: switch `mandate-mcp`'s private fund-movement tokenizer to `mandate_domain::fund_movement`**
+  once lane L2 lands it (E7-12, DEC-839 item 3). `client.rs`'s `moves_funds`, `words` and
+  `FUND_TOKENS` then go, and the crate gains its `mandate-domain` dependency, so the connector and
+  the scope check cannot disagree on a name.
+
+From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-841](decisions/DEC-841.md)):
+
+- **Delete the transitional Alpaca profile** (`mandate-executor`'s `shape::transitional_alpaca`,
+  which `ExecutorState::new` starts with, and the default body of the shell's
+  `Connector::profile`) in B3, before the first non-Alpaca executor
+  path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
+  constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
+  2's defensive path goes with it.

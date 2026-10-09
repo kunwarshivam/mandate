@@ -536,7 +536,86 @@ REFUSAL_V2 = rec(
 )
 CLIENT_EVENTS = (*CLIENT_EVENTS, "OwnerCommandIssued")
 
-# §9.12 (DEC-780): the records-access, export, and verification records. Each names what it covers
+# §9.12 (DEC-437 item 9, DEC-648): the membership records. Instants are timestamps and step-up evidence
+# is §9.2's `STEP_UP`; a member is a user principal's ULID.
+ROLE = one_of("approver", "auditor", "operator", "viewer", "workspace_admin")
+COOLING_ROLES = ("approver", "operator")
+COOL_OFF_SECONDS = 86400
+WRITERS = {
+    "MemberInvited": "invited_by",
+    "MemberInvitationRevoked": "revoked_by",
+    "MemberRoleChanged": "changed_by",
+    "MemberDeactivated": "by",
+    "MemberReactivated": "by",
+    "MemberRemoved": "by",
+}
+STEP_UP_WINDOW_SECONDS = 300
+INVITATION_DAYS = 7
+OWN_INSTANT = {
+    "MemberInvited": "invited_at",
+    "MemberActivated": "activated_at",
+    "MemberRoleChanged": "changed_at",
+    "MemberReactivated": "reactivated_at",
+}
+SYSTEM_REASONS = ("founding", "deprovisioned", "group_removed", "org_deleted")
+SELF_REASONS = ("admin",)
+SCHEMAS[("ctl", "MemberInvited")] = rec(
+    ("invitation", ULID),
+    ("roles", list_of(ROLE)),
+    ("invited_by", STR),
+    ("step_up", STEP_UP),
+    ("invited_at", TS),
+    ("expires_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberInvitationRevoked")] = rec(
+    ("invitation", ULID), ("revoked_by", STR), ("session_ref", opt(STR))
+)
+SCHEMAS[("ctl", "MemberActivated")] = rec(
+    ("member", ULID),
+    ("invitation", opt(ULID)),
+    ("reason", one_of("invitation_accepted", "founding")),
+    ("roles", list_of(ROLE)),
+    ("method", one_of("passkey", "oidc", "email_link")),
+    ("activated_at", TS),
+    ("independent_approval_required", BOOL),
+    ("cool_off_ends_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberRoleChanged")] = rec(
+    ("member", ULID),
+    ("changed_by", STR),
+    ("added", list_of(rec(("role", ROLE), ("cool_off_ends_at", TS)))),
+    ("removed", list_of(ROLE)),
+    ("changed_at", TS),
+    ("independent_approval_required", BOOL),
+    ("step_up", opt(STEP_UP)),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberDeactivated")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("reason", one_of("admin", "left", "deprovisioned", "group_removed")),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberReactivated")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("step_up", STEP_UP),
+    ("roles", list_of(ROLE)),
+    ("reactivated_at", TS),
+    ("independent_approval_required", BOOL),
+    ("cool_off_ends_at", TS),
+    ("session_ref", opt(STR)),
+)
+SCHEMAS[("ctl", "MemberRemoved")] = rec(
+    ("member", ULID),
+    ("by", STR),
+    ("reason", one_of("admin", "org_deleted")),
+    ("session_ref", opt(STR)),
+)
+
+# §9.13 (DEC-780): the records-access, export, and verification records. Each names what it covers
 # as stream ranges of its own workspace, bounded by event hashes, never by instrument or content.
 # A `digest` is bare hex, so it names no stored artifact and stays out of `artifact_refs`.
 GENESIS = "0" * 64
@@ -1029,6 +1108,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += answer_violations(event_type, draft, skip)
     out += connection_violations(event_type, draft, skip)
     out += workspace_violations(event_type, draft, skip)
+    out += membership_violations(event_type, draft, skip)
     out += audit_violations(event_type, draft, skip)
     return out
 
@@ -1258,8 +1338,142 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("94", MODE_ORDER.index(p["to"]) >= floor, "payload.to")
 
 
+def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.12's rules 96 to 106, on a well-typed payload, in number order and each rule's clauses in
+    the order the spec gives them."""
+    if event_type not in WRITERS and event_type != "MemberActivated":
+        return []
+    p = draft["payload"]
+    actor = draft["actor"]
+    reason = p.get("reason")
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str, why: str = "schema") -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", why, path))
+
+    for member in ("roles", "removed"):
+        if member in p:
+            rule(f"96.{member}", ascending(encoded(listed(p[member]))), f"payload.{member}", "non_canonical")
+    if "added" in p:
+        added_roles = encoded([a.get("role") for a in record_items(p["added"])])
+        rule("96.added", ascending(added_roles), "payload.added", "non_canonical")
+    writer = WRITERS.get(event_type)
+    if writer:
+        rule("97", p[writer] == actor["id"], f"payload.{writer}")
+    system = reason in SYSTEM_REASONS
+    rule("98", actor["kind"] == ("system" if system else "user"), "actor.kind")
+    if event_type == "MemberRoleChanged":
+        rule("99.self", p["changed_by"] != p["member"], "payload.changed_by")
+    if event_type == "MemberReactivated" or (
+        event_type in ("MemberDeactivated", "MemberRemoved") and reason in SELF_REASONS
+    ):
+        rule("99.self", p["by"] != p["member"], "payload.by")
+    if event_type == "MemberDeactivated" and reason == "left":
+        rule("99.left", p["by"] == p["member"], "payload.by")
+    if event_type == "MemberActivated":
+        rule("99.invitation", (p["invitation"] is None) == (reason == "founding"), "payload.invitation")
+        if reason == "invitation_accepted":
+            rule("99.invitee", p["member"] == actor["id"], "payload.member")
+    if event_type in ("MemberInvited", "MemberActivated", "MemberReactivated"):
+        rule("100.empty", bool(listed(p["roles"])), "payload.roles")
+    if event_type == "MemberActivated" and reason == "founding" and listed(p["roles"]):
+        rule("100.founding_admin", "workspace_admin" in listed(p["roles"]), "payload.roles")
+    if event_type == "MemberRoleChanged":
+        rule("100.no_change", bool(listed(p["added"])) or bool(listed(p["removed"])), "payload.added")
+        added = {a.get("role") for a in record_items(p["added"])}
+        removed = {r for r in listed(p["removed"]) if isinstance(r, str)}
+        rule("100.disjoint", not added & removed, "payload.removed")
+        rule("101", (p["step_up"] is not None) == bool(listed(p["added"])), "payload.step_up")
+    step_up = p.get("step_up")
+    if isinstance(step_up, dict):
+        allowed = ("passkey",) if draft["environment"] == "live" else ("passkey", "cli_confirm")
+        rule("102.method", step_up.get("method") in allowed, "payload.step_up.method")
+        at = draft["event_time"]
+        rule("102.window", step_up_fresh(step_up.get("authenticated_at"), at, skip), "payload.step_up.authenticated_at")
+    for end, cooling, path in cool_offs(event_type, p, skip):
+        rule(f"103.{event_type}", cool_off_exact(draft["event_time"], end, cooling, skip), path)
+    if event_type == "MemberInvited":
+        days = gap_nanos(p["invited_at"], p["expires_at"])
+        week = INVITATION_DAYS * 86400 * 10**9
+        lasts = days is not None and days >= week if "boundary.rule_104_at_least" in skip else days == week
+        rule("104", lasts, "payload.expires_at")
+    rule("105", (p["session_ref"] is not None) == (actor["kind"] == "user"), "payload.session_ref")
+    instant = OWN_INSTANT.get(event_type)
+    if instant:
+        rule("106", p[instant] == draft["event_time"], f"payload.{instant}")
+    return out
+
+
+def gap_nanos(start, end) -> int | None:
+    """`end` − `start` in nanoseconds, or `None` for an instant a seeded type bug let through."""
+    if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
+        return None
+    return instant_nanos(end) - instant_nanos(start)
+
+
+def step_up_fresh(authenticated_at, at, skip: frozenset[str]) -> bool:
+    """Mandate spec §6.1: valid at `at` when 0 ≤ `at` − `authenticated_at` ≤ 300 s."""
+    gap = gap_nanos(authenticated_at, at)
+    if gap is None:
+        return False
+    if "boundary.rule_102_after" in skip:
+        gap = abs(gap)
+    limit = STEP_UP_WINDOW_SECONDS * 10**9 + (1 if "boundary.rule_102_window" in skip else 0)
+    return 0 <= gap <= limit
+
+
+def listed(value) -> list:
+    """A list as rules read it: anything else, which only a seeded type bug lets through, is empty."""
+    return value if isinstance(value, list) else []
+
+
+def record_items(value) -> list[dict]:
+    """A list of records as rules read it, so a seeded `loose` bug that lets another kind through
+    leaves the rule nothing to check rather than failing."""
+    return [v for v in listed(value) if isinstance(v, dict)]
+
+
+END = ".cool_off_ends_at"
+
+
+def cool_offs(event_type: str, p: dict, skip: frozenset[str]) -> list[tuple[str, bool, str]]:
+    """Each cool-off a record states: its end, whether identity spec §8.3's 24 hours apply to it, and
+    its path (rule 103). They apply exactly when independence is required and the grant adds operator
+    or approver to an existing workspace."""
+    independent = p.get("independent_approval_required") is True or "boundary.rule_103_ignores_independence" in skip
+    roles = COOLING_ROLES + (("workspace_admin",) if "boundary.rule_103_admin_cools" in skip else ())
+    if event_type == "MemberActivated":
+        cooling = independent and p["reason"] != "founding" and any(r in roles for r in listed(p["roles"]))
+        if "boundary.rule_103_founding_cools" in skip and p["reason"] == "founding":
+            cooling = independent and any(r in roles for r in listed(p["roles"]))
+        return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
+    if event_type == "MemberReactivated":
+        cooling = independent and any(r in roles for r in listed(p["roles"]))
+        return [(p["cool_off_ends_at"], cooling, "payload.cool_off_ends_at")]
+    if event_type == "MemberRoleChanged":
+        return [
+            (a.get(END[1:]), independent and a.get("role") in roles, f"payload.added[{i}]{END}")
+            for i, a in enumerate(record_items(p["added"]))
+        ]
+    return []
+
+
+def cool_off_exact(start: str, end, cooling: bool, skip: frozenset[str]) -> bool:
+    """Rule 103: the end is exactly a day after `start` when the 24 hours apply, and `start` itself
+    otherwise."""
+    gap = gap_nanos(start, end)
+    if gap is None:
+        return False
+    if "boundary.rule_103_either" in skip:
+        return gap in (0, COOL_OFF_SECONDS * 10**9)
+    if "boundary.rule_103_at_least" in skip and cooling:
+        return gap >= COOL_OFF_SECONDS * 10**9
+    return gap == (COOL_OFF_SECONDS * 10**9 if cooling else 0)
+
+
 def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.12's rules 96 to 101, on a well-typed payload, in number order. A seeded `loose` or
+    """§9.13's rules 107 to 112, on a well-typed payload, in number order. A seeded `loose` or
     `nullable` bug can let a mistyped member through; a clause whose inputs are mistyped is not
     judged, so the bug shows as the type violation it hid rather than as a rule at the same path."""
     if event_type not in ("RecordsAccessed", "ExportCreated", "VerificationRun"):
@@ -1274,61 +1488,61 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
 
     ranges = p["ranges"] if isinstance(p["ranges"], list) else None
     items = [r if isinstance(r, dict) else {} for r in ranges or []]
-    rule("96.empty", ranges is None or bool(ranges), "payload.ranges")
+    rule("107.empty", ranges is None or bool(ranges), "payload.ranges")
     workspace = draft["stream_id"].split(":")[1]
     previous = None
     for i, r in enumerate(items):
         at = f"payload.ranges[{i}]"
         stream, first, last, prev = r.get("stream_id"), r.get("from_seq"), r.get("to_seq"), r.get("prev_hash")
         named = isinstance(stream, str)
-        rule("96.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
-        least = 0 if "boundary.rule_96_from_seq" in skip else 1
-        rule("96.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
+        rule("107.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
+        least = 0 if "boundary.rule_107_from_seq" in skip else 1
+        rule("107.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
         seqs = is_integer(first) and is_integer(last)
-        rule("96.to_seq", not seqs or last >= first, f"{at}.to_seq")
+        rule("107.to_seq", not seqs or last >= first, f"{at}.to_seq")
         typed = isinstance(prev, str) and is_integer(first)
-        rule("96.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
+        rule("107.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
         if previous is not None and named and isinstance(previous.get("stream_id"), str):
             here, before = stream.encode(), previous["stream_id"].encode()
-            gap = 0 if "boundary.rule_96_overlap" in skip else 1
+            gap = 0 if "boundary.rule_107_overlap" in skip else 1
             ends = is_integer(first) and is_integer(previous.get("to_seq"))
             disjoint = not ends or first >= previous["to_seq"] + gap
-            rule("96.order", here > before or (here == before and disjoint), f"{at}.stream_id")
+            rule("107.order", here > before or (here == before and disjoint), f"{at}.stream_id")
         previous = r
     if event_type == "RecordsAccessed":
         accessor = p["accessor"]
-        rule("97.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
-        refused = tuple(k for k in ("agent", "broker") if f"kinds.97.{k}" not in skip)
-        rule("97.actor", kind not in refused, "actor.kind")
+        rule("108.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
+        refused = tuple(k for k in ("agent", "broker") if f"kinds.108.{k}" not in skip)
+        rule("108.actor", kind not in refused, "actor.kind")
         approved = kind != "platform_operator" or draft["causation_id"] is not None
-        rule("97.break_glass", approved, "causation_id")
+        rule("108.break_glass", approved, "causation_id")
         resources = p["resources"] if isinstance(p["resources"], list) else []
         named = [r.encode() for r in resources if isinstance(r, str)]
-        rule("97.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
+        rule("108.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
     if event_type == "ExportCreated":
-        widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.98.{k}" in skip)
-        rule("98.actor", kind in ("user", "system", *widened), "actor.kind")
+        widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.109.{k}" in skip)
+        rule("109.actor", kind in ("user", "system", *widened), "actor.kind")
         if p["form"] in ("canonical", *VIEW_FORMS) and (p["view"] is None or isinstance(p["view"], str)):
-            rule("98.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
+            rule("109.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
     if event_type == "VerificationRun":
         if p["trigger"] in TRIGGERS:
             allowed = ("user", "system") if p["trigger"] == "request" else ("system",)
-            widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.99.{k}" in skip)
-            rule("99", kind in (*allowed, *widened), "actor.kind")
+            widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.110.{k}" in skip)
+            rule("110", kind in (*allowed, *widened), "actor.kind")
         for i, r in enumerate(items):
             at = f"payload.ranges[{i}]"
             failure = r.get("failure")
             if isinstance(failure, dict):
                 seq, check = failure.get("seq"), failure.get("check")
                 if check in EVENT_CHECKS or check in RANGE_CHECKS:
-                    rule("100.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
+                    rule("111.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
                 bounds = (r.get("from_seq"), seq, r.get("to_seq"))
                 if all(is_integer(b) for b in bounds):
-                    rule("100.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
-            rule("100.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
+                    rule("111.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
+            rule("111.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
         if p["result"] in ("pass", "fail"):
             passed = all(r.get("failure") is None for r in items)
-            rule("101", (p["result"] == "pass") == passed, "payload.result")
+            rule("112", (p["result"] == "pass") == passed, "payload.result")
     return out
 
 

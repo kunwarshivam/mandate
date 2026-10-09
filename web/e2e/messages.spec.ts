@@ -33,22 +33,31 @@ async function pageScrolls(page: Page) {
   return page.evaluate(() => ({ down: document.documentElement.scrollHeight - innerHeight, across: document.documentElement.scrollWidth - innerWidth }));
 }
 
-for (const [width, height] of [
-  [1024, 768],
-  [1440, 900],
-  [1920, 1080],
+/** The rail shows from 80rem; from 64 to 80rem the thread takes its room, so it is never the narrowest column (DEC-513 item 8). */
+for (const [width, height, withRail] of [
+  [1024, 768, false],
+  [1440, 900, true],
+  [1920, 1080, true],
 ] as const) {
-  test(`${width} px: three panes from edge to edge, each to the foot of the window, and the composer above the dock`, async ({ page }) => {
+  test(`${width} px: ${withRail ? "three panes" : "two panes, the rail waiting for 80rem,"} from edge to edge, each to the foot of the window, and the composer above the dock`, async ({ page }) => {
     await open(page, THREAD, width, height);
     const threads = (await page.locator("[data-slot=threads-pane]").boundingBox())!;
     const pane = (await page.locator("[data-slot=thread-pane]").boundingBox())!;
-    const rail = (await page.locator("[data-slot=rail-pane]").boundingBox())!;
     const header = (await page.getByRole("banner").first().boundingBox())!;
     expect(threads.x, "the threads start at the window's left edge").toBe(0);
-    expect(rail.x + rail.width, "the rail ends at the window's right edge").toBeCloseTo(width, 0);
     expect(pane.x, "the thread meets the threads").toBeCloseTo(threads.x + threads.width, 0);
-    expect(rail.x, "and the rail meets the thread").toBeCloseTo(pane.x + pane.width, 0);
-    for (const box of [threads, pane, rail]) {
+    const panes = [threads, pane];
+    if (withRail) {
+      const rail = (await page.locator("[data-slot=rail-pane]").boundingBox())!;
+      expect(rail.x + rail.width, "the rail ends at the window's right edge").toBeCloseTo(width, 0);
+      expect(rail.x, "and the rail meets the thread").toBeCloseTo(pane.x + pane.width, 0);
+      panes.push(rail);
+    } else {
+      await expect(page.locator("[data-slot=rail-pane]"), "below 80rem the rail waits for room (DEC-513 item 8)").toBeHidden();
+      expect(pane.x + pane.width, "and the thread ends at the window's right edge").toBeCloseTo(width, 0);
+      expect(pane.width, "the thread is the widest column").toBeGreaterThan(threads.width);
+    }
+    for (const box of panes) {
       expect(box.y, "each pane starts under the header").toBeCloseTo(header.y + header.height, 0);
       expect(box.y + box.height, "and runs to the foot of the window").toBeCloseTo(height, 0);
     }
