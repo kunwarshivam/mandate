@@ -566,7 +566,6 @@ fn orders(server: &SimServer) -> Vec<mandate_rh_sim::Order> {
 /// Trading spec §5.2, Robinhood: "market: whole, fractional, notional; every other type: whole
 /// shares". DEC-860 item 7: an order the profile does not offer is `NotSent`, before any call.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_fractional_limit_or_stop_limit_is_not_sent_and_nothing_is_called() {
     let server = server();
     let (mut c, probe) = probed(&server);
@@ -597,7 +596,6 @@ fn a_fractional_limit_or_stop_limit_is_not_sent_and_nothing_is_called() {
 /// nothing is placed, and the connector does not report an order. Which refusal it reports is
 /// left open.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_openings_review_refused_lost_or_without_alerts_places_nothing() {
     let bends: [(&str, Bend); 3] = [
         ("isError", refuse),
@@ -628,7 +626,6 @@ fn an_openings_review_refused_lost_or_without_alerts_places_nothing() {
 /// journaled and the order is placed anyway, so the broker accepts or rejects it." A review that
 /// is lost or refused holds a risk-reducing order no more than an alert does.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_risk_reducing_order_is_placed_when_its_review_is_lost_or_refused() {
     let sell = |purpose: Purpose| SubmitOrder {
         side: Way::Sell,
@@ -672,7 +669,6 @@ fn a_risk_reducing_order_is_placed_when_its_review_is_lost_or_refused() {
 /// timeout, a dropped connection"); an answer that is not JSON is `Unreadable` ("the broker
 /// answered and the connector could not read the answer"). Neither is `CancelAccepted`.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_lost_or_unreadable_cancel_answer_never_reads_as_cancelled() {
     let cancel = BrokerRequest::Cancel {
         client_order_id: key("01JOPEN"),
@@ -700,7 +696,6 @@ fn a_lost_or_unreadable_cancel_answer_never_reads_as_cancelled() {
 /// is `Unknown` (DEC-860 item 4: "Anything else to a place ... is `ConnectorError::Unknown`"),
 /// and to a cancel `Unreadable`, never `CancelAccepted`.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_is_error_that_is_not_a_boolean_is_never_success() {
     let bends: [(&str, Bend); 2] = [("text", is_error_text), ("zero", is_error_zero)];
     for (name, bend) in bends {
@@ -735,7 +730,6 @@ fn an_is_error_that_is_not_a_boolean_is_never_success() {
 /// implement it yet"). `CancelAll` and `ClosePosition` take an `AccountWideScope` no test can
 /// build. Each is `NotSent` with nothing called, even with an order on record.
 #[test]
-#[ignore = "pending E7-6"]
 fn every_other_request_is_not_sent_and_nothing_is_called() {
     let server = server();
     let (mut c, probe) = probed(&server);
