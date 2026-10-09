@@ -11,8 +11,8 @@ use mandate_time::UtcNanos;
 
 use crate::{Assertion, Challenge, Credential, Refusal, RelyingParty, Verified, verify};
 use mandate_identity::{
-    AssertionId, PrincipalId, StepUpActionKind, StepUpEvidence, StepUpMethod, UlidTextError,
-    WorkspaceId,
+    AssertionId, PrincipalId, StepUpActionKind, StepUpEvidence, StepUpMethod, TenantContext,
+    UlidTextError, WorkspaceId,
 };
 
 /// How long a challenge stays usable after it is issued (§7.1, §7.2 step 1).
@@ -164,6 +164,79 @@ impl ChallengeRecord {
     fn is_current_at(&self, now: UtcNanos) -> bool {
         self.issued_at <= now && now < self.expires_at
     }
+}
+
+/// Why [`issue_challenge`] issues no challenge ([DEC-665]).
+///
+/// [DEC-665]: ../../../docs/project/decisions/DEC-665.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum IssueRefusal {
+    /// The context was authorized for another row of identity spec §4.2 than the one the action's
+    /// kind needs (workspace API spec §3.6), including a row without **S**: `forbidden`.
+    #[error(transparent)]
+    Refused(#[from] mandate_identity::Refusal),
+    /// The record cannot be issued at this instant.
+    #[error(transparent)]
+    Issue(#[from] IssueError),
+}
+
+/// A challenge issued to a request: the record, and whether the authorization behind it was
+/// granted without the membership store's answer (identity spec §7.2 step 1, §4.5), which the
+/// challenge store keeps beside the record. Only [`issue_challenge`] builds one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Issued {
+    record: ChallengeRecord,
+    membership_unverified: bool,
+}
+
+impl Issued {
+    pub fn record(&self) -> &ChallengeRecord {
+        &self.record
+    }
+
+    /// The context's [`TenantContext::membership_unverified`]: true only for a risk-reducing row
+    /// (an owner exit) authorized from the session's roles snapshot during a membership outage.
+    pub fn membership_unverified(&self) -> bool {
+        self.membership_unverified
+    }
+}
+
+/// Issues the challenge for `action` to the request `context` authorizes (identity spec §7.2
+/// step 1, [DEC-665]). A challenge is authorized exactly as the §4.2 row its action needs, so the
+/// caller first calls `mandate_identity::authorize` for that row, and passes the context it
+/// yields: a workspace row's [`TenantContext`], an `own` row's `PrincipalContext::into_tenant`,
+/// or an org row's `OrgContext::into_workspace`. A principal that may not act has no such
+/// context, so it cannot express the call; a client, a service account, the host CLI, a platform
+/// operator, and a reduction-only session never hold one for an **S** row.
+///
+/// The record binds the context's principal and workspace, `action`, and `issued_at`, and expires
+/// [`CHALLENGE_LIFETIME_S`] later. Refused, in this order: a context authorized for another row
+/// than the one `action.kind` needs, a row without **S** among them, `forbidden`; then
+/// [`IssueError::OutOfRange`].
+///
+/// Issuance cannot be called with anything but a context `authorize` built:
+///
+/// ```compile_fail,E0308
+/// use mandate_identity::{AssertionId, PrincipalId, WorkspaceId};
+/// use mandate_passkey::stepup::{Action, issue_challenge};
+/// use mandate_time::UtcNanos;
+///
+/// fn unauthorized(w: WorkspaceId, p: PrincipalId, action: Action, id: AssertionId) {
+///     let _ = issue_challenge(&(w, p), action, id, UtcNanos::EPOCH);
+/// }
+/// ```
+///
+/// [DEC-665]: ../../../docs/project/decisions/DEC-665.md
+pub fn issue_challenge(
+    context: &TenantContext,
+    action: Action,
+    challenge_id: AssertionId,
+    issued_at: UtcNanos,
+) -> Result<Issued, IssueRefusal> {
+    let _ = (context, action, challenge_id, issued_at);
+    Err(IssueRefusal::Refused(
+        mandate_identity::Refusal::Unimplemented { story: "E9-4" },
+    ))
 }
 
 /// Where the action runs, which decides the methods step-up accepts (§7.3).
