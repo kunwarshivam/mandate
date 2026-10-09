@@ -58,6 +58,7 @@ pub use connection_fold::{
 };
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
+    verify_break_glass_causes,
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};

@@ -70,7 +70,8 @@ the owl, the rules and the record.
       dialog that keeps Tab inside but is not modal, mounted in the frame's sheet layer under the
       dock and the tab bar, like the More sheet. `e2e/stop-visible.spec.ts` pins it at 390 and
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
-      (#1038)
+      (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
+      opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
 
 ## C. The cutting pass (one PR, no new rules)
 
@@ -248,6 +249,8 @@ item above (C-3, C-9) are not repeated.
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
 - [x] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
       reconciliation conditions do. (C-25, #1057)
+      - Every in-flight order state (`IN_FLIGHT`) now says why too, swept by a test so a state
+        added later can't lose its line. (#1083)
 - [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
       leaves out its "Asked you" row. (C-5)
 - [x] **"At the limit:" on the overview card**, so a limit's action never reads as the current

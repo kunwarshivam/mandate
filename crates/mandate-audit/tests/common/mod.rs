@@ -183,6 +183,11 @@ impl Fixture {
 
     /// Appends drafts the caller wrote whole, each with its `event_id`, in one `append` batch.
     pub fn append_batch(&mut self, stream: &str, drafts: &[(String, &[u8])]) {
+        self.append_batch_at(stream, T, drafts);
+    }
+
+    /// Appends drafts in one `append` batch whose `recorded_at` is `recorded_at`.
+    pub fn append_batch_at(&mut self, stream: &str, recorded_at: &str, drafts: &[(String, &[u8])]) {
         let record = self.appended.get_mut(stream).unwrap();
         let head = record.event_ids.len() as u64;
         let bodies: Vec<&[u8]> = drafts.iter().map(|(_, draft)| *draft).collect();
@@ -190,7 +195,7 @@ impl Fixture {
             &StreamId::parse(stream).unwrap(),
             head,
             record.epoch,
-            UtcNanos::parse(T).unwrap(),
+            UtcNanos::parse(recorded_at).unwrap(),
             &bodies,
         );
         assert!(

@@ -16,7 +16,7 @@
 
 use std::collections::BTreeSet;
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Key, Object, Value, to_canonical};
 use mandate_domain::AssetId;
 
 use crate::ConnectError;
@@ -110,37 +110,106 @@ pub enum RemainingPositions {
 }
 
 /// Plans the ordinary revoke (`compromised` `false` or absent), from the folds.
+///
+/// It commits `[Revoke { reason: Owner }]` only when step-up is verified, every agent on the
+/// connection is stopped, and the positions fold answers "none held". When more than one reason
+/// holds, it refuses for the first of:
+///
+/// 1. [`RevokeRefusal::StepUpNotVerified`], so a caller without valid step-up learns nothing of
+///    the connection's agents or positions;
+/// 2. [`RevokeRefusal::FoldCannotAnswer`], when either fold cannot answer, so no refusal is stated
+///    from a fact the folds did not establish (DEC-693 item 7);
+/// 3. [`RevokeRefusal::PositionsHeld`];
+/// 4. [`RevokeRefusal::AgentsNotStopped`].
 pub fn plan_ordinary(
     connection_id: &ConnectionId,
     step_up: StepUp,
     facts: &OrdinaryFacts,
 ) -> Result<RevokePlan, ConnectError> {
-    let _ = (connection_id, step_up, facts);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    Ok(match ordinary_refusal(step_up, facts) {
+        Some(refusal) => RevokePlan::Refused(refusal),
+        None => RevokePlan::Commit(vec![RevokeEffect::Revoke {
+            connection_id: connection_id.clone(),
+            reason: RevokeReason::Owner,
+        }]),
+    })
 }
 
-/// Plans the compromised revoke (`compromised: true`): the kill switch, then the revocation.
+/// The first reason, in [`plan_ordinary`]'s order, that refuses an ordinary revoke; `None` lets it
+/// commit.
+fn ordinary_refusal(step_up: StepUp, facts: &OrdinaryFacts) -> Option<RevokeRefusal> {
+    let agents = facts.agents;
+    let positions = &facts.positions;
+    if step_up != StepUp::Verified {
+        Some(RevokeRefusal::StepUpNotVerified)
+    } else if agents == AgentsFold::CannotAnswer || *positions == PositionsFold::CannotAnswer {
+        Some(RevokeRefusal::FoldCannotAnswer)
+    } else if matches!(positions, PositionsFold::Answered(held) if !held.is_empty()) {
+        Some(RevokeRefusal::PositionsHeld)
+    } else if agents != AgentsFold::AllStopped {
+        Some(RevokeRefusal::AgentsNotStopped)
+    } else {
+        None
+    }
+}
+
+/// Plans the compromised revoke (`compromised: true`): the kill switch, then the revocation. It is
+/// never refused: without verified step-up the kill switch still commits and only the revocation
+/// is refused (workspace API §5.6, API-7, DEC-158 option (c), DEC-697).
 pub fn plan_compromised(
     connection_id: &ConnectionId,
     step_up: StepUp,
 ) -> Result<RevokePlan, ConnectError> {
-    let _ = (connection_id, step_up);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    let kill_switch = RevokeEffect::KillSwitch {
+        connection_id: connection_id.clone(),
+    };
+    Ok(match step_up {
+        StepUp::Verified => RevokePlan::Commit(vec![
+            kill_switch,
+            RevokeEffect::Revoke {
+                connection_id: connection_id.clone(),
+                reason: RevokeReason::Compromised,
+            },
+        ]),
+        StepUp::NotVerified => RevokePlan::KillSwitchOnly {
+            kill_switch,
+            revocation: RevokeRefusal::StepUpNotVerified,
+        },
+    })
 }
 
 /// The positions to show for a compromised revoke, from the account stream's fold.
 pub fn remaining_positions(fold: &PositionsFold) -> Result<RemainingPositions, ConnectError> {
-    let _ = fold;
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    Ok(match fold {
+        PositionsFold::CannotAnswer => RemainingPositions::Unknown,
+        PositionsFold::Answered(held) => RemainingPositions::Known(held.clone()),
+    })
 }
 
 /// The step-up digest (kind `connection`): SHA-256 of the canonical `{workspace_id,
-/// connection_id, compromised}`, an absent `compromised` binding `false`.
+/// connection_id, compromised}`, an absent `compromised` binding `false` (DEC-693 items 1, 3, 4).
+///
+/// Never errs: its member names are valid canonical keys, so the `InvalidRecord` it would return
+/// for one that is not cannot occur.
 pub fn revoke_digest(
     workspace_id: &str,
     connection_id: &ConnectionId,
     compromised: Option<bool>,
 ) -> Result<Digest, ConnectError> {
-    let _ = (workspace_id, connection_id, compromised);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    let members = [
+        ("workspace_id", Value::Str(workspace_id.to_owned())),
+        (
+            "connection_id",
+            Value::Str(connection_id.as_str().to_owned()),
+        ),
+        ("compromised", Value::Bool(compromised.unwrap_or(false))),
+    ];
+    let object = members
+        .into_iter()
+        .map(|(name, value)| Key::new(name).map(|key| (key, value)))
+        .collect::<Result<Object, _>>()
+        .map_err(|_| ConnectError::InvalidRecord {
+            member: "revoke digest",
+        })?;
+    Ok(Digest::of(&to_canonical(&Value::Object(object))))
 }

@@ -13,6 +13,7 @@ use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
+use crate::listing::{query_unknown, queryable};
 use crate::payload::{int, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
@@ -97,7 +98,7 @@ pub(crate) fn legal(from: OrderState, to: OrderState) -> bool {
 }
 
 /// The order a broker id names, if it is one this executor derived and the fold carries.
-fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOrderId> {
+pub(crate) fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOrderId> {
     let id = ClientOrderId::parse(raw?).ok()?;
     batch.view.orders.contains_key(&id).then_some(id)
 }
@@ -304,24 +305,6 @@ pub(crate) fn silence(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// Asks what became of an `Unknown` order: by its client order id where the profile can query
-/// by it, and otherwise by DEC-529 item 4's listing, which E7-23 B2b builds (DEC-862).
-pub(crate) fn query_unknown(
-    batch: &mut Batch<'_, '_>,
-    id: ClientOrderId,
-) -> Result<(), ExecutorError> {
-    let queryable = batch
-        .view
-        .profile
-        .as_ref()
-        .is_none_or(|profile| profile.idempotency().query_by_client_order_id);
-    if !queryable {
-        return Err(ExecutorError::Unimplemented { story: "E7-23" });
-    }
-    batch.broker(BrokerRequest::GetOrderByClientId(id));
-    Ok(())
-}
-
 /// The broker refusing our own `client_order_id` means the order is already there: it is queried,
 /// never failed (E7-2 step 6).
 pub(crate) fn duplicate(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
@@ -329,8 +312,7 @@ pub(crate) fn duplicate(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         return Ok(());
     };
     transition(batch, &id, OrderState::Unknown, StateEvidence::default())?;
-    batch.broker(BrokerRequest::GetOrderByClientId(id));
-    Ok(())
+    query_unknown(batch, id)
 }
 
 /// One answer that the broker does not have the order. It is counted, never acted on alone: only
@@ -397,6 +379,9 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
 /// up) have passed since it went `Unknown` or since its last absence, so N lookups span the whole
 /// window and no faster.
 pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
+    if !queryable(&batch.view) {
+        return;
+    }
     let config = batch.ports.config;
     let gaps = i64::from(config.unknown_absent_lookups.saturating_sub(1).max(1));
     let spacing = config
