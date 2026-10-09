@@ -7956,18 +7956,28 @@ jq -r "$filter" "$src"
     /// under DEC-176). A known non-executing command is one of `echo`, `printf`, `cat`, `jq`,
     /// `awk`, `sed`, `grep`, `tr`, `cut`, `sort`, `uniq`, `head`, `tail`, `tee`, `wc`, `test`,
     /// `[`, `true`, `false`, `read`, `basename`, `dirname`, `date`, `mkdir`, `rm`, `cp`, `mv`,
-    /// `ls`, `chmod`, `curl`, `git`, and `gh`, which main's `merge-approved.sh` needs for its
-    /// multi-line GraphQL query; every other command executes, unknown ones, `source`,
-    /// `.`, `exec`, `watch`, `parallel`, every shell and every wrapper included. A quoted word
-    /// holding a space, `cargo` or a `$` is re-read as a command line unless its command is
-    /// known non-executing, every later stage of its pipeline is too, and it is not inside a
-    /// `$( … )` or `<( … )` whose consumer executes (`echo "…" | sh`, `source <(echo "…")`); a
-    /// bare assignment captures its `$( … )` and does not execute it. A here-doc's
-    /// lines and a here-string's (`<<<`) target are read as commands unless their command is
-    /// known non-executing, so `cat <<EOF` holding `$F` is allowed. An `x=( … )` word is one word,
-    /// re-read as a command line when it holds `cargo`, and a command word that expands an array
-    /// (`"${x[@]}"`, `"$@"`) holds a `$`, so it may be cargo. The lines inside a single-quoted
-    /// string that spans lines are not read as commands only when its command is known
+    /// `ls`, `chmod`, `curl`, `git`, and `gh api` alone, which main's `merge-approved.sh` needs
+    /// for its multi-line GraphQL query; every other command executes, any other `gh`
+    /// subcommand (`gh alias set --shell`), unknown ones, `source`, `.`, `exec`, `watch`,
+    /// `parallel`, every shell and every wrapper included. A quoted word holding a space,
+    /// `cargo` or a `$` is re-read as a command line unless its command is known
+    /// non-executing, every later stage of its pipeline is too, and it is not inside a `$( … )`
+    /// or `<( … )` whose consumer executes (`echo "…" | sh`, `source <(echo "…")`); a bare
+    /// assignment captures its `$( … )` and does not execute it. A here-doc's lines and a
+    /// here-string's (`<<<`) target are read as commands unless their command is known
+    /// non-executing, so `cat <<EOF` holding `$F` is allowed. Defining an array (`x=( … )`, one
+    /// word) is never refused beyond the live-token backstop; a command word that expands a
+    /// whole array (`"${x[@]}"`, `${x[*]}`) is refused when any definition of that array in the
+    /// file holds `cargo` or an expansion, or the file defines no such array (the coordinator's
+    /// eighth-round rulings under DEC-176). A re-read word that is exactly one whole-array
+    /// expansion in argument position is read as the array's defined elements, which stay
+    /// arguments of the outer command (`parse_flags "${flags[@]}"`), unless a definition of that
+    /// array, `+=` appends included, holds the literal `cargo` or the token `live`, which is
+    /// refused (ninth round). `$(( … ))` is arithmetic and `${#x[@]}` a length, neither read as
+    /// a command; `if`, `then`, `else`, `elif`, `do`, `while`, `until`, `!` and `time` are
+    /// skipped when finding the command word, and the word after one is still read
+    /// (`if cargo build …; then`). The lines inside a single-quoted string that spans
+    /// lines are not read as commands only when its command is known
     /// non-executing and nothing pipes it onward. A word holding `${{ … }}` in command position is
     /// possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`), and not in a
     /// job name, an `env:` value, a `with:` input or a cache key. The live-token backstop still
@@ -8252,6 +8262,10 @@ jq -r "$filter" "$src"
             (".github/scripts/build.sh", "set -e\necho \"$a $b\"\n"),
             (
                 ".github/scripts/build.sh",
+                "set -e\nflags=()\nfor arg in \"$@\"; do flags+=(\"$arg\"); done\nparse_flags \"${flags[@]}\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
                 "set -e\nshards=(\"$A\" \"$A/tmp\")\n",
             ),
             (
@@ -8353,6 +8367,31 @@ jq -r "$filter" "$src"
             (
                 ".github/scripts/build.sh",
                 "set -e\nfrobnicate \"cargo build $F\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nx=($C build --features $A$B); \"${x[@]}\"\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\n\"${undefined[@]}\" build\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\na=(cargo build --features \"$A$B\")\nrun_it \"${a[@]}\"\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nif cargo build --features \"$A$B\"; then\n",
+                ":2",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ngh alias set --shell x \"cargo build --features $A$B\"\n",
                 ":2",
             ),
             (
