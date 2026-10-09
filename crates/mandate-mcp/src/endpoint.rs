@@ -1,5 +1,7 @@
 //! The one URL a transport ever dials (connections spec §6.2 rule 1).
 
+use std::net::IpAddr;
+
 use reqwest::Url;
 
 use crate::error::McpError;
@@ -40,7 +42,34 @@ impl PinnedEndpoint {
         endpoint: &str,
         build: Build,
     ) -> Result<Self, McpError> {
-        let _ = (pinned_host, endpoint, build);
-        Err(McpError::Unimplemented { story: "E7-16" })
+        let url = Url::parse(endpoint).map_err(|_| McpError::EndpointShape)?;
+        if !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(McpError::EndpointShape);
+        }
+        match url.scheme() {
+            "https" => {}
+            "http" if build == Build::Test && is_loopback(&url) => {}
+            _ => return Err(McpError::NotHttps),
+        }
+        if url.host_str() != Some(pinned_host) {
+            return Err(McpError::HostNotPinned);
+        }
+        Ok(Self { url })
     }
+
+    pub(crate) fn url(&self) -> &Url {
+        &self.url
+    }
+}
+
+/// An IP literal on loopback; a name such as `localhost` is not, since resolving it is a lookup.
+fn is_loopback(url: &Url) -> bool {
+    url.host_str()
+        .map(|host| host.trim_start_matches('[').trim_end_matches(']'))
+        .and_then(|host| host.parse::<IpAddr>().ok())
+        .is_some_and(|ip| ip.is_loopback())
 }

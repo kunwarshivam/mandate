@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/revoke-request.schema.json",
+  "type": "object",
+  "required": [],
+  "additionalProperties": false,
+  "properties": {
+    "compromised": {
+      "type": "boolean"
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /connections/{connection_id}/revoke (\u00a74.5, \u00a75.6). compromised absent or false is the ordinary revoke; true commits the connection-scope kill switch, then the revocation."
+}

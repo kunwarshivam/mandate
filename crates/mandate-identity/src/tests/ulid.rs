@@ -51,7 +51,6 @@ fn spellings(value: u128) -> Vec<(Result<String, UlidTextError>, Result<u128, Ul
 }
 
 #[test]
-#[ignore = "pending E9-2"]
 fn every_id_spells_its_ulid_as_the_oracle_and_reads_it_back() {
     for (value, text) in [
         (0, "00000000000000000000000000"),
@@ -82,7 +81,6 @@ fn every_id_spells_its_ulid_as_the_oracle_and_reads_it_back() {
 }
 
 #[test]
-#[ignore = "pending E9-2"]
 fn a_text_the_journal_would_refuse_is_no_id() {
     let valid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     let expected: u128 = valid.bytes().fold(0, |acc, b| {

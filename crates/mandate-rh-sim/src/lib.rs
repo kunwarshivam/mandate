@@ -41,7 +41,9 @@
 //! [DEC-124]: ../../../docs/project/04-decision-log.md
 //! [DEC-441]: ../../../docs/project/decisions/DEC-441.md
 
-use mandate_num::{Price, Qty, Usd};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use mandate_num::{Price, Qty, ShareIncrement, Usd};
 
 /// The ten values of `get_equity_orders`'s `state`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -192,9 +194,6 @@ pub struct Review {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SimError {
-    /// The body of every stub in the tests PR (DEC-77).
-    #[error("{story} has not been implemented yet")]
-    Unimplemented { story: &'static str },
     #[error("two accounts share a number")]
     DuplicateAccount,
     #[error("no such account")]
@@ -236,56 +235,457 @@ pub enum SimError {
 /// The simulated broker: its accounts, orders, positions, and the scripted market.
 #[derive(Debug, Clone)]
 pub struct Sim {
-    _stub: (),
+    accounts: Vec<Account>,
+    orders: Vec<Order>,
+    session: Session,
+    quotes: BTreeMap<String, Price>,
+    halted: BTreeSet<String>,
+    faults: VecDeque<Fault>,
+    positions: BTreeMap<(String, String), Qty>,
+    traded_today: BTreeSet<(String, String, Side)>,
+    requests: Vec<OrderRequest>,
+    server_keys: u64,
+    echo_ref_id: bool,
+    refuse_changed_resend: bool,
 }
 
 impl Sim {
     /// A simulator over these accounts, in the closed session, with no quotes, halts or orders.
-    pub fn new(_accounts: Vec<Account>) -> Result<Self, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn new(accounts: Vec<Account>) -> Result<Self, SimError> {
+        let numbers: BTreeSet<&str> = accounts.iter().map(|a| a.number.as_str()).collect();
+        if numbers.len() != accounts.len() {
+            return Err(SimError::DuplicateAccount);
+        }
+        Ok(Self {
+            accounts,
+            orders: Vec::new(),
+            session: Session::Closed,
+            quotes: BTreeMap::new(),
+            halted: BTreeSet::new(),
+            faults: VecDeque::new(),
+            positions: BTreeMap::new(),
+            traded_today: BTreeSet::new(),
+            requests: Vec::new(),
+            server_keys: 0,
+            echo_ref_id: false,
+            refuse_changed_resend: false,
+        })
     }
 
     /// Applies one scripted input of the market or the broker.
-    pub fn apply(&mut self, _event: Event) -> Result<(), SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn apply(&mut self, event: Event) -> Result<(), SimError> {
+        match event {
+            Event::Session(session) => {
+                self.session = session;
+                for order in &mut self.orders {
+                    if order.state == State::Queued && admits(order.market_hours, session) {
+                        order.state = State::Confirmed;
+                    }
+                }
+            }
+            Event::Quote(symbol, price) => {
+                self.quotes.insert(symbol, price);
+            }
+            Event::Halt(symbol) => {
+                self.halted.insert(symbol);
+            }
+            Event::Script(Fault::Answer(state)) if !is_initial(state) => {
+                return Err(SimError::IllegalTransition);
+            }
+            Event::Script(fault) => self.faults.push_back(fault),
+            Event::EndOfDay => {
+                for order in &mut self.orders {
+                    if order.time_in_force == TimeInForce::Gfd && !is_terminal(order.state) {
+                        order.state = State::Cancelled;
+                    }
+                }
+                self.traded_today.clear();
+                self.session = Session::Closed;
+            }
+            Event::EchoRefId(on) => self.echo_ref_id = on,
+            Event::RefuseChangedResend(on) => self.refuse_changed_resend = on,
+        }
+        Ok(())
     }
 
     /// `review_equity_order`: the place's checks and alerts, with nothing placed.
-    pub fn review(&self, _request: &OrderRequest) -> Result<Review, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn review(&self, request: &OrderRequest) -> Result<Review, SimError> {
+        let account = self.agentic(&request.account_number)?;
+        let (_, alerts) = self.draft(account, request)?;
+        let quote = self.quotes.get(&request.symbol).copied();
+        Ok(Review { quote, alerts })
     }
 
     /// `place_equity_order`. A `ref_id` this account has used returns that first order unchanged.
-    pub fn place(&mut self, _request: &OrderRequest) -> Result<Order, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn place(&mut self, request: &OrderRequest) -> Result<Order, SimError> {
+        let account = self.agentic(&request.account_number)?;
+        let ref_id = match &request.ref_id {
+            Some(ref_id) if is_uuid(ref_id) => ref_id.clone(),
+            Some(_) => return Err(SimError::Unreadable("ref_id")),
+            None => format!("rh-sim-server-key-{}", self.server_keys),
+        };
+        let first = self.orders.iter().zip(&self.requests).find(|(o, _)| {
+            o.account_number == account.number && o.ref_id.as_deref() == Some(ref_id.as_str())
+        });
+        if let Some((first, sent)) = first {
+            if self.refuse_changed_resend && sent != request {
+                return Err(SimError::ChangedResend);
+            }
+            return Ok(shown(first.clone(), self.echo_ref_id));
+        }
+        let (draft, alerts) = self.draft(account, request)?;
+        if let Some(alert) = alerts.first() {
+            return Err(SimError::Alert(*alert));
+        }
+        self.server_keys = self.server_keys.saturating_add(1);
+        let fault = self.faults.pop_front();
+        let state = match fault {
+            Some(Fault::Answer(state)) => state,
+            _ if admits(draft.market_hours, self.session) => State::Confirmed,
+            _ => State::Queued,
+        };
+        let id = format!("rh-sim-{:06}", self.orders.len().saturating_add(1));
+        let order = Order {
+            id,
+            ref_id: Some(ref_id),
+            state,
+            ..draft
+        };
+        self.orders.push(order.clone());
+        self.requests.push(request.clone());
+        match fault {
+            Some(Fault::LoseAnswer) => Err(SimError::AnswerLost),
+            _ => Ok(shown(order, self.echo_ref_id)),
+        }
     }
 
     /// `cancel_equity_order`: refused for a terminal order or another account's.
-    pub fn cancel(&mut self, _account_number: &str, _order_id: &str) -> Result<Order, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn cancel(&mut self, account_number: &str, order_id: &str) -> Result<Order, SimError> {
+        let echo = self.echo_ref_id;
+        let order = self
+            .orders
+            .iter_mut()
+            .find(|o| o.id == order_id && o.account_number == account_number)
+            .ok_or(SimError::UnknownOrder)?;
+        if is_terminal(order.state) {
+            return Err(SimError::Terminal);
+        }
+        order.state = State::Cancelled;
+        Ok(shown(order.clone(), echo))
     }
 
     /// A scripted execution of a working order in a session its market hours admit.
-    pub fn fill(
-        &mut self,
-        _order_id: &str,
-        _quantity: Qty,
-        _price: Price,
-    ) -> Result<Order, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn fill(&mut self, order_id: &str, quantity: Qty, price: Price) -> Result<Order, SimError> {
+        let session = self.session;
+        let echo = self.echo_ref_id;
+        let order = self
+            .orders
+            .iter_mut()
+            .find(|o| o.id == order_id)
+            .ok_or(SimError::UnknownOrder)?;
+        if is_terminal(order.state) {
+            return Err(SimError::Terminal);
+        }
+        if !matches!(order.state, State::Confirmed | State::PartiallyFilled) {
+            return Err(SimError::NotWorking);
+        }
+        if !admits(order.market_hours, session) {
+            return Err(SimError::OutsideSession);
+        }
+        let filled = order
+            .filled_quantity
+            .checked_add(quantity)
+            .map_err(|_| SimError::Overfill)?;
+        if quantity.is_zero() || filled > order.quantity {
+            return Err(SimError::Overfill);
+        }
+        let through = match (order.side, order.limit_price) {
+            (Side::Buy, Some(limit)) => price > limit,
+            (Side::Sell, Some(limit)) => price < limit,
+            (_, None) => false,
+        };
+        if through {
+            return Err(SimError::ThroughLimit);
+        }
+        let key = (order.account_number.clone(), order.symbol.clone());
+        let held = self.positions.get(&key).copied().unwrap_or(Qty::ZERO);
+        let position = match order.side {
+            Side::Buy => held.checked_add(quantity).map_err(|_| SimError::Overfill)?,
+            Side::Sell => held
+                .checked_sub(quantity)
+                .map_err(|_| SimError::InsufficientShares)?,
+        };
+        self.positions.insert(key.clone(), position);
+        self.traded_today.insert((key.0, key.1, order.side));
+        order.filled_quantity = filled;
+        order.executions.push(Execution { quantity, price });
+        order.state = if filled == order.quantity {
+            State::Filled
+        } else {
+            State::PartiallyFilled
+        };
+        Ok(shown(order.clone(), echo))
     }
 
     /// A scripted broker-side state change other than a fill.
-    pub fn advance(&mut self, _order_id: &str, _to: State) -> Result<Order, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn advance(&mut self, order_id: &str, to: State) -> Result<Order, SimError> {
+        let echo = self.echo_ref_id;
+        let order = self
+            .orders
+            .iter_mut()
+            .find(|o| o.id == order_id)
+            .ok_or(SimError::UnknownOrder)?;
+        may_advance(order.state, to)?;
+        order.state = to;
+        Ok(shown(order.clone(), echo))
     }
 
     /// `get_equity_orders` for one account, newest first.
-    pub fn orders(&self, _account_number: &str) -> Result<Vec<Order>, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn orders(&self, account_number: &str) -> Result<Vec<Order>, SimError> {
+        self.account(account_number)?;
+        let mine = self
+            .orders
+            .iter()
+            .filter(|o| o.account_number == account_number);
+        Ok(mine
+            .rev()
+            .map(|o| shown(o.clone(), self.echo_ref_id))
+            .collect())
     }
 
-    pub fn position(&self, _account_number: &str, _symbol: &str) -> Result<Qty, SimError> {
-        Err(SimError::Unimplemented { story: "E7-25" })
+    pub fn position(&self, account_number: &str, symbol: &str) -> Result<Qty, SimError> {
+        self.account(account_number)?;
+        let key = (account_number.to_owned(), symbol.to_owned());
+        Ok(self.positions.get(&key).copied().unwrap_or(Qty::ZERO))
     }
+
+    fn account(&self, number: &str) -> Result<&Account, SimError> {
+        self.accounts
+            .iter()
+            .find(|a| a.number == number)
+            .ok_or(SimError::UnknownAccount)
+    }
+
+    fn agentic(&self, number: &str) -> Result<Account, SimError> {
+        let account = self.account(number)?;
+        if !account.agentic_allowed {
+            return Err(SimError::NotAgentic);
+        }
+        Ok(account.clone())
+    }
+
+    /// The contract's checks, in order: the order the request would place, not yet numbered,
+    /// and the alerts it would draw.
+    fn draft(&self, account: Account, r: &OrderRequest) -> Result<(Order, Vec<Alert>), SimError> {
+        let side = match r.side.as_str() {
+            "buy" => Side::Buy,
+            "sell" => Side::Sell,
+            _ => return Err(SimError::Unreadable("side")),
+        };
+        let order_type = match r.order_type.as_str() {
+            "market" => OrderType::Market,
+            "limit" => OrderType::Limit,
+            "stop_market" => OrderType::StopMarket,
+            "stop_limit" => OrderType::StopLimit,
+            _ => return Err(SimError::Unreadable("type")),
+        };
+        let time_in_force = match r.time_in_force.as_deref() {
+            None | Some("gfd") => TimeInForce::Gfd,
+            Some("gtc") => TimeInForce::Gtc,
+            Some(_) => return Err(SimError::Unreadable("time_in_force")),
+        };
+        let market_hours = match r.market_hours.as_deref() {
+            None | Some("regular_hours") => MarketHours::Regular,
+            Some("extended_hours") => MarketHours::Extended,
+            Some("all_day_hours") => MarketHours::AllDay,
+            Some(_) => return Err(SimError::Unreadable("market_hours")),
+        };
+        let limited = matches!(order_type, OrderType::Limit | OrderType::StopLimit);
+        let stopped = matches!(order_type, OrderType::StopMarket | OrderType::StopLimit);
+        let limit_price = price_field(r.limit_price.as_deref(), limited, "limit_price")?;
+        let stop_price = price_field(r.stop_price.as_deref(), stopped, "stop_price")?;
+        if market_hours != MarketHours::Regular && order_type != OrderType::Limit {
+            return Err(SimError::SessionNeedsLimit);
+        }
+        let quote = self.quotes.get(&r.symbol).copied();
+        let quantity = match (r.quantity.as_deref(), r.dollar_amount.as_deref()) {
+            (Some(text), None) => {
+                let quantity = Qty::parse(text).map_err(|_| SimError::Unreadable("quantity"))?;
+                if quantity.is_zero() {
+                    return Err(SimError::Unreadable("quantity"));
+                }
+                if order_type != OrderType::Market && quantity.to_string().contains('.') {
+                    return Err(SimError::QuantityForm);
+                }
+                quantity
+            }
+            (None, Some(text)) => {
+                if order_type != OrderType::Market {
+                    return Err(SimError::QuantityForm);
+                }
+                let dollars =
+                    Usd::parse(text).map_err(|_| SimError::Unreadable("dollar_amount"))?;
+                let quote = quote.ok_or(SimError::NoQuote)?;
+                let quantity = dollars
+                    .shares_at(quote, ShareIncrement::Fractional)
+                    .map_err(|_| SimError::Unreadable("dollar_amount"))?;
+                if quantity.is_zero() {
+                    return Err(SimError::Unreadable("dollar_amount"));
+                }
+                quantity
+            }
+            _ => return Err(SimError::Unreadable("quantity")),
+        };
+        let reference = match order_type {
+            OrderType::Market => quote.ok_or(SimError::NoQuote)?,
+            OrderType::StopMarket => stop_price.ok_or(SimError::Unreadable("stop_price"))?,
+            OrderType::Limit | OrderType::StopLimit => {
+                limit_price.ok_or(SimError::Unreadable("limit_price"))?
+            }
+        };
+        let key = (account.number.clone(), r.symbol.clone());
+        let held = self.positions.get(&key).copied().unwrap_or(Qty::ZERO);
+        let working_sells = self
+            .orders
+            .iter()
+            .filter(|o| o.account_number == account.number && o.symbol == r.symbol)
+            .filter(|o| o.side == Side::Sell && !is_terminal(o.state))
+            .try_fold(Qty::ZERO, |sum, o| {
+                o.quantity
+                    .checked_sub(o.filled_quantity)
+                    .and_then(|left| sum.checked_add(left))
+            })
+            .map_err(|_| SimError::InsufficientShares)?;
+        let unsold = held.checked_sub(working_sells).unwrap_or(Qty::ZERO);
+        if side == Side::Sell && quantity > unsold {
+            return Err(SimError::InsufficientShares);
+        }
+        let cost = quantity
+            .notional(reference)
+            .map_err(|_| SimError::Alert(Alert::BuyingPower))?;
+        let opposite = match side {
+            Side::Buy => Side::Sell,
+            Side::Sell => Side::Buy,
+        };
+        let mut alerts = Vec::new();
+        if side == Side::Buy && cost > account.buying_power {
+            alerts.push(Alert::BuyingPower);
+        }
+        if account.pattern_day_trader && self.traded_today.contains(&(key.0, key.1, opposite)) {
+            alerts.push(Alert::PatternDayTrading);
+        }
+        if self.halted.contains(&r.symbol) {
+            alerts.push(Alert::Halt);
+        }
+        let order = Order {
+            id: String::new(),
+            account_number: account.number,
+            ref_id: None,
+            symbol: r.symbol.clone(),
+            side,
+            order_type,
+            quantity,
+            limit_price,
+            stop_price,
+            time_in_force,
+            market_hours,
+            state: State::New,
+            filled_quantity: Qty::ZERO,
+            executions: Vec::new(),
+        };
+        Ok((order, alerts))
+    }
+}
+
+/// A price the order type needs (present, positive, canonical) or must not carry.
+fn price_field(
+    text: Option<&str>,
+    needed: bool,
+    field: &'static str,
+) -> Result<Option<Price>, SimError> {
+    match (text, needed) {
+        (Some(text), true) => Price::parse(text)
+            .map(Some)
+            .map_err(|_| SimError::Unreadable(field)),
+        (None, false) => Ok(None),
+        _ => Err(SimError::Unreadable(field)),
+    }
+}
+
+/// Whether a session lets an order with these market hours trade.
+fn admits(hours: MarketHours, session: Session) -> bool {
+    match hours {
+        MarketHours::Regular => session == Session::Regular,
+        MarketHours::Extended => matches!(session, Session::Regular | Session::Extended),
+        MarketHours::AllDay => session != Session::Closed,
+    }
+}
+
+fn is_terminal(state: State) -> bool {
+    matches!(
+        state,
+        State::Filled | State::Cancelled | State::Rejected | State::Failed | State::Voided
+    )
+}
+
+/// The states a place may answer with when a fault scripts the answer.
+fn is_initial(state: State) -> bool {
+    matches!(
+        state,
+        State::New | State::Unconfirmed | State::Rejected | State::Failed
+    )
+}
+
+/// The broker-side moves other than a fill; fills alone reach `partially_filled` and `filled`, and
+/// a terminal order moves nowhere.
+fn may_advance(from: State, to: State) -> Result<(), SimError> {
+    let allowed = match from {
+        State::New => matches!(
+            to,
+            State::Queued
+                | State::Confirmed
+                | State::Unconfirmed
+                | State::Cancelled
+                | State::Rejected
+                | State::Failed
+        ),
+        State::Queued => matches!(
+            to,
+            State::Confirmed
+                | State::Unconfirmed
+                | State::Cancelled
+                | State::Rejected
+                | State::Failed
+        ),
+        State::Unconfirmed => {
+            matches!(
+                to,
+                State::Confirmed | State::Cancelled | State::Rejected | State::Failed
+            )
+        }
+        State::Confirmed => matches!(to, State::Cancelled | State::Voided | State::Failed),
+        State::PartiallyFilled => matches!(to, State::Cancelled | State::Voided),
+        State::Filled | State::Cancelled | State::Rejected | State::Failed | State::Voided => {
+            return Err(SimError::Terminal);
+        }
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(SimError::IllegalTransition)
+    }
+}
+
+/// The order as an answer shows it: without its `ref_id` unless the echo switch is on.
+fn shown(mut order: Order, echo_ref_id: bool) -> Order {
+    if !echo_ref_id {
+        order.ref_id = None;
+    }
+    order
+}
+
+/// A UUID in its 8-4-4-4-12 hexadecimal text form.
+fn is_uuid(text: &str) -> bool {
+    let groups: Vec<usize> = text.split('-').map(str::len).collect();
+    groups == [8, 4, 4, 4, 12] && text.chars().all(|c| c == '-' || c.is_ascii_hexdigit())
 }
