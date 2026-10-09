@@ -5,33 +5,48 @@ mod common;
 mod stepup;
 
 use mandate_canon::Digest;
-use mandate_identity::{StepUpActionKind, StepUpEvidence, StepUpMethod, WorkspaceId};
+use mandate_identity::{AssertionId, StepUpActionKind, StepUpEvidence, StepUpMethod, WorkspaceId};
 use mandate_passkey::stepup::{
-    Action, Consumed, Environment, Missing, StepUpRefusal, Used, reverify,
+    Action, ChallengeRecord, Consumed, Environment, Missing, StepUpRefusal, reverify,
 };
 use mandate_passkey::{Challenge, Refusal};
 
 use common::{UV, rp};
-use stepup::{Case, EXPIRES, Kind, State, at, challenge_bytes, issued_plus, record};
+use stepup::{Case, EXPIRES, ISSUED, Kind, State, at, challenge_bytes, issued_plus, record};
 
-fn passkey_consumed(now: mandate_time::UtcNanos) -> Consumed {
-    Consumed {
-        evidence: StepUpEvidence {
-            assertion_id: stepup::challenge_id(),
-            authenticated_at: now,
-            method: StepUpMethod::Passkey,
-        },
-        used: Used {
-            challenge_id: stepup::challenge_id(),
-        },
-        sign_count: Some(8),
-    }
+/// A passed step-up's evidence, the challenge it marks used, and the counter it stores.
+type Outputs = (StepUpEvidence, AssertionId, Option<u32>);
+
+/// What `consume` returned, read through `Consumed`'s accessors, since no test can build one.
+fn outputs(result: Result<Consumed, StepUpRefusal>) -> Result<Outputs, StepUpRefusal> {
+    result.map(|consumed| {
+        (
+            consumed.evidence().clone(),
+            consumed.used().challenge_id().clone(),
+            consumed.sign_count(),
+        )
+    })
+}
+
+/// A passed step-up of `method`: the evidence is stamped with the challenge's issue time, the
+/// earliest the gesture can have happened, whenever it is judged (DEC-662 item 7).
+fn passed(method: StepUpMethod, sign_count: Option<u32>) -> Result<Outputs, StepUpRefusal> {
+    let evidence = StepUpEvidence {
+        assertion_id: stepup::challenge_id(),
+        authenticated_at: at(ISSUED),
+        method,
+    };
+    Ok((evidence, stepup::challenge_id(), sign_count))
+}
+
+fn passkey_passed() -> Result<Outputs, StepUpRefusal> {
+    passed(StepUpMethod::Passkey, Some(8))
 }
 
 #[test]
 #[ignore = "pending E9-4"]
 fn a_challenge_expires_three_hundred_seconds_after_it_is_issued() {
-    assert_eq!(record().expires_at, at(EXPIRES));
+    assert_eq!(record().expires_at(), at(EXPIRES));
 }
 
 #[test]
@@ -54,11 +69,7 @@ fn a_passkey_step_up_returns_the_evidence_and_the_used_marker_together() {
     for environment in [Environment::Live, Environment::Paper] {
         let mut case = Case::new();
         case.environment = environment;
-        assert_eq!(
-            case.run(),
-            Ok(passkey_consumed(case.now)),
-            "{environment:?}"
-        );
+        assert_eq!(outputs(case.run()), passkey_passed(), "{environment:?}");
     }
 }
 
@@ -68,15 +79,7 @@ fn cli_confirm_counts_in_paper_only() {
     let mut case = Case::new();
     case.kind = Kind::CliConfirm;
     case.environment = Environment::Paper;
-    let expected = Consumed {
-        evidence: StepUpEvidence {
-            method: StepUpMethod::CliConfirm,
-            ..passkey_consumed(case.now).evidence
-        },
-        sign_count: None,
-        ..passkey_consumed(case.now)
-    };
-    assert_eq!(case.run(), Ok(expected));
+    assert_eq!(outputs(case.run()), passed(StepUpMethod::CliConfirm, None));
     case.environment = Environment::Live;
     assert_eq!(case.run(), Err(StepUpRefusal::Method));
 }
@@ -108,7 +111,7 @@ fn a_challenge_counts_from_its_issue_until_just_before_its_expiry() {
         case.now = now;
         let result = case.run();
         if accepted {
-            assert_eq!(result, Ok(passkey_consumed(now)), "{now}");
+            assert_eq!(outputs(result), passkey_passed(), "{now}");
         } else {
             assert_eq!(result, Err(StepUpRefusal::Stale), "{now}");
         }
@@ -119,11 +122,7 @@ fn a_challenge_counts_from_its_issue_until_just_before_its_expiry() {
 #[ignore = "pending E9-4"]
 fn a_challenge_bound_to_another_principal_or_workspace_is_a_mismatch() {
     let mut case = Case::new();
-    assert_eq!(
-        case.run(),
-        Ok(passkey_consumed(case.now)),
-        "the unchanged case"
-    );
+    assert_eq!(outputs(case.run()), passkey_passed(), "the unchanged case");
     case.principal = stepup::mallory();
     assert_eq!(case.run(), Err(StepUpRefusal::Mismatch));
     let mut case = Case::new();
@@ -135,11 +134,7 @@ fn a_challenge_bound_to_another_principal_or_workspace_is_a_mismatch() {
 #[ignore = "pending E9-4"]
 fn another_principals_credential_or_none_counts_as_missing() {
     let mut case = Case::new();
-    assert_eq!(
-        case.run(),
-        Ok(passkey_consumed(case.now)),
-        "the unchanged case"
-    );
+    assert_eq!(outputs(case.run()), passkey_passed(), "the unchanged case");
     case.enrolled = case
         .enrolled
         .map(|e| mandate_passkey::stepup::EnrolledCredential {
@@ -172,7 +167,7 @@ fn a_passkey_in_its_enrolment_cool_off_cannot_step_up() {
         cool_off_ends: now,
         ..enrolled
     });
-    assert_eq!(case.run(), Ok(passkey_consumed(now)));
+    assert_eq!(outputs(case.run()), passkey_passed());
 }
 
 #[test]
@@ -192,11 +187,7 @@ fn an_assertion_that_does_not_verify_counts_as_missing_with_its_reason() {
 #[ignore = "pending E9-4"]
 fn a_step_up_for_another_action_is_a_mismatch() {
     let mut case = Case::new();
-    assert_eq!(
-        case.run(),
-        Ok(passkey_consumed(case.now)),
-        "the unchanged case"
-    );
+    assert_eq!(outputs(case.run()), passkey_passed(), "the unchanged case");
     case.action = Action {
         digest: Digest::of(b"another approval's content object"),
         ..case.action
@@ -281,13 +272,19 @@ fn a_stored_assertion_reverifies_against_the_public_key_after_its_counter_moved_
     let case = Case::new();
     let consumed = case.run().expect("the step-up counts");
     let stored = mandate_passkey::Credential {
-        sign_count: consumed.sign_count.expect("a passkey counter"),
+        sign_count: consumed.sign_count().expect("a passkey counter"),
         ..case.enrolled.clone().expect("enrolled").credential
     };
     let raw = case.assertion.view();
     assert!(reverify(&rp(), &case.record, &stored, &raw).is_ok());
-    let mut other = record();
-    other.principal_id = stepup::mallory();
+    let other = ChallengeRecord::issue(
+        stepup::challenge_id(),
+        stepup::workspace(),
+        stepup::mallory(),
+        stepup::approval(),
+        at(ISSUED),
+    )
+    .expect("a record for another principal");
     assert_eq!(
         reverify(&rp(), &other, &stored, &raw),
         Err(StepUpRefusal::Missing(Missing::Passkey(
