@@ -108,54 +108,271 @@ pub struct MembershipFold {
     records: Vec<MembershipRecord>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "a fold and its readings have no error to carry, so their stubs are todo!(), the \
-              other form DEC-137 names"
-)]
 impl MembershipFold {
     /// The fold of `records`, given in `seq` order, for a holder of the seal.
-    pub fn new(_seal: Seal, _records: Vec<MembershipRecord>) -> Self {
-        todo!()
+    pub fn new(seal: Seal, records: Vec<MembershipRecord>) -> Self {
+        let _: Seal = seal;
+        Self { records }
     }
 
     /// Whether a record at or before `at` did not fit the state it found.
-    pub fn unreadable(&self, _at: UtcNanos) -> bool {
-        todo!()
+    pub fn unreadable(&self, at: UtcNanos) -> bool {
+        self.refused(at).is_some()
     }
 
     /// The `seq` of the record at or before `at` that made the fold unreadable, if any.
-    pub fn refused(&self, _at: UtcNanos) -> Option<u64> {
-        todo!()
+    pub fn refused(&self, at: UtcNanos) -> Option<u64> {
+        self.replay(at).refused
     }
 
     /// The member's §5.1 state at `at`, or `None` if no record activated it by then.
-    pub fn state(&self, _member: PrincipalId, _at: UtcNanos) -> Option<MembershipState> {
-        todo!()
+    pub fn state(&self, member: PrincipalId, at: UtcNanos) -> Option<MembershipState> {
+        let replay = self.replay(at);
+        let seat = replay.seats.get(&member)?;
+        Some(match seat.standing {
+            Standing::Live if at >= seat.until => MembershipState::Active,
+            Standing::Live => MembershipState::CoolingOff,
+            Standing::Deactivated => MembershipState::Deactivated,
+            Standing::Removed => MembershipState::Removed,
+        })
     }
 
     /// The member's roles whose cool-off ended at or before `at`, while it is `cooling_off` or
     /// `active`; empty in every other state.
-    pub fn effective_roles(&self, _member: PrincipalId, _at: UtcNanos) -> BTreeSet<Role> {
-        todo!()
+    pub fn effective_roles(&self, member: PrincipalId, at: UtcNanos) -> BTreeSet<Role> {
+        let replay = self.replay(at);
+        let held = replay.seats.get(&member).map(|seat| &seat.roles);
+        held.into_iter()
+            .flatten()
+            .filter(|(_, since)| **since <= at)
+            .map(|(role, _)| *role)
+            .collect()
     }
 
     /// The roles a `deactivated` member keeps for a reactivation at `at`, each it held when
     /// deactivated, effective or still cooling, less those removed since; empty in other states.
-    pub fn kept_roles(&self, _member: PrincipalId, _at: UtcNanos) -> BTreeSet<Role> {
-        todo!()
+    pub fn kept_roles(&self, member: PrincipalId, at: UtcNanos) -> BTreeSet<Role> {
+        let replay = self.replay(at);
+        match replay.seats.get(&member) {
+            Some(seat) if seat.standing == Standing::Deactivated => seat.kept.clone(),
+            _ => BTreeSet::new(),
+        }
     }
 
     /// The invitation's state at `at`, or `None` if it was not issued by then.
-    pub fn invitation(&self, _invitation: InvitationId, _at: UtcNanos) -> Option<InvitationState> {
-        todo!()
+    pub fn invitation(&self, invitation: InvitationId, at: UtcNanos) -> Option<InvitationState> {
+        let replay = self.replay(at);
+        let invite = replay.invites.get(&invitation)?;
+        Some(match invite.state {
+            InvitationState::Invited if at >= invite.expires_at => InvitationState::Expired,
+            state => state,
+        })
     }
 
     /// `workspace_users` at `at` (§5.3, ID-7): the members `active`, so past their cool-off, at
     /// `at`, or 1 when the fold is unreadable at `at`.
-    pub fn workspace_users(&self, _at: UtcNanos) -> u32 {
-        todo!()
+    pub fn workspace_users(&self, at: UtcNanos) -> u32 {
+        let replay = self.replay(at);
+        if replay.refused.is_some() {
+            return 1;
+        }
+        let active = replay
+            .seats
+            .values()
+            .filter(|seat| seat.standing == Standing::Live && seat.until <= at)
+            .count();
+        u32::try_from(active).unwrap_or(u32::MAX)
     }
+
+    /// The fold of the records whose `event_time` is at or before `at`, in `seq` order, each
+    /// checked for order against the record held before it, folded at `at` or not (DEC-657 item
+    /// 4). The first record that does not fit is refused and the rest fold on, as the reference
+    /// fold does, so the latch holds.
+    fn replay(&self, at: UtcNanos) -> Replay {
+        let mut replay = Replay::default();
+        let mut previous: Option<&MembershipRecord> = None;
+        for record in &self.records {
+            let ordered = previous.is_none_or(|before| follows(before, record));
+            previous = Some(record);
+            if record.event_time > at {
+                continue;
+            }
+            let fits = ordered && replay.apply(record).is_some();
+            if !fits && replay.refused.is_none() {
+                replay.refused = Some(record.seq);
+            }
+        }
+        replay
+    }
+}
+
+/// Whether `record` may follow `before` (DEC-657 item 4): its `seq` is above, and its
+/// `event_time` not before, `before`'s; no `seq` is above `u64::MAX`.
+fn follows(before: &MembershipRecord, record: &MembershipRecord) -> bool {
+    let seq_above = before
+        .seq
+        .checked_add(1)
+        .is_some_and(|next| record.seq >= next);
+    seq_above && record.event_time >= before.event_time
+}
+
+/// Where a membership stands in the fold: live (`cooling_off` until its cool-off ends, then
+/// `active`), `deactivated`, or `removed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    Live,
+    Deactivated,
+    Removed,
+}
+
+/// A member as the fold keeps it: where it stands, the end of its activation's or reactivation's
+/// cool-off, each held role with the instant it becomes effective, and, while deactivated, the
+/// roles it keeps. A deactivation moves the held roles to the kept ones, so a member holds roles
+/// only while it is live, and a removed one neither holds nor keeps any.
+#[derive(Debug, Clone)]
+struct Seat {
+    standing: Standing,
+    until: UtcNanos,
+    roles: BTreeMap<Role, UtcNanos>,
+    kept: BTreeSet<Role>,
+}
+
+impl Seat {
+    /// A membership entering `cooling_off` at `at` until `end` with `roles`: operator and approver
+    /// are effective from `end` (§8.3), every other role from `at`.
+    fn started(roles: &BTreeSet<Role>, at: UtcNanos, end: UtcNanos) -> Self {
+        let since = |role: &Role| match role {
+            Role::Approver | Role::Operator => end,
+            _ => at,
+        };
+        Self {
+            standing: Standing::Live,
+            until: end,
+            roles: roles.iter().map(|role| (*role, since(role))).collect(),
+            kept: BTreeSet::new(),
+        }
+    }
+}
+
+/// An issued invitation: its state (`invited`, `accepted`, or `revoked`; `expired` is read
+/// against the instant), the roles it names, and its expiry.
+#[derive(Debug, Clone)]
+struct Invite {
+    state: InvitationState,
+    roles: BTreeSet<Role>,
+    expires_at: UtcNanos,
+}
+
+impl Invite {
+    /// Whether it can still be used or revoked at `at`: `invited`, and `at` before `expires_at`.
+    fn open(&self, at: UtcNanos) -> bool {
+        self.state == InvitationState::Invited && at < self.expires_at
+    }
+}
+
+/// The fold's state after the records so far, and the first record it refused.
+#[derive(Debug, Clone, Default)]
+struct Replay {
+    seats: BTreeMap<PrincipalId, Seat>,
+    invites: BTreeMap<InvitationId, Invite>,
+    refused: Option<u64>,
+}
+
+impl Replay {
+    /// Folds `record` if it fits the state it finds, or returns `None` and changes nothing.
+    fn apply(&mut self, record: &MembershipRecord) -> Option<()> {
+        let at = record.event_time;
+        match &record.event {
+            MembershipEvent::Invited {
+                invitation,
+                roles,
+                expires_at,
+            } => {
+                refuse_unless(!self.invites.contains_key(invitation))?;
+                let invite = Invite {
+                    state: InvitationState::Invited,
+                    roles: roles.clone(),
+                    expires_at: *expires_at,
+                };
+                self.invites.insert(*invitation, invite);
+            }
+            MembershipEvent::InvitationRevoked { invitation } => {
+                let invite = self.invites.get_mut(invitation)?;
+                refuse_unless(invite.open(at))?;
+                invite.state = InvitationState::Revoked;
+            }
+            MembershipEvent::Activated {
+                member,
+                invitation,
+                roles,
+                cool_off_ends_at,
+                ..
+            } => {
+                let fresh = self
+                    .seats
+                    .get(member)
+                    .is_none_or(|seat| seat.standing == Standing::Removed);
+                refuse_unless(fresh)?;
+                if let Some(invitation) = invitation {
+                    let invite = self.invites.get_mut(invitation)?;
+                    refuse_unless(invite.open(at) && invite.roles == *roles)?;
+                    invite.state = InvitationState::Accepted;
+                }
+                self.seats
+                    .insert(*member, Seat::started(roles, at, *cool_off_ends_at));
+            }
+            MembershipEvent::RoleChanged {
+                member,
+                added,
+                removed,
+                ..
+            } => {
+                let seat = self.seats.get_mut(member)?;
+                match seat.standing {
+                    Standing::Live => {
+                        refuse_unless(removed.iter().all(|role| seat.roles.contains_key(role)))?;
+                        refuse_unless(added.keys().all(|role| !seat.roles.contains_key(role)))?;
+                        seat.roles.retain(|role, _| !removed.contains(role));
+                        seat.roles
+                            .extend(added.iter().map(|(role, end)| (*role, *end)));
+                    }
+                    Standing::Deactivated => {
+                        refuse_unless(added.is_empty() && removed.is_subset(&seat.kept))?;
+                        seat.kept.retain(|role| !removed.contains(role));
+                    }
+                    Standing::Removed => return None,
+                }
+            }
+            MembershipEvent::Deactivated { member } => {
+                let seat = self.seats.get_mut(member)?;
+                refuse_unless(seat.standing == Standing::Live)?;
+                seat.kept = std::mem::take(&mut seat.roles).into_keys().collect();
+                seat.standing = Standing::Deactivated;
+            }
+            MembershipEvent::Reactivated {
+                member,
+                roles,
+                cool_off_ends_at,
+                ..
+            } => {
+                let seat = self.seats.get_mut(member)?;
+                refuse_unless(seat.standing == Standing::Deactivated)?;
+                refuse_unless(!roles.is_empty() && seat.kept == *roles)?;
+                *seat = Seat::started(roles, at, *cool_off_ends_at);
+            }
+            MembershipEvent::Removed { member } => {
+                let seat = self.seats.get_mut(member)?;
+                refuse_unless(seat.standing == Standing::Deactivated)?;
+                seat.standing = Standing::Removed;
+            }
+        }
+        Some(())
+    }
+}
+
+/// `Some` when the record fits, so `?` stops a fold step that does not.
+fn refuse_unless(fits: bool) -> Option<()> {
+    fits.then_some(())
 }
 
 /// Why workspace services refuse to commit a membership record (§9.12's cross-record checks).
@@ -165,20 +382,33 @@ pub enum RecordRefusal {
     /// its `event_time` (DEC-648 item 7), so its cool-off (rule 103) was decided on a false input.
     #[error("the record's independent_approval_required is not the effective policy")]
     IndependenceMismatch,
-    /// The stub of a story not yet implemented.
-    #[error("{story} has not been implemented yet")]
-    Unimplemented {
-        /// The story.
-        story: &'static str,
-    },
 }
 
 /// The writer's check that a record's `independent_approval_required` equals `effective`, the
 /// workspace's effective policy at the record's `event_time` (mandate spec §4.3), which the caller
 /// reads from the policy fold (DEC-657 item 7). A record with no such member passes.
-pub fn check_independence(
-    _record: &MembershipRecord,
-    _effective: bool,
-) -> Result<(), RecordRefusal> {
-    Err(RecordRefusal::Unimplemented { story: "E9-7" })
+pub fn check_independence(record: &MembershipRecord, effective: bool) -> Result<(), RecordRefusal> {
+    let recorded = match &record.event {
+        MembershipEvent::Activated {
+            independent_approval_required,
+            ..
+        }
+        | MembershipEvent::RoleChanged {
+            independent_approval_required,
+            ..
+        }
+        | MembershipEvent::Reactivated {
+            independent_approval_required,
+            ..
+        } => *independent_approval_required,
+        MembershipEvent::Invited { .. }
+        | MembershipEvent::InvitationRevoked { .. }
+        | MembershipEvent::Deactivated { .. }
+        | MembershipEvent::Removed { .. } => return Ok(()),
+    };
+    if recorded == effective {
+        Ok(())
+    } else {
+        Err(RecordRefusal::IndependenceMismatch)
+    }
 }

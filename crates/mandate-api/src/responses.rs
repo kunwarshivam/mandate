@@ -1,14 +1,19 @@
 //! The command responses of workspace API spec §5. Each repeats the envelope's members through
 //! `response!`, since a type that flattens another cannot refuse an unknown member (DEC-682 item
-//! 23). A non-empty `as_of` and a non-empty, unique `dropped` list of pointers are pending rules.
+//! 23). `as_of` names at least one watermark, and `dropped` is a non-empty list of unique pointers.
+
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::{ApiVersion, StepUpStatus, Watermark};
-use crate::requests::Shape;
-use crate::wire::{Decimal, EventId, Id, Ref, Timestamp, present};
+use crate::requests::{Shape, max_orders};
+use crate::wire::{
+    Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_pointer, is_stream_id, is_word, present,
+};
 
-/// A closed response: the envelope's members, then its own, with its rules pending.
+/// A closed response: the envelope's members, then its own. Its [`Rules`] check `as_of` with
+/// [`as_of`] and then its own members.
 macro_rules! response {
     ($(#[$doc:meta])* $name:ident { $($(#[$attr:meta])* $member:ident: $ty:ty,)* }) => {
         $(#[$doc])*
@@ -22,8 +27,103 @@ macro_rules! response {
             $($(#[$attr])* pub $member: $ty,)*
         }
 
-        crate::wire::rules!(pending: $name);
+        crate::wire::rules!(checked: $name);
     };
+}
+
+/// Common `AsOf` under `at` (§6.1, API-14): at least one watermark, each valid.
+fn as_of(watermarks: &[Watermark], at: &str, check: &mut Check) {
+    check.rule(!watermarks.is_empty(), &format!("{at}/as_of"), "items");
+    for (index, watermark) in watermarks.iter().enumerate() {
+        watermark.rules(&format!("{at}/as_of/{index}"), check);
+    }
+}
+
+/// A `dropped` list under `at` (DEC-682 item 27): absent, or at least one pointer and each once,
+/// the root `""` only where `root` allows it.
+fn dropped(list: Option<&[String]>, root: bool, at: &str, check: &mut Check) {
+    let Some(list) = list else {
+        return;
+    };
+    let at = format!("{at}/dropped");
+    let unique: BTreeSet<&String> = list.iter().collect();
+    check.rule(!list.is_empty() && unique.len() == list.len(), &at, "items");
+    for (index, pointer) in list.iter().enumerate() {
+        let holds = is_pointer(pointer, root);
+        check.rule(holds, &format!("{at}/{index}"), "pattern");
+    }
+}
+
+/// The root is dropped only from a pause or hold body that is not JSON (DEC-682 item 27).
+impl Rules for CommandAccepted {
+    fn rules(&self, at: &str, check: &mut Check) {
+        as_of(&self.as_of, at, check);
+        dropped(self.dropped.as_deref(), true, at, check);
+    }
+}
+
+/// A Skip body that is not JSON is refused, never read as `{}`, so the root is never dropped.
+impl Rules for ApprovalResponseAccepted {
+    fn rules(&self, at: &str, check: &mut Check) {
+        as_of(&self.as_of, at, check);
+        dropped(self.dropped.as_deref(), false, at, check);
+    }
+}
+
+impl Rules for ConfirmAccepted {
+    fn rules(&self, at: &str, check: &mut Check) {
+        as_of(&self.as_of, at, check);
+    }
+}
+
+impl Rules for EndDelegationAlreadyEnded {
+    fn rules(&self, at: &str, check: &mut Check) {
+        as_of(&self.as_of, at, check);
+    }
+}
+
+impl Rules for DelegationPreview {
+    fn rules(&self, at: &str, check: &mut Check) {
+        as_of(&self.as_of, at, check);
+        let delegation = format!("{at}/delegation");
+        max_orders(self.delegation.max_orders, &delegation, check);
+    }
+}
+
+/// `recorded` has no steps and every other phase at least one.
+impl Rules for CommandStatus {
+    fn rules(&self, at: &str, check: &mut Check) {
+        as_of(&self.as_of, at, check);
+        let recorded = self.phase == CommandPhase::Recorded;
+        let steps = self.steps.is_empty() == recorded;
+        check.rule(steps, &format!("{at}/steps"), "items");
+        for (index, step) in self.steps.iter().enumerate() {
+            step.rules(&format!("{at}/steps/{index}"), check);
+        }
+    }
+}
+
+/// `stream_id` an account, agent, control, or clock stream; `seq` from 1; `event_type`
+/// `^[A-Z][A-Za-z]+$`; `reason` a lowercase code.
+impl Rules for Step {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let stream = is_stream_id(&self.stream_id, &["ctl", "clock"]);
+        check.rule(stream, &format!("{at}/stream_id"), "pattern");
+        check.rule(self.seq >= 1, &format!("{at}/seq"), "range");
+        let named = is_event_type(&self.event_type);
+        check.rule(named, &format!("{at}/event_type"), "pattern");
+        let reason = self.reason.as_deref().is_none_or(is_word);
+        check.rule(reason, &format!("{at}/reason"), "pattern");
+    }
+}
+
+/// `^[A-Z][A-Za-z]+$`: an uppercase letter, then at least one letter.
+fn is_event_type(text: &str) -> bool {
+    let [first, second, rest @ ..] = text.as_bytes() else {
+        return false;
+    };
+    let letters = rest.iter().chain([second]).all(u8::is_ascii_alphabetic);
+    first.is_ascii_uppercase() && letters
 }
 
 /// Every `202`'s phase (DEC-682 item 14): recorded, never applied or approved (API-12).
@@ -108,8 +208,8 @@ pub enum IncreasesRisk {
 }
 
 response! {
-    /// The `200` of a delegation preview (§5.3, DEC-682 item 29). The delegation's `max_orders`, 1
-    /// to 1,000, is a pending rule.
+    /// The `200` of a delegation preview (§5.3, DEC-682 item 29). The delegation's `max_orders` is
+    /// 1 to 1,000.
     DelegationPreview {
         preview_id: Id,
         mandate_version: Ref,
@@ -147,7 +247,7 @@ pub enum CommandPhase {
 
 response! {
     /// `GET /commands/{event_id}` (§5.5, DEC-682 item 15). `recorded` has no steps and every other
-    /// phase at least one, a pending rule.
+    /// phase at least one.
     CommandStatus {
         command_id: EventId,
         phase: CommandPhase,
@@ -155,8 +255,7 @@ response! {
     }
 }
 
-/// One event a command produced. The stream id's and event type's grammars, `seq` from 1, and a
-/// reason in snake case are pending rules.
+/// One event a command produced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {

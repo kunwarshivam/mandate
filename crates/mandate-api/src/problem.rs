@@ -285,7 +285,7 @@ impl Rules for Violation {
                 (path, "key", is_word(key))
             }
         };
-        check.rule(is_pointer(path), &format!("{at}/path"), "pattern");
+        check.rule(is_pointer(path, true), &format!("{at}/path"), "pattern");
         check.rule(holds, &format!("{at}/{named}"), "pattern");
     }
 }

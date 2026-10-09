@@ -246,7 +246,6 @@ fn event(o: &Oracle, at: i64, &(kind, who, inv, mask, ind, fitted, _): &Op) -> O
 /// and each member's state, effective roles, and kept roles equal the oracle's own fold, so a
 /// member the oracle reads deactivated or removed is granted nothing and counts zero.
 #[test]
-#[ignore = "pending E9-7"]
 fn the_fold_equals_an_independent_oracle_over_random_histories() {
     let fitted = proptest::bool::weighted(0.9);
     let op = (

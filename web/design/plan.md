@@ -20,8 +20,10 @@ the owl, the rules and the record.
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
       this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
       fixes in section J)
-- [ ] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
-      ten minutes that must be perfect on every release.
+- [x] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
+      ten minutes that must be perfect on every release. (spec: #1035,
+      `e2e/golden-path.spec.ts`, at 390 and 1440px in both themes; left as `fixme`: the request
+      appearing once on Home, which waits on section J's "A request once on Home", C-5)
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
 - [ ] **Reference, not inspiration.** Five products and what is taken from each, written down:
       Linear (speed and keyboard), Bloomberg (density without clutter), Things (calm states), Arc
@@ -49,11 +51,15 @@ the owl, the rules and the record.
 - [x] **Landing windows.** Each window now cascades 28px down and right of the one in front,
       so a new one shows the last rather than covering it. "Try it." already had its button on
       the next line, and the windows scroll; the review's capture used overlay scrollbars. (R-30)
-- [ ] **The account chart's dark-mode paint.** The first `npm run shots` run found the account
+- [x] **The account chart's dark-mode paint.** The first `npm run shots` run found the account
       chart blank in dark mode on Home at 390 and 1440px (captured 900ms after load) while the
       agent's chart drew and the same screens in light drew; earlier captures at 1500ms showed it.
       Find whether the dark-mode redraw (`setChartMode`) races the draw-in, and pin it with a test
-      that reads the canvas after the mode switch.
+      that reads the canvas after the mode switch. (#1032) Cause: hydration read the chart mode
+      from the server's default, so a dark Home drew a light chart, then tore it down for a dark
+      one, later than light; the blank captures themselves (C-22, both themes) were taken before
+      the dev server hydrated, with no canvas yet, not a sizing or draw-in race. Fix: charts read
+      `<html>` while hydrating, one chart per load; `e2e/chart-paint.spec.ts` reads its pixels.
 - [x] **Set-up replies on a miss.** A second miss in a row says what shape of answer would be
       read, never a value; each model setting's question names its range, so nobody guesses.
       Defaulting a setting would amend DEC-472 and brief A3 ("each setting empty"), so it waits

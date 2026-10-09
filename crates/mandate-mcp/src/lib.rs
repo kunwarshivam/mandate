@@ -29,7 +29,7 @@
 //!
 //! - **The founder's OAuth login** ([`AuthServer`], E7-24): discovery of the authorization server
 //!   from the MCP server's published metadata, on pinned hosts only, and registration of a public
-//!   client with a loopback redirect (DEC-847). The token is O1b's.
+//!   client with a loopback redirect (DEC-847), then PKCE and a single-use `state` (O1b, DEC-855).
 
 mod auth;
 mod budget;
@@ -39,7 +39,8 @@ mod error;
 mod frame;
 mod transport;
 
-pub use auth::{AuthServer, ClientRegistration, LoopbackRedirect};
+pub use auth::{AccessToken, CallbackListener, LOGIN_LIFETIME};
+pub use auth::{AuthServer, AuthorizationCode, ClientRegistration, LoopbackRedirect, PendingLogin};
 pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use client::{ALLOWLIST, ContractHash, McpClient};
 pub use endpoint::PinnedEndpoint;
