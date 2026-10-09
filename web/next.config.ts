@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
   turbopack: { resolveAlias: devOnlyAliases(process.env.NODE_ENV) },
   reactStrictMode: true,
   devIndicators: false,
+  // Cloudflare Workers serves images as they are; nothing optimises them on request (DEC-731 item 2).
+  images: { unoptimized: true },
   agentRules: false,
   experimental: {
     optimizePackageImports: ["@cloudflare/kumo", "@phosphor-icons/react"],

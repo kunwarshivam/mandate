@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { config } from "@/proxy";
+import { config } from "@/middleware";
 import { isPublicPath } from "@/lib/auth-routes";
 
 /** E8-14 S8d: the worker script is fetched with no session, so neither the proxy nor sign-in may redirect it. */

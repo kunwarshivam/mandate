@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/auth-config";
 import type { BetaRequest } from "@/lib/beta";
 
-/** Where requests go when the Supabase table is missing: one JSON line each, never committed. */
+/** Where requests go in development when the Supabase table is missing: one JSON line each, never committed. */
 export const LOCAL_FILE = join(process.cwd(), ".data", "beta-requests.jsonl");
 
 /**
@@ -13,8 +13,7 @@ export const LOCAL_FILE = join(process.cwd(), ".data", "beta-requests.jsonl");
  * table alone and anything else answers unavailable (DEC-731 item 4).
  */
 export function localFileAllowed(nodeEnv: string | undefined): boolean {
-  void nodeEnv;
-  throw new Error("Unimplemented: E11-9");
+  return nodeEnv === "development" || nodeEnv === "test";
 }
 
 const UNIQUE_VIOLATION = "23505";
@@ -40,7 +39,8 @@ async function toFile(request: BetaRequest): Promise<boolean> {
 
 /**
  * Keeps one request: in Supabase's `beta_requests` (`supabase/migrations/`), which the publishable key
- * may insert into and never read; until that table exists, in a local file. A repeat address counts
+ * may insert into and never read; until that table exists, in a local file in development and tests
+ * only, and in a production build not at all (unavailable, DEC-731 item 4). A repeat address counts
  * as stored, so the form never tells anyone whether an address is already on the list.
  */
 export async function storeBetaRequest(request: BetaRequest): Promise<boolean> {
@@ -49,7 +49,7 @@ export async function storeBetaRequest(request: BetaRequest): Promise<boolean> {
     case "stored":
       return true;
     case "missing":
-      return toFile(request);
+      return localFileAllowed(process.env.NODE_ENV) ? toFile(request) : false;
     case "failed":
       return false;
     default: {

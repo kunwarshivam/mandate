@@ -25,6 +25,7 @@ npm run typecheck
 npm test
 npm run pending    # every pending test fails at its stub when un-skipped (DEC-750)
 npm run build && npm start
+npm run cf:build   # the Cloudflare Worker through OpenNext (DEC-823, DEC-731); npm run cf:preview runs it locally
 npm run shots      # every screen as PNG files with a contact sheet in .shots/, against a running dev server (DEC-516)
 
 npx playwright install --with-deps --only-shell chromium   # once
@@ -117,7 +118,9 @@ request, an email and an optional use, in one of two places:
   `supabase db push`). Row level security lets the publishable key add a row and never read one;
   read the list in the dashboard's table editor or with the secret key.
 - **A local file**, `web/.data/beta-requests.jsonl`, one JSON line per request, while Supabase is
-  not configured or the table does not exist yet. Git ignores `.data/`.
+  not configured or the table does not exist yet, in development and tests only. Git ignores
+  `.data/`. A production build has no file to fall back on (it runs on Cloudflare Workers,
+  DEC-823), so there the form answers unavailable until the table exists (DEC-731 item 4).
 
 A repeat address counts as stored, so the form never says whether someone is already on the list.
 

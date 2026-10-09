@@ -35,5 +35,5 @@
     ".next-auth-e2e/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", ".open-next", ".wrangler"]
 }

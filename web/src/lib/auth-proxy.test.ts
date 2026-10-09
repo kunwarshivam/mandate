@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { proxy } from "@/proxy";
+import { middleware as proxy } from "@/middleware";
 import type * as AuthConfig from "./auth-config";
 import type * as SupabaseProxy from "./supabase/proxy";
 
