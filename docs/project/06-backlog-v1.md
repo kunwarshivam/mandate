@@ -4749,8 +4749,9 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
 - **Restrict the lenient inherent `deserialize` that `#[serde(remote = "Self")]` leaves** (#1143).
   Every derived wire shape in `mandate-api` keeps a public inherent `Self::deserialize` that reads
   an array in an object's place; only the `Deserialize` impl `object_only!` writes is strict. No
-  caller uses the inherent one today. Make it unreachable from outside the crate, or add a test
-  that no crate calls it; tests first.
+  caller outside that macro uses the inherent one today (the macro's `visit_map` and `Serialize`
+  impl do). Make it unreachable from outside the crate, or add a test that no code outside the
+  macro calls it; tests first.
 - **`crates/mandate-api/tests/body_workspace.rs`** (#1155, round 2).
   - The module header's sixth line is mis-wrapped and over 100 columns.
   - The schema walk follows `properties`, `items`, `oneOf`, `anyOf`, and `$ref` into the
@@ -4770,9 +4771,11 @@ From the independent reviews of L2's E10-10 and E7-17 slices, 2026-10-09 (minors
   State it in one sentence in workspace API spec §5, or as its own decision from L2's range, at
   L2's next workspace API spec change.
 - **Journal spec v0.37** (L2, after v0.36), each item tightening or risk-neutral:
-  - §9.8 and §11: a `ConnectionRevoked` is written on the control stream only, so it is never
-    judged on an account stream; align `reference/journal/connections.py`'s `judged()` and the
-    tests' predicate (#1159's review; #1183 already ignores one);
+  - §9.8 and §11: a `ConnectionRevoked` belongs to the control stream; one on an account stream
+    is judged and refused under rule 68, the fail-closed reading the coordinator ruled under
+    DEC-176, as `reference/journal/connections.py`'s `judged()` already reads it (#1159's
+    review). `mandate-journal`'s fold ignores one today (#1183), so a tests PR pinning the
+    refusal, then its implementation, follow the spec change;
   - a `connections` vector that enters `suspended` twice on one account stream, so the reference
     vectors kill a fold that confuses two suspensions ([#1174](https://github.com/kunwarshivam/mandate/pull/1174));
   - [DEC-885](decisions/DEC-885.md)'s "refuses more and admits nothing new" is to read "admits
