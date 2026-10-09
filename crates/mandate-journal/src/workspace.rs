@@ -1,12 +1,12 @@
-//! The records journal spec v0.19 to v0.21 close (§9.8 to §9.10; DEC-670 to DEC-672): the
-//! workspace API's drafts, the compiler's model call, confirmations that name their agent, owner
-//! requests, `ConnectionRevoked`'s reason, the client records, and the hold on new openings, with
-//! rules 54 to 80. §3's `client` actor is checked in [`crate::draft`] (rules 66 to 68); the agent
-//! stream's `AgentModeChanged` version 2 is [`crate::agent`]'s (rules 78 to 80). Every rule only
-//! refuses a draft.
+//! The records journal spec v0.23 closes in §9.9 to §9.11 (DEC-670 to DEC-672): the workspace
+//! API's drafts, the compiler's model call, confirmations that name their agent, owner requests,
+//! `ConnectionRevoked`'s reason, the client records, and the hold on new openings, with rules 69
+//! to 80 and 84 to 92. §3's `client` actor (rules 81 to 83) is read here and called from
+//! [`crate::draft`]; the agent stream's `AgentModeChanged` version 2 is [`crate::agent`]'s (rules
+//! 93 to 95). Every rule only refuses a draft.
 //!
 //! `OwnerCommandIssued` is closed for `hold_openings` and `lift_hold` only. Every other command
-//! stays open: its `command` is read, a client's is refused (rule 75), and nothing else about it is
+//! stays open: its `command` is read, a client's is refused (rule 90), and nothing else about it is
 //! judged, so a kill switch from any other principal is always recorded (`AGENTS.md` rule 13).
 
 use mandate_canon::{Key, Object, Value};
@@ -15,7 +15,7 @@ use mandate_time::UtcNanos;
 use crate::schema::{Ty, normalize};
 use crate::{Draft, Invalid, InvalidReason, StreamType};
 
-/// The control-stream event types §9.8 to §9.10 add to [`crate::control::governs`].
+/// The control-stream event types §9.9 to §9.11 add to [`crate::control::governs`].
 pub(crate) const CONTROL: [&str; 6] = [
     "MandateDraftSaved",
     "ModelInvocationRecorded",
@@ -29,7 +29,7 @@ const COMMAND: &str = "OwnerCommandIssued";
 const HOLD: &str = "hold_openings";
 const LIFT: &str = "lift_hold";
 
-/// What a `client` actor may write (rule 68): its `propose`, `request`, `read` and `dry_run`, and
+/// What a `client` actor may write (rule 83): its `propose`, `request`, `read` and `dry_run`, and
 /// `hold` scopes, all on the control stream.
 const CLIENT_EVENTS: [&str; 4] = [
     "MandateDraftSaved",
@@ -38,7 +38,7 @@ const CLIENT_EVENTS: [&str; 4] = [
     COMMAND,
 ];
 
-/// §3's client actor, rules 66 and 67, on an envelope whose types passed: `on_behalf_of` is
+/// §3's client actor, rules 81 and 82, on an envelope whose types passed: `on_behalf_of` is
 /// present exactly on a `client` actor, and is then an `id`, which is put back into the actor; a
 /// client's `build` is `null`.
 pub(crate) fn client_actor(
@@ -69,7 +69,7 @@ pub(crate) fn client_actor(
     Ok(())
 }
 
-/// Rule 68: a `client` actor writes only [`CLIENT_EVENTS`], on the control stream (`schema` at
+/// Rule 83: a `client` actor writes only [`CLIENT_EVENTS`], on the control stream (`schema` at
 /// `actor.kind`), checked once the event type's streams are known and before its payload is read.
 pub(crate) fn client_writes(
     fields: &Object,
@@ -87,10 +87,10 @@ pub(crate) fn client_writes(
     )
 }
 
-/// The draft origins that start a draft rather than replace a save (rule 54).
+/// The draft origins that start a draft rather than replace a save (rule 69).
 const NEW_DRAFT: [&str; 4] = ["description", "goal_answers", "template", "version"];
 
-/// Inference spec §3.3's refusals: nothing left the deployment (rule 58).
+/// Inference spec §3.3's refusals: nothing left the deployment (rule 73).
 const REFUSALS: [&str; 6] = [
     "policy_denied",
     "budget_exhausted",
@@ -100,7 +100,7 @@ const REFUSALS: [&str; 6] = [
     "model_withdrawn",
 ];
 
-/// The §9.8 to §9.10 schema of `event_type` at `schema_version` on `stream`, or `None` when this
+/// The §9.9 to §9.11 schema of `event_type` at `schema_version` on `stream`, or `None` when this
 /// module registers none there.
 pub(crate) fn schema(
     event_type: &str,
@@ -121,8 +121,8 @@ pub(crate) fn schema(
     }
 }
 
-/// An `OwnerCommandIssued` §9.10 leaves open: any command but the two hold commands. Its `command`
-/// is text (`schema` at `payload.command` otherwise) and a client never issues it (rule 75).
+/// An `OwnerCommandIssued` §9.11 leaves open: any command but the two hold commands. Its `command`
+/// is text (`schema` at `payload.command` otherwise) and a client never issues it (rule 90).
 pub(crate) fn open_command(
     payload: &Value,
     actor: Option<&Value>,
@@ -141,8 +141,8 @@ pub(crate) fn open_command(
     Some(checked)
 }
 
-/// Rules 54 to 65 and 69 to 77 on a payload its schema has normalized, in rule order: the first
-/// that fails is reported. `config_refs`, `actor` and `causation_id` are the envelope's.
+/// Rules 69 to 80, 84 to 89 (rule 84's batch clause is [`check_batch`]'s), and 90 to 92 on a
+/// payload its schema has normalized, in rule order: the first that fails is reported. `config_refs`, `actor` and `causation_id` are the envelope's.
 pub(crate) fn rules(
     event_type: &str,
     schema_version: u64,
@@ -221,7 +221,7 @@ pub(crate) fn rules(
             let reason = p.text("reason");
             let allowed: &[&str] = match reason {
                 "owner" | "admin" => &["user"],
-                "member_deactivated" | "deprovisioned" => &["system"],
+                "deprovisioned" => &["system"],
                 _ => &["user", "system"],
             };
             ensure(allowed.contains(&writer), "actor.kind")?;
@@ -243,7 +243,7 @@ pub(crate) fn rules(
     }
 }
 
-/// Rules 56 to 61 on the compiler's control-stream `ModelInvocationRecorded`.
+/// Rules 71 to 76 on the compiler's control-stream `ModelInvocationRecorded`.
 fn compiler_rules(p: View<'_>, config_refs: Option<&Value>, writer: &str) -> Result<(), Invalid> {
     let bound = config_refs
         .and_then(|refs| refs.get("model_version"))
@@ -299,7 +299,7 @@ fn compiler_rules(p: View<'_>, config_refs: Option<&Value>, writer: &str) -> Res
     ensure(writer == "system", "actor.kind")
 }
 
-/// §9.9's batch clause of rule 69, over one `append` batch whose drafts each passed
+/// §9.10's batch clause of rule 84, over one `append` batch whose drafts each passed
 /// [`Draft::parse`]: a compromised revocation's `causation_id` names an `OwnerCommandIssued`
 /// earlier in the batch whose `command` is `kill_switch`, whose `scope` is `connection`, and whose
 /// `subject` is the revoked connection (`schema` at `causation_id`).

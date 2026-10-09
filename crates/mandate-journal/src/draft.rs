@@ -123,6 +123,7 @@ impl Draft {
                     config_refs: fields.get("config_refs"),
                     actor: fields.get("actor"),
                     causation_id,
+                    pii_refs: fields.get("pii_refs"),
                 },
             )?
         } else {
@@ -149,6 +150,7 @@ impl Draft {
         if closed {
             agent::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if controlled {
+            crate::connections::copy(event_type, int("schema_version"), &payload, causation_id)?;
             control::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if event_type == "StreamOpened"
             && subject(&stream_id, &payload).as_deref() != Some(stream_id.as_str())
@@ -312,7 +314,9 @@ fn subject(stream_id: &StreamId, payload: &Value) -> Option<String> {
             field("workspace_id")?,
             field("account_ref")?
         )),
-        StreamType::Agent | StreamType::Control | StreamType::Scheduler => None,
+        StreamType::Agent | StreamType::Control | StreamType::Scheduler | StreamType::Notice => {
+            None
+        }
     }
 }
 

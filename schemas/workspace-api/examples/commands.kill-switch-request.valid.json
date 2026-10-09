@@ -1,0 +1,77 @@
+[
+  {
+    "label": "scope only",
+    "remove": [
+      "/environment_shown",
+      "/owner_exit",
+      "/record",
+      "/step_up"
+    ]
+  },
+  {
+    "label": "the workspace scope",
+    "set": {
+      "/scope": {
+        "kind": "workspace",
+        "id": null
+      }
+    }
+  },
+  {
+    "label": "every optional member null",
+    "set": {
+      "/environment_shown": null,
+      "/owner_exit": null,
+      "/record": null,
+      "/step_up": null
+    }
+  },
+  {
+    "label": "auto: /environment_shown = \"paper\"",
+    "set": {
+      "/environment_shown": "paper"
+    }
+  },
+  {
+    "label": "auto: /environment_shown = \"live\"",
+    "set": {
+      "/environment_shown": "live"
+    }
+  },
+  {
+    "label": "auto: /environment_shown null",
+    "set": {
+      "/environment_shown": null
+    }
+  },
+  {
+    "label": "auto: /owner_exit null",
+    "set": {
+      "/owner_exit": null
+    }
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
+  },
+  {
+    "label": "auto: /scope/kind = \"agent\"",
+    "set": {
+      "/scope/kind": "agent"
+    }
+  },
+  {
+    "label": "auto: /scope/kind = \"connection\"",
+    "set": {
+      "/scope/kind": "connection"
+    }
+  }
+]

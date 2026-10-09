@@ -1,0 +1,38 @@
+[
+  {
+    "label": "requested_by in the body",
+    "set": {
+      "/requested_by": "owner"
+    }
+  },
+  {
+    "label": "a record without its build",
+    "remove": [
+      "/record/ui_build"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /record/artifact",
+    "remove": [
+      "/record/artifact"
+    ]
+  },
+  {
+    "label": "auto: no /record/ui_build",
+    "remove": [
+      "/record/ui_build"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /record",
+    "set": {
+      "/record/mutant_member": 1
+    }
+  }
+]

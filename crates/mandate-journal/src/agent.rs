@@ -169,7 +169,7 @@ pub enum AgentStreamCheck {
     /// `kill_switch`.
     ModeEventMismatch,
     /// A version-2 `AgentModeChanged` that is not a hold or a lift changes the owner's `held`, or a
-    /// version-1 one follows a version-2 one (journal spec v0.21 §9.10, §11; DEC-672).
+    /// version-1 one follows a version-2 one (journal spec v0.23 §9.11, §11; DEC-672, DEC-673).
     HeldMismatch,
 }
 
@@ -291,11 +291,11 @@ pub fn verify_agent_stream_anchored(
 }
 
 /// The owner's hold as a range of `AgentModeChanged` records has carried it so far (§11's
-/// `held_mismatch`): `false` before any on a full chain, and unknown before a later range reaches
-/// its first version-2 record. The check anchors on the stored chain, never on the range: a
-/// version-2 copy read while the hold is unknown fails closed, since only a hold or a lift sets it
-/// without an anchor. A caller that holds the chain before the range passes its anchoring record
-/// as the range's first row.
+/// `held_mismatch`, DEC-673): `false` on a full chain, which is anchored on nothing, and on a range
+/// anchored on no version 2; the anchor's `held` on a `Carried` range; and unknown on a later range
+/// whose caller cannot read the chain before it. The check anchors on the stored chain, never on
+/// the range: a version-2 copy read while the hold is unknown fails closed, since only a hold or a
+/// lift sets it without an anchor, and a version-1 record before it is not judged (item 4).
 struct Held {
     last: Option<bool>,
     versioned: bool,
@@ -367,7 +367,7 @@ const OWNER_MODE_REASONS: [&str; 5] = [
     "owner_lift_hold",
 ];
 
-/// Rule 11 and journal spec v0.21 §9.10's rules 78 and 79 (DEC-672): `held` follows a hold's and a
+/// Rule 11 and journal spec v0.23 §9.11's rules 93 and 94 (DEC-672): `held` follows a hold's and a
 /// lift's reason, and `to` is at least as strict as the lifecycle and at least `exits_only` while
 /// held, so a resume never clears a hold and a lift never clears a pause. A version-1 record has no
 /// `held` and no hold reason, so for it this is rule 11 alone.
@@ -527,6 +527,11 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
         schema,
         "payload.decided_by",
     )?;
+    ensure(
+        decided_by != "policy_overlay" || autonomy != "auto",
+        schema,
+        "payload.decided_by",
+    )?;
 
     let discretionary = p.text("purpose") == "discretionary_exit";
     ensure(
@@ -664,6 +669,7 @@ fn is_label(label: &str) -> bool {
         "default",
         "admission_ceiling",
         "client_ceiling",
+        "policy_overlay",
     ]
     .contains(&label)
         || ["rule:", DELEGATION]
@@ -1077,7 +1083,7 @@ static AGENT_MODE_CHANGED: Ty = Ty::Record(&[
     ("lifecycle", Ty::OneOf(&["normal", "paused", "stopped"])),
 ]);
 
-/// §9.10's version 2: version 1's members with the hold's two reasons, then `held`.
+/// §9.11's version 2: version 1's members with the hold's two reasons, then `held`.
 static AGENT_MODE_CHANGED_V2: Ty = Ty::Record(&[
     ("from", MODE),
     ("to", MODE),

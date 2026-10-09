@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-08, after the founder's product-flow decisions (DEC-528: no order ticket, display-only search and owner watchlists, adoption deferred, four stories after the first paper trade) |
+| **Last updated** | 2026-10-09, the coordinator handover: session `01BFjCWYU2cDwPmFkR3RAHQK` took the coordinator role, the founder decided DEC-833 and DEC-834, and the paper path was dispatched again |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -23,9 +23,10 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M3 Simulated execution and backtest | Done | The backtest runner's remaining pieces (DEC-127 items 15, 24, 25) have no story row yet |
 | M4 Journal | In progress: core, Postgres, artifacts, verification CLI, cold store and its checks, E5-8 `verify-cold` (#654, #662) merged; E7-19's artifact-aware Postgres append in tests (#676, DEC-510) | E5-5 the personal-data vault; E5-7 and E5-9 the cold store's operational half and examination bundle; all safety-critical; DEC-265 item 1 waits on the founder |
 | M5 Agent runtime and risk | In progress: the runtime and kill switches, the mandate document (validation, policy, change classification), the risk state and ladder, the gate with the US account rules, eligibility, conduct controls and restrictions, autonomy and the order builder, delegations, the client ceiling, the review date, V-047 | Tripwires (E6-13: MC-W01 to MC-W57) in the DEC-77 sequence; the Proposed readings under Waiting on the founder |
-| M6 Alpaca connector (paper) and recovery | In progress: the executor's intent, state machine and reconciliation; the protective-exit slices 1 to 6, slice 7's tests corrections (#671 to #673); the agent-, control- and account-stream schemas | E7-4 slice 7, the agent-scoped kill switch (DEC-485); then the first real paper trade (DEC-502, DEC-509, the [brief](tasks/first-paper-trade.md)): one SPY order through the production cycle API from a confirmed mandate version and the pinned `quant.ma_crossover` model; E7-19 slice 5 deletes E7-7's AAPL assembly |
+| M6 Alpaca connector (paper) and recovery | In progress. The executor, protective exits slices 1 to 7, and the paper path through D3, D4a, Q1, A1, D1 to D2b, P0, V0, M0 to M2b and R0 are merged. The live path's SP1, L0, K1a, B1 (tests and implementation) and the M1, S1 and X1 tests are merged | **First paper trade** ([brief](tasks/first-paper-trade.md)), in order: J3, D2c and D4b implementations, then D4c, D4d, Q2, H3, E1a, E1b, E3; then E2, the founder's run. **First live trade** ([brief](tasks/first-live-trade.md), DEC-529, target 2026-10-23): the implementations of M1, S1 and X1; then M2, O1a, S2, B2a, B3, K1b, then B2b and the C and G rows; rows E7-23 to E7-26 are in the backlog |
 | M7 Escalation v0 | In progress: `mandate-approval` (E8-1 to E8-3), the runtime's approval path, owner commands, the MC-E lifecycle driver | The CLI's `clap` wiring of the inbox and owner commands; email and one chat channel; MC-E01, E06, E17 to E24, E29 |
 | M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page; the design plan's first five decisions (DEC-511 to DEC-515) on #669 | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment; after the first paper trade, the founder's Home (signed-in, D1), holdings, search and watchlist stories (E11-10, E11-11; [DEC-528](decisions/DEC-528.md), which also places E10-19 and E19-12 later and defers adoption) |
+| M8 and M9's demo lanes (DEC-820, demo about 2026-10-26) | In progress in five lanes (below): identity spec v0.3, the authn, identity and passkey crates' tests and the passkey implementation; the workspace API contract and schemas; journal spec to v0.21; notifications spec v0.2 and its crates' tests; the web client foundation; the audit read contracts | L1 E9-1 sessions, E9-2 I1 implementation, E9-4 step-up, E9-7; L2 the journal spec queue (after v0.21), E10-13, E10-10 implementation, E10-7; L3 the E8-9 and E8-14 implementations; L4 the E11-9 slices; L5 E12-6, waiting on E9-2's `authorize` (identity ID-8) |
 | M8, M10 to M13 | Planned; the design layer drafted (DEC-431 to DEC-443) | ADR-0003's code stories (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5) |
 
 **Reference cases.** Journal 46 of 46. Trading domain 13 of 26 cases plus four variants; the rest
@@ -33,29 +34,25 @@ wait on the executor stories (E7-2 to E7-5) and the founder's DEC-129 items. Man
 the rest on E6-13, E8-3, E8-8 and DEC-444's harness. `crates/mandate-refcases/status.toml` is the
 record.
 
-**Open PRs.** #669 (the design plan, DEC-511 to DEC-515), #647 (the xtask reference checks,
-DEC-493), #514 (DEC-422, amends trading spec §5.4). Each merges on green CI and an independent
-review on a different model (DEC-79).
+**Open PRs.** About thirty; GitHub is the live record. Each merges on green CI and an independent
+review on a different model (DEC-79), approved by the coordinator under DEC-175.
 
 ## Next, in order
 
-1. **The faster process** ([DEC-516](decisions/DEC-516.md), proposed): two lanes, one item per
-   PR, review from pictures (`npm run shots`), tests that pin invariants, one row and one paragraph
-   per session. Item 1's light-lane merge rule waits for the founder's yes; the rest is in force.
-   Then the test sort (DEC-511 item 5), its own light-lane PR.
-2. **E7-4 slice 7, the agent-scoped kill switch (DEC-485).** Nearly done; it finishes first.
-3. **The first real paper trade (DEC-502, DEC-509).** One SPY order on the founder's Alpaca paper
-   account through the production cycle API, the deployment built from a confirmed mandate version
-   and the model output from the pinned quant model `quant.ma_crossover`, which makes no model
-   call, so neither the gateway (E15-6) nor the inference registry (E15-7) is on this path. The
-   [brief](tasks/first-paper-trade.md) sets the slices (DEC-503 to DEC-505; rows E10-16, E15-13,
-   E19-11, and for BTC/USD later E7-21 and E7-22). The one submission waits for the founder's
-   explicit confirmation (DEC-450).
-4. **The web plan** (`web/design/plan.md`), in its order: the process and codebase items (I), the
-   remaining Home and agent-page items (F), craft (G), the website (H).
-5. **Tripwires (E6-13)**, then M7's remainder (and the full agent process, E19-1, which its soak
-   needs), then M4's safety-critical half, then ADR-0003's code stories, each in the DEC-77
-   sequence with its own claim.
+1. **The first paper trade.** J3, D2c and D4b implementations are dispatched (claims #850, #851);
+   D4c, D4d, Q2, H3, E1a, E1b and E3 follow in the [brief](tasks/first-paper-trade.md)'s order, then
+   the founder's run (E2), which waits for the founder's explicit confirmation (DEC-450).
+2. **The first live trade** (DEC-529, target 2026-10-23, deadline 2026-11-02): land M1, S1 and
+   X1's implementations, then M2, O1a, S2, B2a, B3 and K1b's implementation, then B2b, the C and G
+   rows and the rehearsal (R0). It needs the paper path's E1a and E1b.
+3. **L1 identity:** the E9-1 session stack, E9-2's I1 implementation (it unblocks L5's E12-6),
+   E9-4's step-up tests, E9-7 after its spec.
+4. **L2 workspace API:** the open journal spec changes, renumbered after v0.21 and merged one at a
+   time (E10-15's client actor, then its hold records, then E9-7's identity records, then E12-3's
+   audit records), then E10-15's registration code; E10-13's tests and implementation; E10-10's
+   implementation; E10-7.
+5. **L3 and L4:** the E8-9 and E8-14 implementations; the next E11-9 slices on live data.
+6. **Then** tripwires (E6-13), M7's remainder, M4's safety-critical half, as before.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
 
@@ -72,6 +69,8 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   the plan prefers one era of type); the short set-up summary (counsel, DEC-477 question 23);
   the phone chart's axis (a canvas option against the no-script-media-query rule).
 - **Robinhood:** whether a paper or test path exists for agentic accounts.
+- **Decided 2026-10-09:** DEC-833 (route 2 serves both key kinds) and DEC-834 item 2 (route 2's
+  limits never refuse a valid key).
 - **GitHub Support:** purge the closed PRs' `refs/pull/*/head` refs from before the 2026-10-03
   history rewrite.
 - **Spike paper runs** (E17-0): the go-ahead.
@@ -109,6 +108,14 @@ it up.
 
 ## How the work runs
 
+- **Lanes.** The paper and live paths ([paper brief](tasks/first-paper-trade.md),
+  [live brief](tasks/first-live-trade.md)), and the demo lanes of DEC-820: L1 identity and tenancy
+  (E9-1, E9-2, E9-4, E9-7, E9-8; DEC-640 to DEC-669), L2 workspace API and connections (E10-10 to
+  E10-15, E7-11, E7-12, E7-17; DEC-670 to DEC-699), L3 notifications and approvals (E8-9 to E8-16;
+  DEC-700 to DEC-729), L4 web on live data (E11-9, E11-1 to E11-3; DEC-730 to DEC-759), L5 audit
+  (E12-1 to E12-3, E12-6; DEC-760 to DEC-789). One coordinating session dispatches builders,
+  runs the independent reviews and approves; the claim issues and the coordinator log (#165) are
+  the record of who holds what.
 - Builders follow `.cursor/skills/mandate-mode/` (story, spec-change, correction and ship
   playbooks) and prove work with `.cursor/skills/verify-mandate/`.
 - Safety-critical stories ship as the DEC-77 sequence: tests PR, implementation PR (test files only

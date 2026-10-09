@@ -1,9 +1,9 @@
-"""Journal spec v0.21 §9.10's reference vectors (DEC-672): the hold on new openings (DEC-191). They
+"""Journal spec v0.23 §9.11's reference vectors (DEC-672): the hold on new openings (DEC-191). They
 are the `hold_openings` and `lift_hold` owner commands on the control stream, and the agent
 runtime's two copies of them on the agent stream: `AgentModeChanged` version 2, which records the
 hold, and `OwnerCommandRefused` version 2, which can refuse a lift.
 
-The rules (75 to 80, and rule 26's new command) live in `control.py`, so one validator judges every
+The rules (90 to 95, and rule 26's new command) live in `control.py`, so one validator judges every
 closed schema. This module builds the `hold` section and checks it with three oracles of its own:
 the strictest mode each copy may leave, recomputed from mandate spec §5.9 and §6.1 by its own
 ranking; that each command is copied at most once; and that a hold is a person's and a lift is a
@@ -35,7 +35,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.21 §9.10 (DEC-672)"
+SPEC = "docs/specs/journal.md v0.23 §9.11 (DEC-672)"
 AT = "2026-10-08T16:00:00.000000000Z"
 IDS = {
     "hold": "01J8Z6H0A000000000000000H1",
@@ -147,7 +147,7 @@ MEMBER_CASES = {
         ("effective_at", 1791475560, "2026-10-08T16:06:00Z"),
     ),
 }
-# `held` on a hold's copy is rule 78's, and `user` and `subject` rule 76's, at the member's own path with the same
+# `held` on a hold's copy is rule 93's, and `user` and `subject` rule 91's, at the member's own path with the same
 # reason, so a mistyped or `null` value is refused identically whether or not its type is checked.
 RULE_TYPED = ("held", "user", "subject")
 NULLED = {
@@ -162,17 +162,17 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.10 types", base, [change(path, wrong_kind)], "schema", path))
+            out.append(invalid(f"{base}.{member}.kind", "§9.11 types", base, [change(path, wrong_kind)], "schema", path))
             if wrong_form is not None:
                 out.append(
-                    invalid(f"{base}.{member}.form", "§9.10 types", base, [change(path, wrong_form)], "non_canonical", path)
+                    invalid(f"{base}.{member}.form", "§9.11 types", base, [change(path, wrong_form)], "non_canonical", path)
                 )
         for member in NULLED[base]:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.null", "§9.10 types", base, [change(path, None)], "schema", path))
+            out.append(invalid(f"{base}.{member}.null", "§9.11 types", base, [change(path, None)], "schema", path))
         some = MEMBER_CASES[base][0][0]
-        out.append(invalid(f"{base}.missing", "§9.10 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
-        out.append(invalid(f"{base}.extra", "§9.10 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
+        out.append(invalid(f"{base}.missing", "§9.11 closed", base, [delete(f"payload.{some}")], "schema", f"payload.{some}"))
+        out.append(invalid(f"{base}.extra", "§9.11 closed", base, [change("payload.note", "x")], "schema", "payload.note"))
     return out
 
 
@@ -181,7 +181,7 @@ def invalid_drafts() -> list[dict]:
         *member_drafts(),
         invalid(
             "lift_step_up_as_a_timestamp",
-            "§9.10: times are integer risk-clock seconds, as §9.7's",
+            "§9.11: times are integer risk-clock seconds, as §9.7's",
             "lift",
             [change("payload.step_up.authenticated_at", "2026-10-08T15:59:50.000000000Z")],
             "schema",
@@ -189,7 +189,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "mode_changed_unknown_version",
-            "§9.10: version 2 is registered here; version 1 is §9.1's",
+            "§9.11: version 2 is registered here; version 1 is §9.1's",
             "held",
             [change("schema_version", 3)],
             "unknown_schema",
@@ -197,7 +197,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "refused_v1_lift",
-            "§9.10: version 1's command list stays closed",
+            "§9.11: version 1's command list stays closed",
             "lift_refused",
             [change("schema_version", 1)],
             "non_canonical",
@@ -221,7 +221,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_lifts_a_hold",
-            "rule 75: lifting is the owner's alone (DEC-191)",
+            "rule 90: lifting is the owner's alone (DEC-191)",
             "lift",
             [change("actor", dict(CLIENT))],
             "schema",
@@ -229,7 +229,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_pauses",
-            "rule 75: a client issues no command but a hold (DEC-191)",
+            "rule 90: a client issues no command but a hold (DEC-191)",
             "hold",
             [change("actor", dict(CLIENT)), change("payload.command", "pause")],
             "schema",
@@ -237,7 +237,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_kill_switch",
-            "rule 75: the kill switch stays the human's (DEC-141 item 3)",
+            "rule 90: the kill switch stays the human's (DEC-141 item 3)",
             "hold",
             [*kill_switch(CLIENT)],
             "schema",
@@ -245,7 +245,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "open_command_without_a_command",
-            "§9.10: every command names itself",
+            "§9.11: every command names itself",
             "hold",
             [change("payload.command", 7)],
             "schema",
@@ -254,7 +254,7 @@ def invalid_drafts() -> list[dict]:
         *(
             invalid(
                 f"lift_by_{name}",
-                "rule 75: only a user lifts a hold",
+                "rule 90: only a user lifts a hold",
                 "lift",
                 [change("actor", dict(actor))],
                 "schema",
@@ -265,7 +265,7 @@ def invalid_drafts() -> list[dict]:
         *(
             invalid(
                 f"hold_by_{name}",
-                "rule 75: a hold is a user's or a client's",
+                "rule 90: a hold is a user's or a client's",
                 "hold",
                 [change("actor", dict(actor))],
                 "schema",
@@ -275,7 +275,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_hold_with_a_build",
-            "rule 67: a client is external, so it has no build digest",
+            "rule 82: a client is external, so it has no build digest",
             "hold",
             [change("actor", dict(CLIENT) | {"build": "sha256:" + "d" * 64})],
             "schema",
@@ -283,7 +283,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "version_1_mode_change_with_a_hold",
-            "§9.10: version 1's reasons stay closed; a hold is version 2's",
+            "§9.11: version 1's reasons stay closed; a hold is version 2's",
             "held",
             [change("schema_version", 1), delete("payload.held")],
             "non_canonical",
@@ -291,7 +291,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "hold_by_the_system",
-            "rule 75: a hold is a person's command",
+            "rule 90: a hold is a person's command",
             "hold",
             [change("actor", dict(SERVICES))],
             "schema",
@@ -299,7 +299,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_holds_on_an_agent_stream",
-            "rule 68: a client writes only to the control stream",
+            "rule 83: a client writes only to the control stream",
             "held",
             [change("actor", dict(CLIENT))],
             "schema",
@@ -307,7 +307,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "hold_names_another_user",
-            "rule 76: the command names its human",
+            "rule 91: the command names its human",
             "hold",
             [change("payload.user", "user_owner_02")],
             "schema",
@@ -315,7 +315,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "client_hold_names_its_own_id",
-            "rule 76: a client's command names the user it acts for",
+            "rule 91: a client's command names the user it acts for",
             "hold",
             [change("actor", dict(CLIENT)), change("payload.user", "client_01")],
             "schema",
@@ -323,7 +323,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "hold_for_another_agent",
-            "rule 76: an agent-scope command's subject is its agent",
+            "rule 91: an agent-scope command's subject is its agent",
             "hold",
             [change("payload.subject", "agent_b")],
             "schema",
@@ -331,7 +331,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "hold_with_step_up",
-            "rule 77: a hold needs no step-up and carries none",
+            "rule 92: a hold needs no step-up and carries none",
             "hold",
             [change("payload.step_up", dict(STEP_UP))],
             "schema",
@@ -339,7 +339,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "hold_copied_as_not_held",
-            "rule 78",
+            "rule 93",
             "held",
             [change("payload.held", False), change("payload.to", "normal")],
             "schema",
@@ -347,7 +347,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "lift_copied_as_held",
-            "rule 78",
+            "rule 93",
             "lifted",
             [change("payload.held", True), change("payload.to", "exits_only")],
             "schema",
@@ -355,7 +355,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "resume_clears_the_hold",
-            "rule 79: a resume lifts only the pause, never the hold (MI-3)",
+            "rule 94: a resume lifts only the pause, never the hold (MI-3)",
             "held",
             [change("payload.from", "paused"), change("payload.to", "normal"), change("payload.reason", "owner_resume")],
             "schema",
@@ -363,7 +363,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "lift_clears_the_pause",
-            "rule 79: a lift lifts only the hold",
+            "rule 94: a lift lifts only the hold",
             "lifted",
             [change("payload.from", "paused"), change("payload.lifecycle", "paused")],
             "schema",
@@ -371,7 +371,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "hold_copied_without_its_command",
-            "rule 80",
+            "rule 95",
             "held",
             [change("causation_id", None)],
             "schema",
@@ -379,7 +379,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "lift_copied_without_its_command",
-            "rule 80: a lift's copy names its command",
+            "rule 95: a lift's copy names its command",
             "lifted",
             [change("causation_id", None)],
             "schema",
@@ -387,7 +387,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "copy_with_a_null_hold",
-            "§9.10 types: `held` is a boolean on every version-2 copy",
+            "§9.11 types: `held` is a boolean on every version-2 copy",
             "held",
             [change("payload.reason", "restriction_changed"), change("causation_id", None), change("payload.held", None)],
             "schema",
@@ -395,7 +395,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "resume_copied_without_its_command",
-            "rule 80: every owner copy at version 2",
+            "rule 95: every owner copy at version 2",
             "lifted",
             [change("payload.reason", "owner_resume"), change("causation_id", None)],
             "schema",
@@ -419,7 +419,7 @@ def valid_drafts() -> list[dict]:
     return [
         valid(
             "version_1_mode_change_unchanged",
-            "§9.10: version 1 stays registered",
+            "§9.11: version 1 stays registered",
             "held",
             [
                 change("schema_version", 1),
@@ -431,61 +431,61 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "kill_switch_stays_open",
-            "§9.10: other commands are not closed here, and a kill switch is always recorded",
+            "§9.11: other commands are not closed here, and a kill switch is always recorded",
             "hold",
             kill_switch(USER),
         ),
         valid(
             "host_cli_kill_switch",
-            "§9.10, rule 75: the host CLI's `system` kill switch is never refused (rule 13)",
+            "§9.11, rule 90: the host CLI's `system` kill switch is never refused (rule 13)",
             "hold",
             kill_switch(SERVICES),
         ),
         valid(
             "pause_with_any_members",
-            "§9.10: an open command's other members are not judged here",
+            "§9.11: an open command's other members are not judged here",
             "hold",
             [change("payload.command", "pause"), change("payload.note", "x")],
         ),
         valid(
             "client_holds",
-            "rules 68, 75 and 76: a client may hold (DEC-191)",
+            "rules 83, 90 and 91: a client may hold (DEC-191)",
             "hold",
             [change("actor", dict(CLIENT))],
         ),
         valid(
             "lift_without_step_up",
-            "§9.10: the runtime refuses it as step_up_missing; the journal accepts it",
+            "§9.11: the runtime refuses it as step_up_missing; the journal accepts it",
             "lift",
             [change("payload.step_up", None)],
         ),
         valid(
             "lift_while_a_limit_is_latched",
-            "rule 79: a lift never clears a latched limit, so the mode may stay exits_only",
+            "rule 94: a lift never clears a latched limit, so the mode may stay exits_only",
             "lifted",
             [change("payload.to", "exits_only")],
         ),
         valid(
             "resume_while_held",
-            "rule 79: the resume leaves the hold",
+            "rule 94: the resume leaves the hold",
             "held",
             [change("payload.from", "paused"), change("payload.reason", "owner_resume")],
         ),
         valid(
             "hold_while_paused",
-            "rule 79: the mode stays paused and the hold is recorded",
+            "rule 94: the mode stays paused and the hold is recorded",
             "held",
             [change("payload.from", "paused"), change("payload.to", "paused"), change("payload.lifecycle", "paused")],
         ),
         valid(
             "hold_after_stop",
-            "rule 79: a stopped agent records the hold and stays stopped",
+            "rule 94: a stopped agent records the hold and stays stopped",
             "held",
             [change("payload.from", "stopped"), change("payload.to", "stopped"), change("payload.lifecycle", "stopped")],
         ),
         valid(
             "restriction_lifts_under_a_hold",
-            "rules 79 and 80: not an owner copy, and the hold keeps exits_only",
+            "rules 94 and 95: not an owner copy, and the hold keeps exits_only",
             "held",
             [change("payload.reason", "restriction_changed"), change("payload.from", "paused"), change("causation_id", None)],
         ),
@@ -754,20 +754,20 @@ def check_section(section: dict) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.75",
-    "rule.75.client_lifts",
-    "rule.75.client_commands",
+    "rule.90",
+    "rule.90.client_lifts",
+    "rule.90.client_commands",
     "closed.owner_commands",
-    "rule.76",
-    "rule.76.subject",
+    "rule.91",
+    "rule.91.subject",
     "types.null",
-    "rule.77",
-    "rule.78",
-    "rule.79",
-    "rule.79.held",
-    "rule.80",
+    "rule.92",
+    "rule.93",
+    "rule.94",
+    "rule.94.held",
+    "rule.95",
     "rule.28",
-    "rule.68",
+    "rule.83",
     "record.extra",
     "record.missing",
     *sorted(
@@ -791,19 +791,19 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         return next(c for c in s[kind] if c["name"] == name)
 
     return [
-        ("a base draft breaks rule 77", "drafts.valid", mutated(lambda s: s["drafts"]["hold"]["payload"].update(step_up=dict(STEP_UP)))),
+        ("a base draft breaks rule 92", "drafts.valid", mutated(lambda s: s["drafts"]["hold"]["payload"].update(step_up=dict(STEP_UP)))),
         (
             "two copies of one lift",
             "drafts.copies",
             mutated(lambda s: s["drafts"]["lift_refused"].update(causation_id=IDS["lift"])),
         ),
         (
-            "a valid resume clears the hold while rule 79 forgets it",
+            "a valid resume clears the hold while rule 94 forgets it",
             "drafts.floor",
             mutated(lambda s: case(s, "valid_drafts", "resume_while_held")["changes"].append(change("payload.to", "normal"))),
         ),
         (
-            "a valid hold names someone else while rule 76 is read loosely",
+            "a valid hold names someone else while rule 91 is read loosely",
             "drafts.who",
             mutated(lambda s: case(s, "valid_drafts", "client_holds")["changes"].append(change("actor.on_behalf_of", "user_owner_02"))),
         ),

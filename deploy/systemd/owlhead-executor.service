@@ -1,0 +1,65 @@
+# A connection's executor (DEC-692): its own process and user, never inside the API. A TEMPLATE,
+# installed and never enabled by bootstrap.sh: the live lane supplies the binary and its arguments
+# (the name below is provisional) and the founder enables it when they do. It reads its settings
+# from /etc/owlhead/executor.env, which holds no secret, and the vault's two keys as systemd
+# credentials (DEC-822 item 4); the token key is this unit's alone. The Alpaca client secret is in
+# the vault. It listens on no port.
+[Unit]
+Description=Owlhead connection executor
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+ConditionPathExists=/usr/local/bin/mandate-executor
+
+[Service]
+Type=simple
+User=owlhead_exec
+Group=owlhead_exec
+EnvironmentFile=/etc/owlhead/executor.env
+LoadCredential=vault-pending-key:/etc/owlhead/credentials/vault-pending-key
+LoadCredential=vault-token-key:/etc/owlhead/credentials/vault-token-key
+ExecStart=/usr/local/bin/mandate-executor
+Restart=on-failure
+RestartSec=2s
+
+# Writable: the artifact store and the vault's two directories; bootstrap.sh owns their layout
+# (DEC-692). No StateDirectory=, which would chown /var/lib/owlhead to this user.
+ReadWritePaths=/var/lib/owlhead/artifacts /var/lib/owlhead/vault/pending /var/lib/owlhead/vault/tokens
+UMask=0027
+
+# Default-deny egress (DEC-822 item 5): only loopback (Postgres's socket needs no IP at all). The
+# hosts DEC-821 allows (Alpaca's OAuth and paper API) are added per host by
+# deploy/allow-egress.sh as a drop-in, never in this file.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+# Hardening.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SocketBindDeny=any
+
+[Install]
+WantedBy=multi-user.target

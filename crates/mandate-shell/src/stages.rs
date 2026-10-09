@@ -157,6 +157,18 @@ pub struct Admitted {
     /// The pinned instrument's ticker, which stored bars are keyed by. The same pinned entry gives
     /// the view's one instrument id.
     pub symbol: String,
+    /// The registered policy set and model registry that govern the run, or `None` when nothing
+    /// does yet (DEC-484).
+    pub governed: Option<GovernedRefs>,
+}
+
+/// The content hashes of the effective `policy_set` and `model_registry` registrations, which a
+/// governed run's version-2 `ModelOutputRecorded` and `DecisionMade` reference (journal spec
+/// v0.16, DEC-484 item 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GovernedRefs {
+    pub policy_set: Digest,
+    pub model_registry: Digest,
 }
 
 /// A signal model as the mandate's envelope names it (mandate spec §8.1). The tracer feeds no model

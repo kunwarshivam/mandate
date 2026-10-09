@@ -84,17 +84,20 @@ const COMPANION: &str = "OrderRequestRecorded";
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
         StreamType::Control => {
-            CONTROL.contains(&event_type) || crate::workspace::CONTROL.contains(&event_type)
+            CONTROL.contains(&event_type)
+                || crate::connections::CONTROL.contains(&event_type)
+                || crate::workspace::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
-            event_type == REFUSAL
+            crate::connections::ACCOUNT.contains(&event_type)
+                || event_type == REFUSAL
                 || event_type == SNAPSHOT
                 || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
-        StreamType::Scheduler => false,
+        StreamType::Scheduler | StreamType::Notice => false,
     }
 }
 
@@ -111,16 +114,23 @@ pub(crate) fn payload(
         config_refs,
         actor,
         causation_id,
+        pii_refs,
     } = envelope;
     if event_type == "OwnerCommandIssued"
         && let Some(open) = crate::workspace::open_command(payload, actor)
     {
         return open;
     }
-    let schema = crate::workspace::schema(event_type, schema_version, stream.stream_type())
-        .or_else(|| schema(event_type, schema_version))
+    let stream_type = stream.stream_type();
+    let schema = crate::workspace::schema(event_type, schema_version, stream_type)
+        .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
+        .or_else(|| match (event_type, stream_type) {
+            ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
+            _ => schema(event_type, schema_version),
+        })
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
+    crate::connections::rules(event_type, schema_version, &payload, causation_id, pii_refs)?;
     crate::workspace::rules(
         event_type,
         schema_version,
@@ -281,13 +291,15 @@ pub(crate) fn payload(
     Ok(payload)
 }
 
-/// The envelope members [`payload`]'s rules read: `config_refs` (rules 22, 38, 56), the actor
-/// (rules 46, 55, 61, 63, 64, 70, and 73 to 76), and `causation_id` (rules 54 and 69).
+/// The envelope members [`payload`]'s rules read: `config_refs` (rules 22, 38, and 71), the actor
+/// (rules 46, 70, 76, 78, 79, 85, and 88 to 91), `causation_id` (rules 65, 69, and 84), and
+/// `pii_refs` (rule 62).
 #[derive(Clone, Copy)]
 pub(crate) struct Envelope<'a> {
     pub(crate) config_refs: Option<&'a Value>,
     pub(crate) actor: Option<&'a Value>,
     pub(crate) causation_id: Option<&'a Value>,
+    pub(crate) pii_refs: Option<&'a Value>,
 }
 
 /// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
@@ -313,7 +325,7 @@ pub(crate) fn subject_and_copy(
     let allowed: &[&str] = match stream.stream_type() {
         StreamType::Account => &["acknowledge"],
         StreamType::Agent => &["resume", "stop", "lift_hold"],
-        StreamType::Control | StreamType::Scheduler => &[],
+        StreamType::Control | StreamType::Scheduler | StreamType::Notice => &[],
     };
     ensure(
         allowed.contains(&p.text("command")),

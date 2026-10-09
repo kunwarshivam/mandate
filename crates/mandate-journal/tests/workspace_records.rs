@@ -1,11 +1,9 @@
-//! E10-15 (DEC-670 to DEC-672; journal spec v0.19 to v0.21): the records the workspace API commits,
-//! the `client` actor, and the hold on new openings, through the journal's own draft and batch
-//! checks against the vectors' `workspace_api`, `client_actor` and `hold` sections. Every base and
-//! valid draft parses, every invalid draft is refused with its reason at its path, and rule 69's
-//! batches commit or fail at their draft. Until E10-15's implementation registers them, the journal
-//! refuses these records as not catalogued or not registered, which is the answer these tests fail
-//! on.
+//! E10-15 (DEC-670 to DEC-673; journal spec v0.23 §3, §9.9 to §9.11, §11): the workspace API
+//! records, the `client` actor, and the hold, against the vectors' `workspace_api`,
+//! `client_actor` and `hold` sections. Until E10-15's implementation the journal refuses these
+//! records as not catalogued or not registered, and the range test stops at its stub.
 
+use std::ops::RangeInclusive;
 use std::path::Path;
 
 use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
@@ -69,197 +67,120 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
     changed(base, case)
 }
 
-/// Every base and valid draft of `name` parses; answers the failures and the number of valid
-/// drafts.
-fn unrefused(name: &str) -> (Vec<String>, usize) {
-    let section = section(name);
-    let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
-    let mut failed = Vec::new();
-    for (base, body) in drafts {
-        let parsed = Draft::parse(&to_canonical(body)).map(|d| d.event_type().to_owned());
-        if parsed.as_deref() != Ok(text(body, "event_type")) {
-            failed.push(format!("base {}: {parsed:?}", base.as_str()));
-        }
-    }
-    let valid = list(&section, "valid_drafts");
-    for case in valid {
-        let bytes = draft(&section, case);
-        let written = parse(&bytes).unwrap();
-        let parsed = Draft::parse(&bytes).map(|d| (d.event_type().to_owned(), d.schema_version()));
-        let want = (
-            text(&written, "event_type").to_owned(),
-            written
-                .get("schema_version")
-                .and_then(Value::as_int)
-                .unwrap_or_default(),
-        );
-        if parsed.as_ref() != Ok(&want) {
-            failed.push(format!("valid {}: {parsed:?}", text(case, "name")));
-        }
-    }
-    (failed, valid.len())
-}
+/// The sections, each with its least valid and invalid drafts and the rules its invalid drafts
+/// cite: §9.9 (DEC-670), §3's `client` actor with §9.10 (DEC-671), and §9.11 (DEC-672).
+const SECTIONS: [(&str, usize, usize, RangeInclusive<u32>); 3] = [
+    ("workspace_api", 13, 147, 69..=80),
+    ("client_actor", 9, 71, 81..=89),
+    ("hold", 12, 78, 90..=95),
+];
 
-/// Every invalid draft of `name` is refused with its reason at its path; answers the failures and
-/// the clauses the cases cite.
-fn refused(name: &str) -> (Vec<String>, Vec<String>) {
-    let section = section(name);
-    let invalid = list(&section, "invalid_drafts");
+/// Every base and valid draft parses as its own type and version, and every invalid draft is
+/// refused with its reason at its path, with never fewer cases and each rule cited.
+#[test]
+fn every_e10_15_draft_parses_or_is_refused_as_its_case_says() {
     let mut failed = Vec::new();
-    for case in invalid {
-        let expect = case.get("expect").unwrap();
-        let want = (text(expect, "reason"), text(expect, "path"));
-        let got = Draft::parse(&draft(&section, case)).err();
-        let got = got.as_ref().map(|e| (e.reason.code(), e.path.as_str()));
-        if got != Some(want) {
-            failed.push(format!(
-                "{}: expected {want:?}, got {got:?}",
-                text(case, "name")
-            ));
+    for (name, valid, invalid, rules) in SECTIONS {
+        let section = section(name);
+        let bases = section.get("drafts").and_then(Value::as_object).unwrap();
+        let valid_cases = list(&section, "valid_drafts");
+        let valid_drafts = valid_cases.iter().map(|case| draft(&section, case));
+        for bytes in bases.values().map(to_canonical).chain(valid_drafts) {
+            let written = parse(&bytes).unwrap();
+            let version = written.get("schema_version").and_then(Value::as_int);
+            let want = (text(&written, "event_type").to_owned(), version);
+            let got =
+                Draft::parse(&bytes).map(|d| (d.event_type().to_owned(), Some(d.schema_version())));
+            if got.as_ref() != Ok(&want) {
+                failed.push(format!(
+                    "{name} {}: {got:?}",
+                    String::from_utf8_lossy(&bytes)
+                ));
+            }
         }
-    }
-    let clauses = invalid
-        .iter()
-        .map(|c| text(c, "clause").to_owned())
-        .collect();
-    (failed, clauses)
-}
-
-fn assert_rules_cited(clauses: &[String], rules: std::ops::RangeInclusive<u32>) {
-    for rule in rules {
-        let named = format!("rule {rule}");
+        let invalid_cases = list(&section, "invalid_drafts");
+        for case in invalid_cases {
+            let expect = case.get("expect").unwrap();
+            let want = (text(expect, "reason"), text(expect, "path"));
+            let got = Draft::parse(&draft(&section, case)).err();
+            let got = got.as_ref().map(|e| (e.reason.code(), e.path.as_str()));
+            if got != Some(want) {
+                failed.push(format!(
+                    "{name} {}: want {want:?}, got {got:?}",
+                    text(case, "name")
+                ));
+            }
+        }
+        let counts = (valid_cases.len(), invalid_cases.len());
         assert!(
-            clauses.iter().any(|clause| clause.starts_with(&named)),
-            "{named} has an invalid draft"
+            counts.0 >= valid && counts.1 >= invalid,
+            "{name}: {counts:?} cases; never fewer"
         );
+        for rule in rules {
+            let named = format!("rule {rule}");
+            let cited = |c: &Value| text(c, "clause").split(':').next() == Some(&named);
+            assert!(
+                invalid_cases.iter().any(cited),
+                "{name}: {named} has no invalid draft"
+            );
+        }
     }
-}
-
-#[test]
-fn every_workspace_api_base_and_valid_draft_parses() {
-    let (failed, valid) = unrefused("workspace_api");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert!(valid >= 13, "{valid} valid drafts; never fewer");
 }
 
-#[test]
-fn every_invalid_workspace_api_draft_is_refused_with_its_reason_at_its_path() {
-    let (failed, clauses) = refused("workspace_api");
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert!(
-        clauses.len() >= 147,
-        "{} invalid drafts; never fewer",
-        clauses.len()
-    );
-    assert_rules_cited(&clauses, 54..=65);
-}
-
-#[test]
-fn every_client_actor_base_and_valid_draft_parses() {
-    let (failed, valid) = unrefused("client_actor");
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert!(valid >= 8, "{valid} valid drafts; never fewer");
-}
-
-#[test]
-fn every_invalid_client_actor_draft_is_refused_with_its_reason_at_its_path() {
-    let (failed, clauses) = refused("client_actor");
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert!(
-        clauses.len() >= 68,
-        "{} invalid drafts; never fewer",
-        clauses.len()
-    );
-    assert_rules_cited(&clauses, 66..=74);
-}
-
-/// Rule 69's batch clause: a compromised revocation names, earlier in its batch, the kill switch at
-/// its connection's scope. Each valid batch commits, and each invalid one fails at its draft.
+/// Rule 84's batch clause: a compromised revocation names, earlier in its batch, the kill switch at
+/// its connection's scope. Each valid batch commits, with or without an unrelated draft between,
+/// and each invalid one fails at its draft.
 #[test]
 fn a_compromised_revocation_follows_its_connections_kill_switch_in_its_batch() {
     let section = section("client_actor");
+    let base = |member: &Value| match member.get("kill_switch") {
+        Some(Value::Bool(true)) => section.get("kill_switch"),
+        _ => section
+            .get("drafts")
+            .and_then(|d| d.get(text(member, "base_draft"))),
+    };
     let batch = |case: &Value| -> Vec<Draft> {
-        list(case, "drafts")
-            .iter()
-            .map(|member| {
-                let base = if member.get("kill_switch") == Some(&Value::Bool(true)) {
-                    section.get("kill_switch")
-                } else {
-                    section
-                        .get("drafts")
-                        .and_then(|d| d.get(text(member, "base_draft")))
-                };
-                Draft::parse(&changed(base, member)).unwrap()
-            })
+        let members = list(case, "drafts").iter();
+        members
+            .map(|m| Draft::parse(&changed(base(m), m)).unwrap())
             .collect()
     };
+    let unrelated = parse(br#"{"base_draft":"client_connected"}"#).unwrap();
+    let unrelated = Draft::parse(&draft(&section, &unrelated)).unwrap();
+    let (valid, invalid) = (
+        list(&section, "valid_batches"),
+        list(&section, "invalid_batches"),
+    );
+    let check = |drafts: &[Draft]| {
+        let refused = check_batch(drafts).err();
+        refused.map(|(i, e)| (u64::try_from(i).ok(), e.reason.code(), e.path))
+    };
+    let index = |e: &Value| e.get("draft_index").and_then(Value::as_int);
+    let cases = valid.iter().map(|c| (c, None));
     let mut failed = Vec::new();
-    let valid = list(&section, "valid_batches");
-    for case in valid {
-        let drafts = batch(case);
-        if let Err(e) = check_batch(&drafts) {
-            failed.push(format!("valid {}: {e:?}", text(case, "name")));
+    for (case, expect) in cases.chain(invalid.iter().map(|c| (c, c.get("expect")))) {
+        let want = expect.map(|e| (index(e), text(e, "reason"), text(e, "path").to_owned()));
+        let mut drafts = batch(case);
+        let mut got = check(&drafts);
+        if got.is_none() && want.is_none() {
+            drafts.insert(1, unrelated.clone());
+            got = check(&drafts);
         }
-        let unrelated = section
-            .get("drafts")
-            .and_then(|d| d.get("client_connected"))
-            .map(to_canonical)
-            .and_then(|bytes| Draft::parse(&bytes).ok())
-            .unwrap();
-        let mut apart = drafts.clone();
-        apart.insert(1, unrelated);
-        if let Err(e) = check_batch(&apart) {
+        if got != want {
             failed.push(format!(
-                "valid {} with an unrelated draft between: {e:?}",
-                text(case, "name")
-            ));
-        }
-    }
-    assert!(!valid.is_empty(), "at least one valid batch");
-    let invalid = list(&section, "invalid_batches");
-    for case in invalid {
-        let expect = case.get("expect").unwrap();
-        let index = expect
-            .get("draft_index")
-            .and_then(Value::as_int)
-            .and_then(|i| usize::try_from(i).ok());
-        let want = (index, text(expect, "reason"), text(expect, "path"));
-        let got = check_batch(&batch(case)).err();
-        let got = got
-            .as_ref()
-            .map(|(i, e)| (Some(*i), e.reason.code(), e.path.as_str()));
-        if got != Some(want) {
-            failed.push(format!(
-                "{}: expected {want:?}, got {got:?}",
+                "{}: want {want:?}, got {got:?}",
                 text(case, "name")
             ));
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert!(
-        invalid.len() >= 6,
-        "{} invalid batches; never fewer",
+        !valid.is_empty() && invalid.len() >= 6,
+        "{} and {} batches",
+        valid.len(),
         invalid.len()
     );
-}
-
-#[test]
-fn every_hold_base_and_valid_draft_parses() {
-    let (failed, valid) = unrefused("hold");
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert!(valid >= 11, "{valid} valid drafts; never fewer");
-}
-
-#[test]
-fn every_invalid_hold_draft_is_refused_with_its_reason_at_its_path() {
-    let (failed, clauses) = refused("hold");
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert!(
-        clauses.len() >= 69,
-        "{} invalid drafts; never fewer",
-        clauses.len()
-    );
-    assert_rules_cited(&clauses, 75..=80);
 }
 
 /// One stored agent-stream row at `seq` of an `event_type` with `payload`.
@@ -282,11 +203,9 @@ fn stored(seq: u64, event_type: &str, version: u64, payload: &Value) -> StoredEv
     }
 }
 
-/// §11's `held_mismatch` (§9.10, DEC-672, DEC-673) over each of the `hold` section's ranges, with
-/// the anchor each case's caller derives from the stored chain before the range: none, no version
-/// 2 before it, or the `held` the last version 2 carried. The first failing record is reported at
-/// its `seq`, and only it: a case lists every violation the reference finds, and the verifier
-/// stops at the first.
+/// §11's `held_mismatch` (§9.11, DEC-673) over the `hold` section's ranges, each with the anchor
+/// its caller derives (item 1); a full chain from seq 1 is anchored on nothing, so answers the same
+/// told `Unknown`. Only the first failing record is reported, at its `seq`.
 #[test]
 fn the_owners_hold_is_carried_through_every_range() {
     let section = section("hold");
@@ -303,35 +222,37 @@ fn the_owners_hold_is_carried_through_every_range() {
                 stored(seq, text(event, "event_type"), version, payload)
             })
             .collect();
-        let anchor = match case.get("anchor") {
-            Some(anchor @ Value::Object(_))
-                if anchor.get("v2_before") == Some(&Value::Bool(true)) =>
-            {
-                HeldAnchor::Carried {
+        let anchor = case.get("anchor").filter(|a| a.as_object().is_some());
+        let anchors = match anchor {
+            None if from == 1 => vec![HeldAnchor::Unknown, HeldAnchor::NoVersionTwo],
+            None => vec![HeldAnchor::Unknown],
+            Some(a) if a.get("v2_before") == Some(&Value::Bool(true)) => {
+                vec![HeldAnchor::Carried {
                     seq: from - 1,
-                    held: anchor.get("held") == Some(&Value::Bool(true)),
-                }
+                    held: a.get("held") == Some(&Value::Bool(true)),
+                }]
             }
-            Some(Value::Object(_)) => HeldAnchor::NoVersionTwo,
-            _ => HeldAnchor::Unknown,
-        };
-        let start = TrustedStart {
-            from_seq: from,
-            prev_hash: Digest::of(b""),
+            Some(_) => vec![HeldAnchor::NoVersionTwo],
         };
         let expect = list(case, "expect");
         let want = expect
             .first()
             .and_then(Value::as_int)
             .map(|i| (from + i, "held_mismatch"));
-        let got = verify_agent_stream_anchored(&rows, start, anchor)
-            .err()
-            .map(|f| (f.seq, f.check.code()));
-        if got != want {
-            failed.push(format!(
-                "{}: expected the first of {expect:?} from seq {from}, got {got:?}",
-                text(case, "name")
-            ));
+        for anchor in anchors {
+            let start = TrustedStart {
+                from_seq: from,
+                prev_hash: Digest::of(b""),
+            };
+            let got = verify_agent_stream_anchored(&rows, start, anchor)
+                .err()
+                .map(|f| (f.seq, f.check.code()));
+            if got != want {
+                failed.push(format!(
+                    "{} with {anchor:?}: expected the first of {expect:?} from seq {from}, got {got:?}",
+                    text(case, "name")
+                ));
+            }
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -340,14 +261,25 @@ fn the_owners_hold_is_carried_through_every_range() {
         "{} range cases; never fewer",
         cases.len()
     );
-    assert!(
-        cases.iter().any(|c| list(c, "expect").len() >= 2),
-        "a case with two violations shows only the first is reported"
-    );
-    assert!(
-        cases
-            .iter()
-            .any(|c| c.get("anchor").and_then(|a| a.get("v2_before")) == Some(&Value::Bool(false))),
-        "a case anchored on no version 2 before the range"
-    );
+    let nothing_before = parse(br#"{"v2_before":false}"#).unwrap();
+    let kinds: [(Option<&Value>, bool, &[u64]); 4] = [
+        (None, true, &[0]),
+        (None, true, &[]),
+        (Some(&nothing_before), true, &[]),
+        (None, false, &[1, 2]),
+    ];
+    for (anchor, later, expect) in kinds {
+        let found = cases.iter().any(|c| {
+            c.get("anchor").filter(|a| a.as_object().is_some()) == anchor
+                && (c.get("from_seq").and_then(Value::as_int) != Some(1)) == later
+                && list(c, "expect")
+                    .iter()
+                    .filter_map(Value::as_int)
+                    .eq(expect.iter().copied())
+        });
+        assert!(
+            found,
+            "a case anchored {anchor:?}, after seq 1 {later}, expecting {expect:?}"
+        );
+    }
 }
