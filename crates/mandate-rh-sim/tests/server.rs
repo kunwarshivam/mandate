@@ -204,7 +204,6 @@ fn orders(server: &SimServer, account: &str) -> Result<Vec<Order>, ServerError> 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_server_listens_on_loopback_only_at_a_port_the_system_chose() -> Outcome {
     let first = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let second = SimServer::start(sim().unwrap(), Variant::Honest)?;
@@ -219,7 +218,6 @@ fn the_server_listens_on_loopback_only_at_a_port_the_system_chose() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_handshake_answers_the_transports_revision_and_a_session_later_requests_need() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let mut wire = Wire::connect(&server.url()?);
@@ -252,7 +250,6 @@ fn the_handshake_answers_the_transports_revision_and_a_session_later_requests_ne
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
     let tools = Wire::connect(&server.url()?).list();
@@ -294,7 +291,6 @@ fn the_honest_listing_is_the_pinned_contract_and_carries_no_instruction_text() -
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_extra_tool_variant_lists_one_more_tool_keeps_the_hash_and_reaches_nothing() -> Outcome {
     for extra in ["place_option_order", "transfer_funds"] {
         let (server, mut wire) = served(Variant::ExtraTool(extra.to_owned()))?;
@@ -316,7 +312,6 @@ fn the_extra_tool_variant_lists_one_more_tool_keeps_the_hash_and_reaches_nothing
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn the_injection_variant_carries_instruction_text_in_every_description_and_result() -> Outcome {
     assert!(
         instructs(INJECTION),
@@ -354,7 +349,6 @@ fn the_injection_variant_carries_instruction_text_in_every_description_and_resul
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothing() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let args = json!({"name": "get_equity_tax_lots", "arguments": {"account_number": AGENTIC}});
@@ -374,7 +368,6 @@ fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothin
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let mut direct = sim().unwrap();
@@ -453,7 +446,6 @@ fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let buy = |q: &str, at: &str, n| arguments(&limit("buy", q, at, n));
@@ -502,7 +494,6 @@ fn review_reads_and_cancel_drive_the_core_and_review_places_nothing() -> Outcome
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_lost_answer_leaves_one_order_the_client_finds_only_by_its_fields() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     let mut direct = sim().unwrap();
@@ -542,7 +533,6 @@ fn a_lost_answer_leaves_one_order_the_client_finds_only_by_its_fields() -> Outco
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome {
     let (server, mut wire) = served(Variant::Honest)?;
     for n in [1, 2] {
@@ -568,7 +558,6 @@ fn two_lost_answers_for_one_body_leave_records_nothing_tells_apart() -> Outcome 
 }
 
 #[test]
-#[ignore = "pending E7-25"]
 fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_bent() -> Outcome {
     let states: Vec<&str> = STATES.iter().map(|s| state_text(*s)).collect();
     let all = [
