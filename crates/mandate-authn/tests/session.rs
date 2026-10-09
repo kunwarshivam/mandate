@@ -217,6 +217,45 @@ fn an_idle_timeout_longer_than_the_absolute_lifetime_is_refused() {
     assert_eq!(longer, Err(SessionRefusal::IdleLongerThanAbsolute));
 }
 
+/// DEC-658: a deprovision signal or a failed refresh ends the session even when the `next`
+/// secret is one used before, the presented one or one rotated away; ending it comes before
+/// refusing the secret, so a replayed `next` never keeps a deprovisioned subject's session open.
+/// An outage and a grant still refuse that `next` and change nothing.
+#[test]
+#[ignore = "pending E9-1"]
+fn a_deprovision_or_failed_refresh_ends_the_session_even_with_a_reused_next() {
+    let rotated_once = || {
+        let mut s = open();
+        let granted = s.refresh(&secret(1), ProviderAnswer::Granted, &secret(2), at(60));
+        assert!(granted.is_ok(), "the baseline rotation");
+        s
+    };
+    let ending = [
+        (ProviderAnswer::Deprovision, EndReason::Deprovisioned),
+        (ProviderAnswer::Status(401), EndReason::RefreshFailed),
+    ];
+    for (answer, reason) in ending {
+        for reused in [2, 1] {
+            let mut s = rotated_once();
+            let got = s.refresh(&secret(2), answer, &secret(reused), at(61));
+            assert_eq!(got, Err(ended(reason)), "{answer:?}, next {reused}");
+            assert_eq!(s.ended(), Some(reason), "{answer:?}, next {reused}");
+            let later = s.refresh(&secret(2), ProviderAnswer::Granted, &secret(3), at(62));
+            assert_eq!(later, Err(ended(reason)), "{answer:?}, next {reused}");
+        }
+    }
+    for answer in [ProviderAnswer::Unreachable, ProviderAnswer::Granted] {
+        let mut s = rotated_once();
+        let got = s.refresh(&secret(2), answer, &secret(1), at(61));
+        assert_eq!(got, Err(SessionRefusal::RefreshSecretReused), "{answer:?}");
+        assert_eq!(
+            (s.ended(), s.reach()),
+            (None, Reach::Full),
+            "{answer:?} changes nothing"
+        );
+    }
+}
+
 #[test]
 fn a_refresh_never_rotates_to_a_secret_used_before() {
     let mut s = open();
