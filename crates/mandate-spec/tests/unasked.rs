@@ -1,7 +1,10 @@
 //! The unasked dollars (mandate spec §4.2; DEC-189, DEC-695), E10-7 slice S1a.
 //!
 //! The DEC-77 tests: every test here is pending on [`unasked_usd`]'s stub. The table's figures were
-//! produced once by running `reference/mandate/ref.py`'s `unasked_usd` over the same scenarios.
+//! produced once by running `reference/mandate/ref.py`'s `unasked_usd` over the same scenarios. The
+//! two properties check the figure against oracles of their own: a simulated risk day with its own
+//! decision walk and accumulators (fuzz.py's `own_unasked_run`), and a greedy day in the family
+//! where the bound is reached exactly (fuzz.py's `fuzz_unasked`).
 
 mod common;
 
@@ -16,6 +19,8 @@ use mandate_spec::unasked::{DelegationUsage, EffectivePolicy, UnaskedInputs, una
 use mandate_spec::validate::{ValidatedMandate, ValidationContext};
 use mandate_spec::{Mandate, SpecError};
 use mandate_time::{Date, UtcNanos};
+use proptest::prelude::*;
+use proptest::test_runner::TestRunner;
 
 /// The risk clock is 10:00 New York on 2026-09-24, a risk day that ends 14 hours later, at [`END`].
 const NOW: &str = "2026-09-24T14:00:00.000000000Z";
@@ -335,4 +340,334 @@ fn the_figure_matches_the_reference_model() {
             .map(|figure| Usd::parse(figure).expect("a figure"));
         assert_eq!(got, expect, "{}", case.name);
     }
+}
+
+/// The base mandate's `max_order_usd` and `max_gross_exposure_usd`, in mills.
+const MAX_ORDER: i64 = 1_000_000;
+const GROSS_LIMIT: i64 = 3_000_000;
+
+/// The test's own reading of a condition, which the oracles below decide by: whether an opening or
+/// an increase of `v` mills matches it, and every amount it compares against.
+impl C {
+    fn holds(&self, v: i64) -> bool {
+        match self {
+            C::Cmp("lt", x) => v < *x,
+            C::Cmp("lte", x) => v <= *x,
+            C::Cmp("eq", x) => v == *x,
+            C::Cmp("gt", x) => v > *x,
+            C::Cmp("gte", x) => v >= *x,
+            C::Cmp(_, x) => v != *x,
+            C::Purpose => true,
+            C::All(members) => members.iter().all(|c| c.holds(v)),
+            C::Any(members) => members.iter().any(|c| c.holds(v)),
+            C::Not(member) => !member.holds(v),
+        }
+    }
+
+    fn values(&self, out: &mut Vec<i64>) {
+        match self {
+            C::Cmp(_, x) => out.push(*x),
+            C::Purpose => {}
+            C::All(members) | C::Any(members) => members.iter().for_each(|c| c.values(out)),
+            C::Not(member) => member.values(out),
+        }
+    }
+}
+
+/// Windows a random delegation takes: past, expiring at or just after the risk clock, live all
+/// day, starting later today, starting at the day's end, and starting at the clock.
+const WINDOWS: [(&str, &str); 7] = [
+    (TWO_DAYS_AGO, PAST),
+    (PAST, NOW),
+    (PAST, NOW_1S),
+    (PAST, WEEK),
+    (LATER, LATER_3H),
+    (END, END_1H),
+    (NOW, WEEK),
+];
+
+/// An instant as seconds from the risk clock, which is how the oracles below keep time.
+fn seconds(text: &str) -> i64 {
+    instant(text).secs() - instant(NOW).secs()
+}
+
+/// A small deterministic generator, seeded by proptest, so a case is one `u64` and shrinks to it.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        (z ^ (z >> 31)) % n
+    }
+    fn pick<T: Clone>(&mut self, items: &[T]) -> T {
+        items[self.below(items.len() as u64) as usize].clone()
+    }
+    fn usage(&mut self, model: &Model) -> Usage {
+        let spent = |d: &Del| [0, 100_000, 899_500, d.max_total];
+        let mut usage = vec![];
+        for d in &model.delegations {
+            let used = (self.below(2) == 0).then(|| {
+                (
+                    self.below(u64::from(d.max_orders) + 1) as u32,
+                    self.pick(&spent(d)),
+                )
+            });
+            usage.push(used);
+        }
+        usage
+    }
+}
+
+/// The delegation an order of `v` mills at `t` seconds runs `auto` through (`Some(None)` for a rule
+/// or the default), or `None` when it is not `auto`: §6.2 steps 4, 4a, and 5b walked here, and the
+/// gate's per-order cap, with this test's own usage state.
+fn decide(m: &Model, v: i64, t: i64, used: &Usage) -> Option<Option<usize>> {
+    if m.review_passed == Some(true) || v <= 0 || v > MAX_ORDER {
+        return None;
+    }
+    let source = m.rules.iter().position(|(_, when)| when.holds(v));
+    match source.map_or(m.default, |r| m.rules[r].0) {
+        "auto" => Some(None),
+        "ask" => {
+            let live = |(d, used): &(&Del, &Option<(u32, i64)>)| {
+                let (orders, total) = used.unwrap_or((0, 0));
+                d.lifts == source
+                    && (seconds(d.window.0)..seconds(d.window.1)).contains(&t)
+                    && orders < d.max_orders
+                    && total + v <= d.max_total
+                    && v <= d.max_order
+                    && d.when.holds(v)
+            };
+            let k = m
+                .delegations
+                .iter()
+                .zip(used)
+                .position(|pair| live(&pair))?;
+            Some(Some(k))
+        }
+        _ => None,
+    }
+}
+
+/// The value one risk day runs `auto`: at each of `times`, the first candidate that runs `auto`
+/// and fits the gross headroom, counted against the orders left today. With `frees`, a mark fall,
+/// a cancelled order, or an exit may free headroom before each order. `greedy` offers the largest
+/// amounts the mandate names; otherwise a random mix with the headroom itself.
+fn run_day(
+    m: &Model,
+    today: u32,
+    usage: &Usage,
+    times: &[i64],
+    rng: &mut Rng,
+    greedy: bool,
+) -> i64 {
+    let (mut left, mut used, mut total) = (m.per_day.saturating_sub(today), usage.clone(), 0);
+    let (mut equity, mut gross) = if greedy {
+        (i64::MAX / 4, 0)
+    } else {
+        (
+            rng.pick(&[10_000_000, 3_000_123, 800_000, -5_000]),
+            rng.pick(&[0, 250_000, 1_999_990, 12_000_000]),
+        )
+    };
+    for &t in times {
+        if !greedy && gross > 0 && rng.below(2) == 0 {
+            let freed = gross / rng.pick(&[1, 2]);
+            equity -= if rng.below(10) < 3 { freed } else { 0 };
+            gross -= freed;
+        }
+        if left == 0 {
+            break;
+        }
+        let headroom = if greedy {
+            i64::MAX / 4
+        } else {
+            GROSS_LIMIT.min(equity) - gross
+        };
+        let mut offers = vec![];
+        if greedy {
+            offers.push(MAX_ORDER);
+            m.rules
+                .iter()
+                .for_each(|(_, when)| when.values(&mut offers));
+            for (d, u) in m.delegations.iter().zip(&used) {
+                offers.extend([d.max_order, d.max_total - u.map_or(0, |u| u.1)]);
+                d.when.values(&mut offers);
+            }
+            offers.sort_unstable_by(|a, b| b.cmp(a));
+        } else {
+            let some = [
+                10, 1_000, 99_990, 100_000, 300_000, 450_500, 500_000, 899_990, 900_000, 950_000,
+            ];
+            offers = (0..6)
+                .map(|_| rng.pick(&[&some[..], &[MAX_ORDER, 5_000_000, headroom]].concat()))
+                .collect();
+        }
+        for v in offers.into_iter().filter(|v| *v <= headroom) {
+            let Some(via) = decide(m, v, t, &used) else {
+                continue;
+            };
+            if let Some(k) = via {
+                let (orders, spent) = used[k].unwrap_or((0, 0));
+                used[k] = Some((orders + 1, spent + v));
+            }
+            (total, gross, left) = (total + v, gross + v, left - 1);
+            break;
+        }
+    }
+    total
+}
+
+fn random_condition(rng: &mut Rng) -> C {
+    let leaf = |rng: &mut Rng| {
+        let op = rng.pick(&["lt", "lte", "eq", "gt", "gte", "ne"]);
+        C::Cmp(op, rng.pick(&[100_000, 300_000, 500_000, 900_000]))
+    };
+    let member = |rng: &mut Rng| {
+        if rng.below(2) == 0 {
+            leaf(rng)
+        } else {
+            C::Purpose
+        }
+    };
+    match rng.below(5) {
+        0 => leaf(rng),
+        1 => C::Purpose,
+        2 => not(leaf(rng)),
+        3 => all((0..=rng.below(3)).map(|_| member(rng)).collect()),
+        _ => any((0..=rng.below(3)).map(|_| member(rng)).collect()),
+    }
+}
+
+/// A random delegation lifting one of the `ask`s in `m`, if it has any.
+fn random_delegation(rng: &mut Rng, m: &Model, when: C, ends: &[&'static str]) -> Option<Del> {
+    let mut asks: Vec<Option<usize>> = (0..m.rules.len())
+        .filter(|r| m.rules[*r].0 == "ask")
+        .map(Some)
+        .collect();
+    if m.default == "ask" {
+        asks.push(None);
+    }
+    let lifts = *asks.get(rng.below(asks.len().max(1) as u64) as usize)?;
+    let max_order = rng.pick(&[100_000, 300_000, 450_500, 900_000, 1_000_000]);
+    let max_total = rng.pick(&[max_order, 2 * max_order, 2_500_000, 3_000_000]);
+    let max_orders = 1 + rng.below(4) as u32;
+    let window = if ends.is_empty() {
+        rng.pick(&WINDOWS)
+    } else {
+        (PAST, rng.pick(ends))
+    };
+    Some(Del {
+        lifts,
+        when,
+        max_order,
+        max_orders,
+        max_total,
+        window,
+    })
+}
+
+fn run(cases: u32, property: impl Fn(&mut Rng) -> Result<(), TestCaseError>) {
+    let config = ProptestConfig {
+        cases,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    };
+    if let Err(failure) =
+        TestRunner::new(config).run(&prop::num::u64::ANY, |seed| property(&mut Rng(seed)))
+    {
+        panic!("{failure}");
+    }
+}
+
+fn known(figure: Result<Option<Usd>, SpecError>) -> Result<Usd, TestCaseError> {
+    figure
+        .map_err(|e| TestCaseError::fail(format!("{e:?}")))?
+        .ok_or_else(|| TestCaseError::fail("every input is known, yet the figure is not"))
+}
+
+/// DEC-695 items 2 and 4: no risk day runs more unasked than the figure, whatever its orders'
+/// values and times, while marks, cancels, and exits free gross headroom within the day.
+#[test]
+#[ignore = "pending E10-7"]
+fn no_day_runs_more_unasked_than_the_figure() {
+    run(512, |rng| {
+        let mut m = Model::base();
+        m.default = rng.pick(&["auto", "ask", "ask", "deny"]);
+        m.rules = (0..rng.below(3))
+            .map(|_| (rng.pick(&["auto", "ask", "deny"]), random_condition(rng)))
+            .collect();
+        for _ in 0..rng.below(3) {
+            let when = if rng.below(2) == 0 {
+                random_condition(rng)
+            } else {
+                C::Purpose
+            };
+            m.delegations.extend(random_delegation(rng, &m, when, &[]));
+        }
+        m.per_day = 1 + rng.below(8) as u32;
+        m.review_passed = rng.pick(&[None, None, None, Some(false), Some(true)]);
+        let today = rng.below(4) as u32;
+        let usage = rng.usage(&m);
+        let bound = known(figure(&m, Some(NOW), Some(today), Some(&usage), None))?;
+        for _ in 0..3 {
+            let mut times: Vec<i64> = (0..12)
+                .map(|_| rng.below(seconds(END) as u64) as i64)
+                .collect();
+            times.sort_unstable();
+            let ran = run_day(&m, today, &usage, &times, rng, false);
+            prop_assert!(
+                usd(ran) <= bound,
+                "{m:?} {today} {usage:?}: ran {ran} mills, figure {bound}"
+            );
+        }
+        Ok(())
+    });
+}
+
+/// DEC-695's rationale: where every condition is a catch-all or an `lte` bound and no `ask` or
+/// `deny` rule comes before an `auto` one, a greedy day reaches the figure, to the cent above.
+#[test]
+#[ignore = "pending E10-7"]
+fn a_greedy_day_reaches_the_figure() {
+    run(512, |rng| {
+        let lte = |rng: &mut Rng| C::Cmp("lte", rng.pick(&[300_000, 450_505, 500_000, 900_000]));
+        let bound = |rng: &mut Rng| match rng.below(4) {
+            0 => C::Purpose,
+            1 => lte(rng),
+            2 => all(vec![lte(rng), lte(rng)]),
+            _ => any(vec![lte(rng), lte(rng)]),
+        };
+        let mut m = Model::base();
+        if rng.below(2) == 0 {
+            m.rules = (0..rng.below(3)).map(|_| ("auto", bound(rng))).collect();
+        } else {
+            (m.default, m.rules) = ("deny", vec![("ask", bound(rng))]);
+        }
+        for _ in 0..rng.below(4) {
+            let when = bound(rng);
+            m.delegations
+                .extend(random_delegation(rng, &m, when, &[NOW, NOW_1S, WEEK]));
+        }
+        m.per_day = 1 + rng.below(6) as u32;
+        m.review_passed = (rng.below(5) == 0).then_some(true);
+        let today = rng.below(4) as u32;
+        let usage = rng.usage(&m);
+        let fig = known(figure(&m, Some(NOW), Some(today), Some(&usage), None))?;
+        let best = run_day(&m, today, &usage, &[0; 20], rng, true);
+        let cents = (best + 9) / 10 * 10;
+        prop_assert_eq!(
+            fig,
+            usd(cents),
+            "{:?} {} {:?}: greedy {} mills",
+            m,
+            today,
+            usage,
+            best
+        );
+        Ok(())
+    });
 }
