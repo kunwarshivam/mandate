@@ -14,6 +14,8 @@ pub enum ConnectError {
     StateExpired,
     #[error("the state was issued to another user")]
     StateUserMismatch,
+    #[error("the state is already issued")]
+    StateReused,
     #[error("the request may not leave the process")]
     RequestRefused,
     #[error("the granted scopes differ from the requested ones")]
@@ -61,6 +63,7 @@ impl ConnectError {
             Self::StateUnknown => "state_unknown",
             Self::StateExpired => "state_expired",
             Self::StateUserMismatch => "state_user_mismatch",
+            Self::StateReused => "state_reused",
             Self::RequestRefused => "request_refused",
             Self::ScopeMismatch => "scope_mismatch",
             Self::TokenType => "token_type",

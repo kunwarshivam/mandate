@@ -699,6 +699,46 @@ fn a_revoked_account_reconnects_on_its_own_connection() {
     );
 }
 
+/// A reconnect continues its account stream and the state that stream last recorded (journal spec
+/// §9.8): `suspended` stays `suspended` (connections spec §9.1), and `degraded` stays `degraded`,
+/// since a reconnect is only the connection's condition and the owner must still acknowledge.
+/// Each line is (the state the connection was revoked from, the state after the reconnect).
+#[test]
+fn a_reconnect_keeps_the_state_its_connection_was_revoked_from() {
+    for (revoked_from, reconnected) in [
+        (Active, Active),
+        (Degraded, Degraded),
+        (Suspended, Suspended),
+    ] {
+        let mut registry = empty();
+        registry.insert(record(alpaca("conn_a", 1))).unwrap();
+        if revoked_from != Active {
+            registry.set_state(&id("conn_a"), revoked_from).unwrap();
+        }
+        registry.set_state(&id("conn_a"), Revoked).unwrap();
+        assert_eq!(
+            registry.view(&id("conn_a")).unwrap().map(|v| v.state),
+            Some(Revoked),
+            "revoked while revoked ({revoked_from:?})"
+        );
+        registry.insert(record(alpaca("conn_a", 1))).unwrap();
+        assert_eq!(
+            registry.view(&id("conn_a")).unwrap().map(|v| v.state),
+            Some(reconnected),
+            "revoked from {revoked_from:?}"
+        );
+        assert_eq!(registry.records.len(), 1, "replaced, not added");
+    }
+    let mut loaded = Registry::new(vec![stored(alpaca("conn_a", 1), Revoked)], false).unwrap();
+    loaded.insert(record(alpaca("conn_a", 1))).unwrap();
+    assert_eq!(
+        loaded.view(&id("conn_a")).unwrap().map(|v| v.state),
+        Some(Suspended),
+        "a revoked record the registry was not told the earlier state of reconnects suspended, \
+         the state that needs the most to leave (AGENTS.md rule 3)"
+    );
+}
+
 #[test]
 fn a_reconnect_keeps_its_broker_and_environment() {
     let mut registry = empty();
@@ -834,7 +874,8 @@ fn holds_cn_5(registry: &Registry) -> bool {
 /// CN-5, CN-12 and §9.1, against an oracle that keeps its own map of which connection each account
 /// was first bound to, with which broker, and in which state: an account is never connected twice;
 /// once bound it keeps its connection id, `account_ref`, and broker through every revoke and
-/// reconnect; a state moves only as `MOVES` lists; and the registry holds CN-5 after every step.
+/// reconnect; a reconnect resumes the state its connection was revoked from; a state moves only as
+/// `MOVES` lists; and the registry holds CN-5 after every step.
 #[test]
 fn one_account_one_connection_for_life() {
     let lives = prop::collection::vec(step(), 1..48);
@@ -843,6 +884,7 @@ fn one_account_one_connection_for_life() {
             let mut registry = empty();
             let mut bound: BTreeMap<u8, (ConnectionId, AccountRef, Broker)> = BTreeMap::new();
             let mut state: BTreeMap<u8, ConnectionState> = BTreeMap::new();
+            let mut revoked_from: BTreeMap<u8, ConnectionState> = BTreeMap::new();
             let mut minted = 0u8;
             for step in steps {
                 match step {
@@ -874,23 +916,27 @@ fn one_account_one_connection_for_life() {
                         };
                         let got = registry.admit(&asked);
                         prop_assert_eq!(&got, &want);
-                        let (connection_id, reference) = match got {
+                        let (connection_id, reference, resumed) = match got {
                             Ok(Admission::New) => {
                                 minted += 1;
-                                (id(&format!("conn_{minted}")), account_ref(minted))
+                                (id(&format!("conn_{minted}")), account_ref(minted), Active)
                             }
                             Ok(Admission::Reconnect {
                                 connection_id,
                                 account_ref,
-                            }) => (connection_id, account_ref),
+                            }) => (connection_id, account_ref, revoked_from[&n]),
                             Err(_) => continue,
                         };
                         let mut new = alpaca(connection_id.as_str(), n);
                         new.broker = broker;
                         new.account_ref = reference.clone();
                         prop_assert_eq!(registry.insert(record(new)), Ok(()));
+                        prop_assert_eq!(
+                            registry.view(&connection_id).map(|v| v.map(|v| v.state)),
+                            Ok(Some(resumed))
+                        );
                         bound.entry(n).or_insert((connection_id, reference, broker));
-                        state.insert(n, Active);
+                        state.insert(n, resumed);
                     }
                     Step::Move(n, to) => {
                         let Some((connection_id, _, _)) = bound.get(&n) else {
@@ -900,6 +946,9 @@ fn one_account_one_connection_for_life() {
                         let got = registry.set_state(connection_id, to);
                         if MOVES.contains(&(from, to)) {
                             prop_assert_eq!(got, Ok(()));
+                            if to == Revoked {
+                                revoked_from.insert(n, from);
+                            }
                             state.insert(n, to);
                         } else {
                             prop_assert_eq!(got, Err(ConnectError::InvalidTransition { from, to }));

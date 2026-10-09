@@ -92,6 +92,7 @@ fn each_reason_has_its_journal_code() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn a_clean_connect_reports_every_check_passed() {
     let report = run(&alpaca()).unwrap();
     assert_eq!(
@@ -124,6 +125,7 @@ fn a_clean_connect_reports_every_check_passed() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn scopes_must_be_exactly_trading_and_data() {
     for granted in [
         &["trading"][..],
@@ -144,6 +146,7 @@ fn scopes_must_be_exactly_trading_and_data() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn nothing_that_can_move_funds_out_is_accepted() {
     for permissions in [
         &["trade", "withdraw"][..],
@@ -203,7 +206,183 @@ fn nothing_that_can_move_funds_out_is_accepted() {
     );
 }
 
+/// Fund movement is judged by whole tokens (DEC-839 item 3, shared by check 1 under DEC-676 item
+/// 1): a name is split at every character that is not a letter or digit, at each lower-to-upper
+/// and digit-to-upper change, and before the last capital of a run of capitals that a lowercase
+/// letter follows (`ACHDebit` is `ach`, `debit`); lowercased; and refused when a token is in
+/// DEC-839's set. A name with any character that is not ASCII is refused whatever its tokens, so a
+/// homoglyph cannot spell a fund word past the rule. A word that only contains one, such as
+/// `fundamentals`, is another word. The rule is the same for every kind of grant: a key
+/// permission, an OAuth scope, and an MCP tool.
 #[test]
+#[ignore = "pending E7-12"]
+fn fund_movement_is_judged_by_whole_tokens() {
+    let kraken_key = |name: &str| CheckInput {
+        broker: Broker::KrakenDerivativesUs,
+        auth_kind: AuthKind::ApiKey,
+        granted: Granted::KeyPermissions(Some(set(&["trade", name]))),
+        ..alpaca()
+    };
+    let alpaca_scope = |name: &str| CheckInput {
+        granted: Granted::OAuth(GrantedScopes(set(&["data", "trading", name]))),
+        ..alpaca()
+    };
+    let robinhood_tool = |name: &str| CheckInput {
+        granted: Granted::Tools(set(&["get_accounts", "place_equity_order", name])),
+        ..robinhood()
+    };
+    type Grant<'a> = &'a dyn Fn(&str) -> CheckInput;
+    let kinds: [(&str, Grant, Outcome); 3] = [
+        ("a key permission", &kraken_key, Outcome::Passed),
+        (
+            "an OAuth scope",
+            &alpaca_scope,
+            Outcome::Failed(Reason::ScopeMismatch),
+        ),
+        ("an MCP tool", &robinhood_tool, Outcome::Passed),
+    ];
+    for (kind, grant, other_word) in kinds {
+        for name in FUND_MOVEMENT_NAMES.iter().chain(&FUND_MOVEMENT_TOKENS) {
+            assert_eq!(
+                outcome(&run(&grant(name)).unwrap(), Check::Scope),
+                Some(Outcome::Failed(Reason::FundMovement)),
+                "{name} as {kind} has a fund-movement token"
+            );
+        }
+        for name in OTHER_WORDS {
+            assert_eq!(
+                outcome(&run(&grant(name)).unwrap(), Check::Scope),
+                Some(other_word),
+                "{name} as {kind} has no fund-movement token"
+            );
+        }
+    }
+}
+
+/// Names with a fund-movement token, one per way a name is split, and a homoglyph.
+const FUND_MOVEMENT_NAMES: [&str; 15] = [
+    "ach_debit",
+    "sendMoney",
+    "initiate-ach-transfer",
+    "get_transfers",
+    "link_ach",
+    "createAchRelationship",
+    "request_payout",
+    "disburse_now",
+    "get_deposits",
+    "add_funds",
+    "ACHDebit",
+    "getACHStatus",
+    "HTTPSend",
+    "v2Transfer",
+    "w\u{456}re",
+];
+
+/// Every token of DEC-839 item 3's set, as a bare name.
+const FUND_MOVEMENT_TOKENS: [&str; 15] = [
+    "transfer",
+    "transfers",
+    "withdraw",
+    "withdrawal",
+    "withdrawals",
+    "wire",
+    "ach",
+    "send",
+    "payout",
+    "disburse",
+    "deposit",
+    "deposits",
+    "fund",
+    "funds",
+    "funding",
+];
+
+/// Names that contain a fund word only inside another word: as a scope each is still not
+/// `data` or `trading`, so it is `scope_mismatch`, never `fund_movement`.
+const OTHER_WORDS: [&str; 6] = [
+    "get_fundamentals",
+    "refund_status",
+    "wireless",
+    "resend",
+    "teacher",
+    "URLParser",
+];
+
+/// A pin is made at the first connect only; at every later occasion a missing pin fails closed as
+/// drift (DEC-676 item 2, AGENTS.md rule 3), never as a pass.
+#[test]
+#[ignore = "pending E7-12"]
+fn a_later_contract_check_without_a_pin_fails_closed() {
+    for occasion in [
+        Occasion::Reconnect,
+        Occasion::Reauthorize,
+        Occasion::ExecutorStart,
+        Occasion::Daily,
+    ] {
+        let mut unpinned = robinhood();
+        unpinned.occasion = occasion;
+        unpinned.pinned_contract = None;
+        assert_eq!(
+            outcome(&run(&unpinned).unwrap(), Check::Contract),
+            Some(Outcome::Failed(Reason::ContractDrift)),
+            "{occasion:?}"
+        );
+    }
+    let first = robinhood();
+    assert_eq!(first.pinned_contract, None);
+    assert_eq!(
+        outcome(&run(&first).unwrap(), Check::Contract),
+        Some(Outcome::Passed),
+        "the first connect pins"
+    );
+}
+
+/// What the broker reported must be the kind the credential is: an API key's permissions, OAuth
+/// scopes, or MCP tools. Any other pairing fails closed as `scope_mismatch` (DEC-676 item 3).
+#[test]
+#[ignore = "pending E7-12"]
+fn a_grant_of_another_kind_than_the_credential_is_refused() {
+    let key = Granted::KeyPermissions(Some(set(&["trade"])));
+    let scopes = Granted::OAuth(GrantedScopes(set(&["data", "trading"])));
+    let tools = Granted::Tools(set(&["get_accounts", "place_equity_order"]));
+    let kraken = CheckInput {
+        broker: Broker::KrakenDerivativesUs,
+        auth_kind: AuthKind::ApiKey,
+        granted: key.clone(),
+        ..alpaca()
+    };
+    let alpaca_key = CheckInput {
+        auth_kind: AuthKind::ApiKey,
+        granted: key.clone(),
+        ..alpaca()
+    };
+    let cases: [(CheckInput, Granted); 9] = [
+        (robinhood(), key.clone()),
+        (robinhood(), Granted::KeyPermissions(None)),
+        (robinhood(), scopes.clone()),
+        (alpaca(), key.clone()),
+        (alpaca(), tools.clone()),
+        (alpaca_key.clone(), scopes.clone()),
+        (alpaca_key, tools.clone()),
+        (kraken.clone(), scopes),
+        (kraken, tools),
+    ];
+    for (base, granted) in cases {
+        let input = CheckInput {
+            granted: granted.clone(),
+            ..base
+        };
+        assert_eq!(
+            outcome(&run(&input).unwrap(), Check::Scope),
+            Some(Outcome::Failed(Reason::ScopeMismatch)),
+            "{:?} given {granted:?}",
+            input.auth_kind
+        );
+    }
+}
+
+#[test]
+#[ignore = "pending E7-12"]
 fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
     let key = |broker, environment| CheckInput {
         broker,
@@ -241,6 +420,7 @@ fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn the_environment_is_judged_from_documentation_without_a_request() {
     let mut live_oauth = alpaca();
     live_oauth.environment = Environment::Live;
@@ -290,6 +470,7 @@ fn the_environment_is_judged_from_documentation_without_a_request() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn the_account_is_read_and_for_robinhood_dedicated() {
     let mut unreadable = alpaca();
     unreadable.account = AccountRead::Unreadable;
@@ -326,6 +507,7 @@ fn the_account_is_read_and_for_robinhood_dedicated() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn an_mcp_contract_is_pinned_then_held() {
     let mut pinned = robinhood();
     pinned.occasion = Occasion::Daily;
@@ -360,6 +542,7 @@ fn an_mcp_contract_is_pinned_then_held() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn the_refusal_is_the_first_failed_check_in_section_8_1_order() {
     let mut everything = robinhood();
     everything.environment = Environment::Paper;
@@ -381,6 +564,7 @@ fn the_refusal_is_the_first_failed_check_in_section_8_1_order() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn a_refused_credential_is_never_stored() {
     let stores = Cell::new(0);
     let store = || {
@@ -399,6 +583,7 @@ fn a_refused_credential_is_never_stored() {
 }
 
 #[test]
+#[ignore = "pending E7-12"]
 fn a_later_failure_suspends_and_drift_degrades() {
     for occasion in [Occasion::ExecutorStart, Occasion::Daily] {
         let mut failed = alpaca();

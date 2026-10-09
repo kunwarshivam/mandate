@@ -7,7 +7,7 @@
 //! detects a second connection to an account already connected; it is never journaled, never
 //! returned ([`ConnectionView`], [`EstablishedMembers`]), and never printed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::ConnectError;
@@ -413,6 +413,8 @@ pub enum Admission {
 pub struct Registry {
     pub(crate) records: Vec<ConnectionRecord>,
     fingerprint_key_rotating: bool,
+    /// The state each revoked connection was revoked from, which its reconnect resumes.
+    revoked_from: BTreeMap<ConnectionId, ConnectionState>,
 }
 
 impl Registry {
@@ -445,6 +447,7 @@ impl Registry {
         Ok(Self {
             records,
             fingerprint_key_rotating,
+            revoked_from: BTreeMap::new(),
         })
     }
 
@@ -496,7 +499,11 @@ impl Registry {
     /// fingerprint a revoked record holds must be that record's reconnect (its id and
     /// `account_ref`, else `AlreadyConnected`; its broker and environment, else
     /// `ReconnectMismatch`); one with a new id and fingerprint whose `account_ref` another record
-    /// holds, revoked or not, is `InvalidAccountRef` (CN-5).
+    /// holds, revoked or not, is `InvalidAccountRef` (CN-5). A reconnect takes the new record's
+    /// members but the state the connection was revoked from, not `active`: its account stream
+    /// continues, and with it that state (connections spec §9.1, journal spec §9.8). A revoked
+    /// record the registry was built with, whose earlier state it was not given, reconnects
+    /// `suspended`, the state that needs the most to leave.
     pub fn insert(&mut self, record: ConnectionRecord) -> Result<(), ConnectError> {
         self.not_rotating()?;
         let held = self
@@ -515,7 +522,14 @@ impl Registry {
             if !holder.same_venue(record.broker, record.environment) {
                 return Err(ConnectError::ReconnectMismatch);
             }
-            *holder = record;
+            let resumed = self
+                .revoked_from
+                .remove(&holder.connection_id)
+                .unwrap_or(ConnectionState::Suspended);
+            *holder = ConnectionRecord {
+                state: resumed,
+                ..record
+            };
             return Ok(());
         }
         if self.record(&record.connection_id).is_some() {
@@ -554,6 +568,10 @@ impl Registry {
                 from: record.state,
                 to: state,
             });
+        }
+        if state == ConnectionState::Revoked {
+            self.revoked_from
+                .insert(record.connection_id.clone(), record.state);
         }
         record.state = state;
         Ok(())
