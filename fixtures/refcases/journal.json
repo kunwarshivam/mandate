@@ -37118,6 +37118,81 @@
     }
    },
    {
+    "name": "group_removed_by_a_user",
+    "clause": "rule 98: the identity provider's group removal is the system's",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "group_removed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "deactivated_by_a_client",
+    "clause": "rule 98: a client never changes a membership (ID-11)",
+    "base_draft": "deactivated",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_b_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "01J8Z4M0AD0000000000000AD1"
+      }
+     },
+     {
+      "path": "payload.by",
+      "value": "client_b_01"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "role_changed_by_an_agent",
+    "clause": "rule 98: only a user or the system writes a membership record",
+    "base_draft": "role_changed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     },
+     {
+      "path": "payload.changed_by",
+      "value": "agent_a"
+     },
+     {
+      "path": "payload.session_ref",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
     "name": "own_roles_changed",
     "clause": "rule 99: no admin changes their own roles (ID-13)",
     "base_draft": "role_changed",
