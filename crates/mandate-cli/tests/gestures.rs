@@ -28,6 +28,7 @@ use double::{CONTROL, FixedIds, Journal, at, owner, stream};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::control::{ControlJournal, Now};
+use mandate_cli::deploy::deploy;
 use mandate_cli::gestures::{AgentCommand, Shown, VersionCommand, confirmation, deployment};
 use mandate_cli::postgres::{JournalArgs, read_stream};
 use mandate_cli::version;
@@ -135,6 +136,137 @@ fn a_shown_code_is_the_gestures_and_showing_writes_nothing() {
     let reason = refused.map_err(|e| e.to_string());
     let invalid = matches!(&reason, Err(why) if why.contains("version_invalid"));
     assert!(invalid, "the V-rules are checked: V-001, {reason:?}");
+}
+
+/// DEC-530 item 9: a re-run while the agent's active deployment is that version shows that
+/// deployment's code, with no warnings, whatever the rules now say, and writes nothing; while
+/// another version is active, the agent is refused `agent_active`, even for a confirmed version.
+#[test]
+#[ignore = "pending E10-16"]
+fn a_deployed_agent_shows_its_version_and_refuses_another() {
+    let (mut journal, mut store) = (Journal::default(), Store::new());
+    store.put_artifact(SPY.as_bytes()).unwrap();
+    let snapshot = SNAPSHOT.replace("@H", &reference(&canonical(SPY)));
+    seed(&mut journal, "ConfigSnapshotRegistered", MODEL);
+    seed(&mut journal, "ConfigSnapshotRegistered", &snapshot);
+    let (mut ids, owner) = (FixedIds::default(), owner());
+    let other = SPY
+        .replace(
+            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            "a1a1a1a1-8b9b-48a9-ba46-b9d54906e416",
+        )
+        .replace("SPY", "QQQ");
+    store.put_artifact(other.as_bytes()).unwrap();
+    seed(
+        &mut journal,
+        "ConfigSnapshotRegistered",
+        &SNAPSHOT.replace("@H", &reference(&canonical(&other))),
+    );
+    let second = MANDATE
+        .replace(
+            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            "a1a1a1a1-8b9b-48a9-ba46-b9d54906e416",
+        )
+        .replace("SPY", "QQQ");
+    let versions = [
+        reference(&canonical(MANDATE)),
+        reference(&canonical(&second)),
+    ];
+    let stream = (&mut journal, &mut store);
+    version::create(stream.0, stream.1, &owner, MANDATE.as_bytes(), now()).unwrap();
+    let stream = (&mut journal, &mut store);
+    let code = confirm_code(&versions[0]);
+    version::confirm(
+        stream.0,
+        stream.1,
+        &mut ids,
+        &owner,
+        &versions[0],
+        &code,
+        now(),
+    )
+    .unwrap();
+    let code = deploy_code(AGENT, &versions[0]);
+    let stream = (&mut journal, &mut store);
+    let named = (AGENT, versions[0].as_str());
+    deploy(
+        stream.0,
+        stream.1,
+        &mut ids,
+        &owner,
+        named.0,
+        named.1,
+        &code,
+        now(),
+    )
+    .unwrap();
+    let written = |journal: &Journal, store: &Store, ids: &FixedIds| {
+        (journal.attempts.len(), store.clone(), ids.assertions)
+    };
+    let before = written(&journal, &store, &ids);
+    let shown = deployment(&journal, &store, &owner, named, now());
+    let (code, warnings) = (code, Vec::new());
+    assert_eq!(shown, Ok(Shown { code, warnings }), "the active version");
+    assert_eq!(written(&journal, &store, &ids), before, "nothing written");
+    let stream = (&mut journal, &mut store);
+    version::create(stream.0, stream.1, &owner, second.as_bytes(), now()).unwrap();
+    let stream = (&mut journal, &mut store);
+    let code = confirm_code(&versions[1]);
+    version::confirm(
+        stream.0,
+        stream.1,
+        &mut ids,
+        &owner,
+        &versions[1],
+        &code,
+        now(),
+    )
+    .unwrap();
+    let before = written(&journal, &store, &ids);
+    let other = deployment(&journal, &store, &owner, (AGENT, &versions[1]), now());
+    let reason = other.map_err(|e| e.to_string());
+    let active = matches!(&reason, Err(why) if why.contains("agent_active"));
+    assert!(active, "another version while one is active: {reason:?}");
+    assert_eq!(written(&journal, &store, &ids), before, "nothing written");
+}
+
+/// Warnings are shown sorted by code (DEC-530 item 4), for a confirmation and for a deployment: a
+/// mandate with a rule after its catch-all warns W-005 as well as W-002 (mandate spec §4.2).
+#[test]
+#[ignore = "pending E10-16"]
+fn warnings_are_shown_sorted_by_code() {
+    let (mut journal, mut store) = (Journal::default(), Store::new());
+    store.put_artifact(SPY.as_bytes()).unwrap();
+    let snapshot = SNAPSHOT.replace("@H", &reference(&canonical(SPY)));
+    seed(&mut journal, "ConfigSnapshotRegistered", MODEL);
+    seed(&mut journal, "ConfigSnapshotRegistered", &snapshot);
+    let (mut ids, owner) = (FixedIds::default(), owner());
+    let late =
+        r#"{"id":"late","then":"deny","when":{"field":"order_usd","op":"gt","value":"100"}}"#;
+    let after = MANDATE.replace(
+        r#"}}]},"behavior""#,
+        &format!(r#"}}}},{late}]}},"behavior""#),
+    );
+    assert_ne!(after, MANDATE, "the late rule is added");
+    let version = reference(&canonical(&after));
+    let stream = (&mut journal, &mut store);
+    version::create(stream.0, stream.1, &owner, after.as_bytes(), now()).unwrap();
+    let warnings = vec!["W-002", "W-005"];
+    let code = confirm_code(&version);
+    let shown = confirmation(&journal, &store, &owner, &version, now());
+    assert_eq!(
+        shown,
+        Ok(Shown {
+            code,
+            warnings: warnings.clone()
+        })
+    );
+    let stream = (&mut journal, &mut store);
+    let code = confirm_code(&version);
+    version::confirm(stream.0, stream.1, &mut ids, &owner, &version, &code, now()).unwrap();
+    let code = deploy_code(AGENT, &version);
+    let shown = deployment(&journal, &store, &owner, (AGENT, &version), now());
+    assert_eq!(shown, Ok(Shown { code, warnings }));
 }
 
 /// The three commands parse with DEC-527's required owner flags and P0's target, `--code` is
@@ -406,6 +538,12 @@ fn the_binary_creates_confirms_and_deploys_in_postgres() {
     let deployed = ok(
         &["agent", "deploy", AGENT, &version, "--code", &deploying],
         &owned,
+    );
+    let reshown = ok(&["agent", "deploy", AGENT, &version], &owned);
+    assert_eq!(
+        reshown,
+        format!("code {deploying}\nwarnings none\n"),
+        "a deployed agent's deployment shown again"
     );
     let rows = read_stream(&journal, &ctl).unwrap();
     let types: Vec<&str> = rows.iter().map(|r| r.event_type.as_str()).collect();
