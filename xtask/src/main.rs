@@ -11472,7 +11472,6 @@ jq -r "$filter" "$src"
     /// carries a `working-directory` into its step, so the line cannot be read, even when the
     /// build names a package (#1169 round 3 review; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_block_merge_key_cannot_be_read() -> Result<()> {
         let flows = [ci_file(
             ".github/workflows/ci.yml",
