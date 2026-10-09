@@ -681,6 +681,26 @@ SCHEMAS[("ctl", "VerificationRun")] = rec(
     ("ranges", list_of(CHECKED_RANGE)),
     ("result", one_of("pass", "fail")),
 )
+# v0.36 (DEC-788 item 1, DEC-789): `VerificationRun` version 2 adds each range's trusted start, its
+# count of events walked, and the check it could not finish, and `incomplete` as a third result.
+# Version 1 is not edited (§8) and stays registered.
+START_KINDS = ("genesis", "manifest", "anchor")
+INCOMPLETE_CHECKS = ("tsa_token_invalid",)
+# DEC-789 items 7 and 9: why the token check could not finish. A stamped token whose imprint matches
+# cannot yet be verified; an anchor with a `null` token was never stamped, which a drill counts as an incident.
+INCOMPLETE_CAUSES = ("token_unverifiable", "anchor_unstamped")
+CHECKED_RANGE_V2 = rec(
+    *CHECKED_RANGE.fields[:5],
+    ("start", rec(("kind", one_of(*START_KINDS)), ("manifest_hash", opt(DIGEST_HEX)), ("anchor_event_id", opt(ULID)))),
+    ("checked", INT),
+    CHECKED_RANGE.fields[5],
+    ("incomplete", opt(rec(("check", one_of(*INCOMPLETE_CHECKS)), ("cause", one_of(*INCOMPLETE_CAUSES))))),
+)
+VERIFICATION_RUN_V2 = rec(
+    ("trigger", one_of(*TRIGGERS)),
+    ("ranges", list_of(CHECKED_RANGE_V2)),
+    ("result", one_of("pass", "incomplete", "fail")),
+)
 
 # §9.14 (DEC-783): the anchor and segment records, in the shapes the code already reads (the anchor
 # file of DEC-115 item 6, DEC-263's manifest). Every hash is a bare-hex `digest`.
@@ -795,6 +815,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("ctl", "ConnectionRevoked"): (1, 2),
     ("agent", "AgentModeChanged"): (1, 2),
     ("agent", "OwnerCommandRefused"): (1, 2),
+    ("ctl", "VerificationRun"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -823,6 +844,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ),
     ("agent", "AgentModeChanged", 2): MODE_CHANGED_V2,
     ("agent", "OwnerCommandRefused", 2): REFUSAL_V2,
+    ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
 }
 
 
@@ -881,6 +903,10 @@ def nested_record(path: str) -> str:
         return "step_up"
     if path.startswith("payload.ranges[") and path.endswith(".failure"):
         return "failure"
+    if path.startswith("payload.ranges[") and path.endswith(".start"):
+        return "start"
+    if path.startswith("payload.ranges[") and path.endswith(".incomplete"):
+        return "incomplete"
     if path.startswith("payload.ranges["):
         return "range"
     if path.startswith("payload.leaves["):
@@ -1591,10 +1617,47 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
                 if all(is_integer(b) for b in bounds):
                     rule("111.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
             rule("111.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
-        if p["result"] in ("pass", "fail"):
+        if draft["schema_version"] == 1 and p["result"] in ("pass", "fail"):
             passed = all(r.get("failure") is None for r in items)
             rule("112", (p["result"] == "pass") == passed, "payload.result")
+        if draft["schema_version"] == 2:
+            out += run_v2_violations(p, items, rule, skip)
     return out
+
+
+def run_v2_violations(p: dict, items: list[dict], rule, skip: frozenset[str]) -> list[Violation]:
+    """Rules 132 and 133 (v0.36, DEC-788 item 1, DEC-789): `VerificationRun` version 2's start,
+    count, and incomplete check per range, then its three-way result. `rule` appends to the caller's
+    list; nothing is returned of its own."""
+    for i, r in enumerate(items):
+        at = f"payload.ranges[{i}]"
+        start = r.get("start") if isinstance(r.get("start"), dict) else {}
+        kind = start.get("kind")
+        if kind in START_KINDS:
+            rule("132.manifest", (start.get("manifest_hash") is not None) == (kind == "manifest"), f"{at}.start.manifest_hash")
+            rule("132.anchor", (start.get("anchor_event_id") is not None) == (kind == "anchor"), f"{at}.start.anchor_event_id")
+            first = r.get("from_seq")
+            if is_integer(first):
+                least = 1 if "boundary.rule_132_anchor_seq" in skip else 2
+                fits = (kind != "genesis" or first == 1) and (kind != "anchor" or first >= least)
+                rule("132.start_seq", fits, f"{at}.start.kind")
+        first, last, checked = r.get("from_seq"), r.get("to_seq"), r.get("checked")
+        if all(is_integer(v) for v in (first, last, checked)):
+            span = last - first + 1
+            ceiling = span + 1 if "boundary.rule_132_checked_ceiling" in skip else span
+            rule("132.checked", checked <= ceiling, f"{at}.checked")
+            rule("132.walked", r.get("failure") is not None or checked == span, f"{at}.checked")
+        rule("132.one_outcome", r.get("failure") is None or r.get("incomplete") is None, f"{at}.incomplete")
+        unproven = kind != "anchor" or r.get("failure") is not None or r.get("incomplete") is not None
+        rule("132.anchor_unproven", unproven, f"{at}.incomplete")
+    if p["result"] in ("pass", "incomplete", "fail"):
+        failed = any(r.get("failure") is not None for r in items)
+        unfinished = any(r.get("incomplete") is not None for r in items)
+        if "rule.133.incomplete_as_pass" in skip:
+            unfinished = False
+        want = "fail" if failed else "incomplete" if unfinished else "pass"
+        rule("133", p["result"] == want, "payload.result")
+    return []
 
 
 def merkle_root(leaves: list[dict], skip: frozenset[str] = frozenset()) -> str:

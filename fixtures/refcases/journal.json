@@ -56747,5 +56747,2891 @@
     }
    ]
   }
+ },
+ "verification_runs": {
+  "spec": "docs/specs/journal.md v0.36 §9.13 and §11 (DEC-788, DEC-789)",
+  "drafts": {
+   "run_passed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3V1A000000000000000V1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "VerificationRun",
+    "schema_version": 2,
+    "event_time": "2026-10-09T18:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "trigger": "weekly",
+     "ranges": [
+      {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "from_seq": 1,
+       "to_seq": 40,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+       "start": {
+        "kind": "genesis",
+        "manifest_hash": null,
+        "anchor_event_id": null
+       },
+       "checked": 40,
+       "failure": null,
+       "incomplete": null
+      },
+      {
+       "stream_id": "agent:ws_01J8Z2:agent_a",
+       "from_seq": 12,
+       "to_seq": 30,
+       "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+       "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+       "start": {
+        "kind": "manifest",
+        "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "anchor_event_id": null
+       },
+       "checked": 19,
+       "failure": null,
+       "incomplete": null
+      },
+      {
+       "stream_id": "ctl:ws_01J8Z2",
+       "from_seq": 1,
+       "to_seq": 9,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+       "start": {
+        "kind": "genesis",
+        "manifest_hash": null,
+        "anchor_event_id": null
+       },
+       "checked": 9,
+       "failure": null,
+       "incomplete": null
+      }
+     ],
+     "result": "pass"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "run_failed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3V2A000000000000000V2",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "VerificationRun",
+    "schema_version": 2,
+    "event_time": "2026-10-09T18:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3R2A000000000000000R2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_owner_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "trigger": "request",
+     "ranges": [
+      {
+       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+       "from_seq": 1,
+       "to_seq": 40,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": null,
+       "start": {
+        "kind": "genesis",
+        "manifest_hash": null,
+        "anchor_event_id": null
+       },
+       "checked": 17,
+       "failure": {
+        "check": "rehash_mismatch",
+        "seq": 17
+       },
+       "incomplete": null
+      },
+      {
+       "stream_id": "ctl:ws_01J8Z2",
+       "from_seq": 1,
+       "to_seq": 9,
+       "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+       "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+       "start": {
+        "kind": "genesis",
+        "manifest_hash": null,
+        "anchor_event_id": null
+       },
+       "checked": 9,
+       "failure": null,
+       "incomplete": null
+      }
+     ],
+     "result": "fail"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "run_incomplete": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3V3A000000000000000V3",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "VerificationRun",
+    "schema_version": 2,
+    "event_time": "2026-10-09T18:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "user_auditor_01",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "trigger": "request",
+     "ranges": [
+      {
+       "stream_id": "agent:ws_01J8Z2:agent_a",
+       "from_seq": 12,
+       "to_seq": 30,
+       "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+       "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+       "start": {
+        "kind": "anchor",
+        "manifest_hash": null,
+        "anchor_event_id": "01J8Z3A1A000000000000000A1"
+       },
+       "checked": 19,
+       "failure": null,
+       "incomplete": {
+        "check": "tsa_token_invalid",
+        "cause": "token_unverifiable"
+       }
+      }
+     ],
+     "result": "incomplete"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "run_incomplete.ranges[0].start.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": "anchor",
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].start.kind.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": 7,
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.kind"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].start.kind.form",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "cold_store",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].start.kind"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].start.anchor_event_id.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": 7
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.anchor_event_id"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].start.anchor_event_id.form",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "anchor_one"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].start.anchor_event_id"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].checked.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": "19",
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].checked"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": "tsa_token_invalid"
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.check.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": 7,
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete.check"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.check.form",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "seq_gap",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].incomplete.check"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.cause.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": 7
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete.cause"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.cause.form",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_missing"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[0].incomplete.cause"
+    }
+   },
+   {
+    "name": "run_incomplete.result.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": true
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "run_incomplete.result.form",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "unproven"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "run_passed.ranges[1].start.manifest_hash.kind",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": 7,
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].start.manifest_hash"
+    }
+   },
+   {
+    "name": "run_passed.ranges[1].start.manifest_hash.form",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.ranges[1].start.manifest_hash"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].start.null",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": null,
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].start.kind.null",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": null,
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.kind"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].checked.null",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": null,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].checked"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.check.null",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": null,
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete.check"
+    }
+   },
+   {
+    "name": "run_incomplete.ranges[0].incomplete.cause.null",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": null
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete.cause"
+    }
+   },
+   {
+    "name": "run_incomplete.result.null",
+    "clause": "§9.13 types, version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "range_without_start",
+    "clause": "§9.13 closed: version 2's range holds every member",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start"
+    }
+   },
+   {
+    "name": "range_without_checked",
+    "clause": "§9.13 closed: version 2's range holds every member",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].checked"
+    }
+   },
+   {
+    "name": "range_without_incomplete",
+    "clause": "§9.13 closed: version 2's range holds every member",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete"
+    }
+   },
+   {
+    "name": "start_extra_member",
+    "clause": "§9.13 closed: a start names its record, never a hash the caller chose",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1",
+         "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.prev_hash"
+    }
+   },
+   {
+    "name": "incomplete_without_its_cause",
+    "clause": "§9.13 closed and rule 132: a non-null incomplete names its cause",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete.cause"
+    }
+   },
+   {
+    "name": "incomplete_extra_member",
+    "clause": "§9.13 closed: an incomplete check carries no seq; it is reported for the range (rule 111)",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable",
+         "seq": 17
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete.seq"
+    }
+   },
+   {
+    "name": "version_1_records_no_incomplete",
+    "clause": "§9.13 versions: version 1's result is pass or fail, so it cannot record an incomplete run",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "failure": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "version_1_carries_no_start",
+    "clause": "§9.13 versions: version 1 is not edited (§8), so its range has no start, count, or incomplete check",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 1
+     },
+     {
+      "path": "payload.result",
+      "value": "pass"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].checked",
+     "also": [
+      {
+       "reason": "schema",
+       "path": "payload.ranges[0].incomplete"
+      },
+      {
+       "reason": "schema",
+       "path": "payload.ranges[0].start"
+      }
+     ]
+    }
+   },
+   {
+    "name": "version_3_unregistered",
+    "clause": "§9.13 versions: no version 3",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 3
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "v2_another_workspace",
+    "clause": "rule 107 judges version 2",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z9:01J8Z9ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].stream_id"
+    }
+   },
+   {
+    "name": "v2_scheduled_run_by_a_user",
+    "clause": "rule 110 judges version 2",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "v2_client_verifies",
+    "clause": "§3 rule 83: a client never verifies, at either version",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "client",
+       "id": "client_01",
+       "version": "1",
+       "build": null,
+       "on_behalf_of": "user_owner_01"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "v2_requested_run_by_an_operator",
+    "clause": "rule 110: platform staff do not run a verification, at either version",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "platform_operator",
+       "id": "operator_01",
+       "version": "1",
+       "build": null
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "v2_range_check_with_a_seq",
+    "clause": "rule 111 judges version 2: `segment_gap` is reported for the range (workspace API §4.8.1, DEC-786)",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 17,
+        "failure": {
+         "check": "segment_gap",
+         "seq": 17
+        },
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].failure.seq"
+    }
+   },
+   {
+    "name": "v2_passed_range_without_its_head",
+    "clause": "rule 111 judges version 2: an incomplete range names the head it walked",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": null,
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].to_hash"
+    }
+   },
+   {
+    "name": "manifest_start_without_its_hash",
+    "clause": "rule 132: a manifest start names its manifest",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].start.manifest_hash"
+    }
+   },
+   {
+    "name": "genesis_start_with_a_manifest",
+    "clause": "rule 132: only a manifest start names a manifest",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.manifest_hash"
+    }
+   },
+   {
+    "name": "anchor_start_without_its_anchor",
+    "clause": "rule 132: an anchor start names its anchor",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.anchor_event_id"
+    }
+   },
+   {
+    "name": "manifest_start_with_an_anchor",
+    "clause": "rule 132: only an anchor start names an anchor",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].start.anchor_event_id"
+    }
+   },
+   {
+    "name": "genesis_start_after_seq_1",
+    "clause": "rule 132: a genesis start enters at seq 1",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].start.kind"
+    }
+   },
+   {
+    "name": "anchor_start_at_seq_1",
+    "clause": "rule 132: an anchor start's leaf is at from_seq − 1, at least 1 (rule 113)",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 1,
+        "to_seq": 30,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 30,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].start.kind"
+    }
+   },
+   {
+    "name": "checked_past_the_range",
+    "clause": "rule 132: checked is at most to_seq − from_seq + 1",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 41,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17
+        },
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].checked"
+    }
+   },
+   {
+    "name": "passed_range_short_of_its_end",
+    "clause": "rule 132: a passed range walked every event (workspace API AU-8)",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 18,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[1].checked"
+    }
+   },
+   {
+    "name": "incomplete_range_short_of_its_end",
+    "clause": "rule 132: an incomplete range walked every event too",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 18,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].checked"
+    }
+   },
+   {
+    "name": "failed_range_also_incomplete",
+    "clause": "rule 132: a failed range records its failure, never an incomplete check too",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 17,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17
+        },
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete"
+    }
+   },
+   {
+    "name": "anchor_start_passed",
+    "clause": "rule 132: an anchor start's token cannot be proven yet (DEC-789, DEC-265 item 1), so its range never passes",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "pass"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ranges[0].incomplete"
+    }
+   },
+   {
+    "name": "incomplete_reported_as_pass",
+    "clause": "rule 133: a run with an incomplete range and no failure is incomplete",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "pass"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "incomplete_reported_as_fail",
+    "clause": "rule 133: an incomplete check alone never fails a run (no false SEV-1)",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "fail"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "fail_reported_as_incomplete",
+    "clause": "rule 133: a failure outranks an incomplete check",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "incomplete"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 17,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17
+        },
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "pass_reported_as_incomplete",
+    "clause": "rule 133: a run with nothing unfinished is not incomplete",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "incomplete"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   },
+   {
+    "name": "fail_reported_as_pass",
+    "clause": "rule 133",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "pass"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.result"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "manifest_start_at_seq_1",
+    "clause": "rule 132: a first segment's manifest is a start at seq 1, not only genesis (rule 116)",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "anchor_start_at_seq_2",
+    "clause": "rule 132: an anchor whose leaf is seq 1",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 2,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 29,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "anchor_start_failed",
+    "clause": "rule 132: an anchor start's range may fail; a failure needs no incomplete check",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "fail"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": {
+         "check": "anchor_root_mismatch",
+         "seq": null
+        },
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "failed_at_its_first_event",
+    "clause": "rule 132: a range may fail having walked nothing past its start",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 0,
+        "failure": {
+         "check": "prev_hash_mismatch",
+         "seq": 1
+        },
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "failed_after_walking_every_event",
+    "clause": "rule 132: a range check may fail a range whose events were all walked",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": {
+         "check": "anchor_head_mismatch",
+         "seq": 40
+        },
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "token_without_its_imprint_fails",
+    "clause": "§11 Incomplete: a token without the anchor's imprint is a real `tsa_token_invalid`, reported for the range",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "fail"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": {
+         "check": "tsa_token_invalid",
+         "seq": null
+        },
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "in_range_anchor_leaves_a_genesis_range_incomplete",
+    "clause": "§11 Incomplete (DEC-789 item 7): an in-range anchor's token check, stamped or null, cannot finish",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.result",
+      "value": "incomplete"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "failure_outranks_another_ranges_incomplete",
+    "clause": "rule 133: one failed range fails the run whatever another range left unfinished",
+    "base_draft": "run_failed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": null,
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 17,
+        "failure": {
+         "check": "rehash_mismatch",
+         "seq": 17
+        },
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "token_unverifiable"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "requested_run_by_a_service_account",
+    "clause": "rule 110 at version 2",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "restore_drill_incomplete",
+    "clause": "rules 110 and 133: a restore drill's run may end incomplete; its anchor start has a token (§9.14), so this is cause (a) and passes the drill (DEC-789 item 9, infrastructure design OPS-8)",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.trigger",
+      "value": "restore_drill"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "restore_drill_null_token_anchor_incomplete",
+    "clause": "rule 133 and DEC-789 items 7 and 9: a genesis range holding a null-token anchor's leaf records incomplete with cause anchor_unstamped, never fail, and append accepts it; a drill reads the cause and calls an integrity incident (infrastructure design OPS-8)",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+     },
+     {
+      "path": "payload.trigger",
+      "value": "restore_drill"
+     },
+     {
+      "path": "payload.result",
+      "value": "incomplete"
+     },
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "anchor_unstamped"
+        }
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "ctl:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "both_causes_record_anchor_unstamped",
+    "clause": "§9.13 and DEC-789 item 7: an anchor start (a stamped token, cause token_unverifiable) whose range also holds a null-token anchor's leaf records anchor_unstamped, the cause that stays an incident; the record cannot show the other cause, so the run's tests hold this precedence (DEC-787 item 8)",
+    "base_draft": "run_incomplete",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "anchor",
+         "manifest_hash": null,
+         "anchor_event_id": "01J8Z3A1A000000000000000A1"
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": {
+         "check": "tsa_token_invalid",
+         "cause": "anchor_unstamped"
+        }
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }

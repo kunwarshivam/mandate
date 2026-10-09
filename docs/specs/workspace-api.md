@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -651,7 +651,7 @@ recorded, in whatever form the event's schema gives it.
 | **AU-5** | **A timeline misses nothing and repeats nothing.** Paging a timeline with its per-stream cursor yields every matching event of each stream exactly once, in that stream's `seq` order | Fuzz with filters and concurrent appends against a k-way merge oracle over the two streams |
 | **AU-6** | **Served after recorded.** No export byte and no verification result is served before its `ExportCreated` or `VerificationRun` is `Committed` or `AlreadyCommitted` | Fault injection on the append: a failed or `Ambiguous` append serves nothing |
 | **AU-7** | **CSV cells are inert.** No CSV cell starts with `=`, `+`, `-`, `@`, a tab, or a carriage return | Fuzz payload strings over those characters; an independent scan of every cell |
-| **AU-8** | **A verification covers its whole range.** A `pass` means every event from `from_seq` to `to_seq` was walked: `checked = to_seq − from_seq + 1`, the first and last `seq` are the range's, and a missing, reordered, or extra event fails | An oracle that counts the range independently; seeded deletions, duplicates, and truncations of the stored range each fail, and an out-of-range `from_seq` or `to_seq` is refused |
+| **AU-8** | **A verification covers its whole range.** A `pass` or an `incomplete` means every event from `from_seq` to `to_seq` was walked: `checked = to_seq − from_seq + 1`, the first and last `seq` are the range's, and a missing, reordered, or extra event fails | An oracle that counts the range independently; seeded deletions, duplicates, and truncations of the stored range each fail, and an out-of-range `from_seq` or `to_seq` is refused; a range with a stamped anchor is never `pass` (DEC-789), including a `genesis` or `manifest` range that holds an anchor's leaf, stamped or with a `null` token, which the record cannot show (DEC-787 item 8) |
 | **AU-9** | **Audit output stays in the workspace.** Pages, traces, gate views, timelines, export files, and verification results are served only from the workspace deployment and are never sent to the global control plane. No request log, metric label, or tracing span carries an event body, a payload member, or an export's content. A notice that an export is ready or a verification is done carries only an opaque id and generic text (rule 6, API-10) | A seeded payload string in the journal; after every route is exercised, a scan of the logs, metrics, spans, notices, and the global control plane's inbound traffic finds it nowhere |
 
 **Who may call.** Every route here is the matrix row "Read records, verification; export": a
@@ -914,50 +914,151 @@ ascending `stream_id` bytes:
 
 #### Verification (J4, FR-7.5, E12-3)
 
-`POST /verifications` (with `Idempotency-Key`) takes `{stream_id, from_seq, to_seq, trusted_start}`:
+`POST /verifications` (with `Idempotency-Key`) takes `{stream_id, from_seq, to_seq, trusted_start}`
+([DEC-767](../project/decisions/DEC-767.md); [DEC-786](../project/decisions/DEC-786.md) to
+[DEC-789](../project/decisions/DEC-789.md)):
 
 - `from_seq` is at least 1; `to_seq` is an integer or `null` for the head read at start. A
   `from_seq` or `to_seq` above the stream's head at start, or `to_seq < from_seq`, is 422 `invalid`
   with violation `range`.
 - `trusted_start` is `{kind: "genesis"}` (only with `from_seq` 1: 64 zeros), `{kind: "manifest",
   manifest_hash}` (a `SegmentExported` manifest of this stream whose `first_seq` is `from_seq`), or
-  `{kind: "anchor", anchor_event_id}` (an `AnchorComputed` whose leaf for this stream has `seq` =
-  `from_seq` − 1). The trusted `prev_hash` is read from that manifest or anchor in the workspace's
-  journal and artifact store, never from the request ([DEC-767](../project/decisions/DEC-767.md)). A
-  manifest or anchor that is absent, foreign, or does not fit the range is 422 `invalid` with
-  violation `trusted_start`, the same for absent and foreign.
-- One run covers at most 1,000,000 events; more is 422.
-- **Coverage (AU-8).** The run reads the events of `from_seq` to `to_seq` in one snapshot and walks
+  `{kind: "anchor", anchor_event_id}` (an `AnchorComputed` with a `token` whose leaf for this
+  stream has `seq` = `from_seq` − 1). The trusted `prev_hash` is read from that manifest or anchor
+  in the workspace's journal and artifact store, never from the request (DEC-767). A manifest or
+  anchor that is absent, foreign, or does not fit the range is 422 `invalid` with violation
+  `trusted_start`, the same for absent and foreign; so is one that fails its own checks or that
+  only the hot store vouches for (**Inputs**, below).
+- One run covers at most 1,000,000 events; more is 422 `invalid` with violation `range`.
+- **The order of refusals** ([DEC-788](../project/decisions/DEC-788.md) item 4). Each is checked
+  only when every one before it passed, and none records anything:
+  1. the role: 403 `forbidden` (**Who may call**);
+  2. the members that are not ids: `from_seq`, `to_seq`, and `trusted_start`'s `kind` and shape,
+     each malformed member 422 `invalid` with its `violations` (**Ids and the 404**, item 2). A
+     `manifest_hash` or `anchor_event_id` is looked up, not rejected, so a malformed one is absent
+     at step 7;
+  3. the idempotent replay: a request whose key names a `VerificationRun` already recorded is
+     answered from that record (below), and one whose members differ from it is 409
+     `idempotency_conflict` (§3.4);
+  4. `stream_id`: absent, malformed, or another workspace's is the 404 (**Ids and the 404**,
+     item 1);
+  5. `range`: 422;
+  6. the size bound: 422, before any trusted-start record or cold-store object is read, since it
+     needs only the range and the head;
+  7. `trusted_start`: 422.
+- **The verification's id** ([DEC-788](../project/decisions/DEC-788.md) item 2):
+  `verification_id` is the `event_id` of the run's `VerificationRun` (journal spec §9.13), which
+  §3.4 derives from the `Idempotency-Key`, as an export's id is its `ExportCreated`'s.
+- **Inputs** ([DEC-787](../project/decisions/DEC-787.md)):
+  - **One snapshot.** The range's events, the workspace's control-stream records the run reads,
+    the trusted-start record, and the hold anchor and connection anchor below are all read in one
+    database snapshot, taken at start, so the run judges one moment whatever is appended while it
+    runs.
+  - **Anchors and manifests** come only from the workspace's own `ctl:{ws}`, up to its head in that
+    snapshot: the trusted-start record and every `AnchorComputed` and `SegmentExported` the checks
+    below read.
+  - **The trusted-start record is itself checked.** Its own `ctl:{ws}` row must pass journal spec
+    §11 checks 1, 2, and 4 (it is canonical, its columns equal its body, and it re-hashes to its
+    stored `hash`), and a `SegmentExported` must also satisfy rule 117 (its `manifest_hash` is its
+    six fields' hash). Otherwise the start is 422 `trusted_start`, nothing recorded: a record that
+    does not re-hash vouches for nothing.
+  - **A manifest start is read from the cold store**, its manifest and its segment file (journal
+    spec §6.2, §9.14). A start that only the hot store's `SegmentExported` vouches for, because
+    the cold store cannot be read, is 422 `trusted_start`, nothing recorded (DEC-787 item 5).
+  - **The hold anchor** (an agent stream, journal spec §11 `held_mismatch`) and **the connection
+    anchor** (a control or account stream, §11 `connection_lifecycle_mismatch`) are folded from the
+    stored chain from `seq` 1 to `from_seq − 1`, in the same snapshot, never from a read model. A
+    range from `seq` 1 is anchored on nothing before it.
+- **Coverage (AU-8).** The run reads the events of `from_seq` to `to_seq` in that snapshot and walks
   them in `seq` order. The first event read must be `from_seq` and the last `to_seq`; an event the
   walk expects and does not find fails `seq_gap` at the expected `seq`. `checked` is the number of
-  events walked. `pass` requires `checked = to_seq − from_seq + 1` and no failure.
-- **Per-event checks:** journal spec §11's, in its order, on every event; the first failure is
-  reported.
-- **Per-range checks**, run only when no per-event check failed, and reported in this order:
-  - `anchor_head_mismatch`: for every `AnchorComputed` on `ctl:{ws}` (up to its head at start)
-    whose leaf for this stream has a `seq` inside the range, reported at that `seq`.
-  - `anchor_root_mismatch` and `tsa_token_invalid`: for those anchors and for the trusted-start
-    anchor itself, reported at the anchored `seq` (`from_seq` − 1 for the trusted start).
-  - `segment_manifest_mismatch`: for every `SegmentExported` manifest of this stream whose range
-    lies wholly inside the run's range, and for the trusted-start manifest, reported at the
-    segment's first `seq`.
-  - `segment_gap`: between consecutive such manifests, reported at the first missing `seq`.
-  - On an agent stream, `intent_action_mismatch` and `mode_event_mismatch` (§9.1, §11), only where
-    the event they reference is inside the range. As §11 says, a reference to an event before the
-    trusted start is not checked by that range. A `mode_event` that names no earlier event fails
-    only on a full chain: `from_seq` 1 with `genesis`, to the head.
+  events of the range walked. `pass` and `incomplete` each require `checked = to_seq − from_seq + 1`
+  (journal spec rule 132). The trusted-start manifest is checked over its whole segment, and its
+  rows past `to_seq` are not counted in `checked`.
+- **The run order** ([DEC-786](../project/decisions/DEC-786.md)). The first failure ends the run
+  and is the one reported:
+  1. **Per-event checks:** journal spec §11's checks 1 to 6, in its order, on every event.
+  2. **Per-range checks**, run only when no per-event check failed, in this order:
+     1. `anchor_head_mismatch`: for every `AnchorComputed` on `ctl:{ws}` whose leaf for this stream
+        has a `seq` inside the range, reported at that `seq`, lowest first.
+     2. `anchor_root_mismatch`, then the token check: for those anchors and for the trusted-start
+        anchor, in ascending anchor `seq`. Both are reported for the range, with `seq` `null`
+        (journal spec rule 111). A token without the anchor's imprint fails `tsa_token_invalid`. A
+        token with it, and an in-range anchor whose `token` is `null`, leave the check
+        **incomplete** (journal spec §11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md)),
+        which never stops the run.
+     3. `segment_manifest_mismatch`: for every `SegmentExported` manifest of this stream whose
+        range lies wholly inside the run's range, and for the trusted-start manifest, in ascending
+        `first_seq`, reported with `seq` `null`.
+     4. `segment_gap`: between consecutive such manifests, including the trusted-start manifest:
+        the next one's `first_seq` is not the previous one's `last_seq + 1`, whether they overlap
+        or leave a gap. Reported with `seq` `null`.
+     5. **The stream type's own checks** (journal spec §11), each only where it reads, judged
+        together: the failure at the lowest `seq` is reported, ties broken by §11's listing order.
+        - On `ctl:{ws}`: `anchor_self_mismatch`, `break_glass_cause_mismatch`, and
+          `connection_lifecycle_mismatch` from the connection anchor.
+        - On an agent stream: `intent_action_mismatch`, `mode_event_mismatch`, and
+          `held_mismatch` from the hold anchor. The first two count only where the event they
+          reference is inside the range: as §11 says, a reference before the trusted start is not
+          checked by that range, and a `mode_event` that names no earlier event fails only on a
+          full chain, `from_seq` 1 with `genesis`, to the head.
+        - On an account stream: `connection_lifecycle_mismatch` from the connection anchor.
+        - `connection_cause_mismatch` is the full-chain run's only (§11: it reads the control
+          stream and its account streams together), so it never runs in a request, which names one
+          stream.
   - A `genesis` start runs these checks like any other kind; the kind changes only where the
     trusted `prev_hash` comes from and which trusted-start object is checked.
-- **Result:** `{stream_id, from_seq, to_seq, trusted_start, result: "pass" | "fail", checked,
-  first_failure: {seq, check} | null}`, with `check` one of §11's codes.
-- The API appends `VerificationRun` with that result and serves the result only once it is
-  committed (AU-6). Response `202 {verification_id, phase: "recorded" | "running"}`;
-  `GET /verifications/{id}` returns the result. The API takes no other action on a failure. Journal
-  spec §11's response to one (SEV-1; pausing the affected agents, or freezing mandate and deployment
-  changes for a control stream; legal hold; a new writer epoch from `IntegrityIncidentRecorded`;
-  the customer notice) is taken by whoever is on call (infrastructure design §8.4), through the
-  "Journal verification failure" alert that a failing `VerificationRun` raises (infrastructure
-  design §8.2, runbook RB-09).
+  - This order differs from the CLI's ([DEC-782](../project/decisions/DEC-782.md) item 1, stream
+    checks before anchor checks) on purpose (DEC-786). Every order gives the same verdict, and only
+    which code a range with several faults shows differs.
+- **Incomplete, never a false pass and never a false failure**
+  ([DEC-789](../project/decisions/DEC-789.md), the founder). A range that needs a stamped anchor, an
+  `anchor` trusted start or an in-range anchor's leaf, ends `incomplete` at best until journal spec
+  §11's token check can answer: never `pass`, and never `tsa_token_invalid` for a token whose
+  imprint matches.
+- **Result:** `{stream_id, from_seq, to_seq, trusted_start, result: "pass" | "incomplete" | "fail",
+  checked, first_failure: {seq: integer | null, check} | null, incomplete: {check:
+  "tsa_token_invalid", cause: "token_unverifiable" | "anchor_unstamped"} | null}`. `cause` says
+  why the token check could not finish: a stamped token whose imprint matches, or an anchor the
+  range checks with a `null` token; a range with both reports `anchor_unstamped` (journal spec
+  §9.13, [DEC-789](../project/decisions/DEC-789.md) item 7).
+  - `to_seq` is the resolved last `seq`, never `null`, and `trusted_start` is the request's, with
+    a `manifest_hash` as a `sha256:` ref (**Hash forms**).
+  - `check` is one of journal spec §11's codes. `first_failure.seq` is `null` exactly for
+    `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, and `segment_gap`,
+    and otherwise lies from `from_seq` to `to_seq` (journal spec rule 111).
+  - `result` is `fail` exactly when `first_failure` is non-null; `incomplete` exactly when it is
+    `null` and `incomplete` is non-null; `pass` otherwise. `first_failure` stays `null` on an
+    incomplete run, and `incomplete` is `null` on a failed one (journal spec rules 132 and 133).
+- **The record.** The API appends `VerificationRun` version 2 with `trigger` `request` and one
+  range: `stream_id`, `from_seq`, `to_seq`, the trusted `prev_hash`, `to_hash` (the head walked, or
+  `null` when a failure left none), `start` (the request's `trusted_start`, its other member
+  `null`, its `manifest_hash` bare hex), `checked`, `failure` (`first_failure`), and `incomplete`.
+  `GET /verifications/{id}` rebuilds the result from that record alone. It serves the result only
+  once that record is committed (AU-6).
+- **The response.** `202 {verification_id, phase: "recorded"}`. A run within the bound ends before
+  the response, so `phase` is always `recorded` in v1; `running` is reserved for an asynchronous
+  run and never sent (DEC-788 item 3).
+- **The replay.** A retry with the same key and members returns the recorded result and is never
+  run again, so a head that has moved since cannot change it (§3.4, DEC-788 item 4). §3.4's
+  equality compares the request with the record after one normalisation each way, and nothing
+  else: `stream_id` and `from_seq` are equal; a `to_seq` of `null` matches whatever head the record
+  resolved, and an integer `to_seq` must equal the recorded one; `trusted_start.kind` equals
+  `start.kind`; a `manifest_hash` sent as a `sha256:` ref and the record's bare hex compare as the
+  same digest (**Hash forms**); and `anchor_event_id` is equal. Any other difference is 409
+  `idempotency_conflict`.
+- **`GET /verifications/{id}`** resolves the id among the workspace's control-stream events like
+  any event id (**Ids and the 404**). An id that names no version-2 `VerificationRun` with
+  `trigger` `request` there is the 404.
+- **After a result.** The API takes no other action on a failure. Journal spec §11's response to one
+  (SEV-1; pausing the affected agents, or freezing mandate and deployment changes for a control
+  stream; legal hold; a new writer epoch from `IntegrityIncidentRecorded`; the customer notice) is
+  taken by whoever is on call (infrastructure design §8.4), through the "Journal verification
+  failure" alert that a failing `VerificationRun` raises (infrastructure design §8.2, runbook
+  RB-09), on `result: fail` only. An `incomplete` result is not a failure: it raises no SEV-1 and
+  pages no one; it is reported as the informational "Journal verification incomplete" row of
+  infrastructure design §8.2 (journal spec §11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md)
+  item 9).
 
 ### 4.9 How the web app's fixtures map
 
@@ -1451,7 +1552,7 @@ risk-reducing call never consults one (API-7, API-8).
 | **Auditor or viewer probing the audit routes** | A viewer reads the journal; anyone pages with a huge `limit` or an `after_seq` far past the head | The role is checked before any id is resolved (403 for every id); `limit` above 1,000 is 422, never clamped; an `after_seq` past the head returns an empty page with the head (§4.8.1) |
 | **Causation cycle or fan-out bomb** | Events that link in a cycle, or a decision with thousands of outputs, to hang or exhaust a trace | Each event visited once; at most 16 hops and 256 events; `truncated` says so (AU-3) |
 | **Spreadsheet formula in a CSV view** | A payload string such as `=HYPERLINK(…)` runs when the export is opened | Leading `=`, `+`, `-`, `@`, tab, and CR are prefixed with `'` (AU-7) |
-| **Forged trusted start** | Verify a tampered range against a `prev_hash` the caller chose | The trusted start is read from a manifest or anchor in the workspace, never from the request (§4.8.1) |
+| **Forged trusted start** | Verify a tampered range against a `prev_hash` the caller chose, or against a start record rewritten in the hot store | The trusted start is read from a manifest or anchor in the workspace, never from the request; the start record must itself pass journal spec §11 checks 1, 2, and 4 and, for a manifest, rule 117; a manifest start is read from the cold store and refused when only the hot store vouches for it; an anchor start needs a `token`, and a run over one ends `incomplete`, never `pass`, until the token can be proven (§4.8.1, DEC-787, DEC-789) |
 | **Malicious owner-connected agent** | Confirm a version, approve its own ask, kill-switch, pause during a fall | Closed scope list (§3.8, API-6): it can request and propose, and hold openings, nothing else. Its openings always ask (MI-30); a hold never holds exits (DEC-191) |
 | **Prompt-injected agent calling the API** | Flood asks; request buys in an illiquid name; propose a looser envelope | Every client opening asks a human (MI-30); the ask budget and suppression (mandate spec §6.4) bound the flood; a proposal is only a draft until a user confirms in Owlhead with step-up (DEC-185 item 4); the dry run and requests are rate-limited (§3.10) |
 | **Injected text in model output** shown by the API | A thesis or chat reply that reads as an instruction or a button | Model text is typed quoted content (API-18); action cards come from deterministic code |
@@ -1494,7 +1595,12 @@ risk-reducing call never consults one (API-7, API-8).
 
 §4.8.1's readings are [DEC-760](../project/decisions/DEC-760.md) to
 [DEC-767](../project/decisions/DEC-767.md), each Accepted: each closes an unclosed contract by
-the reading that adds no risk (DEC-176 item 2). The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
+the reading that adds no risk (DEC-176 item 2). Its Verification is closed further by
+[DEC-786](../project/decisions/DEC-786.md) (the run order), [DEC-787](../project/decisions/DEC-787.md)
+(the run's inputs), and [DEC-788](../project/decisions/DEC-788.md) (the record, the id, and the
+refusal order), each Accepted by an agent under DEC-176 as a tightening, and by
+[DEC-789](../project/decisions/DEC-789.md), Accepted by the founder: a token that cannot be proven
+ends a run `incomplete`, never `pass` and never a false failure. The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
 one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its
 ruling on M2 and M3.

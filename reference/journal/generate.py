@@ -43,6 +43,7 @@ import membership
 import membership_fold
 import research
 import risk_state
+import verification
 import workspace
 import yaml
 from common import (
@@ -3834,6 +3835,7 @@ def render(
     fold_section: dict,
     audit_section: dict,
     cold_section: dict,
+    verification_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3858,6 +3860,7 @@ def render(
             "membership_fold": fold_section,
             "records_access": audit_section,
             "cold_records": cold_section,
+            "verification_runs": verification_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3913,6 +3916,7 @@ def main(argv: list[str] | None = None) -> int:
     fold_section = membership_fold.build_section()
     audit_section = audit.build_section()
     cold_section = cold.build_section(v3)
+    verification_section = verification.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3954,6 +3958,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += audit.run_mutants(audit_section)
     problems += cold.check_section(cold_section, v3)
     problems += cold.run_mutants(cold_section, v3)
+    problems += verification.check_section(verification_section)
+    problems += verification.run_mutants(verification_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3981,6 +3987,7 @@ def main(argv: list[str] | None = None) -> int:
         fold_section,
         audit_section,
         cold_section,
+        verification_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4004,6 +4011,7 @@ def main(argv: list[str] | None = None) -> int:
         or membership_fold.check_section(reread["membership_fold"])
         or audit.check_section(reread["records_access"])
         or cold.check_section(reread["cold_records"], v3)
+        or verification.check_section(reread["verification_runs"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4084,7 +4092,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(cold_section['valid_drafts'])} valid; {len(cold.VALIDATOR_MUTANTS)} validator and "
         f"{len(cold.vector_mutants(cold_section))} vector mutants caught, "
         f"{len(cold_section['range_checks'])} range checks and {len(cold_section['trusted_starts']['cases'])} trusted starts, "
-        f"{len(cold.RANGE_MUTANTS)} range and {len(cold.START_MUTANTS)} start mutants caught"
+        f"{len(cold.RANGE_MUTANTS)} range and {len(cold.START_MUTANTS)} start mutants caught; "
+        f"{len(verification_section['drafts'])} verification-run drafts, {len(verification_section['invalid_drafts'])} invalid and "
+        f"{len(verification_section['valid_drafts'])} valid; {len(verification.VALIDATOR_MUTANTS)} validator and "
+        f"{len(verification.vector_mutants(verification_section))} vector mutants caught"
     )
     return 0
 

@@ -2490,7 +2490,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   failover, and evacuation drills recorded as journal events, so that OPS-8's "journaled" has
   somewhere to go (design §6.4, DEC-434 item 24). *Accepted when:* a journal spec change adds the
   backup and drill events to §9's catalogue on the control stream, each naming what was restored or
-  exercised, the `VerificationRun` it relied on, and pass or fail, with test vectors; the
+  exercised, the `VerificationRun` it relied on, and pass, fail, or token-only incomplete ([DEC-789](decisions/DEC-789.md) item 9), with test vectors; the
   registration lands tests first (DEC-77); and an unregistered drill event is still rejected at
   append. Blocks E21-5.
 - **E21-26 (Proposed, M6; SC)** As an owner, I want the journal-outage hold tested for exactly what
