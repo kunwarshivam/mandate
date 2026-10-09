@@ -1520,34 +1520,140 @@ async fn a_5xx_on_submit_is_an_unknown_outcome_never_a_rejection() {
     );
 }
 
+/// The three requests of a cancel the broker took: the lookup by our id, the `DELETE` by the
+/// broker's, and DEC-867 item 3's read-back by our id.
+const CANCEL_THEN_READ_BACK: [&str; 3] = [
+    "GET /v2/orders:by_client_order_id?client_order_id=md-e144b97773a6f87c1978cc2831",
+    "DELETE /v2/orders/e02fc2d2-0ff3-444f-a0ab-6253613302fe",
+    "GET /v2/orders:by_client_order_id?client_order_id=md-e144b97773a6f87c1978cc2831",
+];
+
+fn cancel_recorded_order() -> mandate_executor::BrokerRequest {
+    mandate_executor::BrokerRequest::Cancel {
+        client_order_id: client_order_id("md-e144b97773a6f87c1978cc2831"),
+    }
+}
+
+/// The recorded `order_by_client_id_found` record, showing `status` with `filled_qty` filled.
+fn found_showing(
+    status: &str,
+    filled_qty: &str,
+) -> Result<mandate_alpaca::Response, mandate_alpaca::TransportError> {
+    let body = common::body("order_by_client_id_found", 0);
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&body).unwrap_or_else(|e| panic!("the recorded order parses: {e}"));
+    record["status"] = serde_json::json!(status);
+    record["filled_qty"] = serde_json::json!(filled_qty);
+    common::inline(200, &record.to_string())
+}
+
+/// DEC-867 items 1 and 3, trading spec §5.7's `PendingCancel --> Canceled: confirmed`: Alpaca
+/// cancels by the broker's order id, which `BrokerRequest::Cancel` does not carry, so the client
+/// looks it up by our id first; an accepted `DELETE` is only a request taken, so the client reads
+/// the order back once, and the recorded `canceled` it reads is the confirmation.
 #[tokio::test]
+#[ignore = "pending E7-4"]
 async fn a_cancel_looks_the_order_up_then_deletes_it_by_the_broker_id() {
-    let (client, transport) = serving(vec![
-        common::reply(200, "order_by_client_id_found", 0),
-        common::inline(204, ""),
-    ]);
-    let outcome = client
-        .call_one(&mandate_executor::BrokerRequest::Cancel {
-            client_order_id: client_order_id("md-e144b97773a6f87c1978cc2831"),
-        })
-        .await
-        .expect("an accepted cancel is an answer");
-    assert_eq!(
-        lines(&transport),
-        vec![
-            "GET /v2/orders:by_client_order_id?client_order_id=md-e144b97773a6f87c1978cc2831"
-                .to_owned(),
-            "DELETE /v2/orders/e02fc2d2-0ff3-444f-a0ab-6253613302fe".to_owned(),
-        ],
-        "Alpaca cancels by the broker's order id, which `BrokerRequest::Cancel` does not carry, \
-         so the client reads it back by our id first"
-    );
-    assert_eq!(
-        outcome,
-        mandate_executor::BrokerOutcome::CancelAccepted {
-            client_order_id: "md-e144b97773a6f87c1978cc2831".to_owned()
-        }
-    );
+    for deleted in [204, 200] {
+        let (client, transport) = serving(vec![
+            common::reply(200, "order_by_client_id_found", 0),
+            common::inline(deleted, ""),
+            common::reply(200, "cancel_confirmed", 1),
+        ]);
+        let outcome = client
+            .call_one(&cancel_recorded_order())
+            .await
+            .unwrap_or_else(|e| panic!("{deleted}: a confirmed cancel is an answer: {e}"));
+        assert_eq!(lines(&transport), CANCEL_THEN_READ_BACK, "{deleted}");
+        assert_eq!(
+            outcome,
+            mandate_executor::BrokerOutcome::CancelAccepted {
+                client_order_id: "md-e144b97773a6f87c1978cc2831".to_owned()
+            },
+            "{deleted}"
+        );
+    }
+}
+
+/// DEC-867 items 2 and 3: a `DELETE` Alpaca accepted whose order the read-back does not show
+/// `canceled`, with a `204` or a `200`, is answered with that order, in the status the read shows,
+/// so the executor keeps the cancel unconfirmed (§5.4) and waits for Alpaca's own `canceled`. An
+/// order in `pending_cancel` can still fill.
+#[tokio::test]
+#[ignore = "pending E7-4"]
+async fn an_accepted_cancel_whose_order_is_not_yet_canceled_answers_the_order_read_back() {
+    let shown = [
+        ("pending_cancel", "0"),
+        ("accepted", "0"),
+        ("new", "0"),
+        ("partially_filled", "0.4"),
+    ];
+    for ((status, filled), deleted) in shown.into_iter().flat_map(|s| [(s, 204), (s, 200)]) {
+        let (client, transport) = serving(vec![
+            common::reply(200, "order_by_client_id_found", 0),
+            common::inline(deleted, ""),
+            found_showing(status, filled),
+        ]);
+        let outcome = client
+            .call_one(&cancel_recorded_order())
+            .await
+            .unwrap_or_else(|e| panic!("{status}: the read-back is an answer: {e}"));
+        assert!(
+            !matches!(outcome, BrokerOutcome::CancelAccepted { .. }),
+            "{status}: an accepted DELETE is not a confirmation: {outcome:?}"
+        );
+        let BrokerOutcome::Order(order) = outcome else {
+            panic!("{status}: {outcome:?}")
+        };
+        assert_eq!(order.status, status);
+        assert_eq!(
+            order.broker_order_id,
+            "e02fc2d2-0ff3-444f-a0ab-6253613302fe"
+        );
+        assert_eq!(
+            order.client_order_id.as_deref(),
+            Some("md-e144b97773a6f87c1978cc2831")
+        );
+        assert_eq!(
+            (order.qty, order.filled_qty),
+            (exact_qty("1"), exact_qty(filled)),
+            "{status}"
+        );
+        assert_eq!(lines(&transport), CANCEL_THEN_READ_BACK, "{status}");
+    }
+}
+
+/// DEC-867 item 3: a read-back after an accepted `DELETE` that times out, is throttled or meets a
+/// failing broker says nothing about the order, so the cancel's outcome is unknown, never
+/// `CancelAccepted`, and nothing is deleted again.
+#[tokio::test]
+#[ignore = "pending E7-4"]
+async fn a_failed_read_back_after_an_accepted_cancel_is_unknown_never_confirmed() {
+    let failed = [
+        ("timeout", Err(mandate_alpaca::TransportError::Timeout)),
+        (
+            "429",
+            common::inline(429, "{\"message\":\"too many requests\"}"),
+        ),
+        ("503", common::inline(503, "{\"message\":\"unavailable\"}")),
+    ];
+    for (name, read_back) in failed {
+        let (client, transport) = serving(vec![
+            common::reply(200, "order_by_client_id_found", 0),
+            common::inline(204, ""),
+            read_back,
+        ]);
+        let error =
+            common::answered(client.call_one(&cancel_recorded_order()).await).expect_err(name);
+        assert!(
+            matches!(
+                error.to_connector(),
+                mandate_executor::ConnectorError::Unknown(_)
+            ),
+            "{name}: {error:?}"
+        );
+        assert_eq!(lines(&transport), CANCEL_THEN_READ_BACK, "{name}");
+    }
 }
 
 #[tokio::test]
