@@ -131,7 +131,6 @@ fn stored(new: NewRecord, state: ConnectionState) -> ConnectionRecord {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn identifiers_are_validated() {
     for good in ["conn_alpaca_paper", "a", "A-9_z", &"x".repeat(64)] {
         assert_eq!(ConnectionId::new(good), Ok(id(good)), "{good:?}");
@@ -201,7 +200,6 @@ fn each_broker_has_its_journal_name() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_broker_is_read_back_from_its_name_only() {
     for broker in [
         Broker::Alpaca,
@@ -316,7 +314,6 @@ fn a_record_shows_references_only() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_record_keeps_the_connections_rules() {
     let invalid = |member| Err(ConnectError::InvalidRecord { member });
     let with = |change: &dyn Fn(&mut NewRecord), base: NewRecord| {
@@ -487,7 +484,6 @@ fn a_record_keeps_the_connections_rules() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_registry_starts_from_records_that_keep_cn_5() {
     let active = || stored(alpaca("conn_a", 1), Active);
     let both_orders = |revoked: NewRecord| {
@@ -528,7 +524,6 @@ fn a_registry_starts_from_records_that_keep_cn_5() {
 /// Another account, under a new id, cannot take an account stream a record holds, live or
 /// revoked (CN-5).
 #[test]
-#[ignore = "pending E7-11"]
 fn an_account_ref_is_held_by_one_record() {
     for state in [Active, Revoked] {
         let mut registry = empty();
@@ -548,7 +543,6 @@ fn an_account_ref_is_held_by_one_record() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_fingerprint_matches_on_every_byte() {
     let mut registry = empty();
     registry.insert(record(alpaca("conn_a", 1))).unwrap();
@@ -579,7 +573,6 @@ fn empty_with_a(new: &NewRecord) -> Result<(), ConnectError> {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_second_connection_to_a_connected_account_is_refused() {
     for state in [Active, Degraded, Suspended] {
         let mut registry = empty();
@@ -608,7 +601,6 @@ fn a_second_connection_to_a_connected_account_is_refused() {
 /// Every pair of states, against §9.1's moves written out above: each listed move is taken, every
 /// other one, a move to the same state among them, is refused and leaves the state as it was.
 #[test]
-#[ignore = "pending E7-11"]
 fn states_move_only_as_section_9_allows() {
     let reach = |state| -> Registry {
         let mut registry = empty();
@@ -644,7 +636,6 @@ fn states_move_only_as_section_9_allows() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_revoked_account_reconnects_on_its_own_connection() {
     let mut registry = empty();
     registry.insert(record(alpaca("conn_a", 1))).unwrap();
@@ -709,7 +700,6 @@ fn a_revoked_account_reconnects_on_its_own_connection() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_reconnect_keeps_its_broker_and_environment() {
     let mut registry = empty();
     registry.insert(record(alpaca("conn_a", 1))).unwrap();
@@ -760,7 +750,6 @@ fn a_reconnect_keeps_its_broker_and_environment() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn ids_are_unique_and_a_view_needs_a_record() {
     let mut registry = empty();
     registry.insert(record(alpaca("conn_a", 1))).unwrap();
@@ -779,7 +768,6 @@ fn ids_are_unique_and_a_view_needs_a_record() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn every_connect_waits_while_the_fingerprint_key_rotates() {
     let revoked = {
         let mut registry = empty();
@@ -848,7 +836,6 @@ fn holds_cn_5(registry: &Registry) -> bool {
 /// once bound it keeps its connection id, `account_ref`, and broker through every revoke and
 /// reconnect; a state moves only as `MOVES` lists; and the registry holds CN-5 after every step.
 #[test]
-#[ignore = "pending E7-11"]
 fn one_account_one_connection_for_life() {
     let lives = prop::collection::vec(step(), 1..48);
     TestRunner::deterministic()

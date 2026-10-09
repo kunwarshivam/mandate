@@ -50,8 +50,23 @@ impl Broker {
     /// The inverse of [`Broker::code`]: exactly those names, nothing near them
     /// (`InvalidRecord { member: "broker" }`).
     pub fn from_code(code: &str) -> Result<Self, ConnectError> {
-        let _ = code;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        match code {
+            "alpaca" => Ok(Self::Alpaca),
+            "robinhood" => Ok(Self::Robinhood),
+            "kraken_derivatives_us" => Ok(Self::KrakenDerivativesUs),
+            _ => Err(ConnectError::InvalidRecord { member: "broker" }),
+        }
+    }
+
+    /// Whether the broker takes a credential of this kind: Alpaca an API key or OAuth, Robinhood
+    /// MCP OAuth only, Kraken an API key only (connections spec §3 to §5).
+    fn takes(self, auth_kind: AuthKind) -> bool {
+        matches!(
+            (self, auth_kind),
+            (Self::Alpaca, AuthKind::ApiKey | AuthKind::Oauth)
+                | (Self::Robinhood, AuthKind::McpOauth)
+                | (Self::KrakenDerivativesUs, AuthKind::ApiKey)
+        )
     }
 }
 
@@ -83,6 +98,50 @@ pub enum ConnectionState {
     Revoked,
 }
 
+impl ConnectionState {
+    /// Whether §9.1 moves a record from `self` to `to`. A move to the same state is not a move.
+    fn moves_to(self, to: Self) -> bool {
+        matches!(
+            (self, to),
+            (
+                Self::Active,
+                Self::Degraded | Self::Suspended | Self::Revoked
+            ) | (
+                Self::Degraded,
+                Self::Active | Self::Suspended | Self::Revoked
+            ) | (Self::Suspended, Self::Active | Self::Revoked)
+        )
+    }
+}
+
+/// Journal spec §2's identifier grammar: 1 to 64 of `A-Z`, `a-z`, `0-9`, `_` and `-`.
+fn is_identifier(text: &str) -> bool {
+    (1..=64).contains(&text.len())
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// One character of Crockford's base-32 alphabet, uppercase: no `I`, `L`, `O` or `U`.
+fn is_crockford(b: u8) -> bool {
+    b.is_ascii_digit() || (b.is_ascii_uppercase() && !matches!(b, b'I' | b'L' | b'O' | b'U'))
+}
+
+/// `sha256:` and exactly 64 lowercase hex digits (connections spec §6.2 rule 3).
+fn is_digest(text: &str) -> bool {
+    text.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
+/// A broker's name for a grant or, for MCP, a tool: printable ASCII with no space, never empty.
+fn is_scope(scope: &str) -> bool {
+    !scope.is_empty() && scope.bytes().all(|b| b.is_ascii_graphic())
+}
+
 /// The opaque id mandates name a connection by: `[A-Za-z0-9_-]`, 1 to 64 characters (journal
 /// spec §2's identifier grammar).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -94,8 +153,11 @@ impl ConnectionId {
     }
 
     pub fn new(text: &str) -> Result<Self, ConnectError> {
-        let _ = text;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        if is_identifier(text) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ConnectError::InvalidConnectionId)
+        }
     }
 }
 
@@ -110,8 +172,12 @@ impl AccountRef {
     }
 
     pub fn new(text: &str) -> Result<Self, ConnectError> {
-        let _ = text;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        let first_at_most_7 = text.starts_with(|c| ('0'..='7').contains(&c));
+        if text.len() == 26 && first_at_most_7 && text.bytes().all(is_crockford) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ConnectError::InvalidAccountRef)
+        }
     }
 }
 
@@ -133,8 +199,11 @@ impl AccountPiiRef {
     }
 
     pub fn new(text: &str) -> Result<Self, ConnectError> {
-        let _ = text;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        if is_identifier(text) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ConnectError::InvalidPiiRef)
+        }
     }
 }
 
@@ -223,8 +292,45 @@ impl ConnectionRecord {
     /// - a `terms_version` on a broker without platform terms (any but Robinhood), or not
     ///   `sha256:` and 64 lowercase hex digits (`terms_version`).
     pub fn new(new: NewRecord) -> Result<Self, ConnectError> {
-        let _ = new;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        let invalid = |member| Err(ConnectError::InvalidRecord { member });
+        if !new.broker.takes(new.auth_kind) {
+            return invalid("auth_kind");
+        }
+        if new.broker == Broker::Alpaca && new.environment != Environment::Paper {
+            return Err(ConnectError::EnvironmentRefused);
+        }
+        if new.scopes.is_empty() || !new.scopes.iter().all(|scope| is_scope(scope)) {
+            return invalid("scopes");
+        }
+        let over_mcp = new.auth_kind == AuthKind::McpOauth;
+        if over_mcp != new.contract_hash.is_some()
+            || !new.contract_hash.as_deref().is_none_or(is_digest)
+        {
+            return invalid("contract_hash");
+        }
+        if let Some(terms) = new.terms_version.as_deref()
+            && (new.broker != Broker::Robinhood || !is_digest(terms))
+        {
+            return invalid("terms_version");
+        }
+        Ok(Self {
+            connection_id: new.connection_id,
+            broker: new.broker,
+            environment: new.environment,
+            auth_kind: new.auth_kind,
+            scopes: new.scopes,
+            account_ref: new.account_ref,
+            account_pii_ref: new.account_pii_ref,
+            fingerprint: new.fingerprint,
+            state: ConnectionState::Active,
+            contract_hash: new.contract_hash,
+            terms_version: new.terms_version,
+        })
+    }
+
+    /// Whether a reconnect of this record keeps its broker and environment (CN-12).
+    fn same_venue(&self, broker: Broker, environment: Environment) -> bool {
+        self.broker == broker && self.environment == environment
     }
 
     /// What an API response or the CLI may show.
@@ -319,8 +425,46 @@ impl Registry {
         records: Vec<ConnectionRecord>,
         fingerprint_key_rotating: bool,
     ) -> Result<Self, ConnectError> {
-        let _ = (records, fingerprint_key_rotating);
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        let mut rest = records.as_slice();
+        while let Some((first, later)) = rest.split_first() {
+            for other in later {
+                if first.connection_id == other.connection_id {
+                    return Err(ConnectError::InvalidConnectionId);
+                }
+                if first.fingerprint == other.fingerprint {
+                    return Err(ConnectError::AlreadyConnected {
+                        existing: first.connection_id.clone(),
+                    });
+                }
+                if first.account_ref == other.account_ref {
+                    return Err(ConnectError::InvalidAccountRef);
+                }
+            }
+            rest = later;
+        }
+        Ok(Self {
+            records,
+            fingerprint_key_rotating,
+        })
+    }
+
+    /// The record holding an account, by its fingerprint: at most one, by CN-5.
+    fn holder(&self, fingerprint: &AccountFingerprint) -> Option<&ConnectionRecord> {
+        self.records.iter().find(|r| r.fingerprint == *fingerprint)
+    }
+
+    fn record(&self, connection_id: &ConnectionId) -> Option<&ConnectionRecord> {
+        self.records
+            .iter()
+            .find(|r| r.connection_id == *connection_id)
+    }
+
+    fn not_rotating(&self) -> Result<(), ConnectError> {
+        if self.fingerprint_key_rotating {
+            Err(ConnectError::FingerprintRotating)
+        } else {
+            Ok(())
+        }
     }
 
     /// Check 4 (connections spec §8.1): refuses an account a record that is not revoked holds
@@ -328,8 +472,22 @@ impl Registry {
     /// broker and environment (`Reconnect`), refuses one of another (`ReconnectMismatch`), and
     /// refuses every connect while the key rotates (`FingerprintRotating`).
     pub fn admit(&self, candidate: &Candidate) -> Result<Admission, ConnectError> {
-        let _ = candidate;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        self.not_rotating()?;
+        let Some(holder) = self.holder(&candidate.fingerprint) else {
+            return Ok(Admission::New);
+        };
+        if holder.state != ConnectionState::Revoked {
+            return Err(ConnectError::AlreadyConnected {
+                existing: holder.connection_id.clone(),
+            });
+        }
+        if !holder.same_venue(candidate.broker, candidate.environment) {
+            return Err(ConnectError::ReconnectMismatch);
+        }
+        Ok(Admission::Reconnect {
+            connection_id: holder.connection_id.clone(),
+            account_ref: holder.account_ref.clone(),
+        })
     }
 
     /// Adds a record, or replaces the revoked record a reconnect reuses, re-checking what
@@ -340,8 +498,38 @@ impl Registry {
     /// `ReconnectMismatch`); one with a new id and fingerprint whose `account_ref` another record
     /// holds, revoked or not, is `InvalidAccountRef` (CN-5).
     pub fn insert(&mut self, record: ConnectionRecord) -> Result<(), ConnectError> {
-        let _ = record;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        self.not_rotating()?;
+        let held = self
+            .records
+            .iter_mut()
+            .find(|r| r.fingerprint == record.fingerprint);
+        if let Some(holder) = held {
+            if holder.state != ConnectionState::Revoked
+                || holder.connection_id != record.connection_id
+                || holder.account_ref != record.account_ref
+            {
+                return Err(ConnectError::AlreadyConnected {
+                    existing: holder.connection_id.clone(),
+                });
+            }
+            if !holder.same_venue(record.broker, record.environment) {
+                return Err(ConnectError::ReconnectMismatch);
+            }
+            *holder = record;
+            return Ok(());
+        }
+        if self.record(&record.connection_id).is_some() {
+            return Err(ConnectError::InvalidConnectionId);
+        }
+        if self
+            .records
+            .iter()
+            .any(|r| r.account_ref == record.account_ref)
+        {
+            return Err(ConnectError::InvalidAccountRef);
+        }
+        self.records.push(record);
+        Ok(())
     }
 
     /// Moves a record to `state` (connections spec §9.1, journal spec §9.8 rule 60): `degraded`
@@ -356,8 +544,19 @@ impl Registry {
         connection_id: &ConnectionId,
         state: ConnectionState,
     ) -> Result<(), ConnectError> {
-        let _ = (connection_id, state);
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        let record = self
+            .records
+            .iter_mut()
+            .find(|r| r.connection_id == *connection_id)
+            .ok_or(ConnectError::UnknownConnection)?;
+        if !record.state.moves_to(state) {
+            return Err(ConnectError::InvalidTransition {
+                from: record.state,
+                to: state,
+            });
+        }
+        record.state = state;
+        Ok(())
     }
 
     /// The view of one record, if the deployment has it.
@@ -365,8 +564,7 @@ impl Registry {
         &self,
         connection_id: &ConnectionId,
     ) -> Result<Option<ConnectionView>, ConnectError> {
-        let _ = connection_id;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        Ok(self.record(connection_id).map(ConnectionRecord::view))
     }
 
     /// The `ConnectionEstablished` members of one record, if the deployment has it: after a
@@ -375,7 +573,8 @@ impl Registry {
         &self,
         connection_id: &ConnectionId,
     ) -> Result<Option<EstablishedMembers>, ConnectError> {
-        let _ = connection_id;
-        Err(ConnectError::Unimplemented { story: "E7-11" })
+        Ok(self
+            .record(connection_id)
+            .map(ConnectionRecord::established_members))
     }
 }
