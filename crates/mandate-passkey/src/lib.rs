@@ -40,6 +40,7 @@ mod auth_data;
 mod cbor;
 mod client_data;
 mod cose;
+pub mod stepup;
 
 use mandate_canon::Digest;
 
