@@ -70,7 +70,8 @@ pub const TSA_VERIFICATION_INCOMPLETE: &str = "tsa_verification_incomplete";
 
 /// The run's result: everything verified, or the one failure reported first. The segment checks
 /// and the per-event checks run in range order first (DEC-264), then the range checks of the
-/// stream's type (DEC-782), then the anchor's two checks, then the token's, so a failing export is described by its first failing check alone.
+/// stream's type (DEC-782), then the anchor's two checks, then the token's, so a failing export is
+/// described by its first failing check alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColdOutcome {
     /// Every check passed over the span the trusted start and the segments cover. Never the
