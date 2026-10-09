@@ -33562,6 +33562,426 @@ cold_records:
         kind: manifest
         manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
       expect: null
+    rows:
+    - stream_id: ctl:ws_01J8Z2
+      seq: 1
+      event_id: 01J8Z3C6A000000000000000R1
+      event_type: StreamOpened
+      schema_version: 1
+      environment: paper
+      recorded_at: '2026-09-21T16:00:00.000000000Z'
+      prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: a1d24e379acfc8db5d020d6a26d341792ef0088b1c41e0a874de517abd3e23bb
+      body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R1","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"StreamOpened","payload":{"stream_type":"control","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":1,"stream_id":"ctl:ws_01J8Z2"}'
+    - stream_id: ctl:ws_01J8Z2
+      seq: 2
+      event_id: 01J8Z3C6A000000000000000R2
+      event_type: SegmentExported
+      schema_version: 1
+      environment: paper
+      recorded_at: '2026-09-21T16:00:00.000000000Z'
+      prev_hash: a1d24e379acfc8db5d020d6a26d341792ef0088b1c41e0a874de517abd3e23bb
+      hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+      body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R2","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","first_seq":1,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":3,"manifest_hash":"43de04ae2020c830f98522c6201bf4a736a2ddc579809d1ed0adff2e999fde90","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"a1d24e379acfc8db5d020d6a26d341792ef0088b1c41e0a874de517abd3e23bb","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":2,"stream_id":"ctl:ws_01J8Z2"}'
+    - stream_id: ctl:ws_01J8Z2
+      seq: 3
+      event_id: 01J8Z3C6A000000000000000R3
+      event_type: SegmentExported
+      schema_version: 1
+      environment: paper
+      recorded_at: '2026-09-21T16:00:00.000000000Z'
+      prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+      hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+      body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+    - stream_id: ctl:ws_01J8Z2
+      seq: 4
+      event_id: 01J8Z3C6A000000000000000R4
+      event_type: AnchorComputed
+      schema_version: 1
+      environment: paper
+      recorded_at: '2026-09-21T16:00:00.000000000Z'
+      prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+      hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+      body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+    - stream_id: ctl:ws_01J8Z9
+      seq: 1
+      event_id: 01J8Z3C6A000000000000000R5
+      event_type: SegmentExported
+      schema_version: 1
+      environment: paper
+      recorded_at: '2026-09-21T16:00:00.000000000Z'
+      prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 660043d3bb3fed6433603afc666bcb3b326c32c07c77dff018cc74c86592c995
+      body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R5","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"9999999999999999999999999999999999999999999999999999999999999999","first_seq":20,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":30,"manifest_hash":"0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":1,"stream_id":"ctl:ws_01J8Z9"}'
+    row_cases:
+    - name: genesis_start_reads_no_record
+      clause: '§11: the genesis start'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 1
+      request:
+        kind: genesis
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: start
+        from_seq: 1
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    - name: manifest_start_from_genesis
+      clause: 'DEC-787 items 3, 5: a checked row, the cold manifest read'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 1
+      request:
+        kind: manifest
+        manifest_hash: 43de04ae2020c830f98522c6201bf4a736a2ddc579809d1ed0adff2e999fde90
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","first_seq":1,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":3,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: start
+        from_seq: 1
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    - name: manifest_start_cold_confirmed
+      clause: 'DEC-787 items 3, 5: a checked row, the cold manifest read'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: start
+        from_seq: 4
+        prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
+    - name: anchor_start_needs_no_cold_store
+      clause: 'DEC-787 item 3: a checked stamped anchor'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: start
+        from_seq: 10
+        prev_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+    - name: another_workspaces_row
+      clause: '§9.14, DEC-767: its own columns name another workspace'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 20
+      request:
+        kind: manifest
+        manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"9999999999999999999999999999999999999999999999999999999999999999","first_seq":20,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":30,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: manifest_cold_object_absent
+      clause: 'DEC-787 item 5: only the hot store vouches'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: absent
+      expect:
+        outcome: cold_unreadable
+    - name: manifest_cold_store_unreadable
+      clause: 'DEC-787 item 5: only the hot store vouches'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: cold_unreadable
+    - name: manifest_rewritten_in_the_hot_store
+      clause: 'DEC-894 item 1: the cold manifest disagrees'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 54204ef04c2c637f3404179bafdd84ec9cc35a3e02b1e360adcba96311661623
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 3
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: 28b4646730cea4c828d73eadf4d62579c46f6992b95f9ed24b26285084cff67d
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"54204ef04c2c637f3404179bafdd84ec9cc35a3e02b1e360adcba96311661623","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: cold_manifest_mismatch
+    - name: cold_bytes_not_the_manifest
+      clause: 'DEC-894 item 1: the cold bytes hash to another digest'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}
+
+          '
+      expect:
+        outcome: refused
+        cause: cold_manifest_mismatch
+    - name: manifest_row_not_canonical
+      clause: '§11 check 1: a space inserted, re-hashed'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 3
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: 061e4b38d3b038cb212697cf7fe04088c04d05c8056ea8df9c286a020763c86e
+          body: '{ "actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: non_canonical
+    - name: anchor_row_keys_unsorted
+      clause: '§11 check 1: keys out of order, re-hashed'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: 0e8f8f681e537d3e9277623f6ba2785afc365c00bffacf0b593d78fd07e64ab3
+          body: '{"stream_id":"ctl:ws_01J8Z2","seq":4,"schema_version":1,"recorded_at":"2026-09-21T16:00:00.000000000Z","prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","pii_refs":[],"payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"event_type":"AnchorComputed","event_time":"2026-09-21T16:00:00.000000000Z","event_id":"01J8Z3C6A000000000000000R4","environment":"paper","envelope_version":1,"correlation_id":null,"config_refs":{},"clock_source":"local","causation_id":null,"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"}}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: non_canonical
+    - name: workspace_column_claims_this_workspace
+      clause: '§11 check 2: another workspace''s body under this workspace''s column'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 20
+      request:
+        kind: manifest
+        manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
+      replace:
+        index: 4
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 1
+          event_id: 01J8Z3C6A000000000000000R5
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+          hash: 660043d3bb3fed6433603afc666bcb3b326c32c07c77dff018cc74c86592c995
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R5","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"9999999999999999999999999999999999999999999999999999999999999999","first_seq":20,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":30,"manifest_hash":"0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":1,"stream_id":"ctl:ws_01J8Z9"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"9999999999999999999999999999999999999999999999999999999999999999","first_seq":20,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":30,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: column_mismatch
+    - name: workspace_column_names_another
+      clause: '§11 check 2: this workspace''s body under another''s column'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z9
+          seq: 3
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_event_id_column_differs
+      clause: '§11 check 2: the event_id column'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R1
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R1
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: column_mismatch
+    - name: manifest_seq_column_differs
+      clause: '§11 check 2: the seq column'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 7
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: column_mismatch
+    - name: anchor_leaf_forged_under_its_old_hash
+      clause: '§11 check 4: the body forged, the stored hash kept'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"c2f3eee46e2a0ecab10682365385553878e4053ccd37190826c6976dbffe459e","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: rehash_mismatch
+    - name: manifest_forged_under_its_old_hash
+      clause: '§11 check 4: the body forged, the stored hash kept'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 54204ef04c2c637f3404179bafdd84ec9cc35a3e02b1e360adcba96311661623
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 3
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"54204ef04c2c637f3404179bafdd84ec9cc35a3e02b1e360adcba96311661623","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: rehash_mismatch
+    - name: manifest_row_breaks_rule_117
+      clause: 'rule 117: the manifest hash is not its fields'''
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 3
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: 5fa7c217743df9e223cde6cee19d2be84c455be0c5e6fe5a86b506a38333ed6f
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: rule_117
 verification_runs:
   spec: docs/specs/journal.md v0.36 §9.13 and §11 (DEC-788, DEC-789)
   drafts:
