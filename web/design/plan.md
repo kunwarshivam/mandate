@@ -238,8 +238,8 @@ item above (C-3, C-9) are not repeated.
       with no new DEC. (C-1)
 - [ ] **Stop above the palette's scrim.** Check that Stop takes a press with the command palette
       open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
-- [ ] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
-      reconciliation conditions do. (C-25)
+- [x] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
+      reconciliation conditions do. (C-25, #1057)
 - [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
       leaves out its "Asked you" row. (C-5)
 - [ ] **"At the limit:" on the overview card**, so a limit's action never reads as the current
