@@ -9931,6 +9931,63 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A command word that is solely the expansion of a scalar variable (`$C`, `"$C"`, `${C}`)
+    /// the file assigns (`C=…`, `C+=…`) is read through those definitions, concatenated in order,
+    /// as arrays are: it is refused when that value builds or runs `live`, and when a definition
+    /// cannot be read statically because it expands (DEC-851 item 2; X1 tests correction 10). A
+    /// quoted word a shell runs (`echo "$C" | sh`) is read through the same definitions.
+    /// An expansion of a variable the file never assigns, `"$@"`, a positional parameter or an
+    /// environment input, is not refused by this rule, and a clean definition stays allowed.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn variable_command_words_are_read_through_their_definitions() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let built_across_lines =
+            "C=ca; C+=rgo; C+=\" build -\"; C+=\"-feat\"; C+=\"ures l\"; C+=ive";
+        let refused_at_the_expansion = [
+            format!("{built_across_lines}\n$C"),
+            format!("{built_across_lines}\n\"$C\""),
+            format!("{built_across_lines}\n${{C}} -p the-runner"),
+            "C=$(cat cmd.txt)\n$C".to_owned(),
+            "C=echo\nC+=\" $X\"\n\"$C\"".to_owned(),
+            format!("{built_across_lines}\necho \"$C\" | sh"),
+        ];
+        for text in refused_at_the_expansion {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].contains(&format!(
+                    ".github/scripts/build.sh:{}",
+                    text.lines().count().saturating_add(1)
+                )),
+                "names the file and the expansion's line: {problems:?}"
+            );
+        }
+        let allowed = [
+            "\"$@\"",
+            "$TOOL --version",
+            "C=echo; $C hi",
+            "C=echo\nC+=\" hi\"\n$C",
+        ];
+        for text in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        Ok(())
+    }
+
     /// A marked crate that is not a workspace member is no runner, so even the compile-only form
     /// naming it is refused, beside the membership problem (#738 review, finding 2: the
     /// membership test of the runner).
