@@ -1302,3 +1302,70 @@ fn thesis_and_invocation_text_is_only_quoted() {
         (proposed.as_str(), 4)
     );
 }
+
+/// DEC-775 item 2: an `intended` `ProtectionChanged` records its `intent_id` with a null `agent_id`
+/// (journal spec rule 44), so its `IntentProposed` is one `not_recorded`, with no fallback to the
+/// `IntentReceived`'s agent; the `IntentReceived` it shows still finds it on `AG1`.
+#[test]
+#[ignore = "pending E12-1"]
+fn an_intended_protection_reads_its_proposal_not_recorded_without_a_fallback() {
+    let mut i = intents();
+    let intended = event_id(810_010);
+    let payload = protected(&i.proposed, "AG1")
+        .replace(
+            r#""passive_start","orders":["o"]"#,
+            r#""intended","orders":[]"#,
+        )
+        .replace(
+            r#""entry":"e","agent_id":"AG1""#,
+            r#""entry":null,"agent_id":null"#,
+        );
+    let changed = ("ProtectionChanged", 1);
+    i.g.put(&account("ACCT1"), &intended, changed, None, &payload);
+    let trace = traced(&i.g, WS_A, &intended, &[]);
+    let mut expected = i.each(&intended, &HopStatus::Shown);
+    expected[3] = hop(&intended, INTENT, None, HopStatus::NotRecorded);
+    let [received, ..] = i.records();
+    expected.extend(i.each(received, &HopStatus::AlreadyShown));
+    expected[7].status = HopStatus::Shown;
+    expected.extend(i.closing()[4..].iter().cloned());
+    assert_eq!(trace.hops, expected);
+}
+
+/// DEC-775 item 3: a row naming an event by id and type reads an event of that id on the stream it
+/// names but of another type as `unexpected_type`, shown and not followed: an approval naming an
+/// output, a decision using an approval request, and a request citing a decision.
+#[test]
+#[ignore = "pending E12-1"]
+fn a_by_id_target_of_another_type_is_unexpected_type() {
+    let mut a = approvals();
+    let ag1 = agent(WS_A, "AG1");
+    let ([o1, ..], [bare, _]) = (a.outputs.clone(), a.bare.clone());
+    let [check, used, cites] = [1, 2, 3].map(|n| event_id(832_000 + n));
+    a.g.put(
+        &ag1,
+        &check,
+        ("ApprovalRevalidated", 1),
+        None,
+        &revalidated(&o1),
+    );
+    a.g.put(&ag1, &used, ("DecisionMade", 1), None, &decided(&[&bare]));
+    let cited = requested(&[&a.decision]);
+    a.g.put(&ag1, &cites, ("ApprovalRequested", 1), None, &cited);
+    for (from, link, to, found) in [
+        (&check, "payload.approval", &o1, "ModelOutputRecorded"),
+        (&used, "payload.outputs_used[]", &bare, "ApprovalRequested"),
+        (
+            &cites,
+            "payload.content.evidence.outputs[].event_id",
+            &a.decision,
+            "DecisionMade",
+        ),
+    ] {
+        let trace = traced(&a.g, WS_A, from, &[]);
+        let event_type = found.to_owned();
+        let status = HopStatus::UnexpectedType { event_type };
+        assert_eq!(trace.hops, [hop(from, link, Some(to), status)]);
+        assert_eq!(depths(&trace), [(from.as_str(), 0), (to.as_str(), 1)]);
+    }
+}

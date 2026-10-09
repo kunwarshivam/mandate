@@ -1665,6 +1665,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-identity-seal",
+ "mandate-tenant",
  "mandate-time",
  "proptest",
  "thiserror",
@@ -1984,6 +1985,14 @@ dependencies = [
  "mandate-domain",
  "mandate-num",
  "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-tenant"
+version = "0.0.0"
+dependencies = [
  "proptest",
  "thiserror",
 ]

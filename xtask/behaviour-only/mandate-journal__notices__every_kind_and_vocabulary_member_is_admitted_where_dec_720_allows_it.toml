@@ -1,8 +1,0 @@
-file = "crates/mandate-journal/tests/notices.rs"
-test = "every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it"
-reason = """
-E8-9 slice S2's (DEC-720). It checks `StreamId::parse`, `Draft::parse`, and `check_batch`, the
-journal's existing checks, so there is no stub to stop at: until S2's implementation, the journal
-refuses `ntf:` as a stream id and `OwnerAlertSent` off the control stream, which is the
-behaviour it fails on. S2's implementation deletes this file with the test's `#[ignore]` line.
-"""

@@ -21,7 +21,10 @@
 #
 # Planned crates and layers, created only when a story needs them:
 #   0  mandate-num, mandate-time, mandate-canon, mandate-identity-seal (DEC-642 item 7: its
-#      allowed_dependents list is the only thing that may build an identity session or membership)
+#      allowed_dependents list is the only thing that may build an identity session or membership),
+#      and mandate-tenant (DEC-642 item 7, DEC-668): the sealed `Tenant` trait and the ID values it
+#      returns, below mandate-identity, which re-exports them; its allowed_dependents list is the
+#      only thing that may implement `Tenant`
 #   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
@@ -67,7 +70,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
     "mandate-identity-system",
-    "mandate-tenant",
     "mandate-identity-seal",
     "mandate-identity-testkit",
 ]
@@ -148,6 +150,13 @@ safety_critical = true
 pure = true
 allowed_external = []
 allowed_dependents = ["mandate-authn", "mandate-identity", "mandate-identity-testkit"]
+
+[crates.mandate-tenant]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+allowed_dependents = ["mandate-identity", "mandate-identity-system"]
 
 [crates.mandate-identity-testkit]
 layer = 11
