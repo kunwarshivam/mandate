@@ -1561,9 +1561,11 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
             files.extend(files_by_extension(&dir, extensions)?);
         }
     }
-    let cargo_config = root.join(".cargo/config.toml");
-    if cargo_config.is_file() {
-        files.push(cargo_config);
+    for cargo_config in [".cargo/config.toml", ".cargo/config"] {
+        let cargo_config = root.join(cargo_config);
+        if cargo_config.is_file() {
+            files.push(cargo_config);
+        }
     }
     files.sort();
     files.dedup();
@@ -1603,6 +1605,8 @@ fn build_files(root: &Path) -> Result<Vec<PathBuf>> {
                 name.as_ref(),
                 "Makefile" | "makefile" | "GNUmakefile" | "justfile" | "Justfile"
             ) || name.ends_with(".mk")
+                || (matches!(name.as_ref(), "config" | "config.toml")
+                    && dir.file_name().is_some_and(|parent| parent == ".cargo"))
                 || name.starts_with("Dockerfile")
                 || (name.starts_with("docker-compose")
                     && (name.ends_with(".yml") || name.ends_with(".yaml")))
@@ -1805,6 +1809,33 @@ fn resolved_live_problems(
         .collect();
     let mut builds = vec![("the default build".to_owned(), Vec::new(), true)];
     let mut problems = Vec::new();
+    let mut aliases = Aliases::new();
+    for file in workflows {
+        let Some(root) = cargo_config(&file.path) else {
+            continue;
+        };
+        let unread = |why: String| {
+            format!(
+                "{}: {why}, so its aliases cannot be read and the check cannot judge the builds \
+                 they name (DEC-868 item 3)",
+                file.path
+            )
+        };
+        let (read, why) = cargo_aliases(&file.text);
+        problems.extend(why.into_iter().map(unread));
+        if !root && !read.is_empty() {
+            problems.push(unread(
+                "has an `[alias]` below the repository root, which a directory change picks up"
+                    .to_owned(),
+            ));
+            continue;
+        }
+        for (name, words) in read {
+            if aliases.insert(name.clone(), words).is_some() {
+                problems.push(unread(format!("defines the alias `{name}` twice")));
+            }
+        }
+    }
     for file in workflows
         .iter()
         .filter(|file| file.path.starts_with(".github/workflows/"))
@@ -1824,6 +1855,16 @@ fn resolved_live_problems(
                 invocation.job,
                 invocation.words.join(" ")
             );
+            match expand_alias(&invocation.words, &aliases) {
+                Ok(None) => {}
+                Ok(Some(expanded)) => {
+                    builds.push((format!("{at}, its alias expanded"), expanded, false));
+                }
+                Err(()) => problems.push(format!(
+                    "{at}: an alias chain that does not end cannot be read, so the check cannot \
+                     judge it (DEC-868 item 3)"
+                )),
+            }
             builds.push((at, invocation.words, false));
         }
     }
@@ -1916,13 +1957,17 @@ fn selected_ids<'a>(
             "-p" | "--package" => named.extend(rest.next()),
             "--exclude" => excluded.extend(rest.next()),
             _ => {
-                if let Some(package) = word
-                    .strip_prefix("--package=")
-                    .or_else(|| word.strip_prefix("-p").filter(|glued| !glued.is_empty()))
-                {
+                if let Some(package) = word.strip_prefix("--package=") {
                     named.push(package);
                 } else if let Some(package) = word.strip_prefix("--exclude=") {
                     excluded.push(package);
+                } else {
+                    match short_cluster(word) {
+                        Some(ShortCluster::Package(Some(package))) => named.push(package),
+                        Some(ShortCluster::Package(None)) => named.extend(rest.next()),
+                        Some(ShortCluster::Unread) => return members(),
+                        Some(ShortCluster::Plain) | None => {}
+                    }
                 }
             }
         }
@@ -2065,7 +2110,13 @@ fn is_compile_only(words: &[String], runner: &str) -> bool {
                     .or_else(|| cluster_rest(word))
                 {
                     features.push(list);
-                } else if word.starts_with("-p") || word.starts_with("--manifest-path=") {
+                } else if word.starts_with("-p")
+                    || word.starts_with("--manifest-path=")
+                    || matches!(
+                        short_cluster(word),
+                        Some(ShortCluster::Package(_) | ShortCluster::Unread)
+                    )
+                {
                     return false;
                 }
             }
@@ -2146,13 +2197,223 @@ fn uncommented(line: &str) -> &str {
     line
 }
 
-/// How many words of `line`, outside its comment and split on anything but letters, digits, `_`,
-/// `.`, `/` and `-`, name cargo ([`is_cargo`]).
+/// The pieces of `text`, split on anything but letters, digits, `_`, `.`, `/` and `-`.
+fn word_pieces(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-')))
+}
+
+/// How many [`word_pieces`] of `line`, outside its comment, are `cargo` or `cargo.exe`, by
+/// themselves or at the end of a path.
 fn cargo_words(line: &str) -> usize {
-    uncommented(line)
-        .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-')))
-        .filter(|piece| is_cargo(piece))
+    word_pieces(uncommented(line))
+        .filter(|piece| matches!(basename(piece), "cargo" | "cargo.exe"))
         .count()
+}
+
+/// The last `/`-separated part of `word`.
+fn basename(word: &str) -> &str {
+    word.rsplit('/').next().unwrap_or(word)
+}
+
+/// Whether `word` runs cargo: `cargo` or `cargo.exe`, or a `cargo-<subcommand>` binary such as
+/// `cargo-nextest`, by itself or at the end of a path (#1169 round 3 review, bypass 4).
+fn names_cargo(word: &str) -> bool {
+    let base = basename(word);
+    matches!(base, "cargo" | "cargo.exe")
+        || base
+            .strip_prefix("cargo-")
+            .is_some_and(|sub| !sub.is_empty() && !sub.contains('.'))
+}
+
+/// What a short-flag cluster word passes for `-p`, as cargo reads it: after a `p`, the rest of
+/// the cluster or else the next word is the package (`-qp rh-host`, `-vprh-host`); `F`, `j`, `Z`
+/// and `C` take the rest as their own value; `v`, `q`, `r`, `h` and `V` take none. A cluster with
+/// any other letter cannot be read (#1169 round 3 review, bypass 3).
+enum ShortCluster<'w> {
+    /// No `-p` in the cluster.
+    Plain,
+    /// A `-p`, with its glued value or `None` for the next word.
+    Package(Option<&'w str>),
+    /// A letter the check does not know.
+    Unread,
+}
+
+/// `word` read as a [`ShortCluster`], when it is one: a single `-` and at least one letter.
+fn short_cluster(word: &str) -> Option<ShortCluster<'_>> {
+    let rest = word
+        .strip_prefix('-')
+        .filter(|rest| !rest.is_empty() && !rest.starts_with('-'))?;
+    for (at, c) in rest.char_indices() {
+        let after = rest
+            .get(at.saturating_add(c.len_utf8())..)
+            .unwrap_or_default();
+        match c {
+            'v' | 'q' | 'r' | 'h' | 'V' => {}
+            'p' => return Some(ShortCluster::Package((!after.is_empty()).then_some(after))),
+            'F' | 'j' | 'Z' | 'C' => return Some(ShortCluster::Plain),
+            _ => return Some(ShortCluster::Unread),
+        }
+    }
+    Some(ShortCluster::Plain)
+}
+
+/// Whether `word`, a command word's basename, is an interpreter that runs a program it is given
+/// as an argument or on its input: Python, Perl, Node.js, Ruby, PHP, Deno or Bun.
+fn is_interpreter(word: &str) -> bool {
+    word.starts_with("python")
+        || matches!(
+            word,
+            "perl" | "node" | "nodejs" | "ruby" | "php" | "deno" | "bun"
+        )
+}
+
+/// Why a command, its command word and `args` after its wrappers, may run cargo with no `cargo`
+/// word the check can see (#1169 round 3 review, bypass 6): `eval`; a shell or interpreter fed
+/// by a pipe or a here-string, or given its program in an argument (a shell's `-c`, an
+/// interpreter's `-c`, `-e`, `-E` or `-p`, in any short cluster, or `--eval`, `--print`,
+/// `--command`); and a glob in the command word, unless the word is a `case` pattern.
+fn hidden_command(
+    command_word: &str,
+    args: &[&str],
+    fed: bool,
+    case_pattern: bool,
+) -> Option<&'static str> {
+    let base = basename(command_word);
+    if base == "eval" {
+        return Some("`eval` runs a string the check cannot read");
+    }
+    if !case_pattern
+        && !matches!(command_word, "[" | "[[")
+        && command_word.contains(['*', '?', '['])
+    {
+        return Some("a glob in a command word");
+    }
+    if !(is_shell(base) || is_interpreter(base)) {
+        return None;
+    }
+    if fed {
+        return Some("a pipe or here-string into a shell or an interpreter");
+    }
+    let letters: &[char] = if is_shell(base) {
+        &['c']
+    } else {
+        &['c', 'e', 'E', 'p']
+    };
+    let program = |arg: &&str| {
+        matches!(*arg, "--eval" | "--print" | "--command")
+            || arg
+                .strip_prefix('-')
+                .is_some_and(|rest| !rest.starts_with('-') && rest.contains(letters))
+    };
+    args.iter().any(program).then_some(PROGRAM_IN_AN_ARGUMENT)
+}
+
+/// [`hidden_command`]'s reason for a shell or interpreter given its program in an argument.
+const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program in an argument";
+
+/// The workflow lines, each by its file and trimmed logical line, whose interpreter program a
+/// person has read and found to run no cargo, so [`PROGRAM_IN_AN_ARGUMENT`] does not refuse
+/// them. A line not listed is refused until a person adds it, as [`PARSER_LIMITED_LINES`] works.
+const READ_PROGRAM_LINES: &[(&str, &str)] = &[(
+    ".github/workflows/web-e2e.yml",
+    r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
+)];
+
+/// How many commands a `case` clause's patterns make of `line`: the `|`-separated words before
+/// its first `)` (`'' | *[!0-9]* | 0?*) exit 1 ;;` makes three), or none when `line` is no
+/// such clause.
+fn case_patterns(line: &str) -> usize {
+    let Some((patterns, _)) = uncommented(line).trim_start().split_once(')') else {
+        return 0;
+    };
+    let parts: Vec<&str> = patterns.split('|').map(str::trim).collect();
+    let words = parts
+        .iter()
+        .all(|part| !part.is_empty() && !part.contains(char::is_whitespace));
+    if words && !patterns.contains(['(', '$', '=', '`']) {
+        parts.len()
+    } else {
+        0
+    }
+}
+
+/// One cargo alias table's entries, by name, as words.
+type Aliases = BTreeMap<String, Vec<String>>;
+
+/// The `[alias]` entries of a cargo configuration's `text` that can be read, each a string,
+/// split on whitespace, or an array of strings, and why each other one cannot be: an entry of
+/// another shape, an `alias` that is not a table, or text that does not parse.
+fn cargo_aliases(text: &str) -> (Aliases, Vec<String>) {
+    let (mut read, mut unread) = (Aliases::new(), Vec::new());
+    let table: toml::Table = match text.parse() {
+        Ok(table) => table,
+        Err(err) => return (read, vec![format!("does not parse: {err}")]),
+    };
+    let Some(aliases) = table.get("alias") else {
+        return (read, unread);
+    };
+    let Some(aliases) = aliases.as_table() else {
+        return (read, vec!["has an `alias` that is not a table".to_owned()]);
+    };
+    for (name, value) in aliases {
+        let words = match value {
+            toml::Value::String(text) => Some(text.split_whitespace().map(str::to_owned).collect()),
+            toml::Value::Array(items) => items
+                .iter()
+                .map(|item| item.as_str().map(str::to_owned))
+                .collect::<Option<Vec<String>>>(),
+            _ => None,
+        };
+        match words {
+            Some(words) => {
+                read.insert(name.clone(), words);
+            }
+            None => unread.push(format!(
+                "has an alias `{name}` that is neither a string nor an array of strings"
+            )),
+        }
+    }
+    (read, unread)
+}
+
+/// `words` with its subcommand expanded through `aliases` as cargo expands it, chained up to
+/// eight times: `Ok(None)` when its subcommand is no alias, `Err` when the chain does not end.
+/// The subcommand is the first word that is not a flag, a `+toolchain`, or the value of `-Z`,
+/// `-C`, `--config` or `--color`.
+fn expand_alias(
+    words: &[String],
+    aliases: &Aliases,
+) -> std::result::Result<Option<Vec<String>>, ()> {
+    let mut expanded = words.to_vec();
+    for _ in 0..8 {
+        let mut at = None;
+        let mut index = 0;
+        while let Some(word) = expanded.get(index) {
+            if matches!(word.as_str(), "-Z" | "-C" | "--config" | "--color") {
+                index = index.saturating_add(2);
+            } else if word.starts_with(['-', '+']) {
+                index = index.saturating_add(1);
+            } else {
+                at = Some(index);
+                break;
+            }
+        }
+        let Some((at, alias)) = at.and_then(|at| Some((at, aliases.get(expanded.get(at)?)?)))
+        else {
+            return Ok((expanded != words).then_some(expanded));
+        };
+        expanded.splice(at..=at, alias.iter().cloned());
+    }
+    Err(())
+}
+
+/// Whether `path` is a cargo configuration file: `config.toml` or `config` in a `.cargo`
+/// directory, and whether that directory is the repository root's.
+fn cargo_config(path: &str) -> Option<bool> {
+    let dir = path
+        .strip_suffix("/config.toml")
+        .or_else(|| path.strip_suffix("/config"))?;
+    (dir == ".cargo" || dir.ends_with("/.cargo")).then_some(dir == ".cargo")
 }
 
 /// Whether a cargo invocation's `words` change the directory cargo reads before its subcommand:
@@ -2251,8 +2512,44 @@ fn unread_yaml_lines(
                 _ => {}
             }
         }
+        if key.trim() == "shell" && !matches!(value.split_whitespace().next(), Some("bash" | "sh"))
+        {
+            unread.push((number, "a step `shell:` other than bash or sh"));
+        }
+        if key.trim() == "run"
+            && value.starts_with('"')
+            && (value.contains('\\') || value.len() < 2 || !value.ends_with('"'))
+        {
+            unread.push((
+                number,
+                "a double-quoted `run:` holding a `\\` or running over several lines",
+            ));
+        }
         if value.starts_with(['|', '>']) {
             scalar_above = Some(indent);
+        }
+    }
+    unread
+}
+
+/// The lines of a workflow's `text`, block scalars included, the check cannot read, each with
+/// its number and why: a backslash-newline after a character that is not a space, which joins
+/// two words into one as the shell reads it (`ca\` then `rgo`), and a `CARGO_ALIAS_*` variable,
+/// which defines a cargo alias at any level (#1169 round 3 review, bypasses 1 and 5).
+fn unread_text_lines(text: &str) -> Vec<(usize, &'static str)> {
+    let mut unread = Vec::new();
+    for (number, line) in (1_usize..).zip(text.lines()) {
+        let code = uncommented(line).trim_end();
+        let bare = code.trim_end_matches('\\');
+        let escapes = code.len().saturating_sub(bare.len());
+        if escapes % 2 == 1 && bare.ends_with(|c: char| !c.is_whitespace()) {
+            unread.push((number, "a backslash-newline that splits a word"));
+        }
+        if code.contains("CARGO_ALIAS") {
+            unread.push((
+                number,
+                "a `CARGO_ALIAS_*` variable, which defines a cargo alias",
+            ));
         }
     }
     unread
@@ -2275,6 +2572,7 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
     let mut invocations = Vec::new();
     let mut unread: Vec<UnreadLine> = unread_yaml_lines(&file.text, &sections)
         .into_iter()
+        .chain(unread_text_lines(&file.text))
         .map(|(number, why)| (number, job_at(number), why))
         .collect();
     for (number, line) in logical_lines(&file.path, &file.text) {
@@ -2283,55 +2581,71 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
             .and_then(|(_, job)| job.clone())
             .unwrap_or_else(|| format!("line {number}"));
         let mut judged = 0_usize;
-        let mut commands = vec![Vec::new()];
-        let mut open = true;
-        let tokens = if run_lines.contains(&number) {
-            shell_tokens(&line, &mut Vec::new())
+        let mut hidden_pieces = 0_usize;
+        let mut texts = if run_lines.contains(&number) {
+            vec![(line.clone(), true)]
         } else {
             Vec::new()
         };
-        for token in tokens {
-            match token {
-                ShellToken::Word(word, _) if open => {
-                    if let Some(command) = commands.last_mut() {
-                        command.push(word);
-                    }
+        let patterns = case_patterns(&line);
+        let read_program = READ_PROGRAM_LINES.contains(&(file.path.as_str(), line.trim()));
+        while let Some((text, top_level)) = texts.pop() {
+            let mut nested = Vec::new();
+            for (index, (command, fed)) in
+                shell_commands(&text, &mut nested).into_iter().enumerate()
+            {
+                let named: Vec<&(String, bool)> = command
+                    .iter()
+                    .skip_while(|(word, _)| is_skipped_word(word))
+                    .collect();
+                let plain: Vec<&str> = named.iter().map(|(word, _)| word.as_str()).collect();
+                let tail = unwrapped(&plain);
+                let start = plain.len().saturating_sub(tail.len());
+                hidden_pieces = hidden_pieces.saturating_add(
+                    named
+                        .iter()
+                        .enumerate()
+                        .filter(|(at, (word, quoted))| {
+                            *at == start || *quoted || word.contains(['$', '`'])
+                        })
+                        .flat_map(|(_, (word, _))| word_pieces(word))
+                        .filter(|piece| names_cargo(piece) && basename(piece).starts_with("cargo-"))
+                        .count(),
+                );
+                let Some((command_word, args)) = tail.split_first() else {
+                    continue;
+                };
+                let case_pattern = top_level && index < patterns;
+                if let Some(why) = hidden_command(command_word, args, fed, case_pattern)
+                    && !(read_program && why == PROGRAM_IN_AN_ARGUMENT)
+                {
+                    unread.push((number, job_at(number), why));
                 }
-                ShellToken::Word(..) => {}
-                ShellToken::Redirect | ShellToken::HereString => open = false,
-                ShellToken::Pipe | ShellToken::End => {
-                    commands.push(Vec::new());
-                    open = true;
+                if !top_level || !names_cargo(command_word) {
+                    continue;
                 }
+                judged = judged.saturating_add(1);
+                let words: Vec<String> = args.iter().map(|word| (*word).to_owned()).collect();
+                let prefix = plain.get(..start).unwrap_or_default();
+                if cargo_changes_directory(&words) || wrapper_changes_directory(prefix) {
+                    unread.push((number, job_at(number), "cargo runs in another directory"));
+                }
+                let config = |word: &String| word == "--config" || word.starts_with("--config=");
+                if words.iter().take_while(|word| *word != "--").any(config) {
+                    unread.push((
+                        number,
+                        job_at(number),
+                        "`--config` on a cargo line, which may define an alias",
+                    ));
+                }
+                invocations.push(CargoInvocation {
+                    job: job.clone(),
+                    words,
+                });
             }
+            texts.extend(nested.into_iter().map(|(text, _)| (text, false)));
         }
-        for command in commands {
-            let named: Vec<&str> = command
-                .iter()
-                .map(String::as_str)
-                .skip_while(|word| is_skipped_word(word))
-                .collect();
-            let tail = unwrapped(&named);
-            let Some((command_word, args)) = tail.split_first() else {
-                continue;
-            };
-            if !is_cargo(command_word) {
-                continue;
-            }
-            judged = judged.saturating_add(1);
-            let words: Vec<String> = args.iter().map(|word| (*word).to_owned()).collect();
-            let prefix = named
-                .get(..named.len().saturating_sub(tail.len()))
-                .unwrap_or_default();
-            if cargo_changes_directory(&words) || wrapper_changes_directory(prefix) {
-                unread.push((number, job_at(number), "cargo runs in another directory"));
-            }
-            invocations.push(CargoInvocation {
-                job: job.clone(),
-                words,
-            });
-        }
-        if cargo_words(&line) > judged {
+        if cargo_words(&line).saturating_add(hidden_pieces) > judged {
             unread.push((
                 number,
                 job_at(number),
@@ -2340,7 +2654,46 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
         }
     }
     unread.sort_unstable();
+    unread.dedup();
     (invocations, unread)
+}
+
+/// The commands of a shell command `line`, each as its words (with whether any of a word was
+/// quoted or escaped) and whether a pipe or a here-string feeds it. A redirection's target word
+/// is skipped and the words after it stay the command's (`cargo test > log -p x`), as the shell
+/// reads them (#1169 round 3 review, bypass 2). Substitutions' text goes to `nested`.
+fn shell_commands(
+    line: &str,
+    nested: &mut Vec<(String, usize)>,
+) -> Vec<(Vec<(String, bool)>, bool)> {
+    let mut commands = vec![(Vec::new(), false)];
+    let mut target = false;
+    for token in shell_tokens(line, nested) {
+        match token {
+            ShellToken::Word(..) if target => target = false,
+            ShellToken::Word(word, quoted) => {
+                if let Some((command, _)) = commands.last_mut() {
+                    command.push((word, quoted));
+                }
+            }
+            ShellToken::Redirect => target = true,
+            ShellToken::HereString => {
+                target = true;
+                if let Some((_, fed)) = commands.last_mut() {
+                    *fed = true;
+                }
+            }
+            ShellToken::Pipe => {
+                commands.push((Vec::new(), true));
+                target = false;
+            }
+            ShellToken::End => {
+                commands.push((Vec::new(), false));
+                target = false;
+            }
+        }
+    }
+    commands
 }
 
 /// The [`Resolve`] `cargo metadata --format-version 1 --locked` gives at `root` for the
@@ -11867,7 +12220,6 @@ jq -r "$filter" "$src"
     /// nothing, as the shell does, so the line cannot be read; a continuation after a space is
     /// read as before (#1169 round 3 review, bypass 1; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_continuation_that_splits_a_word_cannot_be_read() -> Result<()> {
         let flows = [yaml_lines(&[
             "on: push",
@@ -11898,7 +12250,6 @@ jq -r "$filter" "$src"
     /// (`> /dev/null -p rh-host`, `2>&1`, `>&2`, `<<< x`) are still the command's (#1169 round 3
     /// review, bypass 2; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn the_words_after_a_redirection_are_read() -> Result<()> {
         let flows = [workflow(&[
             ("redirect-out", "cargo test -p a-lib > /dev/null -p rh-host"),
@@ -11923,7 +12274,6 @@ jq -r "$filter" "$src"
     /// selects every member; and a cluster naming a package keeps a build out of the
     /// compile-only form (#1169 round 3 review, bypass 3; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_short_flag_cluster_selects_its_package() -> Result<()> {
         let flows = [workflow(&[
             ("quiet-cluster", "cargo test -p a-lib -qp rh-host"),
@@ -11953,7 +12303,6 @@ jq -r "$filter" "$src"
     /// (`tar xzf cargo-mutants.tgz cargo-mutants`) is not an invocation (#1169 round 3 review,
     /// bypass 4; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn cargo_subcommand_binaries_and_cargo_exe_are_cargo() -> Result<()> {
         let flows = [workflow(&[
             ("nextest-binary", "cargo-nextest nextest run -p rh-host"),
@@ -11983,7 +12332,6 @@ jq -r "$filter" "$src"
     /// `CARGO_ALIAS_*` variable in a workflow, and `--config` on a cargo line (#1169 round 3
     /// review, bypass 5; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_cargo_alias_is_expanded_or_cannot_be_read() -> Result<()> {
         let flows = [
             ci_file(
@@ -12055,7 +12403,6 @@ jq -r "$filter" "$src"
     /// `.cargo/config.toml`, at the root and in any directory below it (#1169 round 3 review,
     /// bypass 5; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn ci_files_reads_every_cargo_configuration() -> Result<()> {
         let root = env::temp_dir().join(format!(
             "mandate-xtask-cargo-configs-{}",
@@ -12098,7 +12445,6 @@ jq -r "$filter" "$src"
     /// `\`, and a step `shell:` that is not bash or sh (#1169 round 3 review, bypass 6; DEC-176
     /// tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn cargo_without_a_cargo_word_cannot_be_read() -> Result<()> {
         let flows = [yaml_lines(&[
             "on: push",
@@ -12164,7 +12510,6 @@ jq -r "$filter" "$src"
     /// case for each character, so dropping any one from the rule is caught (#1169 round 3
     /// review, bypass 7).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_flow_sequence_that_is_not_flat_cannot_be_read() -> Result<()> {
         let cases = [
             ("pair", "[a: b]"),
