@@ -8297,6 +8297,10 @@ jq -r "$filter" "$src"
     /// run time. Where a word is read as a command is pinned by
     /// [`commands_are_read_fail_closed_where_a_word_may_execute`], arrays by
     /// [`array_expansions_are_read_through_their_definitions`] (X1 tests correction 5).
+    ///
+    /// The backstop's match ignores case, so a bare `LIVE` or `Live` word is refused in a command
+    /// without `cargo`, and an empty feature value (`--features ""`, `--features=` with nothing
+    /// after it) is no complete literal, so it is refused (X1 tests correction 6, #923 review).
     #[test]
     #[ignore = "pending E7-26"]
     fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
@@ -8484,6 +8488,8 @@ jq -r "$filter" "$src"
             "cargo run -qFlive",
             "cargo run -vFlive",
             "cargo build -p the-runner --features LIVE",
+            "cargo build --features \"\"",
+            "cargo build --features=",
             "cargo check -p the-runner --features live && make build FEATURES=live",
             "cargo check -p the-runner --features live; c=cargo; $c run -Flive",
         ];
@@ -8497,6 +8503,8 @@ jq -r "$filter" "$src"
             "l\\ive",
             "--features=li\"ve\"",
             "--features $(echo live)",
+            "echo LIVE",
+            "echo Live",
         ];
         let refused_through_a_command_word_that_may_be_cargo = [
             "c=cargo; $c build --features live",
