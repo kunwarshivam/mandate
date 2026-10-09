@@ -8268,40 +8268,6 @@ jq -r "$filter" "$src"
     /// `--features=live` is refused with it. A line is refused once, however many of its words
     /// hold the token. The pins that need no `cargo` word are listed apart from those with one.
     ///
-    /// Where a word is read as a command fails closed (the coordinator's seventh-round ruling
-    /// under DEC-176). A known non-executing command is one of `echo`, `printf`, `cat`, `jq`,
-    /// `awk`, `sed`, `grep`, `tr`, `cut`, `sort`, `uniq`, `head`, `tail`, `tee`, `wc`, `test`,
-    /// `[`, `true`, `false`, `read`, `basename`, `dirname`, `date`, `mkdir`, `rm`, `cp`, `mv`,
-    /// `ls`, `chmod`, `curl`, `git`, and `gh api` alone, which main's `merge-approved.sh` needs
-    /// for its multi-line GraphQL query; every other command executes, any other `gh`
-    /// subcommand (`gh alias set --shell`), unknown ones, `source`, `.`, `exec`, `watch`,
-    /// `parallel`, every shell and every wrapper included. A quoted word holding a space,
-    /// `cargo` or a `$` is re-read as a command line unless its command is known
-    /// non-executing, every later stage of its pipeline is too, and it is not inside a `$( … )`
-    /// `<( … )` or `>( … )` whose consumer executes (`echo "…" | sh`, `source <(echo "…")`,
-    /// `tee >(sh)`); a bare
-    /// assignment captures its `$( … )` and does not execute it. A here-doc's lines and a
-    /// here-string's (`<<<`) target are read as commands unless their command is known
-    /// non-executing, so `cat <<EOF` holding `$F` is allowed. Defining an array (`x=( … )`, one
-    /// word) is never refused beyond the live-token backstop and the cargo-word rule below, so
-    /// `a=(cargo build --features "$A$B")` is refused on its own line beside `run_it "${a[@]}"`;
-    /// a command word that expands a
-    /// whole array (`"${x[@]}"`, `${x[*]}`) is refused when any definition of that array in the
-    /// file holds `cargo` or an expansion, or the file defines no such array (the coordinator's
-    /// eighth-round rulings under DEC-176). A re-read word that is exactly one whole-array
-    /// expansion in argument position is read as the array's defined elements, which stay
-    /// arguments of the outer command (`parse_flags "${flags[@]}"`), unless a definition of that
-    /// array, `+=` appends included, holds the literal `cargo` or the token `live`, which is
-    /// refused (ninth round). `$(( … ))` is arithmetic and `${#x[@]}` a length, neither read as
-    /// a command; `if`, `then`, `else`, `elif`, `do`, `while`, `until`, `!` and `time` are
-    /// skipped when finding the command word, and the word after one is still read
-    /// (`if cargo build …; then`). The lines inside a single-quoted string that spans
-    /// lines are not read as commands only when its command is known
-    /// non-executing and nothing pipes it onward. A word holding `${{ … }}` in command position is
-    /// possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`), and not in a
-    /// job name, an `env:` value, a `with:` input or a cache key. The live-token backstop still
-    /// reads every word of every line.
-    ///
     /// The cargo-word rule closes what a known non-executing command can still run (`awk`'s
     /// `system` or `getline`, `sed`'s `e` flag, a `git -c alias.x=!…`, `tee >(sh)`, a script
     /// written and then run, a command held in a scalar; the coordinator's tenth-round ruling
@@ -8316,11 +8282,8 @@ jq -r "$filter" "$src"
     /// static scan; the cargo-word rule is what leaves such a script no way to carry a computed
     /// feature, and the live-token backstop no way to carry `live` itself.
     ///
-    /// The final round (the coordinator's eleventh-round rulings under DEC-176). An `awk` word
-    /// holding `system(` or `getline`, a `sed` word with an `e` command or an `/e` flag, and a
-    /// `git` with `-c alias.*=!` or a `!` alias make that command executing, so its words are
-    /// re-read; an executing `awk` or `sed` program builds a command no static reading can
-    /// follow, so it is refused outright. The value rule applies to every feature flag, with or
+    /// The final round (the coordinator's eleventh-round rulings under DEC-176). The value rule
+    /// applies to every feature flag, with or
     /// without `cargo`: `--features`, `--features=`, `FEATURES=` and `--all-features` are feature
     /// flags in any word, and `-F` only in a command whose command word is `cargo` or may be
     /// cargo (it holds `$`, a backtick or `${{`, or is a whole-array expansion), or in a re-read
@@ -8329,13 +8292,14 @@ jq -r "$filter" "$src"
     /// cluster holding `F` (`-qF…`) are feature flags there, while `run:` values and scripts keep
     /// the rule above. Outside the one compile-only form, `--all-features` is refused, and so is
     /// a value that is not a complete literal of `[a-z0-9_,-]` without the token `live`, which
-    /// any value holding `$`, a backtick or `${{` is not. `Makefile`, `*.mk`, `justfile`,
-    /// `Dockerfile*` and `docker-compose*.yml` are read anywhere in the repository. Out of reach:
-    /// Rust sources (`xtask/`, `build.rs`), which code review and the layers check cover, and
-    /// scripts that exist only at run time.
+    /// any value holding `$`, a backtick or `${{` is not. Out of reach: Rust sources (`xtask/`,
+    /// `build.rs`), which code review and the layers check cover, and scripts that exist only at
+    /// run time. Where a word is read as a command is pinned by
+    /// [`commands_are_read_fail_closed_where_a_word_may_execute`], arrays by
+    /// [`array_expansions_are_read_through_their_definitions`] (X1 tests correction 5).
     #[test]
     #[ignore = "pending E7-26"]
-    fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
+    fn the_backstop_and_the_feature_value_rules_refuse_ci_bypasses() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
         let allowed = [
@@ -8555,33 +8519,10 @@ jq -r "$filter" "$src"
             "cmd=\"cargo build --features $A$B\"; $cmd",
             "read -r cmd <<< \"cargo build --features $A$B\"; $cmd",
         ];
-        let refused_through_an_executing_command_at_line_two = [
-            "echo \"cargo build --features $A$B\" | sh",
-            "printf '%s' \"c=cargo; $c build --features $A$B\" | bash",
-            "source <(echo \"cargo build --features $A$B\")",
-            ". <(printf '%s\\n' \"cargo build --features $A$B\")",
-            "sh <<< \"cargo build --features $A$B\"",
-            "x=(cargo build --features \"$A$B\"); \"${x[@]}\"",
-            "watch \"cargo build --features $A$B\"",
-            "parallel \"cargo build --features $A$B\" ::: x",
-            "frobnicate \"cargo build $F\"",
-            "x=($C build --features $A$B); \"${x[@]}\"",
-            "\"${undefined[@]}\" build",
-            "if cargo build --features \"$A$B\"; then",
-            "gh alias set --shell x \"cargo build --features $A$B\"",
-            "ssh h \"cargo build $F\"",
-            "sudo sh -c \"cargo build $F\"",
-            "awk 'BEGIN{system(\"c\" \"argo build --features \" a b)}' a=li b=ve",
-            "echo a | sed \"s/a/c&rgo build --features $A$B/e\"",
-            "git -c 'alias.b=!sh -c \"$0\"' b \"$c $A\"",
-            "make build FEATURES=$A$B",
-            "$C build -F \"$A$B\"",
-        ];
         let refused_at_line_two = refused_with_no_cargo_word
             .iter()
             .chain(&refused_through_a_command_word_that_may_be_cargo)
-            .chain(&refused_by_the_cargo_word_rule)
-            .chain(&refused_through_an_executing_command_at_line_two);
+            .chain(&refused_by_the_cargo_word_rule);
         for line in refused_at_line_two {
             let files = [ci_file(
                 ".github/scripts/build.sh",
@@ -8594,16 +8535,6 @@ jq -r "$filter" "$src"
                 "names the file and line: {problems:?}"
             );
         }
-        let here_doc_fed_to_sh = [ci_file(
-            ".github/scripts/build.sh",
-            "set -e\nsh <<'EOF'\nc=cargo; A=li; B=ve; $c build --features $A$B\nEOF\n",
-        )];
-        let problems = live_feature_problems(&policy, &meta(), &here_doc_fed_to_sh)?;
-        assert_eq!(problems.len(), 1, "a here-doc fed to sh: {problems:?}");
-        assert!(
-            problems[0].contains(".github/scripts/build.sh:3"),
-            "names the file and the here-doc's line: {problems:?}"
-        );
         for line in refused_by_words_before_an_operator {
             let files = [ci_file(
                 ".github/scripts/build.sh",
@@ -8647,25 +8578,11 @@ jq -r "$filter" "$src"
                 ".github/workflows/ci.yml",
                 "steps:\n  - name: liveness\n    run: ./probe.sh --liveness\n",
             ),
-            (".github/scripts/build.sh", "set -e\necho \"$a $b\"\n"),
             (".github/scripts/build.sh", "set -e\nawk -F: '{print $1}'\n"),
             (
                 ".github/scripts/build.sh",
                 "set -e\ngh api -F owner=\"$o\"\n",
             ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nflags=()\nfor arg in \"$@\"; do flags+=(\"$arg\"); done\nparse_flags \"${flags[@]}\"\n",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nshards=(\"$A\" \"$A/tmp\")\n",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\ncat <<EOF\ncargo build $F\nEOF\n",
-            ),
-            (".github/scripts/build.sh", "set -e\njq -n '\n$a $b\n'\n"),
             (
                 ".github/workflows/ci.yml",
                 "steps:\n  - uses: an/action@v1\n    with:\n      key: x-${{ runner.os }}\n",
@@ -8723,43 +8640,7 @@ jq -r "$filter" "$src"
             assert_eq!(problems.len(), 1, "{text}: {problems:?}");
             assert!(problems[0].contains(path), "names the file: {problems:?}");
         }
-        let refused_through_an_executing_command = [
-            (
-                ".github/scripts/build.sh",
-                "set -e\nsetsid sh <<'EOF'\ncargo build --features $A$B\nEOF\n",
-                ":3",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\necho '\ncargo build $F\n' | sh\n",
-                ":3",
-            ),
-            (
-                ".github/scripts/build.sh",
-                "set -e\nbash -c '\ncargo build $F\n'\n",
-                ":3",
-            ),
-            (
-                ".github/workflows/ci.yml",
-                "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
-                ":2",
-            ),
-        ];
-        for (path, text, line) in refused_through_an_executing_command {
-            let files = [ci_file(path, text)];
-            let problems = live_feature_problems(&policy, &meta(), &files)?;
-            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
-            assert!(
-                problems[0].contains(&format!("{path}{line}")),
-                "names the file and line: {problems:?}"
-            );
-        }
         let refused_on_two_lines = [
-            (
-                ".github/scripts/build.sh",
-                "set -e\na=(cargo build --features \"$A$B\")\nrun_it \"${a[@]}\"\n",
-                [":2", ":3"],
-            ),
             (
                 ".github/scripts/build.sh",
                 "set -e\nFLAGS=\"--features live\"\ncargo build $FLAGS\n",
@@ -8800,6 +8681,200 @@ jq -r "$filter" "$src"
                 problems[0].contains(".cargo/config.toml:2"),
                 "names the file and line: {problems:?}"
             );
+        }
+        Ok(())
+    }
+
+    /// Where a word is read as a command fails closed (the coordinator's seventh-round ruling
+    /// under DEC-176), split out of the bypass test so X1's step 3b un-ignores it (X1 tests
+    /// correction 5).
+    ///
+    /// A known non-executing command is one of `echo`, `printf`, `cat`, `jq`, `awk`, `sed`, `grep`,
+    /// `tr`, `cut`, `sort`, `uniq`, `head`, `tail`, `tee`, `wc`, `test`, `[`, `true`, `false`,
+    /// `read`, `basename`, `dirname`, `date`, `mkdir`, `rm`, `cp`, `mv`, `ls`, `chmod`, `curl`,
+    /// `git`, and `gh api` alone, which main's `merge-approved.sh` needs for its multi-line GraphQL
+    /// query; every other command executes, any other `gh` subcommand (`gh alias set --shell`),
+    /// unknown ones, `source`, `.`, `exec`, `watch`, `parallel`, every shell and every wrapper
+    /// included. A quoted word holding a space, `cargo` or a `$` is re-read as a command line
+    /// unless its command is known non-executing, every later stage of its pipeline is too, and it
+    /// is not inside a `$( … )` `<( … )` or `>( … )` whose consumer executes (`echo "…" | sh`,
+    /// `source <(echo "…")`, `tee >(sh)`); a bare assignment captures its `$( … )` and does not
+    /// execute it. A here-doc's lines and a here-string's (`<<<`) target are read as commands
+    /// unless their command is known non-executing, so `cat <<EOF` holding `$F` is allowed.
+    /// `$(( … ))` is arithmetic and `${#x[@]}` a length, neither read as a command; `if`, `then`, `else`,
+    /// `elif`, `do`, `while`, `until`, `!` and `time` are skipped when finding the command word,
+    /// and the word after one is still read (`if cargo build …; then`). The lines inside a
+    /// single-quoted string that spans lines are not read as commands only when its command is
+    /// known non-executing and nothing pipes it onward. A word holding `${{ … }}` in command
+    /// position is possibly cargo inside a `run:` value only (`run: ${{ inputs.cmd }} build $F`),
+    /// and not in a job name, an `env:` value, a `with:` input or a cache key. The live-token
+    /// backstop still reads every word of every line. An `awk` word holding `system(` or `getline`,
+    /// a `sed` word with an `e` command or an `/e` flag, and a `git` with `-c alias.*=!` or a `!`
+    /// alias make that command executing, so its words are re-read; an executing `awk` or `sed`
+    /// program builds a command no static reading can follow, so it is refused outright (round
+    /// eleven).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn commands_are_read_fail_closed_where_a_word_may_execute() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused_through_an_executing_command_at_line_two = [
+            "echo \"cargo build --features $A$B\" | sh",
+            "printf '%s' \"c=cargo; $c build --features $A$B\" | bash",
+            "source <(echo \"cargo build --features $A$B\")",
+            ". <(printf '%s\\n' \"cargo build --features $A$B\")",
+            "sh <<< \"cargo build --features $A$B\"",
+            "watch \"cargo build --features $A$B\"",
+            "parallel \"cargo build --features $A$B\" ::: x",
+            "frobnicate \"cargo build $F\"",
+            "if cargo build --features \"$A$B\"; then",
+            "gh alias set --shell x \"cargo build --features $A$B\"",
+            "ssh h \"cargo build $F\"",
+            "sudo sh -c \"cargo build $F\"",
+            "awk 'BEGIN{system(\"c\" \"argo build --features \" a b)}' a=li b=ve",
+            "echo a | sed \"s/a/c&rgo build --features $A$B/e\"",
+            "git -c 'alias.b=!sh -c \"$0\"' b \"$c $A\"",
+            "make build FEATURES=$A$B",
+            "$C build -F \"$A$B\"",
+        ];
+        for line in refused_through_an_executing_command_at_line_two {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let here_doc_fed_to_sh = [ci_file(
+            ".github/scripts/build.sh",
+            "set -e\nsh <<'EOF'\nc=cargo; A=li; B=ve; $c build --features $A$B\nEOF\n",
+        )];
+        let problems = live_feature_problems(&policy, &meta(), &here_doc_fed_to_sh)?;
+        assert_eq!(problems.len(), 1, "a here-doc fed to sh: {problems:?}");
+        assert!(
+            problems[0].contains(".github/scripts/build.sh:3"),
+            "names the file and the here-doc's line: {problems:?}"
+        );
+        let allowed_in_a_script = [
+            (".github/scripts/build.sh", "set -e\necho \"$a $b\"\n"),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncat <<EOF\ncargo build $F\nEOF\n",
+            ),
+            (".github/scripts/build.sh", "set -e\njq -n '\n$a $b\n'\n"),
+        ];
+        for (path, text) in allowed_in_a_script {
+            let files = [ci_file(path, text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let refused_through_an_executing_command = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\nsetsid sh <<'EOF'\ncargo build --features $A$B\nEOF\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\necho '\ncargo build $F\n' | sh\n",
+                ":3",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nbash -c '\ncargo build $F\n'\n",
+                ":3",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: ${{ inputs.cmd }} build $F\n",
+                ":2",
+            ),
+        ];
+        for (path, text, line) in refused_through_an_executing_command {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].contains(&format!("{path}{line}")),
+                "names the file and line: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Arrays (the coordinator's eighth- and ninth-round rulings under DEC-176).
+    ///
+    /// Defining an array (`x=( … )`, one word) is never refused beyond the live-token backstop and
+    /// the cargo-word rule, so `a=(cargo build --features "$A$B")` is refused on its own line
+    /// beside `run_it "${a[@]}"`; a command word that expands a whole array (`"${x[@]}"`,
+    /// `${x[*]}`) is refused when any definition of that array in the file holds `cargo` or an
+    /// expansion, or the file defines no such array (eighth round). A re-read word that is exactly one whole-array expansion in argument position is
+    /// read as the array's defined elements, which stay arguments of the outer command
+    /// (`parse_flags "${flags[@]}"`), unless a definition of that array, `+=` appends included,
+    /// holds the literal `cargo` or the token `live`, which is refused (ninth round). Split out of
+    /// the bypass test so X1's step 3c un-ignores it (X1 tests correction 5).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn array_expansions_are_read_through_their_definitions() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused_at_line_two = [
+            "x=(cargo build --features \"$A$B\"); \"${x[@]}\"",
+            "x=($C build --features $A$B); \"${x[@]}\"",
+            "\"${undefined[@]}\" build",
+        ];
+        for line in refused_at_line_two {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let allowed_in_a_script = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\nflags=()\nfor arg in \"$@\"; do flags+=(\"$arg\"); done\nparse_flags \"${flags[@]}\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nshards=(\"$A\" \"$A/tmp\")\n",
+            ),
+        ];
+        for (path, text) in allowed_in_a_script {
+            let files = [ci_file(path, text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let refused_on_two_lines = [(
+            ".github/scripts/build.sh",
+            "set -e\na=(cargo build --features \"$A$B\")\nrun_it \"${a[@]}\"\n",
+            [":2", ":3"],
+        )];
+        for (path, text, lines) in refused_on_two_lines {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 2, "{text}: {problems:?}");
+            for (problem, line) in problems.iter().zip(lines) {
+                assert!(
+                    problem.contains(&format!("{path}{line}")),
+                    "the assignment and the expansion are each refused: {problems:?}"
+                );
+            }
         }
         Ok(())
     }
@@ -8852,13 +8927,70 @@ jq -r "$filter" "$src"
 
     /// The files the check reads are every file that decides a build: workflows (`.yml` and
     /// `.yaml`), scripts, composite actions under `.github/actions`, `deploy/`'s shell scripts
-    /// (the demo host's runbook, DEC-822), `.cargo/config.toml` (aliases and `rustflags`), and
-    /// `Makefile`, `*.mk`, `justfile`, `Dockerfile*` and `docker-compose*.yml` anywhere; a
+    /// (the demo host's runbook, DEC-822), and `.cargo/config.toml` (aliases and `rustflags`); a
     /// repository without the optional ones reads the rest (#738 review, finding 4).
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_files_reads_every_file_that_decides_a_build() -> Result<()> {
         let root = env::temp_dir().join(format!("mandate-xtask-ci-files-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        let write = |path: &str| -> Result<()> {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+            Ok(())
+        };
+        write(".github/workflows/a.yml")?;
+        let only_workflows = ci_files(&root)
+            .map(|files| files.into_iter().map(|file| file.path).collect::<Vec<_>>());
+        for path in [
+            ".github/workflows/b.yaml",
+            ".github/scripts/c.sh",
+            ".github/actions/d/action.yml",
+            ".github/actions/e/action.yaml",
+            ".cargo/config.toml",
+            ".github/pull_request_template.md",
+            "deploy/f.sh",
+            "deploy/README.md",
+        ] {
+            write(path)?;
+        }
+        let mut read: Vec<String> = ci_files(&root)?.into_iter().map(|file| file.path).collect();
+        fs::remove_dir_all(&root).ok();
+        read.sort();
+        assert_eq!(
+            only_workflows?,
+            [".github/workflows/a.yml"],
+            "the optional directories may be absent"
+        );
+        assert_eq!(
+            read,
+            [
+                ".cargo/config.toml",
+                ".github/actions/d/action.yml",
+                ".github/actions/e/action.yaml",
+                ".github/scripts/c.sh",
+                ".github/workflows/a.yml",
+                ".github/workflows/b.yaml",
+                "deploy/f.sh",
+            ]
+        );
+        Ok(())
+    }
+
+    /// The build files the check reads (the coordinator's eleventh-round ruling under DEC-176):
+    /// `Makefile`, `*.mk`, `justfile`, `Dockerfile*` and `docker-compose*.yml` anywhere in the
+    /// repository, beside every file [`ci_files_reads_every_file_that_decides_a_build`] names.
+    /// Split out so X1's step 3c un-ignores it (X1 tests correction 5).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn ci_files_reads_the_build_files_anywhere_in_the_repository() -> Result<()> {
+        let root =
+            env::temp_dir().join(format!("mandate-xtask-build-files-{}", std::process::id()));
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
