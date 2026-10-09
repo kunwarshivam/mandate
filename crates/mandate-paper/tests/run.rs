@@ -374,7 +374,11 @@ fn every_refusal_before_the_credentials_reads_none() {
             "undeployed" => records.retain(|r| r.event_type != "AgentDeployed"),
             "stopped" => push(records, "AgentStopped", r#"{"agent_id":"agent_spy"}"#),
             "missing" => scene.args.store = scene.root.join("empty"),
-            "corrupt" => fs::write(store.object_path(&version), b"{}").unwrap(),
+            "corrupt" => {
+                let object = store.object_path(&version);
+                fs::remove_file(&object).unwrap();
+                fs::write(&object, b"{}").unwrap();
+            }
             "live" => push(records, "AgentDeployed", &deploy),
             "unconfirmed" => records.retain(|r| r.event_type != "MandateConfirmed"),
             "unregistered" => records.retain(|r| r.payload.get("kind") != Some(&rule_set)),
