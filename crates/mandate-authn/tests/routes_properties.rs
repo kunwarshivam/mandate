@@ -208,7 +208,6 @@ fn follows_the_oracle(ops: Vec<Op>) -> Result<(), TestCaseError> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn every_admission_follows_the_spec_rules_over_any_history() {
     let config = ProptestConfig {
         cases: 256,
