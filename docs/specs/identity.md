@@ -1104,7 +1104,7 @@ them to journal §9 with schemas (DEC-437 item 9):
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
 | `SessionRevoked` (reasons schema owed to E9-7) | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
 | `NotificationAddressChanged` | member, channel, action (`added`, `removed`), opaque address reference, step-up evidence for an add or a member's own removal (null when it rides a deactivation, §5.2); defined with lane L3's web-push routes (PR #827), the endpoint and keys only in the vault |
-| `ClientConnected`, `ClientRevoked` | client id, user, scopes, step-up evidence |
+| `ClientConnected`, `ClientRevoked` | `ClientConnected`: client id, user, scopes, agents, step-up evidence. `ClientRevoked`: client id, user, reason (`owner`, `admin`, `member_deactivated`, `deprovisioned`, `compromised`), no step-up (ID-5); journal spec §9.10 |
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence |
 | `ScopeHalted`, `ScopeReenabled` | Only if DEC-437 item 21 is accepted (§4.4): kill-switch scope, by whom, step-up evidence for re-enabling |
@@ -1136,11 +1136,12 @@ each event attributed to the principal who acted (ID-16).
   so mandate §6.4 check 3 ("the response's actor is a `user` in `autonomy.approval.approvers`")
   refuses a client's answer from the record alone, with no extra rule. `DecisionMade`'s `client_id`
   and `requested_by` stay as they are and must agree with the actor.
-- **Owed edits, gating clients.** Journal §3 adds `client` to the closed `actor.kind` set and
-  `on_behalf_of` to `actor` (null for every other kind except the host CLI, §6.4), and the mandate
-  spec's independence checks compare humans (§8.2). Both land in E9-9's tests PR, and no client
-  token is issued, in any environment, before they do (E9-9 precedes E10-6), so the record never
-  holds a client under the old kind set.
+- **Owed edits, gating clients.** Journal §3 adds `client` to the closed `actor.kind` set, with
+  `on_behalf_of` as a member of a `client` actor only, absent from every other kind; that is journal
+  spec v0.22 (DEC-671). The host CLI's `system` actor (§6.4) gains `on_behalf_of` with
+  `HostCliRegistered`. The mandate spec's independence checks compare humans (§8.2). The journal's
+  code for both lands in E9-9's tests PR, and no client token is issued, in any environment, before
+  it does (E9-9 precedes E10-6), so the record never holds a client under the old kind set.
 - Every committed event names its session as an opaque reference (`session_ref`), so a revoked or
   stolen session's actions can be listed afterwards.
 

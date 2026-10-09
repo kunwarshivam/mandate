@@ -2,16 +2,38 @@
 
 | | |
 |---|---|
-| **Status** | v0.21 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.23 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, and `workspace_api` section of §9.9; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, and `hold` section of §9.11 with its `held_mismatch` range cases; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.23 ([DEC-672](../project/decisions/DEC-672.md)):** §9.11 closes the hold on new openings
+  ([DEC-191](../project/04-decision-log.md#decisions), [workspace API spec §4.2](workspace-api.md#42-deployments-and-the-agent-lifecycle-deployment-manager)).
+  `OwnerCommandIssued` is closed for its two new commands, `hold_openings` and `lift_hold`, and only
+  for them. The agent runtime's copies gain the hold at schema version 2: `AgentModeChanged` adds
+  `held` and the reasons `owner_hold` and `owner_lift_hold`, and `OwnerCommandRefused` adds the
+  command `lift_hold`. Rules 90 to 95: a client may hold and only a user lifts, a hold carries no
+  step-up, and the mode a copy leaves is never looser than the owner's pause or hold, so a resume
+  never clears a hold and a lift never clears a pause or a latched limit. Rule 83 admits a client's
+  `OwnerCommandIssued`, which rule 90 confines to `hold_openings`. Version 1 of both agent-stream
+  records stays registered and unchanged. The vectors gain a generated `hold` section and stay
+  version 3.
+- **v0.22 ([DEC-671](../project/decisions/DEC-671.md)):** §3's closed `actor.kind` set gains
+  `client`, an owner-connected agent ([workspace API spec §3.3](workspace-api.md#33-authentication-and-sessions)
+  item 4, [identity spec §12.2](identity.md)), whose actor alone carries `on_behalf_of`, the user it
+  acts for. Every other actor keeps exactly its four members, so no recorded event changes. Rules 81
+  to 83 shape the client actor and confine it to the control stream's `MandateDraftSaved`,
+  `OwnerRequestSubmitted`, and `RecordsAccessed`. §9.9's rules 70 and 79 already had client branches,
+  which now admit. §9.10 closes `ConnectionRevoked` version 2, with the reason `owner` or
+  `compromised` and its step-up (workspace API §5.6), and `ClientConnected` and `ClientRevoked`
+  (identity spec §12.1), with rules 84 to 89; `ClientRevoked` records why with a closed `reason`.
+  Version 1 of `ConnectionRevoked` stays registered and unchanged. The vectors gain a generated
+  `client_actor` section and stay version 3.
 - **v0.21 ([DEC-670](../project/decisions/DEC-670.md)):** §9.9 closes four control-stream records
   the [workspace API](workspace-api.md) commits (its §4.1, §4.6, §5.1; DEC-436 item 14), with rules
   69 to 80. `MandateDraftSaved` records one explicit draft save, its draft stored as an artifact.
@@ -300,8 +322,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `causation_id`, with the request's `requested_by` and `client_id`. The link crosses streams, so
   `append` does not check it, as for the other copies. The agent runtime copies each
   event addressed to its agent at most once, with `causation_id` pointing to it (`ApprovalResponded`,
-  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume or Stop its
-step-up does not count, `OwnerCommandRefused`); the control stream's `event_id`
+  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume, Stop, or lift
+of a hold its step-up does not count, `OwnerCommandRefused`; a hold and a lift are copied at
+schema version 2, §9.11); the control stream's `event_id`
   is the idempotency key. A user's kill switch is therefore a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and
@@ -326,12 +349,39 @@ service at append; all others come from the writer's draft.
 | `recorded_at` | *journal* | Timestamp when appended; informational |
 | `clock_source` | writer | `broker`, `exchange`, `local`, `scheduler` |
 | `causation_id`, `correlation_id` | writer | Event ID or `null` |
-| `actor` | writer | `{kind, id, version, build}`; `kind` ∈ `system`, `agent`, `user`, `broker`, `platform_operator`; `build` is the binary digest (`sha256:…`) or `null` for external actors; users are opaque IDs |
+| `actor` | writer | `{kind, id, version, build}`; `kind` ∈ `system`, `agent`, `user`, `broker`, `platform_operator`, `client`; `build` is the binary digest (`sha256:…`) or `null` for external actors; users are opaque IDs. A `client` actor, and only it, has a fifth member, `on_behalf_of` (below) |
 | `config_refs` | writer | Map of content hashes; required keys per event type (§9) |
 | `payload` | writer | Per the event type's schema |
 | `artifact_refs` | writer | Sorted, de-duplicated set of every `sha256:` reference in the payload |
 | `pii_refs` | writer | Sorted set of opaque vault references (random IDs, never hashes of personal data) |
 | `hash` | *journal* | SHA-256 of the canonical body; **not part of the body** |
+
+**The client actor** ([DEC-671](../project/decisions/DEC-671.md)). An owner-connected agent
+(DEC-141) is recorded as `{kind: "client", id, version, build: null, on_behalf_of}`: `id` is the
+client's opaque ID, and `on_behalf_of` the opaque ID (an `id`) of the user it acts for, from its
+token, never from a request body. This is the one actor shape every record a client may write uses.
+A client is never a `user`, so a rule that requires a user actor, such as
+[mandate spec §6.4](mandate.md#64-approvals) check 3, refuses a client from the record alone. A rule
+that compares people reads the **human** of an actor: `on_behalf_of` for a client, `id` for anyone
+else. So check 7's "not the mandate's author", [mandate spec §5.8](mandate.md)'s requester, and
+[identity spec ID-6](identity.md) count a client as its user, and a person's own client is never
+their second party. Checked at append, after the envelope's types (reason `schema`):
+
+81. `on_behalf_of` is present exactly when `kind` is `client`, and is then an `id`
+    (`actor.on_behalf_of`; a well-typed string of the wrong form is `non_canonical`). Every other
+    actor is exactly as before. The API sets it from the client's token, which names a user, so it
+    is never the client's own `id`. The host CLI's `system` actor with `on_behalf_of` (identity spec
+    §6.4) is not admitted by this version; the change that adds `HostCliRegistered` widens this rule.
+82. A `client` actor's `build` is `null` (`actor.build`): a client is external.
+83. A `client` actor is on the control stream, on `MandateDraftSaved`, `OwnerRequestSubmitted`,
+    `RecordsAccessed`, or `OwnerCommandIssued` only (`actor.kind`), reported before the payload is
+    read. `RecordsAccessed`'s payload is not closed yet (the audit lane closes it); rule 83 admits
+    a client on it at append, but a client's read is journaled only once that schema exists, and it
+    must use this actor shape. These four records are what its `propose`, `request`, `read` and
+    `dry_run`, and `hold` scopes allow (workspace API §3.8); rule 90 confines its
+    `OwnerCommandIssued` to `hold_openings`. Whatever else identity spec ID-11 forbids a client (confirming, approving,
+    acknowledging, pausing and every other owner command, connections, membership) is refused at
+    append, and check 3 refuses an approval again at the runtime.
 
 ## 4. Canonical serialization
 
@@ -590,7 +640,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result, and for a grant that reaches check 7 the approver count and independence it applied (the stricter of the bound values and the policy overlay, [mandate spec §6.4](mandate.md#64-approvals)); `causation_id` is the `ApprovalResponseSubmitted`, copied at most once; the delegation shape chosen, if any, with the new mandate version and delegation id (mandate §6.4, §6.5) |
 | `ApprovalRevalidated` | man | approval, result (`act`, `skip`), reason, and every value compared: bound and current mandate version, mode, instrument restriction, `decided_by` then and now, dry-run verdict and reason, `m_req`, `m_now`, `band_bp` |
 | `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
-| `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
+| `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator; `AgentModeChanged` version 2 also records the owner's hold (§9.11) |
 | `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
 | `OwnerCommandRefused` | — | A resume or Stop the runtime refused for its step-up ([mandate spec §6.1](mandate.md#61-purposes)): the command (`resume`, `stop`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`), and the effective time it was judged at; `causation_id` is the `OwnerCommandIssued`, copied at most once. The executor records a refused acknowledgment the same way on the account stream |
 
@@ -605,12 +655,13 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; closed in §9.2, version 2 of `ConnectionEstablished` with `account_ref`, user, step-up, and the live margin attestation in §9.8 |
 | `ConnectionRefused`, `ConnectionCredentialRotated` | — | A connect, reconnect, or credential replacement the permission checks refused, with the check and reason, or the teardown that ended it; a credential replaced on a connection that is not revoked; closed in §9.8 |
+| `ClientConnected`, `ClientRevoked` | — | An owner-connected client issued or revoked ([identity spec §12.1](identity.md)): client, user, scopes, agents, step-up; closed in §9.10 |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on any stream type ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.9 |
-| `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
+| `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`, and `hold_openings` and `lift_hold`, closed in §9.11), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate, model, policy set, model registry, broker profile), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
 | `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason, `research_thesis_halt` with the instrument and optionally the research agent's pinned content hash, [DEC-100](../project/04-decision-log.md#decisions)), operator (opaque), approval |
@@ -1081,7 +1132,8 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 
 25. Control-stream `StreamOpened`: `stream_id` equals `ctl:{workspace_id}` (`stream_id`).
 26. `OwnerCommandRefused`: `command` is `acknowledge` on the account stream, and `resume` or `stop` on
-    the agent stream (`payload.command`). The executor refuses acknowledgments, and the runtime
+    the agent stream (`payload.command`), or at version 2 also `lift_hold`, which is registered on the
+    agent stream only (§9.11). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
 28. `OwnerCommandRefused` with reason `not_independent` is on the account stream (`payload.reason`):
     only an acknowledgment is judged for independence, and only under `independent_approval_required`
@@ -1903,9 +1955,8 @@ own stream:
       connection clears only on a credential the control services accepted after the suspension.
 
 No rule here refuses a `ConnectionRevoked`, so §5.6's compromised revocation, whose kill switch
-shares its batch, is never held by one. §9.8 adds no `ConnectionRevoked` version; #792's version 2
-lands after this change, at a later spec version, and these rules count a revocation of either
-version.
+shares its batch, is never held by one. §9.8 adds no `ConnectionRevoked` version; version 2
+arrives in §9.10 (v0.22, DEC-671), and these rules count a revocation of either version.
 
 **No mapping to `JournaledFact`** beyond `ConnectionEstablished`'s (§9.2): the control-stream
 version, never its copy. The executor folds the account-stream records itself, and the connection
@@ -2000,8 +2051,7 @@ hands it to the order builder, which sizes, clips, and classifies it as any prop
     first that fails, in that order, is reported.
 70. `MandateDraftSaved`: the actor is a `user`, or a `client` whose `origin` is `version`
     (`actor.kind`): a client's `propose` scope creates a draft from a base version and nothing
-    else (workspace API §3.8). No `client` actor is admitted at this version (§3), so until one is
-    only a user saves a draft.
+    else (workspace API §3.8).
 71. `ModelInvocationRecorded` on the control stream: `model.content_hash` equals
     `config_refs.model_version` (`payload.model.content_hash`), as rule 38 binds a thesis's model.
     A missing ref is already `missing_config_ref`.
@@ -2031,12 +2081,151 @@ hands it to the order builder, which sizes, clips, and classifies it as any prop
 79. `OwnerRequestSubmitted`: the actor is a `user` or a `client` (`actor.kind`); `requested_by`
     is `owner` for a user and `client` for a client (`payload.requested_by`); and `client_id` is
     the actor's `id` for a client and `null` for a user (`payload.client_id`). So who asked is the
-    authenticated principal's, never the request body's (workspace API API-6, DEC-185 item 2). No
-    `client` actor is admitted at this version (§3), so a client's request is refused until one is.
+    authenticated principal's, never the request body's (workspace API API-6, DEC-185 item 2).
 80. `OwnerRequestSubmitted`: a non-null `quantity` is greater than 0 (`payload.quantity`).
 
 These records map to no `JournaledFact` except `MandateConfirmed` version 2, which maps as version 1
 does (§9.2), from the same members.
+
+### 9.10 Connection revocation and client records ([DEC-671](../project/decisions/DEC-671.md))
+
+Closed as §9.9's are, on the control stream. Rules number on from §3's 81 to 83. No member carries
+a credential or a token: a client is named by its opaque ID and scopes, and a connection by its ID
+(§9.2).
+
+**`ConnectionRevoked`** version 2: version 1's member, then why and with what step-up. Version 1
+stays registered and unchanged (§8); the workspace API writes version 2.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | |
+| `reason` | `owner` \| `compromised` | `owner`: the ordinary revoke, which the API refuses while an agent on the connection holds positions or is not stopped (workspace API §4.5). `compromised`: the revoke now of workspace API §5.6, which follows its kill switch: rule 84 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Never `null`: a revocation needs step-up (identity spec ID-4). Without it the API commits only the kill switch (workspace API §5.6) |
+
+**`ClientConnected`**: a user issued a client its token (identity spec §12.1, workspace API §3.8).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `client_id` | `id` | The client, as its actor's `id` names it |
+| `user` | `text` | The user it acts for (opaque), its actors' `on_behalf_of`: rule 88 |
+| `scopes` | `[read \| request \| propose \| dry_run \| hold]` | Workspace API §3.8's closed list: rules 86 and 87 |
+| `agents` | `[id]` | The agents it may see: rules 86 and 87 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}` | Never `null`: connecting a client needs step-up (identity spec ID-4) |
+
+**`ClientRevoked`**: a client's token revoked. It needs no step-up, because it only removes access
+(identity spec ID-5); revocation takes effect for every request authorized after it commits (ID-11).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `client_id` | `id` | |
+| `user` | `text` | The user it acted for (opaque) |
+| `reason` | `owner` \| `admin` \| `member_deactivated` \| `deprovisioned` \| `compromised` | Who ended it and why: the client's own user, a workspace admin (identity spec §4.2), the deactivating admin or the system on a member's deactivation (identity §5.2), the system on deprovisioning (§11.1), or a suspected compromise: rule 89 |
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+84. `ConnectionRevoked` version 2: `causation_id` is non-null exactly when `reason` is
+    `compromised` (`causation_id`); an ordinary revoke has no cause. A compromised revocation's
+    `causation_id` names an `OwnerCommandIssued` earlier in the same `append` batch whose `command`
+    is `kill_switch`, whose `scope` is `connection`, and whose `subject` is the revoked
+    `connection_id` (`causation_id`, as rule 45 checks its pair inside one batch). So the record
+    shows this connection's kill switch ran first (workspace API §5.6), and a revocation citing any
+    other event, a wider kill switch, or a cause outside its batch is refused. These are the
+    members the CLI writes on a kill switch today; no §11 check repeats the clause, since a range
+    never splits a batch.
+85. `ConnectionRevoked` version 2: the actor is a `user` (`actor.kind`).
+86. `ClientConnected`: `scopes` and `agents` are non-empty (the first that is empty).
+87. `ClientConnected`: `scopes` and `agents` are each strictly ascending by bytes (`non_canonical`
+    at the list, `scopes` first).
+88. `ClientConnected`: the actor is a `user` (`actor.kind`), and `user` is its `id`
+    (`payload.user`): a user connects their own client (identity spec §4.2).
+89. `ClientRevoked`: the actor follows the `reason` (`actor.kind`): a `user` for `owner` and
+    `admin`, the `system` for `deprovisioned`, and either a `user` or the `system` for
+    `member_deactivated` (the deactivating admin, or a scheduled deactivation) and `compromised`. For `owner`, `user` is the actor's `id`; for `admin`, it is not
+    (`payload.user`).
+
+`ConnectionRevoked` version 2 maps to the `ConnectionRevoked` fact as version 1 does (§9.2). The
+client records map to no `JournaledFact`.
+
+### 9.11 The hold on new openings ([DEC-672](../project/decisions/DEC-672.md))
+
+An owner, or a client the owner connected with the `hold` scope, may hold an agent's new openings:
+the agent goes to `exits_only` and keeps every exit running. Only the owner lifts it, with step-up
+([DEC-191](../project/04-decision-log.md#decisions), [mandate spec §6.1](mandate.md#61-purposes)).
+The hold is owner state beside the lifecycle of §9.1's `AgentModeChanged`: it survives a pause, a
+resume, and a restriction lifting, so the agent stream records it on every mode change. Closed as
+§9.7's records are; times are integer risk-clock seconds as §9.7's are (DEC-533 item 2).
+
+**`OwnerCommandIssued`**, for `hold_openings` and `lift_hold` only. The members, in order, are
+the ones the CLI already writes for every owner command (`mandate-cli`'s `agent::issued`), so the
+other commands close later (M7's agent-commands slice) without a member renamed; here the Stop's
+and the owner exit's members are always `null`. **Every other command stays open at this
+version:** `append` catalogues `OwnerCommandIssued` on the control stream, reads its `command`
+(text, else `schema` at `payload.command`), refuses it from a client (rule 90), and judges nothing
+else about it. So a pause or a kill switch is recorded from any other principal, including the
+host CLI's `system` actor (identity spec §6.4), and is never refused for its members (`AGENTS.md`
+rule 13); rule 84's batch reads a kill switch's `command`, `scope`, and `subject` from it.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent` | `id` | The agent held or released |
+| `command` | `hold_openings` \| `lift_hold` | |
+| `scope` | `agent` | A hold is per agent |
+| `subject` | `id` | The scope's subject, the agent itself: rule 91 |
+| `release`, `warning_shown` | `null` | A Stop's release choice and warning; none here |
+| `bid`, `bid_size`, `floor` | `null` | An owner exit's confirmed bid; none here |
+| `user` | `text` | The human who asked (opaque): rule 91 |
+| `submitted_at` | `integer` | The risk-clock second it was committed at |
+| `step_up` | `{assertion_id: text, authenticated_at: integer, method: text}?` | A lift's evidence, judged by the runtime; `null` for a hold: rule 92 |
+
+**`AgentModeChanged`** version 2 on the agent stream: version 1's members, with the reasons
+`owner_hold` and `owner_lift_hold`, then `held`. Version 1 stays registered and unchanged (§8), and
+a runtime that records a hold writes version 2 for every mode change after it.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `from`, `to`, `lifecycle` | As version 1's | `to` obeys rule 94, which replaces rule 11 at this version |
+| `reason` | version 1's reasons \| `owner_hold` \| `owner_lift_hold` | |
+| `held` | `boolean` | Whether the owner's hold stands after the change: rule 93 |
+
+**`OwnerCommandRefused`** version 2: version 1's members, with the command `lift_hold`, on the agent
+stream only (rule 26). Version 2 is registered on the agent stream alone, so a version-2 refusal on
+the account stream is `unknown_schema` at `payload`, and rule 26's `stream_mismatch` judges version
+1's commands. A lift whose step-up does not count is refused like a resume (rule 28 keeps
+`not_independent` off it).
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+90. `OwnerCommandIssued`: a `client` actor's command is `hold_openings` (`actor.kind`): a client
+    never lifts a hold, pauses, resumes, stops, exits, or engages the kill switch (identity spec
+    ID-11, DEC-141 item 3). A `hold_openings` is a `user`'s or a `client`'s, and a `lift_hold` a
+    `user`'s (`actor.kind`). No other actor is constrained on another command, so the host CLI's
+    kill switch is never refused here.
+91. `OwnerCommandIssued`: `user` is the actor's human (§3) (`payload.user`), and `subject` is
+    `agent` (`payload.subject`).
+92. `OwnerCommandIssued`: a `hold_openings` has a `null` `step_up` (`payload.step_up`). A hold only
+    reduces risk, so it needs none (`AGENTS.md` rule 2), and a client never presents one.
+93. `AgentModeChanged` version 2: `held` is true when `reason` is `owner_hold` and false when it is
+    `owner_lift_hold` (`payload.held`).
+94. `AgentModeChanged` version 2: `to` is at least as strict as `lifecycle`, and at least
+    `exits_only` while `held` (`payload.to`; `normal` < `exits_only` < `paused` < `stopped`). So a
+    resume never clears a hold, and a lift never clears a pause. A lift that leaves `to` at
+    `exits_only` is valid: a latched limit or a restriction may still hold the agent (MI-3).
+95. `AgentModeChanged` version 2: a copy of an owner command, whose `reason` is `owner_pause`,
+    `owner_resume`, `owner_stop`, `owner_hold`, or `owner_lift_hold`, has a non-null
+    `causation_id`: its `OwnerCommandIssued` (`causation_id`). As rule 16 does at version 1, each
+    command has one copy: its `AgentModeChanged`, or, for a lift, its `OwnerCommandRefused`.
+
+**Carried, never dropped.** `held` changes only on `owner_hold` and `owner_lift_hold`: every other
+version-2 copy (a restriction, a reconciliation, a kill switch, a pause, a resume, a Stop) carries
+the last one's, and once a stream holds a version-2 `AgentModeChanged` every later one is version
+2. `append` sees one record and cannot check either, so §11's per-range check `held_mismatch` does,
+anchored on the stored chain before the range (or failing closed without it), and `mandate journal
+verify` reports it; a stray `held: false` would otherwise drop the hold on replay.
+
+**Lifecycle.** A hold is copied whatever the mode: on a paused or stopped agent the copy records
+`held` with `to` unchanged, so command status reaches `applied`. A second hold, or a lift with no
+hold standing, is copied too, with `held` as it already stood. A latched limit, a restriction, or a
+version change never sets or clears the hold, and a restart folds it from the last copy.
 
 ## 10. Anchoring
 
@@ -2078,7 +2267,22 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
   the approval events' schemas; until then no range fails on it;
 - `mode_event_mismatch` — a `KillSwitchActivated` whose `mode_event` is non-null names an earlier
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
-  `KillSwitchActivated`.
+  `KillSwitchActivated`;
+- `held_mismatch` — the owner's hold is carried, never dropped (§9.11, [DEC-672](../project/decisions/DEC-672.md),
+  [DEC-673](../project/decisions/DEC-673.md)). Only `AgentModeChanged` records are read; any other
+  event between them leaves the hold as it was. The hold carried is the **expected** one, derived
+  from the reasons: `owner_hold` sets it, `owner_lift_hold` clears it, and every other record keeps
+  it whatever it wrote. A hold or lift whose `held` contradicts its reason fails; any other
+  version-2 `AgentModeChanged` whose `held` differs from the carried one fails; and no version-1
+  `AgentModeChanged` follows a version-2 one. **The check anchors on the stored chain, not on the
+  range:** the verifier is given an anchor that its caller derives from the stored chain before
+  the range's trusted start, one of no version-2 `AgentModeChanged` before it, or the `held` the
+  last one before it carried (from a hold, a lift, or a carried copy), or none when the caller
+  cannot read that chain. A full chain is anchored on nothing before it. With no anchor, the
+  range's first version-2 record that is not a hold or a lift fails closed, reported as having no
+  anchor, and a version-1 record before it is not judged: every stream written before §9.11 is all
+  version 1, and the full-chain run or an anchored range catches a version 1 after an unseen
+  version 2. Reported at the first record that breaks it.
 
 On a control or account stream ([§9.8](#98-connection-records-dec-800)):
 

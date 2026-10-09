@@ -122,7 +122,9 @@ fn is_opaque(user: &str) -> bool {
 }
 
 /// The journal and the store `target` names, each opened only once every local check has passed.
-fn open(target: &JournalArgs) -> Result<(PgControlJournal, FsArtifactStore), ControlError> {
+pub(crate) fn open(
+    target: &JournalArgs,
+) -> Result<(PgControlJournal, FsArtifactStore), ControlError> {
     let journal = PgControlJournal::open(target)?;
     let store = FsArtifactStore::open(&target.store)
         .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;

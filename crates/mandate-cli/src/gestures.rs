@@ -8,11 +8,21 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
+use mandate_canon::{Digest, Value, to_canonical};
 use mandate_journal::ArtifactSource;
+use mandate_spec::Mandate;
 
-use crate::control::{ControlError, ControlJournal, Now, Owner, Submitted};
+use crate::control::{
+    ControlError, ControlJournal, Now, Owner, Submitted, agent_stream, code_of, object, text,
+};
+use crate::deploy::{self, active};
+use crate::inbox::InstantIds;
 use crate::postgres::JournalArgs;
-use crate::register::OwnerArgs;
+use crate::register::{OwnerArgs, open};
+use crate::version::{
+    self, CONFIRMED, CREATED, check_instruments, check_rules, envelope_paths, latest, paper_only,
+    refused, rows, stored,
+};
 
 #[derive(Debug, Subcommand)]
 pub enum VersionCommand {
@@ -87,9 +97,21 @@ pub fn confirmation(
     version: &str,
     now: Now,
 ) -> Result<Shown, ControlError> {
-    let _ = (journal, store, owner);
-    let _ = (version, now);
-    Err(ControlError::Unimplemented { story: "E10-16" })
+    paper_only(owner)?;
+    let rows = rows(journal, owner)?;
+    if latest(&rows, CREATED, version).is_none() {
+        return Err(refused("version_unknown"));
+    }
+    let (document, mandate) = stored(store, version)?;
+    let paths = envelope_paths(&document);
+    let digest = Digest::of(&to_canonical(&document));
+    let warnings = check_rules(&rows, store, (&mandate, ""), Some((digest, &paths)), now)?;
+    check_instruments(&rows, store, &document)?;
+    let gesture = object(vec![
+        ("gesture", text("mandate_confirm")),
+        ("mandate_version", text(version)),
+    ])?;
+    Ok(shown(&gesture, warnings))
 }
 
 /// What deploying `agent` with `version` shows, after every check [`crate::deploy::deploy`] makes
@@ -104,9 +126,60 @@ pub fn deployment(
     (agent, version): (&str, &str),
     now: Now,
 ) -> Result<Shown, ControlError> {
-    let _ = (journal, store, owner);
-    let _ = (agent, version, now);
-    Err(ControlError::Unimplemented { story: "E10-16" })
+    paper_only(owner)?;
+    agent_stream(owner, agent).map_err(|_| refused("agent_invalid"))?;
+    let rows = rows(journal, owner)?;
+    if latest(&rows, CREATED, version).is_none() {
+        return Err(refused("version_unknown"));
+    }
+    let (document, mandate) = stored(store, version)?;
+    let confirmed =
+        latest(&rows, CONFIRMED, version).ok_or_else(|| refused("version_unconfirmed"))?;
+    let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);
+    if last.map(|r| r.seq) != Some(confirmed.seq) {
+        return Err(refused("version_superseded"));
+    }
+    let gesture = object(vec![
+        ("agent_id", text(agent)),
+        ("gesture", text("agent_deploy")),
+        ("mandate_version", text(version)),
+    ])?;
+    let mut warnings = Vec::new();
+    match active(&rows, agent) {
+        Some(deployed) if deployed.member("mandate_version") == Some(version) => {}
+        Some(_) => return Err(refused("agent_active")),
+        None => {
+            warnings = check_rules(&rows, store, (&mandate, agent), None, now)?;
+            check_instruments(&rows, store, &document)?;
+        }
+    }
+    Ok(shown(&gesture, warnings))
+}
+
+/// The gesture's code and its warnings, in the code order [`check_rules`] gives them.
+fn shown(gesture: &Value, warnings: Vec<&'static str>) -> Shown {
+    Shown {
+        code: code_of(gesture),
+        warnings,
+    }
+}
+
+/// Prints what a gesture shows: its code, then its warnings or `none`.
+fn display(report: &mut impl Write, shown: &Shown) -> anyhow::Result<()> {
+    writeln!(report, "code {}", shown.code)?;
+    let warnings = if shown.warnings.is_empty() {
+        "none".to_owned()
+    } else {
+        shown.warnings.join(", ")
+    };
+    writeln!(report, "warnings {warnings}")?;
+    Ok(())
+}
+
+/// Prints what a gesture `done` committed or found.
+fn committed(report: &mut impl Write, done: &str, at: &Submitted) -> anyhow::Result<()> {
+    writeln!(report, "{done} as event {} at seq {}", at.event_id, at.seq)?;
+    Ok(())
 }
 
 /// Runs `version create`, and prints the version and the event id and `seq` it committed or found.
@@ -116,8 +189,17 @@ pub fn deployment(
 /// `config_file_unreadable` before the journal is opened or the store created, then
 /// [`crate::version::create`]'s; no message names the DSN.
 pub fn create(args: &CreateArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Submitted> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E10-16" }.into())
+    let owner = args.owner.owner()?;
+    let document = std::fs::read(&args.file).map_err(|_| refused("config_file_unreadable"))?;
+    let (mut journal, mut store) = open(&args.target)?;
+    let submitted = version::create(&mut journal, &mut store, &owner, &document, now)?;
+    let canonical =
+        Mandate::parse(&mandate_canon::parse(&document).map_err(|_| refused("mandate_invalid"))?)
+            .and_then(|m| m.canonical_bytes())
+            .map_err(|_| refused("mandate_invalid"))?;
+    let done = format!("created sha256:{}", Digest::of(&canonical).to_hex());
+    committed(report, &done, &submitted)?;
+    Ok(submitted)
 }
 
 /// Runs `version confirm`: without `--code`, prints [`confirmation`]'s code and warnings and
@@ -130,8 +212,28 @@ pub fn confirm(
     now: Now,
     report: &mut impl Write,
 ) -> anyhow::Result<Option<Submitted>> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E10-16" }.into())
+    let owner = args.owner.owner()?;
+    let (mut journal, mut store) = open(&args.target)?;
+    let Some(code) = &args.code else {
+        display(
+            report,
+            &confirmation(&journal, &store, &owner, &args.version, now)?,
+        )?;
+        return Ok(None);
+    };
+    let mut ids = InstantIds::new(&owner, now);
+    let stream = (&mut journal, &mut store);
+    let submitted = version::confirm(
+        stream.0,
+        stream.1,
+        &mut ids,
+        &owner,
+        &args.version,
+        code,
+        now,
+    )?;
+    committed(report, "confirmed", &submitted)?;
+    Ok(Some(submitted))
 }
 
 /// Runs `agent deploy`: without `--code`, prints [`deployment`]'s code and warnings and returns
@@ -144,6 +246,18 @@ pub fn deploy(
     now: Now,
     report: &mut impl Write,
 ) -> anyhow::Result<Option<Submitted>> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E10-16" }.into())
+    let owner = args.owner.owner()?;
+    let (mut journal, mut store) = open(&args.target)?;
+    let named = (args.agent.as_str(), args.version.as_str());
+    let Some(code) = &args.code else {
+        display(report, &deployment(&journal, &store, &owner, named, now)?)?;
+        return Ok(None);
+    };
+    let mut ids = InstantIds::new(&owner, now);
+    let stream = (&mut journal, &mut store);
+    let submitted = deploy::deploy(
+        stream.0, stream.1, &mut ids, &owner, named.0, named.1, code, now,
+    )?;
+    committed(report, "deployed", &submitted)?;
+    Ok(Some(submitted))
 }
