@@ -1,6 +1,9 @@
 //! A live guard on the mirrored client (DEC-849 item 2): against a listener written here, it must
 //! send exactly what `McpTransport::post` and `McpClient::connect` send, so a drift between the
-//! two fails on every run, not only once the server lands.
+//! two fails on every run, not only once the server lands. Two values are literal pins, since
+//! `mandate-mcp` exports neither: its `user-agent`, `mandate-mcp/` and its package version, and
+//! the version in `clientInfo`. `connection: close` is the wire client's own header, not the
+//! transport's, which keeps connections open; the simulator answers both the same way.
 
 mod common;
 

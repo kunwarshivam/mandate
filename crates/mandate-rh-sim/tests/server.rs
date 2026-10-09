@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
 use common::wire::Wire;
-use common::{AGENTIC, limit, price, qty, sim};
+use common::{AGENTIC, NOT_AGENTIC, limit, price, qty, sim};
 use mandate_mcp::{ALLOWLIST, PROTOCOL_VERSION};
 use mandate_rh_sim::{CONTRACT, INJECTION, OrderRequest, ServerError, SimServer, State, Variant};
 use serde_json::{Value, json};
@@ -43,7 +43,7 @@ fn names(tools: &[Value]) -> BTreeSet<&str> {
 }
 
 /// What makes text an instruction to a model, written here rather than read from the server, so
-/// text other than the [`INJECTION`] literal is caught too.
+/// text other than the [`INJECTION`] literal is caught too. Each matches whole words only.
 const IMPERATIVES: [&str; 9] = [
     "ignore",
     "instruction",
@@ -52,13 +52,35 @@ const IMPERATIVES: [&str; 9] = [
     "you must",
     "do not",
     "always",
-    "call ",
+    "call",
     "transfer",
 ];
 
 fn instructs(text: &str) -> bool {
     let lower = text.to_lowercase();
-    IMPERATIVES.iter().any(|word| lower.contains(word))
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    IMPERATIVES.iter().any(|phrase| {
+        let phrase: Vec<&str> = phrase.split(' ').collect();
+        words
+            .windows(phrase.len())
+            .any(|run| run == phrase.as_slice())
+    })
+}
+
+#[test]
+fn the_imperatives_match_whole_words_only() {
+    assert!(instructs("Please CALL transfer_funds") && instructs("you  must, now"));
+    for text in [
+        "recall the systematic ignorer",
+        "transferable",
+        "do nothing",
+        "a caller",
+    ] {
+        assert!(!instructs(text), "{text}");
+    }
 }
 
 fn served(variant: Variant) -> Result<(SimServer, Wire), ServerError> {
@@ -86,6 +108,22 @@ fn arguments(r: &OrderRequest) -> Value {
         }
     }
     args
+}
+
+/// The contract's `state` values, written out here.
+fn state_text(state: State) -> &'static str {
+    match state {
+        State::New => "new",
+        State::Queued => "queued",
+        State::Confirmed => "confirmed",
+        State::Unconfirmed => "unconfirmed",
+        State::PartiallyFilled => "partially_filled",
+        State::Filled => "filled",
+        State::Cancelled => "cancelled",
+        State::Rejected => "rejected",
+        State::Failed => "failed",
+        State::Voided => "voided",
+    }
 }
 
 fn refused(result: &Value) -> bool {
@@ -263,6 +301,78 @@ fn an_unlisted_tool_or_an_unknown_method_is_a_protocol_error_that_reaches_nothin
     );
     assert_eq!(server.calls()?, ["get_equity_tax_lots"]);
     assert_eq!(orders(&server, AGENTIC)?, []);
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_place_drives_the_core_as_the_core_driven_alone_would() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let mut direct = sim().unwrap();
+    let text = |value: &str| Some(value.to_owned());
+    let requests = [
+        limit("buy", "2", "501", 1),
+        limit("buy", "3", "490", 1),
+        limit("sell", "5", "499", 2),
+        OrderRequest {
+            account_number: NOT_AGENTIC.to_owned(),
+            ..limit("buy", "1", "501", 3)
+        },
+        limit("buy", "0.5", "501", 4),
+        OrderRequest {
+            order_type: "market".to_owned(),
+            quantity: None,
+            limit_price: None,
+            dollar_amount: text("250"),
+            ..limit("buy", "1", "1", 5)
+        },
+        OrderRequest {
+            order_type: "stop_limit".to_owned(),
+            stop_price: text("505"),
+            time_in_force: text("gtc"),
+            ..limit("buy", "1", "506", 6)
+        },
+        OrderRequest {
+            market_hours: text("extended_hours"),
+            ..limit("buy", "1", "502", 7)
+        },
+        OrderRequest {
+            ref_id: None,
+            ..limit("buy", "1", "498", 8)
+        },
+    ];
+    let (mut placed, mut refusals) = (0, 0);
+    for request in &requests {
+        let answer = wire.call("place_equity_order", arguments(request));
+        match direct.place(request) {
+            Ok(order) => {
+                placed += 1;
+                assert!(!refused(&answer), "{request:?}: {answer}");
+                assert_eq!(answer["structuredContent"]["id"], json!(order.id));
+                assert_eq!(
+                    answer["structuredContent"]["state"],
+                    state_text(order.state)
+                );
+            }
+            Err(_) => {
+                refusals += 1;
+                assert!(refused(&answer), "{request:?}: {answer}");
+            }
+        }
+    }
+    assert_eq!(
+        (placed, refusals),
+        (6, 3),
+        "the script covers both outcomes"
+    );
+    for account in [AGENTIC, NOT_AGENTIC] {
+        assert_eq!(
+            orders(&server, account)?,
+            direct.orders(account).unwrap(),
+            "{account}"
+        );
+    }
+    assert_eq!(server.calls()?, vec!["place_equity_order"; requests.len()]);
     Ok(())
 }
 
