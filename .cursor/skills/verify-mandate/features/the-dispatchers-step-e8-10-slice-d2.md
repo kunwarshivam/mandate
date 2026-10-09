@@ -2,7 +2,7 @@
 
 - **Spec:** [notifications spec](../../../../docs/specs/notifications.md) §3.3 (the interim
   recipients), §3.4 (one notice per cause), §5.1 (the journal is the outbox), §5.5 (records),
-  NT-3, NT-8; journal spec §5.1 (fencing) and §9.15; DEC-701 item 3; DEC-704.
+  NT-3, NT-8; journal spec §5.1 (fencing) and §9.15; DEC-701 item 3; DEC-704; DEC-705.
 - **Code:** `mandate-dispatcher` (layer 4, pure, safety-critical, now over `mandate-journal`):
   `crates/mandate-dispatcher/src/step.rs` (`NoticeWriter`, which holds only a notice stream;
   the `Journal` trait, whose only append takes a `NoticeWriter`; `Config`; `step`). Tests PR: the
@@ -18,5 +18,6 @@
   send; recipients are sorted and unique; a `retryable` or `permanent` answer is journaled
   `failed` with its reason before the next send; and an append that does not commit
   (`Unavailable` on the issue batch, `Ambiguous` on an attempt) returns `NotCommitted` with no
-  send or append after it.
+  send or append after it. Per DEC-705, the kill switch's cause is the control-stream alert
+  even when the subject streams are given as `[A1, A2, CTL]`.
 - **Run:** `cargo nextest run -p mandate-dispatcher`; `cargo xtask ci pending`.

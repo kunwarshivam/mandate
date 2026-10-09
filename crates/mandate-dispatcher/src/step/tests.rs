@@ -6,6 +6,7 @@ use super::{Config, Journal, NoticeWriter, step};
 use crate::DispatchError;
 use mandate_canon::{Value, parse};
 use mandate_journal::{AppendOutcome, Environment, MemoryJournal, StoredEvent, StreamId};
+use mandate_notify::PushChannel::{Email, WebPush};
 use mandate_notify::{
     AddressHandle, FixtureProvider, IdempotencyKey, Notification, NotifyError, Origin, Outcome,
     Provider, PushChannel, Reason, Recipient, SecureRandom,
@@ -353,10 +354,20 @@ fn one_user_kill_switch_is_one_notice_and_a_cause_is_issued_once() -> Checked {
     let kinds: Vec<String> = issued.iter().map(|p| text(p, "kind")).collect();
     assert_eq!(kinds, ["kill_switch", "risk_limit"]);
     assert_eq!(sends.fx.sent()?.len(), 4, "the second step sent nothing");
-    let cause = issued
-        .first()
-        .map(|p| (text(p, "cause"), text(p, "cause_stream")));
-    assert_eq!(cause, Some((id(9, 1), CTL.to_owned())), "the API's alert");
+    the_cause_is_the_apis_alert(&journal)
+}
+
+/// The one kill-switch notice answers the API's control-stream alert `id(9, 1)`, whose `subject`
+/// is the `OwnerCommandIssued` (spec §3.4; journal spec §9.15 rule 124; DEC-705).
+fn the_cause_is_the_apis_alert(journal: &Shared) -> Checked {
+    let issued = payloads(journal, "NoticeIssued");
+    let killed = |p: &&Value| text(p, "kind") == "kill_switch";
+    let causes: Vec<(String, String)> = issued
+        .iter()
+        .filter(killed)
+        .map(|p| (text(p, "cause"), text(p, "cause_stream")))
+        .collect();
+    assert_eq!(causes, [(id(9, 1), CTL.to_owned())], "the API's alert");
     let j = journal.0.borrow();
     let body = |event: &str| j.event(event).and_then(|r| parse(&r.body).ok());
     let subject = body(&id(9, 1)).and_then(|b| b.get("payload").map(|p| text(p, "subject")));
@@ -418,7 +429,6 @@ fn a_steps_notices_are_one_batch_that_opens_a_fresh_stream() -> Checked {
 #[test]
 #[ignore = "pending E8-10"]
 fn recipients_are_sorted_and_unique_and_each_gets_its_own_channels() -> Checked {
-    use PushChannel::{Email, WebPush};
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
     let audience = [
@@ -531,4 +541,21 @@ fn an_append_that_does_not_commit_stops_the_step_before_its_next_send() -> Check
         assert!(payloads(&journal, "NoticeAttempted").is_empty(), "{name}");
     }
     Ok(())
+}
+
+#[test]
+#[ignore = "pending E8-10"]
+fn the_control_streams_alert_is_the_kill_switch_cause_whatever_the_subject_order() -> Checked {
+    let journal = world()?;
+    kill_switch(&journal)?;
+    alerts(&journal, A1, 1, &[(1, "kill_switch"), (2, "risk_limit")])?;
+    alerts(&journal, A2, 1, &[(3, "kill_switch")])?;
+    let (writer, mut sends) = (writer(&journal)?, provider(&journal)?);
+    run(&journal, &writer, &[A1, A2, CTL], &mut sends)??;
+    assert_eq!(
+        sends.fx.sent()?.len(),
+        4,
+        "one kill-switch notice and one risk-limit notice"
+    );
+    the_cause_is_the_apis_alert(&journal)
 }
