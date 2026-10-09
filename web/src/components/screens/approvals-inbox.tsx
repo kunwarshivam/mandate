@@ -9,7 +9,7 @@ import { Deadline } from "@/components/approvals/deadline";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { clock, dateLabel, price, quantity, seconds } from "@/lib/format";
-import { APPROVAL_STATUS_LABEL } from "@/lib/labels";
+import { APPROVAL_STATUS_LABEL, ruleSentence } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { agentHref } from "@/lib/screens";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
@@ -58,13 +58,16 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
   );
 }
 
-/** Which of an agent's rules send the owner a request, and how long a request waits, in words. */
+/**
+ * Which of an agent's rules send the owner a request, each by its sentence and never its id (critique
+ * C-6), and how long a request waits, in words.
+ */
 export function askSentence(agent: Agent): string {
   const { rules, default: otherwise, approval } = agent.mandate.autonomy;
-  const asks = rules.filter((r) => r.then === "ask").map((r) => `\u201c${r.id}\u201d`);
-  const which = asks.length === 0 ? "No rule of yours asks" : `${asks.length === 1 ? "Your rule" : "Your rules"} ${asks.join(", ")} ${asks.length === 1 ? "asks" : "ask"}`;
-  const rest = otherwise === "ask" ? ", and so does anything no rule covers" : "";
-  return `${which} you${rest}. A request waits ${seconds(approval.timeout_s)}, then is skipped.`;
+  const asks = rules.filter((r) => r.then === "ask").map(ruleSentence);
+  const which = asks.length === 0 ? "No rule of yours asks you." : `${asks.length === 1 ? "Your rule" : "Your rules"}: ${asks.join("; ")}.`;
+  const rest = otherwise === "ask" ? ` Anything no rule covers asks you${asks.length === 0 ? "" : " too"}.` : "";
+  return `${which}${rest} A request waits ${seconds(approval.timeout_s)}, then is skipped.`;
 }
 
 /**

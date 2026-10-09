@@ -3,8 +3,9 @@ import { cn } from "@/lib/utils";
 import { OwlheadWordmark } from "./Logo";
 
 /**
- * The Owlhead logo (DEC-452): the product's own owl, awake, in the feather colour `BRAND_OWL_SCRIPT`
- * picked for this page load. Decorative, because the link or button around it carries the name.
+ * The Owlhead logo (DEC-452): the product's own owl, awake, in the logo's colour, the wordmark's, and
+ * never an agent's (DEC-739 item 2), since a second owl in an agent's colour reads as a second agent.
+ * Decorative, because the link or button around it carries the name.
  * Its sprite is 16 pixels, so it stays crisp at 16, 32 and 48 px.
  */
 export function BrandOwl({ still, className }: { still?: boolean; className?: string }) {

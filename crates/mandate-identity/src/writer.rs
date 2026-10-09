@@ -9,7 +9,9 @@
 
 use mandate_time::UtcNanos;
 
-use crate::{MembershipEvent, MembershipRecord, RecordRefusal};
+use mandate_identity_seal::Seal;
+
+use crate::{MembershipEvent, MembershipRecord, RecordRefusal, check_order};
 
 /// How many times [`write_membership`] re-runs an attempt whose head moved before it reports
 /// [`WriteError::Contended`].
@@ -67,11 +69,6 @@ pub trait ControlStream {
 /// nothing is granted while it lasts (DEC-659 item 8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteError<E> {
-    /// The body of every stub in the tests PR (DEC-77).
-    Unimplemented {
-        /// The story that implements it.
-        story: &'static str,
-    },
     /// The record is refused against the stream's last membership record.
     Refused(RecordRefusal),
     /// The head moved on every one of [`ATTEMPTS`] attempts.
@@ -87,9 +84,23 @@ pub enum WriteError<E> {
 /// last membership record; returns the committed record.
 pub fn write_membership<S: ControlStream>(
     stream: &mut S,
-    now: impl FnMut() -> UtcNanos,
+    mut now: impl FnMut() -> UtcNanos,
     event: MembershipEvent,
 ) -> Result<MembershipRecord, WriteError<S::Error>> {
-    let _ = (stream, now, event);
-    Err(WriteError::Unimplemented { story: "E9-7" })
+    for _ in 0..ATTEMPTS {
+        let view = stream.read().map_err(WriteError::Store)?;
+        let last = view.tail.iter().rev().find_map(|entry| match entry {
+            ControlEntry::Membership(record) => Some(record),
+            ControlEntry::Other { .. } => None,
+        });
+        let seq = view.head.checked_add(1).ok_or(WriteError::StreamFull)?;
+        let record = MembershipRecord::new(Seal::grant(), seq, now(), event.clone());
+        check_order(last, &record).map_err(WriteError::Refused)?;
+        let appended = stream.append(view.head, &record);
+        match appended.map_err(WriteError::Store)? {
+            Appended::Committed => return Ok(record),
+            Appended::HeadMoved => continue,
+        }
+    }
+    Err(WriteError::Contended)
 }

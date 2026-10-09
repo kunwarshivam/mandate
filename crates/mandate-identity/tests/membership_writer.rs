@@ -169,7 +169,6 @@ fn a_record_reads_back_what_it_was_built_from() {
 /// DEC-659 item 4: with no membership record yet, the first commits at head + 1, after a stream
 /// opening or on an empty stream.
 #[test]
-#[ignore = "pending E9-7"]
 fn the_first_membership_record_commits_at_the_head() {
     let mut empty = Stream::default();
     let got = write(&mut empty, t(0));
@@ -181,7 +180,6 @@ fn the_first_membership_record_commits_at_the_head() {
 
 /// An in-order record commits at the next `seq` with the clock's own instant, later or equal.
 #[test]
-#[ignore = "pending E9-7"]
 fn an_in_order_record_commits_with_its_own_instant() {
     for (at, seq) in [(3_600, 3), (3_601, 3), (90_000, 3)] {
         let mut stream = Stream::with(&[Interloper::Other(0), Interloper::Member(3_600)]);
@@ -193,7 +191,6 @@ fn an_in_order_record_commits_with_its_own_instant() {
 /// DEC-659 items 3 and 8: a clock behind the last membership record, even by 1 ns, is refused
 /// and writes nothing; never clamped, the record commits with the clock's instant once past it.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_record_behind_the_last_is_refused_and_never_clamped() {
     let mut stream = Stream::with(&[Interloper::Other(0), Interloper::Member(7_200)]);
     let before = stream.rows.clone();
@@ -209,7 +206,6 @@ fn a_record_behind_the_last_is_refused_and_never_clamped() {
 /// Two records in one second are ordered by their nanoseconds: an equal instant passes, one
 /// nanosecond later passes, and one nanosecond earlier is refused.
 #[test]
-#[ignore = "pending E9-7"]
 fn records_within_one_second_are_ordered_by_nanosecond() {
     let within = |nanos| UtcNanos::from_parts(EPOCH + 3_600, nanos).unwrap();
     let mut stream = Stream::with(&[Interloper::Other(0)]);
@@ -225,7 +221,6 @@ fn records_within_one_second_are_ordered_by_nanosecond() {
 /// DEC-659 item 1: `last` is the last membership record, so a later record of another type
 /// neither refuses a record after it nor admits one before it.
 #[test]
-#[ignore = "pending E9-7"]
 fn last_is_the_last_membership_record_whatever_follows_it() {
     let mut stream = Stream::with(&[Interloper::Member(3_600), Interloper::Other(9_000)]);
     let got = write(&mut stream, t(5_000));
@@ -239,7 +234,6 @@ fn last_is_the_last_membership_record_whatever_follows_it() {
 /// DEC-659 item 2: a membership record a concurrent writer commits after the read moves the head,
 /// so the attempt re-runs against it: a stale `last` never admits a record now behind it.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_moved_head_reruns_the_guard_against_the_new_last() {
     let mut stream = Stream::with(&[Interloper::Member(0)]);
     stream.pending.push_back(Interloper::Member(7_200));
@@ -251,7 +245,6 @@ fn a_moved_head_reruns_the_guard_against_the_new_last() {
 /// A moved head re-reads and re-stamps: the retry commits after the concurrent records, of either
 /// type, at the new head and the clock's instant at the retry.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_moved_head_retries_at_the_new_head_with_a_fresh_instant() {
     let mut stream = Stream::with(&[Interloper::Member(0)]);
     stream
@@ -265,7 +258,6 @@ fn a_moved_head_retries_at_the_new_head_with_a_fresh_instant() {
 /// A head that moves on every attempt ends in `Contended` after [`ATTEMPTS`] reads, with nothing
 /// of the writer's committed.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_head_that_always_moves_is_contended() {
     let pending = (0..ATTEMPTS).map(|i| Interloper::Other(i.into())).collect();
     let mut stream = Stream {
@@ -308,7 +300,6 @@ impl ControlStream for Full {
 /// No `seq` follows `u64::MAX`: the writer answers `StreamFull` before it reads the clock
 /// (DEC-647 item 1), and never appends or wraps.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_full_stream_takes_no_record() {
     let mut stream = Full { appends: 0 };
     let mut reads = 0_u32;
@@ -332,7 +323,6 @@ fn a_full_stream_takes_no_record() {
 /// and the stream predicts each answer and every row, and the stream's membership records stay in
 /// `seq` and `event_time` order.
 #[test]
-#[ignore = "pending E9-7"]
 fn the_stream_stays_ordered_under_random_interleavings() {
     let interloper = prop_oneof![
         (0..20i64).prop_map(Interloper::Member),
@@ -387,14 +377,12 @@ fn the_stream_stays_ordered_under_random_interleavings() {
 
 /// DEC-646 item 3: a failed `read` is passed through as `Store`, after one read and no append.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_failed_read_is_a_store_error_and_appends_nothing() {
     Faulty::new(true).failed(1, 0);
 }
 
 /// DEC-646 item 3: a failed `append` is passed through as `Store`, never retried as a moved head.
 #[test]
-#[ignore = "pending E9-7"]
 fn a_failed_append_is_a_store_error_and_is_not_retried() {
     Faulty::new(false).failed(1, 1);
 }
@@ -403,7 +391,6 @@ fn a_failed_append_is_a_store_error_and_is_not_retried() {
 /// cut exactly there, so that record is `tail[0]` and the tail's only membership record, or one
 /// starting at an older record of either type, gives the same `last`, and commits at head + 1.
 #[test]
-#[ignore = "pending E9-7"]
 fn last_is_found_wherever_the_tail_starts() {
     let rows = [
         Interloper::Other(0),

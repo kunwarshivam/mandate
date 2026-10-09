@@ -34,7 +34,7 @@ describe("asking the record", () => {
     const reply = interpret("Why did it ask?", ctx(AGENT_IDS.swing));
     const said = lines(reply);
     expect(said[0]).toBe("Agent 2's latest: Buy 2 XYZ at a limit of $141.30, waiting for you.");
-    expect(said).toContain("Your rule \u201clow_score\u201d: ask when the combined model score is below 0.65.");
+    expect(said).toContain("Your rule: ask when the combined model score is below 0.65.");
     expect(said).toContain("Risk gate: Allowed.");
     expect(said).toContain("Position after it fills: $1,412.44 of the $1,500.00 position limit");
     expect(reply.kind === "answer" && reply.cites).toEqual([

@@ -312,12 +312,47 @@ pub enum Proof<'a> {
 }
 
 /// A step-up as the caller presents it with the action it wants to commit.
+///
+/// Its workspace and principal are the request's, read from the [`TenantContext`] `authorize`
+/// returned ([DEC-649], ID-8): [`Presentation::new`] is the request path. The public ID fields
+/// stay only until the test fixture moves to `new`; DEC-649 item 4 then makes them private, so
+/// no caller can name a workspace or principal it was not authorized for.
+///
+/// [DEC-649]: ../../../docs/project/decisions/DEC-649.md
 #[derive(Debug, Clone, Copy)]
 pub struct Presentation<'a> {
-    pub workspace_id: &'a WorkspaceId,
-    pub principal_id: &'a PrincipalId,
+    pub workspace_id: WorkspaceId,
+    pub principal_id: PrincipalId,
     pub action: Action,
     pub proof: Proof<'a>,
+}
+
+impl<'a> Presentation<'a> {
+    /// The step-up the request `context` presents: the context's workspace and principal, with
+    /// `action` and `proof` ([DEC-649] item 1). The context is the one `authorize` returned for
+    /// the request committing `action` (identity spec §7.2 step 4), so a challenge issued under
+    /// another workspace's or principal's context never matches it.
+    ///
+    /// It takes no bare workspace or principal, only a context `authorize` built:
+    ///
+    /// ```compile_fail,E0308
+    /// use mandate_identity::{PrincipalId, WorkspaceId};
+    /// use mandate_passkey::stepup::{Action, Presentation, Proof};
+    ///
+    /// fn named(w: WorkspaceId, p: PrincipalId, action: Action) -> Presentation<'static> {
+    ///     Presentation::new(&(w, p), action, Proof::CliConfirm)
+    /// }
+    /// ```
+    ///
+    /// [DEC-649]: ../../../docs/project/decisions/DEC-649.md
+    pub fn new(context: &TenantContext, action: Action, proof: Proof<'a>) -> Self {
+        Self {
+            workspace_id: context.workspace(),
+            principal_id: context.principal(),
+            action,
+            proof,
+        }
+    }
 }
 
 /// The challenge a consumed step-up used. The caller marks it used in the same transaction that
@@ -444,8 +479,8 @@ pub fn consume(
     if !record.is_current_at(now) {
         return Err(StepUpRefusal::Stale);
     }
-    if *presented.principal_id != record.principal_id
-        || *presented.workspace_id != record.workspace_id
+    if presented.principal_id != record.principal_id
+        || presented.workspace_id != record.workspace_id
     {
         return Err(StepUpRefusal::Mismatch);
     }

@@ -16,7 +16,9 @@ the owl, the rules and the record.
       #669).
 - [x] **Test sort** (DEC-511 item 5). Loosen look-pinning tests to the invariant they protect,
       remove the ones that only notice the look changed, keep every safety and compliance test
-      exactly as it is. Its own PR. (part 1, #882; part 2, #1005)
+      exactly as it is. Its own PR. (part 1, #882; part 2, #1005; part 2's four "unsure" pins, the
+      agent chart's 200px, the header's 65px, the dock's light shadow and the glass alphas, ruled
+      look by the founder and unpinned to their outcomes, DEC-739 item 1, #1128)
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
       this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
       fixes in section J)
@@ -63,6 +65,9 @@ the owl, the rules and the record.
       1280px, opened with ⌘K and with its button, and the palette's "Stop…" from the keyboard.
       (#1038) The review's follow-up names the dialog "Command palette", gives focus back to its
       opener when Escape closes it, and `e2e/command-bar.spec.ts` pins the Tab wrap both ways.
+      (#1089) Its review's minor 1: neither of the palette's focus returns runs while the Stop
+      sheet is open, so a press on Stop that leaves focus on the page (Safari, Firefox on macOS)
+      still ends with focus in the sheet; `e2e/command-bar.spec.ts` pins it at 390 and 1280px.
 
 ## C. The cutting pass (one PR, no new rules)
 
@@ -266,8 +271,9 @@ item above (C-3, C-9) are not repeated.
         all at 1440px and in both themes. `npm run shots` now waits for every chart on screen to
         show its line, and the spec covers the paused and reconciliation Homes.
         ([#1106](https://github.com/kunwarshivam/mandate/pull/1106))
-- [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
-      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
+- [x] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
+      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6) Done
+      in [#1118](https://github.com/kunwarshivam/mandate/pull/1118).
 - [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
 - [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
       Tooling. (C-27, C-28)
@@ -286,8 +292,10 @@ item above (C-3, C-9) are not repeated.
 - [ ] **One paragraph per set of shared rules** on the Approvals rail. (C-12)
 - [ ] **The phone thread header without the slug.** (C-16)
 - [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
-- [ ] **The brand owl never wears an agent's colour.** Waits on the founder: DEC-452 is the
-      founder's "choose the color at random". (C-15)
+- [x] **The brand owl never wears an agent's colour.** The founder decided it on 2026-10-09
+      (DEC-739 item 2, amending DEC-452's "choose the color at random"): the brand owl wears
+      `--logo`, the wordmark's colour, and the per-load pick is gone. (C-15) Done in
+      [#1127](https://github.com/kunwarshivam/mandate/pull/1127).
 
 ## Learnings (not action items)
 

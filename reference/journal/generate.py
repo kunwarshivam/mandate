@@ -3821,10 +3821,12 @@ def render(
     risk_section: dict,
     research_section: dict,
     account_section: dict,
+    shape_section: dict,
     approval_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
+    range_section: dict,
     workspace_section: dict,
     client_section: dict,
     hold_section: dict,
@@ -3843,10 +3845,12 @@ def render(
             "risk_state": risk_section,
             "research": research_section,
             "account_stream": account_section,
+            "protection_shapes": shape_section,
             "approval_answers": approval_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
+            "connection_ranges": range_section,
             "workspace_api": workspace_section,
             "client_actor": client_section,
             "hold": hold_section,
@@ -3896,10 +3900,12 @@ def main(argv: list[str] | None = None) -> int:
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
+    shape_section = account.build_shape_section()
     approval_section = approval.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
+    range_section = connections.build_range_section()
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
     hold_section = holds.build_section()
@@ -3922,6 +3928,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += research.run_mutants(research_section)
     problems += account.check_section(account_section)
     problems += account.run_mutants(account_section)
+    problems += account.check_shape_section(shape_section)
+    problems += account.run_shape_mutants(shape_section)
     problems += approval.check_section(approval_section)
     problems += approval.run_mutants(approval_section)
     problems += check_broker_profile(broker_profile)
@@ -3930,6 +3938,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += connections.run_mutants(connections_section)
     problems += connections.check_section(request_section)
     problems += connections.run_request_mutants(request_section)
+    problems += connections.check_section(range_section)
+    problems += connections.run_range_mutants(range_section, request_section)
     problems += workspace.check_section(workspace_section)
     problems += workspace.run_mutants(workspace_section)
     problems += clients.check_section(client_section)
@@ -3958,10 +3968,12 @@ def main(argv: list[str] | None = None) -> int:
         risk_section,
         research_section,
         account_section,
+        shape_section,
         approval_section,
         broker_profile,
         connections_section,
         request_section,
+        range_section,
         workspace_section,
         client_section,
         hold_section,
@@ -3979,10 +3991,12 @@ def main(argv: list[str] | None = None) -> int:
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
         or account.check_section(reread["account_stream"])
+        or account.check_shape_section(reread["protection_shapes"])
         or approval.check_section(reread["approval_answers"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
         or connections.check_section(reread["connection_requests"])
+        or connections.check_section(reread["connection_ranges"])
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
         or holds.check_section(reread["hold"])
@@ -4030,6 +4044,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(account_section['valid_drafts'])} valid drafts, "
         f"{len(account_section['valid_batches']) + len(account_section['invalid_batches'])} rule-45 batches; "
         f"{len(account.VALIDATOR_MUTANTS)} validator and {len(account.vector_mutants(account_section))} vector mutants caught; "
+        f"{len(shape_section['invalid_drafts'])} invalid and {len(shape_section['valid_drafts'])} valid protection-shape drafts; "
+        f"{len(account.SHAPE_VALIDATOR_MUTANTS)} validator, {len(account.SHAPE_TIGHTEN_MUTANTS)} tightening, and "
+        f"{len(account.SHAPE_VECTOR_MUTANTS)} vector mutants caught; "
         f"{len(approval_section['drafts'])} approval-answer drafts, {len(approval_section['invalid_drafts'])} invalid and "
         f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
@@ -4044,6 +4061,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(request_section['invalid_drafts'])} invalid and {len(request_section['valid_drafts'])} valid connection-request "
         f"drafts, {len(request_section['sequences'])} rule-131 sequences; {len(connections.REQUEST_VALIDATOR_MUTANTS)} "
         f"validator, {len(connections.REQUEST_STREAM_MUTANTS)} stream, and {connections.REQUEST_VECTOR_MUTANTS} vector mutants caught; "
+        f"{len(range_section['sequences'])} connection ranges and {len(connections.RANGE_MUTANTS)} range mutants caught; "
         f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
         f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
         f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught; "

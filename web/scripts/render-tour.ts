@@ -59,9 +59,13 @@ function castOwl(seed: string, mood: OwlMood, feathers?: string, beak?: string) 
   };
 }
 
-/** The brand owl as `BrandOwl` draws it in the light theme's first colour, and the perch's five agents. */
+/**
+ * The brand owl as `BrandOwl` draws it in the light theme, in the logo's colour (`--logo`, the type
+ * colour; `tokens()` copies only literal colours, so it is named here by its value), never an
+ * agent's (DEC-739 item 2), and the perch's five agents.
+ */
 const CAST = {
-  brand: castOwl("owlhead", "awake", "var(--series-1)", "var(--highlight)"),
+  brand: castOwl("owlhead", "awake", "var(--foreground)", "var(--highlight)"),
   perch: PERCH.map((p) => castOwl(p.seed, p.mood)),
 };
 

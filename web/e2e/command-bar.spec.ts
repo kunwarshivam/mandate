@@ -5,9 +5,9 @@ import { agentHref } from "../src/lib/screens";
 /**
  * From 1024 px the header carries a wide command bar between its two sides: a search icon, the
  * prompt and a ⌘K key on a muted fill with a hairline. It opens the command palette, like ⌘K. The
- * header keeps its height, and the bar never overlaps the paper badge, the theme menu, the approvals
- * and alerts links, the account menus, the brand or the trail. Below 1024 px it is the compact icon
- * beside the theme menu.
+ * header covers none of the page (its height is look, DEC-739 item 1), and the bar never overlaps
+ * the paper badge, the theme menu, the approvals and alerts links, the account menus, the brand or
+ * the trail. Below 1024 px it is the compact icon beside the theme menu.
  */
 
 const bar = (page: Page) => page.locator("[data-slot=command-bar]");
@@ -30,6 +30,7 @@ async function boxes(page: Page) {
     ].filter((el) => el.getAttribute("data-slot") !== "command-bar" && !el.closest("[data-slot=command-bar]") && shown(el));
     return {
       header: rect(header),
+      main: rect(document.getElementById("main")!),
       bar: rect(document.querySelector("[data-slot=command-bar]")!),
       others: others.map((el) => ({ name: el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 24) ?? el.tagName, ...rect(el) })),
     };
@@ -38,13 +39,13 @@ async function boxes(page: Page) {
 
 for (const width of [1024, 1280, 1440]) {
   for (const route of ROUTES) {
-    test(`${width} px, ${route}: a wide bar that overlaps nothing in a header of fixed height`, async ({ page }) => {
+    test(`${width} px, ${route}: a wide bar that overlaps nothing in a header that covers none of the page`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(route);
       await page.waitForLoadState("networkidle");
       await expect(bar(page)).toBeVisible();
       const found = await boxes(page);
-      expect(found.header.height, "the header keeps its height").toBe(65);
+      expect(found.main.top, "the header covers none of the page").toBeGreaterThanOrEqual(found.header.bottom);
       expect(found.bar.top, "the bar sits inside the header").toBeGreaterThanOrEqual(found.header.top);
       expect(found.bar.bottom, "the bar sits inside the header").toBeLessThanOrEqual(found.header.bottom);
       expect(found.bar.width).toBeLessThanOrEqual(460);
@@ -99,13 +100,14 @@ test("a press opens the command palette, and ⌘K does the same", async ({ page 
 });
 
 for (const width of [390, 768, 1023]) {
-  test(`${width} px: the bar gives way to Search in the More sheet, and the header keeps its height`, async ({ page }) => {
+  test(`${width} px: the bar gives way to Search in the More sheet, and the header covers none of the page`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await expect(bar(page)).toBeHidden();
     await expect(page.getByRole("banner").getByRole("button", { name: "Go to…", exact: true })).toHaveCount(0);
-    expect((await page.locator("header").boundingBox())!.height).toBe(65);
+    const top = (await page.locator("header").boundingBox())!;
+    expect((await page.locator("#main").boundingBox())!.y, "the header covers none of the page").toBeGreaterThanOrEqual(top.y + top.height);
     await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
     await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: /^Search/ }).click();
     const palette = commandPalette(page);
@@ -221,6 +223,110 @@ test.describe("the palette keeps focus inside and gives it back (C-21)", () => {
       await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
       expect(await sheet.evaluate((el) => el.contains(document.activeElement)), "focus stays in the Stop sheet once the palette has gone").toBe(true);
     });
+  }
+});
+
+/**
+ * The palette's two openers: ⌘K, from the header's brand link so that focus has somewhere to go
+ * back to, and its button, the bar from 1024 px and Search in the More sheet below it.
+ */
+const PALETTE_OPENERS = [
+  {
+    name: "⌘K",
+    open: async (page: Page) => {
+      const brand = page.getByRole("banner").getByRole("link", { name: "Owlhead, dashboard", exact: true });
+      await brand.focus();
+      await expect(brand, "focus is on the brand link before ⌘K").toBeFocused();
+      await page.keyboard.press("ControlOrMeta+k");
+    },
+  },
+  {
+    name: "its button",
+    open: async (page: Page, width: number) => {
+      if (width >= 1024) {
+        await bar(page).click();
+        return;
+      }
+      await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
+      await page.locator("[data-slot=more-search]").click();
+    },
+  },
+];
+
+/**
+ * How Stop is pressed. Chromium focuses a button on a press. Safari, and Firefox on macOS, do not:
+ * the press leaves the page itself (`body`) active, so the Stop sheet, not Stop, is the next thing to
+ * take focus. That press is played here by refusing the button focus on `mousedown` and blurring the
+ * palette's input as the pointer goes down, before the sheet opens.
+ */
+const STOP_PRESSES = [
+  { name: "a press", leavesFocusOnThePage: false },
+  { name: "a press that does not focus the button", leavesFocusOnThePage: true },
+];
+
+/** The Stop sheet's popup, which `[role=dialog]` and the name "Stop" find. */
+const STOP_SHEET = "[data-slot=stop-sheet]";
+
+/**
+ * Rule 13 and #1089's review minor 1: when Stop is pressed with the palette open, the palette gives
+ * way and focus ends in the Stop sheet. Once the sheet is in the page, nothing outside it takes focus,
+ * even for a moment: the palette's focus return never hands focus back to its opener over the sheet.
+ * Every element that takes focus is recorded by a `focusin` listener of the test's own, not read
+ * from the component's rule.
+ */
+test.describe("a press on Stop with the palette open leaves focus in the Stop sheet (C-21, rule 13)", () => {
+  for (const width of [390, 1280]) {
+    for (const opener of PALETTE_OPENERS) {
+      for (const press of STOP_PRESSES) {
+        test(`${width} px, the palette opened with ${opener.name}, ${press.name} on Stop`, async ({ page }) => {
+          await page.setViewportSize({ width, height: 900 });
+          await page.goto("/");
+          await page.waitForLoadState("networkidle");
+          await opener.open(page, width);
+          const palette = commandPalette(page);
+          await expect(palette.getByRole("combobox", { name: "Command" }), "the palette is open and holds focus").toBeFocused();
+          const stop = frameStop(page, width);
+          await stop.evaluate(
+            (button, { leavesFocusOnThePage, sheetSelector }) => {
+              const record = window as unknown as { focusedOutsideSheet: string[]; activeAtPress: string };
+              record.focusedOutsideSheet = [];
+              button.addEventListener(
+                "click",
+                () => (record.activeAtPress = document.activeElement === button ? "Stop" : document.activeElement === document.body ? "the page" : "elsewhere"),
+                { capture: true },
+              );
+              document.addEventListener(
+                "focusin",
+                (event) => {
+                  const sheet = document.querySelector(sheetSelector);
+                  const target = event.target as Element;
+                  if (sheet && !sheet.contains(target)) {
+                    record.focusedOutsideSheet.push(`<${target.tagName.toLowerCase()} ${target.getAttribute("aria-label") ?? target.textContent?.trim().slice(0, 32) ?? ""}>`);
+                  }
+                },
+                true,
+              );
+              if (!leavesFocusOnThePage) return;
+              button.addEventListener("pointerdown", () => (document.activeElement as HTMLElement | null)?.blur(), { capture: true });
+              button.addEventListener("mousedown", (event) => event.preventDefault(), { capture: true });
+            },
+            { leavesFocusOnThePage: press.leavesFocusOnThePage, sheetSelector: STOP_SHEET },
+          );
+          await stop.click();
+          const activeAtPress = await page.evaluate(() => (window as unknown as { activeAtPress: string }).activeAtPress);
+          expect(activeAtPress, "what had focus as the press landed").toBe(press.leavesFocusOnThePage ? "the page" : "Stop");
+          const sheet = page.getByRole("dialog", { name: /^Stop/ });
+          await expect(sheet, "Stop opens its sheet").toBeVisible();
+          await expect(palette, "the palette gives way to the Stop sheet").toHaveCount(0);
+          await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+          await expect
+            .poll(() => sheet.evaluate((el) => el.contains(document.activeElement)), { message: "focus ends in the Stop sheet" })
+            .toBe(true);
+          const focusedOutsideSheet = await page.evaluate(() => (window as unknown as { focusedOutsideSheet: string[] }).focusedOutsideSheet);
+          expect(focusedOutsideSheet, "elements outside the Stop sheet that took focus while it was open").toEqual([]);
+        });
+      }
+    }
   }
 });
 

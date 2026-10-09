@@ -1,4 +1,5 @@
-import type { AgentMode, ApprovalStatus, CancelReason, ChangeClass, OrderState, Provenance, Purpose, RiskFigure } from "@/fixtures/types";
+import type { AgentMode, ApprovalStatus, AutonomyRule, CancelReason, ChangeClass, OrderState, Provenance, Purpose, RiskFigure } from "@/fixtures/types";
+import { usd } from "./format";
 
 /** A mode is named by what the agent may do (DEC-512), so "Trading" needs no "Selling only" beside it to be understood. */
 export const MODE_LABEL: Record<AgentMode, string> = {
@@ -91,3 +92,73 @@ export const CHANGE_CLASS_LABEL: Record<ChangeClass, string> = {
   risk_reducing: "Risk-reducing",
   neutral: "Neutral",
 };
+
+/** What an autonomy rule has the agent do, as the rule's sentence begins. */
+const RULE_THEN: Record<AutonomyRule["then"], string> = {
+  ask: "ask",
+  auto: "submit without asking",
+  deny: "never allow it",
+};
+
+/** A rule's field, named as the request names it. Any other field is named by its words. */
+const RULE_FIELD: Record<string, string> = {
+  order_usd: "the order value",
+  combined_score: "the combined model score",
+  purpose: "the purpose",
+};
+
+/** One value compared: the words and the value for exactly one value, `null` for any other count. */
+const one = (words: string) => (vs: string[]) => (vs.length === 1 ? `${words} ${vs[0]}` : null);
+
+/**
+ * A rule's comparison and its values as the sentence reads them, `null` when the values do not fit
+ * the comparison: none, or several for a comparison of one value.
+ */
+const RULE_OP: Record<string, (values: string[]) => string | null> = {
+  eq: one("is"),
+  ne: one("is not"),
+  gt: one("is above"),
+  gte: one("is at or above"),
+  lt: one("is below"),
+  lte: one("is at or below"),
+  in: (vs) => (vs.length === 0 ? null : `is ${vs.join(" or ")}`),
+  not_in: (vs) => {
+    if (vs.length === 0) return null;
+    if (vs.length === 1) return `is not ${vs[0]}`;
+    if (vs.length === 2) return `is neither ${vs[0]} nor ${vs[1]}`;
+    return `is none of ${vs.slice(0, -1).join(", ")} or ${vs.at(-1)}`;
+  },
+};
+
+/** What a rule says when its operator is one this page does not know, or its values do not fit it: never the raw operator. */
+const RULE_CONDITION_UNREAD = "meets this rule's condition";
+
+/** A rule's value as the owner wrote it: dollars for a dollar field, whole dollars without cents; a purpose by its label. */
+function ruleValue(field: string, value: string): string {
+  if (field.endsWith("_usd")) return usd(value).replace(/\.00$/, "");
+  if (field === "purpose" && Object.hasOwn(PURPOSE_LABEL, value)) return PURPOSE_LABEL[value as Purpose].toLowerCase();
+  return value;
+}
+
+/**
+ * The owner's own autonomy rule as its sentence, "ask when the combined model score is below 0.65",
+ * wherever the owner reads the rule; its id stays in the record and the audit (critique C-6). It
+ * says only what the owner's rule says, never what the owner should do.
+ */
+export function ruleSentence(rule: AutonomyRule): string {
+  const { field, op, value } = rule.when;
+  const values = (Array.isArray(value) ? value : [value]).map((v) => ruleValue(field, v));
+  const compare = (Object.hasOwn(RULE_OP, op) ? RULE_OP[op](values) : null) ?? RULE_CONDITION_UNREAD;
+  return `${RULE_THEN[rule.then]} when ${RULE_FIELD[field] ?? `the ${field.replaceAll("_", " ")}`} ${compare}`;
+}
+
+/**
+ * A recorded line with each of the agent's rules named by its sentence, not its id: "your rule
+ * “low_score”" reads "your rule: ask when the combined model score is below 0.65" (critique C-6).
+ */
+export function withRuleSentences(text: string, rules: readonly AutonomyRule[]): string {
+  return text.replace(/rule “([^”]+)”/g, (named, id: string) => {
+    const rule = rules.find((r) => r.id === id);
+    return rule ? `rule: ${ruleSentence(rule)}` : named;
+  });
+}

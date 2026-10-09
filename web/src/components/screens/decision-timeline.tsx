@@ -8,8 +8,9 @@ import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { GateDecision, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { clock } from "@/lib/format";
-import { actionSentence, gateRule, verdictBadge } from "@/lib/gate-reasons";
-import { PURPOSE_LABEL } from "@/lib/labels";
+import { actionSentence, decidedRule, verdictBadge } from "@/lib/gate-reasons";
+import { PURPOSE_LABEL, withRuleSentences } from "@/lib/labels";
+import { mandateAt } from "@/lib/mandate-history";
 import { decisionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +31,10 @@ export function tally(decisions: GateDecision[]): string {
 /**
  * What the agents set out to do, newest first, narrow enough for a rail or a phone: each entry hangs
  * off one hairline by the agent's owl, with the action, the gate's verdict in words, who and when, and
- * one line of why: the rule that held it, or else what happened next. The verdict sits first, in
+ * one line of why: the rule that held it, or else what happened next, the owner's rules named by
+ * their sentence (critique C-6) where the audit keeps their ids. A rule reads as the mandate version
+ * the gate decided under said it, never as the agent's current version says it; a decision whose
+ * version is not in the agent's history keeps the recorded id. The verdict sits first, in
  * one column of one width on every row, so it never wraps and the eye reads it down the list
  * (DEC-512); it wears no meaning colour.
  */
@@ -39,7 +43,8 @@ export function DecisionTimeline({ ws, decisions }: { ws: Workspace; decisions: 
     <ol aria-label="Decisions, newest first" data-slot="decision-timeline" className={cn("grid", VERDICT_COLUMN)}>
       {decisions.map((d, i) => {
         const agent = findAgent(ws, d.agent_id);
-        const rule = d.reason_code && agent ? gateRule(d.reason_code, agent.mandate) : null;
+        const rule = agent ? decidedRule(d, agent) : null;
+        const decidedUnder = agent ? mandateAt(agent, d.mandate_version) : null;
         return (
           <li
             key={d.event_id}
@@ -72,7 +77,7 @@ export function DecisionTimeline({ ws, decisions }: { ws: Workspace; decisions: 
                   {rule}
                 </p>
               ) : d.then ? (
-                <p className="text-sm text-pretty text-muted-foreground">{d.then}</p>
+                <p className="text-sm text-pretty text-muted-foreground">{decidedUnder ? withRuleSentences(d.then, decidedUnder.autonomy.rules) : d.then}</p>
               ) : null}
             </div>
           </li>

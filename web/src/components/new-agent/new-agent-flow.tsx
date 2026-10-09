@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { claimedBy, unallocatedUsd } from "@/lib/fixture-journey";
+import { claimedBy, independentApprovalRequired, unallocatedUsd } from "@/lib/fixture-journey";
 import { useHandoff } from "@/lib/handoff";
 import { useRuntime } from "@/lib/mock-runtime";
 import { Chat, type Creation } from "./chat";
@@ -28,7 +28,10 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
   const [attempt, setAttempt] = useState(0);
   const [sent, setSent] = useState<{ id: string; revision: number } | null>(null);
 
-  const checks = useMemo<Checks>(() => ({ room: unallocatedUsd(ws), claimedBy: (symbol) => claimedBy(ws, symbol)?.label ?? null }), [ws]);
+  const checks = useMemo<Checks>(
+    () => ({ room: unallocatedUsd(ws), claimedBy: (symbol) => claimedBy(ws, symbol)?.label ?? null, independentApproval: independentApprovalRequired(ws) }),
+    [ws],
+  );
   const checksRef = useRef(checks);
   useEffect(() => {
     checksRef.current = checks;
@@ -96,7 +99,7 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
         onSend={send}
         initialText={attempt === 0 ? handed : null}
         actions={{
-          onChoose: (model) => setConversation((c) => chooseModel(c, model)),
+          onChoose: (model) => setConversation((c) => chooseModel(c, model, checksRef.current)),
           onRetry: (messageId) => void read(inputFor(conversation, messageId), messageId, !conversation.figuresOnly),
           onWithoutModel: (messageId) => {
             const next = readWithoutModel(conversation);

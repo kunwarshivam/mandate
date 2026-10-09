@@ -135,8 +135,8 @@ Flat controls and panels; soft corners, rounder the larger the surface: `xs`/`sm
 ticks, `lg`/`xl` for buttons and menus, `2xl` for panels (the mandate field, a well), `3xl` for the
 sheet, dialog and dock, `full` for pills. In light mode only what floats casts a soft ink-tinted
 shadow; in dark mode nothing does. Glass is on the frame only (the header, the tab bar, the dock;
-DEC-208), at 72% so muted text keeps AA over anything under it, and solid where the browser cannot
-blur. Everything else is flat.
+DEC-208), translucent but opaque enough that muted text keeps AA over anything under it (how
+opaque is look, DEC-739), and solid where the browser cannot blur. Everything else is flat.
 
 ## Components
 
@@ -150,7 +150,8 @@ One line each; the reference has the rest.
 - **Owls** (DEC-217, DEC-514). A 16-pixel sprite whose ears and markings come from the agent's ID
   and whose eyes say its mode and nothing else; drawn only at 16, 32, 48, 64 or 80px, where a sprite
   pixel is whole, so the owls and the icons share one pixel grid. A new agent's owl hatches once,
-  when the runtime records it; under reduced motion it is simply there.
+  when the runtime records it; under reduced motion it is simply there. The brand owl wears the logo
+  colour, never an agent's (DEC-739 item 2).
 - **Stop control and sheet** (DEC-206). The octagon pill, quiet or loud; one sheet for every opener,
   Pause before Stop before Close everything.
 - **Kill-switch button.** The only thing that draws crimson.

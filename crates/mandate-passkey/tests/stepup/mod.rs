@@ -10,7 +10,13 @@
 )]
 
 use mandate_canon::Digest;
-use mandate_identity::{AssertionId, PrincipalId, StepUpActionKind, WorkspaceId};
+use mandate_identity::MembershipState::Active;
+use mandate_identity::SessionKind::Full;
+use mandate_identity::{
+    AssertionId, Authorized, OrgId, Permission, Principal, PrincipalId, Role, Scope, SessionRef,
+    StepUpActionKind, TenantContext, WorkspaceId, authorize,
+};
+use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_passkey::stepup::{
     Action, ChallengeRecord, ChallengeState, Consumed, EnrolledCredential, Environment,
     Presentation, Proof, StepUpRefusal, consume,
@@ -183,12 +189,38 @@ impl Case {
             },
             Kind::CliConfirm => Proof::CliConfirm,
         };
-        let presentation = Presentation {
-            workspace_id: &self.workspace,
-            principal_id: &self.principal,
-            action: self.action,
-            proof,
-        };
+        let context = context(self.principal, self.workspace);
+        let presentation = Presentation::new(&context, self.action, proof);
         consume(&rp(), self.environment, state, &presentation, self.now)
+    }
+}
+
+/// The context the real `authorize` yields for `principal`, an approver in `workspace` since the
+/// passkey's cool-off ended, at [`ISSUED`]: the request's context the presentation takes its
+/// workspace and principal from (DEC-649).
+pub fn context(principal: PrincipalId, workspace: WorkspaceId) -> TenantContext {
+    let scope = Scope::Workspace {
+        org: OrgId(0x11),
+        workspace,
+    };
+    let theirs = vec![membership(
+        principal,
+        scope,
+        Active,
+        &[(Role::Approver, at(COOL_OFF_ENDS))],
+    )];
+    let held = session(SessionRef(0x41), Full, theirs.clone());
+    let user = Principal::User { id: principal };
+    let authorized = authorize(
+        &StaticLookup(theirs),
+        &user,
+        &held,
+        scope,
+        Permission::Approve,
+        at(ISSUED),
+    );
+    match authorized {
+        Ok(Authorized::Workspace { tenant, .. }) => tenant,
+        other => panic!("the fixture authorizes the approve row: {other:?}"),
     }
 }
