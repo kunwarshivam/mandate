@@ -19,7 +19,9 @@
   a member's name escaped in its pointer as RFC 6901 says (#1112). Pending on behaviour
   (`xtask/behaviour-only/` rows), DEC-881: an internally tagged object (`Actor`, the kill switch's
   `scope`, a problem's violation) written as a JSON array, `[]` included, refused as `type` at its
-  member or array item.
+  member or array item; DEC-882: a derived struct (a whole request, response, problem, or envelope
+  shape; a nested record, step-up, delegation, bid, watermark, or step) written as a JSON array
+  refused as `type` at `""`, its member, or its array item.
 - **Schemas:** `crates/mandate-api/tests/schemas.rs`: live enum and member drift against
   `schemas/workspace-api/` (DEC-683), each member `null`-able and optional exactly as its schema
   says, a kill switch scope's `null` id exactly for `workspace`, and no `serde(flatten)`; pending,

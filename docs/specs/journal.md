@@ -2,16 +2,58 @@
 
 | | |
 |---|---|
-| **Status** | v0.32 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.34 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, `approval_answers` section of §9.7, `connections` section of §9.8 and its `connection_requests` section of rule 131, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, `connections` section of §9.8 and its `connection_requests` section of rule 131, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, and `cold_records` section of §9.14; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.34 ([DEC-869](../project/decisions/DEC-869.md)):** §9.16 journals the broker's own id for
+  an order, so a connector that cancels by it (the Robinhood connector, connections spec §6.2)
+  rebuilds its `client_order_id` → order id map from the account stream at start and never holds
+  it only in memory ([DEC-860](../project/decisions/DEC-860.md) item 7). It only adds (DEC-176).
+  - **`OrderStateChanged` version 2**: version 1's members in their order, and `broker_order_id`
+    (`text?`) last. Version 1 is not edited (§8), stays registered, and keeps replaying; a stream
+    written before v0.34 holds no order id, and an order with none is cancelled by no guess: the
+    connector refuses the cancel `NotSent` (`no_order_id`) and the owner is alerted.
+  - **Who writes it.** Non-null exactly on a record written from a broker order record that
+    carries the order's broker id (a place answer, an order query, a cancel answer that is the
+    order, a list-and-match or reconciliation adoption); null on every other record.
+  - **How it is read.** Only by the connector's rebuild; the executor's fold and every risk input
+    are unchanged. Two different non-null ids for one `client_order_id` leave it with no
+    recoverable id.
+  - **Vectors.** None: `reference/journal` does not model `OrderStateChanged`, and the vectors stay
+    version 3. `mandate-journal`'s registration of version 2 and the executor's writer follow in
+    their own code change, which reads this one (ES-22).
+- **v0.33 ([DEC-859](../project/decisions/DEC-859.md), option (a), the founder 2026-10-09):** §9.5
+  rules 41 and 44 admit the `ProtectionChanged` records the executor's fold reads and the closed
+  schema refused (DEC-446). This loosens the closed schema toward the code; the founder decided
+  it (DEC-79, DEC-176). Every other clause of rules 41 to 44 stays.
+  - **Rule 41.** `orders` may be empty on `passive_start` and `unprotected_start`, and still names
+    at least one order on `placed` and `cancelled`. `awaiting` may be empty on `interval_limit`
+    and `unprotected_end`, which the text allowed but the code and the reference read as
+    non-empty; it stays empty on every other action.
+  - **Rule 44.** On the two starts, where `replacing` is true, `entry` and `agent_id` may be
+    non-null, together, with `intent_id` null: a re-placement before expiry. With `intent_id`
+    non-null the three still go together, and with `replacing` false or null `entry` and
+    `agent_id` still need an intent.
+  - **Replay unchanged.** The fold already reads these shapes: an interval ends on an
+    `unprotected_end` awaiting nothing and not uncovered, and a re-placement is read from
+    `replacing`, `entry`, and `agent_id`. No start reads `orders`. Every record valid under v0.32
+    stays valid.
+  - **Vectors.** A new generated `protection_shapes` section holds 11 valid drafts, one or more
+    for each row of DEC-859 item 1's table, and 14 near misses that stay invalid: `orders` empty
+    on `placed` or `cancelled`, `orders` on an end, `awaiting` on a start or a `watchdog`, `entry`
+    without `intent_id` when `replacing` is false or null, a re-placement naming only one of
+    `entry` and `agent_id`, and the members an end still refuses. It has 5 validator, 3
+    tightening (each puts a removed clause back), and 4 vector mutants, as `generate.py` prints.
+    It is a section of its own because `mandate-journal`'s `protection_changed_rules` still reads
+    v0.32 and its tests count the `account_stream` cases: the code change follows this one
+    (ES-22) and reads it. `account_stream` is unchanged. The vectors stay version 3.
 - **v0.32 ([DEC-694](../project/decisions/DEC-694.md) item 4, [DEC-699](../project/decisions/DEC-699.md)):**
   §9.8 journals the pending connection that connections spec §5.2 step 1 and §9.1 create at a
   connect's start. Each change only tightens (DEC-176).
@@ -765,7 +807,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `IntentReceived` | man | intent ID, agent, instrument, side, type, TIF, quantity, limit, purpose |
 | `GateDecided` | fee, cal, ins, rule, man | intent ID, verdict, reason code, **`checks: [{id, result, inputs, computed}]`** with IDs matching trading spec §9.1 (`account_status`, `agent_mode`, `eligibility`, `concentration`, `order_size`, `session`, `halt`, `order_constraints`, `mark_freshness`, `collar`, `conduct`, `buying_power`, `gross_exposure`, `day_trade_budget`), `quotes_used`, `marks_used`, `data_profile` |
 | `OrderSubmitted`, `OrderAbandoned` | — | client order ID, attempt, broker status, internal state |
-| `OrderStateChanged` | — | Closed at schema version 1: required `client_order_id`, `state`, and `risk_clock`; always-present nullable `attempted`, `broker_status`, `filled_qty`, `reject_code`, `replaces`, `replaced_by`, `replaced_by_broker_order_id`, and `lookup`; always-present booleans `ignored`, `cancel_requested`, `cancel_confirmed`, `cancel_overdue`, `adopted`, and `ladder_step`. `state` and non-null `attempted` use the complete executor order-state vocabulary; non-null `lookup` is `absent`; `filled_qty` is a decimal; opaque text is non-empty ([DEC-459](../project/decisions/DEC-459.md)) |
+| `OrderStateChanged` | — | Closed at schema version 1: required `client_order_id`, `state`, and `risk_clock`; always-present nullable `attempted`, `broker_status`, `filled_qty`, `reject_code`, `replaces`, `replaced_by`, `replaced_by_broker_order_id`, and `lookup`; always-present booleans `ignored`, `cancel_requested`, `cancel_confirmed`, `cancel_overdue`, `adopted`, and `ladder_step`. `state` and non-null `attempted` use the complete executor order-state vocabulary; non-null `lookup` is `absent`; `filled_qty` is a decimal; opaque text is non-empty ([DEC-459](../project/decisions/DEC-459.md)). Version 2 adds `broker_order_id` last, closed in §9.16 ([DEC-869](../project/decisions/DEC-869.md)) |
 | `OrderRequestRecorded` | — | the exact request a version-2 `OrderSubmitted` names (DEC-360 option (c)): agent, intent, purpose, extended hours, the protective trigger and legs, and a ladder rung's; closed in §9.5 |
 | `BrokerExchangeRecorded` | — | direction, endpoint, `raw` (or artifact), status; credentials redacted |
 | `FillApplied`, `LateFillApplied` | fee, cal, set, ins | fill ID, client order ID, gross quantity, price, fees, trade date |
@@ -1674,9 +1716,12 @@ unprotected intervals, and the receipt-time protective prices of `intended` (DEC
 
 **Consistency rules** for `ProtectionChanged` (reason `schema`; the path is the member named):
 
-41. `orders` is empty except on `placed`, `cancelled`, `passive_start`, and `unprotected_start`,
-    where it names at least one order (`payload.orders`); `awaiting` is empty except on
-    `interval_limit` and `unprotected_end` (`payload.awaiting`).
+41. `orders` names at least one order on `placed` and `cancelled`, may be empty on
+    `passive_start` and `unprotected_start`, and is empty on every other action
+    (`payload.orders`); `awaiting` may be empty on `interval_limit` and `unprotected_end`, and is
+    empty on every other action (`payload.awaiting`). A start may name no order (a bracket entry's
+    first fill, a handed-on passive start, a passive wait, lost protection), and an interval may
+    end, or reach its bound, awaiting no cancel ([DEC-859](../project/decisions/DEC-859.md)).
 42. `qty` is non-null on `placed` — the record's covered quantity — and null on every action but
     `placed` and `cancelled` (`payload.qty`).
 43. `stop` and `take_profit` are null on every action but `intended`, `placed`, `passive_start`,
@@ -1686,7 +1731,10 @@ unprotected intervals, and the receipt-time protective prices of `intended` (DEC
     member in the table's order, from `intent_id` to `acknowledged`: `intent_id` is non-null on
     `intended` and `rung_short`, and on `passive_start` and `unprotected_start` `intent_id`,
     `entry`, and `agent_id` are null together or non-null together — an exit sequence names all
-    three — reported at the first that disagrees, in the order `intent_id`, `entry`, `agent_id`;
+    three — except where `replacing` is true, where `entry` and `agent_id` may be non-null, together,
+    with `intent_id` null — a re-placement names its entry and owner and has no intent
+    ([DEC-859](../project/decisions/DEC-859.md)) — reported at the first that disagrees, in the
+    order `intent_id`, `entry`, `agent_id`;
     `replacing` may be non-null only on those two starts; `bracket` may be non-null only on
     `placed`, the two starts, and `unprotected_end`; `created_on` only on `placed`; `sent` only
     on `rung_short`; `uncovered` only on `interval_limit` and `unprotected_end`; and
@@ -3066,6 +3114,44 @@ restart the dispatcher issues every cause without one and attempts again every n
 terminal attempt (notifications spec §5.1). A later receipt for a delivered message is a new
 `NoticeAttempted` naming the same `provider_message_id`; it never retracts the earlier `delivered`
 (notifications spec §5.5). Nothing on the notice stream is a risk input, and no trading path waits on it (NT-9).
+
+### 9.16 The broker's order id ([DEC-869](../project/decisions/DEC-869.md))
+
+**`OrderStateChanged`** on the account stream at `schema_version` 2: version 1's members, in
+their version-1 order, and `broker_order_id` last, nothing else moved. Version 1 is never
+edited (§8), stays registered, and keeps replaying as it always has. §9.2's conventions apply
+unchanged: every member is present on every record (§4.2), `null` only where the type is
+nullable, any other member refused, and opaque text non-empty.
+
+| Member | Type | Meaning |
+|---|---|---|
+| version 1's members | as §9's row | Unchanged ([DEC-459](../project/decisions/DEC-459.md)) |
+| `broker_order_id` | `text?` | The broker's own id for the order named by `client_order_id`, as the broker record gave it |
+
+**Who writes it.** The executor writes `broker_order_id` non-null exactly on a record it writes
+from a broker order record that carries the order's broker id: a place answer, an order query's
+answer, a cancel answer that is the order, and an adoption by list-and-match or reconciliation.
+It is `null` on every other record: a fill, a timeout, a cancel request, a lookup's `absent`, and
+any record written with no broker order record in hand. A replacement's new id stays in
+`replaced_by_broker_order_id`, beside `replaced_by`, as at version 1.
+
+**Who reads it.** A connector that cancels by the broker's id (connections spec §6.2) rebuilds
+its `client_order_id` → order id map at start from the account stream: each `client_order_id`
+maps to the `broker_order_id` of its version-2 records that carry one. The map is never held only
+in memory ([DEC-860](../project/decisions/DEC-860.md) item 7). An order with no such record — one
+on a stream written before v0.34, or one whose place answer was in doubt and is not yet adopted —
+has no recoverable id, and so does an order whose records carry two different ids: its cancel is
+refused before any call, `NotSent` (`no_order_id`), the shell stops and alerts the owner (DEC-85),
+the order stays live in the executor's view, never assumed cancelled, and nothing is cancelled or
+adopted by guess (CN-7). The executor's fold does not read the member: no risk state, limit, or
+order state depends on it, and replay of every earlier record is unchanged.
+
+**Content.** The member is the broker's opaque order identifier and nothing else: never a
+credential, token, account number, or vault path. It is not a notification payload (`AGENTS.md`
+rule 6); it is in the journal, as `ExternalActivityIngested`'s `broker_order_id` already is.
+
+**No mapping to `JournaledFact`**, and no vectors: `reference/journal` does not model
+`OrderStateChanged` at either version, and the test vectors stay version 3.
 
 ## 10. Anchoring
 
