@@ -24,22 +24,32 @@ function watchRoot(attribute: string): (onChange: () => void) => () => void {
 const watchCvd = watchRoot("data-cvd");
 const watchMode = watchRoot("data-mode");
 
+const colourBlindNow = () => document.documentElement.dataset.cvd === "on";
+const chartModeNow = (): ThemeMode => (document.documentElement.dataset.mode === "dark" ? "dark" : "light");
+
+/**
+ * What a chart reads while the server renders and while the client hydrates. The server has no
+ * document and draws no canvas, so it takes the default. Hydrating, the client reads `<html>`
+ * itself: the head script set it before React ran, and the canvas is not in the server's markup,
+ * so nothing can mismatch. Taking the default there drew a light chart into a dark page, then tore
+ * it down for the dark one, and the plot stayed blank while the page loaded (plan B, the account
+ * chart's dark-mode paint).
+ */
+function hydrating<T>(now: () => T, fallback: T): () => T {
+  return () => (typeof document === "undefined" ? fallback : now());
+}
+
+const colourBlindHydrating = hydrating(colourBlindNow, false);
+const chartModeHydrating = hydrating<ThemeMode>(chartModeNow, "light");
+
 /** Canvas cannot follow the CSS remap, so charts read the colour-blind friendly flag from `<html data-cvd>`. */
 export function useColourBlind(): boolean {
-  return useSyncExternalStore(
-    watchCvd,
-    () => document.documentElement.dataset.cvd === "on",
-    () => false,
-  );
+  return useSyncExternalStore(watchCvd, colourBlindNow, colourBlindHydrating);
 }
 
 /** Charts redraw from the palette when `<html data-mode>` changes, for the same reason. */
 export function useChartMode(): ThemeMode {
-  return useSyncExternalStore(
-    watchMode,
-    () => (document.documentElement.dataset.mode === "dark" ? "dark" : "light"),
-    () => "light",
-  );
+  return useSyncExternalStore(watchMode, chartModeNow, chartModeHydrating);
 }
 
 /**

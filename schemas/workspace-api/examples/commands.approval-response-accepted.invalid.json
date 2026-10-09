@@ -40,6 +40,12 @@
     }
   },
   {
+    "label": "no as_of watermark",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
     "label": "auto: no /response_id",
     "remove": [
       "/response_id"

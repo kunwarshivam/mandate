@@ -30,6 +30,18 @@
     }
   },
   {
+    "label": "a timed shape without a per-order cap",
+    "set": {
+      "/max_order_usd": null
+    }
+  },
+  {
+    "label": "a timed shape without a total cap",
+    "set": {
+      "/max_total_usd": null
+    }
+  },
+  {
     "label": "auto: no /shape",
     "remove": [
       "/shape"

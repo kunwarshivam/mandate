@@ -1,8 +1,0 @@
-file = "crates/mandate-journal/tests/records_access.rs"
-test = "every_check_code_names_its_seq_exactly_when_it_is_reported_at_an_event"
-reason = """
-E12-3's (DEC-780, journal spec v0.26 §9.13). It checks `Draft::parse`, the journal's existing
-check, so there is no stub to stop at: until E12-3's implementation, the journal refuses
-`RecordsAccessed`, `ExportCreated` and `VerificationRun` as `unknown_schema`, which is the
-behaviour it fails on. E12-3's implementation deletes this file with the test's `#[ignore]` line.
-"""
