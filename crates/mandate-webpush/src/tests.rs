@@ -377,7 +377,6 @@ fn the_default_list_is_the_decisions() {
 /// The shared table (DEC-792 item 3, spec §4.6): the browsers' own push services on the default
 /// list, and every syntax DEC-792 item 1 refuses rather than normalizes.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&SPEC_DEFAULT_LIST)?;
     let table = [
@@ -442,7 +441,6 @@ fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushEr
 /// RFC 8292 §2: `aud` is the push resource's origin, whose ASCII serialization (RFC 6454 §6.2)
 /// omits the default port, so a written `:443` never reaches the token; the address keeps it.
 #[test]
-#[ignore = "pending E8-14"]
 fn the_vapid_audience_omits_a_written_default_port() -> Result<(), WebPushError> {
     let url = "https://fcm.googleapis.com:443/fcm/send/x";
     let endpoint =
@@ -463,7 +461,6 @@ fn the_vapid_audience_omits_a_written_default_port() -> Result<(), WebPushError>
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_wildcard_entry_matches_proper_subdomains_at_any_depth_and_never_the_domain()
 -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&["*.example.net"])?;
@@ -482,7 +479,6 @@ fn a_wildcard_entry_matches_proper_subdomains_at_any_depth_and_never_the_domain(
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn an_exact_entry_matches_only_its_own_host() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&["push.example.net"])?;
     let table = [
@@ -504,7 +500,6 @@ fn an_exact_entry_matches_only_its_own_host() -> Result<(), WebPushError> {
 
 /// A customer-run deployment may shorten the list (DEC-792 item 2); what it dropped is refused.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_shortened_list_refuses_the_hosts_it_dropped() -> Result<(), WebPushError> {
     let list = PushAllowlist::parse(&["fcm.googleapis.com"])?;
     let table = [
@@ -525,7 +520,6 @@ fn a_shortened_list_refuses_the_hosts_it_dropped() -> Result<(), WebPushError> {
 /// An entry is one exact host or `*.` and a domain (DEC-792 item 2); one no accepted endpoint
 /// could match is a configuration error, refused rather than kept.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_malformed_allowlist_entry_is_refused() {
     let accepted = [
         "fcm.googleapis.com",
