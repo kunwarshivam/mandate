@@ -174,3 +174,103 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
     });
   }
 });
+
+/** The frame's Stop at a width: at the end of the dock from `lg` (DEC-207), of the tab bar below it. */
+function frameStop(page: Page, width: number) {
+  return page.getByRole("navigation", { name: width < DESKTOP ? "Main" : "Primary" }).getByRole("button", { name: "Stop", exact: true });
+}
+
+const PALETTE_OPENERS = [
+  {
+    name: "⌘K",
+    open: async (page: Page) => {
+      await page.keyboard.press("ControlOrMeta+k");
+    },
+  },
+  {
+    name: "its button",
+    open: async (page: Page, width: number) => {
+      if (width >= DESKTOP) {
+        await page.locator("[data-slot=command-bar]").click();
+        return;
+      }
+      await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
+      await page.locator("[data-slot=more-search]").click();
+    },
+  },
+];
+
+/**
+ * C-21. The command palette is modal: it traps focus and lays a scrim over the page. Stop is not the
+ * page. With the palette open, Stop stays in view, the element at its own centre with nothing of the
+ * palette or its scrim stacked above it, neither inert nor hidden from assistive technology, and a
+ * real press opens the Stop sheet exactly as it does without the palette (brief §5, rule 13).
+ */
+test.describe("Stop takes a press with the command palette open (C-21, rule 13)", () => {
+  for (const width of [390, 1280]) {
+    for (const opener of PALETTE_OPENERS) {
+      test(`${width} px, the palette opened with ${opener.name}`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto("/");
+        await page.waitForLoadState("networkidle");
+        const command = page.getByRole("combobox", { name: "Command" });
+        await opener.open(page, width);
+        await expect(command, "the palette is open").toBeVisible();
+        await expect(command, "the palette holds focus").toBeFocused();
+        await expectStopVisible(page, width, "with the palette open");
+        const stop = frameStop(page, width);
+        const layers = await stop.evaluate(async (el) => {
+          while (window.__viewTransitions.running > 0) await new Promise((frame) => requestAnimationFrame(frame));
+          const r = el.getBoundingClientRect();
+          const stack = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          const own = stack.findIndex((hit) => hit === el || el.contains(hit));
+          const above = own < 0 ? stack : stack.slice(0, own);
+          const label = (hit: Element) => `<${hit.tagName.toLowerCase()} class="${(hit.getAttribute("class") ?? "").slice(0, 80)}">`;
+          const palette = document.querySelector("[role=dialog]:has([aria-label=Command])");
+          const scrims = [...document.querySelectorAll("[role=presentation]")];
+          return {
+            found: own >= 0,
+            above: above.map(label),
+            paletteAbove: above.filter((hit) => palette !== null && palette.contains(hit)).map(label),
+            scrimAbove: above.filter((hit) => scrims.some((s) => s === hit || s.contains(hit))).map(label),
+            inert: el.closest("[inert]") !== null,
+            ariaHidden: el.closest("[aria-hidden=true]") !== null,
+            pointerEvents: getComputedStyle(el).pointerEvents,
+          };
+        });
+        expect(layers.found, "Stop is in the stack of elements at its own centre").toBe(true);
+        expect(layers.above, "elements stacked above Stop's centre").toEqual([]);
+        expect(layers.paletteAbove, "the palette over Stop").toEqual([]);
+        expect(layers.scrimAbove, "the palette's scrim over Stop").toEqual([]);
+        expect(layers.inert, "Stop is inert").toBe(false);
+        expect(layers.ariaHidden, "Stop is hidden from assistive technology").toBe(false);
+        expect(layers.pointerEvents, "Stop takes pointer events").not.toBe("none");
+        await stop.click();
+        await expect(page.getByRole("dialog", { name: /^Stop/ }), "Stop opens its sheet over the palette").toBeVisible();
+        await expect(command, "the palette gives way to the Stop sheet").toBeHidden();
+      });
+    }
+  }
+
+  for (const width of [390, 1280]) {
+    test(`${width} px, the palette's Stop… opens the same sheet from the keyboard`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/");
+      await page.waitForLoadState("networkidle");
+      await page.keyboard.press("ControlOrMeta+k");
+      const command = page.getByRole("combobox", { name: "Command" });
+      await expect(command).toBeFocused();
+      const palette = page.getByRole("dialog").filter({ has: command });
+      for (const key of ["Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"]) {
+        await page.keyboard.press(key);
+        await expect(palette.locator(":focus"), `${key} keeps focus in the palette`).toHaveCount(1);
+      }
+      await command.focus();
+      await page.keyboard.type("Stop");
+      await expect(page.getByRole("option", { name: /^Stop…/ })).toBeVisible();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("dialog", { name: /^Stop/ }), "Stop… opens the Stop sheet").toBeVisible();
+      await expect(command).toBeHidden();
+    });
+  }
+});
