@@ -437,8 +437,18 @@ export interface Workspace {
   now: Iso;
   environment: Environment;
   connection: Connection;
-  /** Distinct users with the approver role, which V-024 counts for a two-approver threshold. */
+  /**
+   * Distinct active members with the approver role, which V-024 counts for a two-approver threshold
+   * and V-047 reads as a lower bound on the workspace's users. A pending invitation or a deactivated
+   * account is not counted.
+   */
   approver_users: number;
+  /**
+   * The workspace's effective `independent_approval_required` (policy schema; mandate spec §4.3:
+   * once `true` at a level it is `true` below it). `null` when not known. Anything but a stated
+   * `false`, including the field missing, counts as required (rule 3, V-047).
+   */
+  independent_approval_required: boolean | null;
   health: Health;
   agents: Agent[];
   approvals: Approval[];

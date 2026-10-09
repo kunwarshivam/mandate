@@ -10,7 +10,7 @@ import { findAgent } from "@/fixtures/workspace";
 import { dec, sub } from "@/lib/decimal";
 import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
 import { CHANGE_CLASS_LABEL } from "@/lib/labels";
-import { type Effects, type Origin, type Proposal, changeWords, effectsOf } from "@/lib/mandate-change";
+import { type Effects, INDEPENDENT_APPROVAL_RULE, type Origin, type Proposal, changeWords, effectsOf } from "@/lib/mandate-change";
 import { type MandateChangeRequest, useRuntime } from "@/lib/mock-runtime";
 import { RESTRICTIONS } from "@/lib/restrictions";
 import { useCan } from "@/lib/roles";
@@ -20,7 +20,9 @@ import { cn } from "@/lib/utils";
 /** How the version applies and what it does besides its own fields (mandate spec §2.2, §5.1), in the order the review shows them. */
 export function applyLines(agent: Agent, p: Proposal, e: Effects): string[] {
   const lines: string[] = [];
-  if (p.classification === "risk_increasing") {
+  if (p.refusals.some((r) => r.rule === INDEPENDENT_APPROVAL_RULE)) {
+    lines.push("This can't be confirmed here, for the reason below.");
+  } else if (p.classification === "risk_increasing") {
     lines.push("This raises risk, so it takes your passkey. It applies at the agent's next check with no order in an unknown state.");
     if (e.unknownOrder) lines.push("An order is in an unknown state now, so it waits until the broker answers for that order.");
   } else {

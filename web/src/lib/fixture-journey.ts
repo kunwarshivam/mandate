@@ -67,10 +67,40 @@ export function claimedBy(ws: Workspace, symbol: string): Agent | undefined {
   return activeAgents(ws).find((a) => a.mandate.universe.pinned_instruments.some((i) => i.symbol === symbol));
 }
 
-export type DeployCheck = { ok: true } | { ok: false; reason: string };
+/** The rule id a refusal for independent approval carries, kept in the record, never in the sentence (C-6). */
+export const INDEPENDENT_APPROVAL_RULE = "V-047";
 
-/** The checks a deployment repeats when it is applied (mandate spec V-002 and V-006). */
+/** §4.3's effective policy. Only a stated `false` turns it off: absent or not known counts as required (rule 3). */
+export function independentApprovalRequired(ws: Workspace): boolean {
+  return ws.independent_approval_required !== false;
+}
+
+/** Why a deployment is refused, with the rule it falls under; `rule` is set only for a rule the record names apart from the sentence. */
+export interface DeployRefusal {
+  rule?: string;
+  reason: string;
+}
+
+/**
+ * §4.3 and V-047: under `independent_approval_required` every deployment needs a user other than the
+ * requester, a first version having no previous version for DEC-444's risk-reducing exception.
+ * Nothing here can ask a second user yet, so a deployment under the policy is always refused, however
+ * many people could approve, rather than confirmed with a passkey alone (interim, E11-12).
+ */
+export function independentDeployRefusal(ws: Workspace): DeployRefusal | null {
+  if (!independentApprovalRequired(ws)) return null;
+  return {
+    rule: INDEPENDENT_APPROVAL_RULE,
+    reason: "This workspace needs a second person to approve a new agent, and that approval can't be asked for here yet, so a passkey alone can't create it.",
+  };
+}
+
+export type DeployCheck = { ok: true } | ({ ok: false } & DeployRefusal);
+
+/** The checks a deployment repeats when it is applied (mandate spec V-047, V-002 and V-006). */
 export function checkDeploy(ws: Workspace, mandate: Mandate): DeployCheck {
+  const independence = independentDeployRefusal(ws);
+  if (independence) return { ok: false, ...independence };
   const room = unallocatedUsd(ws);
   if (dec(mandate.capital.allocation_usd) > room) {
     return { ok: false, reason: `Your paper account has ${usd(room)} that no agent uses, less than the ${usd(mandate.capital.allocation_usd)} this agent asks for.` };
@@ -115,7 +145,8 @@ export function agentIdFor(mandate: Mandate, seed: string): string {
 
 /**
  * The confirmed mandate as a running paper agent with nothing held: version 1, its allocation as
- * its equity, and one timeline entry saying who confirmed it. The caller checks `checkDeploy` first.
+ * its equity, and one timeline entry saying who confirmed it. The caller checks `checkDeploy` first,
+ * which refuses every deployment the workspace's independent-approval policy covers (V-047).
  */
 export function deployAgent(ws: Workspace, request: NewAgent, at: Iso, seed: string): { ws: Workspace; agentId: string } {
   const next = structuredClone(ws);

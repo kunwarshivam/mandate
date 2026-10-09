@@ -11,7 +11,7 @@ import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { StepUpDialog } from "@/components/stop/step-up-dialog";
 import type { ContentRef, Provenance } from "@/fixtures/types";
 import { type Dec, sub } from "@/lib/decimal";
-import { type NewAgent, mandateVersion } from "@/lib/fixture-journey";
+import { type NewAgent, independentDeployRefusal, mandateVersion } from "@/lib/fixture-journey";
 import { PROVENANCE_LABEL } from "@/lib/labels";
 import { clock, quantity, price, usd, zoneLabel } from "@/lib/format";
 import { type Deployment, useRuntime } from "@/lib/mock-runtime";
@@ -176,7 +176,9 @@ function Progress({ deployment }: { deployment: Deployment }) {
       return (
         <div data-phase="rejected" role="alert" className="grid gap-1">
           <p className="font-semibold">Not created. Nothing was confirmed, and version 1 does not exist.</p>
-          <p className="text-pretty">{deployment.reason}</p>
+          <p className="text-pretty" data-rule={deployment.rule}>
+            {deployment.reason}
+          </p>
           <p className="text-pretty">Tell me what to change.</p>
         </div>
       );
@@ -232,6 +234,7 @@ export function Summary({
   const [notice, setNotice] = useState<string | null>(null);
   const progress = useRef<HTMLElement>(null);
   const version = mandateVersion(request.mandate);
+  const independence = independentDeployRefusal(ws);
   const confirmed = isConfirmed(deployment);
   const sentId = deployment?.id ?? null;
   useEffect(() => {
@@ -309,6 +312,10 @@ export function Summary({
       {current && !confirmed ? (
         !mayDeploy ? (
           <p className="text-sm">Only the workspace owner can create an agent.</p>
+        ) : independence ? (
+          <p className="font-medium text-pretty" data-slot="blocked" data-rule={independence.rule}>
+            {independence.reason}
+          </p>
         ) : blocked ? (
           <p className="font-medium text-pretty" data-slot="blocked">
             {blocked}
