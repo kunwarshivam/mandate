@@ -290,7 +290,6 @@ fn operator_read() -> (Vec<Json>, u64) {
 /// With DEC-890's line but on revocations only. Valid control chains name account-stream causes
 /// the export lacks, so they verify only while no single-stream run judges the cause check.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_single_stream_chains_answer_their_vectors_from_seq_1() {
     let chains = genesis();
     let kinds = ["ctl:", "acct:"].map(|stream| [(stream, false), (stream, true)]);
@@ -307,7 +306,6 @@ fn the_single_stream_chains_answer_their_vectors_from_seq_1() {
 /// The scan agrees with every unanchored vector; every sequence's records and full chain (valid
 /// ones too), moved to `seq` 2, the first tail, and to [`TAIL`], fail closed where it says.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_tail_range_fails_closed_at_its_first_judged_record() {
     let sequences = single_stream();
     for s in (sequences.iter()).filter(|s| s.3["outcome"] == "Unanchored") {
@@ -332,7 +330,6 @@ fn a_tail_range_fails_closed_at_its_first_judged_record() {
 /// The control checks judge `AnchorComputed` and `RecordsAccessed`, the connection check only
 /// connection records, so no record fails both and DEC-782 item 2's tie-break has no case.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_lowest_seq_wins_between_the_control_and_connection_checks() {
     let (reads, glass) = operator_read();
     let failing = genesis().into_iter().filter(|g| g.2.is_some());
@@ -360,7 +357,6 @@ fn an_agent_export_or_one_without_connection_records_runs_no_connection_check() 
 
 /// The DEC-890 line stays on an anchor's or a token's failure: the stream checks ran.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_connection_check_is_reported_before_the_anchor_and_the_token() {
     let failing = genesis().into_iter().filter(|g| g.2.is_some());
     let honest = genesis().into_iter().find(|g| g.2.is_none()).unwrap();
