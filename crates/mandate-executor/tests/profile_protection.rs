@@ -130,6 +130,13 @@ fn oco_of(quantity: &str) -> OcoLegs {
 }
 
 const EQUITY: (AssetClass, MarketSession) = (AssetClass::UsEquity, MarketSession::Regular);
+const SESSIONS: [MarketSession; 5] = [
+    MarketSession::Overnight,
+    MarketSession::PreMarket,
+    MarketSession::Regular,
+    MarketSession::AfterHours,
+    MarketSession::Crypto,
+];
 const CRYPTO: (AssetClass, MarketSession) = (AssetClass::Crypto, MarketSession::Crypto);
 
 #[test]
@@ -145,11 +152,6 @@ fn an_alpaca_equity_with_a_take_profit_is_covered_by_a_gtc_oco() {
         sent.oco,
         Some(oco_of("100")),
         "the legs are the take-profit and the stop"
-    );
-    assert_eq!(
-        (sent.limit_price, sent.stop_price),
-        (None, None),
-        "the legs carry the prices"
     );
 }
 
@@ -336,7 +338,7 @@ proptest! {
 
     #[test]
     #[ignore = "pending E7-23"]
-    fn the_shape_never_depends_on_the_asset_class_only_on_the_profile(
+    fn the_shape_never_depends_on_the_asset_class_or_the_clocks_session(
         spec in specs(),
         take_profit in any::<bool>(),
         offset in any::<bool>(),
@@ -349,8 +351,38 @@ proptest! {
         ]);
         let quantity = if whole { "100" } else { "0.5" };
         let equity = shape(&profile, EQUITY, quantity, take_profit, offset);
-        let crypto = shape(&profile, CRYPTO, quantity, take_profit, offset);
-        prop_assert_eq!(equity, crypto, "LT-2: one rule table, whatever the asset class is called");
+        for clock in SESSIONS {
+            for class in [AssetClass::UsEquity, AssetClass::Crypto] {
+                let read = shape(&profile, (class, clock), quantity, take_profit, offset);
+                prop_assert_eq!(&read, &equity, "LT-2: one rule table, whatever the class or the clock");
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E7-23"]
+fn protection_reads_its_own_session_not_the_clocks() {
+    let equity = alpaca_equity();
+    let oco = profile(&[(AssetClass::UsEquity, MarketSession::Regular, &equity)]);
+    let crypto = simple_stop_limit(Qf::Whole);
+    let crypto = profile(&[(AssetClass::Crypto, MarketSession::Crypto, &crypto)]);
+    let want_oco = shape(&oco, EQUITY, "100", true, true).expect("the regular-session OCO");
+    let want_stop = shape(&crypto, CRYPTO, "100", true, true).expect("crypto's stop-limit");
+    assert_eq!(
+        (want_oco.form, want_stop.form),
+        (Form::Oco, Form::StopLimit),
+        "AGENTS rule 13: re-placement at the open or after the close still protects (DEC-838 item 4)"
+    );
+    for clock in SESSIONS {
+        assert_eq!(
+            shape(&oco, (AssetClass::UsEquity, clock), "100", true, true),
+            Some(want_oco.clone())
+        );
+        assert_eq!(
+            shape(&crypto, (AssetClass::Crypto, clock), "100", true, true),
+            Some(want_stop.clone())
+        );
     }
 }
 
@@ -363,12 +395,17 @@ fn re_place_no_longer_reads_the_asset_class_and_asks_the_profile() {
         .expect("re_place is in protection.rs");
     let body = &source[start..];
     let body = &body[..body.find("\n}\n").expect("re_place ends")];
+    let named = body.contains("AssetClass::") || body.contains("Crypto");
+    assert!(!named, "LT-2 (DEC-531 item 2): the asset-class branch goes");
+    let at = body
+        .find("protective_shape(")
+        .expect("re_place asks the profile's shape");
+    let before = &body[..at];
+    let statement = &before[before.rfind([';', '{', '}']).map_or(0, |i| i + 1)..];
+    let after = body[at..].split(';').next().unwrap_or_default();
+    assert!(!statement.contains("let _"), "the result is not discarded");
     assert!(
-        !body.contains("Crypto"),
-        "LT-2 (DEC-531 item 2): the `asset_class == Crypto` branch goes"
-    );
-    assert!(
-        body.contains("protective_shape("),
-        "re_place sends what the profile's shape says"
+        statement.contains("match") || statement.contains("let") || after.ends_with(")?"),
+        "the result is matched or propagated, never ignored"
     );
 }

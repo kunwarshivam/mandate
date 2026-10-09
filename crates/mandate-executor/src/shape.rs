@@ -23,7 +23,7 @@ pub struct ProtectiveShape {
     pub oco: Option<OcoLegs>,
 }
 
-/// The strongest protective form `profile` offers for `qty` in `asset_class` and `session`, as the
+/// The strongest protective form `profile` offers for `qty` in `asset_class`, as the
 /// order to send, or `None` when it offers none the executor can place on a position.
 ///
 /// The order of strength is OCO, then one resting stop-limit (DEC-838 item 1; §5.1, §5.4). A
@@ -33,10 +33,15 @@ pub struct ProtectiveShape {
 /// order's own type and quantity form lists it and lists `gtc` (item 2); the quantity form is
 /// whole for a whole `qty` and fractional otherwise (item 3). An unlisted cell offers nothing
 /// (DEC-630 item 9).
+///
+/// The row read is the protective order's own session, never `clock_session`: a US equity reads
+/// its regular-session row and crypto its crypto row, since a GTC protective order rests and
+/// triggers in the regular session (§5.4; DEC-838 item 4). Re-placement runs in pre-market and
+/// after the close, and must not lose its protection to the clock.
 pub fn protective_shape(
     _profile: &CapabilityProfile,
     _asset_class: AssetClass,
-    _session: MarketSession,
+    _clock_session: MarketSession,
     _qty: Qty,
     _prices: ProtectionPrices,
     _stop_limit_offset: Option<Fraction>,
