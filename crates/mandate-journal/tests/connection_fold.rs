@@ -15,11 +15,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
+use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
 use mandate_journal::{
-    ConnectionAnchor, ConnectionCheck, ConnectionCheckError, ConnectionFailure, ConnectionStart,
-    ConnectionStreamRule, ConnectionVerifyError, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL,
-    LocatedConnectionFailure, StoredEvent, verify_connection_causes,
+    ConnectionAnchor, ConnectionAnchorError, ConnectionCheck, ConnectionCheckError,
+    ConnectionFailure, ConnectionStart, ConnectionStreamRule, ConnectionVerifyError, EventCheck,
+    EventFailure, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL, LocatedConnectionFailure, PrefixError,
+    StoredEvent, TrustedStart, VerifiedPrefix, verify_connection_causes,
     verify_connection_causes_from_genesis, verify_connection_lifecycle,
     verify_connection_lifecycle_from,
 };
@@ -873,6 +874,10 @@ fn judged(row: &StoredEvent) -> bool {
 /// is unanchored when `before` is `null` (its rows then start at `seq` 101), and the answer must be
 /// the vector's, located by the range row's stream and `seq`, with its code. A `before` that breaks
 /// a rule anchors nothing (I5).
+#[allow(
+    deprecated,
+    reason = "the raw fold's tests, deleted with it once their verified twins are live (DEC-889 item 3)"
+)]
 fn judge_range(section: &Value, case: &Value) {
     let label = text(case, "name");
     let unanchored = case.get("before") == Some(&Value::Null);
@@ -920,6 +925,10 @@ fn judge_range(section: &Value, case: &Value) {
 /// §11 (v0.35, DEC-885) over the 22 `connection_ranges` and `connection_requests`'
 /// `range_after_an_unseen_request`, each judged by [`judge_range`].
 #[test]
+#[allow(
+    deprecated,
+    reason = "the raw fold's tests, deleted with it once their verified twins are live (DEC-889 item 3)"
+)]
 fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
     let mut judged_cases = 0;
     for name in ["connection_ranges", "connection_requests"] {
@@ -943,6 +952,10 @@ fn every_range_vector_is_judged_from_its_anchor_as_its_vector_says() {
 /// the same row; a range from `seq` 1, anchored on nothing or from genesis, is the full chain; and
 /// rows before `k` that break a rule anchor nothing.
 #[test]
+#[allow(
+    deprecated,
+    reason = "the raw fold's tests, deleted with it once their verified twins are live (DEC-889 item 3)"
+)]
 fn an_anchored_range_agrees_with_the_full_chain_on_every_split() {
     let chains = full_chains();
     assert!(
@@ -978,6 +991,10 @@ fn an_anchored_range_agrees_with_the_full_chain_on_every_split() {
 /// `k` fail closed at the first one [`judged`] names, with no rule, and pass when it names none, so
 /// a range of revocations passes, anchored or not.
 #[test]
+#[allow(
+    deprecated,
+    reason = "the raw fold's tests, deleted with it once their verified twins are live (DEC-889 item 3)"
+)]
 fn an_unanchored_range_fails_closed_at_its_first_judged_record() {
     let mut revocations_passed = 0;
     for chain in full_chains() {
@@ -1037,6 +1054,303 @@ fn the_unanchored_cause_keeps_the_lifecycle_code() {
     }
 }
 
+/// `rows` as the journal stores them, each stream chained on its own: the body carries its `seq`,
+/// `prev_hash`, and `recorded_at` and no artifact references, and `hash` is its digest, so every
+/// row passes checks 1 to 6. The members the rules read are unchanged.
+fn sealed(rows: &[StoredEvent]) -> Vec<StoredEvent> {
+    let mut tails: BTreeMap<String, Digest> = BTreeMap::new();
+    let mut sealed = Vec::new();
+    for row in rows {
+        let prev_hash = tails.get(&row.stream_id).copied().unwrap_or(Digest::ZERO);
+        let mut body = parse(&row.body).unwrap().as_object().cloned().unwrap();
+        for (name, value) in [
+            ("seq", Value::Int(Int::new(row.seq).unwrap())),
+            ("prev_hash", Value::Str(prev_hash.to_hex())),
+            ("recorded_at", Value::Str(row.recorded_at.clone())),
+            ("artifact_refs", Value::Array(vec![])),
+            ("config_refs", Value::Object(BTreeMap::new())),
+        ] {
+            body.insert(Key::new(name).unwrap(), value);
+        }
+        let body = to_canonical(&Value::Object(body));
+        let hash = Digest::of(&body);
+        tails.insert(row.stream_id.clone(), hash);
+        sealed.push(StoredEvent {
+            prev_hash,
+            hash,
+            body,
+            ..row.clone()
+        });
+    }
+    sealed
+}
+
+/// The trusted start of the range of `prefix`'s stream just after it.
+fn start_after(prefix: &[StoredEvent]) -> TrustedStart {
+    TrustedStart {
+        from_seq: prefix.last().map_or(1, |row| row.seq + 1),
+        prev_hash: prefix.last().map_or(Digest::ZERO, |row| row.hash),
+    }
+}
+
+fn bind(prefix: &[StoredEvent], start: TrustedStart) -> Result<VerifiedPrefix<'_>, PrefixError> {
+    VerifiedPrefix::bind(prefix, start, &BTreeMap::<Digest, Vec<u8>>::new())
+}
+
+/// Where a caller runs a range from (DEC-892 item 3, DEC-889): anchored on the fold of `prefix`
+/// once `bind` verifies it and binds it to `start`, and unanchored when `bind` refuses it or the
+/// fold finds it broken. Anything else, a stub's report included, fails with its variant named.
+fn verified_start(prefix: &[StoredEvent], start: TrustedStart) -> ConnectionStart {
+    match bind(prefix, start).map(|bound| ConnectionAnchor::from_verified(&bound)) {
+        Ok(Ok(anchor)) => ConnectionStart::Anchored(anchor),
+        Ok(Err(ConnectionAnchorError::Broken))
+        | Err(PrefixError::Unverified(_) | PrefixError::Unbound) => ConnectionStart::Unanchored,
+        unexpected => panic!("neither an anchor nor a refusal: {unexpected:?}"),
+    }
+}
+
+/// `every_range_vector_is_judged_from_its_anchor_as_its_vector_says` with each `before` sealed and
+/// bound through `bind` at the range's own trusted start. An unanchored vector's range starts at
+/// `seq` 101 with no rows before it, so `bind` refuses the empty prefix and the range fails closed.
+#[test]
+#[ignore = "pending E7-17"]
+fn every_range_vector_is_judged_from_its_verified_anchor_as_its_vector_says() {
+    let mut judged_cases = 0;
+    for name in ["connection_ranges", "connection_requests"] {
+        let section = section_named(name);
+        let ranges = list(&section, "sequences")
+            .iter()
+            .filter(|case| text(case, "scope") == "range");
+        for case in ranges {
+            let label = text(case, "name");
+            let unanchored = case.get("before") == Some(&Value::Null);
+            let before = list(case, "before");
+            let records = [before, list(case, "records")].concat();
+            let records = Object::from([(Key::new("records").unwrap(), Value::Array(records))]);
+            let mut chain = rows(&section, &Value::Object(records));
+            if unanchored {
+                chain.iter_mut().for_each(|row| row.seq += 100);
+            }
+            let chain = sealed(&chain);
+            let (prefix, range) = chain.split_at(before.len());
+            let start = TrustedStart {
+                from_seq: range[0].seq,
+                prev_hash: range[0].prev_hash,
+            };
+            let start = verified_start(prefix, start);
+            let clean = !unanchored && verify_connection_lifecycle(prefix).is_ok();
+            let anchored = matches!(start, ConnectionStart::Anchored(_));
+            assert_eq!(anchored, clean, "{label}: I5, and no anchor unread");
+            let expect = case.get("expect").unwrap();
+            let want = match text(expect, "outcome") {
+                "Valid" => Ok(()),
+                outcome => {
+                    let check = match outcome {
+                        "Unanchored" => ConnectionCheck::Unanchored,
+                        _ => ConnectionCheck::LifecycleMismatch(rule(text(expect, "rule"))),
+                    };
+                    let index = expect.get("index").and_then(Value::as_int).unwrap();
+                    at(&range[usize::try_from(index).unwrap()], check)
+                }
+            };
+            assert_eq!(
+                verify_connection_lifecycle_from(start, range),
+                want,
+                "{label}"
+            );
+            judged_cases += 1;
+        }
+    }
+    assert_eq!(judged_cases, 23, "22 `connection_ranges` and one request");
+}
+
+/// Each stream's rows of `chain`, in commit order (DEC-889).
+fn per_stream(chain: &[StoredEvent]) -> Vec<Vec<StoredEvent>> {
+    let mut streams: BTreeMap<&str, Vec<StoredEvent>> = BTreeMap::new();
+    for row in chain {
+        streams.entry(&row.stream_id).or_default().push(row.clone());
+    }
+    streams.into_values().collect()
+}
+
+/// `an_anchored_range_agrees_with_the_full_chain_on_every_split` per stream, each prefix bound
+/// through `bind` (DEC-885 I1, I4, I5; DEC-889). A chain of several streams is first checked to be
+/// judged as its streams are, at the earliest row any of them fails.
+#[test]
+#[ignore = "pending E7-17"]
+fn a_verified_anchor_agrees_with_the_full_chain_on_every_split_of_every_stream() {
+    let chains = full_chains();
+    assert!(chains.len() >= 66, "{} full chains", chains.len());
+    let mut several = 0;
+    for chain in chains.iter().map(|chain| sealed(chain)) {
+        let streams = per_stream(&chain);
+        several += usize::from(streams.len() > 1);
+        let commit_order = |failure: &ConnectionCheckError| {
+            let ConnectionCheckError::Failed(f) = failure;
+            chain
+                .iter()
+                .position(|row| row.stream_id == f.stream_id && row.seq == f.seq)
+        };
+        let earliest = streams
+            .iter()
+            .filter_map(|rows| located(rows, verify_connection_lifecycle(rows)).err())
+            .min_by_key(commit_order);
+        let whole = located(&chain, verify_connection_lifecycle(&chain));
+        assert_eq!(whole, earliest.map_or(Ok(()), Err), "streams of {chain:?}");
+        for rows in &streams {
+            let answer = verify_connection_lifecycle(rows);
+            let first = answer.map_err(|ConnectionVerifyError::Mismatch(f)| f.index);
+            let full = located(rows, answer);
+            for k in 0..=rows.len() {
+                let (prefix, range) = rows.split_at(k);
+                let start = verified_start(prefix, start_after(prefix));
+                let clean = first.err().is_none_or(|index| index >= k);
+                let anchored = matches!(start, ConnectionStart::Anchored(_));
+                assert_eq!(anchored, clean, "I5: split at {k} of {rows:?}");
+                if clean {
+                    let got = verify_connection_lifecycle_from(start, range);
+                    assert_eq!(got, full, "I1: split at {k} of {rows:?}");
+                }
+            }
+        }
+    }
+    assert!(several >= 3, "{several} chains of several streams");
+}
+
+/// A sound control-stream chain whose third row, `revoke Y`, a hot-store rewrite into `revoke X`
+/// would make an anchor read as `X` revoked, passing the refused `reconnect` of `X` after it. The
+/// chain, and that rewritten row under the stored hash.
+fn attacked() -> (Vec<StoredEvent>, StoredEvent) {
+    let records = ["request X A1", "establish X A1", "revoke Y"];
+    let chain = sealed(&control(&[&records[..], &["refuse X reconnect"]].concat()));
+    let mut forged = sealed(&control(&[records[0], records[1], "revoke X"]))[2].clone();
+    forged.hash = chain[2].hash;
+    (chain, forged)
+}
+
+/// DEC-892 items 1 and 3: a prefix that is rewritten under its stored hashes, truncated, bound to
+/// another tail, or given for a range from `seq` 1 does not bind, so the range runs unanchored and
+/// fails closed at its first judged record; the sound prefix anchors it as the full chain judges.
+#[test]
+#[ignore = "pending E7-17"]
+fn a_forged_short_or_unbound_prefix_runs_the_range_unanchored() {
+    let (chain, forged_row) = attacked();
+    let (prefix, range) = chain.split_at(3);
+    let start = start_after(prefix);
+    let full = located(&chain, verify_connection_lifecycle(&chain));
+    let rotated = ConnectionCheck::LifecycleMismatch(ConnectionStreamRule::Rotated);
+    assert_eq!(full, at(&range[0], rotated), "rule 67 refuses it");
+    let sound = verify_connection_lifecycle_from(verified_start(prefix, start), range);
+    assert_eq!(sound, full, "the sound prefix");
+    let mut forged = prefix.to_vec();
+    forged[2] = forged_row;
+    let short = TrustedStart {
+        prev_hash: prefix[1].hash,
+        ..start
+    };
+    let other_tail = TrustedStart {
+        prev_hash: Digest::of(b"another chain"),
+        ..start
+    };
+    let rehashed = PrefixError::Unverified(EventFailure {
+        seq: 3,
+        check: EventCheck::RehashMismatch,
+    });
+    let cases = [
+        (
+            &forged[..],
+            start,
+            rehashed,
+            "a body rewritten under kept hashes",
+        ),
+        (
+            &prefix[..2],
+            short,
+            PrefixError::Unbound,
+            "a prefix short of from_seq - 1",
+        ),
+        (
+            prefix,
+            other_tail,
+            PrefixError::Unbound,
+            "a tail hash other than prev_hash",
+        ),
+        (
+            prefix,
+            TrustedStart::GENESIS,
+            PrefixError::Unbound,
+            "rows before seq 1",
+        ),
+    ];
+    for (rows, start, refused, name) in cases {
+        assert_eq!(bind(rows, start).err(), Some(refused), "{name}");
+        let got = verify_connection_lifecycle_from(verified_start(rows, start), range);
+        assert_eq!(got, at(&range[0], ConnectionCheck::Unanchored), "{name}");
+    }
+}
+
+/// DEC-889 item 2: an anchored run judges its anchor's stream only, and fails closed at the first
+/// judged record of another; an empty prefix's anchor takes the range's first judged record's stream.
+#[test]
+#[ignore = "pending E7-17"]
+fn an_anchored_run_fails_closed_at_another_streams_record() {
+    let records = ["request X A1", "establish X A1", "revoke Y"];
+    let foreign = "establish Z A2 ws=ws_01J8Z3";
+    let chain = sealed(&control(&[&records[..], &[foreign]].concat()));
+    for k in [0, 2] {
+        let (prefix, range) = chain.split_at(k);
+        let start = verified_start(prefix, start_after(prefix));
+        let got = verify_connection_lifecycle_from(start, range);
+        assert_eq!(
+            got,
+            at(&chain[3], ConnectionCheck::Unanchored),
+            "split at {k}"
+        );
+    }
+}
+
+/// DEC-889 item 2 and DEC-885 I6: another control stream's `ConnectionRevoked` is never judged, so
+/// it never fails an anchored run, which still fails closed at that stream's next judged record.
+#[test]
+#[ignore = "pending E7-17"]
+fn an_anchored_run_passes_another_streams_revocation() {
+    let records = ["request X A1", "establish X A1", "revoke Y"];
+    let foreign = ["revoke X ws=ws_01J8Z3", "establish Z A2 ws=ws_01J8Z3"];
+    let chain = sealed(&control(&[&records[..], &foreign[..]].concat()));
+    let (prefix, _) = chain.split_at(2);
+    for (range, want) in [
+        (&chain[2..4], Ok(())),
+        (&chain[2..], at(&chain[4], ConnectionCheck::Unanchored)),
+    ] {
+        let start = verified_start(prefix, start_after(prefix));
+        assert_eq!(verify_connection_lifecycle_from(start, range), want);
+    }
+}
+
+/// DEC-889 item 2: an empty prefix's anchor takes the stream of the range's first judged record,
+/// not of a leading revocation on another control stream, so that stream is judged as the full
+/// chain judges it, and a later judged record of the revoking stream fails closed.
+#[test]
+#[ignore = "pending E7-17"]
+fn an_empty_anchor_takes_the_stream_of_the_first_judged_record() {
+    let own = ["revoke Y ws=ws_01J8Z3", "request X A1", "establish X A1"];
+    let rotated = ConnectionCheck::LifecycleMismatch(ConnectionStreamRule::Rotated);
+    for (last, check) in [
+        ("refuse X reconnect", rotated),
+        ("establish Z A2 ws=ws_01J8Z3", ConnectionCheck::Unanchored),
+    ] {
+        let chain = sealed(&control(&[&own[..], &[last]].concat()));
+        let start = verified_start(&[], TrustedStart::GENESIS);
+        let got = verify_connection_lifecycle_from(start, &chain);
+        assert_eq!(got, at(&chain[3], check), "{last}");
+        let full = located(&chain, verify_connection_lifecycle(&chain));
+        assert!(
+            check != rotated || got == full,
+            "as the full chain judges it"
+        );
+    }
+}
+
 /// Journal spec v0.37 (DEC-888) over the 6 `connection_revocations`: a full-chain case through
 /// [`verify_connection_lifecycle`] and from [`ConnectionStart::Genesis`], whose answers agree, and
 /// a range case from its anchor, folded by [`ConnectionAnchor::fold`], or unanchored, by
@@ -1044,6 +1358,10 @@ fn the_unanchored_cause_keeps_the_lifecycle_code() {
 /// chain (I1), and an unanchored one fails closed at the first record [`judged`] names (I2), an
 /// account-stream revocation included.
 #[test]
+#[allow(
+    deprecated,
+    reason = "the raw fold's tests, deleted with it once their verified twins are live (DEC-889 item 3)"
+)]
 fn every_revocation_vector_is_judged_as_its_vector_says() {
     let section = section_named("connection_revocations");
     let cases = list(&section, "sequences");
