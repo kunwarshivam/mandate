@@ -1271,7 +1271,9 @@ story buys a service, and none uses a real identity-provider account in tests (s
   serialized append, against the stream's last membership record, stamps `event_time` there,
   re-runs the guard on every head-mismatch retry, and never clamps a refused record (DEC-659 items
   2 and 8). Membership commands from L2's workspace API routes (E10-x) call this writer and never
-  append `Member*` records directly.
+  append `Member*` records directly. It is `mandate_identity::write_membership`, pure, over the
+  `ControlStream` compare-and-append port the workspace store implements on the journal
+  ([DEC-646](decisions/DEC-646.md)).
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level

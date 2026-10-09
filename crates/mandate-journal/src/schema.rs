@@ -44,6 +44,9 @@ pub(crate) enum Ty {
     StreamName,
     /// 64 lowercase hex characters: a SHA-256 the journal does not store (journal spec §9.13).
     Digest,
+    /// A string its predicate admits, refused as `id` is: `schema` when not a string, otherwise
+    /// `non_canonical` (journal spec §9.15's `notice_id`, `opaque`, and `kind`).
+    Text(fn(&str) -> bool),
 }
 
 pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
@@ -95,6 +98,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
         Ty::PiiRef => checked(text()?.strip_prefix("pii_").is_some_and(is_ulid)),
         Ty::StreamName => checked(is_stream_name(text()?)),
         Ty::Digest => checked(Digest::from_hex(text()?).is_some()),
+        Ty::Text(admits) => checked(admits(text()?)),
         Ty::Null => match value {
             Value::Null => Ok(Value::Null),
             _ => Err(schema()),

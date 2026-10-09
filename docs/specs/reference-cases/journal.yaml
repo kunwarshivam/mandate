@@ -25242,7 +25242,7 @@ membership_fold:
       roles: []
       invitations: []
 records_access:
-  spec: docs/specs/journal.md v0.26 §9.13 (DEC-780)
+  spec: docs/specs/journal.md v0.29 §9.13 and §11 (DEC-780, DEC-774)
   drafts:
     records_read:
       envelope_version: 1
@@ -26922,6 +26922,110 @@ records_access:
       outcome: Invalid
       reason: schema
       path: payload.ranges[0].failure.seq
+  - name: held_mismatch_without_its_seq
+    clause: 'rule 111: `held_mismatch` (§11) is reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: null
+        failure:
+          check: held_mismatch
+          seq: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: connection_lifecycle_mismatch_without_its_seq
+    clause: 'rule 111: `connection_lifecycle_mismatch` (§11) is reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: connection_lifecycle_mismatch
+          seq: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[0].failure.seq
+  - name: connection_cause_mismatch_without_its_seq
+    clause: 'rule 111: `connection_cause_mismatch` (§11) is reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: connection_cause_mismatch
+          seq: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].failure.seq
+  - name: break_glass_cause_mismatch_without_its_seq
+    clause: 'rule 111: `break_glass_cause_mismatch` (§11) is reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: break_glass_cause_mismatch
+          seq: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.ranges[1].failure.seq
   - name: range_check_with_a_seq
     clause: 'rule 111: a range check names no seq'
     base_draft: verification_fail
@@ -27121,7 +27225,7 @@ records_access:
     expect:
       outcome: Valid
   - name: read_by_an_operator
-    clause: 'rule 108 and §7: platform staff''s break-glass reads are journaled where the customer reads them'
+    clause: 'rule 108 and §7: platform staff''s break-glass reads are journaled where the customer reads them; append admits it, and §11''s `break_glass_cause_mismatch` fails it until DEC-261 item 9 (range_checks.operator_read_fails_until_dec_261_item_9)'
     base_draft: records_read
     changes:
     - path: actor
@@ -27322,6 +27426,597 @@ records_access:
       value: []
     expect:
       outcome: Valid
+  - name: failure_at_held_mismatch
+    clause: '§9.13 and rule 111: a run records `held_mismatch` (§11), reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: agent:ws_01J8Z2:agent_a
+        from_seq: 12
+        to_seq: 30
+        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+        to_hash: null
+        failure:
+          check: held_mismatch
+          seq: 14
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: failure_at_connection_lifecycle_mismatch
+    clause: '§9.13 and rule 111: a run records `connection_lifecycle_mismatch` (§11), reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: connection_lifecycle_mismatch
+          seq: 17
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
+        failure: null
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: failure_at_connection_cause_mismatch
+    clause: '§9.13 and rule 111: a run records `connection_cause_mismatch` (§11), reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: connection_cause_mismatch
+          seq: 5
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  - name: failure_at_break_glass_cause_mismatch
+    clause: '§9.13 and rule 111: a run records `break_glass_cause_mismatch` (§11), reported at the event that breaks it (DEC-774)'
+    base_draft: verification_fail
+    changes:
+    - path: payload.ranges
+      value:
+      - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+        from_seq: 1
+        to_seq: 40
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        failure: null
+      - stream_id: ctl:ws_01J8Z2
+        from_seq: 1
+        to_seq: 9
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+        to_hash: null
+        failure:
+          check: break_glass_cause_mismatch
+          seq: 9
+    - path: artifact_refs
+      value: []
+    expect:
+      outcome: Valid
+  range_checks:
+  - name: operator_read_fails_until_dec_261_item_9
+    clause: '§11 break_glass_cause_mismatch: no control stream holds a PlatformOperatorAction yet, so the read `read_by_an_operator` names fails in the full chain'
+    from_seq: 1
+    prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R6A000000000000000S1
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R7A000000000000000U1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: user
+          id: user_auditor_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: user_auditor_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+      hash: 56f9c6ab1a97b947805906cf363c790439337f83c1307166bfa0f5df97727dc7
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R8A000000000000000O1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: 01J8Z3R9A000000000000000B1
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: operator_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 56f9c6ab1a97b947805906cf363c790439337f83c1307166bfa0f5df97727dc7
+      hash: 1b7e8fbc8c03a7c4855b4bc84822a1d7902d74035d2d131b33cf784bb892bc16
+    expect:
+      seq: 3
+      check: break_glass_cause_mismatch
+  - name: operator_read_citing_another_record
+    clause: '§11 break_glass_cause_mismatch: the cause is a PlatformOperatorAction, not any earlier record'
+    from_seq: 1
+    prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R6A000000000000000S1
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R7A000000000000000U1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: user
+          id: user_auditor_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: user_auditor_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+      hash: 56f9c6ab1a97b947805906cf363c790439337f83c1307166bfa0f5df97727dc7
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R8A000000000000000O1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: 01J8Z3R7A000000000000000U1
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: operator_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 56f9c6ab1a97b947805906cf363c790439337f83c1307166bfa0f5df97727dc7
+      hash: d0c81a82cc5f3d28dcaed58c35de3007fc1190e51c368ef5f1a9140c45fc84fd
+    expect:
+      seq: 3
+      check: break_glass_cause_mismatch
+  - name: operator_read_citing_a_later_action
+    clause: '§11 break_glass_cause_mismatch: the cause comes before the read'
+    from_seq: 1
+    prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R6A000000000000000S1
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R8A000000000000000O1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: 01J8Z3R9A000000000000000B2
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: operator_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+      hash: 906267936a3627e39f23ff0b394116796d64b98f65182f986101283aa4347f15
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R9A000000000000000B2
+        stream_id: ctl:ws_01J8Z2
+        event_type: PlatformOperatorAction
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload: {}
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 906267936a3627e39f23ff0b394116796d64b98f65182f986101283aa4347f15
+      hash: e433b819e21871141b6119d581ce9375926285b6caa9f21155eb687a7e2bdb9c
+    expect:
+      seq: 2
+      check: break_glass_cause_mismatch
+  - name: operator_read_citing_its_action
+    clause: '§11 break_glass_cause_mismatch: passes once a PlatformOperatorAction can be journaled (DEC-261 item 9; append refuses this chain''s action as unknown_schema today)'
+    from_seq: 1
+    prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R6A000000000000000S1
+        stream_id: ctl:ws_01J8Z2
+        event_type: StreamOpened
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: system
+          id: control_services
+          version: 0.1.0
+          build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        config_refs: {}
+        payload:
+          stream_type: control
+          workspace_id: ws_01J8Z2
+        artifact_refs: []
+        pii_refs: []
+        seq: 1
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+      hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R9A000000000000000B2
+        stream_id: ctl:ws_01J8Z2
+        event_type: PlatformOperatorAction
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload: {}
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+      hash: bb219ce6530d11cab734027f6605422d16ae9888622989732111c5b36a205b85
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R7A000000000000000U1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: user
+          id: user_auditor_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: user_auditor_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: bb219ce6530d11cab734027f6605422d16ae9888622989732111c5b36a205b85
+      hash: 8fc41d392d9251ae85d11cad74228b801ef36b37f3de87c19931990382e3d976
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R8A000000000000000O1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: 01J8Z3R9A000000000000000B2
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: operator_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 4
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 8fc41d392d9251ae85d11cad74228b801ef36b37f3de87c19931990382e3d976
+      hash: 3c7ad659f4f58d77bf552086b91a671ca7764eefce4fc7bed158e8ea125a64bf
+    expect: null
+  - name: operator_read_in_a_tail_range
+    clause: '§11: a cause before the range''s trusted start is not judged by that range; the full chain judges it'
+    from_seq: 2
+    prev_hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+    chain:
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R7A000000000000000U1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: user
+          id: user_auditor_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: user_auditor_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 2
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 27faf80fd0605d3e436b21e75752914c5a84d799d455dc01d42bf4ea279f904c
+      hash: 56f9c6ab1a97b947805906cf363c790439337f83c1307166bfa0f5df97727dc7
+    - body:
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8Z3R8A000000000000000O1
+        stream_id: ctl:ws_01J8Z2
+        event_type: RecordsAccessed
+        schema_version: 1
+        event_time: '2026-09-21T15:00:00.000000000Z'
+        clock_source: local
+        causation_id: 01J8Z3R9A000000000000000B1
+        correlation_id: null
+        actor:
+          kind: platform_operator
+          id: operator_01
+          version: '1'
+          build: null
+        config_refs: {}
+        payload:
+          accessor: operator_01
+          operation: journal_events
+          ranges:
+          - stream_id: agent:ws_01J8Z2:agent_a
+            from_seq: 12
+            to_seq: 30
+            prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
+            to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
+          resources: []
+          result: null
+        artifact_refs: []
+        pii_refs: []
+        seq: 3
+        recorded_at: '2026-09-21T15:00:01.000000000Z'
+        prev_hash: 56f9c6ab1a97b947805906cf363c790439337f83c1307166bfa0f5df97727dc7
+      hash: 1b7e8fbc8c03a7c4855b4bc84822a1d7902d74035d2d131b33cf784bb892bc16
+    expect: null
 cold_records:
   spec: docs/specs/journal.md v0.27 §9.14 (DEC-783)
   drafts:
