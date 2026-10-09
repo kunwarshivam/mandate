@@ -11,6 +11,6 @@
   access token, idle and absolute limits that end the session as `expired`, a clock behind the
   session, refresh rotation with reuse revoking the family) and
   `crates/mandate-authn/tests/routes.rs` (an unreachable provider, a failed refresh, a deprovision
-  closing route 2, the reduction-only session, an idle lapse that a granted refresh does not
-  restore, and a property over random histories against a folded oracle), pending.
+  closing route 2, the reduction-only session, and an idle lapse that a granted refresh does not
+  restore), pending.
 - **Run:** `cargo nextest run -p mandate-authn`.
