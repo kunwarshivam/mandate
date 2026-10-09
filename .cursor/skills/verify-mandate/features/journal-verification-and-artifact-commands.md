@@ -11,8 +11,13 @@
   express, replayed through the command against `fixtures/refcases/journal.json`, with the two it
   cannot asserted as inexpressible; the exact report; malformed lines, trusted starts, anchors,
   mixed streams, artifacts present, absent, and altered), `crates/mandate-cli/tests/artifact.rs`
-  (the FIPS 180-2 addresses a put prints, the round trip, the re-hash on read, reference forms).
+  (the FIPS 180-2 addresses a put prints, the round trip, the re-hash on read, reference forms),
+  `crates/mandate-cli/tests/journal_verify_ranges.rs` (E12-3, DEC-782: the control stream's
+  `anchor_self_mismatch` and `break_glass_cause_mismatch`, wired into `verify` and `verify-cold`
+  after checks 1 to 6 and before the anchor and token checks, from the `cold_records` and
+  `records_access` range-check vectors; pending until W1's implementation lands. The agent-stream
+  checks follow in W2 under DEC-782).
   Planted bugs per test: the task brief.
 - **Reference cases:** `journal::tamper::*` and `journal::export_line_seq_1` in
   `fixtures/refcases/journal.json`, read directly rather than through `mandate-refcases`.
-- **Run:** `cargo nextest run -p mandate-cli --test journal_verify --test artifact`.
+- **Run:** `cargo nextest run -p mandate-cli --test journal_verify --test journal_verify_ranges --test artifact`.
