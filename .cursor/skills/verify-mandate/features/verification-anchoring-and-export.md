@@ -6,13 +6,18 @@
   `crates/mandate-journal/src/control_verify.rs` (§11's control-stream range checks
   `anchor_self_mismatch` and `break_glass_cause_mismatch`, run after `verify_events`; E12-3),
   `crates/mandate-journal/src/start.rs` (§9.14's trusted start of a range, resolved from a
-  `SegmentExported` or a stamped `AnchorComputed`; E12-3, pending).
+  `SegmentExported` or a stamped `AnchorComputed`; E12-3, pending),
+  `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
+  run from its connection anchor or failing closed without one, DEC-885; E7-17, pending).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
   their vectors and independent random walks), `crates/mandate-journal/tests/trusted_start.rs`
-  (the trusted-start resolver against its vectors, each §9.14 clause, and a random oracle).
+  (the trusted-start resolver against its vectors, each §9.14 clause, and a random oracle),
+  `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
+  and every split of every full chain against the full-chain run and an independent scan).
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
   the `cold_records.range_checks`, `cold_records.trusted_starts`, and
-  `records_access.range_checks` vectors of `fixtures/refcases/journal.json`.
+  `records_access.range_checks`, `connections`, `connection_requests`, and `connection_ranges`
+  vectors of `fixtures/refcases/journal.json`.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-refcases`.
