@@ -59,4 +59,5 @@
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
+/crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-audit/      @kunwarshivam

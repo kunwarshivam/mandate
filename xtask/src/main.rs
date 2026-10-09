@@ -10524,7 +10524,6 @@ jq -r "$filter" "$src"
         }
         let allowed = [
             "\"$@\"",
-            "$TOOL --version",
             "C=echo; $C hi",
             "C=echo\nC+=\" hi\"\n$C",
             "read -r C < f\necho \"$C\"",
@@ -10889,6 +10888,134 @@ jq -r "$filter" "$src"
         assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
         assert_eq!(problems.len(), 1, "{problems:?}");
+        Ok(())
+    }
+
+    /// A command word that starts with an expansion fails closed (DEC-851 item 6; X1 tests
+    /// correction 12b, after #979's review): after its wrappers and keywords, it is refused unless
+    /// it is `"$@"`, a sole `$C`/`${C}` or whole array whose definitions are all readable and hold
+    /// neither `cargo` nor `live`, `"$(dirname "$0")/<literal path>"`, or `"${ARR[<digits>]}"` of
+    /// such an array. So the parameter operators (`${C:-}`, `${C:0}`, `${C//zz/}`, `${C@E}`), an
+    /// indirection `${!n}`, a variable no definition in the file gives (`$TOOL`) and a nameref
+    /// (`declare`, `local` or `typeset -n`) are refused. A pipeline that feeds a shell after an
+    /// expanding word is refused, quoted or not, and so is a `set` that expands in a file that runs
+    /// `"$@"`. `$(( … ))` is read whole as arithmetic, its substitutions still read, and is
+    /// refused as a command word like any other expansion; an escaped `\$` expands nothing, a double-quoted string
+    /// runs on across lines, and a job's `outputs:` is not a `run:` step, so the real lines those
+    /// read stay allowed, as do `x+=( … )` and `x[i]=…`, which do not start with an expansion.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let built_across_lines =
+            "C=ca; C+=rgo; C+=\" build -\"; C+=\"-feat\"; C+=\"ures l\"; C+=ive";
+        let refused_at_the_last_line = [
+            format!("{built_across_lines}\n${{C:-}}"),
+            format!("{built_across_lines}\n${{C:0}}"),
+            format!("{built_across_lines}\n${{C//zz/}}"),
+            format!("{built_across_lines}\n${{C@E}}"),
+            format!("{built_across_lines}\nn=C\n${{!n}}"),
+            format!("{built_across_lines}\ndeclare -n R=C\n$R"),
+            format!("{built_across_lines}\nlocal -n R=C\n$R"),
+            format!("{built_across_lines}\ntypeset -n R=C\n$R"),
+            format!("{built_across_lines}\nset -- $C; \"$@\""),
+            format!("{built_across_lines}\necho $C | sh"),
+            format!("{built_across_lines}\necho \"$C\" | /bin/bash -s"),
+            "$TOOL --version".to_owned(),
+            "\"$(cat cmd.txt)\" build".to_owned(),
+            "\"$(dirname \"$0\")/$X\"".to_owned(),
+            "\"$(pwd)/x.sh\"".to_owned(),
+            "\"${ARR[0]}\" build".to_owned(),
+            "ARR=($X tool)\n\"${ARR[0]}\" build".to_owned(),
+            "ARR=(cargo build)\n\"${ARR[1]}\" x".to_owned(),
+            "\"$*\"".to_owned(),
+            "n=$(( $(cargo build --features \"$F\") ))".to_owned(),
+            "\"$((1 + 2))\"".to_owned(),
+            "ARR=(echo hi)\n\"${ARR[$i]}\" x".to_owned(),
+        ];
+        for text in refused_at_the_last_line {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(&format!(
+                    ".github/scripts/build.sh:{}:",
+                    text.lines().count().saturating_add(1)
+                )),
+                "names the file and the last line: {problems:?}"
+            );
+        }
+        let allowed = [
+            ".github/scripts/build.sh",
+            "\"$@\"",
+            "C=echo\n$C hi",
+            "x=(echo hi)\n\"${x[@]}\"",
+            "base=$(\"$(dirname \"$0\")/base-ref.sh\")",
+            "\"$(dirname \"$0\")/base-ref.sh\"",
+            "ARR=(/usr/local/bin/tool sub)\n\"${ARR[0]}\" --help",
+            "set -- a b; \"$@\"",
+            "set -- $A\necho \"$@\"",
+            "echo hi | sh",
+            "echo \"$X\" | grep y",
+            "a=$((10#$a))",
+            "db_kb=$(($(du -sk \"$D\" | cut -f1) / 1024))",
+            "m=\"${A:-}\n$(git log --format=%B \"$b..HEAD\")\"",
+            "psql <<SQL\nDO \\$\\$\nBEGIN\nEND\n\\$\\$;\nSQL",
+            "case \"$a\" in\n  -*) flags+=(\"$arg\") ;;\n  *) args+=(\"$arg\") ;;\nesac",
+            "values[$1]=\"$2\"",
+        ];
+        for text in allowed.iter().skip(1) {
+            let files = [ci_file(allowed[0], &format!("set -e\n{text}\n"))];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let outputs = ci_file(
+            ".github/workflows/x.yml",
+            concat!(
+                "jobs:\n  a:\n    runs-on: ubuntu-latest\n    outputs:\n",
+                "      run: ${{ steps.check.outputs.run }}\n",
+                "    steps:\n      - run: echo hi\n",
+            ),
+        );
+        assert_eq!(
+            live_feature_problems(&policy, &meta(), &[outputs])?,
+            Vec::<String>::new(),
+            "a job's `outputs: run:` is not a `run:` step"
+        );
+        Ok(())
+    }
+
+    /// A build file the check cannot read as text, a dangling symlink or a file that is not
+    /// UTF-8, is reported as a problem naming its path, not an error that aborts the check (X1
+    /// tests correction 12b, after #979's review; DEC-851 item 6).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn an_unreadable_build_file_is_refused_by_path() -> Result<()> {
+        let root = fixture_repository(
+            "build-file-unreadable",
+            &[(".github/workflows/a.yml", "x\n")],
+        )?;
+        std::os::unix::fs::symlink(root.join("missing"), root.join("Makefile"))?;
+        fs::write(root.join("justfile"), [0xff_u8, 0xfe, b'\n'])?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read?)?;
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        for path in ["Makefile", "justfile"] {
+            assert!(
+                problems
+                    .iter()
+                    .any(|problem| problem.starts_with(&format!("{path}: "))),
+                "{path} is named: {problems:?}"
+            );
+        }
         Ok(())
     }
 
