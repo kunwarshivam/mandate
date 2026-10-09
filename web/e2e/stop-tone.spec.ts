@@ -163,6 +163,29 @@ test.describe("Stop turns loud when something needs you", () => {
       expect(contrast(f.text, f.pillBg), "label on the loud pill").toBeGreaterThanOrEqual(LABEL_CONTRAST);
     });
   }
+
+  /** The unreachable deployment replaces Home with its own notice, which says why. */
+  for (const scenario of LOUD.filter((s) => s !== "unreachable")) {
+    test(`${scenario}: Home's Needs you says why, with an agent's condition (C-25)`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await load(page, scenario);
+      await expect(stopIn(page)).toHaveAttribute("data-tone", "loud");
+      const conditions = page.locator("[data-slot=needs-you] li[data-kind=alert]");
+      await expect(conditions.first(), "a condition explains the loud Stop").toBeVisible();
+      await expect(conditions.first().getByRole("link")).toHaveAttribute("href", /^\/agents\/agt_/);
+    });
+  }
+
+  test("unknown-order: Needs you names the agent's unknown order, and opens its record", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await load(page, "unknown-order");
+    const row = page.locator("[data-slot=needs-you] li[data-kind=alert]").filter({ hasText: "Agent 2: an order's state is unknown" });
+    await expect(row).toHaveCount(1);
+    await expect(row).not.toContainText("QRS");
+    await row.getByRole("link").click();
+    await expect(page).toHaveURL(/^[^?]*\/agents\/agt_[0-9A-Z]+\/orders\/cid_[0-9A-Z]+/);
+    await expect(page.getByRole("main")).toContainText("Unknown");
+  });
 });
 
 test.describe("both tones share one box (no layout shift)", () => {

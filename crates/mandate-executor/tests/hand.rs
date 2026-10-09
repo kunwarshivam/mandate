@@ -3448,8 +3448,7 @@ fn a_re_cover_leaves_a_held_brackets_shares_to_its_legs() {
             d.event_type == "ProtectionChanged"
                 && d.payload.get("action").and_then(|v| v.as_str()) == Some("placed")
         })
-        .and_then(|d| d.payload.get("orders").and_then(|v| v.as_str()))
-        .map(str::to_owned)
+        .and_then(|d| common::named_orders(&d.payload, "orders").pop())
         .expect("the completed bracket's legs are recorded placed (§5.4)");
     a_held_bracket(&mut shell, &ports, common::AGENT, OTHER_INTENT);
     let lost = shell.run(
@@ -5503,13 +5502,25 @@ fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_o
                     == Some("watchdog")
         })
         .expect("the stop at 140 under a 139 mark for stop_watchdog_s fires the watchdog");
+    let handed = fired
+        .draft("IntentReceived")
+        .expect("the watchdog hands in its exit");
+    let agent_of = |payload: &mandate_canon::Value, member: &str| {
+        payload
+            .get(member)
+            .and_then(mandate_canon::Value::as_str)
+            .map(str::to_owned)
+    };
+    let intents = agent_of(&handed.payload, "agent_id");
     assert_eq!(
-        watchdog
-            .payload
-            .get("agent")
-            .and_then(mandate_canon::Value::as_str),
-        Some("*"),
-        "five of fifteen is no single holder, so the exit belongs to no agent (§2.3)"
+        [
+            agent_of(&watchdog.payload, "agent").or_else(|| intents.clone()),
+            intents,
+            agent_of(&watchdog.payload, "agent_id"),
+        ],
+        [Some("*".to_owned()), Some("*".to_owned()), None],
+        "five of fifteen is no single holder, so the exit belongs to no agent (§2.3): its intent \
+         names `*`, as a legacy watchdog's `agent` does; §9.5's closed watchdog names no agent"
     );
     let exited = shell.run(
         Input::Broker(Ok(BrokerOutcome::CancelAccepted {

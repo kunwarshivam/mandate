@@ -924,6 +924,9 @@ impl FakeConnector {
                 format!("acknowledge_replace {}", replaced.as_str())
             }
             BrokerRequest::GetOrderByClientId(id) => format!("get {}", id.as_str()),
+            BrokerRequest::ListOrders(listing) => {
+                format!("list {}", listing.client_order_id.as_str())
+            }
             BrokerRequest::ListOpenOrders => "list_open_orders".to_owned(),
             BrokerRequest::ListPositions => "list_positions".to_owned(),
             BrokerRequest::GetAccount => "get_account".to_owned(),
