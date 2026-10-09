@@ -7907,10 +7907,14 @@ jq -r "$filter" "$src"
     /// later line is refused; so is `--cfg feature = "live"` with spaces or tabs around the
     /// `=`, in a command, `RUSTFLAGS` or `rustflags`; and so is a cargo command that takes
     /// arguments from a variable, `${...}`, `$(...)` or a backtick (`cargo build $FLAGS`), which
-    /// cannot be read. A cargo command in a CI file may contain no `$` and no backtick, because a
-    /// variable can carry a `--features` or `--cfg` flag past a line-based scan: even
-    /// `--target $TARGET`, `--target "$TARGET"` and `--target ${TARGET}` are refused (the
-    /// coordinator's ruling under DEC-176: it only refuses more).
+    /// cannot be read. The words of a cargo command in a CI file, up to the first shell operator
+    /// or redirection (`>`, `>>`, `2>`, `<`, `|`, `;`, `&&`, `||`), may contain no `$` and no
+    /// backtick, because a variable can carry a `--features` or `--cfg` flag past a line-based
+    /// scan: even `--target $TARGET`, `--target "$TARGET"` and `--target ${TARGET}` are refused
+    /// (the coordinator's ruling under DEC-176: it only refuses more). A `$` in a redirect target
+    /// or after an operator cannot carry a cargo flag, so `cargo xtask ci mutants --plan >>
+    /// "$GITHUB_OUTPUT"` and `cargo build -p x 2> "$LOG"` are allowed; a second cargo command
+    /// after `&&`, `||`, `;` or `|` is judged on its own words.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -7922,6 +7926,9 @@ jq -r "$filter" "$src"
             "cargo check -p the-runner --features 'other live'",
             "cargo check -p the-runner --features \"other\" --target x86_64-unknown-linux-gnu",
             "cargo build -p a-lib --features \"other --features=live\"",
+            "            cargo xtask ci mutants --plan >> \"$GITHUB_OUTPUT\"",
+            "cargo build -p x 2> \"$LOG\"",
+            "cargo build -p a-lib < \"$IN\" | tee \"$LOG\"",
         ];
         for line in allowed {
             let files = [ci_file(".github/workflows/ci.yml", line)];
@@ -8039,6 +8046,30 @@ jq -r "$filter" "$src"
             let problems = live_feature_problems(&policy, &meta(), &files)?;
             assert_eq!(problems.len(), 1, "{text}: {problems:?}");
             assert!(problems[0].contains(path), "names the file: {problems:?}");
+        }
+        let refused_by_words_before_an_operator = [
+            "cargo build $FLAGS >> out",
+            "cargo build --target $T | tee log",
+            "cargo build -p a-lib $FLAGS 2> \"$LOG\"",
+            "cargo build -p a-lib --target \"$T\" < in",
+            "cargo build ; cargo build --features live",
+            "cargo build -p a-lib > \"$OUT\" ; cargo run -p the-runner --features live",
+            "cargo check -p the-runner --features live && cargo build -p the-runner $FLAGS",
+            "cargo check -p the-runner --features live ; cargo build -p the-runner $FLAGS",
+            "cargo build -p a-lib || cargo test -p the-runner --features live",
+            "cargo build -p a-lib >> \"$OUT\" && cargo build -p the-runner --features live",
+        ];
+        for line in refused_by_words_before_an_operator {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/scripts/build.sh:2"),
+                "names the file and line: {problems:?}"
+            );
         }
         let refused_spaced_cfg = [
             "cargo rustc -p the-runner -- --cfg 'feature = \"live\"'",
