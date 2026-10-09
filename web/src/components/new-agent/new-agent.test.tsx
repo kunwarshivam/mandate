@@ -583,6 +583,29 @@ describe("creating it where the workspace requires independent approval (§4.3, 
     expect(main().querySelector("[data-slot=after-confirm]")).toBeNull();
   });
 
+  const NOT_HERE = "That's everything. Here is your agent. It can't be created here without a second person's approval.";
+
+  it.each([true, null, "absent"] as const)("ends the chat with a line that does not invite a create when the policy is %s", async (value) => {
+    renderFlow({ workspace: policy(value) });
+    await toSummary();
+    expect(lastReply()).toEqual(["Got it: lookback of 20.", NOT_HERE]);
+    await send("Make it $2,000");
+    expect(lastReply()).toEqual(["Got it: $2,000.00 to use.", NOT_HERE]);
+    for (const line of replies().flatMap((r) => [...r.querySelectorAll("p")].map((p) => p.textContent!))) {
+      expect(line).not.toMatch(/Create it/);
+      expect(line).not.toMatch(/V-047/);
+    }
+  });
+
+  it("ends the chat inviting a create exactly as before when the policy is off", async () => {
+    renderFlow({ workspace: policy(false) });
+    await toSummary();
+    expect(lastReply()).toEqual(["Got it: lookback of 20.", READY]);
+    expect(READY).toBe("That's everything. Here is your agent. Create it, or tell me what to change.");
+    await send("Make it $2,000");
+    expect(lastReply()).toEqual(["Got it: $2,000.00 to use.", READY]);
+  });
+
   it("still refuses after a change is said, since no draft can satisfy it", async () => {
     renderFlow({ workspace: policy(true) });
     await toSummary();
@@ -608,6 +631,7 @@ describe("creating it where the workspace requires independent approval (§4.3, 
     fireEvent.click(button("Create agent"));
     press("Use passkey");
     act(() => {
+      // Deliberate direct mutation: the policy changes between the owner's click and the runtime applying it.
       probed().ws.independent_approval_required = null;
       vi.advanceTimersByTime(PASSKEY_ANSWER_MS);
     });
