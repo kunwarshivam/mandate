@@ -156,6 +156,10 @@
 //! no active org owner or workspace admin (§5.2), and yields the step-up the change needs (ID-4,
 //! DEC-654). Refusals carry DEC-643's codes ([`Refusal`]).
 //!
+//! **Memberships fold from the control stream** (E9-7, DEC-657): [`MembershipFold`] reads
+//! journal spec §9.12's records to each member's state and roles and `workspace_users` (§5.3,
+//! ID-7).
+//!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
 use std::{
@@ -168,9 +172,13 @@ use mandate_time::UtcNanos;
 
 pub mod demand;
 mod matrix;
+mod membership;
 mod permission;
 
 use matrix::Column;
+pub use membership::{
+    InvitationId, InvitationState, MembershipEvent, MembershipFold, MembershipRecord,
+};
 pub use permission::Permission;
 
 /// A principal's opaque ID, a ULID (identity spec §3.1).
