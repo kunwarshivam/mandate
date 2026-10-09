@@ -1036,14 +1036,38 @@ pub(crate) fn trusted_daily_bars(
     listed_bars(dir, inspection.dataset.kind())
 }
 
+/// The pinned symbol's closes, each with its session, exactly as stored and only once `trusted`
+/// admits the dataset at `now`: the span the liquidity facts read, handed to the model host
+/// (DEC-846 item 2).
+pub(crate) fn trusted_daily_closes(
+    dir: &Path,
+    symbol: &str,
+    now: UtcNanos,
+) -> Result<Vec<(Date, Price)>, Cause> {
+    let inspection = inspect::inspect(dir)?;
+    trusted(&inspection, symbol, now)?;
+    listed_days(dir, inspection.dataset.kind())?
+        .into_iter()
+        .map(|(day, bar)| Ok((day, Price::parse(bar.close.as_str())?)))
+        .collect()
+}
+
 fn listed_bars(dir: &Path, kind: Kind) -> Result<Vec<Bar>, Cause> {
+    Ok(listed_days(dir, kind)?
+        .into_iter()
+        .map(|(_, bar)| bar)
+        .collect())
+}
+
+/// One bar per day the manifest lists with a file, in its date order, with that day.
+fn listed_days(dir: &Path, kind: Kind) -> Result<Vec<(Date, Bar)>, Cause> {
     let (_, days) = dataset::read_manifest(dir)?;
     let mut listed_bars = Vec::new();
     for listed in days.iter().filter(|listed| listed.file.is_some()) {
         let path = dir.join(dataset::partition_name(listed.day));
         match dataset::read(&path, kind)? {
             Records::Bars(bars) => match <[Bar; 1]>::try_from(bars) {
-                Ok([bar]) => listed_bars.push(bar),
+                Ok([bar]) => listed_bars.push((listed.day, bar)),
                 Err(_) => return Err(untrusted("a listed day does not hold exactly one bar")),
             },
             Records::Trades(_) | Records::Quotes(_) => {

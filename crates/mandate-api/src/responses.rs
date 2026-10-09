@@ -5,7 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::{ApiVersion, StepUpStatus, Watermark};
-use crate::wire::{EventId, Ref, Timestamp};
+use crate::requests::Shape;
+use crate::wire::{Decimal, EventId, Id, Ref, Timestamp, present};
 
 /// A closed response: the envelope's members, then its own, with its rules pending.
 macro_rules! response {
@@ -34,13 +35,135 @@ pub enum Recorded {
 
 response! {
     /// The `202` of an owner command, a kill switch, or a revoke (§5.4). `step_up_status` is the
-    /// kill switch's alone; `dropped` lists what an API-7 operation dropped (DEC-682 item 27).
+    /// kill switch's alone; `dropped` lists what an API-7 operation dropped (DEC-682 item 27). Each
+    /// is absent, never `null`, when it has nothing to say.
     CommandAccepted {
         command_id: EventId,
         phase: Recorded,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
         step_up_status: Option<StepUpStatus>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
         dropped: Option<Vec<String>>,
     }
+}
+
+response! {
+    /// The `202` of an approval response (§5.2): recorded, never approved (API-12). `dropped` is
+    /// never the root `""`, and is absent, never `null`, when nothing was dropped.
+    ApprovalResponseAccepted {
+        response_id: EventId,
+        phase: Recorded,
+        #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+        dropped: Option<Vec<String>>,
+    }
+}
+
+/// The server's own classification of a confirmed change (§5.1, mandate spec §9.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Classification {
+    RiskIncreasing,
+    RiskReducing,
+    Neutral,
+}
+
+/// When a confirmed version takes effect: `now` unless it increases risk (§5.1, mandate spec
+/// §2.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Applies {
+    Now,
+    NextSafePoint,
+}
+
+response! {
+    /// The `202` of a confirm (§5.1).
+    ConfirmAccepted {
+        command_id: EventId,
+        phase: Recorded,
+        classification: Classification,
+        applies: Applies,
+    }
+}
+
+/// Ending a delegation already gone (§5.3, DEC-682 item 29): nothing is committed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlreadyEnded {
+    AlreadyEnded,
+}
+
+response! {
+    /// The `200` of ending a delegation that is already gone (§5.3).
+    EndDelegationAlreadyEnded {
+        outcome: AlreadyEnded,
+    }
+}
+
+/// A preview's classification: a delegation always increases risk (§5.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IncreasesRisk {
+    RiskIncreasing,
+}
+
+response! {
+    /// The `200` of a delegation preview (§5.3, DEC-682 item 29). The delegation's `max_orders`, 1
+    /// to 1,000, is a pending rule.
+    DelegationPreview {
+        preview_id: Id,
+        mandate_version: Ref,
+        unasked_usd_after: Decimal,
+        classification: IncreasesRisk,
+        step_up_digest: Ref,
+        delegation: PreviewedDelegation,
+    }
+}
+
+/// The delegation a preview's version adds, as the owner entered it. Mandate spec §6.5's other
+/// members are planned with E8-15 (DEC-681 item 8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewedDelegation {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub expires_at: Option<Timestamp>,
+    pub shape: Shape,
+    pub max_orders: u32,
+    pub max_order_usd: Decimal,
+    pub max_total_usd: Decimal,
+    pub source_approval_id: EventId,
+}
+
+/// Where a command stands (§5.5): never `unknown`, since an ambiguous append has no event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandPhase {
+    Recorded,
+    Taken,
+    Applied,
+    Refused,
+    Ended,
+}
+
+response! {
+    /// `GET /commands/{event_id}` (§5.5, DEC-682 item 15). `recorded` has no steps and every other
+    /// phase at least one, a pending rule.
+    CommandStatus {
+        command_id: EventId,
+        phase: CommandPhase,
+        steps: Vec<Step>,
+    }
+}
+
+/// One event a command produced. The stream id's and event type's grammars, `seq` from 1, and a
+/// reason in snake case are pending rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub reason: Option<String>,
+    pub stream_id: String,
+    pub seq: u64,
+    pub event_type: String,
+    pub recorded_at: Timestamp,
 }

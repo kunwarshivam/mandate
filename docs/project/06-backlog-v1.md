@@ -1236,8 +1236,15 @@ story buys a service, and none uses a real identity-provider account in tests (s
   - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
     which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
   - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
-    record for it: an invitation's roles are fixed by `MemberInvited`. Decide the writer-side
-    mapping (revoke the invitation and invite again, or a new record in a later journal change).
+    record for it: an invitation's roles are fixed by `MemberInvited`. Until a record exists, the
+    writer maps it to `MemberInvitationRevoked` then `MemberInvited` with the reduced roles (merge
+    coordinator, 2026-10-09); whether to add a record stays open.
+  - Fold vectors (#812's review, access-reducing): a reactivation with a strict subset of the kept
+    roles, an activation with a strict subset of the invitation's roles, and a grant of a role held
+    but still cooling off are each refused, but only disjoint roles are tested; add a valid and a
+    refused history and a fold mutant for each.
+  - Rule 103's non-cooling branch has no vector with a gap under 1 s (#789's delta review); add an
+    invalid 1 ns gap and a mutant.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
