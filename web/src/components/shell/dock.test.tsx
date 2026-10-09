@@ -36,8 +36,8 @@ describe("the desktop dock", () => {
       expect(b).not.toHaveAttribute("aria-label");
     }
     for (const label of dock().querySelectorAll("[data-slot=dock-label]")) {
-      expect(label).toHaveClass("font-medium", "group-data-current:font-semibold");
-      expect(label.parentElement).toHaveClass("text-xs");
+      expect(label, "the current item is marked by a semibold label (DEC-478 item 4)").toHaveClass("group-data-current:font-semibold");
+      expect(label.className, "so no label is semibold or bolder until it is current").not.toMatch(/(^|\s)font-(semibold|bold|extrabold|black)\b/);
     }
   });
 
