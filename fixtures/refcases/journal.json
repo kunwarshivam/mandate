@@ -59052,7 +59052,7 @@
    },
    {
     "name": "in_range_anchor_leaves_a_genesis_range_incomplete",
-    "clause": "§11 Incomplete (DEC-789 item 4): an in-range anchor's token check, stamped or null, cannot finish",
+    "clause": "§11 Incomplete (DEC-789 item 7): an in-range anchor's token check, stamped or null, cannot finish",
     "base_draft": "run_passed",
     "changes": [
      {
@@ -59195,7 +59195,7 @@
    },
    {
     "name": "restore_drill_incomplete",
-    "clause": "rules 110 and 133: a restore drill's run may end incomplete",
+    "clause": "rules 110 and 133: a restore drill's run may end incomplete; a token-only incomplete passes the drill (DEC-789 item 9, infrastructure design OPS-8)",
     "base_draft": "run_incomplete",
     "changes": [
      {

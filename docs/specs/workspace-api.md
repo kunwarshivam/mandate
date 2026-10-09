@@ -1045,8 +1045,10 @@ ascending `stream_id` bytes:
   stream; legal hold; a new writer epoch from `IntegrityIncidentRecorded`; the customer notice) is
   taken by whoever is on call (infrastructure design §8.4), through the "Journal verification
   failure" alert that a failing `VerificationRun` raises (infrastructure design §8.2, runbook
-  RB-09). An `incomplete` result is not a failure: it raises no SEV-1 and no alert of its own
-  (journal spec §11 "Incomplete").
+  RB-09), on `result: fail` only. An `incomplete` result is not a failure: it raises no SEV-1 and
+  pages no one; it is reported as the informational "Journal verification incomplete" row of
+  infrastructure design §8.2 (journal spec §11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md)
+  item 9).
 
 ### 4.9 How the web app's fixtures map
 

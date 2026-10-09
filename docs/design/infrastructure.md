@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.2: the fixes from the post-merge review of v0.1 (#552). The engineering readings are Accepted (agent) in [DEC-434](../project/decisions/DEC-434.md), items 1 to 12 and 22 to 24. The founder accepted items 13 to 20 on 2026-10-03. Item 21, what an exit does while the journal is unavailable (§2.1), is Proposed for the founder |
+| **Status** | Draft v0.2: the fixes from the post-merge review of v0.1 (#552). The engineering readings are Accepted (agent) in [DEC-434](../project/decisions/DEC-434.md), items 1 to 12 and 22 to 24. The founder accepted items 13 to 20 on 2026-10-03. Item 21, what an exit does while the journal is unavailable (§2.1), is Proposed for the founder. OPS-8, §6.3, §6.4, and §8.2 take [DEC-789](../project/decisions/DEC-789.md) item 9 (the founder, 2026-10-09): a token-only `incomplete` verification passes a restore drill, and only `result: fail` raises the SEV-1 alert |
 | **Date** | 2026-10-03 |
 | **Owner** | Engineering (founder) |
 | **Builds on** | [HLD](../HLD.md) §4, §5, §6 D, §7, §8, §11; [ADR-0001](../adr/0001-engineering-setup.md) ES-08, ES-09, ES-14, ES-17 to ES-20, ES-23; [journal spec](../specs/journal.md) §5, §6, §10, §11; [trading domain spec](../specs/trading-domain.md) §5.4, §5.5, §5.7, §11; [quality and release plan](../project/07-quality-and-release.md) |
@@ -104,7 +104,7 @@ startup or CI check that refuses to proceed.
 | **OPS-5** | Every environment except production has no path to live money: no live host compiled in, no live credential in its vault, and no network egress to a live trading host. **Narrowing of ES-23 and of this invariant, for paper Alpaca OAuth only ([DEC-821](../project/decisions/DEC-821.md) items 2 and 5):** one live-host URL, `POST https://api.alpaca.markets/oauth/token`, is compiled in, only in the token-exchange client, and only the token-exchange process (§3.1) has egress to that host. No executor, runtime, or API process has egress to any live host. Nothing else in this invariant changes | Rule 8; ES-23; [DEC-821](../project/decisions/DEC-821.md) | CI forbids the `live` feature; a build test that the only live-host URL compiled in is the token-exchange client's; an egress test in staging that a request to each live trading host fails at the network layer from every process but the token-exchange process; the token-exchange client's pinned tests (connections spec §5.2 step 4); the tracer refuses any host but Alpaca's paper host (E7-7) |
 | **OPS-6** | Tenant isolation holds at every layer: agent processes are never shared across workspaces; rows carry `workspace_id` with row-level security; data and vault paths are per workspace, under per-workspace keys; telemetry and alerts carry opaque IDs only | HLD §8; journal §6.1, §6.5 | Cross-workspace access tests at the API, database, vault, and messaging layers (07, Isolation); a label lint on the metrics registry |
 | **OPS-7** | A deploy, upgrade, restart, or rollback never drops a running agent's protection, and never interrupts an exit sequence in a way the trading spec does not already bound | Trading §5.4; FR-9.3 | The upgrade drill: upgrade every process type with open positions, exits in flight, and pending approvals, and assert no protective order was canceled by the deploy and every unprotected interval stayed within `max_unprotected_s` |
-| **OPS-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades | Journal §10, §11 | The restore drill (§6.4) runs journal §11 verification, whose result is journaled as `VerificationRun`; the drill's own record (which backup, which drill, pass or fail) is journaled once the journal spec defines its events (E21-25, journal spec first); a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
+| **OPS-8** | Backups restore to a verifiable journal. After any restore, journal §11 verification passes over every stream from its trusted start to the restored head, and every anchor and `SegmentExported` is consistent with the restored heads; otherwise the restore is an integrity incident and no agent trades. **Passes** here includes a run that ends `incomplete` on the token check alone: every event walked, nothing failed, and the timestamp token the only check left unproven ([DEC-789](../project/decisions/DEC-789.md) item 9, the founder). Any other `incomplete`, and any `fail`, is an integrity incident | Journal §10, §11 | The restore drill (§6.4) runs journal §11 verification, whose result is journaled as `VerificationRun`; the drill's own record (which backup, which drill, pass or fail) is journaled once the journal spec defines its events (E21-25, journal spec first); a test that restores a backup older than the last anchor and asserts the incident path, not a silent resume |
 | **OPS-9** | A restored or recovered agent trades only after replay and broker reconciliation pass; the broker is the source of truth for orders and positions; anything unexplained pauses the agent until the owner acknowledges with step-up | Trading §11; HLD §6 D | Fault injection and restore drills; reconciliation reference cases |
 | **OPS-10** | Notifications and operator alerts carry no sensitive content: opaque IDs and generic text only | Rule 6 | Payload capture tests (07, Privacy) extended to the paging channel |
 | **OPS-11** | Telemetry is never the audit record and never an input to a trading decision; losing all telemetry changes no order | DEC-73 | A test that runs the decision cycle with the exporter failing; a layering check that no core crate depends on the telemetry API |
@@ -508,7 +508,10 @@ A restore never repairs the journal in place and never resumes trading on its ow
 2. **Restore** the hot store to the latest consistent point, then **re-import** any later cold
    segments that verify (they are canonical bytes with manifests; `mandate-journal-cold`'s
    importer and checks).
-3. **Verify** every stream with journal §11 from its trusted start to the restored head.
+3. **Verify** every stream with journal §11 from its trusted start to the restored head. The step
+   passes when every `VerificationRun` is `pass`, or `incomplete` with the token check its only
+   incomplete check and every event walked (journal §11 "Incomplete", DEC-789 item 9). Any `fail`,
+   or any other incomplete check, is an **integrity incident**, as in step 4.
 4. **Check against anchors and exports.** For every stream, compare the restored head with the
    latest `AnchorComputed` leaf and `SegmentExported` manifest held outside the restored database
    (cold store, and in hybrid mode the global plane's anchor copies). If any of them names a `seq`
@@ -529,12 +532,13 @@ A restore never repairs the journal in place and never resumes trading on its ow
 no backup or drill event today. Telemetry cannot hold the record (OPS-11). So the journal spec
 change comes first: E21-25 adds the backup and drill events with test vectors, and E21-5 is blocked
 on it. Until then a drill journals only what the catalogue already has (`VerificationRun`,
-journal §11), and "journaled" in the table below means "journaled once E21-25 lands".
+journal §11), and "journaled" in the table below means "journaled once E21-25 lands". A drill's
+verification "passes" as OPS-8 says: `pass`, or a token-only `incomplete` (DEC-789 item 9).
 
 | Drill | Where | Frequency (Proposed) | Pass condition, journaled |
 |---|---|---|---|
 | Hot-store restore and verify | Staging; the paper environment in Phase 1 | Monthly | Steps 1 to 4 pass; a canary scan finds no secret in the restored data (OPS-1) |
-| Cold-store restore and verify (E5-7) | From the replica | Quarterly (journal §6.2) | §11 per-range checks pass against anchors |
+| Cold-store restore and verify (E5-7) | From the replica | Quarterly (journal §6.2) | §11 per-range checks pass against anchors; a token check left `incomplete` alone still passes (DEC-789 item 9), any other `incomplete` or any `fail` does not |
 | Restore older than the last anchor | Staging | Each release that touches recovery | The integrity-incident path runs and no agent resumes (OPS-8) |
 | Postgres failover | Staging, under load with intents in flight | Monthly and each Postgres upgrade | Zero duplicates, zero lost acknowledged appends |
 | Region evacuation | Staging | Twice a year, once a second region exists | Agents resume only after reconciliation |
@@ -653,7 +657,8 @@ are authoritative; a few come from metrics.
 | Journal append `Unavailable` or `Ambiguous`; p99 append over 5 ms | Writer metrics | SEV-2 | RB-07 |
 | Synchronous standby lost | Postgres metrics | SEV-2 | RB-07 |
 | Unexpected `Fenced` | Writer outcome | SEV-2 | RB-08 |
-| Journal verification failure | `VerificationRun` (journal §11) | SEV-1 | RB-09 |
+| Journal verification failure | `VerificationRun` with `result: fail` (journal §11), and nothing else | SEV-1 | RB-09 |
+| Journal verification incomplete | `VerificationRun` with `result: incomplete` (journal §11 "Incomplete"): the timestamp token cannot be proven yet (DEC-265 item 1, DEC-789) | Informational: pages no one | RB-10 |
 | DDL or superuser session outside a release | Postgres audit (journal §6.1) | SEV-1 | RB-09 |
 | Cold export lag over 1 minute (before live capital) | Exporter metrics (journal §6.2) | SEV-2 | RB-10 |
 | Anchor or timestamping gap | `AnchorComputed` gaps (journal §10) | SEV-3 | RB-10 |
@@ -812,7 +817,7 @@ Each failure, walked to its exit: what detects it, what agents do, how it ends, 
 | **Clock skew** | The scheduler's offset checks (journal §5.4) | `ClockToleranceExceeded` is journaled and events are flagged; broker `event_time` stays authoritative for executions; the risk clock comes from the scheduler, not each host | Time sync returns; the next measurement within tolerance ends the flag |
 | **Bad deploy** | Canary health, crash loops, alert spike | Drained processes hand over normally; a crashing new version leaves agents `Paused` after the crash-loop bound, with protection at the broker | Rollback through the same drain and hand-over (§7.4) |
 | **Network partition between executor and Postgres** | Append errors | The executor cannot journal, so it sends nothing, exits included (§2.1); protection rests at the broker; if a second executor is started on the other side, it fences the first | Partition heals; the fenced process exits |
-| **Journal integrity failure** | `VerificationRun` | Affected agents pause; the kill switch still works; control-stream failures freeze mandate and deployment changes (journal §11) | SEV-1 incident; a new writer epoch from `IntegrityIncidentRecorded`; nothing repaired in place |
+| **Journal integrity failure** | `VerificationRun` with `result: fail` | Affected agents pause; the kill switch still works; control-stream failures freeze mandate and deployment changes (journal §11) | SEV-1 incident; a new writer epoch from `IntegrityIncidentRecorded`; nothing repaired in place |
 | **Credential leak suspected** | Secret scanning; vault audit; the owner | Revoke the connection (`ConnectionRevoked`); the executor stops sending for it; protection rests at the broker | Owner reconnects with a new credential; SEV-1 postmortem (07) |
 
 ---

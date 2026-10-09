@@ -487,7 +487,7 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "in_range_anchor_leaves_a_genesis_range_incomplete",
-            "§11 Incomplete (DEC-789 item 4): an in-range anchor's token check, stamped or null, cannot finish",
+            "§11 Incomplete (DEC-789 item 7): an in-range anchor's token check, stamped or null, cannot finish",
             ok,
             [change(f"{R2}.incomplete", "tsa_token_invalid"), change("payload.result", "incomplete")],
         ),
@@ -505,7 +505,7 @@ def valid_drafts() -> list[dict]:
         ),
         valid(
             "restore_drill_incomplete",
-            "rules 110 and 133: a restore drill's run may end incomplete",
+            "rules 110 and 133: a restore drill's run may end incomplete; a token-only incomplete passes the drill (DEC-789 item 9, infrastructure design OPS-8)",
             unfinished,
             [change("actor", SERVICES), change("payload.trigger", "restore_drill")],
         ),

@@ -37,6 +37,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     token is `null`, leave the token check incomplete: never `pass`, never a false
     `tsa_token_invalid`, and no SEV-1. The CLI's `tsa_verification_incomplete` (DEC-490 item 6) is
     the same outcome under its own word. "On failure" now says it means a `fail` result.
+  - **Restore drills** ([DEC-789](../project/decisions/DEC-789.md) item 9, the founder 2026-10-09):
+    a drill passes on a token-only `incomplete` (every event walked, nothing failed, only the token
+    check unproven, from either cause); any other incomplete check or any failure is still an
+    integrity incident. Only `result: fail` raises the SEV-1 alert; `incomplete` is an
+    informational row of infrastructure design §8.2 that pages no one.
   - **§9.14:** a manifest start is one the cold store vouches for; one only the hot store's record
     vouches for is not a trusted start (DEC-787 item 5).
   - **Vectors.** A new generated `verification_runs` section holds version 2's base drafts (passed,
@@ -3397,7 +3402,7 @@ incomplete, the token check whose failure is `tsa_token_invalid`:
   word: a command line has no third exit, and it never prints `verified` for it. The CLI journals
   nothing, so no record holds its word; a `VerificationRun` names the check, `tsa_token_invalid`,
   in `incomplete`.
-- **An anchor the range must check whose `token` is `null`** (DEC-789 item 4). Nothing outside the
+- **An anchor the range must check whose `token` is `null`** (DEC-789 item 7). Nothing outside the
   journal vouches for it (§9.14), so its token check cannot finish either. It is not a failure: the
   outage is §10's journaled gap, already alerted.
 
@@ -3407,10 +3412,18 @@ range's `incomplete` and, with no range failed, as the run's `result` `incomplet
 133); version 1 cannot, which is why every writer appends version 2. **An incomplete run raises no
 SEV-1** and starts none of the responses under "On failure" below: nothing was found wrong, and
 until DEC-265 item 1's crypto half lands every stamped token is incomplete, so an alert on it would
-fire on every run that reads an anchor. It raises no alert of its own; a `null` token is already
-alerted as §10's timestamping gap. **It is not a pass either:** whatever requires a run to pass
-does not take an incomplete one as passing. When the token check can answer, the incomplete arm
-goes, as DEC-490 item 6 says of the CLI's.
+fire on every run that reads an anchor. It pages no one: it is reported as the informational
+"Journal verification incomplete" row of [infrastructure design](../design/infrastructure.md) §8.2,
+and a `null` token is already alerted as §10's timestamping gap. **It is not a pass either:**
+whatever requires a run to pass does not take an incomplete one as passing, with one exception the
+founder made ([DEC-789](../project/decisions/DEC-789.md) item 9): a **restore drill** (infrastructure
+design OPS-8, §6.3, §6.4) passes when every event of every range was walked (`checked` is the
+whole range), no range failed, and the token check is the only check incomplete, whatever its
+cause above: a stamped token with the imprint, or an anchor with a `null` token. At this version
+`incomplete` can name nothing but the token check (§9.13), so every incomplete run is token-only;
+a check that a later version lets end incomplete counts for a drill only if a decision says so.
+Any other incomplete check, and any failure, is an integrity incident for a drill. When the token
+check can answer, the incomplete arm goes, as DEC-490 item 6 says of the CLI's.
 
 A reference to an event before the range's trusted start is not checked by that range, except
 through an anchor (`held_mismatch`'s, or the connection anchor, whose rotation copies a
