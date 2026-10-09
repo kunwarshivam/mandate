@@ -12,6 +12,8 @@ use crate::checks::{
 use crate::grant::GrantedScopes;
 use crate::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, ConnectionState, Environment};
 
+use ConnectionState::{Degraded, Suspended};
+
 const PINNED: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const DRIFTED: &str = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
 
@@ -152,6 +154,7 @@ fn nothing_that_can_move_funds_out_is_accepted() {
         &["deposit"],
         &["trade", "funding"],
         &["trade", "withdrawal"],
+        &["trade", "Withdraw"],
     ] {
         let input = CheckInput {
             broker: Broker::KrakenDerivativesUs,
@@ -181,6 +184,26 @@ fn nothing_that_can_move_funds_out_is_accepted() {
             "an MCP server offering {tool} is refused (CN-2)"
         );
     }
+    let mut oauth = alpaca();
+    oauth.granted = Granted::OAuth(GrantedScopes(set(&["data", "trading", "transfer"])));
+    assert_eq!(
+        outcome(&run(&oauth).unwrap(), Check::Scope),
+        Some(Outcome::Failed(Reason::FundMovement)),
+        "a fund-movement scope is named as one, not only as a mismatch (CN-2)"
+    );
+    let empty_live = CheckInput {
+        broker: Broker::KrakenDerivativesUs,
+        environment: Environment::Live,
+        auth_kind: AuthKind::ApiKey,
+        granted: Granted::KeyPermissions(Some(BTreeSet::new())),
+        ..alpaca()
+    };
+    assert_eq!(
+        outcome(&run(&empty_live).unwrap(), Check::Scope),
+        Some(Outcome::Passed),
+        "an empty set was read and shows no fund movement: DEC-441 item 4 refuses only what \
+         cannot be shown absent"
+    );
 }
 
 #[test]
@@ -200,6 +223,17 @@ fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
         ),
         Some(Outcome::Passed),
         "a paper key is recorded and disclosed (DEC-441 item 4)"
+    );
+    let kraken_demo = run(&key(Broker::KrakenDerivativesUs, Environment::Paper)).unwrap();
+    assert_eq!(
+        outcome(&kraken_demo, Check::Scope),
+        Some(Outcome::Passed),
+        "a demo key too (DEC-441 item 4)"
+    );
+    assert_eq!(
+        kraken_demo.refusal(),
+        None,
+        "and it is recorded, not refused"
     );
     for broker in [Broker::Alpaca, Broker::KrakenDerivativesUs] {
         assert_eq!(
@@ -247,13 +281,15 @@ fn the_environment_is_judged_from_documentation_without_a_request() {
     };
     for (broker, environment) in [
         (Broker::Alpaca, Environment::Paper),
+        (Broker::Alpaca, Environment::Live),
         (Broker::KrakenDerivativesUs, Environment::Paper),
         (Broker::KrakenDerivativesUs, Environment::Live),
     ] {
         assert_eq!(
             outcome(&run(&key(broker, environment)).unwrap(), Check::Environment),
             Some(Outcome::Passed),
-            "a key is issued for one environment's host only ({broker:?} {environment:?})"
+            "a key is issued for one environment's host only ({broker:?} {environment:?}); a live \
+             Alpaca key is refused by the record (DEC-441 item 3) and check 1, not here"
         );
     }
 }
@@ -380,7 +416,7 @@ fn a_later_failure_suspends_and_drift_degrades() {
         failed.account = AccountRead::Unreadable;
         assert_eq!(
             run(&failed).unwrap().later_state(),
-            Some(ConnectionState::Suspended),
+            Some(Suspended),
             "{occasion:?}"
         );
         let mut drifted = robinhood();
@@ -392,8 +428,24 @@ fn a_later_failure_suspends_and_drift_degrades() {
         });
         assert_eq!(
             run(&drifted).unwrap().later_state(),
-            Some(ConnectionState::Degraded),
+            Some(Degraded),
             "{occasion:?}"
+        );
+        let mut missing_and_drifted = drifted.clone();
+        missing_and_drifted.contract = Some(ContractSeen {
+            allowlisted_tools_present: false,
+            hash: DRIFTED.to_owned(),
+        });
+        let report = run(&missing_and_drifted).unwrap();
+        assert_eq!(
+            outcome(&report, Check::Contract),
+            Some(Outcome::Failed(Reason::ToolsMissing)),
+            "a missing tool is reported over drift ({occasion:?})"
+        );
+        assert_eq!(
+            report.later_state(),
+            Some(Suspended),
+            "DEC-674 ({occasion:?})"
         );
         let mut clean = alpaca();
         clean.occasion = occasion;
@@ -505,11 +557,10 @@ fn no_failed_check_ever_reaches_the_vault_write() {
 }
 
 /// Later occasions, against a table written out here: any scope, environment, or account failure
-/// suspends, alone or with contract drift (journal rule 60: never degraded); a contract failure
-/// alone degrades; a connect-time occasion never changes state.
+/// suspends, alone or with contract drift (journal rule 60: never degraded), and so does a missing
+/// tool (DEC-674); contract drift alone degrades; a connect-time occasion never changes state.
 #[test]
-fn a_later_failure_suspends_unless_only_the_contract_failed() {
-    use ConnectionState::{Degraded, Suspended};
+fn a_later_failure_suspends_unless_only_the_contract_drifted() {
     let drift = (Check::Contract, Reason::ContractDrift);
     let cases: [(Failures, Option<ConnectionState>); 10] = [
         (&[], None),
@@ -524,7 +575,7 @@ fn a_later_failure_suspends_unless_only_the_contract_failed() {
         ),
         (&[(Check::Account, Reason::NotDedicated)], Some(Suspended)),
         (&[drift], Some(Degraded)),
-        (&[(Check::Contract, Reason::ToolsMissing)], Some(Degraded)),
+        (&[(Check::Contract, Reason::ToolsMissing)], Some(Suspended)),
         (
             &[(Check::Scope, Reason::FundMovement), drift],
             Some(Suspended),

@@ -166,14 +166,17 @@ impl CheckReport {
 
     /// A later run's consequence (connections spec §8.1, "failure later"; §9.1; journal spec §9.8
     /// rule 60): a failed scope, environment, or account check suspends the connection, whatever
-    /// else failed with it; a failed contract check alone (drift or a missing tool) degrades it;
-    /// and a connect-time occasion changes no state, since its failure is a refusal.
+    /// else failed with it, and so does a missing allowlisted tool, which §8.1 check 1 names
+    /// (DEC-674); contract drift alone degrades it (§8.2); and a connect-time occasion changes no
+    /// state, since its failure is a refusal.
     pub fn later_state(&self) -> Option<ConnectionState> {
         if !matches!(self.occasion, Occasion::ExecutorStart | Occasion::Daily) {
             return None;
         }
         let suspending = [Check::Scope, Check::Environment, Check::Account];
-        if suspending.iter().any(|check| self.failed(*check).is_some()) {
+        if suspending.iter().any(|check| self.failed(*check).is_some())
+            || self.failed(Check::Contract) == Some(Reason::ToolsMissing)
+        {
             return Some(ConnectionState::Suspended);
         }
         self.failed(Check::Contract)
