@@ -644,9 +644,8 @@ fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_ben
     Ok(())
 }
 
-/// One request, its head and body written here byte for byte, and the whole answer as text, or
-/// `None` when the server closes or resets the connection with no byte of an answer.
-fn exchange(addr: SocketAddr, line: &str, session: Option<&str>, body: &[u8]) -> Option<String> {
+/// A request's head and body, written here byte for byte.
+fn request(addr: SocketAddr, line: &str, session: Option<&str>, body: &[u8]) -> Vec<u8> {
     let mut head = format!(
         "{line}\r\nhost: {addr}\r\nconnection: close\r\ncontent-type: application/json\r\n\
          accept: application/json, text/event-stream\r\nmcp-protocol-version: {PROTOCOL_VERSION}\r\n"
@@ -655,16 +654,35 @@ fn exchange(addr: SocketAddr, line: &str, session: Option<&str>, body: &[u8]) ->
         head.push_str(&format!("mcp-session-id: {session}\r\n"));
     }
     head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
+    let mut bytes = head.into_bytes();
+    bytes.extend_from_slice(body);
+    bytes
+}
+
+/// Writes `bytes` split at `splits`, pausing between the parts, and returns the whole answer as
+/// text, or `None` when the server closes or resets the connection with no byte of an answer.
+fn send(addr: SocketAddr, bytes: &[u8], splits: &[usize]) -> Option<String> {
     let mut stream = TcpStream::connect(addr).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    let mut bytes = head.into_bytes();
-    bytes.extend_from_slice(body);
-    let _written = stream.write_all(&bytes);
+    let mut from = 0;
+    for &to in splits.iter().chain([&bytes.len()]) {
+        let _written = stream.write_all(&bytes[from..to]);
+        thread::sleep(Duration::from_millis(if to == bytes.len() {
+            0
+        } else {
+            50
+        }));
+        from = to;
+    }
     let mut answer = Vec::new();
     let _read = stream.read_to_end(&mut answer);
     (!answer.is_empty()).then(|| String::from_utf8(answer).unwrap())
+}
+
+fn exchange(addr: SocketAddr, line: &str, session: Option<&str>, body: &[u8]) -> Option<String> {
+    send(addr, &request(addr, line, session, body), &[])
 }
 
 const POST: &str = "POST /mcp HTTP/1.1";
@@ -853,5 +871,63 @@ fn anything_but_post_to_mcp_is_404_never_400() -> Outcome {
         unparsed.starts_with("HTTP/1.1 404 "),
         "the path before the body: {unparsed}"
     );
+    Ok(())
+}
+
+/// `MAX_REQUEST`: "the most bytes one request may hold; past that the connection closes
+/// unanswered". A request is its whole head and body, so that is what is counted here.
+const MIB: usize = 1_048_576;
+
+/// A `tools/list` request of exactly `total` bytes, its body padded with JSON whitespace.
+fn request_of(total: usize, addr: SocketAddr, session: &str) -> Vec<u8> {
+    let mut pad = total - 512;
+    loop {
+        let mut body = list_body();
+        let close = body.pop().unwrap();
+        body.extend(std::iter::repeat_n(b' ', pad));
+        body.push(close);
+        let bytes = request(addr, POST, Some(session), &body);
+        match bytes.len() {
+            len if len == total => return bytes,
+            len => pad = pad + total - len,
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_request_of_one_mib_is_answered_and_one_byte_more_is_closed_unanswered() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let addr = server.addr()?;
+    let fits = request_of(MIB, addr, &session);
+    assert_eq!(fits.len(), MIB);
+    for splits in [vec![], vec![MIB - 1]] {
+        let answer = send(addr, &fits, &splits).unwrap_or_default();
+        assert!(
+            answer.starts_with("HTTP/1.1 200 OK\r\n"),
+            "{splits:?}: {answer:.80}"
+        );
+        assert!(body_of(&answer)["result"]["tools"].is_array(), "{splits:?}");
+    }
+    let over = request_of(MIB + 1, addr, &session);
+    assert_eq!(over.len(), MIB + 1);
+    let splits = [
+        vec![],
+        vec![MIB],
+        vec![1],
+        vec![4097, MIB / 2 + 3],
+        vec![MIB - 4095],
+    ];
+    for splits in splits {
+        let answer = send(addr, &over, &splits);
+        assert_eq!(
+            answer.as_deref().map(|a| &a[..a.len().min(80)]),
+            None,
+            "{splits:?}"
+        );
+    }
+    let after = exchange(addr, POST, Some(&session), &list_body()).unwrap();
+    assert!(after.starts_with("HTTP/1.1 200 "), "it serves on: {after}");
     Ok(())
 }
