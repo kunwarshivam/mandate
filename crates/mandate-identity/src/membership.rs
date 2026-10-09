@@ -155,3 +155,28 @@ impl MembershipFold {
         todo!()
     }
 }
+
+/// Why workspace services refuse to commit a membership record (§9.12's cross-record checks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RecordRefusal {
+    /// The record's `independent_approval_required` is not the workspace's effective policy at
+    /// its `event_time` (DEC-648 item 7), so its cool-off (rule 103) was decided on a false input.
+    #[error("the record's independent_approval_required is not the effective policy")]
+    IndependenceMismatch,
+    /// The stub of a story not yet implemented.
+    #[error("{story} has not been implemented yet")]
+    Unimplemented {
+        /// The story.
+        story: &'static str,
+    },
+}
+
+/// The writer's check that a record's `independent_approval_required` equals `effective`, the
+/// workspace's effective policy at the record's `event_time` (mandate spec §4.3), which the caller
+/// reads from the policy fold (DEC-657 item 6). A record with no such member passes.
+pub fn check_independence(
+    _record: &MembershipRecord,
+    _effective: bool,
+) -> Result<(), RecordRefusal> {
+    Err(RecordRefusal::Unimplemented { story: "E9-7" })
+}

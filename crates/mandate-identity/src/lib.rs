@@ -178,6 +178,7 @@ mod permission;
 use matrix::Column;
 pub use membership::{
     InvitationId, InvitationState, MembershipEvent, MembershipFold, MembershipRecord,
+    RecordRefusal, check_independence,
 };
 pub use permission::Permission;
 
