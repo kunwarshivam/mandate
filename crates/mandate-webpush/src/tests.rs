@@ -2,9 +2,9 @@
 //! own path, with the receiver's key or the signer's public key, never through the code under test.
 
 use super::{
-    MAX_BODY_LEN, NoticeClass, PADDED_RECORD_LEN, PushEndpoint, PushPlaintext, PushRequest,
-    PushText, Subscription, Urgency, VapidSigner, VapidSubject, WebPushError, aes128gcm,
-    build_request, encrypt, seal, vapid_authorization,
+    DEFAULT_PUSH_ALLOWLIST, MAX_BODY_LEN, NoticeClass, PADDED_RECORD_LEN, PushAllowlist,
+    PushEndpoint, PushPlaintext, PushRequest, PushText, Subscription, Urgency, VapidSigner,
+    VapidSubject, WebPushError, aes128gcm, build_request, encrypt, seal, vapid_authorization,
 };
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -17,7 +17,7 @@ use vectors::{
 #[path = "../tests/vectors/mod.rs"]
 mod vectors;
 
-const ENDPOINT: &str = "https://push.example.net/push/JzLQ3raZJfFBR0aqvOMsLrt54w4rJUsV";
+const ENDPOINT: &str = "https://fcm.googleapis.com/fcm/send/JzLQ3raZJfFBR0aqvOMsLrt54w4rJUsV";
 const NOW: u64 = 1_453_480_568;
 
 fn subscription(endpoint: &str) -> Result<Subscription, WebPushError> {
@@ -81,7 +81,7 @@ fn no_product_code_reaches_the_rfc_vectors() -> std::io::Result<()> {
 fn an_endpoint_never_prints_its_address() {
     let endpoint = PushEndpoint {
         url: ENDPOINT.to_owned(),
-        origin_len: "https://push.example.net".len(),
+        origin_len: "https://fcm.googleapis.com".len(),
     };
     assert_eq!(format!("{endpoint:?}"), "PushEndpoint(..)", "NT-2");
 }
@@ -132,7 +132,6 @@ fn the_closed_tables_are_the_specs() {
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn rfc_8291_section_5_message_is_reproduced_byte_exact() -> Result<(), WebPushError> {
     let plaintext = b"When I grow up, I want to be a watermelon";
     let body = seal(&subscription(ENDPOINT)?, plaintext, None, &mut rfc_random())?;
@@ -141,7 +140,6 @@ fn rfc_8291_section_5_message_is_reproduced_byte_exact() -> Result<(), WebPushEr
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn rfc_8188_section_3_1_record_is_reproduced_byte_exact() -> Result<(), WebPushError> {
     let expected = b64(RFC_8188_MESSAGE);
     let salt: [u8; 16] = expected
@@ -154,7 +152,6 @@ fn rfc_8188_section_3_1_record_is_reproduced_byte_exact() -> Result<(), WebPushE
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_notice_decrypts_with_the_subscriptions_key_to_its_padded_payload() -> Result<(), WebPushError>
 {
     let notice = PushPlaintext::new([0xab; 16], PushText::ApprovalNeeded);
@@ -183,10 +180,9 @@ fn a_notice_decrypts_with_the_subscriptions_key_to_its_padded_payload() -> Resul
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn the_vapid_token_verifies_against_the_signers_public_key() -> Result<(), WebPushError> {
     let signer = TestSigner::new();
-    let endpoint = PushEndpoint::parse("https://push.example.net:8443/a/b?c")?;
+    let endpoint = PushEndpoint::parse("https://fcm.googleapis.com/a/b?c")?;
     let header = vapid_authorization(&endpoint, &subject()?, &signer, NOW)?;
     let overflow = vapid_authorization(&endpoint, &subject()?, &signer, u64::MAX);
     assert_eq!(overflow, Err(WebPushError::Clock));
@@ -205,7 +201,7 @@ fn the_vapid_token_verifies_against_the_signers_public_key() -> Result<(), WebPu
     let claims = String::from_utf8(b64(claims)).unwrap_or_default();
     let exp = NOW + 43_200;
     let want = format!(
-        r#"{{"aud":"https://push.example.net:8443","exp":{exp},"sub":"mailto:push@example.invalid"}}"#
+        r#"{{"aud":"https://fcm.googleapis.com","exp":{exp},"sub":"mailto:push@example.invalid"}}"#
     );
     assert_eq!(claims, want, "aud is the origin, exp is 12 h ahead");
     let verifying = VerifyingKey::from_sec1_bytes(&b64(key)).unwrap_or_else(|_| unreachable!());
@@ -218,7 +214,6 @@ fn the_vapid_token_verifies_against_the_signers_public_key() -> Result<(), WebPu
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn the_envelope_is_fixed_by_class_and_the_endpoint_passes_through() -> Result<(), WebPushError> {
     let table = [
         (NoticeClass::Action, "high", 3_600),
@@ -253,7 +248,6 @@ fn the_envelope_is_fixed_by_class_and_the_endpoint_passes_through() -> Result<()
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn a_body_over_512_octets_is_refused_and_one_at_512_is_not() -> Result<(), WebPushError> {
     let sub = subscription(ENDPOINT)?;
     let at_cap = seal(&sub, &[b'a'; 409], None, &mut rfc_random())?;
@@ -286,13 +280,18 @@ fn a_body_over_512_octets_is_refused_and_one_at_512_is_not() -> Result<(), WebPu
 }
 
 #[test]
-#[ignore = "pending E8-14"]
 fn bad_endpoints_keys_and_subjects_are_refused() -> Result<(), WebPushError> {
     let endpoint = PushEndpoint::parse(ENDPOINT)?;
     assert_eq!(
         format!("{endpoint:?}"),
         "PushEndpoint(..)",
         "an address is never printed (NT-2)"
+    );
+    let with_port = "https://fcm.googleapis.com:443/fcm/send/x";
+    assert_eq!(
+        PushEndpoint::parse(with_port).map(|e| e.url),
+        Ok(with_port.to_owned()),
+        "port 443 written out"
     );
     for url in [
         "http://push.example.net/x",
@@ -301,6 +300,8 @@ fn bad_endpoints_keys_and_subjects_are_refused() -> Result<(), WebPushError> {
         "https://a b/",
         "https://push.example.net/\"",
         "https://push.example.net/\\",
+        "https://fcm.googleapis.com:0443/x",
+        "https://fcm.googleapis.com:+443/x",
     ] {
         assert_eq!(
             PushEndpoint::parse(url),
@@ -345,11 +346,238 @@ fn bad_endpoints_keys_and_subjects_are_refused() -> Result<(), WebPushError> {
     Ok(())
 }
 
+/// DEC-792 item 2's default list, written out from the decision.
+const SPEC_DEFAULT_LIST: [&str; 4] = [
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "*.push.apple.com",
+    "*.notify.windows.com",
+];
+
+const REFUSED: Result<&str, WebPushError> = Err(WebPushError::InvalidEndpoint);
+
+/// Each row is accepted with its address unchanged, or refused with `invalid_endpoint`.
+fn check_endpoints(
+    allowlist: &PushAllowlist,
+    table: &[(&str, Result<&str, WebPushError>)],
+) -> Result<(), WebPushError> {
+    assert!(table.len() >= 4, "a table with rows to check");
+    for (url, expected) in table {
+        let got = PushEndpoint::parse_allowed(url, allowlist).map(|e| e.url);
+        assert_eq!(got, expected.clone().map(str::to_owned), "{url}");
+    }
+    Ok(())
+}
+
+#[test]
+fn the_default_list_is_the_decisions() {
+    assert_eq!(DEFAULT_PUSH_ALLOWLIST, SPEC_DEFAULT_LIST, "DEC-792 item 2");
+}
+
+/// The shared table (DEC-792 item 3, spec §4.6): the browsers' own push services on the default
+/// list, and every syntax DEC-792 item 1 refuses rather than normalizes.
+#[test]
+fn the_shared_endpoint_table_holds_on_the_default_list() -> Result<(), WebPushError> {
+    let list = PushAllowlist::parse(&SPEC_DEFAULT_LIST)?;
+    let table = [
+        (
+            "https://fcm.googleapis.com/fcm/send/abc",
+            Ok("https://fcm.googleapis.com/fcm/send/abc"),
+        ),
+        (
+            "https://fcm.googleapis.com/fcm/send/AbC-123",
+            Ok("https://fcm.googleapis.com/fcm/send/AbC-123"),
+        ),
+        (
+            "https://updates.push.services.mozilla.com/wpush/v2/gA",
+            Ok("https://updates.push.services.mozilla.com/wpush/v2/gA"),
+        ),
+        (
+            "https://web.push.apple.com/QGuQ",
+            Ok("https://web.push.apple.com/QGuQ"),
+        ),
+        (
+            "https://a.b.push.apple.com/x",
+            Ok("https://a.b.push.apple.com/x"),
+        ),
+        (
+            "https://wns2-bl2p.notify.windows.com/w/?token=AQE",
+            Ok("https://wns2-bl2p.notify.windows.com/w/?token=AQE"),
+        ),
+        (
+            "https://fcm.googleapis.com:443/fcm/send/abc",
+            Ok("https://fcm.googleapis.com:443/fcm/send/abc"),
+        ),
+        ("https://push.apple.com/x", REFUSED),
+        ("https://notify.windows.com/x", REFUSED),
+        ("https://fcm.googleapis.com:8443/fcm/send/abc", REFUSED),
+        ("https://fcm.googleapis.com:80/fcm/send/abc", REFUSED),
+        ("https://fcm.googleapis.com:0443/fcm/send/abc", REFUSED),
+        ("https://fcm.googleapis.com:/fcm/send/abc", REFUSED),
+        ("http://fcm.googleapis.com/fcm/send/abc", REFUSED),
+        ("https://u@fcm.googleapis.com/fcm/send/abc", REFUSED),
+        ("https://u:p@web.push.apple.com/x", REFUSED),
+        ("https://142.250.72.10/fcm/send/abc", REFUSED),
+        ("https://[::1]/x", REFUSED),
+        ("https://fcm.googleapis.com./fcm/send/abc", REFUSED),
+        ("https://web.push.apple.com./x", REFUSED),
+        ("https://xn--80ak6aa92e.push.apple.com/x", REFUSED),
+        ("https://web.xn--push-9qa.apple.com/x", REFUSED),
+        ("https://wéb.push.apple.com/x", REFUSED),
+        ("https://FCM.googleapis.com/fcm/send/abc", REFUSED),
+        ("https://Web.Push.Apple.com/x", REFUSED),
+        ("https://fcm%2egoogleapis.com/fcm/send/abc", REFUSED),
+        ("https://web%2Epush.apple.com/x", REFUSED),
+        ("https://evilfcm.googleapis.com/fcm/send/abc", REFUSED),
+        ("https://a.fcm.googleapis.com/fcm/send/abc", REFUSED),
+        ("https://fcm.googleapis.com.evil.net/fcm/send/abc", REFUSED),
+        ("https://x.notify.windows.com.evil.net/w", REFUSED),
+        ("https://evilpush.apple.com/x", REFUSED),
+        ("https://android.googleapis.com/gcm/send/abc", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
+/// RFC 8292 §2: `aud` is the push resource's origin, whose ASCII serialization (RFC 6454 §6.2)
+/// omits the default port, so a written `:443` never reaches the token; the address keeps it.
+#[test]
+fn the_vapid_audience_omits_a_written_default_port() -> Result<(), WebPushError> {
+    let url = "https://fcm.googleapis.com:443/fcm/send/x";
+    let endpoint =
+        PushEndpoint::parse_allowed(url, &PushAllowlist::parse(&DEFAULT_PUSH_ALLOWLIST)?)?;
+    assert_eq!(endpoint.url, url, "the stored address is unchanged");
+    let header = vapid_authorization(&endpoint, &subject()?, &TestSigner::new(), NOW)?;
+    let claims = header
+        .strip_prefix("vapid t=")
+        .and_then(|t| t.split('.').nth(1))
+        .unwrap_or_default();
+    let claims = String::from_utf8(b64(claims)).unwrap_or_default();
+    let aud = claims
+        .split(r#""aud":""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next());
+    assert_eq!(aud, Some("https://fcm.googleapis.com"), "RFC 6454 §6.2");
+    Ok(())
+}
+
+#[test]
+fn a_wildcard_entry_matches_proper_subdomains_at_any_depth_and_never_the_domain()
+-> Result<(), WebPushError> {
+    let list = PushAllowlist::parse(&["*.example.net"])?;
+    let table = [
+        ("https://a.example.net/p", Ok("https://a.example.net/p")),
+        (
+            "https://a.b.c.example.net/p",
+            Ok("https://a.b.c.example.net/p"),
+        ),
+        ("https://example.net/p", REFUSED),
+        ("https://aexample.net/p", REFUSED),
+        ("https://a.example.net.evil/p", REFUSED),
+        ("https://a.example.org/p", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
+#[test]
+fn an_exact_entry_matches_only_its_own_host() -> Result<(), WebPushError> {
+    let list = PushAllowlist::parse(&["push.example.net"])?;
+    let table = [
+        (
+            "https://push.example.net/p",
+            Ok("https://push.example.net/p"),
+        ),
+        (
+            "https://push.example.net:443/p",
+            Ok("https://push.example.net:443/p"),
+        ),
+        ("https://a.push.example.net/p", REFUSED),
+        ("https://xpush.example.net/p", REFUSED),
+        ("https://push.example.ne/p", REFUSED),
+        ("https://example.net/p", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
+/// A customer-run deployment may shorten the list (DEC-792 item 2); what it dropped is refused.
+#[test]
+fn a_shortened_list_refuses_the_hosts_it_dropped() -> Result<(), WebPushError> {
+    let list = PushAllowlist::parse(&["fcm.googleapis.com"])?;
+    let table = [
+        (
+            "https://fcm.googleapis.com/fcm/send/abc",
+            Ok("https://fcm.googleapis.com/fcm/send/abc"),
+        ),
+        (
+            "https://updates.push.services.mozilla.com/wpush/v2/gA",
+            REFUSED,
+        ),
+        ("https://web.push.apple.com/QGuQ", REFUSED),
+        ("https://wns2-bl2p.notify.windows.com/w/?token=AQE", REFUSED),
+    ];
+    check_endpoints(&list, &table)
+}
+
+/// An entry is one exact host or `*.` and a domain (DEC-792 item 2); one no accepted endpoint
+/// could match is a configuration error, refused rather than kept.
+#[test]
+fn a_malformed_allowlist_entry_is_refused() {
+    let accepted = [
+        "fcm.googleapis.com",
+        "updates.push.services.mozilla.com",
+        "*.push.apple.com",
+        "*.notify.windows.com",
+        "push-1.example.net",
+    ];
+    for entry in accepted {
+        assert_eq!(
+            PushAllowlist::parse(&[entry]).map(|_| ()),
+            Ok(()),
+            "{entry}"
+        );
+    }
+    let refused = [
+        "",
+        "*",
+        "*.",
+        ".",
+        "*.*.example.net",
+        "a.*.example.net",
+        "*example.net",
+        "**.example.net",
+        "example.net.",
+        "*.example.net.",
+        "a..example.net",
+        "Fcm.googleapis.com",
+        "*.Push.apple.com",
+        "127.0.0.1",
+        "*.0.1",
+        "[::1]",
+        "xn--80ak6aa92e.example",
+        "*.xn--p1ai",
+        "wéb.example.net",
+        "fcm%2egoogleapis.com",
+        "fcm.googleapis.com:443",
+        "https://fcm.googleapis.com",
+        "fcm.googleapis.com/",
+        " fcm.googleapis.com",
+        "u@fcm.googleapis.com",
+    ];
+    for entry in refused {
+        let one = PushAllowlist::parse(&[entry]).map(|_| ());
+        assert_eq!(one, Err(WebPushError::InvalidEndpoint), "{entry:?}");
+        let among = PushAllowlist::parse(&["fcm.googleapis.com", entry]).map(|_| ());
+        assert_eq!(
+            among,
+            Err(WebPushError::InvalidEndpoint),
+            "{entry:?} after a good one"
+        );
+    }
+}
+
 proptest! {
     /// NT-1: whatever the notice id and text key, the plaintext is exactly the closed payload, so
     /// every body is the same length and opens to the payload's own bytes.
     #[test]
-    #[ignore = "pending E8-14"]
     fn every_payload_is_the_closed_pair_and_every_body_one_size(
         notice in any::<[u8; 16]>(),
         text in 0usize..4,
@@ -373,7 +601,6 @@ proptest! {
 
     /// RFC 8292 §2: `exp` is in the future and never more than 24 hours ahead.
     #[test]
-    #[ignore = "pending E8-14"]
     fn the_token_expires_within_24_hours(now in 0u64..=4_102_444_800) {
         let endpoint = PushEndpoint::parse(ENDPOINT)?;
         let header = vapid_authorization(&endpoint, &subject()?, &TestSigner::new(), now)?;
