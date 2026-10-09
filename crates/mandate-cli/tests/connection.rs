@@ -475,9 +475,11 @@ fn commits_exactly_when_every_needed_check_passed() {
 /// The id the rival's event takes, after any history a case starts from.
 const RIVAL: &str = "20000000000000000000000009";
 
-/// A journal on which a rival `record` commits right after the command first reads the control
-/// stream, before it appends: two concurrent records that both read before either appends, without
-/// threads. The rival is history words ([`history`]), or `alpaca` for Alpaca's paper connection,
+/// A journal on which a rival `record` commits on the control stream at the command's first append
+/// to it, just before that append lands (taking the stream's writer epoch, as its writer would):
+/// two concurrent records that both read, however often, before either appends, without threads.
+/// So a command that only reads again before appending still appends behind the rival; only one
+/// that appends at the head its checked rows were read at sees the race (#915 review). The rival is history words ([`history`]), or `alpaca` for Alpaca's paper connection,
 /// which binds nothing the command records.
 struct Racing {
     inner: RefCell<Journal>,
@@ -512,11 +514,7 @@ impl Racing {
 
 impl ControlJournal for Racing {
     fn rows(&self, s: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
-        let rows = self.inner.borrow().rows(s)?;
-        if s.as_str() == CONTROL {
-            self.commit_rival();
-        }
-        Ok(rows)
+        self.inner.borrow().rows(s)
     }
 
     fn head(&self, s: &StreamId) -> Result<Head, ControlError> {
@@ -535,6 +533,9 @@ impl ControlJournal for Racing {
         recorded_at: UtcNanos,
         drafts: &[&[u8]],
     ) -> Result<AppendOutcome, ControlError> {
+        if s.as_str() == CONTROL {
+            self.commit_rival();
+        }
         let j = self.inner.get_mut();
         j.append(s, expected_head, writer_epoch, recorded_at, drafts)
     }
