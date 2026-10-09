@@ -1,5 +1,5 @@
 import { type ReactElement, useEffect } from "react";
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
 import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
@@ -169,6 +169,27 @@ describe("D2 agent detail", () => {
     expect(card.querySelector("[role=progressbar]")).toBeNull();
     expect(within(card).getByRole("link", { name: "View full mandate" })).toHaveAttribute("href", `/agents/${AGENT_IDS.swing}/mandate`);
     expect(main().querySelector("[data-slot=mandate-fields]")).toBeNull();
+  });
+
+  it("labels what the next level does 'At the limit:', so it never reads as the mode the chip shows (C-7)", () => {
+    for (const agentId of Object.values(AGENT_IDS)) {
+      cleanup();
+      renderScreen(`/agents/${agentId}`, <AgentDetailScreen agentId={agentId} />);
+      const card = within(main()).getByRole("region", { name: "Your mandate" });
+      const next = card.querySelector("[data-slot=next-level]");
+      if (!next) continue;
+      const lines = [...next.querySelectorAll("p")].map((p) => p.textContent ?? "");
+      const said = lines.find((line) => /equity now\./.test(line));
+      expect(said, `${agentId}: ${lines.join(" | ")}`).toMatch(/equity now\. At the limit: [a-z][^.]*\.$/);
+      expect(within(card).getByRole("group", { name: "Mode" })).toBeVisible();
+    }
+    cleanup();
+    renderScreen(`/agents/${AGENT_IDS.btc}`, <AgentDetailScreen agentId={AGENT_IDS.btc} />);
+    const card = within(main()).getByRole("region", { name: "Your mandate" });
+    const daily = card.querySelector("[data-slot=next-level][data-level=daily]");
+    expect(daily).not.toBeNull();
+    expect(daily).toHaveTextContent(/below equity now\. At the limit: selling only until a new risk day\./);
+    expect(daily).not.toHaveTextContent(/now\. Selling only/);
   });
 
   it("tells the story in the main column, with a recent slice of activity and a link to all of it", () => {

@@ -2088,7 +2088,8 @@ fn unexpected_snapshot(outcome: BrokerOutcome, what: &'static str) -> Cause {
         | BrokerOutcome::Account(_)
         | BrokerOutcome::Activities { .. }
         | BrokerOutcome::CancelAccepted { .. }
-        | BrokerOutcome::AccountWideAccepted => Cause::Absent { what },
+        | BrokerOutcome::AccountWideAccepted
+        | BrokerOutcome::Listed { .. } => Cause::Absent { what },
     }
 }
 

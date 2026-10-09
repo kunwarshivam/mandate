@@ -291,7 +291,7 @@ export function MandateCard({ agent, className }: { agent: Agent; className?: st
             <span className="font-mono tabular">{usd(next.level.at)}</span>
           </p>
           <p className="text-caption text-mandate-muted">
-            <span className="font-mono tabular">{usd(next.distance)}</span> {next.side} equity now. {next.level.action}.
+            <span className="font-mono tabular">{usd(next.distance)}</span> {next.side} equity now. At the limit: {next.level.action.toLowerCase()}.
           </p>
         </div>
       ) : null}

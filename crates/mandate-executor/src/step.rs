@@ -218,6 +218,7 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         | BrokerOutcome::Positions(_)
         | BrokerOutcome::Activities { .. }
         | BrokerOutcome::AccountWideAccepted => later_slice(),
+        BrokerOutcome::Listed { .. } => Err(ExecutorError::Unimplemented { story: "E7-23" }),
     }
 }
 

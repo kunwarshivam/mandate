@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/src/protection.rs"
+test = "sequence_tests::the_alerting_records_are_closed"
+reason = """
+E7-19 E1b-P (DEC-859): a data reshaping with no new function, so it reaches no stub and fails on
+main's legacy draft until E1b-P's implementation PR deletes this file with the test's `#[ignore]`
+line.
+"""
