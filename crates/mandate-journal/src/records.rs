@@ -4,8 +4,11 @@
 //! refusing `schema` at its member. §3's client actor (rules 81 to 83) is [`crate::workspace`]'s:
 //! it admits a client's own `RecordsAccessed` and refuses a client on the other two before the
 //! payload is read. Every rule only refuses a draft.
+//!
+//! It also holds §9.14's `AnchorComputed` and `SegmentExported` (DEC-783, journal spec v0.27),
+//! closed there at schema version 1, with consistency rules 113 to 118.
 
-use mandate_canon::Value;
+use mandate_canon::{Digest, Key, Object, Value, to_canonical};
 
 use crate::schema::Ty;
 use crate::{Invalid, InvalidReason, StreamId, StreamType};
@@ -13,9 +16,22 @@ use crate::{Invalid, InvalidReason, StreamId, StreamType};
 const READ: &str = "RecordsAccessed";
 const EXPORT: &str = "ExportCreated";
 const VERIFICATION: &str = "VerificationRun";
+const ANCHOR: &str = "AnchorComputed";
+const SEGMENT: &str = "SegmentExported";
 
-/// The control-stream event types §9.13 adds to [`crate::control::governs`].
-pub(crate) const CONTROL: [&str; 3] = [READ, EXPORT, VERIFICATION];
+/// The control-stream event types §9.13 and §9.14 add to [`crate::control::governs`].
+pub(crate) const CONTROL: [&str; 5] = [READ, EXPORT, VERIFICATION, ANCHOR, SEGMENT];
+
+/// DEC-263's six manifest fields, each as its manifest names it and the record member it is read
+/// from (rule 117).
+const MANIFEST: [(&str, &str); 6] = [
+    ("stream", "stream_id"),
+    ("first_seq", "first_seq"),
+    ("last_seq", "last_seq"),
+    ("first_prev_hash", "first_prev_hash"),
+    ("last_hash", "last_hash"),
+    ("file_sha256", "file_sha256"),
+];
 
 /// The `prev_hash` before seq 1 (§3).
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -63,11 +79,13 @@ pub(crate) fn schema(
         (READ, 1, StreamType::Control) => Some(&RECORDS_ACCESSED),
         (EXPORT, 1, StreamType::Control) => Some(&EXPORT_CREATED),
         (VERIFICATION, 1, StreamType::Control) => Some(&VERIFICATION_RUN),
+        (ANCHOR, 1, StreamType::Control) => Some(&ANCHOR_COMPUTED),
+        (SEGMENT, 1, StreamType::Control) => Some(&SEGMENT_EXPORTED),
         _ => None,
     }
 }
 
-/// Rules 107 to 112 on a payload its schema has normalized, in rule order: the first that fails
+/// Rules 107 to 118 on a payload its schema has normalized, in rule order: the first that fails
 /// is reported. `stream`, `actor` and `causation_id` are the envelope's.
 pub(crate) fn rules(
     event_type: &str,
@@ -76,8 +94,11 @@ pub(crate) fn rules(
     actor: Option<&Value>,
     causation_id: Option<&Value>,
 ) -> Result<(), Invalid> {
-    if !CONTROL.contains(&event_type) {
-        return Ok(());
+    match event_type {
+        ANCHOR => return anchor_rules(payload, stream, actor),
+        SEGMENT => return segment_rules(payload, stream, actor),
+        _ if !CONTROL.contains(&event_type) => return Ok(()),
+        _ => {}
     }
     let ranges = list(payload, "ranges");
     ranges_rule(ranges, stream)?;
@@ -169,6 +190,83 @@ fn checked_ranges_rule(ranges: &[Value]) -> Result<(), Invalid> {
     Ok(())
 }
 
+/// Rules 113 to 115: non-empty leaves, each in this workspace with `seq` at least 1 and sorting
+/// after the one before it by `stream_id` bytes, one of them the envelope's own stream; the root
+/// recomputed over them; and a `system` writer.
+fn anchor_rules(payload: &Value, stream: &StreamId, actor: Option<&Value>) -> Result<(), Invalid> {
+    let leaves = list(payload, "leaves");
+    ensure(!leaves.is_empty(), "payload.leaves")?;
+    let workspace = stream.as_str().split(':').nth(1);
+    let mut previous: Option<&str> = None;
+    for (i, leaf) in leaves.iter().enumerate() {
+        let at = |member: &str| format!("payload.leaves[{i}].{member}");
+        let named = text(Some(leaf), "stream_id");
+        ensure(named.split(':').nth(1) == workspace, &at("stream_id"))?;
+        ensure(seq(leaf, "seq") >= 1, &at("seq"))?;
+        if let Some(before) = previous {
+            ensure(named > before, &at("stream_id"))?;
+        }
+        previous = Some(named);
+    }
+    let own = leaves
+        .iter()
+        .any(|leaf| text(Some(leaf), "stream_id") == stream.as_str());
+    ensure(own, "payload.leaves")?;
+    let root = anchor_leaves(leaves)
+        .as_deref()
+        .and_then(crate::merkle::merkle_root)
+        .map(|digest| digest.to_hex());
+    ensure(
+        root.as_deref() == Some(text(Some(payload), "root")),
+        "payload.root",
+    )?;
+    ensure(text(actor, "kind") == "system", "actor.kind")
+}
+
+/// The normalized `leaves` as §10's leaves, or `None` when one does not convert.
+fn anchor_leaves(leaves: &[Value]) -> Option<Vec<crate::merkle::AnchorLeaf>> {
+    leaves
+        .iter()
+        .map(|leaf| {
+            Some(crate::merkle::AnchorLeaf {
+                stream_id: leaf.get("stream_id")?.as_str()?.to_owned(),
+                seq: leaf.get("seq")?.as_int()?,
+                hash: Digest::from_hex(leaf.get("hash")?.as_str()?)?,
+            })
+        })
+        .collect()
+}
+
+/// Rules 116 to 118: the segment's stream in this workspace, `first_seq` at least 1, `last_seq`
+/// at least `first_seq`, the genesis hash exactly before seq 1; the manifest hash over DEC-263's
+/// six fields; and a `system` writer.
+fn segment_rules(payload: &Value, stream: &StreamId, actor: Option<&Value>) -> Result<(), Invalid> {
+    let workspace = stream.as_str().split(':').nth(1);
+    let named = text(Some(payload), "stream_id");
+    ensure(named.split(':').nth(1) == workspace, "payload.stream_id")?;
+    let (first, last) = (seq(payload, "first_seq"), seq(payload, "last_seq"));
+    ensure(first >= 1, "payload.first_seq")?;
+    ensure(last >= first, "payload.last_seq")?;
+    let genesis = text(Some(payload), "first_prev_hash") == GENESIS;
+    ensure(genesis == (first == 1), "payload.first_prev_hash")?;
+    let manifest = manifest_hash(payload).map(|digest| digest.to_hex());
+    ensure(
+        manifest.as_deref() == Some(text(Some(payload), "manifest_hash")),
+        "payload.manifest_hash",
+    )?;
+    ensure(text(actor, "kind") == "system", "actor.kind")
+}
+
+/// DEC-263 item 3: the SHA-256 of the canonical JSON of the six manifest fields this record
+/// carries, or `None` when one is missing.
+fn manifest_hash(payload: &Value) -> Option<Digest> {
+    let mut manifest = Object::new();
+    for (field, member) in MANIFEST {
+        manifest.insert(Key::new(field).ok()?, payload.get(member)?.clone());
+    }
+    Some(Digest::of(&to_canonical(&Value::Object(manifest))))
+}
+
 fn failure(range: &Value) -> Option<&Value> {
     range.get("failure").filter(|f| **f != Value::Null)
 }
@@ -253,4 +351,26 @@ static VERIFICATION_RUN: Ty = Ty::Record(&[
     ),
     ("ranges", Ty::List(&CHECKED_RANGE)),
     ("result", Ty::OneOf(&["pass", "fail"])),
+]);
+
+static LEAF: Ty = Ty::Record(&[
+    ("hash", Ty::Digest),
+    ("seq", Ty::Int),
+    ("stream_id", Ty::StreamName),
+]);
+
+static ANCHOR_COMPUTED: Ty = Ty::Record(&[
+    ("leaves", Ty::List(&LEAF)),
+    ("root", Ty::Digest),
+    ("token", Ty::Nullable(&Ty::DigestRef)),
+]);
+
+static SEGMENT_EXPORTED: Ty = Ty::Record(&[
+    ("stream_id", Ty::StreamName),
+    ("first_seq", Ty::Int),
+    ("last_seq", Ty::Int),
+    ("first_prev_hash", Ty::Digest),
+    ("last_hash", Ty::Digest),
+    ("file_sha256", Ty::Digest),
+    ("manifest_hash", Ty::Digest),
 ]);
