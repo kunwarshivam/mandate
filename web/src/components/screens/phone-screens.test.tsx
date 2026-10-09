@@ -8,8 +8,8 @@ import { agentLimits, headroomLine, nextLevel } from "@/lib/limits";
 import { usd } from "@/lib/format";
 import { MODE_MEANING } from "@/lib/labels";
 import { allOrders } from "@/lib/orders";
-import { agentHref } from "@/lib/screens";
-import { renderWithRuntime } from "@/test/harness";
+import { agentHref, orderHref } from "@/lib/screens";
+import { dockStop, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { shownOnDesktop, shownOnPhone } from "@/test/viewport";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
@@ -69,6 +69,19 @@ describe("Home on a phone", () => {
     expect(rows.slice(3).map((r) => r.textContent)).toEqual(["Agent 2: stale price (XYZ, QRS)"]);
     expect(within(rows[3]).getByRole("link")).toHaveAttribute("href", expect.stringMatching(/^\/agents\/agt_/));
     expect(needsYou().querySelector("h2")).toHaveTextContent("Needs you4 items");
+  });
+
+  it("says why Stop is loud for an order whose state is unknown: its agent's condition, opening the order's record (C-25)", () => {
+    home("unknown-order");
+    const unknown = buildWorkspace("unknown-order")
+      .agents.flatMap((a) => a.orders.filter((o) => o.state === "Unknown").map((o) => ({ agent: a, order: o })));
+    expect(unknown).toHaveLength(1);
+    const [{ agent, order }] = unknown;
+    expect(dockStop()).toHaveAttribute("data-tone", "loud");
+    const conditions = [...needsYou().querySelectorAll<HTMLElement>("li[data-kind=alert]")];
+    expect(conditions.map((r) => r.textContent)).toEqual([`${agent.label}: an order's state is unknown`]);
+    expect(conditions[0]).not.toHaveTextContent(order.instrument.symbol);
+    expect(within(conditions[0]).getByRole("link")).toHaveAttribute("href", orderHref(agent.agent_id, order.client_order_id));
   });
 
   it("lays Needs you out as one row of cards that scrolls sideways on a phone, and as stacked rows on desktop", () => {
