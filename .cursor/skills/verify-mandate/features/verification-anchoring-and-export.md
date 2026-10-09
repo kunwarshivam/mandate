@@ -18,8 +18,7 @@
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
   and every split of every full chain against the full-chain run and an independent scan),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
-  vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3,
-  pending).
+  vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3).
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
   the `cold_records.range_checks`, `cold_records.trusted_starts`, and
   `records_access.range_checks`, `verification_runs`, `connections`, `connection_requests`, and
