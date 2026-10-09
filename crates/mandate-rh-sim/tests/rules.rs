@@ -4,6 +4,7 @@
 mod common;
 
 use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, account, limit, price, qty, sim};
+use mandate_rh_sim::SimError::{QuantityForm, SessionNeedsLimit, Unreadable};
 use mandate_rh_sim::{Alert, Event, OrderRequest, Session, Sim, SimError};
 
 type Outcome = Result<(), SimError>;
@@ -35,7 +36,6 @@ const STOP_LIMIT: [(&str, &str); 2] = [("type", "stop_limit"), ("stop_price", "4
 
 #[test]
 fn quantity_forms_sessions_and_text_follow_the_contract() -> Outcome {
-    use SimError::{QuantityForm, SessionNeedsLimit, Unreadable};
     let cases: Vec<(OrderRequest, Result<(), SimError>)> = vec![
         (req(&[]), Ok(())),
         (req(&[("quantity", "1.5")]), Err(QuantityForm)),

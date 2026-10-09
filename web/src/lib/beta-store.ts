@@ -7,6 +7,16 @@ import type { BetaRequest } from "@/lib/beta";
 /** Where requests go when the Supabase table is missing: one JSON line each, never committed. */
 export const LOCAL_FILE = join(process.cwd(), ".data", "beta-requests.jsonl");
 
+/**
+ * Whether a request may fall back to the local file: never in a production build, whose host
+ * (Cloudflare Workers, DEC-823) keeps no file between requests, so there the store is the Supabase
+ * table alone and anything else answers unavailable (DEC-731 item 4).
+ */
+export function localFileAllowed(nodeEnv: string | undefined): boolean {
+  void nodeEnv;
+  throw new Error("Unimplemented: E11-9");
+}
+
 const UNIQUE_VIOLATION = "23505";
 const MISSING_TABLE = "PGRST205";
 

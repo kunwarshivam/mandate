@@ -22,6 +22,7 @@ const CLOCK: &str = "clock";
 
 /// Journal spec §9, with §2's copies into account streams: `ClockAdvanced`, and `OwnerAcknowledged`
 /// as a risk input (mandate spec §5.2, DEC-81).
+/// `OwnerAlertSent` and the notice stream's records are DEC-720's, written out in `tests/notices.rs`.
 const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("StreamOpened", &[ACCT, AGENT, CTL, CLOCK], &[]),
     ("IntentReceived", &[ACCT], &[MAN]),
@@ -89,7 +90,6 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("ConnectionEstablished", &[CTL], &[]),
     ("ConnectionRevoked", &[CTL], &[]),
     ("DisclosureAccepted", &[CTL], &[]),
-    ("OwnerAlertSent", &[CTL], &[]),
     ("OwnerAcknowledged", &[ACCT, CTL], &[]),
     ("ConfigSnapshotRegistered", &[CTL], &[]),
     ("SurveillanceReportGenerated", &[CTL], &[RULE]),
@@ -156,6 +156,28 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
     ("OwnerCommandRefused", AGENT),
 ];
 
+/// The records journal spec v0.17 §9.7 closes (DEC-533), each on its one stream with the
+/// configuration it names. Until J2's implementation catalogues and closes them, the journal refuses
+/// them as not catalogued or not registered; `the_approval_answers_are_catalogued_and_closed_on_their_streams`
+/// asserts what they become, so the table above leaves their schema reason alone.
+const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
+    ("ApprovalResponseSubmitted", CTL, &[]),
+    ("ApprovalResponded", AGENT, &[MAN]),
+    ("ApprovalRevalidated", AGENT, &[MAN]),
+];
+
+/// The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800), with the stream types
+/// each is closed on. `ConnectionEstablished` gains the account stream for the executor's copy, so
+/// [`stream_types_and_required_config_refs_match_the_spec`] leaves its streams alone;
+/// `the_connection_records_are_catalogued_and_closed_on_their_streams` asserts what each becomes.
+const CLOSED_BY_E7_17: &[(&str, &[&str])] = &[
+    ("ConnectionRefused", &[CTL]),
+    ("ConnectionCredentialRotated", &[CTL, ACCT]),
+    ("ConnectionChecked", &[ACCT]),
+    ("ConnectionStateChanged", &[ACCT]),
+    ("ConnectionCredentialRefreshed", &[ACCT]),
+];
+
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
@@ -220,6 +242,9 @@ fn draft(event_type: &str, kind: &str, refs: &[&str]) -> Vec<u8> {
 #[test]
 fn stream_types_and_required_config_refs_match_the_spec() {
     for (event_type, streams, required) in SPEC {
+        if *event_type == "ConnectionEstablished" {
+            continue;
+        }
         for kind in [ACCT, AGENT, CTL, CLOCK] {
             let reason = |refs: &[&str]| {
                 Draft::parse(&draft(event_type, kind, refs))
@@ -240,8 +265,12 @@ fn stream_types_and_required_config_refs_match_the_spec() {
             } else {
                 InvalidReason::UnknownSchema
             };
+            let section_9_7 = CLOSED_BY_SECTION_9_7
+                .iter()
+                .any(|(t, _, _)| t == event_type);
             if !(kind == AGENT && CLOSED_ON_AGENT.contains(event_type))
                 && !closed_by_section_9_2(event_type, kind)
+                && !section_9_7
             {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
@@ -1272,4 +1301,73 @@ fn a_provenance_entry_refuses_an_unlisted_member() {
             "payload.provenance[0].quoted_span".to_owned()
         )
     );
+}
+
+/// §9.7's three records are catalogued on their one stream with the configuration they name, and
+/// closed there: a payload §9.7 does not list is refused `schema`, never `unknown_schema`.
+#[test]
+fn the_approval_answers_are_catalogued_and_closed_on_their_streams() {
+    for (event_type, home, refs) in CLOSED_BY_SECTION_9_7 {
+        for kind in [ACCT, AGENT, CTL, CLOCK] {
+            let refused = Draft::parse(&draft(event_type, kind, refs)).unwrap_err();
+            let want = if kind == *home {
+                (InvalidReason::Schema, "payload.unregistered".to_owned())
+            } else {
+                (InvalidReason::WrongStream, "event_type".to_owned())
+            };
+            assert_eq!(
+                (refused.reason, refused.path),
+                want,
+                "{event_type} in {kind}"
+            );
+        }
+        for missing in refs.iter() {
+            let refused = Draft::parse(&draft(event_type, home, &[])).unwrap_err();
+            let want = (
+                InvalidReason::MissingConfigRef,
+                format!("config_refs.{missing}"),
+            );
+            assert_eq!(
+                (refused.reason, refused.path),
+                want,
+                "{event_type} without {missing}"
+            );
+        }
+    }
+}
+
+/// §9.8's connection records are catalogued on their streams and closed there: an unlisted member
+/// is refused `schema`, never `unknown_schema`. `ConnectionEstablished` stays closed at version 1 on
+/// the control stream and is catalogued on the account stream too, where only the executor's
+/// version-2 copy is registered, so a version-1 draft there is `unknown_schema`.
+#[test]
+fn the_connection_records_are_catalogued_and_closed_on_their_streams() {
+    for (event_type, homes) in CLOSED_BY_E7_17 {
+        for kind in [ACCT, AGENT, CTL, CLOCK] {
+            let refused = Draft::parse(&draft(event_type, kind, &[])).unwrap_err();
+            let want = if homes.contains(&kind) {
+                (InvalidReason::Schema, "payload.unregistered".to_owned())
+            } else {
+                (InvalidReason::WrongStream, "event_type".to_owned())
+            };
+            assert_eq!(
+                (refused.reason, refused.path),
+                want,
+                "{event_type} in {kind}"
+            );
+        }
+    }
+    for kind in [ACCT, AGENT, CTL, CLOCK] {
+        let refused = Draft::parse(&draft("ConnectionEstablished", kind, &[])).unwrap_err();
+        let want = match kind {
+            CTL => (InvalidReason::Schema, "payload.unregistered".to_owned()),
+            ACCT => (InvalidReason::UnknownSchema, "payload".to_owned()),
+            _ => (InvalidReason::WrongStream, "event_type".to_owned()),
+        };
+        assert_eq!(
+            (refused.reason, refused.path),
+            want,
+            "ConnectionEstablished in {kind}"
+        );
+    }
 }

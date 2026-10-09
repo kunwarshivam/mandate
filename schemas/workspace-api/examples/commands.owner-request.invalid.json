@@ -1,0 +1,44 @@
+[
+  {
+    "label": "requested_by in the body",
+    "set": {
+      "/requested_by": "owner"
+    }
+  },
+  {
+    "label": "a number for size",
+    "set": {
+      "/size": 5
+    }
+  },
+  {
+    "label": "side short",
+    "set": {
+      "/side": "short"
+    }
+  },
+  {
+    "label": "auto: no /instrument",
+    "remove": [
+      "/instrument"
+    ]
+  },
+  {
+    "label": "auto: no /side",
+    "remove": [
+      "/side"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /side outside its set",
+    "set": {
+      "/side": "mutant_value"
+    }
+  }
+]

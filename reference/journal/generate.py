@@ -32,9 +32,12 @@ from fractions import Fraction
 from pathlib import Path
 
 import account
+import approval
+import connections
 import control
 import research
 import risk_state
+import workspace
 import yaml
 from common import (
     BOOL,
@@ -147,8 +150,9 @@ ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
 REQUESTED_BY = one_of("agent", "owner", "client")
 BUILTIN_LABEL = "builtin_risk_reducing"
 DELEGATION_PREFIX = "delegation:"
+POLICY_OVERLAY_LABEL = "policy_overlay"
 DECIDED_BY = re.compile(
-    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|(rule|delegation):[A-Za-z0-9_-]+)\Z"
+    r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|review_ceiling|policy_overlay|(rule|delegation):[A-Za-z0-9_-]+)\Z"
 )
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -279,11 +283,12 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule(4, (p["reason_code"] is None) == allow, "schema", "payload.reason_code")
         rule(5, (p["autonomy"] is not None) == allow, "schema", "payload.autonomy")
         by, classified = p["decided_by"], p["autonomy"] is not None
+        unlisted_overlay = by == POLICY_OVERLAY_LABEL and "regress.labels_without_policy_overlay" in skip
         labelled = (by is not None) == classified and (not classified or (by == BUILTIN_LABEL) != adds_risk)
         rule("5.decided_by", labelled, "schema", "payload.decided_by")
         rule(
             "5.decided_by_label",
-            by is None or bool(DECIDED_BY.match(by)),
+            by is None or (bool(DECIDED_BY.match(by)) and not unlisted_overlay),
             "non_canonical",
             "payload.decided_by",
         )
@@ -324,6 +329,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         )
         ceiling_label = by != "client_ceiling" or (client and asked)
         rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
+        overlay_label = by != POLICY_OVERLAY_LABEL or p["autonomy"] != "auto"
+        rule("7.policy_overlay_label", overlay_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule(
             "8.exit_origin",
@@ -2902,6 +2909,20 @@ LEGACY_CONFIG_REGISTRATION_SCHEMA = rec(
     ("params", list_of(STR)),
     ("admits_instruments", opt(BOOL)),
 )
+PROFILE_CONFIG_KINDS = (*PRODUCTION_CONFIG_KINDS, "broker_profile")
+PROFILE_REGISTRATION_SCHEMA = rec(
+    ("kind", one_of(*PROFILE_CONFIG_KINDS)),
+    ("content_hash", REF),
+    ("model_id", opt(STR)),
+    ("model_version", opt(STR)),
+    ("params", list_of(STR)),
+    ("admits_instruments", opt(BOOL)),
+)
+REGISTRATION_SCHEMAS = {
+    1: LEGACY_CONFIG_REGISTRATION_SCHEMA,
+    2: CONFIG_REGISTRATION_SCHEMA,
+    3: PROFILE_REGISTRATION_SCHEMA,
+}
 POLICY_SCHEMA = json.loads((ROOT / "schemas/policy.schema.json").read_text(encoding="utf-8"))
 
 
@@ -3024,19 +3045,22 @@ def production_artifact_problems(artifact: dict) -> list[str]:
     return out
 
 
-def production_registration_violations(draft: dict, stored: dict[str, dict]) -> list[Violation]:
+def production_registration_violations(
+    draft: dict, stored: dict[str, dict], skip: frozenset[str] = frozenset()
+) -> list[Violation]:
+    """Rules 20, 21, 21a and (v0.19) 21b. `skip` seeds the broker-profile section's validator bugs."""
     out = type_violations(ENVELOPE, draft, "", frozenset())
     if out:
         return out
-    if draft["schema_version"] not in (1, 2):
+    if draft["schema_version"] not in REGISTRATION_SCHEMAS:
         return [Violation("catalogue", "unknown_schema", "payload")]
     if draft["event_type"] != "ConfigSnapshotRegistered":
         return [Violation("catalogue", "unknown_event_type", "event_type")]
     stream = draft["stream_id"].split(":")
     if len(stream) != 2 or stream[0] != "ctl" or not all(IDENT.match(part) for part in stream):
         return [Violation("stream", "wrong_stream", "event_type")]
-    schema = CONFIG_REGISTRATION_SCHEMA if draft["schema_version"] == 2 else LEGACY_CONFIG_REGISTRATION_SCHEMA
-    payload_types = type_violations(schema, draft["payload"], "payload", frozenset())
+    version = 3 if "21b.version_2_admits" in skip and draft["schema_version"] == 2 else draft["schema_version"]
+    payload_types = type_violations(REGISTRATION_SCHEMAS[version], draft["payload"], "payload", frozenset())
     if payload_types:
         return payload_types
     payload = draft["payload"]
@@ -3057,7 +3081,7 @@ def production_registration_violations(draft: dict, stored: dict[str, dict]) -> 
     artifact = stored.get(payload["content_hash"])
     if artifact is None:
         return [Violation("registration.stored", "missing_artifact", "payload.content_hash")]
-    if artifact["object"].get("kind") != payload["kind"]:
+    if artifact["object"].get("kind") != payload["kind"] and "21b.kind_binding" not in skip:
         return [Violation("registration.binding", "config_ref_kind", "payload.kind")]
     return []
 
@@ -3339,6 +3363,440 @@ def build_section(v3: dict) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- policy_overlay
+
+
+OVERLAY_CLAUSE = "§9.1 rule 7; mandate spec §6.2 step 5c (DEC-536)"
+OVERLAY_VALIDATOR_MUTANTS = (
+    "rule.5.decided_by",
+    "rule.5.decided_by_label",
+    "rule.7.policy_overlay_label",
+    "regress.labels_without_policy_overlay",
+)
+
+
+def build_policy_overlay_section() -> dict:
+    """Journal spec v0.18 (DEC-536): `DecisionMade` drafts on the agent chain's opening that the
+    policy overlay of mandate spec §4.3 decided. The section is additive, so the agent-stream cases
+    and their counts stay as they are; each draft is built from `agent_stream`'s chain."""
+
+    def overlay() -> dict:
+        return change("payload.decided_by", POLICY_OVERLAY_LABEL)
+
+    return {
+        "spec": "docs/specs/journal.md v0.18 §9.1 rules 5 and 7 (DEC-536)",
+        "base": "agent_stream",
+        "invalid_drafts": [
+            invalid(
+                "decision_overlay_on_auto",
+                OVERLAY_CLAUSE,
+                "decision",
+                [overlay()],
+                "schema",
+                "payload.decided_by",
+            ),
+            invalid(
+                "decision_overlay_label_with_a_level",
+                "§9.1 rule 5",
+                "decision",
+                [
+                    change("payload.autonomy", "ask"),
+                    change("payload.decided_by", "policy_overlay:workspace"),
+                ],
+                "non_canonical",
+                "payload.decided_by",
+            ),
+            invalid(
+                "decision_overlay_after_a_denied_dry_run",
+                "§9.1 rule 5",
+                "decision",
+                [
+                    change("payload.dry_run", "deny"),
+                    change("payload.reason_code", "insufficient_buying_power"),
+                    change("payload.autonomy", None),
+                    overlay(),
+                ],
+                "schema",
+                "payload.decided_by",
+            ),
+        ],
+        "valid_drafts": [
+            valid(
+                "decision_overlay_narrows_auto_to_ask",
+                OVERLAY_CLAUSE,
+                "decision",
+                [change("payload.autonomy", "ask"), overlay()],
+            ),
+            valid(
+                "decision_overlay_ask_suppressed",
+                OVERLAY_CLAUSE,
+                "decision",
+                [
+                    change("payload.autonomy", "ask"),
+                    change("payload.ask_suppressed", "budget"),
+                    overlay(),
+                ],
+            ),
+            valid(
+                "decision_overlay_denies_a_nonconforming_opening",
+                "§9.1 rule 7; DEC-534 item 2",
+                "decision",
+                [change("payload.autonomy", "deny"), overlay()],
+            ),
+            valid(
+                "decision_overlay_denies_a_client_request",
+                "§9.1 rule 7; DEC-534 item 2",
+                "decision",
+                [
+                    change("payload.requested_by", "client"),
+                    change("payload.client_id", "client_dots"),
+                    change("payload.autonomy", "deny"),
+                    overlay(),
+                ],
+            ),
+        ],
+    }
+
+
+def overlay_case_failures(chain: list[dict], section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    """Each invalid draft breaks exactly its one rule, with its reason and path; each valid draft
+    breaks none."""
+    problems = []
+    for case in section["invalid_drafts"]:
+        got = violations(apply_changes(chain, case), skip)
+        want = case["expect"]
+        if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
+            problems.append(f"policy_overlay invalid {case['name']}: {got}")
+    for case in section["valid_drafts"]:
+        got = violations(apply_changes(chain, case), skip)
+        if got:
+            problems.append(f"policy_overlay valid {case['name']}: {got}")
+    return problems
+
+
+def check_policy_overlay(section: dict, agent_section: dict) -> list[str]:
+    problems = overlay_case_failures(agent_section["chain"], section)
+    if section["base"] != "agent_stream":
+        problems.append("policy_overlay base: drafts are built from agent_stream's chain")
+    labels = {
+        change_["value"]
+        for case in section["valid_drafts"]
+        for change_ in case["changes"]
+        if change_["path"] == "payload.decided_by"
+    }
+    if labels != {POLICY_OVERLAY_LABEL}:
+        problems.append(f"policy_overlay valid drafts must each be decided by the overlay: {labels}")
+    return problems
+
+
+def run_policy_overlay_mutants(section: dict, agent_section: dict) -> list[str]:
+    """Every seeded validator bug and vector bug is caught by the section's own cases."""
+    escaped = []
+    chain = agent_section["chain"]
+    for mutant in OVERLAY_VALIDATOR_MUTANTS:
+        if not overlay_case_failures(chain, section, frozenset([mutant])):
+            escaped.append(f"policy_overlay validator mutant {mutant}")
+    unasked = copy.deepcopy(section)
+    unasked["valid_drafts"][0]["changes"][0]["value"] = "auto"
+    if not check_policy_overlay(unasked, agent_section):
+        escaped.append("policy_overlay vector mutant: the narrowed ask written as auto")
+    asked = copy.deepcopy(section)
+    asked["invalid_drafts"][0]["changes"].insert(0, change("payload.autonomy", "ask"))
+    if not check_policy_overlay(asked, agent_section):
+        escaped.append("policy_overlay vector mutant: the overlay on auto written as an ask")
+    return escaped
+
+
+# --------------------------------------------------------------------------- broker_profile (v0.19)
+
+PROFILE_MEMBERS = {"kind", "profile_version", "rows", "idempotency"}
+PROFILE_ROW_ENUMS = {
+    "asset_class": ("crypto", "us_equity"),
+    "session": ("after_hours", "crypto", "overnight", "pre_market", "regular"),
+}
+PROFILE_CELL_ENUMS = {
+    "order_type": ("limit", "market", "stop", "stop_limit"),
+    "quantity_form": ("fractional", "notional", "whole"),
+}
+TIMES_IN_FORCE = ("day", "gtc", "ioc")
+PROTECTION_FORMS = ("bracket", "oco", "stop_limit")
+RETRY = ("idempotent", "not_idempotent", "unknown")
+
+
+def alpaca_profile() -> dict:
+    """Trading spec §5.2's Alpaca rows as DEC-630 item 6's object: US equities in the regular session;
+    whole shares take `day` and `gtc`, and a cell lists the protective forms an order of that type
+    may be sent as (DEC-630 item 1): a market or limit entry as a bracket, a limit as an OCO; stop and
+    stop-limit orders as none. Fractional and notional are `day` only and never in an OCO or bracket.
+    Written here from the rule, then compared with the bytes B1's own test pins
+    (`crates/mandate-alpaca/tests/profile.rs`, #802)."""
+    whole_protection = {
+        "limit": ["bracket", "oco"],
+        "market": ["bracket"],
+        "stop": [],
+        "stop_limit": [],
+    }
+    cells = []
+    for order_type in PROFILE_CELL_ENUMS["order_type"]:
+        for form in PROFILE_CELL_ENUMS["quantity_form"]:
+            whole = form == "whole"
+            cells.append(
+                {
+                    "order_type": order_type,
+                    "quantity_form": form,
+                    "times_in_force": ["day", "gtc"] if whole else ["day"],
+                    "protection_forms": whole_protection[order_type] if whole else [],
+                }
+            )
+    return {
+        "kind": "broker_profile",
+        "profile_version": 1,
+        "rows": [{"asset_class": "us_equity", "session": "regular", "cells": cells}],
+        "idempotency": {"client_order_id": True, "retry": "idempotent", "query_by_client_order_id": True},
+    }
+
+
+ALPACA_PROFILE_CANONICAL = (
+    '{"idempotency":{"client_order_id":true,"query_by_client_order_id":true,"retry":"idempotent"},'
+    '"kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity",'
+    '"cells":[{"order_type":"limit","protection_forms":[],"quantity_form":"fractional",'
+    '"times_in_force":["day"]},{"order_type":"limit","protection_forms":[],"quantity_form":"notional",'
+    '"times_in_force":["day"]},{"order_type":"limit","protection_forms":["bracket","oco"],'
+    '"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"market",'
+    '"protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
+    '{"order_type":"market","protection_forms":[],"quantity_form":"notional",'
+    '"times_in_force":["day"]},{"order_type":"market","protection_forms":["bracket"],'
+    '"quantity_form":"whole","times_in_force":["day","gtc"]},{"order_type":"stop",'
+    '"protection_forms":[],"quantity_form":"fractional","times_in_force":["day"]},'
+    '{"order_type":"stop","protection_forms":[],"quantity_form":"notional","times_in_force":["day"]},'
+    '{"order_type":"stop","protection_forms":[],"quantity_form":"whole","times_in_force":["day",'
+    '"gtc"]},{"order_type":"stop_limit","protection_forms":[],"quantity_form":"fractional",'
+    '"times_in_force":["day"]},{"order_type":"stop_limit","protection_forms":[],'
+    '"quantity_form":"notional","times_in_force":["day"]},{"order_type":"stop_limit",'
+    '"protection_forms":[],"quantity_form":"whole","times_in_force":["day","gtc"]}],'
+    '"session":"regular"}]}'
+)
+
+
+def profile_shape_problem(obj) -> str | None:
+    """The first way `obj` breaks §9's `broker_profile` contract, as a reason code: DEC-630 item 7's
+    codes (`ProfileError::code()` in `mandate-domain`) for the constructor's refusals, and the vectors'
+    own `schema` (a member, type or spelling outside the contract) and `non_canonical` (an array not
+    strictly ascending) for stored bytes the constructor, which sorts its input, cannot produce.
+    `None` when it holds."""
+    if not isinstance(obj, dict) or set(obj) != PROFILE_MEMBERS or obj["kind"] != "broker_profile":
+        return "schema"
+    version, rows, idem = obj["profile_version"], obj["rows"], obj["idempotency"]
+    if not isinstance(version, int) or isinstance(version, bool) or not isinstance(rows, list):
+        return "schema"
+    if version < 1:
+        return "profile_version_zero"
+    if not rows:
+        return "profile_no_rows"
+    row_keys = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {*PROFILE_ROW_ENUMS, "cells"}
+            or any(row[k] not in allowed for k, allowed in PROFILE_ROW_ENUMS.items())
+            or not isinstance(row["cells"], list)
+        ):
+            return "schema"
+        if not row["cells"]:
+            return "profile_empty_row"
+        cell_keys = []
+        for cell in row["cells"]:
+            if (
+                not isinstance(cell, dict)
+                or set(cell) != {*PROFILE_CELL_ENUMS, "times_in_force", "protection_forms"}
+                or any(cell[k] not in allowed for k, allowed in PROFILE_CELL_ENUMS.items())
+                or not isinstance(cell["times_in_force"], list)
+                or not isinstance(cell["protection_forms"], list)
+                or any(t not in TIMES_IN_FORCE for t in cell["times_in_force"])
+                or any(f not in PROTECTION_FORMS for f in cell["protection_forms"])
+            ):
+                return "schema"
+            if not cell["times_in_force"]:
+                return "profile_no_time_in_force"
+            for members in (cell["times_in_force"], cell["protection_forms"]):
+                if not ascending([m.encode() for m in members]):
+                    return "non_canonical"
+            cell_keys.append((cell["order_type"].encode(), cell["quantity_form"].encode()))
+        if len(set(cell_keys)) != len(cell_keys):
+            return "profile_duplicate_cell"
+        if not ascending(cell_keys):
+            return "non_canonical"
+        row_keys.append((row["asset_class"].encode(), row["session"].encode()))
+    if len(set(row_keys)) != len(row_keys):
+        return "profile_duplicate_row"
+    if not ascending(row_keys):
+        return "non_canonical"
+    if (
+        not isinstance(idem, dict)
+        or set(idem) != {"client_order_id", "retry", "query_by_client_order_id"}
+        or not isinstance(idem["client_order_id"], bool)
+        or not isinstance(idem["query_by_client_order_id"], bool)
+        or idem["retry"] not in RETRY
+    ):
+        return "schema"
+    if not idem["client_order_id"] and (idem["retry"] != "not_idempotent" or idem["query_by_client_order_id"]):
+        return "profile_claim_without_client_id"
+    return None
+
+
+def build_broker_profile_section(control_section: dict) -> dict:
+    """Journal spec v0.19 (DEC-531 item 4, DEC-630): a version-3 `ConfigSnapshotRegistered` of a
+    broker's capability profile, with the profile stored under its hash. Additive, so the
+    `production_config_refs` cases and their counts stay as they are."""
+    profile = alpaca_profile()
+    assert canon(profile) == ALPACA_PROFILE_CANONICAL, "the Alpaca profile differs from B1's pinned bytes"
+    ref = artifact_ref(profile)
+    registration = copy.deepcopy(
+        next(
+            draft_of(entry["body"])
+            for entry in control_section["chain"]
+            if entry["event_type"] == "ConfigSnapshotRegistered"
+            and entry["body"]["payload"]["kind"] == "fee_config"
+        )
+    )
+    registration["schema_version"] = 3
+    registration["payload"] = {
+        "kind": "broker_profile",
+        "content_hash": ref,
+        "model_id": None,
+        "model_version": None,
+        "params": [],
+        "admits_instruments": None,
+    }
+    registration["artifact_refs"] = [ref]
+    rows = profile["rows"]
+    cells = rows[0]["cells"]
+
+    def with_cells(new_cells: list) -> list:
+        return [dict(rows[0], cells=new_cells)]
+
+    def invalid_artifact(name: str, changes: list, reason: str) -> dict:
+        return {"name": name, "base": "alpaca", "changes": changes, "expect": {"reason": reason}}
+
+    def invalid_draft(name: str, changes: list, reason: str, path: str) -> dict:
+        return {"name": name, "base": "profile_registration", "changes": changes, "expect": {"reason": reason, "path": path}}
+
+    return {
+        "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
+        "artifacts": [{"name": "alpaca", "ref": ref, "object": profile, "canonical": canon(profile)}],
+        "valid_drafts": {"profile_registration": registration},
+        "invalid_drafts": [
+            invalid_draft("profile_registration_version_2", [change("schema_version", 2)], "non_canonical", "payload.kind"),
+            invalid_draft("profile_registration_version_1", [change("schema_version", 1)], "non_canonical", "payload.kind"),
+            invalid_draft("profile_registration_version_4", [change("schema_version", 4)], "unknown_schema", "payload"),
+            invalid_draft("profile_registration_as_policy_set", [change("payload.kind", "policy_set")], "config_ref_kind", "payload.kind"),
+            invalid_draft("profile_registration_with_a_model_id", [change("payload.model_id", "sm.trend")], "schema", "payload.model_id"),
+        ],
+        "missing_artifact": {"base": "profile_registration", "expect": {"reason": "missing_artifact", "path": "payload.content_hash"}},
+        "invalid_artifacts": [
+            invalid_artifact("profile_version_zero", [change("profile_version", 0)], "profile_version_zero"),
+            invalid_artifact("no_rows", [change("rows", [])], "profile_no_rows"),
+            invalid_artifact("empty_row", [change("rows", with_cells([]))], "profile_empty_row"),
+            invalid_artifact("duplicate_row", [change("rows", rows + rows)], "profile_duplicate_row"),
+            invalid_artifact("duplicate_cell", [change("rows", with_cells([cells[0], *cells]))], "profile_duplicate_cell"),
+            invalid_artifact(
+                "no_time_in_force", [change("rows", with_cells([dict(cells[0], times_in_force=[]), *cells[1:]]))], "profile_no_time_in_force"
+            ),
+            invalid_artifact("cells_out_of_order", [change("rows", with_cells([cells[1], cells[0], *cells[2:]]))], "non_canonical"),
+            invalid_artifact(
+                "times_in_force_out_of_order",
+                [change("rows", with_cells([*cells[:2], dict(cells[2], times_in_force=["gtc", "day"]), *cells[3:]]))],
+                "non_canonical",
+            ),
+            invalid_artifact(
+                "a_claim_without_a_client_order_id",
+                [change("idempotency", {"client_order_id": False, "retry": "unknown", "query_by_client_order_id": False})],
+                "profile_claim_without_client_id",
+            ),
+            invalid_artifact(
+                "robinhood_stop_market_spelling",
+                [change("rows", with_cells([*cells[:6], dict(cells[6], order_type="stop_market"), *cells[7:]]))],
+                "schema",
+            ),
+            invalid_artifact("a_gtc_expiry_member", [change("gtc_expiry_days", 90)], "schema"),
+            invalid_artifact("an_unknown_row_member", [change("rows", [dict(rows[0], venue="xnys")])], "schema"),
+            invalid_artifact(
+                "an_unknown_cell_member", [change("rows", with_cells([dict(cells[0], min_qty="1"), *cells[1:]]))], "schema"
+            ),
+            invalid_artifact("a_wrong_kind", [change("kind", "policy_set")], "schema"),
+            invalid_artifact(
+                "protection_forms_duplicated",
+                [change("rows", with_cells([*cells[:2], dict(cells[2], protection_forms=["oco", "oco"]), *cells[3:]]))],
+                "non_canonical",
+            ),
+            invalid_artifact(
+                "protection_forms_out_of_order",
+                [change("rows", with_cells([*cells[:2], dict(cells[2], protection_forms=["oco", "bracket"]), *cells[3:]]))],
+                "non_canonical",
+            ),
+        ],
+    }
+
+
+def changed_profile_object(section: dict, case: dict) -> dict:
+    obj = copy.deepcopy(next(a["object"] for a in section["artifacts"] if a["name"] == case["base"]))
+    for item in case["changes"]:
+        apply_change(obj, item)
+    return obj
+
+
+def check_broker_profile(section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    problems = []
+    stored = {}
+    for artifact in section["artifacts"]:
+        if artifact["canonical"] != canon(artifact["object"]) or artifact["ref"] != artifact_ref(artifact["object"]):
+            problems.append(f"broker_profile artifact.rehash {artifact['name']}")
+        shape = profile_shape_problem(artifact["object"])
+        if shape is not None:
+            problems.append(f"broker_profile artifact {artifact['name']}: {shape}")
+        stored[artifact["ref"]] = artifact
+    for name, draft in section["valid_drafts"].items():
+        found = production_registration_violations(draft, stored, skip)
+        if found:
+            problems.append(f"broker_profile valid {name}: {found}")
+    for case in section["invalid_drafts"]:
+        draft = changed_production_draft(section, case)
+        found = production_registration_violations(draft, stored, skip)
+        want = case["expect"]
+        if len(found) != 1 or (found[0].reason, found[0].path) != (want["reason"], want["path"]):
+            problems.append(f"broker_profile invalid {case['name']}: {found}")
+    missing = section["missing_artifact"]
+    found = production_registration_violations(section["valid_drafts"][missing["base"]], {}, skip)
+    if len(found) != 1 or (found[0].reason, found[0].path) != (missing["expect"]["reason"], missing["expect"]["path"]):
+        problems.append(f"broker_profile missing_artifact: {found}")
+    for case in section["invalid_artifacts"]:
+        got = profile_shape_problem(changed_profile_object(section, case))
+        if got != case["expect"]["reason"]:
+            problems.append(f"broker_profile invalid artifact {case['name']}: {got}")
+    return problems
+
+
+def run_broker_profile_mutants(section: dict) -> list[str]:
+    """Each seeded validator bug and vector bug is caught by the section's own cases."""
+    escaped = []
+    for mutant in ("21b.kind_binding", "21b.version_2_admits"):
+        if not check_broker_profile(section, frozenset([mutant])):
+            escaped.append(f"broker_profile validator mutant {mutant}")
+    rehashed = copy.deepcopy(section)
+    rehashed["artifacts"][0]["canonical"] += " "
+    if not any("artifact.rehash" in p for p in check_broker_profile(rehashed)):
+        escaped.append("broker_profile vector mutant: canonical bytes edited")
+    unsorted = copy.deepcopy(section)
+    unsorted["artifacts"][0]["object"]["rows"][0]["cells"].reverse()
+    if not any("artifact alpaca: non_canonical" in p for p in check_broker_profile(unsorted)):
+        escaped.append("broker_profile vector mutant: cells stored out of order")
+    claimed = copy.deepcopy(section)
+    claimed["invalid_artifacts"][8]["changes"][0]["value"]["retry"] = "not_idempotent"
+    if not check_broker_profile(claimed):
+        escaped.append("broker_profile vector mutant: a lawful no-client-id profile listed as refused")
+    return escaped
+
+
 class Dumper(yaml.SafeDumper):
     pass
 
@@ -3352,20 +3810,30 @@ def render(
     v3_text: str,
     section: dict,
     production_config_refs: dict,
+    policy_overlay: dict,
     control_section: dict,
     risk_section: dict,
     research_section: dict,
     account_section: dict,
+    approval_section: dict,
+    broker_profile: dict,
+    connections_section: dict,
+    workspace_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
         {
             "agent_stream": section,
             "production_config_refs": production_config_refs,
+            "policy_overlay": policy_overlay,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
             "account_stream": account_section,
+            "approval_answers": approval_section,
+            "broker_profile": broker_profile,
+            "connections": connections_section,
+            "workspace_api": workspace_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3404,14 +3872,21 @@ def main(argv: list[str] | None = None) -> int:
     section = build_section(v3)
     control_section = control.build_section(v3)
     production_config_refs = build_production_config_refs_section(control_section)
+    policy_overlay = build_policy_overlay_section()
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
+    approval_section = approval.build_section()
+    broker_profile = build_broker_profile_section(control_section)
+    connections_section = connections.build_section()
+    workspace_section = workspace.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
     problems += check_production_config_refs(production_config_refs)
     problems += run_production_config_ref_mutants(production_config_refs)
+    problems += check_policy_overlay(policy_overlay, section)
+    problems += run_policy_overlay_mutants(policy_overlay, section)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -3420,6 +3895,14 @@ def main(argv: list[str] | None = None) -> int:
     problems += research.run_mutants(research_section)
     problems += account.check_section(account_section)
     problems += account.run_mutants(account_section)
+    problems += approval.check_section(approval_section)
+    problems += approval.run_mutants(approval_section)
+    problems += check_broker_profile(broker_profile)
+    problems += run_broker_profile_mutants(broker_profile)
+    problems += connections.check_section(connections_section)
+    problems += connections.run_mutants(connections_section)
+    problems += workspace.check_section(workspace_section)
+    problems += workspace.run_mutants(workspace_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3429,19 +3912,29 @@ def main(argv: list[str] | None = None) -> int:
         text,
         section,
         production_config_refs,
+        policy_overlay,
         control_section,
         risk_section,
         research_section,
         account_section,
+        approval_section,
+        broker_profile,
+        connections_section,
+        workspace_section,
     )
     reread = yaml.safe_load(rendered)
     if (
         check_chain(reread["agent_stream"], v3)
         or check_production_config_refs(reread["production_config_refs"])
+        or check_policy_overlay(reread["policy_overlay"], reread["agent_stream"])
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
         or account.check_section(reread["account_stream"])
+        or approval.check_section(reread["approval_answers"])
+        or check_broker_profile(reread["broker_profile"])
+        or connections.check_section(reread["connections"])
+        or workspace.check_section(reread["workspace_api"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -3465,6 +3958,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(vector_mutants(section))} vector mutants caught; "
         f"{len(production_config_refs['valid_drafts'])} production config-ref drafts, "
         f"{len(production_config_refs['invalid_drafts'])} invalid, 3 validator and 5 vector mutants caught; "
+        f"{len(policy_overlay['invalid_drafts'])} invalid and {len(policy_overlay['valid_drafts'])} valid "
+        f"policy-overlay drafts, {len(OVERLAY_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "
@@ -3479,7 +3974,21 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(account_section['chain'])} account-stream events, {len(account_section['invalid_drafts'])} invalid and "
         f"{len(account_section['valid_drafts'])} valid drafts, "
         f"{len(account_section['valid_batches']) + len(account_section['invalid_batches'])} rule-45 batches; "
-        f"{len(account.VALIDATOR_MUTANTS)} validator and {len(account.vector_mutants(account_section))} vector mutants caught"
+        f"{len(account.VALIDATOR_MUTANTS)} validator and {len(account.vector_mutants(account_section))} vector mutants caught; "
+        f"{len(approval_section['drafts'])} approval-answer drafts, {len(approval_section['invalid_drafts'])} invalid and "
+        f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
+        f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
+        f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
+        f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
+        f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "
+        f"{len(connections_section['valid_drafts'])} valid, {len(connections_section['sequences'])} stream sequences, "
+        f"{len(connections_section['chains'])} cause chains; "
+        f"{len(connections.VALIDATOR_MUTANTS)} validator, {len(connections.STREAM_MUTANTS)} stream, "
+        f"{len(connections.CHAIN_MUTANTS)} chain, and "
+        f"{len(connections.vector_mutants(connections_section))} vector mutants caught; "
+        f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
+        f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
+        f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught"
     )
     return 0
 

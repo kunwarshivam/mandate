@@ -34,8 +34,9 @@ use crate::schema::{GATE_CHECK_IDS, Ty};
 use crate::{Draft, Invalid, InvalidReason, StreamId, StreamType};
 
 /// The event types §9.2 closes on the control stream.
-const CONTROL: [&str; 9] = [
+const CONTROL: [&str; 10] = [
     "StreamOpened",
+    "ApprovalResponseSubmitted",
     "ConnectionEstablished",
     "ConnectionRevoked",
     "DisclosureAccepted",
@@ -82,16 +83,19 @@ const COMPANION: &str = "OrderRequestRecorded";
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
-        StreamType::Control => CONTROL.contains(&event_type),
+        StreamType::Control => {
+            CONTROL.contains(&event_type) || crate::connections::CONTROL.contains(&event_type)
+        }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
-            event_type == REFUSAL
+            crate::connections::ACCOUNT.contains(&event_type)
+                || event_type == REFUSAL
                 || event_type == SNAPSHOT
                 || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
-        StreamType::Scheduler => false,
+        StreamType::Scheduler | StreamType::Notice => false,
     }
 }
 
@@ -100,12 +104,24 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
 pub(crate) fn payload(
     event_type: &str,
     schema_version: u64,
+    stream: &StreamId,
     payload: &Value,
-    config_refs: Option<&Value>,
+    envelope: Envelope<'_>,
 ) -> Result<Value, Invalid> {
-    let schema = schema(event_type, schema_version)
+    let Envelope {
+        config_refs,
+        actor,
+        causation_id,
+        pii_refs,
+    } = envelope;
+    let schema = crate::connections::schema(event_type, schema_version, stream.stream_type())
+        .or_else(|| match (event_type, stream.stream_type()) {
+            ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
+            _ => schema(event_type, schema_version),
+        })
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
+    crate::connections::rules(event_type, schema_version, &payload, causation_id, pii_refs)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -123,6 +139,14 @@ pub(crate) fn payload(
         }
         "MandateConfirmed" => ascending(&p.texts("confirmed_paths"), "payload.confirmed_paths")?,
         "ConnectionEstablished" => ascending(&p.texts("scopes"), "payload.scopes")?,
+        "ApprovalResponseSubmitted" => {
+            let writer = actor.and_then(|a| a.get("id")).and_then(Value::as_str);
+            ensure(
+                writer == Some(p.text("responder")),
+                InvalidReason::Schema,
+                "payload.responder",
+            )?;
+        }
         "ConfigSnapshotRegistered" => {
             ascending(&p.texts("params"), "payload.params")?;
             let model = p.text("kind") == MODEL_KIND;
@@ -250,6 +274,16 @@ pub(crate) fn payload(
     Ok(payload)
 }
 
+/// The envelope members [`payload`]'s rules read: `config_refs` (rules 22 and 38), the actor (rule
+/// 46), `causation_id` (rule 65), and `pii_refs` (rule 62).
+#[derive(Clone, Copy)]
+pub(crate) struct Envelope<'a> {
+    pub(crate) config_refs: Option<&'a Value>,
+    pub(crate) actor: Option<&'a Value>,
+    pub(crate) causation_id: Option<&'a Value>,
+    pub(crate) pii_refs: Option<&'a Value>,
+}
+
 /// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
 /// [`payload`]: reported after `artifact_refs` and `pii_refs` (§9.1's order, which §9.2 keeps).
 pub(crate) fn subject_and_copy(
@@ -273,7 +307,7 @@ pub(crate) fn subject_and_copy(
     let allowed: &[&str] = match stream.stream_type() {
         StreamType::Account => &["acknowledge"],
         StreamType::Agent => &["resume", "stop"],
-        StreamType::Control | StreamType::Scheduler => &[],
+        StreamType::Control | StreamType::Scheduler | StreamType::Notice => &[],
     };
     ensure(
         allowed.contains(&p.text("command")),
@@ -604,6 +638,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("ConnectionRevoked", 1) => Some(&CONNECTION_REVOKED),
         ("DisclosureAccepted", 1) => Some(&DISCLOSURE_ACCEPTED),
         ("ConfigSnapshotRegistered", 1) => Some(&CONFIG_SNAPSHOT_REGISTERED),
+        ("ApprovalResponseSubmitted", 1) => Some(&APPROVAL_RESPONSE_SUBMITTED),
         ("ConfigSnapshotRegistered", 2) => Some(&CONFIG_SNAPSHOT_REGISTERED_V2),
         ("MandateVersionCreated", 1) => Some(&MANDATE_VERSION_CREATED),
         ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
@@ -664,6 +699,24 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     }
     Ok(())
 }
+
+/// §9.7's step-up evidence: `authenticated_at` in integer risk-clock seconds (DEC-533 item 2).
+pub(crate) static ANSWER_STEP_UP: Ty = Ty::Record(&[
+    ("assertion_id", Ty::Str),
+    ("authenticated_at", Ty::Int),
+    ("method", Ty::Str),
+]);
+
+static APPROVAL_RESPONSE_SUBMITTED: Ty = Ty::Record(&[
+    ("agent", Ty::Ident),
+    ("approval", Ty::Ulid),
+    ("verdict", Ty::OneOf(&["approved", "skipped"])),
+    ("content_hash", Ty::DigestRef),
+    ("submitted_at", Ty::Int),
+    ("step_up", Ty::Nullable(&ANSWER_STEP_UP)),
+    ("responder", Ty::Str),
+    ("role", Ty::OneOf(&["approver"])),
+]);
 
 static MANDATE_VERSION_APPLIED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),

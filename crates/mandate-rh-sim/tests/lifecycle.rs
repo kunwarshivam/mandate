@@ -5,7 +5,7 @@
 mod common;
 
 use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
-use mandate_rh_sim::{Event, Fault, OrderRequest, Session, SimError, State};
+use mandate_rh_sim::{Event, Fault, OrderRequest, Session, Sim, SimError, State};
 
 type Outcome = Result<(), SimError>;
 
@@ -240,7 +240,7 @@ fn scripted_answers_and_broker_changes_follow_the_lifecycle() -> Outcome {
 fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Outcome {
     let mut sim = sim()?;
     let order = sim.place(&limit("buy", "1", "501", 1))?;
-    let echoed = |sim: &mandate_rh_sim::Sim| -> Result<Option<String>, SimError> {
+    let echoed = |sim: &Sim| -> Result<Option<String>, SimError> {
         Ok(sim.orders(AGENTIC)?.first().and_then(|o| o.ref_id.clone()))
     };
     assert_eq!(
@@ -264,5 +264,27 @@ fn a_ref_id_is_echoed_and_a_changed_resend_refused_only_when_switched_on() -> Ou
         "the same body still returns it"
     );
     assert_eq!(sim.orders(AGENTIC)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_working_sell_reserves_only_its_unfilled_remainder() -> Outcome {
+    let mut sim = sim()?;
+    let bought = sim.place(&limit("buy", "3", "501", 1))?;
+    sim.fill(&bought.id, qty("3"), price("500"))?;
+    let first = sim.place(&limit("sell", "2", "499", 2))?;
+    sim.fill(&first.id, qty("1"), price("500"))?;
+    let rest = sim.place(&limit("sell", "1", "499", 3))?;
+    assert_eq!(
+        rest.quantity,
+        qty("1"),
+        "two held, one of them reserved by the working sell"
+    );
+    let more = sim.place(&limit("sell", "1", "499", 4));
+    assert_eq!(
+        more,
+        Err(SimError::InsufficientShares),
+        "nothing is left unreserved"
+    );
     Ok(())
 }

@@ -7,11 +7,12 @@
 //! never writes an agent or account stream and never talks to a runtime or a broker (`AGENTS.md`
 //! rule 12). Its local checks are a convenience: the runtime makes every one of them again.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
 use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
-use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, ArtifactRef, Environment, Head, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
 
 /// The reads and the one append a command makes, with journal spec §5.1's append. The
@@ -217,12 +218,68 @@ fn build_ref() -> String {
     format!("sha256:{}", digest.to_hex())
 }
 
-/// What an envelope says of its event besides its type and payload: the schema version, and the
-/// content references the payload names, sorted, which the envelope must list (journal spec §3).
+/// What an envelope says of its event besides its type and payload: the schema version, the
+/// content references the payload names, sorted, which the envelope must list (journal spec §3),
+/// and the configuration it binds, by kind (§9's required `config_refs`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Shape {
     pub(crate) schema_version: u64,
     pub(crate) artifact_refs: Vec<String>,
+    pub(crate) config_refs: Vec<(&'static str, Value)>,
+}
+
+/// Who writes a control-stream draft. Private to this module, so no other module can name the
+/// system writer, and [`draft`] refuses it for anything but the stream's opening (#725 review).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Writer {
+    /// The owner, as a `user` (EI-10).
+    Owner,
+    /// The vectors' `control_services` opener, as a `system`, for `StreamOpened` alone (DEC-527
+    /// item 7).
+    Opener,
+}
+
+const OPENER_ID: &str = "control_services";
+
+/// Commits `ctl:{workspace}`'s `StreamOpened` in the owner's environment, as the vectors'
+/// `control_services` opener (DEC-527 item 7), its id derived at head 0 (DEC-290).
+///
+/// # Errors
+/// As [`commit`].
+pub(crate) fn open_control_stream(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    let stream = control_stream(owner)?;
+    let payload = object(vec![
+        ("stream_type", text("control")),
+        ("workspace_id", text(&owner.workspace)),
+    ])?;
+    let event_id = derive(&stream, "StreamOpened", &payload, false, 0)?;
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    let bytes = draft(
+        Writer::Opener,
+        owner,
+        &stream,
+        &event_id,
+        "StreamOpened",
+        shape,
+        payload,
+        now,
+    )?;
+    settle(
+        journal,
+        &stream,
+        event_id,
+        Repeat::FindsEarlier,
+        &bytes,
+        now,
+    )
 }
 
 /// A schema version as the canonical integer the envelope carries.
@@ -236,8 +293,16 @@ fn version(schema_version: u64) -> Result<Value, ControlError> {
 }
 
 /// The canonical bytes of one control-stream draft, written by the owner as a `user` (journal spec
-/// §3; EI-10 admits nothing else).
+/// §3; EI-10 admits nothing else), or, for the stream's `StreamOpened` alone, by the opener.
+///
+/// # Errors
+/// [`ControlError::Journal`] for the opener writing any other event type.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each is one envelope member's source; bundling them would name a type for one caller"
+)]
 fn draft(
+    writer: Writer,
     owner: &Owner,
     stream: &StreamId,
     event_id: &str,
@@ -246,14 +311,23 @@ fn draft(
     payload: Value,
     now: Now,
 ) -> Result<Vec<u8>, ControlError> {
+    let (kind, id) = match writer {
+        Writer::Owner => ("user", owner.user.as_str()),
+        Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
+        Writer::Opener => {
+            return Err(ControlError::Journal(format!(
+                "only the stream's opening is written as {OPENER_ID}, not {event_type}"
+            )));
+        }
+    };
     let one = seconds(1)?;
     let fields = object(vec![
         (
             "actor",
             object(vec![
                 ("build", text(&build_ref())),
-                ("id", text(&owner.user)),
-                ("kind", text("user")),
+                ("id", text(id)),
+                ("kind", text(kind)),
                 ("version", text(env!("CARGO_PKG_VERSION"))),
             ])?,
         ),
@@ -263,7 +337,7 @@ fn draft(
         ),
         ("causation_id", Value::Null),
         ("clock_source", text("local")),
-        ("config_refs", Value::Object(Object::new())),
+        ("config_refs", object(shape.config_refs)?),
         ("correlation_id", Value::Null),
         ("environment", text(owner.environment.as_str())),
         ("envelope_version", one.clone()),
@@ -575,12 +649,37 @@ pub(crate) fn commit(
     };
     key.push(("step_up", evidence));
     let payload = object(key)?;
+    let mut referenced = BTreeSet::new();
+    digest_refs(&payload, &mut referenced);
     let shape = Shape {
         schema_version: 1,
-        artifact_refs: Vec::new(),
+        artifact_refs: referenced.into_iter().collect(),
+        config_refs: Vec::new(),
     };
-    let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
+    let bytes = draft(
+        Writer::Owner,
+        owner,
+        &stream,
+        &event_id,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
+}
+
+/// Every digest reference `value` holds, at any depth: what the envelope's `artifact_refs` lists,
+/// sorted and each once (journal spec §3), such as an answer's `content_hash` (DEC-533 item 6).
+fn digest_refs(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(s) if ArtifactRef::parse(s).is_some() => {
+            out.insert(s.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|v| digest_refs(v, out)),
+        Value::Object(members) => members.values().for_each(|v| digest_refs(v, out)),
+        _ => {}
+    }
 }
 
 /// [`commit`] for an event whose payload is exactly the owner's choice, with no second and no
@@ -604,7 +703,16 @@ pub(crate) fn commit_choice(
         ..
     } = decided;
     let payload = object(key)?;
-    let bytes = draft(owner, &stream, &event_id, event_type, shape, payload, now)?;
+    let bytes = draft(
+        Writer::Owner,
+        owner,
+        &stream,
+        &event_id,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
 }
 
@@ -662,5 +770,81 @@ mod tests {
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
             "{build}"
         );
+    }
+
+    /// The opener writes the stream's `StreamOpened` as the `control_services` system and nothing
+    /// else; the owner writes as a `user` (#725 review).
+    #[test]
+    fn only_the_opening_is_written_as_the_system() -> Result<(), ControlError> {
+        let owner = Owner {
+            workspace: "ws1".to_owned(),
+            user: "u1".to_owned(),
+            environment: Environment::Paper,
+        };
+        let now = Now {
+            at: UtcNanos::from_parts(1_790_000_000, 0)
+                .map_err(|e| ControlError::Journal(format!("{e:?}")))?,
+            secs: 1_790_000_000,
+        };
+        let stream = control_stream(&owner)?;
+        let shape = || Shape {
+            schema_version: 1,
+            artifact_refs: Vec::new(),
+            config_refs: Vec::new(),
+        };
+        let actor = |writer, event_type| -> Result<(String, String), ControlError> {
+            let bytes = draft(
+                writer,
+                &owner,
+                &stream,
+                "01J8ZA00000000000000000001",
+                event_type,
+                shape(),
+                Value::Object(Object::new()),
+                now,
+            )?;
+            let body = parse(&bytes).map_err(|e| ControlError::Journal(format!("{e:?}")))?;
+            let member = |name: &str| {
+                let actor = body.get("actor").and_then(|a| a.get(name));
+                actor.and_then(Value::as_str).unwrap_or_default().to_owned()
+            };
+            Ok((member("kind"), member("id")))
+        };
+        let pair = |kind: &str, id: &str| (kind.to_owned(), id.to_owned());
+        assert_eq!(
+            actor(Writer::Opener, "StreamOpened")?,
+            pair("system", "control_services")
+        );
+        assert_eq!(
+            actor(Writer::Owner, "ApprovalResponseSubmitted")?,
+            pair("user", "u1")
+        );
+        for other in ["ConfigSnapshotRegistered", "ApprovalResponseSubmitted"] {
+            assert!(
+                matches!(actor(Writer::Opener, other), Err(ControlError::Journal(_))),
+                "{other}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The references an envelope lists are every digest reference in the payload, at any depth,
+    /// inside arrays as inside objects, sorted and each once; a lookalike is not one (journal spec
+    /// §3, DEC-533 item 6).
+    #[test]
+    fn the_listed_references_are_every_digest_reference_at_any_depth() {
+        let [a, b, c] = ["a", "b", "c"].map(|d| format!("sha256:{}", d.repeat(64)));
+        let payload = parse(
+            format!(
+                r#"{{"top":"{c}","nested":{{"list":["{a}",{{"deep":"{b}"}},"{c}"]}},
+                "upper":"sha256:{}","short":"sha256:abc","plain":"cli-0123","n":1}}"#,
+                "A".repeat(64)
+            )
+            .as_bytes(),
+        )
+        .unwrap_or(Value::Null);
+        let mut listed = BTreeSet::new();
+        digest_refs(&payload, &mut listed);
+        assert_eq!(listed.into_iter().collect::<Vec<_>>(), [a, b, c]);
     }
 }

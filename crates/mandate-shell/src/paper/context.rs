@@ -237,6 +237,7 @@ fn run_context(
             builder: Some(builder),
             gate: Some(advisory_gate_context(template)),
         }),
+        governance: None,
     })
 }
 

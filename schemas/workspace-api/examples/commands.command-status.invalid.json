@@ -1,0 +1,155 @@
+[
+  {
+    "label": "phase unknown",
+    "set": {
+      "/phase": "unknown"
+    }
+  },
+  {
+    "label": "applied with no steps",
+    "set": {
+      "/steps": []
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "recorded with a step",
+    "set": {
+      "/phase": "recorded"
+    }
+  },
+  {
+    "label": "a step with seq 0",
+    "set": {
+      "/steps/0/seq": 0
+    }
+  },
+  {
+    "label": "a stream id with a trailing newline",
+    "set": {
+      "/steps/0/stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_1\n"
+    }
+  },
+  {
+    "label": "an event type with a trailing newline",
+    "set": {
+      "/steps/0/event_type": "AgentModeChanged\n"
+    }
+  },
+  {
+    "label": "a reason with a trailing newline",
+    "set": {
+      "/steps/0/reason": "step_up_stale\n"
+    }
+  },
+  {
+    "label": "auto: no /command_id",
+    "remove": [
+      "/command_id"
+    ]
+  },
+  {
+    "label": "auto: no /phase",
+    "remove": [
+      "/phase"
+    ]
+  },
+  {
+    "label": "auto: no /steps",
+    "remove": [
+      "/steps"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: /phase outside its set",
+    "set": {
+      "/phase": "mutant_value"
+    }
+  },
+  {
+    "label": "auto: no /steps/0/stream_id",
+    "remove": [
+      "/steps/0/stream_id"
+    ]
+  },
+  {
+    "label": "auto: no /steps/0/seq",
+    "remove": [
+      "/steps/0/seq"
+    ]
+  },
+  {
+    "label": "auto: no /steps/0/event_type",
+    "remove": [
+      "/steps/0/event_type"
+    ]
+  },
+  {
+    "label": "auto: no /steps/0/recorded_at",
+    "remove": [
+      "/steps/0/recorded_at"
+    ]
+  },
+  {
+    "label": "auto: no /steps/0/reason",
+    "remove": [
+      "/steps/0/reason"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /steps/0",
+    "set": {
+      "/steps/0/mutant_member": 1
+    }
+  },
+  {
+    "label": "auto: no /as_of/0/stream_id",
+    "remove": [
+      "/as_of/0/stream_id"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/seq",
+    "remove": [
+      "/as_of/0/seq"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/hash",
+    "remove": [
+      "/as_of/0/hash"
+    ]
+  },
+  {
+    "label": "auto: no /as_of/0/recorded_at",
+    "remove": [
+      "/as_of/0/recorded_at"
+    ]
+  },
+  {
+    "label": "auto: an extra member in /as_of/0",
+    "set": {
+      "/as_of/0/mutant_member": 1
+    }
+  },
+  {
+    "label": "no phase and no steps",
+    "remove": [
+      "/phase"
+    ],
+    "set": {
+      "/steps": []
+    }
+  }
+]

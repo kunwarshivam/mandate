@@ -17,6 +17,7 @@ use crate::control::{
 /// version 2's `policy_set` and `model_registry` (DEC-484 item 4). `mandate_version` and
 /// `model_version` are other commands'.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "snake_case")]
 pub enum ConfigKind {
     FeeConfig,
     TradingCalendar,
@@ -113,6 +114,7 @@ fn registration(
     let shape = Shape {
         schema_version,
         artifact_refs: vec![reference],
+        config_refs: Vec::new(),
     };
     commit_choice(journal, owner, decided, shape, now)
 }

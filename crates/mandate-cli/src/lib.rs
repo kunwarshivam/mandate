@@ -25,11 +25,18 @@ pub mod agent;
 pub mod approvals;
 pub mod artifact;
 pub mod config;
+pub mod connection;
 pub mod control;
+pub mod deploy;
 pub mod download;
+pub mod gestures;
+pub mod inbox;
 pub mod inspect;
 pub mod journal;
 pub mod postgres;
+pub mod register;
+pub mod version;
+pub mod workspace;
 
 /// Mandate research and audit tools.
 #[derive(Debug, Parser)]
@@ -54,4 +61,25 @@ pub enum Command {
     /// Put bytes into a content-addressed artifact store, or fetch them back re-hashed.
     #[command(subcommand)]
     Artifact(artifact::ArtifactCommand),
+    /// The approval inbox: list, show, approve or skip an agent's approvals, in paper.
+    #[command(subcommand)]
+    Approvals(inbox::ApprovalsCommand),
+    /// Store a configuration object and register it on the workspace control stream, in paper.
+    #[command(subcommand)]
+    Config(register::ConfigCommand),
+    /// Store a model's content object and register it on the workspace control stream, in paper.
+    #[command(subcommand)]
+    Model(register::ModelCommand),
+    /// Open the workspace control stream, once, in paper.
+    #[command(subcommand)]
+    Workspace(workspace::WorkspaceCommand),
+    /// Record a checked broker connection on the workspace control stream.
+    #[command(subcommand)]
+    Connection(connection::ConnectionCommand),
+    /// Create a mandate version, or show its confirmation code and confirm it, in paper.
+    #[command(subcommand)]
+    Version(gestures::VersionCommand),
+    /// Show an agent's deployment code, or deploy it with a confirmed version, in paper.
+    #[command(subcommand)]
+    Agent(gestures::AgentCommand),
 }

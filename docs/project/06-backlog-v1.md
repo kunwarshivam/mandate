@@ -334,6 +334,14 @@ the spec invariants (DP-n) its tests cover.
   question 4.
   *Accepted when:* a bundle is produced within the configured deadline, its report reproduces
   byte for byte from the same inputs, and every part verifies through the cold checks.
+- **E5-10 (Should)** As an auditor, I want every closed record's step-up evidence and times typed
+  one way, so that a reader never has to know which record wrote integer risk-clock seconds and
+  which a §4.7 timestamp ([DEC-533](decisions/DEC-533.md) item 2). Journal spec v0.17's §9.7
+  writes `authenticated_at`, `submitted_at` and `effective_at` as integer seconds, while §9.2's and
+  §9.3's step-up evidence writes a timestamp. The fix is a version bump of the records on one side,
+  with their writers and readers, and the old versions kept registered (§8).
+  *Accepted when:* one type serves every step-up's `authenticated_at` at the records' newest
+  versions, and the vectors show the old versions still read.
 
 ### E6 Agent runtime and risk
 
@@ -698,6 +706,51 @@ after U-A1 to U-A5 are recorded.
   `max_order_usd` exceeds §5.2's 200,000 USD is refused; every existing equity test still passes;
   and no crypto rule is relaxed (DEC-450 item 3). A gate check of the 200,000 USD cap is a later
   row.
+- **E7-23 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want each broker to
+  declare what it supports as a capability profile, so that shared code never branches on a broker
+  and a new broker is one profile, not new rules ([DEC-531](decisions/DEC-531.md),
+  [DEC-630](decisions/DEC-630.md), [ADR-0004](../adr/0004-broker-capability-profiles.md), trading spec §5.2; the
+  [first live trade](tasks/first-live-trade.md) rows SP1, B1, B2a, B2b, B3). *Accepted when:*
+  `CapabilityProfile` and its canonical hash live in `mandate-domain`; `BrokerConnector::profile`
+  hands each connector's profile to the executor; Alpaca declares trading spec §5.2's table as its
+  profile with no Alpaca outcome changed (LT-14); protection, reconciliation and the builder's
+  quantity form read the profile, and the executor's `asset_class == Crypto` protection branch is
+  gone (LT-2); policy and profile intersect, never override (LT-3); and a property test over
+  generated profiles checks every order sent is one the profile allows.
+- **E7-24 (Must, M6, the first live trade, DEC-529; SC)** As the founder, I want to log in to
+  Robinhood with OAuth for one run, holding the token only in the connector process's memory, so
+  that no credential reaches a disk, a log, the journal or an agent (CN-1, `AGENTS.md` rule 7; the
+  [first live trade](tasks/first-live-trade.md) rows O1a, O1b). *Accepted when:* the PKCE login
+  runs in the founder's browser through a loopback redirect; the token is a `SecretString` in the
+  connector process only and is gone at exit (a restart logs out); a canary-token test scans every
+  output, error and artifact (LT-9); expiry mid-run leaves the deployment `closing_only` and the
+  resting stop untouched; and no test or CI job reaches a Robinhood host (LT-1).
+- **E7-25 (Must, M6, the first live trade, DEC-124; SC)** As the founder, I want a simulated
+  Robinhood server that speaks the published contract over loopback MCP with Robinhood's rules, so
+  that every Robinhood test and the founder's rehearsal run without touching Robinhood (DEC-124's
+  paper stage; the [first live trade](tasks/first-live-trade.md) rows S1, S2, R0). *Accepted
+  when:* `mandate-rh-sim` is a `tool` crate no production crate depends on; it serves the nine
+  allowlisted tools with the contract's shapes, its order states and its rules (no query by
+  `ref_id`, one GTC stop-limit as protection); its pure core carries the property tests
+  of S1's tests PRs; and the rehearsal (R0) runs the live build against it on a journal separate from
+  the live one.
+- **E7-26 (Must, M6, the first live trade, DEC-529 item 3; SC)** As the founder, I want one
+  deployment runner for any environment and broker, with live hosts only behind a `live` feature
+  that only the runner may enable, so that no other build can reach a live broker (ES-23; the
+  [first live trade](tasks/first-live-trade.md) rows X1, G1a, G1b). *Accepted when:*
+  `cargo xtask live-feature` lets only the runner declare a `live` feature, and no CI or release
+  build enables it except one compile-only job (ES-23 as DEC-529 item 3 narrows it), so the
+  default build contains no Robinhood host (LT-1); the runner built from the
+  paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
+  (LT-4); and a restart after a run sends no second order (LT-6).
+- **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
+  want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
+  so that a token that may reach both environments is on the record before it is used
+  ([DEC-821](decisions/DEC-821.md) item 4, DEC-441 item 22, spec §5.3; follows E7-17,
+  [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
+  defines the event that records, with the connection, whether the token may reach the other
+  environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
+  OAuth connect appends `ConnectionEstablished` before that event.
 
 ### E8 Escalation and approvals
 
@@ -1058,13 +1111,26 @@ after U-A1 to U-A5 are recorded.
   perfect delivery except asks that skip (NT-5); the kill-switch and exit suites pass with the
   dispatcher hung (NT-9); a lost address alerts on the other channels (spec §5.6).
 - **E8-11 (Must, M7; SC)** As an approver, I want email notices (spec §4.4). Provider per DEC-438
-  item 21; until the founder decides, the adapter runs against a recorded fixture only.
-  *Accepted when:* NT-1's canary test passes on captured messages; links match `<origin>/n/<ULID>`
-  (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider configuration check.
-- **E8-12 (Must, M7; SC)** As an approver, I want one chat channel (spec §4.5), Slack or Telegram
-  per DEC-438 item 20. *Accepted when:* NT-1's canary test passes; every inbound message, button, or
+  item 21, decided in DEC-820 item 3 for the founder's own address only; every other recipient waits
+  for counsel's general footer.
+  *Accepted when:* NT-1's canary test passes on captured messages; links match
+  `<origin>/n/<notice id>` (NT-4); no reply is read (NT-3 fuzz); tracking is off in the provider
+  configuration check; the founder-only SMTP transport (spec §4.4, DEC-820 items 3 and 4) sends only
+  to the one founder address the deployment's configuration names, read from the vault, with exactly
+  `Sent by your Mandate workspace to its owner.` as the footer; a notice for any other recipient, a
+  workspace owner who is not the founder included, is refused `recipient_not_permitted` before any
+  connection, is not retried, marks no address `unreachable`, and raises no `channel_lost`; the
+  `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
+  shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
+  outside the founder-only transport while the general footer is unresolved.
+- **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
+  founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
+  at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
   callback leaves the control stream unchanged (NT-3); the webhook URL or bot token is read only
-  from the vault and appears in no log (rule 7).
+  from the vault and appears in no log (rule 7). For Telegram (spec §4.5, DEC-700 item 2): a linking
+  code is refused once 10 minutes have passed since it was shown; it is spent by the first message
+  that carries it, even when no address is then recorded; showing a new code revokes the earlier
+  one; and the replies to an unknown, an expired, and a spent code are byte-identical.
 - **E8-13 (Must, M9 and M10; SC)** As an approver, I want to open a notice, sign in, and answer
   inside my workspace (spec §6, G4), with `web_inbox` as a pull channel (DEC-438 item 3). Depends on
   the workspace API and identity specs (DEC-436, DEC-437). *Accepted when:* a captured link with no
@@ -1371,6 +1437,14 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - every notification carries only an opaque ID and generic text (rule 6);
   - turning a monitor agent into one that trades is a new mandate the owner confirms, never an
     in-place change.
+- **E10-20 (Must, M6, blocker for starting an agent on the L2 host; SC)** As the founder, I want
+  `mandate agent pause` and `mandate agent kill` reachable from the CLI, so that the SSH
+  kill-switch fallback of [DEC-822](decisions/DEC-822.md) item 7 works and the rehearsal in
+  FOUNDER-STEPS step 16 (`deploy/README.md`) can pass. The code exists in
+  `crates/mandate-cli/src/agent.rs` and `control.rs`; `AgentCommand` in `gestures.rs` does not name
+  them. *Accepted when:* `AgentCommand` carries `pause` and `kill`, wired to that code; an agent
+  kill touches only its own scope (rule 13); and a test runs each command through the binary
+  against the journal. No agent starts on the L2 host before this lands.
 
 ### E11 Web app: dashboard and controls
 
@@ -2418,6 +2492,16 @@ an agent on a different model, zero missed mutants, and green CI).
 
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
+From the review of workspace API spec §4.8.1 (the audit read contracts, #767):
+
+- Exports: define the file states `GET /exports/{id}` reports (recorded, building, ready). Map a
+  failed or `Ambiguous` `ExportCreated` append to §3.5's `journal_unavailable` or `effect:
+  unknown`, retryable with the same `Idempotency-Key`. Define the per-stream range when
+  `recorded_at` steps back (DEC-764 notes the clock may), for example by seq bounds read from a
+  monotone index. Make the view header's `format` match the request's (`json` against `jsonl`).
+- `mandate-audit` enforces tenant isolation, so it is safety-critical. Its `xtask/layers.toml`
+  entry, CODEOWNERS line, and lint header land with the crate (#797).
+
 From the final review of mandate spec v0.3:
 
 - Tie the loss carry to the broker account rather than `connection_id`; show the carry and its
@@ -2569,12 +2653,14 @@ From E10-1's slice-V implementation (DEC-161):
     This follow-up row needs its own story id: its pins and stub cite E8-3, which
     `cargo xtask ci pending` holds to agree but which the tracker records as finished (#395, #397).
   - **E7-1:** the connect flow's `ConnectionEstablished` records the connecting user and step-up
-    (HLD §8), as a new `schema_version` with its own vectors.
+    (HLD §8), as a new `schema_version` with its own vectors. Specified as version 2 in journal
+    §9.8 ([DEC-800](decisions/DEC-800.md) item 3); E7-1 writes it.
   - **Proposed, item 9:** `PlatformOperatorAction` closes with the operator service's specification,
     which must name each action's members: the operator stop's subject, the global kill switch's
     scope, the acceptable-use action, and the row's "approval".
-  - **Proposed, item 10:** a clause binds an account stream to its connection, so that
-    `AccountSnapshotRecorded`'s fact needs no argument.
+  - **Item 10, closed by [DEC-800](decisions/DEC-800.md):** `ConnectionEstablished` version 2's
+    `account_ref` binds an account stream to its connection (journal §9.8); the mapping reads its
+    argument from that binding.
   - **Account-stream risk-state records (stream K with stream L; DEC-303 item 6):** journal spec v0.8
     §9.3 closes `MandateVersionApplied` and `UniverseChanged` (mandate spec §5.10, §2.3), with the
     vectors' `risk_state` section ([DEC-403](decisions/DEC-403.md)). The tests and implementation that
@@ -2876,15 +2962,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
   for the startup reconciliation, so the plant gets weight only with the first opening through
   `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
-- **E7-4 slice 7's tests PR (stream K; moved from slice 6 when slice 6 took #400 round 2's two items), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
-  round 1 (major 1):** §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
+- ~~**E7-4 slice 7's tests PR (stream K; moved from slice 6 when slice 6 took #400 round 2's two items), from [#373](https://github.com/kunwarshivam/mandate/pull/373)
+  round 1 (major 1):**~~ Done: the test landed with #655 and slice 7's agent-scoped implementation
+  makes it live, narrowing `climbs` and the gate together through `kill::mode_holds` ([DEC-485](decisions/DEC-485.md) item 12). §5.5 exempts kill-switch and mandate-limit flatten exits from the agent's
   mode, but slice 4a's ladder stops stepping while the agent is `paused` or `stopped`
   ([DEC-260](04-decision-log.md#decisions) (3)), and the gate's `mode_failure` holds every
   risk-reducing order at `paused` or stricter. Add a pending test: while the agent is paused, a
   flatten's ladder steps, its step cancel does not end the sequence, and `mode_failure` lets that
   flatten through. Slice 7 narrows `climbs` and the gate together to make it pass.
-- **E7-4 slice 7 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174, then from slice 6), from
-  [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):** wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
+- ~~**E7-4 slice 7 (stream K; moved from slice 5 by the coordinator's ruling D3 on #174, then from slice 6), from
+  [#373](https://github.com/kunwarshivam/mandate/pull/373) round 1 (minor 1):**~~ Done for a kill switch's confirmed
+  floor (`hand::an_owner_flattens_rung_rests_at_the_confirmed_floor`, DEC-485 item 11); an owner exit handed over as
+  an intent carries no floor until `OwnerExitRequested` reaches the executor. wire the owner exit's floor (`OwnerExitRequested`'s confirmed floor) into
   `exit_limit` and `next_rung`, which pass none today, so §5.6's "never below an owner exit's
   floor" holds on the live paths and not only in `ladder_tests`. A rung the floor clamps sets
   `at_floor` and rests (§5.5's "any remainder rests at the floor"), rather than being cancelled and
@@ -2892,7 +2981,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 slice 5 (stream K), from slice 4b ([DEC-260](04-decision-log.md#decisions) (12)):**
   a crypto stop-limit is watchdogged as soon as a sane mark is below its limit price, once slice 5
   places stop-limits. The session condition landed with slice 5's session part (DEC-260 (15)).
-- **E7-4 slice 7's tests PR (stream K, moved from slice 6), from slice 4b (DEC-160 (11), (24)):** add pending tests
+- **E7-4 slice 7's tests PR (stream K, moved from slice 6), from slice 4b (DEC-160 (11), (24)):** the agent-scoped half
+  is done (`hand::an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_own_lots`, #655, live with
+  slice 7's agent scope; DEC-485 items 5 and 13); the account and workspace scopes' half stays open. Add pending tests
   that every kill switch whose scope covers an instrument cancels a working `*` watchdog exit
   there by its own `client_order_id` (`md-w-<record>`), an agent-scoped one included when it
   closes that instrument (§5.5's table), and that an agent-scoped kill switch never treats it as
@@ -3023,6 +3114,35 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   by that fill (rule 12). The same lag sizes §5.4's re-placement. Size from the broker's own
   report of the cancelled order, or hold the rung for it, before slice 2 lets protected
   positions exist outside the tests (DEC-160 (4)).
+- ~~**E7-4 slice 7's tests correction, before the agent-scoped kill switch's implementation can pass `xtask ci pending`
+  (stream K, [DEC-485](decisions/DEC-485.md))**~~ Done by [DEC-506](decisions/DEC-506.md) (#671, #672, #673): nine
+  corrected properties and both session hand tests go live with #668; E1, E2 and the confirmed owner's pre-market
+  pricing stay pending in `BEHAVIOUR_ONLY_TESTS` (DEC-485 items 11 and 17). The record as written before it: with the
+  switch live, no property script stops at its stub any more, so every executor property marked pending runs to its
+  own verdict. Those that now pass go live with the implementation (DEC-485 item 17).
+  These still need a DEC-77 tests correction, or a coordinator-approved `BEHAVIOUR_ONLY_TESTS` row, because each passes
+  vacuously or fails away from any stub on behaviour that predates the switch:
+  - the `risk_clock` readers (the #456 round 1 row above): `no_interval_exceeds_the_limit_without_an_alert` and
+    `no_submission_carries_an_intent_older_than_its_maximum_age` pass while checking nothing,
+    `no_recovery_submits_without_a_confirmed_absence` would fail any resubmission's window check, and
+    `every_risk_input_draft_carries_a_non_decreasing_risk_clock` fails on `FillApplied carries no risk_clock`;
+  - `a_client_order_id_is_a_function_of_the_intent_id_alone` rejects every script (`OrderSubmitted` version 2 carries no
+    `intent_id`; read it from the `OrderRequestRecorded` companion, DEC-446 rule 45) and aborts after 385 s;
+  - `no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding`: the rule-5 carve-out in the row below, and DEC-346
+    item 6's protective placement (minimal script: a protected entry partly filled, a kill switch, its cancel confirmed);
+  - `a_reservation_is_never_released_before_a_terminal_state` and `folding_the_journaled_drafts_reproduces_the_live_state`
+    (a broker-created leg `…-p…` in `pending_cancel`: the oracle says unreserved, the fold reserved),
+    `no_resting_order_is_submitted_inside_an_unprotected_interval` (a plain opening beside the protected lead's interval),
+    `protective_sell_quantity_never_exceeds_the_position_in_any_script` (an exit beside a bracket that completes), and
+    `protective_sell_quantity_never_exceeds_the_position` (passes at the pending gate's seed but fails at seeds 1 and 77:
+    an exit, its cancel confirmed, then fills leave CPHC protected for 1 against a position of 0):
+    each minimal script has no kill switch in it, so the oracle or the behaviour needs a ruling;
+  - `an_owner_exit_outside_the_session_prices_from_the_confirmed_bid`: the clock-0 row above; the suite's clock is the
+    regular session, so the confirmed bid and `extended_hours` cannot be reached.
+- **E7-4 (stream K), from slice 7 ([DEC-485](decisions/DEC-485.md) items 13 and 15):** raise a kill switch's close again
+  after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
+  in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
+  `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
@@ -3054,6 +3174,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   OCO is 1; the first completes (Q1 = 2) and its legs activate, so sells are 11 + 1 + 2 = 14 against
   a position of 13. The fix counts held legs, sized to their entry, in every cap and sizing,
   re-placement included, and pins the arithmetic with a hand case.
+  Two more paths size the same way (#689's round-2 review): `passive_exit`'s rest OCO, reachable
+  without E5 whenever another agent's bracket is working, and `re_cover` → `re_place`. The
+  re-placement alone oversells by f1 once the bracket completes, with no second entry: it covers
+  B + f1, and the bracket's legs then sell Q1 against a position of B + Q1. E1's tests
+  ([DEC-532](decisions/DEC-532.md)) pin all four paths as pending hand cases under
+  `BEHAVIOUR_ONLY_TESTS` rows, each with the protected 10 and a bracket holding 4 of 10:
+  `an_exits_re_placement_leaves_a_held_brackets_shares_to_its_legs` (8, not 12),
+  `a_re_placement_before_expiry_leaves_a_held_brackets_shares_to_its_legs` (10, not 14),
+  `a_passive_exits_rest_leaves_a_held_brackets_shares_to_its_legs` (7, not 11) and
+  `a_re_cover_leaves_a_held_brackets_shares_to_its_legs` (2, not 6). The fix sizes each path on
+  the position less every working bracket entry's filled quantity whose legs are held, deletes
+  the rows and the `#[ignore]` lines, and covers the original exit-beside-activated-legs case above.
 - **E7-4 (stream K), E2 from E7-4 slice 7's tests correction ([DEC-506](decisions/DEC-506.md)
   item 8): an opening rests inside an unprotected interval.** Minimal script
   (`properties::no_resting_order_is_submitted_inside_an_unprotected_interval`):
@@ -3088,6 +3220,27 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   which the fix takes live with their `BEHAVIOUR_ONLY_TESTS` rows; the property goes live with #668.
   Done by E4's fix: each interval carries its bracket entry, and both the end that names a bracket
   and the acknowledgment of the OCO placed for one close only that bracket's interval.
+- **E7-4 (stream K), E4b from E4's fix ([DEC-521](decisions/DEC-521.md) item 3, #698's review):
+  while a bracket's OCO awaits its acknowledgment, a new interval's start ends the first open
+  interval in the instrument, not the awaited one.** The fold's `unprotected_start` arm ends an
+  open interval when an acknowledgment is awaited, but picks the first open one in the instrument.
+  Hand case `hand::a_new_brackets_start_ends_the_awaited_interval_not_the_first_brackets`: bracket 1
+  partly fills at 10; bracket 2 partly fills at 20 and is cancelled at 30, so its OCO is awaited;
+  bracket 3 partly fills at 32 and ends bracket 1's interval, so nothing alerts at 70. Trading spec
+  §5.4 ("Bounded unprotected intervals"). Fix tests-first: key that arm, like E4's acknowledged
+  end, to the bracket whose awaited OCO it supersedes (`protected_entry()`), then delete the case's
+  `BEHAVIOUR_ONLY_TESTS` row and `#[ignore]` line. Minors from the same review, for the same PR or
+  the backlog: `interval_limit` marks the first open interval alerted, which can re-alert a later
+  one each tick; the fold's doc for these arms; and `awaiting.insert` replaces an instrument's
+  awaited set rather than adding to it. #771's review added two tests before the fix: a hand case
+  with the awaited interval between two others (`a_new_start_ends_the_awaited_middle_interval_only`)
+  and a property lead where the awaited interval is the first open one and another is the latest
+  (`AWAITED_FIRST_LEAD`), so a fix that ends the latest open interval fails both. Done by E4b's
+  fix: that arm ends the open interval of a bracket whose OCO's acknowledgment was awaited (or an
+  unbracketed one), never another bracket's; `no_interval_exceeds_the_limit_without_an_alert` and
+  both hand cases are live again. The three minors stay open, with a fourth from that review: the
+  fix's match lets an unbracketed open interval (an exit's or a re-placement's) be ended for any
+  awaited bracket OCO; no script here has reached it yet, so pin it with a case if one does.
 - **E7-4 (stream K), E5 from E7-4 slice 7's second tests correction
   ([DEC-521](decisions/DEC-521.md) item 4): an overdue cancel of a bracket entry ends an exit's wait
   while no cap sees that entry's legs (the coordinator rules on it with E1 and E2).** Script, on
@@ -3100,6 +3253,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   1 + 1 + 2 against a position of 3, so a short of 1 is possible; a whole-position exit gets there
   with no OCO. This is arithmetic: the harness cannot fill 01 behind the newer orders. Trading spec
   §5.4 (Σ protective sells ≤ position) and `AGENTS.md` rule 12.
+- **E7-4 (stream K), E5b from #668's round-2 review: the exit ladder steps a rung the broker has
+  not acknowledged, and another exit goes beside that cancel.** Script, the same on `main`
+  (`properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding`, seed 209):
+  `Intent 0 (AAPL open), Acknowledge, Fill, Intent 1 (CPHC protected open), Acknowledge, Fill, Fill,
+  Intent 3 (CPHC risk exit), Cancelled, Cancelled, Intent 2 (CPHC risk exit)`. At 46 the OCO's
+  cancel is confirmed and exit 03 is submitted; the second `Cancelled` re-delivers the OCO's
+  `canceled` (journaled `ignored`); at 54, 03 still `submitting`, its ladder step asks
+  `Cancel{03}` (`ladder_step`, `attempted: pending_cancel`, `ignored`), a cancel of an order the
+  broker has not acknowledged, and exit 02 is submitted in the same step while that cancel is
+  outstanding. CI's shard-81 script on #668 (`Intent 0, Acknowledge, Fill, Intent 1 (CPHC
+  protected), Acknowledge, Fill, Fill, Intent 2 (CPHC exit), Cancelled, Intent 0, Intent 3 (CPHC
+  exit)`) is the same shape. No short follows from it alone: the gate sizes 02 on the position less
+  every live sell, 03 included (`available`). Trading spec §5.6 (a rung steps by cancel, confirm,
+  resubmit) and §5.7 (an order the broker has not acknowledged is queried, never cancelled blind);
+  `AGENTS.md` rule 13. Decide whether the ladder may step an unacknowledged rung, and whether another
+  exit may go beside a rung's step cancel, then fix tests-first; until then the property is pending
+  under a `BEHAVIOUR_ONLY_TESTS` row. To be fixed before any real-money run.
 - **E7-4 (stream K), from E7-4 slice 7's tests correction: an unconfirmed owner exit pre-market
   cancels protection for a sell that cannot fill before 09:30 (open question for the
   coordinator).** At 2026-09-22 08:00 ET an owner kill switch without confirmation cancels the
@@ -4376,3 +4546,39 @@ From the round-6 review of the flatten adapter's implementation PR ([#596](https
   `StoredEvent::draft()` that also checks the columns) is private, so the flatten adapter holds a
   second copy of the three assigned-field names, the digest form, and the re-seal, the exact
   things that must not drift from `seal`.
+
+From the workspace API contract's drift rule (DEC-683, E10-10):
+
+- **A `cargo xtask` check for stale planned markers.** List every `(planned: <story>)` in a spec
+  table and every `x-planned` value in `schemas/`, with its story's state, and fail on a marker
+  whose story is done. Until it exists, removing a story's markers is part of its done-definition.
+- **Rust JSON-pointer checks refuse control characters**, as the schemas' pointer pattern does
+  (`[^/~\u0000-\u001f]`), wherever `mandate-api` checks a path (E10-10 implementation).
+- **Journal the members an API-7 operation dropped** (DEC-682 item 27): the command event names the
+  JSON pointers its `202` listed in `dropped`, so the record shows what the server ignored. A
+  journal spec change first.
+- **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
+  the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
+
+From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
+
+- **The mutation plan's tests** (#768).
+  - `the_planned_shards_test_the_gates_mutants_and_no_more_per_shard` seeds a diff whose mutants
+    are all in one package. Add a second mutated crate to its fixture, so the plan's sum across
+    packages is pinned as well as its listing.
+  - `ci_sizes_the_mutation_matrix_from_the_plan` pins exact `ci.yml` lines, so rewording one
+    fails the test even when the wiring still holds. It fails safe; parse the jobs' keys instead
+    when it next gets in the way.
+- **The behaviour-only rows** (#770, `xtask/behaviour-only/`).
+  - Pin the exact refusal message for a non-`.toml` file in `a_malformed_or_misnamed_row_is_refused`,
+    as the other refusals' messages are pinned.
+  - Read the rows through `git ls-files` rather than `read_dir`, as `ci pending` reads test files, so
+    an untracked or ignored file in the directory cannot change the gate's verdict.
+  - Say in the README that two tests whose paths differ only by `::` against `__` derive the same
+    file name, so the second row cannot be added until one is renamed.
+- **The feature map's directory** (#773, `.cursor/skills/verify-mandate/features/`).
+  - Check or refuse what else sits in the directory: today the README and any non-`.md` file are
+    skipped without a word.
+  - Refuse two feature files with the same `# ` title, which `--index` would list twice.
+  - Add a README to the drift oracle's fixture directory beside the feature files, so the test shows
+    the README is never read as a feature.

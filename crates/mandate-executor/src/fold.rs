@@ -10,6 +10,7 @@ use mandate_time::Date;
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
+use crate::kill::{close_named, closes_with};
 use crate::payload::{
     clock_of, flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
@@ -17,7 +18,7 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail, PendingRequest, Replacement,
+    ObservedAccount, OrderDetail, PendingRequest, Replacement, Switch,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -140,6 +141,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
+        "KillSwitchActivated" => kill_switch_activated(state, event),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
@@ -361,17 +363,63 @@ fn intent_received(
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         protection: prices_of(payload)?,
     };
+    let agent = agent_of(payload)?;
+    if let (IntentBody::Order { instrument, .. }, Some((switch, ordinal))) =
+        (&body, close_named(&id))
+        && let Some(switch) = state.switches.get_mut(&switch)
+        && closes_with(switch, ordinal, &agent, instrument)
+    {
+        switch.pending.remove(instrument);
+    }
     state.intents.insert(
         id.clone(),
         IntentRecord {
             intent_id: id.clone(),
-            agent: agent_of(payload)?,
+            agent,
             received_at: at,
             outcome: IntentOutcome::Received,
             allowed_at: None,
         },
     );
     state.bodies.insert(id, body);
+    Ok(())
+}
+
+/// One agent-scoped `KillSwitchActivated` (§5.5, DEC-485 item 3): the agent, the purpose its
+/// sells carry, the owner's confirmed floor if any, and the closes it named, now or deferred,
+/// every one pending until its flatten's `IntentReceived` folds. Any other scope, the account and
+/// workspace ones included, answers the next slice's stub.
+fn kill_switch_activated(
+    state: &mut ExecutorState,
+    event: &FoldedEvent,
+) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
+    if optional_text(payload, "scope") != Some("agent") {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    }
+    let named = |field: &str| -> Result<Vec<InstrumentId>, ExecutorError> {
+        match payload.get(field) {
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    Ok(InstrumentId::new(
+                        item.as_str().ok_or_else(|| refused(field))?,
+                    )?)
+                })
+                .collect(),
+            _ => Err(refused(field)),
+        }
+    };
+    let mut instruments = named("closes")?;
+    instruments.extend(named("deferred")?);
+    let switch = Switch {
+        agent: AgentId(required_text(payload, "subject")?.to_owned()),
+        purpose: purpose_of(required_text(payload, "purpose")?)?,
+        floor: optional_price(payload, "floor")?,
+        pending: instruments.iter().cloned().collect(),
+        instruments,
+    };
+    state.switches.insert(event.event_id.clone(), switch);
     Ok(())
 }
 
@@ -980,6 +1028,9 @@ fn net_unattributed(
 
 /// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
 /// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
+/// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
+/// not yet raised (DEC-485 item 7): the agent was resumed, so nothing sells its lots behind its
+/// back later.
 fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     let agent = AgentId(required_text(payload, "agent")?.to_owned());
     let mode = mode_of(required_text(payload, "to")?)?;
@@ -987,6 +1038,11 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
         .unwrap_or_default()
         .to_owned();
     if mode == Mode::Normal {
+        for switch in state.switches.values_mut() {
+            if switch.agent == agent && restriction == "kill_switch" {
+                switch.pending.clear();
+            }
+        }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
         state
@@ -1215,11 +1271,22 @@ fn protection_changed(
                 );
             }
             if !passive {
-                let awaited = state.awaiting.remove(&instrument).is_some();
+                let awaited: Option<BTreeSet<ClientOrderId>> =
+                    state.awaiting.remove(&instrument).map(|ids| {
+                        ids.into_iter()
+                            .filter_map(|id| id.protected_entry())
+                            .collect()
+                    });
                 if let Some(waiting) = state.unprotected.iter_mut().find(|interval| {
                     interval.instrument == instrument
                         && interval.ended_at.is_none()
-                        && (awaited || interval.uncovered)
+                        && (interval.uncovered
+                            || awaited.as_ref().is_some_and(|entries| {
+                                interval
+                                    .bracket
+                                    .as_ref()
+                                    .is_none_or(|entry| entries.contains(entry))
+                            }))
                 }) {
                     waiting.ended_at = Some(at);
                 }
