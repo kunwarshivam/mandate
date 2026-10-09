@@ -1,7 +1,7 @@
 ---
 name: Owlhead
 description: The design system of the Owlhead web app. Paper trading only.
-direction: Calm, in Ink and Volt, light and dark (DEC-204, DEC-205, DEC-214)
+direction: Calm, in Azure and Sun, light and dark (DEC-204, DEC-205, DEC-217)
 ---
 
 # Owlhead design system
@@ -39,10 +39,12 @@ Five rules hold everywhere:
    width, side by side in a fixed order, nothing preselected, no autofocus. The default (skip) is
    stated in words beside a static deadline. Nothing counts down, pulses or changes colour as a
    deadline nears, and nothing is shown as approved or submitted until the runtime records it.
-3. **The Meaning Rule.** A colour means one thing everywhere. Volt is your mandate and the account's
-   line; ink is the account's actions, a stopped agent and Stop; crimson is the kill switch and
-   nothing else. System states (stale, unreachable, loading) carry no meaning colour. Nothing is
-   coloured for decoration.
+3. **The Meaning Rule.** A colour means one thing everywhere (DEC-217). Azure is a primary action
+   or link, your mandate, and the account's line; sun is the highlight, always under ink type, and
+   in light mode the account's pale field; green and red are a gain and a loss, and the hero line's
+   direction; the series colours are an asset's share; ink is the account's fill, a stopped agent
+   and Stop; crimson is the kill switch and nothing else. System states (stale, unreachable,
+   loading) carry no meaning colour. Nothing is coloured for decoration.
 4. **No gamification.** No confetti, streaks, badges, levels, celebratory motion or "you're on a
    roll". A gain is shown exactly as plainly as a loss, each with its sign, and every P&L carries the
    performance disclosure (DEC-210).
@@ -55,27 +57,34 @@ Five rules hold everywhere:
 
 ## Colors
 
-Ink and Volt ([COLOR.md](COLOR.md)): cool paper and ink neutrals, one volt accent, crimson for the
-kill switch, all OKLCH ramp steps, all flat. About 60% of a screen is paper (ink in dark), 30% type
-and ink actions, 10% volt.
+Azure and Sun ([DEC-217](../docs/project/decisions/DEC-217.md), which replaced DEC-214's Ink and
+Volt; [COLOR.md](COLOR.md)): cool paper and ink neutrals, azure for actions and your mandate, sun
+for the highlight under ink type, green and red for a gain and a loss, crimson for the kill switch,
+all OKLCH ramp steps, all flat. About 60% of a screen is paper (ink in dark), 30% type and ink, 10%
+azure and sun.
 
 | Colour | Meaning | Tokens | Light | Dark |
 |---|---|---|---|---|
-| Volt | Your mandate | `--mandate`, `--mandate-marker`, `--mandate-strong`, `--mandate-edge` | volt-100 #F2FCD7 / volt-500 #7C9217 / volt-700 #4C5A09 | volt-850 #2C350E / volt-400 #A4C025 / volt-200 #D2F34A |
-| Ink, with a volt line | The account | `--lapis` (= `--primary`), `--lapis-line`, `--lapis-soft` | ink-950 #14161A, volt-500, volt-100 | paper-100 #F5F7F9, volt-400, volt-850 |
+| Azure | A primary action, a link, the focus ring | `--primary`, `--ring` (= `--mandate-strong`) | azure-800 #043E89 | azure-300 #C1D9FE |
+| Azure | Your mandate | `--mandate`, `--mandate-marker`, `--mandate-strong`, `--mandate-edge` | azure-200 #D0E3FE / azure-600 #0858BC / azure-800 #043E89 / azure-600 | ink-850 #292C2F / azure-400 #8BB9FD / azure-300 #C1D9FE / azure-400 |
+| Ink, with an azure line | The account | `--lapis`, `--lapis-line`, `--lapis-soft` | ink-950 #0F1113, azure-600, sun-100 #FFF6E1 | paper-100 #F5F7F9, azure-400, ink-850 |
+| Sun | The highlight, always under ink type | `--highlight`, `--highlight-foreground` | sun-300 #FED254 under ink-950 | the same |
 | Ink | Stopped or paused agent, Stop | `--ink` | ink-950 | paper-100 |
-| Crimson | Kill switch | `--crimson`, `--crimson-edge` | crimson-700 #9C0C12 | crimson-700, edge crimson-400 #FD8C81 |
-| Gain / loss | Signed figures only | `--gain` / `--loss`; `--gain-cvd` / `--loss-cvd` when colour-blind friendly is on | green-700 / red-700 | green-300 / red-300 |
-| Surfaces | The page, wells, hairlines, text | `--card`, `--background`, `--muted`, `--border`, `--foreground`, `--muted-foreground` | paper and ink steps | the same ramps, inverted |
+| Crimson | Kill switch | `--crimson`, `--crimson-edge` | crimson-700 #9B0A28 | crimson-700, edge crimson-400 #FD9696 |
+| Gain / loss | Signed figures and the hero line's direction | `--gain` / `--loss`; `--gain-cvd` / `--loss-cvd` when colour-blind friendly is on | green-600 #0B7133 / red-600 #983D24 | green-400 #78CE8C / red-400 #FD997E |
+| Series | An asset's share of the account, cash, an owl's feathers | `--series-1` to `--series-5` | azure-500, sun-400, teal-500, sky-400, ink-500 | azure-200, sun-300, teal-400, sky-300, paper-500 |
+| Surfaces | The page, wells, hairlines, text | `--card`, `--background`, `--muted`, `--border`, `--foreground`, `--muted-foreground` | paper and ink steps | the same ramps, inverted: the card ink-950 #0F1113, the page ink-975 #07080A |
 
 Rules the tests hold in both themes: every token is a ramp step and every neutral is paper or ink;
-no purple or violet; loss stays 15 degrees of hue from crimson; every semantic and Kumo pair meets
-WCAG 2.2 AA (4.5:1 body, 3:1 marks) and APCA; the colour-vision pairs stay apart; no component uses
-Kumo's warning. Volt only through the volt tokens, never a large block (saturated volt is lines,
-rails and ticks no thicker than 8px; surfaces are the pale tint), and in light mode never text
-lighter than `--mandate-strong`. The one saturated volt fill is the highlight, always under ink
-type. Crimson paints only a kill-switch choice (`crimson.test.tsx`). No gradients, glows, masks or
-fades anywhere (`e2e/flat-fills.spec.ts`). Dark mode is tokens alone: `html[data-mode="dark"]`
+no purple or violet, and no second blue; azure, gain and loss stay a near-triad, and loss stays 15
+degrees of hue from crimson; every semantic and Kumo pair meets WCAG 2.2 AA (4.5:1 body, 3:1 marks)
+and APCA; the colour-vision pairs stay apart; no component uses Kumo's warning. Azure only through
+the azure tokens, never a large block (saturated azure is lines, rails and ticks no thicker than
+8px; surfaces are the pale tint in light and charcoal ink in dark), and in light mode never text
+lighter than azure-600 nor text in a mark colour. Sun only through the sun tokens and never text:
+the highlight is the one saturated warm fill, always under ink type. A series colour is never a gain
+or a loss. Crimson paints only a kill-switch choice (`crimson.test.tsx`). No gradients, glows, masks
+or fades anywhere (`e2e/flat-fills.spec.ts`). Dark mode is tokens alone: `html[data-mode="dark"]`
 re-points every token and there is no `dark:` class in `src/`.
 
 ## Typography
@@ -157,7 +166,10 @@ One line each; the reference has the rest.
 - **Performance disclosure** (DEC-210). An info symbol beside every P&L; the full tag inline in print
   and on record screens.
 - **Hero equity chart.** One hero number over a scrubbable line; levels are labelled lines; nothing
-  is extrapolated; empty, unreachable and error invent no values.
+  is extrapolated; empty, unreachable and error invent no values. The hero line follows its range's
+  change (DEC-217): green when it rose, red when it fell, the type colour when flat, and the
+  colour-blind alternates when that is on; 3px, with no fill, over a dotted rule at the range's
+  opening value.
 - **Needs you.** First on a phone and first in Home's rail: requests, soonest first, each with the
   static time it is skipped at; a request appears once on Home.
 - **Status strip.** Nothing under the header while every feed answers; the strip while one is
@@ -181,7 +193,8 @@ movement and keeps the colour and opacity changes that help comprehension. The t
 - Do use tabular figures wherever numbers line up or change, and give live values a fixed slot.
 - Do check every screen in light and dark; a new colour is a token with a value in each theme.
 - Don't use crimson for anything but the kill switch, including errors and losses.
-- Don't use volt outside the volt tokens, as a block, or in light mode as text lighter than deep volt.
+- Don't use azure outside the azure tokens, as a block, or in light mode as text lighter than
+  azure-600; don't set sun as text or under anything but ink type.
 - Don't write a `dark:` class, a gradient, a glow, a shadow on anything that does not float, or
   glass anywhere but the frame.
 - Don't colour a system state with a meaning colour, set anything in capitals, or go above 600.
