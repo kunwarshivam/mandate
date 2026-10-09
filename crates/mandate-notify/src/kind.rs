@@ -93,6 +93,10 @@ pub enum NoticeKind {
     IntegrityIncident,
     CredentialAdded,
     NewDevice,
+    /// A member added or removed one of their own push addresses, with step-up: the only
+    /// out-of-band sign that a stolen session added a watcher or silenced the member's safety
+    /// notices (spec §3.2, DEC-795 item 6).
+    NotificationAddressChanged,
     RecoveryUsed,
     RoleGranted,
     MemberDeactivated,
@@ -114,15 +118,16 @@ pub enum NoticeKind {
 
 impl NoticeKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::ApprovalRequested, Self::ApprovalReminder, Self::RiskLimit, Self::KillSwitch,
         Self::AgentHeld, Self::AccountRestriction, Self::Protection, Self::ExitStalled,
         Self::Reconciliation, Self::ExternalActivity, Self::AccountState, Self::DataFeedDown,
-        Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice, Self::RecoveryUsed,
-        Self::RoleGranted, Self::MemberDeactivated, Self::Deprovisioned, Self::BreakGlass,
-        Self::VersionRiskIncreasing, Self::DelegationAdded, Self::ConnectionAdded, Self::WentLive,
-        Self::ClientConnected, Self::ChannelLost, Self::DailyBrief, Self::DelegationEnded,
-        Self::ModelStatus, Self::ResearchStatus, Self::SpendCap, Self::ApprovalClosed,
+        Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice,
+        Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
+        Self::MemberDeactivated, Self::Deprovisioned, Self::BreakGlass, Self::VersionRiskIncreasing,
+        Self::DelegationAdded, Self::ConnectionAdded, Self::WentLive, Self::ClientConnected,
+        Self::ChannelLost, Self::DailyBrief, Self::DelegationEnded, Self::ModelStatus,
+        Self::ResearchStatus, Self::SpendCap, Self::ApprovalClosed,
     ];
 
     /// The kind's key as spec §3.2 writes it, for `OwnerAlertSent` and `NoticeIssued`.
@@ -146,6 +151,7 @@ impl NoticeKind {
             Self::IntegrityIncident => "integrity_incident",
             Self::CredentialAdded => "credential_added",
             Self::NewDevice => "new_device",
+            Self::NotificationAddressChanged => "notification_address_changed",
             Self::RecoveryUsed => "recovery_used",
             Self::RoleGranted => "role_granted",
             Self::MemberDeactivated => "member_deactivated",
@@ -186,6 +192,7 @@ impl NoticeKind {
             | Self::IntegrityIncident
             | Self::CredentialAdded
             | Self::NewDevice
+            | Self::NotificationAddressChanged
             | Self::RecoveryUsed
             | Self::RoleGranted
             | Self::MemberDeactivated
@@ -227,6 +234,7 @@ impl NoticeKind {
             | Self::IntegrityIncident => Some(TextKey::AttentionNeeded),
             Self::CredentialAdded
             | Self::NewDevice
+            | Self::NotificationAddressChanged
             | Self::RecoveryUsed
             | Self::RoleGranted
             | Self::MemberDeactivated

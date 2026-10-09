@@ -20,13 +20,14 @@ const NTF: &str = "ntf:ws_1";
 const NOTICE: &str = "0123456789abcdef0123456789abcdef";
 const STREAMS: [&str; 5] = [STREAM, "agent:ws_1:agent_a", "ctl:ws_1", "clock:ws_1", NTF];
 
-/// DEC-720's kinds in notifications spec §3.2's order, each `kind:class`.
+/// DEC-720's kinds, with DEC-795 item 6's `notification_address_changed`, in notifications spec
+/// §3.2's order, each `kind:class`.
 const KINDS: &str = "approval_requested:action approval_reminder:action risk_limit:safety \
     kill_switch:safety agent_held:safety account_restriction:safety protection:safety \
     exit_stalled:safety reconciliation:safety external_activity:safety account_state:safety \
     data_feed_down:safety integrity_incident:safety credential_added:safety new_device:safety \
-    recovery_used:safety role_granted:safety member_deactivated:safety deprovisioned:safety \
-    break_glass:safety version_risk_increasing:safety delegation_added:safety \
+    notification_address_changed:safety recovery_used:safety role_granted:safety \
+    member_deactivated:safety deprovisioned:safety break_glass:safety version_risk_increasing:safety delegation_added:safety \
     connection_added:safety went_live:safety client_connected:safety channel_lost:safety \
     daily_brief:info delegation_ended:info model_status:info research_status:info spend_cap:info \
     approval_closed:info";
@@ -313,7 +314,7 @@ fn every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it() {
         .split_whitespace()
         .filter_map(|pair| pair.split_once(':'))
         .collect();
-    assert_eq!(kinds.len(), 32, "notifications spec §3.2's 32 kinds");
+    assert_eq!(kinds.len(), 33, "notifications spec §3.2's 33 kinds");
     for (kind, class) in kinds {
         let cause_stream = match kind {
             "approval_requested" | "approval_reminder" => "agent:ws_1:agent_a",
@@ -353,6 +354,7 @@ fn every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it() {
         "status=failed reason=auth_failed provider_message_id=null",
         "status=failed reason=too_large provider_message_id=null",
         "status=failed reason=recipient_not_permitted provider_message_id=null",
+        "status=failed reason=address_missing provider_message_id=null",
         "status=failed reason=bounced provider_message_id=m-1",
         "status=failed reason=complained provider_message_id=m-1",
         "status=failed reason=unsubscribed provider_message_id=m-1",
@@ -405,12 +407,16 @@ fn the_consistency_rules_refuse_at_their_paths() {
         &format!("attempted | {abandoned} reason=bounced | schema@payload.reason"),
         &format!("attempted | {failed} reason=retry_window_ended | schema@payload.reason"),
         &format!("attempted | {abandoned} reason=recipient_not_permitted | schema@payload.reason"),
+        &format!("attempted | {abandoned} reason=address_missing | schema@payload.reason"),
         "attempted | provider_message_id=null | schema@payload.provider_message_id",
         &format!("attempted | {failed} reason=bounced | schema@payload.provider_message_id"),
         &format!("attempted | {failed} reason=complained | schema@payload.provider_message_id"),
         &format!("attempted | {failed} reason=unsubscribed | schema@payload.provider_message_id"),
         &format!(
             "attempted | {failed} reason=timeout provider_message_id=m-1 | schema@payload.provider_message_id"
+        ),
+        &format!(
+            "attempted | {failed} reason=address_missing provider_message_id=m-1 | schema@payload.provider_message_id"
         ),
         "attempted | status=deferred_quiet_hours | schema@payload.provider_message_id",
         &format!(

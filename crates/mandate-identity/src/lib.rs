@@ -149,7 +149,8 @@
 //!
 //! **Roles change only through their checks** (ID-13, §4.5): [`change_roles`] refuses a change to
 //! its author's own roles, the org owner role to anyone but an org owner, and a change that leaves
-//! no active org owner or workspace admin (§5.2). Refusals carry DEC-643's codes ([`Refusal`]).
+//! no active org owner or workspace admin (§5.2), and yields the step-up the change needs (ID-4,
+//! DEC-654). Refusals carry DEC-643's codes ([`Refusal`]).
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
@@ -1318,6 +1319,10 @@ impl<L: MembershipLookup> Grant<'_, L> {
 /// author's own deactivation is the leave row), then
 /// ID-13, the reserved owner role, and the last-owner and last-admin rules on the state after it.
 /// It reads every membership of the scope through `lookup`, and judges roles at `now`.
+///
+/// It yields the step-up the whole change needs, resolved (DEC-654 item 1): [`StepUp::Required`]
+/// when a part of it does (a grant at a workspace's scope, ID-4; any change through the org
+/// memberships row), otherwise [`StepUp::NotRequired`]; never `ForInvite` or `ForGrant`.
 pub fn change_roles(
     lookup: &impl MembershipLookup,
     author: &Principal,
@@ -1325,7 +1330,7 @@ pub fn change_roles(
     scope: Scope,
     change: &RoleChange,
     now: UtcNanos,
-) -> Result<(), Refusal> {
+) -> Result<StepUp, Refusal> {
     let _ = (lookup, author, session, scope, change, now);
     Err(Refusal::Unimplemented { story: "E9-2" })
 }
