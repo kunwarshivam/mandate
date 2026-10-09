@@ -6,14 +6,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
-use mandate_api::envelope::Actor;
+use mandate_api::envelope::{Actor, Record, StepUpEvidence, Watermark};
 use mandate_api::idempotency::{Derivation, IdempotencyKey, KeyError, event_id};
 use mandate_api::problem::{
     AncestorLevel, CurrentBase, Effect, PolicyLevel, PolicyValue, Problem, ProblemCode,
     ProblemError, Violation,
 };
-use mandate_api::requests::KillSwitchRequest;
-use mandate_api::responses::CommandStatus;
+use mandate_api::requests::{
+    AcknowledgeRequest, ApprovalResponseRequest, ConfirmRequest, DelegationPreviewRequest,
+    EndDelegationRequest, HoldRequest, KillSwitchRequest, LiftHoldRequest, OwnerExitRequest,
+    OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest, StopRequest,
+};
+use mandate_api::responses::{CommandAccepted, CommandStatus, DelegationPreview};
 use mandate_api::wire::{
     Asset, Decimal, EventId, Id, Ref, Refused, Timestamp, Validate, decode, encode,
 };
@@ -886,6 +890,274 @@ fn a_problems_violation_given_as_an_array_is_refused_as_type_at_its_item() {
         .map(|(body, want)| (body.as_slice(), *want))
         .collect();
     let wrong = misjudged::<Problem>(&cases);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A body with `$` placeholders, and the one `(path, code)` `decode` refuses it with, or `None`.
+type Row<'a> = (&'a str, Option<(&'a str, &'a str)>);
+
+/// `text` with each placeholder spelled out: `$H` an envelope's members, `$R` a record, `$W` a
+/// watermark, `$S` a step-up, `$A` and `$C` references, `$T` an instant, `$U` an event id, and `$X`
+/// an asset.
+fn filled(text: &str) -> String {
+    [
+        (
+            "$H",
+            r#""api_version": "v1", "build": "$A", "served_at": "$T", "as_of": [$W]"#,
+        ),
+        ("$R", r#"{"artifact": "$A", "ui_build": "$C"}"#),
+        (
+            "$W",
+            r#"{"stream_id": "ctl:ws_1", "seq": 1, "hash": "$C", "recorded_at": "$T"}"#,
+        ),
+        (
+            "$S",
+            r#"{"assertion_id": "$U", "authenticated_at": "$T", "method": "passkey"}"#,
+        ),
+        ("$A", &format!("sha256:{}", "ab".repeat(32))),
+        ("$C", &format!("sha256:{}", "cd".repeat(32))),
+        ("$T", "2026-10-08T14:30:00.000000000Z"),
+        ("$U", "01JBH3BTZ8K2M4N6P8R0S2T4V6"),
+        ("$X", "7b4a1c2e-1111-4a2b-9c3d-000000000001"),
+    ]
+    .iter()
+    .fold(text.to_owned(), |text, (mark, value)| {
+        text.replace(mark, value)
+    })
+}
+
+/// [`misjudged`] for rows whose bodies are [`filled`] in.
+fn misjudged_rows<T: DeserializeOwned + Validate + Debug>(rows: &[Row]) -> Vec<String> {
+    let bodies: Vec<String> = rows.iter().map(|(body, _)| filled(body)).collect();
+    let cases: Vec<Judged> = bodies
+        .iter()
+        .zip(rows)
+        .map(|(body, (_, want))| (body.as_bytes(), *want))
+        .collect();
+    misjudged::<T>(&cases)
+}
+
+/// Every request body is an object (`commands/*-request.schema.json`). serde's derived structs
+/// also read a JSON array, their members in order, so `[]` would decode as a pause and
+/// `[{"kind": "agent", "id": "a"}]` as a kill switch. `decode` refuses a whole body given as an
+/// array as `type` at `""`, whether it is empty, positional, or has an item serde would refuse,
+/// as it refuses a scalar body (DEC-882, DEC-681 item 10). The controls: each object form is
+/// accepted, and a scalar is `type` at `""`.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_request_body_given_as_an_array_is_refused_as_type_at_the_root() {
+    let root = Some(("", "type"));
+    let mut wrong = misjudged_rows::<PauseRequest>(&[
+        ("[]", root),
+        ("[$R]", root),
+        ("[null]", root),
+        ("[5]", root),
+        ("{}", None),
+        (r#"{"record": $R}"#, None),
+        ("5", root),
+        ("null", root),
+    ]);
+    wrong.extend(misjudged_rows::<HoldRequest>(&[("[]", root), ("{}", None)]));
+    wrong.extend(misjudged_rows::<EndDelegationRequest>(&[
+        ("[null]", root),
+        ("{}", None),
+    ]));
+    wrong.extend(misjudged_rows::<RevokeRequest>(&[
+        ("[]", root),
+        ("[true]", root),
+        (r#"{"compromised": true}"#, None),
+        ("true", root),
+    ]));
+    wrong.extend(misjudged_rows::<KillSwitchRequest>(&[
+        (r#"[{"kind": "agent", "id": "a"}]"#, root),
+        (r#"[{"kind": "workspace", "id": null}, "paper"]"#, root),
+        (r#"[["agent", "a"]]"#, root),
+        ("[]", root),
+        (r#"{"scope": {"kind": "agent", "id": "a"}}"#, None),
+        (r#""scope""#, root),
+    ]));
+    wrong.extend(misjudged_rows::<OwnerExitRequest>(&[
+        (r#"["$X"]"#, root),
+        (r#"{"instrument": "$X"}"#, None),
+    ]));
+    wrong.extend(misjudged_rows::<OwnerRequest>(&[
+        (r#"["$X", "buy"]"#, root),
+        (r#"["$X", "sell", "1"]"#, root),
+        (r#"{"instrument": "$X", "side": "buy"}"#, None),
+    ]));
+    wrong.extend(misjudged_rows::<ResumeRequest>(&[
+        ("[null, null]", root),
+        ("[$R, $S]", root),
+        (r#"{"record": null, "step_up": null}"#, None),
+    ]));
+    wrong.extend(misjudged_rows::<LiftHoldRequest>(&[("[null, null]", root)]));
+    wrong.extend(misjudged_rows::<AcknowledgeRequest>(&[
+        (r#"[null, null, "$U"]"#, root),
+        (
+            r#"{"record": null, "step_up": null, "acknowledged": "$U"}"#,
+            None,
+        ),
+    ]));
+    wrong.extend(misjudged_rows::<StopRequest>(&[
+        ("[null, null, null, false]", root),
+        (
+            r#"{"warning_shown": null, "record": null, "step_up": null, "release": false}"#,
+            None,
+        ),
+    ]));
+    wrong.extend(misjudged_rows::<DelegationPreviewRequest>(&[
+        (r#"[null, null, null, "until_close", 1]"#, root),
+        (
+            r#"{"max_order_usd": null, "max_total_usd": null, "expires_at": null, "shape": "until_close", "max_orders": 1}"#,
+            None,
+        ),
+    ]));
+    wrong.extend(misjudged_rows::<ConfirmRequest>(&[(
+        r#"[null, null, null, [], [], "neutral", "$A", $R]"#,
+        root,
+    )]));
+    wrong.extend(misjudged_rows::<ApprovalResponseRequest>(&[(
+        r#"[null, null, "skipped", "$A", $R]"#,
+        root,
+    )]));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A record, a step-up, a chosen delegation, and a confirmed bid are objects
+/// (`envelope.schema.json#/$defs/Record`, `#/$defs/StepUpEvidence`, and the request schemas), so
+/// each given as an array is refused as `type` at its member, or at its item in an array, never at
+/// an item inside it (DEC-882). The controls: the object form is accepted, `null` where the schema
+/// allows it, and a scalar is `type` at the same pointer.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_nested_object_given_as_an_array_is_refused_as_type_at_its_member() {
+    let record = Some(("/record", "type"));
+    let mut wrong = misjudged_rows::<PauseRequest>(&[
+        (r#"{"record": ["$A", "$C"]}"#, record),
+        (r#"{"record": ["$A", "$C", 5]}"#, record),
+        (r#"{"record": ["$A", 5]}"#, record),
+        (r#"{"record": []}"#, record),
+        (r#"{"record": null}"#, None),
+        (r#"{"record": 5}"#, record),
+    ]);
+    let step_up = Some(("/step_up", "type"));
+    wrong.extend(misjudged_rows::<ResumeRequest>(&[
+        (
+            r#"{"record": $R, "step_up": ["$U", "$T", "passkey"]}"#,
+            step_up,
+        ),
+        (r#"{"record": $R, "step_up": []}"#, step_up),
+        (r#"{"record": $R, "step_up": $S}"#, None),
+        (r#"{"record": $R, "step_up": "passkey"}"#, step_up),
+    ]));
+    wrong.extend(misjudged_rows::<ConfirmRequest>(&[
+        (
+            r#"{"agent_id": null, "base_version": null, "step_up": null, "confirmed_paths": [], "warnings_acknowledged": [], "classification_shown": "neutral", "screen_digest": "$A", "record": ["$A", "$C"]}"#,
+            record,
+        ),
+        (
+            r#"{"agent_id": null, "base_version": null, "step_up": null, "confirmed_paths": [], "warnings_acknowledged": [], "classification_shown": "neutral", "screen_digest": "$A", "record": $R}"#,
+            None,
+        ),
+    ]));
+    let delegation = Some(("/delegation", "type"));
+    wrong.extend(misjudged_rows::<ApprovalResponseRequest>(&[
+        (
+            r#"{"step_up": null, "delegation": ["p", "$A"], "verdict": "approved", "content_hash": "$A", "record": $R}"#,
+            delegation,
+        ),
+        (
+            r#"{"step_up": null, "delegation": {"preview_id": "p", "mandate_version": "$A"}, "verdict": "approved", "content_hash": "$A", "record": $R}"#,
+            None,
+        ),
+    ]));
+    wrong.extend(misjudged_rows::<KillSwitchRequest>(&[
+        (
+            r#"{"scope": {"kind": "agent", "id": "a"}, "owner_exit": [["$X", "1", "1", "$T", "1"]]}"#,
+            Some(("/owner_exit/0", "type")),
+        ),
+        (
+            r#"{"scope": {"kind": "agent", "id": "a"}, "owner_exit": [{"asset_id": "$X", "bid": "1", "bid_size": "1", "quoted_at": "$T", "floor": "1"}]}"#,
+            None,
+        ),
+        (
+            r#"{"scope": {"kind": "agent", "id": "a"}, "owner_exit": [5]}"#,
+            Some(("/owner_exit/0", "type")),
+        ),
+    ]));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// The responses, the problem, and the envelope's shapes are objects too
+/// (`commands/*.schema.json`, `envelope.schema.json`, `common.schema.json#/$defs/Watermark`): a
+/// whole body given as an array is `type` at `""`, a watermark in `as_of` at `/as_of/<index>`, a
+/// step at `/steps/<index>`, and a preview's delegation at `/delegation` (DEC-882). The controls:
+/// the object form is accepted, and a scalar is `type` where the array stood.
+#[test]
+#[ignore = "pending E10-10"]
+fn a_response_given_as_an_array_is_refused_as_type_where_the_array_stands() {
+    let root = Some(("", "type"));
+    let mut wrong = misjudged_rows::<CommandStatus>(&[
+        (r#"["v1", "$A", "$T", [$W], "$U", "recorded", []]"#, root),
+        ("[]", root),
+        (
+            r#"{"api_version": "v1", "build": "$A", "served_at": "$T", "as_of": [["ctl:ws_1", 1, "$C", "$T"]], "command_id": "$U", "phase": "recorded", "steps": []}"#,
+            Some(("/as_of/0", "type")),
+        ),
+        (
+            r#"{$H, "command_id": "$U", "phase": "applied", "steps": [[null, "ctl:ws_1", 2, "AgentModeChanged", "$T"]]}"#,
+            Some(("/steps/0", "type")),
+        ),
+        (
+            r#"{$H, "command_id": "$U", "phase": "applied", "steps": [{"reason": null, "stream_id": "ctl:ws_1", "seq": 2, "event_type": "AgentModeChanged", "recorded_at": "$T"}]}"#,
+            None,
+        ),
+        (
+            r#"{$H, "command_id": "$U", "phase": "recorded", "steps": []}"#,
+            None,
+        ),
+        (
+            r#"{$H, "command_id": "$U", "phase": "applied", "steps": [5]}"#,
+            Some(("/steps/0", "type")),
+        ),
+    ]);
+    wrong.extend(misjudged_rows::<CommandAccepted>(&[
+        (r#"["v1", "$A", "$T", [$W], "$U", "recorded"]"#, root),
+        (r#"{$H, "command_id": "$U", "phase": "recorded"}"#, None),
+    ]));
+    let preview = r#"{$H, "preview_id": "p", "mandate_version": "$A", "unasked_usd_after": "1", "classification": "risk_increasing", "step_up_digest": "$C", "delegation": DELEGATION}"#;
+    let previews = [
+        r#"[null, "until_close", 1, "1", "1", "$U"]"#,
+        r#"{"expires_at": null, "shape": "until_close", "max_orders": 1, "max_order_usd": "1", "max_total_usd": "1", "source_approval_id": "$U"}"#,
+    ]
+    .map(|delegation| preview.replace("DELEGATION", delegation));
+    wrong.extend(misjudged_rows::<DelegationPreview>(&[
+        (&previews[0], Some(("/delegation", "type"))),
+        (&previews[1], None),
+    ]));
+    wrong.extend(misjudged_rows::<Problem>(&[
+        (
+            r#"["https://mandate.dev/problems/invalid", 422, "invalid", "Invalid request", "none", null, false, []]"#,
+            root,
+        ),
+        (
+            r#"{"type": "https://mandate.dev/problems/invalid", "status": 422, "code": "invalid", "title": "Invalid request", "effect": "none", "event_id": null, "retryable": false, "violations": []}"#,
+            None,
+        ),
+    ]));
+    wrong.extend(misjudged_rows::<Record>(&[
+        (r#"["$A", "$C"]"#, root),
+        ("$R", None),
+        ("5", root),
+    ]));
+    wrong.extend(misjudged_rows::<Watermark>(&[
+        (r#"["ctl:ws_1", 1, "$C", "$T"]"#, root),
+        ("$W", None),
+    ]));
+    wrong.extend(misjudged_rows::<StepUpEvidence>(&[
+        (r#"["$U", "$T", "passkey"]"#, root),
+        ("$S", None),
+    ]));
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 

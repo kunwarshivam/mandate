@@ -1,0 +1,7 @@
+file = "crates/mandate-cli/tests/journal_verify_agent_ranges.rs"
+test = "a_tail_range_fails_closed_at_its_first_version_2_copy"
+reason = """
+E12-3 W2 (DEC-782): both verifiers already run and answer verified or an anchor code, so there is
+no stub to stop at; the agent-stream checks are library functions the CLI does not call yet. W2's
+implementation PR wires them in and deletes the ignore line and this row.
+"""

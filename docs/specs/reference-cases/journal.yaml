@@ -56,6 +56,12 @@
 # companion rebuilds, which a resubmission after a confirmed absence sends again under the same id
 # (§5.7). `valid_batches` and `invalid_batches` are rule 45's batch cases; each member of their
 # `drafts` is built like a draft case, and an invalid one is refused whole at `draft_index`.
+#
+# `protection_shapes` (spec v0.33 §9.5 rules 41 and 44, DEC-859) is generated and checked the same
+# way, by reference/journal/account.py. `drafts` are two `ProtectionChanged` bases of the account
+# chain; each valid draft is a record of DEC-859 item 1's table, and each invalid draft a near miss
+# rules 41 and 44 still refuse. It is a section of its own, so the `account_stream` cases and
+# counts stay as they are.
 
 version: 3
 hash_algorithm: sha256
@@ -8518,6 +8524,530 @@ account_stream:
       client_order_id: md-01J8ZT90A000000000000000P1
       attempt: 2
       changes_nothing_else: true
+protection_shapes:
+  spec: docs/specs/journal.md v0.33 §9.5 rules 41 and 44 (DEC-859)
+  drafts:
+    intended:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA2A000000000000000E3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 1
+      event_time: '2026-09-21T14:00:10.000000000Z'
+      clock_source: local
+      causation_id: 01J8ZQA1A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: intended
+        orders: []
+        awaiting: []
+        qty: null
+        stop: '139'
+        take_profit: '159'
+        intent_id: 01J8ZT90A000000000000000P1
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: null
+        sent: null
+        uncovered: null
+        acknowledged: null
+        risk_clock: '2026-09-21T14:00:10.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    start:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA7A000000000000000E8
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 1
+      event_time: '2026-09-21T14:00:35.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: unprotected_start
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: null
+        stop: '139'
+        take_profit: '159'
+        intent_id: 01J8ZT90A000000000000000P1
+        bracket: null
+        entry: md-01J8ZT90A000000000000000P1
+        agent_id: agent_a
+        replacing: true
+        created_on: null
+        sent: null
+        uncovered: null
+        acknowledged: null
+        risk_clock: '2026-09-21T14:00:35.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: placed_still_names_an_order
+    clause: 'rule 41: placed names at least one order'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: placed
+    - path: payload.orders
+      value: []
+    - path: payload.qty
+      value: '10'
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.orders
+  - name: cancelled_still_names_an_order
+    clause: 'rule 41: cancelled names at least one order'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: cancelled
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.orders
+  - name: an_end_names_an_order
+    clause: 'rule 41: orders is empty on unprotected_end'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.orders
+      value:
+      - md-01J8ZT90A000000000000000P1-p1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.orders
+  - name: a_start_awaits_a_cancel
+    clause: 'rule 41: awaiting is empty on a start'
+    base_draft: start
+    changes:
+    - path: payload.awaiting
+      value:
+      - md-01J8ZT90A000000000000000P1-p1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.awaiting
+  - name: a_passive_start_awaits_a_cancel
+    clause: 'rule 41: awaiting is empty on a start'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.orders
+      value: []
+    - path: payload.awaiting
+      value:
+      - md-01J8ZT90A000000000000000P1-p1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.awaiting
+  - name: watchdog_awaits_a_cancel
+    clause: 'rule 41: awaiting is empty but on the two that await'
+    base_draft: intended
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.action
+      value: watchdog
+    - path: payload.awaiting
+      value:
+      - md-01J8ZT90A000000000000000P1-p1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.awaiting
+  - name: entry_without_intent_not_replacing
+    clause: 'rule 44: replacing false keeps the three together'
+    base_draft: start
+    changes:
+    - path: payload.intent_id
+      value: null
+    - path: payload.replacing
+      value: false
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry
+  - name: entry_without_intent_replacing_null
+    clause: 'rule 44: a start that replaces nothing keeps the three together'
+    base_draft: start
+    changes:
+    - path: payload.intent_id
+      value: null
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry
+  - name: passive_entry_without_intent_not_replacing
+    clause: 'rule 44: the same on a passive start'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.intent_id
+      value: null
+    - path: payload.replacing
+      value: false
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry
+  - name: replacement_without_its_owner
+    clause: 'rule 44: a re-placement names entry and agent_id together'
+    base_draft: start
+    changes:
+    - path: payload.intent_id
+      value: null
+    - path: payload.agent_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent_id
+  - name: replacement_owner_without_entry
+    clause: 'rule 44: a re-placement names entry and agent_id together'
+    base_draft: start
+    changes:
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent_id
+  - name: replacing_exit_without_its_entry
+    clause: 'rule 44: with an intent, an exit sequence names all three'
+    base_draft: start
+    changes:
+    - path: payload.entry
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry
+  - name: an_end_names_an_entry
+    clause: 'rule 44: entry only on the two starts'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.entry
+      value: md-01J8ZT90A000000000000000P1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry
+  - name: an_end_replaces
+    clause: 'rule 44: replacing only on the two starts'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.replacing
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.replacing
+  valid_drafts:
+  - name: bracket_first_fill_start
+    clause: 'rule 41: a bracket entry''s first fill starts an interval naming only its bracket'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    expect:
+      outcome: Valid
+  - name: bracket_filled_end
+    clause: 'rule 41: the bracket filled after it ends the interval awaiting nothing'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    expect:
+      outcome: Valid
+  - name: nothing_to_cover_end
+    clause: 'rule 41: an interval with nothing to cover ends awaiting nothing'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Valid
+  - name: acknowledged_end
+    clause: 'rule 41: the owner''s acknowledgment ends an interval awaiting nothing'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.acknowledged
+      value: true
+    expect:
+      outcome: Valid
+  - name: uncovered_end
+    clause: 'rule 41: an interval ends uncovered, awaiting nothing'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.uncovered
+      value: true
+    expect:
+      outcome: Valid
+  - name: interval_limit_awaiting_nothing
+    clause: 'rule 41: the interval''s bound, awaiting no cancel'
+    base_draft: intended
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.action
+      value: interval_limit
+    expect:
+      outcome: Valid
+  - name: replacement_before_expiry
+    clause: 'rule 44: a re-placement names its entry and owner with no intent'
+    base_draft: start
+    changes:
+    - path: payload.intent_id
+      value: null
+    expect:
+      outcome: Valid
+  - name: passive_replacement_before_expiry
+    clause: 'rule 44: the same on a passive start'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.intent_id
+      value: null
+    expect:
+      outcome: Valid
+  - name: handed_on_passive_start
+    clause: 'rule 41: a handed-on passive sequence starts naming no order'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Valid
+  - name: passive_wait_start
+    clause: 'rule 41: a passive wait starts naming no order and no exit sequence'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Valid
+  - name: lost_protection_start
+    clause: 'rule 41: lost protection starts an interval naming no order'
+    base_draft: start
+    changes:
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.replacing
+      value: null
+    expect:
+      outcome: Valid
 approval_answers:
   spec: docs/specs/journal.md v0.17 §9.7 (DEC-533)
   drafts:
