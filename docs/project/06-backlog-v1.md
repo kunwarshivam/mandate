@@ -4604,6 +4604,15 @@ From the workspace API contract's drift rule (DEC-683, E10-10):
 - **Run `schemas/workspace-api/`'s checkers in CI** (`check_examples.py`, `check_planned.py`, and
   the mutation sweep) from a `cargo xtask` job; until then reviewers run them.
 
+From the independent review of the E10-10 A1 implementation, part 1 ([#993](https://github.com/kunwarshivam/mandate/pull/993), minors; [DEC-681](decisions/DEC-681.md) item 10):
+
+- **Locate a custom refusal on an object's last member by its name.** serde_json reports a custom
+  error such as `non_canonical` after the object's closing brace when the bad member is the last
+  one, so `decode` points at the parent. Locate custom errors by member name, as DEC-681 item 10
+  says ("where serde can name it"). The body is still refused, and no sibling is ever named.
+- **Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
+  `type` at the member. It is still refused either way.
+
 From the independent reviews of three CI and xtask conflict-and-queue fixes ([#768](https://github.com/kunwarshivam/mandate/pull/768), [DEC-538](decisions/DEC-538.md); [#770](https://github.com/kunwarshivam/mandate/pull/770), the behaviour-only rows as one file a row; [#773](https://github.com/kunwarshivam/mandate/pull/773), the feature map as one file a feature; minors):
 
 - **The mutation plan's tests** (#768).
