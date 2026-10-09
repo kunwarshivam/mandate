@@ -286,8 +286,10 @@ item above (C-3, C-9) are not repeated.
 - [ ] **One paragraph per set of shared rules** on the Approvals rail. (C-12)
 - [ ] **The phone thread header without the slug.** (C-16)
 - [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
-- [ ] **The brand owl never wears an agent's colour.** Waits on the founder: DEC-452 is the
-      founder's "choose the color at random". (C-15)
+- [x] **The brand owl never wears an agent's colour.** The founder decided it on 2026-10-09
+      (DEC-739 item 2, amending DEC-452's "choose the color at random"): the brand owl wears
+      `--logo`, the wordmark's colour, and the per-load pick is gone. (C-15) Done in
+      [#1127](https://github.com/kunwarshivam/mandate/pull/1127).
 
 ## Learnings (not action items)
 
