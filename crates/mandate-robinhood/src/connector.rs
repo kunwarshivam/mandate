@@ -5,9 +5,8 @@ use mandate_executor::{BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorE
 use mandate_mcp::{CallClass, McpError};
 use serde_json::Value;
 
-/// One MCP `tools/call` (DEC-860 item 2): `tool` with `arguments`, drawing on `class`'s budget,
-/// answered with the JSON-RPC `result` exactly as the server sent it. An `Err` says nothing about
-/// whether the call reached the server.
+/// One MCP `tools/call` (DEC-860 item 2), answered with the JSON-RPC `result` as sent. An `Err`
+/// says nothing about whether the call reached the server.
 pub trait Tools {
     fn call_tool(
         &self,
@@ -52,9 +51,7 @@ impl<T: Tools> BrokerConnector for RobinhoodConnector<T> {
         crate::profile::robinhood()
     }
 
-    /// `Submit` and `Cancel` as the crate documentation says. A request the profile does not
-    /// offer (a bracket, an OCO, extended hours, `ioc`), or one this slice does not map, is
-    /// `NotSent` with nothing called.
+    /// `Submit` and `Cancel` (DEC-860); anything the profile does not offer is `NotSent`.
     async fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         todo!()
     }

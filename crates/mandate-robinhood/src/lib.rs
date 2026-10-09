@@ -8,26 +8,11 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! The Robinhood equity connector (backlog E7-6, the first live trade brief's C1; connections
-//! spec §6.2): the `BrokerConnector` `mandate-executor` declares, over the tool calls of
-//! Robinhood's published contract ([robinhood-contract.md]).
-//!
-//! - **Its profile** ([`robinhood_profile`]) is trading spec §5.2's Robinhood table as data
-//!   (DEC-531, DEC-630): limit, whole shares and `gfd` for an opening, one resting `gtc`
-//!   stop-limit for protection, a `ref_id` the broker deduplicates by, and no query by it.
-//! - **`Submit`** is `review_equity_order`, then `place_equity_order` on the recorded agentic
-//!   account with the [`ref_id`] derived from the intent's idempotency key, never omitted. A
-//!   pre-trade alert refuses an opening or an increase before the place; a sell or a protective
-//!   order is placed anyway (`AGENTS.md` rule 13).
-//! - **A place answer that is not exactly an order record is `Unknown`** (LT-6): never rejected,
-//!   never placed again (DEC-529 item 4, DEC-860 item 4). States read by [`executor_status`].
-//! - **`Cancel`** is `cancel_equity_order` by the broker's `order_id` from the place's answer.
-//!
-//! Every call goes through the [`Tools`] seam (DEC-860 item 2): in production `McpClient`, which
-//! holds the allowlist, the pinned contract and the drift halt. Numbers are decimal text read by
-//! `mandate-num`, never a float (ES-23).
-//!
-//! [robinhood-contract.md]: ../../../docs/project/tasks/robinhood-contract.md
+//! The Robinhood equity connector (E7-6, the first live trade brief's C1): connections spec
+//! §6.2's `BrokerConnector` over the [`Tools`] seam, as DEC-860 reads it. `Submit` is review then
+//! place with the [`ref_id`]; an alert refuses only an opening or an increase (`AGENTS.md` rule
+//! 13); a place answer that is not exactly an order record is `Unknown` and never re-sent (LT-6);
+//! `Cancel` goes by the broker's `order_id`. Numbers are decimal text read by `mandate-num`.
 
 mod connector;
 mod profile;

@@ -17,9 +17,7 @@ use proptest::test_runner::{Config, TestRunner};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-/// §5.2's Robinhood rows: market, limit, stop-market and stop-limit; decimals and dollar amounts
-/// for market only; `gfd` (`day`) and `gtc` throughout; one resting stop-limit and no OCO or
-/// bracket; `ref_id` deduplicated, its retry unknown, no query by it.
+/// §5.2's Robinhood rows, typed by hand.
 const ROBINHOOD: &str = concat!(
     r#"{"idempotency":{"client_order_id":true,"query_by_client_order_id":false,"retry":"unknown"},"#,
     r#""kind":"broker_profile","profile_version":1,"rows":[{"asset_class":"us_equity","cells":["#,
@@ -81,8 +79,7 @@ fn robinhoods_profile_is_trading_spec_5_2s_table() {
     assert_eq!(BrokerConnector::profile(&connector).unwrap(), profile);
 }
 
-/// DEC-529 item 7: with a take-profit price too, a filled whole-share position is protected by
-/// one `gtc` stop-limit at stop × (1 − offset), never an OCO; without an offset, by nothing.
+/// DEC-529 item 7: one `gtc` stop-limit at stop × (1 − offset), never an OCO.
 #[test]
 #[ignore = "pending E7-6"]
 fn robinhoods_profile_protects_by_one_gtc_stop_limit() {
@@ -167,4 +164,19 @@ fn each_contract_state_reads_as_the_connections_spec_says() {
             "{other:?}"
         );
     }
+}
+
+/// Live, so the mutation gate can judge the crate (#175): each error's text is stable, and the
+/// connector hands over the crate's own profile, whatever it is.
+#[test]
+fn the_errors_read_stably_and_the_connector_hands_over_the_profile() {
+    let unimplemented = RobinhoodError::Unimplemented { story: "E7-6" };
+    assert_eq!(
+        unimplemented.to_string(),
+        "E7-6 has not been implemented yet"
+    );
+    let unknown = RobinhoodError::UnknownState.to_string();
+    assert_eq!(unknown, "the order state is none of the contract's ten");
+    let connector = RobinhoodConnector::new(Silent, "5QR00001".to_owned());
+    assert_eq!(BrokerConnector::profile(&connector), robinhood_profile());
 }

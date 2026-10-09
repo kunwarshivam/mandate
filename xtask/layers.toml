@@ -300,8 +300,7 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
 
-# The Robinhood equity connector (E7-6, connections spec §6.2): beside mandate-alpaca, over the
-# MCP client, and pure, since every call goes through the injected tool seam (DEC-860 item 2).
+# The Robinhood connector (E7-6): beside mandate-alpaca; pure, behind its tool seam (DEC-860).
 [crates.mandate-robinhood]
 layer = 7
 safety_critical = true
