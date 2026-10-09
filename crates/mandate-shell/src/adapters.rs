@@ -30,6 +30,7 @@
 
 use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -43,7 +44,9 @@ use mandate_builder::{
     ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
 };
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_domain::{AutonomyDecision, CapabilityProfile, Purpose as BuilderPurpose};
+use mandate_domain::{
+    AutonomyDecision, CapabilityProfile, ProfileError, Purpose as BuilderPurpose,
+};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
     BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
@@ -1036,14 +1039,38 @@ pub(crate) fn trusted_daily_bars(
     listed_bars(dir, inspection.dataset.kind())
 }
 
+/// The pinned symbol's closes, each with its session, exactly as stored and only once `trusted`
+/// admits the dataset at `now`: the span the liquidity facts read, handed to the model host
+/// (DEC-846 item 2).
+pub(crate) fn trusted_daily_closes(
+    dir: &Path,
+    symbol: &str,
+    now: UtcNanos,
+) -> Result<Vec<(Date, Price)>, Cause> {
+    let inspection = inspect::inspect(dir)?;
+    trusted(&inspection, symbol, now)?;
+    listed_days(dir, inspection.dataset.kind())?
+        .into_iter()
+        .map(|(day, bar)| Ok((day, Price::parse(bar.close.as_str())?)))
+        .collect()
+}
+
 fn listed_bars(dir: &Path, kind: Kind) -> Result<Vec<Bar>, Cause> {
+    Ok(listed_days(dir, kind)?
+        .into_iter()
+        .map(|(_, bar)| bar)
+        .collect())
+}
+
+/// One bar per day the manifest lists with a file, in its date order, with that day.
+fn listed_days(dir: &Path, kind: Kind) -> Result<Vec<(Date, Bar)>, Cause> {
     let (_, days) = dataset::read_manifest(dir)?;
     let mut listed_bars = Vec::new();
     for listed in days.iter().filter(|listed| listed.file.is_some()) {
         let path = dir.join(dataset::partition_name(listed.day));
         match dataset::read(&path, kind)? {
             Records::Bars(bars) => match <[Bar; 1]>::try_from(bars) {
-                Ok([bar]) => listed_bars.push(bar),
+                Ok([bar]) => listed_bars.push((listed.day, bar)),
                 Err(_) => return Err(untrusted("a listed day does not hold exactly one bar")),
             },
             Records::Trades(_) | Records::Quotes(_) => {
@@ -1884,10 +1911,12 @@ impl Executor for CoreExecutor {
         Ok(())
     }
 
-    /// A stub until E7-23 B2a: the profile replaces the transitional one in the folded state.
     fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
-        let _ = profile;
-        Err(Cause::Unimplemented { story: "E7-23" })
+        let scope = self.state.borrow().scope().clone();
+        let mut state = self.state.borrow_mut();
+        let folded = mem::replace(&mut *state, ExecutorState::new(scope));
+        *state = folded.with_profile(profile);
+        Ok(())
     }
 
     fn step(
@@ -1923,6 +1952,10 @@ pub struct AlpacaConnector<T> {
 }
 
 impl<T: TradingTransport + Clone> Connector for AlpacaConnector<T> {
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        TradingClient::new(self.transport.clone(), TokioPause, RetryPolicy::default()).profile()
+    }
+
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
@@ -2426,7 +2459,6 @@ mod tests {
     /// DEC-838 item 5: the profile handed to the core executor replaces its transitional one in
     /// the state it has folded, which it keeps.
     #[test]
-    #[ignore = "pending E7-23"]
     fn core_executor_keeps_its_fold_and_takes_the_profile_it_is_handed() -> Result<(), String> {
         let (mut core, _) = CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
         let opened = stream_opened()?;

@@ -1,7 +1,0 @@
-file = "crates/mandate-shell/src/stages/fail_closed.rs"
-test = "every_start_hands_the_executor_the_connectors_profile_after_the_fold"
-reason = """
-E7-23 B2a's (DEC-838 item 5). `Connector::profile` and `Executor::use_profile` exist, but today's
-tracer start never calls them, so the test fails on the log of each start, not at a stub. The
-implementation PR deletes this file with the #[ignore] line.
-"""

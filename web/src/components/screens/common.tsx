@@ -20,10 +20,13 @@ export const PAGE_GRID = "grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[min
 /**
  * What needs the owner, on a phone (DEC-482): one row of tinted cards that scrolls sideways, edge to
  * edge, however many there are, so the money below keeps its place. One card spans the row; with
- * more, each takes most of it and the next shows at the edge. From `lg`, a list on hairlines.
+ * more, each takes most of it and the next shows at the edge. From `lg`, a list on hairlines. The strip
+ * is `relative`, the containing block of the words a card keeps for screen readers alone: absolutely
+ * placed, they would otherwise sit outside the strip's scroll and widen the page by every card that
+ * waits off to the right.
  */
 export const NEEDS_STRIP =
-  "grid max-lg:-mx-(--page-x) max-lg:flex max-lg:snap-x max-lg:snap-mandatory max-lg:gap-2 max-lg:overflow-x-auto max-lg:scroll-px-(--page-x) max-lg:px-(--page-x) max-lg:[scrollbar-width:none]";
+  "relative grid max-lg:-mx-(--page-x) max-lg:flex max-lg:snap-x max-lg:snap-mandatory max-lg:gap-2 max-lg:overflow-x-auto max-lg:scroll-px-(--page-x) max-lg:px-(--page-x) max-lg:[scrollbar-width:none]";
 
 /** One card in the strip; a hairline row from `lg`. */
 export const NEEDS_ITEM = "lg:border-b lg:border-border/70 lg:last:border-b-0 max-lg:flex max-lg:w-full max-lg:shrink-0 max-lg:snap-start max-lg:not-only:w-[min(19rem,85%)]";
