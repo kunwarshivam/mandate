@@ -1,13 +1,19 @@
-//! The loopback MCP server over the core (E7-25, S2 tests parts 1 and 2): loopback only, the
-//! session, the pinned contract, tool calls driving the core, unlisted tools, and the extra-tool
-//! and injection variants (LT-1, LT-8, CN-9). Oracles: the contract file, `mandate-mcp`'s
+//! The loopback MCP server over the core (E7-25, S2 tests parts 1 and 2, and the tests
+//! correction): loopback only, the session, the pinned contract, tool calls driving the core,
+//! unlisted tools, the extra-tool and injection variants (LT-1, LT-8, CN-9), and the transport's
+//! edges: the listener closing on drop, the status lines, a parse error, an unknown session, a
+//! wrong path, and filters the core does not model. Oracles: the contract file, `mandate-mcp`'s
 //! allowlist and revision, a hash computed outside Rust, imperatives written here, the core
-//! driven directly, and the contract's own state and alert names.
+//! driven directly, the contract's own state and alert names, and HTTP's and JSON-RPC's own
+//! reason phrases and codes.
 
 mod common;
 
 use std::collections::BTreeSet;
-use std::net::{IpAddr, Ipv4Addr};
+use std::io::{Read, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::thread;
+use std::time::Duration;
 
 use common::wire::Wire;
 use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, limit, price, qty, ref_id, sim};
@@ -635,5 +641,293 @@ fn a_garbled_answer_follows_an_order_the_core_placed_and_only_that_answer_is_ben
         );
         listed(&mut wire, &held);
     }
+    Ok(())
+}
+
+/// A request's head and body, written here byte for byte.
+fn request(addr: SocketAddr, line: &str, session: Option<&str>, body: &[u8]) -> Vec<u8> {
+    let mut head = format!(
+        "{line}\r\nhost: {addr}\r\nconnection: close\r\ncontent-type: application/json\r\n\
+         accept: application/json, text/event-stream\r\nmcp-protocol-version: {PROTOCOL_VERSION}\r\n"
+    );
+    if let Some(session) = session {
+        head.push_str(&format!("mcp-session-id: {session}\r\n"));
+    }
+    head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
+    let mut bytes = head.into_bytes();
+    bytes.extend_from_slice(body);
+    bytes
+}
+
+/// Writes `bytes` split at `splits`, pausing between the parts, and returns the whole answer as
+/// text, or `None` when the server closes or resets the connection with no byte of an answer.
+fn send(addr: SocketAddr, bytes: &[u8], splits: &[usize]) -> Option<String> {
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut from = 0;
+    for &to in splits.iter().chain([&bytes.len()]) {
+        let _written = stream.write_all(&bytes[from..to]);
+        thread::sleep(Duration::from_millis(if to == bytes.len() {
+            0
+        } else {
+            50
+        }));
+        from = to;
+    }
+    let mut answer = Vec::new();
+    let _read = stream.read_to_end(&mut answer);
+    (!answer.is_empty()).then(|| String::from_utf8(answer).unwrap())
+}
+
+fn exchange(addr: SocketAddr, line: &str, session: Option<&str>, body: &[u8]) -> Option<String> {
+    send(addr, &request(addr, line, session, body), &[])
+}
+
+const POST: &str = "POST /mcp HTTP/1.1";
+
+fn list_body() -> Vec<u8> {
+    json!({"jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": {}})
+        .to_string()
+        .into_bytes()
+}
+
+/// The JSON-RPC message after the head of an answer.
+fn body_of(answer: &str) -> Value {
+    serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn dropping_the_server_closes_its_listener() -> Outcome {
+    let addr = {
+        let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+        let addr = server.addr()?;
+        assert!(
+            TcpStream::connect(addr).is_ok(),
+            "it listens while it lives"
+        );
+        addr
+    };
+    let wait = Duration::from_millis(20);
+    let accepted = (0..50).take_while(|_| {
+        thread::sleep(wait);
+        TcpStream::connect_timeout(&addr, wait).is_ok()
+    });
+    assert!(
+        accepted.count() < 50,
+        "{addr} still accepts a second after drop"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn each_status_line_carries_its_standard_reason_phrase() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let addr = server.addr()?;
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params":
+        {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+         "clientInfo": {"name": "mandate-mcp", "version": "0.0.0"}}});
+    let ok = exchange(addr, POST, None, init.to_string().as_bytes()).unwrap();
+    assert!(ok.starts_with("HTTP/1.1 200 OK\r\n"), "{ok}");
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}});
+    let accepted = exchange(addr, POST, Some(&session), note.to_string().as_bytes()).unwrap();
+    assert!(
+        accepted.starts_with("HTTP/1.1 202 Accepted\r\n"),
+        "{accepted}"
+    );
+    assert!(
+        accepted.ends_with("\r\n\r\n"),
+        "202 carries no body: {accepted}"
+    );
+    let bad = exchange(addr, POST, None, &list_body()).unwrap();
+    assert!(bad.starts_with("HTTP/1.1 400 Bad Request\r\n"), "{bad}");
+    let gone = exchange(addr, POST, Some("never-given"), &list_body()).unwrap();
+    assert!(gone.starts_with("HTTP/1.1 404 Not Found\r\n"), "{gone}");
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_body_that_is_not_json_is_a_parse_error_under_400() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let answer = exchange(
+        server.addr()?,
+        POST,
+        Some(&session),
+        b"{\"jsonrpc\": \"2.0\", ",
+    )
+    .unwrap();
+    assert!(answer.starts_with("HTTP/1.1 400 "), "{answer}");
+    let message = body_of(&answer);
+    assert_eq!(message["error"]["code"], json!(-32700), "{message}");
+    assert_eq!(
+        (message.get("id"), message.get("result")),
+        (Some(&Value::Null), None)
+    );
+    assert_eq!(server.calls()?, Vec::<String>::new());
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_session_the_server_never_gave_is_404_with_code_32001_and_reaches_nothing() -> Outcome {
+    let (server, wire) = served(Variant::Honest)?;
+    let stale = format!("{}x", wire.session.unwrap());
+    let args = arguments(&limit("buy", "1", "501", 1));
+    let call = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "place_equity_order", "arguments": args}});
+    let answer = exchange(
+        server.addr()?,
+        POST,
+        Some(&stale),
+        call.to_string().as_bytes(),
+    );
+    let answer = answer.unwrap();
+    assert!(answer.starts_with("HTTP/1.1 404 "), "{answer}");
+    let message = body_of(&answer);
+    assert_eq!(message["error"]["code"], json!(-32001), "{message}");
+    assert_eq!(message.get("result"), None);
+    assert_eq!(server.calls()?, Vec::<String>::new(), "no call is recorded");
+    assert_eq!(orders(&server, AGENTIC)?, [], "no order is placed");
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn every_initialize_gets_a_session_of_its_own() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let url = server.url()?;
+    let sessions: BTreeSet<String> = (0..4)
+        .map(|_| Wire::connect(&url).session.unwrap())
+        .collect();
+    assert_eq!(sessions.len(), 4, "{sessions:?}");
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
+    let (_server, mut wire) = served(Variant::Honest)?;
+    let placed = wire.call(
+        "place_equity_order",
+        arguments(&limit("buy", "1", "499", 1)),
+    );
+    assert!(!refused(&placed), "{placed}");
+    let filters = [
+        ("order_id", "nothing"),
+        ("symbol", "QQQ"),
+        ("state", "filled"),
+        ("created_at_gte", "2099-01-01T00:00:00Z"),
+        ("placed_agent", "user"),
+        ("cursor", "next"),
+    ];
+    for (key, value) in filters {
+        let mut args = json!({"account_number": AGENTIC});
+        args[key] = json!(value);
+        let answer = wire.call("get_equity_orders", args);
+        assert!(refused(&answer), "{key} is never ignored: {answer}");
+        assert_eq!(answer.get("structuredContent"), None, "{key}: {answer}");
+    }
+    let plain = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    assert_eq!(
+        plain["structuredContent"]["orders"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn anything_but_post_to_mcp_is_404_never_400() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let addr = server.addr()?;
+    let served = exchange(addr, POST, Some(&session), &list_body()).unwrap();
+    assert!(
+        served.starts_with("HTTP/1.1 200 "),
+        "the same request on POST /mcp: {served}"
+    );
+    let lines = [
+        "GET /mcp HTTP/1.1",
+        "PUT /mcp HTTP/1.1",
+        "POST / HTTP/1.1",
+        "POST /mcpx HTTP/1.1",
+        "POST /mcp/tools HTTP/1.1",
+        "POST /MCP HTTP/1.1",
+    ];
+    for line in lines {
+        let answer = exchange(addr, line, Some(&session), &list_body()).unwrap();
+        assert!(answer.starts_with("HTTP/1.1 404 "), "{line}: {answer}");
+    }
+    let unparsed = exchange(addr, "POST /nowhere HTTP/1.1", Some(&session), b"not json").unwrap();
+    assert!(
+        unparsed.starts_with("HTTP/1.1 404 "),
+        "the path before the body: {unparsed}"
+    );
+    Ok(())
+}
+
+/// `MAX_REQUEST`: "the most bytes one request may hold; past that the connection closes
+/// unanswered". A request is its whole head and body, so that is what is counted here.
+const MIB: usize = 1_048_576;
+
+/// A `tools/list` request of exactly `total` bytes, its body padded with JSON whitespace.
+fn request_of(total: usize, addr: SocketAddr, session: &str) -> Vec<u8> {
+    let mut pad = total - 512;
+    loop {
+        let mut body = list_body();
+        let close = body.pop().unwrap();
+        body.extend(std::iter::repeat_n(b' ', pad));
+        body.push(close);
+        let bytes = request(addr, POST, Some(session), &body);
+        match bytes.len() {
+            len if len == total => return bytes,
+            len => pad = pad + total - len,
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E7-25"]
+fn a_request_of_one_mib_is_answered_and_one_byte_more_is_closed_unanswered() -> Outcome {
+    let server = SimServer::start(sim().unwrap(), Variant::Honest)?;
+    let session = Wire::connect(&server.url()?).session.unwrap();
+    let addr = server.addr()?;
+    let fits = request_of(MIB, addr, &session);
+    assert_eq!(fits.len(), MIB);
+    for splits in [vec![], vec![MIB - 1]] {
+        let answer = send(addr, &fits, &splits).unwrap_or_default();
+        assert!(
+            answer.starts_with("HTTP/1.1 200 OK\r\n"),
+            "{splits:?}: {answer:.80}"
+        );
+        assert!(body_of(&answer)["result"]["tools"].is_array(), "{splits:?}");
+    }
+    let over = request_of(MIB + 1, addr, &session);
+    assert_eq!(over.len(), MIB + 1);
+    let splits = [
+        vec![],
+        vec![MIB],
+        vec![1],
+        vec![4097, MIB / 2 + 3],
+        vec![MIB - 4095],
+    ];
+    for splits in splits {
+        let answer = send(addr, &over, &splits);
+        assert_eq!(
+            answer.as_deref().map(|a| &a[..a.len().min(80)]),
+            None,
+            "{splits:?}"
+        );
+    }
+    let after = exchange(addr, POST, Some(&session), &list_body()).unwrap();
+    assert!(after.starts_with("HTTP/1.1 200 "), "it serves on: {after}");
     Ok(())
 }
