@@ -10970,6 +10970,349 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// `.github/workflows/ci.yml` whose text is `lines`, each ended by a newline.
+    fn yaml_lines(lines: &[&str]) -> CiFile {
+        let mut text = lines.join("\n");
+        text.push('\n');
+        ci_file(".github/workflows/ci.yml", &text)
+    }
+
+    /// Asserts that some problem starts with `path` and says it cannot be read (DEC-868 item 3).
+    fn unreadable_file(problems: &[String], path: &str) {
+        let named = problems
+            .iter()
+            .any(|p| p.starts_with(path) && p.contains("cannot be read"));
+        assert!(named, "{path} cannot be read: {problems:?}");
+    }
+
+    /// A backslash-newline that splits a word (`ca\` then `rgo`, `-\` then `p`) joins it with
+    /// nothing, as the shell does, so the line cannot be read; a continuation after a space is
+    /// read as before (#1169 round 3 review, bypass 1; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_continuation_that_splits_a_word_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  split-cargo:",
+            "    steps:",
+            "      - run: |",
+            "          ca\\",
+            "          rgo test -p rh-host",
+            "  split-flag:",
+            "    steps:",
+            "      - run: |",
+            "          cargo test -p a-lib -\\",
+            "          p rh-host",
+            "  lib-tests:",
+            "    steps:",
+            "      - run: |",
+            "          cargo test -p a-lib \\",
+            "            --locked",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["split-cargo", "split-flag"]);
+        names(&problems, &["split-cargo"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A redirection ends no command: only its target word is skipped, and the words after it
+    /// (`> /dev/null -p rh-host`, `2>&1`, `>&2`, `<<< x`) are still the command's (#1169 round 3
+    /// review, bypass 2; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_words_after_a_redirection_are_read() -> Result<()> {
+        let flows = [workflow(&[
+            ("redirect-out", "cargo test -p a-lib > /dev/null -p rh-host"),
+            ("redirect-dup", "cargo test -p a-lib 2>&1 -p rh-host"),
+            ("redirect-err", "cargo test -p a-lib >&2 -p rh-host"),
+            ("here-string", "cargo test -p a-lib <<< x -p rh-host"),
+            ("lib-tests", "cargo test -p a-lib > out.log 2>&1"),
+        ])];
+        let jobs = [
+            "rh-host",
+            "redirect-out",
+            "redirect-dup",
+            "redirect-err",
+            "here-string",
+        ];
+        names(&host_problems(&flows)?, &jobs, &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A short-flag cluster selects its package as cargo reads it: after `p`, the rest of the
+    /// cluster or the next word (`-qp rh-host`, `-vprh-host`); a cluster the check cannot read
+    /// selects every member; and a cluster naming a package keeps a build out of the
+    /// compile-only form (#1169 round 3 review, bypass 3; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_short_flag_cluster_selects_its_package() -> Result<()> {
+        let flows = [workflow(&[
+            ("quiet-cluster", "cargo test -p a-lib -qp rh-host"),
+            ("verbose-cluster", "cargo test -p a-lib -vp rh-host"),
+            ("glued-cluster", "cargo test -p a-lib -vprh-host"),
+            ("unknown-cluster", "cargo test -p a-lib -k"),
+            (
+                "compile-cluster",
+                "cargo check -p the-runner -qp rh-host --features live",
+            ),
+            ("lib-tests", "cargo test -qp a-lib"),
+        ])];
+        let jobs = [
+            "rh-host",
+            "quiet-cluster",
+            "verbose-cluster",
+            "glued-cluster",
+            "unknown-cluster",
+            "compile-cluster",
+        ];
+        names(&host_problems(&flows)?, &jobs, &["lib-tests"]);
+        Ok(())
+    }
+
+    /// `cargo-<subcommand>` binaries and `cargo.exe` are cargo: their invocations are judged, and
+    /// one hidden in a shell string cannot be read; a `cargo-*` file named as a plain argument
+    /// (`tar xzf cargo-mutants.tgz cargo-mutants`) is not an invocation (#1169 round 3 review,
+    /// bypass 4; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn cargo_subcommand_binaries_and_cargo_exe_are_cargo() -> Result<()> {
+        let flows = [workflow(&[
+            ("nextest-binary", "cargo-nextest nextest run -p rh-host"),
+            ("exe", "cargo.exe test -p rh-host"),
+            ("exe-path", "/usr/bin/cargo.exe test -p rh-host"),
+            ("hidden-binary", "bash -c 'cargo-nextest nextest run'"),
+            ("lib-tests", "cargo-nextest nextest run -p a-lib"),
+            (
+                "unpack",
+                "tar xzf cargo-mutants.tgz cargo-mutants && rm cargo-mutants",
+            ),
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["hidden-binary"]);
+        names(
+            &problems,
+            &["rh-host", "nextest-binary", "exe", "exe-path"],
+            &["lib-tests", "unpack"],
+        );
+        Ok(())
+    }
+
+    /// A cargo alias is read where it can be: an `[alias]` of the root `.cargo/config.toml` or
+    /// `.cargo/config`, a string or an array, chained or not, is expanded and its build judged
+    /// beside the literal one. What cannot be read is a problem: an alias of another shape, an
+    /// `[alias]` in a `.cargo` below the root (which a directory change picks up), a
+    /// `CARGO_ALIAS_*` variable in a workflow, and `--config` on a cargo line (#1169 round 3
+    /// review, bypass 5; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_cargo_alias_is_expanded_or_cannot_be_read() -> Result<()> {
+        let flows = [
+            ci_file(
+                ".cargo/config.toml",
+                "[alias]\nhost = \"test -p rh-host\"\nhost-list = [\"test\", \"-p\", \
+                 \"rh-host\"]\nchain = \"host\"\n",
+            ),
+            ci_file(
+                ".cargo/config",
+                "[alias]\nother = \"test -p rh-host\"\nodd = 3\n",
+            ),
+            ci_file(
+                "crates/a-lib/.cargo/config.toml",
+                "[alias]\nnear = \"test -p rh-host\"\n",
+            ),
+            yaml_lines(&[
+                "on: push",
+                "jobs:",
+                "  alias-string:",
+                "    steps:",
+                "      - run: cargo host -p a-lib",
+                "  alias-array:",
+                "    steps:",
+                "      - run: cargo host-list -p a-lib",
+                "  alias-chain:",
+                "    steps:",
+                "      - run: cargo chain -p a-lib",
+                "  alias-config:",
+                "    steps:",
+                "      - run: cargo other -p a-lib",
+                "  env-alias:",
+                "    env:",
+                "      CARGO_ALIAS_LIB: test -p rh-host",
+                "    steps:",
+                "      - run: cargo lib -p a-lib",
+                "  config-alias:",
+                "    steps:",
+                "      - run: cargo --config 'alias.lib=\"test -p rh-host\"' lib -p a-lib",
+                "  config-file:",
+                "    steps:",
+                "      - run: cargo --config=extra.toml test -p a-lib",
+                "  lib-tests:",
+                "    steps:",
+                "      - run: cargo test -p a-lib",
+            ]),
+            ci_file(
+                ".github/workflows/env.yml",
+                "on: push\nenv:\n  CARGO_ALIAS_LIB: test -p rh-host\njobs:\n  lib:\n    steps:\n      \
+                 - run: cargo lib -p a-lib\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["env-alias", "config-alias", "config-file"]);
+        unreadable_file(&problems, ".cargo/config:");
+        unreadable_file(&problems, "crates/a-lib/.cargo/config.toml");
+        unreadable_file(&problems, ".github/workflows/env.yml:3");
+        let jobs = [
+            "rh-host",
+            "alias-string",
+            "alias-array",
+            "alias-chain",
+            "alias-config",
+        ];
+        names(&problems, &jobs, &["lib-tests"]);
+        Ok(())
+    }
+
+    /// The cargo configurations a cargo alias may come from are read: `.cargo/config` beside
+    /// `.cargo/config.toml`, at the root and in any directory below it (#1169 round 3 review,
+    /// bypass 5; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn ci_files_reads_every_cargo_configuration() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-cargo-configs-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        for path in [
+            ".github/workflows/a.yml",
+            ".cargo/config",
+            "crates/x/.cargo/config.toml",
+            "crates/y/.cargo/config",
+            "crates/z/config.toml",
+        ] {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+        }
+        let read: Result<BTreeSet<String>> =
+            ci_files(&root).map(|files| files.into_iter().map(|file| file.path).collect());
+        fs::remove_dir_all(&root).ok();
+        let read = read?;
+        for path in [
+            ".cargo/config",
+            "crates/x/.cargo/config.toml",
+            "crates/y/.cargo/config",
+        ] {
+            assert!(read.contains(path), "reads {path}: {read:?}");
+        }
+        assert!(!read.contains("crates/z/config.toml"), "{read:?}");
+        Ok(())
+    }
+
+    /// Cargo reached without a literal `cargo` word cannot be read, and neither can the triggers
+    /// that make it possible: `eval`, a pipe into a shell or an interpreter, `sh -c`,
+    /// `python -c`, `perl -e`, `node -e`, a glob in a command word, a double-quoted `run:` with a
+    /// `\`, and a step `shell:` that is not bash or sh (#1169 round 3 review, bypass 6; DEC-176
+    /// tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn cargo_without_a_cargo_word_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  eval-split:",
+            "    steps:",
+            "      - run: eval \"car\"\"go test -p rh-host\"",
+            "  quoted-continuation:",
+            "    steps:",
+            "      - run: \"car\\",
+            "          go test -p rh-host\"",
+            "  pipe-sh:",
+            "    steps:",
+            "      - run: printf '%s%s test -p rh-host' car go | sh",
+            "  pipe-python:",
+            "    steps:",
+            "      - run: echo x | python3",
+            "  bash-c:",
+            "    steps:",
+            "      - run: bash -c \"car\"\"go test -p rh-host\"",
+            "  python-c:",
+            "    steps:",
+            "      - run: python3 -c \"import os; os.system('ca' + 'rgo test -p rh-host')\"",
+            "  perl-e:",
+            "    steps:",
+            "      - run: perl -e 'system(\"ca\" . \"rgo test -p rh-host\")'",
+            "  node-e:",
+            "    steps:",
+            "      - run: node -e \"require('child_process').execSync('ca' + 'rgo test')\"",
+            "  glob-word:",
+            "    steps:",
+            "      - run: ~/.cargo/bin/car* test -p rh-host",
+            "  python-shell:",
+            "    steps:",
+            "      - shell: python {0}",
+            "        run: import os",
+            "  lib-tests:",
+            "    steps:",
+            "      - shell: bash",
+            "        run: bash .github/scripts/check.sh && cargo test -p a-lib | tee out.log",
+            "      - run: if [ -f x ]; then echo found; fi",
+        ])];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "eval-split",
+            "quoted-continuation",
+            "pipe-sh",
+            "pipe-python",
+            "bash-c",
+            "python-c",
+            "perl-e",
+            "node-e",
+            "glob-word",
+            "python-shell",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["eval-split"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A flow sequence under `jobs:` is read only when it is flat: one that holds a `:`, a nested
+    /// `[`, `{` or `]`, or an `&`, `*` or `!`, even inside a quoted scalar, cannot be read. One
+    /// case for each character, so dropping any one from the rule is caught (#1169 round 3
+    /// review, bypass 7).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_flow_sequence_that_is_not_flat_cannot_be_read() -> Result<()> {
+        let cases = [
+            ("pair", "[a: b]"),
+            ("nested-sequence", "[a, [b]]"),
+            ("nested-mapping", "[a, {b: c}]"),
+            ("quoted-colon", "[\"a:b\"]"),
+            ("bare-brace", "[a, {b}]"),
+            ("quoted-open", "[\"a[\"]"),
+            ("quoted-close", "[\"a]\"]"),
+            ("alias-item", "[*a]"),
+            ("anchor-item", "[&a b]"),
+            ("tagged-item", "[!!str a]"),
+        ];
+        let mut text = String::from("on: push\njobs:\n  setup:\n    steps:\n      - run: echo\n");
+        for (job, flow) in cases {
+            text.push_str(&format!(
+                "  {job}:\n    needs: {flow}\n    steps:\n      - run: echo\n"
+            ));
+        }
+        text.push_str("  lib-tests:\n    needs: [setup]\n    steps:\n      - run: echo\n");
+        let problems = host_problems(&[ci_file(".github/workflows/ci.yml", &text)])?;
+        unreadable(&problems, &cases.map(|(job, _)| job));
+        names(&problems, &["pair"], &["lib-tests", "setup"]);
+        Ok(())
+    }
+
     /// A resolve that fails, or an invocation word the shell expands, is a problem naming the job
     /// rather than an abort, and so is a default build that cannot be resolved (DEC-868 item 3).
     #[test]
