@@ -2319,9 +2319,10 @@ const READ_PROGRAM_LINES: &[(&str, &str)] = &[(
     r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
 )];
 
-/// How many commands a `case` clause's patterns make of `line`: the `|`-separated words before
-/// its first `)` (`'' | *[!0-9]* | 0?*) exit 1 ;;` makes three), or none when `line` is no
-/// such clause.
+/// How many commands a `case` clause's patterns make of `line`, a line inside a `case … in` /
+/// `esac` block of the same `run:`: the `|`-separated words before its first `)`
+/// (`'' | *[!0-9]* | 0?*) exit 1 ;;` makes three), or none when `line` is no such clause.
+/// Outside such a block a pattern-shaped line is read as commands.
 fn case_patterns(line: &str) -> usize {
     let Some((patterns, _)) = uncommented(line).trim_start().split_once(')') else {
         return 0;
@@ -2575,11 +2576,16 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
         .chain(unread_text_lines(&file.text))
         .map(|(number, why)| (number, job_at(number), why))
         .collect();
+    let mut case_depth = 0_usize;
     for (number, line) in logical_lines(&file.path, &file.text) {
         let job = sections
             .get(&number)
             .and_then(|(_, job)| job.clone())
             .unwrap_or_else(|| format!("line {number}"));
+        if !run_lines.contains(&number) {
+            case_depth = 0;
+        }
+        let (mut opened, mut closed) = (0_usize, 0_usize);
         let mut judged = 0_usize;
         let mut hidden_pieces = 0_usize;
         let mut texts = if run_lines.contains(&number) {
@@ -2587,7 +2593,11 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
         } else {
             Vec::new()
         };
-        let patterns = case_patterns(&line);
+        let patterns = if case_depth > 0 {
+            case_patterns(&line)
+        } else {
+            0
+        };
         let read_program = READ_PROGRAM_LINES.contains(&(file.path.as_str(), line.trim()));
         while let Some((text, top_level)) = texts.pop() {
             let mut nested = Vec::new();
@@ -2616,6 +2626,13 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
                     continue;
                 };
                 let case_pattern = top_level && index < patterns;
+                if top_level && !case_pattern {
+                    match *command_word {
+                        "case" => opened = opened.saturating_add(1),
+                        "esac" => closed = closed.saturating_add(1),
+                        _ => {}
+                    }
+                }
                 if let Some(why) = hidden_command(command_word, args, fed, case_pattern)
                     && !(read_program && why == PROGRAM_IN_AN_ARGUMENT)
                 {
@@ -2645,6 +2662,7 @@ fn read_workflow(file: &CiFile) -> (Vec<CargoInvocation>, Vec<UnreadLine>) {
             }
             texts.extend(nested.into_iter().map(|(text, _)| (text, false)));
         }
+        case_depth = case_depth.saturating_add(opened).saturating_sub(closed);
         if cargo_words(&line).saturating_add(hidden_pieces) > judged {
             unread.push((
                 number,
@@ -12510,7 +12528,6 @@ jq -r "$filter" "$src"
     /// unreadable, in a `case` arm's body and in a pattern-shaped line outside any `case`
     /// (#1169 round 4 ruling 1; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn a_case_pattern_is_no_command_word() -> Result<()> {
         let flows = [yaml_lines(&[
             "on: push",
@@ -12545,7 +12562,6 @@ jq -r "$filter" "$src"
     /// read only byte for byte: the same line with one character changed, or with a cargo
     /// command added, cannot be read (#1169 round 4 ruling 2).
     #[test]
-    #[ignore = "pending E7-28"]
     fn the_read_interpreter_line_is_read_only_exactly() -> Result<()> {
         let probe = r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##;
         let flow = |run: &str| {
@@ -12576,7 +12592,6 @@ jq -r "$filter" "$src"
     /// and, naming no package, selects every member. An alias chain that loops cannot be read
     /// (#1169 round 4 ruling 3; DEC-176 tightening).
     #[test]
-    #[ignore = "pending E7-28"]
     fn the_xtask_alias_selects_xtask_and_a_loop_cannot_be_read() -> Result<()> {
         let runner = member(RUNNER, &[("rh-host", None)]);
         let mut meta = workspace(vec![
