@@ -1741,7 +1741,6 @@ fn governed_run_under(
 /// artifact-aware append, which finds both objects in the store; every other agent record stays
 /// at version 1, and both streams verify against the store.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_governed_run_writes_version_2_records_with_the_registered_refs() {
     let governed = governance(OPEN_POLICY, &[]);
     let older = registered(1, OLDER_POLICY);
@@ -1799,7 +1798,6 @@ fn a_governed_run_writes_version_2_records_with_the_registered_refs() {
 /// policy set, or that has no store, stops at the first version-2 append that names the missing
 /// object. Nothing is proposed, handed to the executor or sent to the broker.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_registry_or_policy_missing_from_the_store_stops_the_run_before_any_order() {
     let governed = governance(OPEN_POLICY, &[]);
     let full = governed_store(&governed);
@@ -1909,7 +1907,6 @@ fn an_exit_is_auto_while_the_mandate_is_nonconforming() {
 /// asserts what is absent, never the refusal's cause, so D4c's fail-closed stop and D4d's
 /// `policy_overlay` deny both pass it, and D4d's own tests pin the cause.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_nonconforming_mandate_places_no_opening_order() {
     let no_auto = PolicyLevel {
         name: LevelName::Workspace,
