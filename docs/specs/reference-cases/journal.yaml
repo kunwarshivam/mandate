@@ -22678,6 +22678,15 @@ membership_fold:
         - approver
         - viewer
       invitations: []
+    - at: '2026-10-12T15:00:00.000000000Z'
+      workspace_users: 2
+      members:
+      - member: 01J8Z5F0B000000000000000F2
+        state: active
+      roles: []
+      invitations:
+      - invitation: 01J8Z5F1A00000000000000000
+        state: accepted
   - name: per_role_cool_off
     clause: '§8.3: each added role is effective from its own end; a removal is at once'
     records:
@@ -23279,7 +23288,7 @@ membership_fold:
       - invitation: 01J8Z5F1B00000000000000000
         state: accepted
   - name: changed_and_deactivated_while_cooling_off
-    clause: '§9.12: a member in `cooling_off` may have roles changed and be deactivated'
+    clause: '§9.12: a member in `cooling_off` may have roles changed and be deactivated, and keeps every recorded role, effective or not'
     records:
     - event_type: MemberActivated
       event_time: '2026-10-05T14:00:00.000000000Z'
@@ -23373,6 +23382,28 @@ membership_fold:
         by: 01J8Z5F0A000000000000000F1
         reason: admin
         session_ref: session_00F1
+    - event_type: MemberReactivated
+      event_time: '2026-10-06T17:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1700
+          authenticated_at: '2026-10-06T16:59:50.000000000Z'
+          method: passkey
+        roles:
+        - approver
+        - auditor
+        - viewer
+        reactivated_at: '2026-10-06T17:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-07T17:00:00.000000000Z'
+        session_ref: session_00F1
     unreadable: false
     probes:
     - at: '2026-10-05T17:00:00.000000000Z'
@@ -23403,6 +23434,29 @@ membership_fold:
       roles:
       - member: 01J8Z5F0B000000000000000F2
         roles: []
+      invitations: []
+    - at: '2026-10-06T17:00:00.000000000Z'
+      workspace_users: 1
+      members:
+      - member: 01J8Z5F0B000000000000000F2
+        state: cooling_off
+      roles:
+      - member: 01J8Z5F0B000000000000000F2
+        roles:
+        - auditor
+        - viewer
+      invitations: []
+    - at: '2026-10-07T17:00:00.000000000Z'
+      workspace_users: 2
+      members:
+      - member: 01J8Z5F0B000000000000000F2
+        state: active
+      roles:
+      - member: 01J8Z5F0B000000000000000F2
+        roles:
+        - approver
+        - auditor
+        - viewer
       invitations: []
   - name: roles_removed_while_deactivated
     clause: '§9.12, DEC-654 item 7: a removal-only change offboards a deactivated member''s kept roles'
@@ -23535,6 +23589,336 @@ membership_fold:
       - member: 01J8Z5F0B000000000000000F2
         roles:
         - viewer
+      invitations: []
+  - name: activated_a_nanosecond_before_the_expiry
+    clause: '§9.12: `activated_at` < `expires_at`, to the nanosecond'
+    records:
+    - event_type: MemberActivated
+      event_time: '2026-10-05T14:00:00.000000000Z'
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        member: 01J8Z5F0A000000000000000F1
+        invitation: null
+        reason: founding
+        roles:
+        - approver
+        - operator
+        - workspace_admin
+        method: passkey
+        activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+        session_ref: null
+    - event_type: MemberInvited
+      event_time: '2026-10-05T15:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        invitation: 01J8Z5F1A00000000000000000
+        roles:
+        - viewer
+        invited_by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1500
+          authenticated_at: '2026-10-05T14:59:50.000000000Z'
+          method: passkey
+        invited_at: '2026-10-05T15:00:00.000000000Z'
+        expires_at: '2026-10-12T15:00:00.000000000Z'
+        session_ref: session_00F1
+    - event_type: MemberActivated
+      event_time: '2026-10-12T14:59:59.999999999Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0B000000000000000F2
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        invitation: 01J8Z5F1A00000000000000000
+        reason: invitation_accepted
+        roles:
+        - viewer
+        method: oidc
+        activated_at: '2026-10-12T14:59:59.999999999Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-12T14:59:59.999999999Z'
+        session_ref: session_00F2
+    unreadable: false
+    probes:
+    - at: '2026-10-12T14:59:59.999999999Z'
+      workspace_users: 2
+      members:
+      - member: 01J8Z5F0B000000000000000F2
+        state: active
+      roles:
+      - member: 01J8Z5F0B000000000000000F2
+        roles:
+        - viewer
+      invitations:
+      - invitation: 01J8Z5F1A00000000000000000
+        state: accepted
+  - name: unreadable_latches
+    clause: '§9.12, identity spec §5.3: once unreadable, valid records after it never make the count readable'
+    records:
+    - event_type: MemberActivated
+      event_time: '2026-10-05T14:00:00.000000000Z'
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        member: 01J8Z5F0A000000000000000F1
+        invitation: null
+        reason: founding
+        roles:
+        - approver
+        - operator
+        - workspace_admin
+        method: passkey
+        activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+        session_ref: null
+    - event_type: MemberInvited
+      event_time: '2026-10-05T15:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        invitation: 01J8Z5F1A00000000000000000
+        roles:
+        - viewer
+        invited_by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1500
+          authenticated_at: '2026-10-05T14:59:50.000000000Z'
+          method: passkey
+        invited_at: '2026-10-05T15:00:00.000000000Z'
+        expires_at: '2026-10-12T15:00:00.000000000Z'
+        session_ref: session_00F1
+    - event_type: MemberActivated
+      event_time: '2026-10-05T16:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0B000000000000000F2
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        invitation: 01J8Z5F1A00000000000000000
+        reason: invitation_accepted
+        roles:
+        - viewer
+        method: oidc
+        activated_at: '2026-10-05T16:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T16:00:00.000000000Z'
+        session_ref: session_00F2
+    - event_type: MemberRemoved
+      event_time: '2026-10-05T17:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        by: 01J8Z5F0A000000000000000F1
+        reason: admin
+        session_ref: session_00F1
+    - event_type: MemberInvited
+      event_time: '2026-10-05T18:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        invitation: 01J8Z5F1B00000000000000000
+        roles:
+        - auditor
+        invited_by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1800
+          authenticated_at: '2026-10-05T17:59:50.000000000Z'
+          method: passkey
+        invited_at: '2026-10-05T18:00:00.000000000Z'
+        expires_at: '2026-10-12T18:00:00.000000000Z'
+        session_ref: session_00F1
+    - event_type: MemberActivated
+      event_time: '2026-10-05T19:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0C000000000000000F3
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0C000000000000000F3
+        invitation: 01J8Z5F1B00000000000000000
+        reason: invitation_accepted
+        roles:
+        - auditor
+        method: oidc
+        activated_at: '2026-10-05T19:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T19:00:00.000000000Z'
+        session_ref: session_00F3
+    unreadable: true
+    probes:
+    - at: '2026-10-05T16:00:00.000000000Z'
+      workspace_users: 2
+      members:
+      - member: 01J8Z5F0B000000000000000F2
+        state: active
+      roles:
+      - member: 01J8Z5F0B000000000000000F2
+        roles:
+        - viewer
+      invitations: []
+    - at: '2026-10-05T19:00:00.000000000Z'
+      workspace_users: 1
+      members: []
+      roles: []
+      invitations: []
+  - name: an_empty_reactivation_after_every_kept_role_was_stripped
+    clause: '§9.12, rule 100: a reactivation names at least one role; the fold refuses it too'
+    records:
+    - event_type: MemberActivated
+      event_time: '2026-10-05T14:00:00.000000000Z'
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        member: 01J8Z5F0A000000000000000F1
+        invitation: null
+        reason: founding
+        roles:
+        - approver
+        - operator
+        - workspace_admin
+        method: passkey
+        activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+        session_ref: null
+    - event_type: MemberInvited
+      event_time: '2026-10-05T15:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        invitation: 01J8Z5F1A00000000000000000
+        roles:
+        - viewer
+        invited_by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1500
+          authenticated_at: '2026-10-05T14:59:50.000000000Z'
+          method: passkey
+        invited_at: '2026-10-05T15:00:00.000000000Z'
+        expires_at: '2026-10-12T15:00:00.000000000Z'
+        session_ref: session_00F1
+    - event_type: MemberActivated
+      event_time: '2026-10-05T16:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0B000000000000000F2
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        invitation: 01J8Z5F1A00000000000000000
+        reason: invitation_accepted
+        roles:
+        - viewer
+        method: oidc
+        activated_at: '2026-10-05T16:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T16:00:00.000000000Z'
+        session_ref: session_00F2
+    - event_type: MemberDeactivated
+      event_time: '2026-10-05T17:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        by: 01J8Z5F0A000000000000000F1
+        reason: admin
+        session_ref: session_00F1
+    - event_type: MemberRoleChanged
+      event_time: '2026-10-05T18:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        changed_by: 01J8Z5F0A000000000000000F1
+        added: []
+        removed:
+        - viewer
+        changed_at: '2026-10-05T18:00:00.000000000Z'
+        independent_approval_required: true
+        step_up: null
+        session_ref: session_00F1
+    - event_type: MemberReactivated
+      event_time: '2026-10-05T19:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1900
+          authenticated_at: '2026-10-05T18:59:50.000000000Z'
+          method: passkey
+        roles: []
+        reactivated_at: '2026-10-05T19:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T19:00:00.000000000Z'
+        session_ref: session_00F1
+    refused:
+    - record: 6
+      expect:
+        outcome: Invalid
+        reason: schema
+        path: payload.roles
+    unreadable: true
+    probes:
+    - at: '2026-10-05T18:00:00.000000000Z'
+      workspace_users: 1
+      members:
+      - member: 01J8Z5F0B000000000000000F2
+        state: deactivated
+      roles:
+      - member: 01J8Z5F0B000000000000000F2
+        roles: []
+      invitations: []
+    - at: '2026-10-05T19:00:00.000000000Z'
+      workspace_users: 1
+      members: []
+      roles: []
       invitations: []
   - name: activated_at_the_expiry
     clause: '§9.12: `activated_at` < `expires_at`'
@@ -24282,6 +24666,202 @@ membership_fold:
           assertion_id: assert_1900
           authenticated_at: '2026-10-05T18:59:50.000000000Z'
           method: passkey
+        session_ref: session_00F1
+    unreadable: true
+    probes:
+    - at: '2026-10-22T06:00:00.000000000Z'
+      workspace_users: 1
+      members: []
+      roles: []
+      invitations: []
+  - name: a_role_removed_that_is_not_kept_while_deactivated
+    clause: '§9.12: a deactivated member''s removal names only roles it keeps'
+    records:
+    - *id055
+    - *id056
+    - *id057
+    - event_type: MemberDeactivated
+      event_time: '2026-10-05T17:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        by: 01J8Z5F0A000000000000000F1
+        reason: admin
+        session_ref: session_00F1
+    - event_type: MemberRoleChanged
+      event_time: '2026-10-05T18:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        changed_by: 01J8Z5F0A000000000000000F1
+        added: []
+        removed:
+        - auditor
+        changed_at: '2026-10-05T18:00:00.000000000Z'
+        independent_approval_required: true
+        step_up: null
+        session_ref: session_00F1
+    unreadable: true
+    probes:
+    - at: '2026-10-22T06:00:00.000000000Z'
+      workspace_users: 1
+      members: []
+      roles: []
+      invitations: []
+  - name: a_deactivated_member_activated_again
+    clause: '§9.12: only a removed membership starts again by an invitation'
+    records:
+    - *id055
+    - *id056
+    - *id057
+    - event_type: MemberDeactivated
+      event_time: '2026-10-05T17:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        by: 01J8Z5F0A000000000000000F1
+        reason: admin
+        session_ref: session_00F1
+    - event_type: MemberInvited
+      event_time: '2026-10-05T18:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        invitation: 01J8Z5F1B00000000000000000
+        roles:
+        - auditor
+        invited_by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1800
+          authenticated_at: '2026-10-05T17:59:50.000000000Z'
+          method: passkey
+        invited_at: '2026-10-05T18:00:00.000000000Z'
+        expires_at: '2026-10-12T18:00:00.000000000Z'
+        session_ref: session_00F1
+    - event_type: MemberActivated
+      event_time: '2026-10-05T19:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0B000000000000000F2
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0B000000000000000F2
+        invitation: 01J8Z5F1B00000000000000000
+        reason: invitation_accepted
+        roles:
+        - auditor
+        method: oidc
+        activated_at: '2026-10-05T19:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T19:00:00.000000000Z'
+        session_ref: session_00F2
+    unreadable: true
+    probes:
+    - at: '2026-10-22T06:00:00.000000000Z'
+      workspace_users: 1
+      members: []
+      roles: []
+      invitations: []
+  - name: a_removal_of_an_unknown_member
+    clause: §9.12
+    records:
+    - event_type: MemberActivated
+      event_time: '2026-10-05T14:00:00.000000000Z'
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        member: 01J8Z5F0A000000000000000F1
+        invitation: null
+        reason: founding
+        roles:
+        - approver
+        - operator
+        - workspace_admin
+        method: passkey
+        activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+        session_ref: null
+    - event_type: MemberRemoved
+      event_time: '2026-10-05T15:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0C000000000000000F3
+        by: 01J8Z5F0A000000000000000F1
+        reason: admin
+        session_ref: session_00F1
+    unreadable: true
+    probes:
+    - at: '2026-10-22T06:00:00.000000000Z'
+      workspace_users: 1
+      members: []
+      roles: []
+      invitations: []
+  - name: a_reactivation_of_an_unknown_member
+    clause: §9.12
+    records:
+    - event_type: MemberActivated
+      event_time: '2026-10-05T14:00:00.000000000Z'
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        member: 01J8Z5F0A000000000000000F1
+        invitation: null
+        reason: founding
+        roles:
+        - approver
+        - operator
+        - workspace_admin
+        method: passkey
+        activated_at: '2026-10-05T14:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
+        session_ref: null
+    - event_type: MemberReactivated
+      event_time: '2026-10-05T15:00:00.000000000Z'
+      actor:
+        kind: user
+        id: 01J8Z5F0A000000000000000F1
+        version: '1'
+        build: null
+      payload:
+        member: 01J8Z5F0C000000000000000F3
+        by: 01J8Z5F0A000000000000000F1
+        step_up:
+          assertion_id: assert_1500
+          authenticated_at: '2026-10-05T14:59:50.000000000Z'
+          method: passkey
+        roles:
+        - viewer
+        reactivated_at: '2026-10-05T15:00:00.000000000Z'
+        independent_approval_required: true
+        cool_off_ends_at: '2026-10-05T15:00:00.000000000Z'
         session_ref: session_00F1
     unreadable: true
     probes:

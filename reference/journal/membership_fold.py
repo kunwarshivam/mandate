@@ -3,7 +3,8 @@ DEC-648): the membership state, the effective roles, and identity spec §5.3's `
 the control stream's membership records fold to.
 
 The `membership_fold` section holds histories: control-stream records in `seq` order, each a
-membership record valid under §9.12's rules (checked with `control.violations`), or another record
+membership record valid under §9.12's rules (checked with `control.violations`) unless the history
+lists it in `refused` with the refusal it expects, or another record
 by a client, an agent, or a service account, which the fold ignores. Each history states, at named
 instants, the expected per-member and per-invitation state, each member's effective roles, and the
 count. The expectations are written by hand from identity spec §5 and §8.3, not computed by this
@@ -18,7 +19,7 @@ import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from control import STREAM, instant_nanos, violations
+from control import STREAM, instant_nanos, reported, violations
 
 SPEC = "docs/specs/journal.md §9.12 the fold (DEC-437 item 9, DEC-648)"
 COOLING = ("approver", "operator")
@@ -166,6 +167,14 @@ def other(at: datetime, actor: dict, event_type: str = "OwnerCommandIssued") -> 
     return {"event_type": event_type, "event_time": ts(at), "actor": dict(actor), "payload": {}}
 
 
+def a_nanosecond_earlier(rec: dict) -> dict:
+    """The record a nanosecond earlier: its `event_time` and each instant equal to it."""
+    at = rec["event_time"]
+    earlier = ts(datetime.strptime(at, "%Y-%m-%dT%H:%M:%S.%f000Z"), -1)
+    payload = {k: earlier if v == at else v for k, v in rec["payload"].items()}
+    return rec | {"event_time": earlier, "payload": payload}
+
+
 def probe(at: str, users: int, members: dict, roles: dict | None = None, invitations: dict | None = None) -> dict:
     """A probe's expectations as lists sorted by ID: journal keys are lowercase (§4.1), and a ULID is
     not, so no map is keyed by one."""
@@ -203,6 +212,7 @@ def histories() -> list[dict]:
                 probe(ts(h2), 1, {FOUNDER: "active", B: "cooling_off"}, {B: ["viewer"]}, {INV["A"]: "accepted"}),
                 probe(ts(h2 + timedelta(days=1), -1), 1, {B: "cooling_off"}, {B: ["viewer"]}),
                 probe(day_after_h2, 2, {B: "active"}, {B: ["approver", "viewer"]}),
+                probe(ts(h1 + timedelta(days=7)), 2, {B: "active"}, {}, {INV["A"]: "accepted"}),
             ],
         },
         {
@@ -288,19 +298,22 @@ def histories() -> list[dict]:
         },
         {
             "name": "changed_and_deactivated_while_cooling_off",
-            "clause": "§9.12: a member in `cooling_off` may have roles changed and be deactivated",
+            "clause": "§9.12: a member in `cooling_off` may have roles changed and be deactivated, and keeps every recorded role, effective or not",
             "records": [
                 founding(T0),
                 invited(h1, INV["A"], ["approver", "viewer"]),
                 accepted(h2, B, INV["A"], ["approver", "viewer"]),
                 role_changed(h3, B, ["auditor"], []),
                 deactivated(hours(4), B),
+                reactivated(hours(27), B, ["approver", "auditor", "viewer"]),
             ],
             "unreadable": False,
             "probes": [
                 probe(ts(h3), 1, {B: "cooling_off"}, {B: ["auditor", "viewer"]}),
                 probe(ts(hours(4)), 1, {B: "deactivated"}, {B: []}),
                 probe(day_after_h2, 1, {B: "deactivated"}, {B: []}),
+                probe(ts(hours(27)), 1, {B: "cooling_off"}, {B: ["auditor", "viewer"]}),
+                probe(ts(hours(51)), 2, {B: "active"}, {B: ["approver", "auditor", "viewer"]}),
             ],
         },
         {
@@ -319,6 +332,49 @@ def histories() -> list[dict]:
                 probe(ts(hours(5)), 1, {B: "deactivated"}, {B: []}),
                 probe(ts(hours(6)), 2, {B: "active"}, {B: ["viewer"]}),
             ],
+        },
+        {
+            "name": "activated_a_nanosecond_before_the_expiry",
+            "clause": "§9.12: `activated_at` < `expires_at`, to the nanosecond",
+            "records": [
+                founding(T0),
+                invited(h1, INV["A"], ["viewer"]),
+                a_nanosecond_earlier(accepted(h1 + timedelta(days=7), B, INV["A"], ["viewer"])),
+            ],
+            "unreadable": False,
+            "probes": [probe(ts(h1 + timedelta(days=7), -1), 2, {B: "active"}, {B: ["viewer"]}, {INV["A"]: "accepted"})],
+        },
+        {
+            "name": "unreadable_latches",
+            "clause": "§9.12, identity spec §5.3: once unreadable, valid records after it never make the count readable",
+            "records": [
+                founding(T0),
+                invited(h1, INV["A"], ["viewer"]),
+                accepted(h2, B, INV["A"], ["viewer"]),
+                removed(h3, B),
+                invited(hours(4), INV["B"], ["auditor"]),
+                accepted(hours(5), C, INV["B"], ["auditor"]),
+            ],
+            "unreadable": True,
+            "probes": [
+                probe(ts(h2), 2, {B: "active"}, {B: ["viewer"]}),
+                probe(ts(hours(5)), 1, {}),
+            ],
+        },
+        {
+            "name": "an_empty_reactivation_after_every_kept_role_was_stripped",
+            "clause": "§9.12, rule 100: a reactivation names at least one role; the fold refuses it too",
+            "records": [
+                founding(T0),
+                invited(h1, INV["A"], ["viewer"]),
+                accepted(h2, B, INV["A"], ["viewer"]),
+                deactivated(h3, B),
+                role_changed(hours(4), B, [], ["viewer"]),
+                reactivated(hours(5), B, []),
+            ],
+            "refused": [{"record": 6, "expect": {"outcome": "Invalid", "reason": "schema", "path": "payload.roles"}}],
+            "unreadable": True,
+            "probes": [probe(ts(hours(4)), 1, {B: "deactivated"}, {B: []}), probe(ts(hours(5)), 1, {})],
         },
         *[
             {
@@ -406,6 +462,26 @@ def unreadable_histories() -> list[tuple[str, str, list[dict]]]:
             [*two_users, deactivated(hours(3), B), removed(hours(4), B), role_changed(hours(5), B, ["auditor"], [])],
         ),
         (
+            "a_role_removed_that_is_not_kept_while_deactivated",
+            "§9.12: a deactivated member's removal names only roles it keeps",
+            [*two_users, deactivated(hours(3), B), role_changed(hours(4), B, [], ["auditor"])],
+        ),
+        (
+            "a_deactivated_member_activated_again",
+            "§9.12: only a removed membership starts again by an invitation",
+            [*two_users, deactivated(hours(3), B), invited(hours(4), INV["B"], ["auditor"]), accepted(hours(5), B, INV["B"], ["auditor"])],
+        ),
+        (
+            "a_removal_of_an_unknown_member",
+            "§9.12",
+            [founding(T0), removed(h1, C)],
+        ),
+        (
+            "a_reactivation_of_an_unknown_member",
+            "§9.12",
+            [founding(T0), reactivated(h1, C, ["viewer"])],
+        ),
+        (
             "deactivated_twice",
             "§9.12",
             [*two_users, deactivated(hours(3), B), deactivated(hours(4), B)],
@@ -478,6 +554,8 @@ class Fold:
             self.refuse()
 
     def apply(self, rec: dict) -> None:
+        if "fold.unreadable_resets" in self.skip:
+            self.unreadable = False
         kind = rec["event_type"]
         p = rec["payload"]
         at = instant_nanos(rec["event_time"])
@@ -526,16 +604,23 @@ class Fold:
                 return self.unknown_member()
             if m.status not in LIVE and "fold.deactivate_any_state" not in self.skip:
                 return self.refuse()
-            m.kept, m.roles, m.status = sorted(m.roles), {}, "deactivated"
+            kept = [r for r, since in m.roles.items() if since <= at or "fold.kept_effective_only" not in self.skip]
+            m.kept, m.roles, m.status = sorted(kept), {}, "deactivated"
         elif kind == "MemberReactivated":
             m = self.members.get(p["member"])
+            if m is None and "fold.reactivate_unknown_tolerated" in self.skip:
+                return None
             reactivatable = ("deactivated", "removed") if "fold.removed_reactivates" in self.skip else ("deactivated",)
             kept = list(p["roles"]) == m.kept if m else False
             if m is None or m.status not in reactivatable or not (kept or "fold.reactivation_roles_unchecked" in self.skip):
                 return self.refuse()
+            if not p["roles"] and "fold.empty_reactivation_tolerated" not in self.skip:
+                return self.refuse()
             self.start(m, p["roles"], at, instant_nanos(p["cool_off_ends_at"]))
         elif kind == "MemberRemoved":
             m = self.members.get(p["member"])
+            if m is None and "fold.remove_unknown_tolerated" in self.skip:
+                return None
             if m is None or (m.status != "deactivated" and "fold.remove_any_state" not in self.skip):
                 return self.refuse()
             m.status = "removed"
@@ -548,7 +633,7 @@ class Fold:
             return self.refuse()
         if not p["added"] and "fold.deactivated_removal_refused" in self.skip:
             return self.refuse()
-        if any(r not in m.kept for r in p["removed"]):
+        if any(r not in m.kept for r in p["removed"]) and "fold.unkept_role_removed" not in self.skip:
             return self.refuse()
         m.kept = sorted({*m.kept, *(a["role"] for a in p["added"])} - set(p["removed"]))
         return None
@@ -559,11 +644,14 @@ class Fold:
             return False
         if "fold.expiry_inclusive" in self.skip:
             return at <= inv["expires_at"]
+        if "fold.expiry_a_nanosecond_early" in self.skip:
+            return at < inv["expires_at"] - 1
         return at < inv["expires_at"]
 
     def activate(self, p: dict, at: int) -> None:
         previous = self.members.get(p["member"])
-        if previous is not None and previous.status != "removed" and "fold.second_activation_tolerated" not in self.skip:
+        ended = ("removed", "deactivated") if "fold.deactivated_activated_again" in self.skip else ("removed",)
+        if previous is not None and previous.status not in ended and "fold.second_activation_tolerated" not in self.skip:
             return self.refuse()
         if p["reason"] == "invitation_accepted":
             inv = self.invitations.get(p["invitation"])
@@ -598,7 +686,8 @@ class Fold:
 
     def invitation_state(self, invitation: str, at: int) -> str:
         inv = self.invitations[invitation]
-        if inv["state"] == "invited" and at >= inv["expires_at"]:
+        expiring = ("invited", "accepted") if "fold.accepted_expires" in self.skip else ("invited",)
+        if inv["state"] in expiring and at >= inv["expires_at"]:
             return "expired"
         return inv["state"]
 
@@ -701,7 +790,8 @@ def check_section(section: dict, skip: frozenset[str] = frozenset()) -> list[str
         for seq, rec in enumerate(history["records"], start=1):
             if rec["event_type"].startswith("Member"):
                 got = violations(as_draft(rec, seq))
-                if got:
+                want = next((r["expect"] for r in history.get("refused", []) if r["record"] == seq), None)
+                if (want is None and got) or (want is not None and not reported(got, want)):
                     problems.append(found("histories.records_valid", f"{name} record {seq}: {got}"))
         state = fold(history["records"], skip)
         if state.unreadable != history["unreadable"]:
@@ -742,6 +832,15 @@ FOLD_MUTANTS = (
     "fold.remove_any_state",
     "fold.deactivated_removal_refused",
     "fold.deactivated_grant_accepted",
+    "fold.unkept_role_removed",
+    "fold.expiry_a_nanosecond_early",
+    "fold.kept_effective_only",
+    "fold.deactivated_activated_again",
+    "fold.remove_unknown_tolerated",
+    "fold.reactivate_unknown_tolerated",
+    "fold.unreadable_resets",
+    "fold.accepted_expires",
+    "fold.empty_reactivation_tolerated",
 )
 
 

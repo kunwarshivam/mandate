@@ -2476,7 +2476,8 @@ commit nothing when none is left.
 The state at an instant *t* folds the records whose `event_time` is at or before *t* (rule 106 makes
 that each record's own instant), and reads each cool-off and expiry against *t*: `workspace_users`
 (identity spec §5.3) counts the members `active` at *t*. The test vectors' `membership_fold` section
-holds histories of membership records, valid under the rules above, mixed with records by clients,
+holds histories of membership records, valid under the rules above except a record a history lists
+in `refused` with the refusal it expects (which the fold reads as out of state too), mixed with records by clients,
 agents, and service accounts, which hold no membership and which the fold ignores. Each history
 states, at named instants, each member's and invitation's state, each member's effective roles, and
 the count, written by hand from identity spec §5 and §8.3. It also holds out-of-state histories that
