@@ -1,0 +1,7 @@
+file = "crates/mandate-cli/tests/journal_verify_ranges.rs"
+test = "the_lowest_seq_wins_between_the_two_control_checks"
+reason = """
+E12-3 (DEC-782): both verifiers already run and answer verified or an anchor code, so there is no
+stub to stop at; the control-stream checks are library functions the CLI does not call yet. The
+implementation PR wires them in and deletes the marker and this row.
+"""
