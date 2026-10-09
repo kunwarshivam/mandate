@@ -209,13 +209,8 @@ fn ci(job: &str) -> Result<()> {
             )?;
             mutation_anchors()
         }
-        "schemas" => {
-            for checker in SCHEMA_CHECKERS {
-                pinned_python(&format!("{SCHEMA_DIR}/{checker}"), &[])?;
-            }
-            Ok(())
-        }
-        "schema-mutants" => pinned_python(&format!("{SCHEMA_DIR}/mutate_schemas.py"), &[]),
+        "schemas" => schema_checks(&mut |path| pinned_python(path, &[])),
+        "schema-mutants" => schema_mutants(&mut |path| pinned_python(path, &[])),
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
             deps()?;
@@ -610,6 +605,23 @@ fn reference(script_and_args: &[&str]) -> Result<()> {
         bail!("no reference script given");
     };
     pinned_python(&format!("reference/{script}"), rest)
+}
+
+/// The `schemas` job: each of [`SCHEMA_CHECKERS`], by its repository path, through `run`.
+fn schema_checks(run: &mut dyn FnMut(&str) -> Result<()>) -> Result<()> {
+    for checker in SCHEMA_CHECKERS {
+        run(&format!("{SCHEMA_DIR}/{checker}"))?;
+    }
+    Ok(())
+}
+
+/// The `schema-mutants` job: the sweep counts a mutant caught when any checker fails, so it first
+/// runs [`schema_checks`] on the unmutated tree, and runs no mutant unless all three pass; a
+/// failing baseline would otherwise report every mutant caught (DEC-688).
+fn schema_mutants(run: &mut dyn FnMut(&str) -> Result<()>) -> Result<()> {
+    schema_checks(run)
+        .context("baseline fails: fix the schemas before mutants mean anything (DEC-688)")?;
+    run(&format!("{SCHEMA_DIR}/mutate_schemas.py"))
 }
 
 /// Runs the Python script at `path`, from the repository root, in the environment
@@ -3930,9 +3942,9 @@ mod tests {
         live_test_counts, metadata_in, mutant_verdicts, mutants, mutants_args, mutants_job_cargo,
         mutants_outcome, mutants_plan, mutants_scheduled, mutated_crates, names_a_stub, output_in,
         pending_problems, pending_tests, plain_comment_lines, proptest_seeds_in, repo_root,
-        shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
-        test_binary, test_outcomes, unjudged_mutants, verdicts, workspace_closure,
-        workspace_packages,
+        schema_mutants, shellcheck_scripts, spec_guard_problems, spec_guard_problems_for_pr,
+        status_flip_problems, test_binary, test_outcomes, unjudged_mutants, verdicts,
+        workspace_closure, workspace_packages,
     };
 
     #[test]
@@ -7097,9 +7109,47 @@ mod tests {
     /// DEC-688: the workspace API's three schema checkers run inside `full`, and its mutation sweep
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
-    /// it but success while every other job passed.
+    /// it but success while every other job passed. The sweep runs only after all three checkers
+    /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
+        let sweep = format!("{SCHEMA_DIR}/mutate_schemas.py");
+        let checkers: Vec<String> = SCHEMA_CHECKERS
+            .iter()
+            .map(|c| format!("{SCHEMA_DIR}/{c}"))
+            .collect();
+        let mut ran = Vec::new();
+        schema_mutants(&mut |path| {
+            ran.push(path.to_owned());
+            Ok(())
+        })?;
+        let mut expected = checkers.clone();
+        expected.push(sweep.clone());
+        assert_eq!(
+            ran, expected,
+            "the baseline's three checkers, then the sweep"
+        );
+        for failing in &checkers {
+            let mut ran = Vec::new();
+            let err = schema_mutants(&mut |path| {
+                ran.push(path.to_owned());
+                if path == failing {
+                    anyhow::bail!("{path} failed");
+                }
+                Ok(())
+            })
+            .err()
+            .with_context(|| format!("a baseline failing {failing} fails the job"))?;
+            assert!(
+                format!("{err:#}")
+                    .contains("baseline fails: fix the schemas before mutants mean anything"),
+                "the failure names the baseline: {err:#}"
+            );
+            assert!(
+                !ran.contains(&sweep),
+                "no mutant runs on a failing baseline ({failing})"
+            );
+        }
         assert!(FULL_JOB.contains(&"schemas") && !FULL_JOB.contains(&"schema-mutants"));
         assert!(PR_JOBS.contains(&"schemas") && PR_JOBS.contains(&"schema-mutants"));
         for checker in SCHEMA_CHECKERS.iter().chain(["mutate_schemas.py"].iter()) {
