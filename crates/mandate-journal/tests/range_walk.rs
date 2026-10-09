@@ -52,7 +52,6 @@ fn failed(checked: u64, seq: u64, check: EventCheck) -> RangeWalk {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn a_walk_counts_every_event_of_its_range_and_ends_on_the_hash_at_to_seq() {
     let c = chain(6);
     for (from, to) in [(1, 6), (3, 5), (4, 4), (6, 6)] {
@@ -68,7 +67,6 @@ fn a_walk_counts_every_event_of_its_range_and_ends_on_the_hash_at_to_seq() {
 /// two are short reads `verify_events` answers `Ok`; a row left over after `to_seq` is reported at
 /// `to_seq`, the last `seq` rule 111 lets a failure name, with every event of the range walked.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_missing_extra_or_corrupted_row_fails_at_the_position_walked() {
     use EventCheck::{ColumnMismatch, NonCanonical, SeqGap};
     let c = chain(6);
@@ -107,7 +105,6 @@ fn a_missing_extra_or_corrupted_row_fails_at_the_position_walked() {
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn bounds_that_name_no_range_are_refused() {
     let c = chain(3);
     let at = |from, to| walk_range(&c, trusted(from, Digest::ZERO), to, &BTreeMap::new());
@@ -148,7 +145,6 @@ fn expected(intact: &[StoredEvent], stored: &[StoredEvent], from: u64, how: Seed
 }
 
 #[test]
-#[ignore = "pending E12-3"]
 fn every_seeded_fault_fails_where_an_independent_comparison_says() {
     use Seeded::{Column, Delete, Duplicate, Garbage, Intact, LeftOver, Swap, Truncate};
     let c = chain(12);

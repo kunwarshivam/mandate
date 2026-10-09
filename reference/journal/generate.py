@@ -43,6 +43,7 @@ import membership
 import membership_fold
 import research
 import risk_state
+import segment_rows
 import verification
 import workspace
 import yaml
@@ -3828,6 +3829,7 @@ def render(
     connections_section: dict,
     request_section: dict,
     range_section: dict,
+    revocation_section: dict,
     workspace_section: dict,
     client_section: dict,
     hold_section: dict,
@@ -3836,6 +3838,7 @@ def render(
     audit_section: dict,
     cold_section: dict,
     verification_section: dict,
+    rows_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3853,6 +3856,7 @@ def render(
             "connections": connections_section,
             "connection_requests": request_section,
             "connection_ranges": range_section,
+            "connection_revocations": revocation_section,
             "workspace_api": workspace_section,
             "client_actor": client_section,
             "hold": hold_section,
@@ -3861,6 +3865,7 @@ def render(
             "records_access": audit_section,
             "cold_records": cold_section,
             "verification_runs": verification_section,
+            "segment_rows": rows_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3909,6 +3914,7 @@ def main(argv: list[str] | None = None) -> int:
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
     range_section = connections.build_range_section()
+    revocation_section = connections.build_revocation_section()
     workspace_section = workspace.build_section()
     client_section = clients.build_section()
     hold_section = holds.build_section()
@@ -3917,6 +3923,7 @@ def main(argv: list[str] | None = None) -> int:
     audit_section = audit.build_section()
     cold_section = cold.build_section(v3)
     verification_section = verification.build_section()
+    rows_section = segment_rows.build_section(account_section["chain"])
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3944,6 +3951,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += connections.run_request_mutants(request_section)
     problems += connections.check_section(range_section)
     problems += connections.run_range_mutants(range_section, request_section)
+    problems += connections.check_revocation_section(revocation_section)
+    problems += connections.run_revocation_mutants(revocation_section)
     problems += workspace.check_section(workspace_section)
     problems += workspace.run_mutants(workspace_section)
     problems += clients.check_section(client_section)
@@ -3960,6 +3969,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += cold.run_mutants(cold_section, v3)
     problems += verification.check_section(verification_section)
     problems += verification.run_mutants(verification_section)
+    problems += segment_rows.check_section(rows_section)
+    problems += segment_rows.run_mutants(rows_section)
     for problem in problems:
         print(f"FAIL {problem}", file=sys.stderr)
     if problems:
@@ -3980,6 +3991,7 @@ def main(argv: list[str] | None = None) -> int:
         connections_section,
         request_section,
         range_section,
+        revocation_section,
         workspace_section,
         client_section,
         hold_section,
@@ -3988,6 +4000,7 @@ def main(argv: list[str] | None = None) -> int:
         audit_section,
         cold_section,
         verification_section,
+        rows_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4004,6 +4017,7 @@ def main(argv: list[str] | None = None) -> int:
         or connections.check_section(reread["connections"])
         or connections.check_section(reread["connection_requests"])
         or connections.check_section(reread["connection_ranges"])
+        or connections.check_revocation_section(reread["connection_revocations"])
         or workspace.check_section(reread["workspace_api"])
         or clients.check_section(reread["client_actor"])
         or holds.check_section(reread["hold"])
@@ -4012,6 +4026,7 @@ def main(argv: list[str] | None = None) -> int:
         or audit.check_section(reread["records_access"])
         or cold.check_section(reread["cold_records"], v3)
         or verification.check_section(reread["verification_runs"])
+        or segment_rows.check_section(reread["segment_rows"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4070,6 +4085,8 @@ def main(argv: list[str] | None = None) -> int:
         f"drafts, {len(request_section['sequences'])} rule-131 sequences; {len(connections.REQUEST_VALIDATOR_MUTANTS)} "
         f"validator, {len(connections.REQUEST_STREAM_MUTANTS)} stream, and {connections.REQUEST_VECTOR_MUTANTS} vector mutants caught; "
         f"{len(range_section['sequences'])} connection ranges and {len(connections.RANGE_MUTANTS)} range mutants caught; "
+        f"{len(revocation_section['sequences'])} account-stream revocation cases and "
+        f"{len(connections.REVOCATION_MUTANTS)} revocation mutant caught; "
         f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
         f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
         f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught; "
@@ -4095,7 +4112,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(cold.RANGE_MUTANTS)} range and {len(cold.START_MUTANTS)} start mutants caught; "
         f"{len(verification_section['drafts'])} verification-run drafts, {len(verification_section['invalid_drafts'])} invalid and "
         f"{len(verification_section['valid_drafts'])} valid; {len(verification.VALIDATOR_MUTANTS)} validator and "
-        f"{len(verification.vector_mutants(verification_section))} vector mutants caught"
+        f"{len(verification.vector_mutants(verification_section))} vector mutants caught; "
+        f"{len(rows_section['ranges'])} segment-rows ranges, {len(rows_section['valid_drafts'])} valid and "
+        f"{len(rows_section['invalid_drafts'])} invalid drafts; {len(segment_rows.REFERENCE_MUTANTS)} reference and "
+        f"{len(segment_rows.vector_mutants(rows_section))} vector mutants caught"
     )
     return 0
 

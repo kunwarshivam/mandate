@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; DEC-892, pending, an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; DEC-894, pending, an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -969,6 +969,16 @@ ascending `stream_id` bytes:
     anchor** (a control or account stream, §11 `connection_lifecycle_mismatch`) are folded from the
     stored chain from `seq` 1 to `from_seq − 1`, in the same snapshot, never from a read model. A
     range from `seq` 1 is anchored on nothing before it.
+  - **The prefix is verified first** (DEC-892, pending). Before any anchor is folded, the run
+    verifies the stored prefix, `seq` 1 to `from_seq − 1`, once: §11 checks 1 to 6 from genesis,
+    with no gap. It then binds the prefix to the range's trusted start: when `from_seq` is 1 the
+    prefix is empty, and otherwise its last record has `seq` `from_seq − 1` and its hash equals
+    `trusted_start`'s `prev_hash`. A fold over a prefix that fails either check anchors nothing.
+    The hold anchor is `Unknown` and the connection anchor is none, so the range fails closed at
+    its first judged record and never passes. Each fold takes only a `VerifiedPrefix`, which exists
+    only once its prefix is verified and bound (DEC-892), so a fold called outside the run cannot
+    carry unverified history. The verification costs time linear in the prefix, which the fold
+    reads anyway, and the 1,000,000-event bound applies to the range only.
 - **Coverage (AU-8).** The run reads the events of `from_seq` to `to_seq` in that snapshot and walks
   them in `seq` order. The first event read must be `from_seq` and the last `to_seq`; an event the
   walk expects and does not find fails `seq_gap` at the expected `seq`. `checked` is the number of
@@ -990,6 +1000,14 @@ ascending `stream_id` bytes:
      3. `segment_manifest_mismatch`: for every `SegmentExported` manifest of this stream whose
         range lies wholly inside the run's range, and for the trusted-start manifest, in ascending
         `first_seq`, reported with `seq` `null`.
+        - **Step 2.3a**, `segment_rows_mismatch`, run after `segment_manifest_mismatch` and before
+          `segment_gap`: for the trusted-start manifest and each manifest wholly inside the range,
+          the run exports the hot rows `first_seq` to `last_seq` of that segment in journal spec §6.2's
+          segment form and compares the SHA-256 of the result with the manifest's `file_sha256`. A
+          difference fails `segment_rows_mismatch`, with `seq` null (journal spec rule 111). A trusted-start
+          segment begins at `from_seq`, so no prefix row is in it. Rows after `to_seq` come from the
+          same snapshot; they are compared but not counted in `checked`. A segment whose rows the snapshot does not hold in full fails
+          `segment_rows_mismatch` too, never passes (DEC-894, pending).
      4. `segment_gap`: between consecutive such manifests, including the trusted-start manifest:
         the next one's `first_seq` is not the previous one's `last_seq + 1`, whether they overlap
         or leave a gap. Reported with `seq` `null`.
@@ -1025,8 +1043,8 @@ ascending `stream_id` bytes:
   - `to_seq` is the resolved last `seq`, never `null`, and `trusted_start` is the request's, with
     a `manifest_hash` as a `sha256:` ref (**Hash forms**).
   - `check` is one of journal spec §11's codes. `first_failure.seq` is `null` exactly for
-    `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, and `segment_gap`,
-    and otherwise lies from `from_seq` to `to_seq` (journal spec rule 111).
+    `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`,
+    `segment_rows_mismatch`, and `segment_gap`, and otherwise lies from `from_seq` to `to_seq` (journal spec rule 111).
   - `result` is `fail` exactly when `first_failure` is non-null; `incomplete` exactly when it is
     `null` and `incomplete` is non-null; `pass` otherwise. `first_failure` stays `null` on an
     incomplete run, and `incomplete` is `null` on a failed one (journal spec rules 132 and 133).
@@ -1555,7 +1573,7 @@ risk-reducing call never consults one (API-7, API-8).
 | **Auditor or viewer probing the audit routes** | A viewer reads the journal; anyone pages with a huge `limit` or an `after_seq` far past the head | The role is checked before any id is resolved (403 for every id); `limit` above 1,000 is 422, never clamped; an `after_seq` past the head returns an empty page with the head (§4.8.1) |
 | **Causation cycle or fan-out bomb** | Events that link in a cycle, or a decision with thousands of outputs, to hang or exhaust a trace | Each event visited once; at most 16 hops and 256 events; `truncated` says so (AU-3) |
 | **Spreadsheet formula in a CSV view** | A payload string such as `=HYPERLINK(…)` runs when the export is opened | Leading `=`, `+`, `-`, `@`, tab, and CR are prefixed with `'` (AU-7) |
-| **Forged trusted start** | Verify a tampered range against a `prev_hash` the caller chose, or against a start record rewritten in the hot store | The trusted start is read from a manifest or anchor in the workspace, never from the request; the start record must itself pass journal spec §11 checks 1, 2, and 4 and, for a manifest, rule 117; a manifest start is read from the cold store and refused when only the hot store vouches for it; an anchor start needs a `token`, and a run over one ends `incomplete`, never `pass`, until the token can be proven (§4.8.1, DEC-787, DEC-789) |
+| **Forged trusted start** | Verify a tampered range against a `prev_hash` the caller chose, or against a start record rewritten in the hot store | The trusted start is read from a manifest or anchor in the workspace, never from the request; the start record must itself pass journal spec §11 checks 1, 2, and 4 and, for a manifest, rule 117; a manifest start is read from the cold store and refused when only the hot store vouches for it; an anchor start needs a `token`, and a run over one ends `incomplete`, never `pass`, until the token can be proven (§4.8.1, DEC-787, DEC-789). A hot-store rewrite of a prefix record's body that keeps its hash columns: the prefix is verified with checks 1 to 6 from genesis before any anchor is folded (DEC-892). A hot-store rewrite of the range's rows, consistent from the trusted start: the hot rows of each start or in-range segment are exported and compared with the cold file (DEC-894) |
 | **Malicious owner-connected agent** | Confirm a version, approve its own ask, kill-switch, pause during a fall | Closed scope list (§3.8, API-6): it can request and propose, and hold openings, nothing else. Its openings always ask (MI-30); a hold never holds exits (DEC-191) |
 | **Prompt-injected agent calling the API** | Flood asks; request buys in an illiquid name; propose a looser envelope | Every client opening asks a human (MI-30); the ask budget and suppression (mandate spec §6.4) bound the flood; a proposal is only a draft until a user confirms in Owlhead with step-up (DEC-185 item 4); the dry run and requests are rate-limited (§3.10) |
 | **Injected text in model output** shown by the API | A thesis or chat reply that reads as an instruction or a button | Model text is typed quoted content (API-18); action cards come from deterministic code |
@@ -1603,7 +1621,9 @@ the reading that adds no risk (DEC-176 item 2). Its Verification is closed furth
 (the run's inputs), and [DEC-788](../project/decisions/DEC-788.md) (the record, the id, and the
 refusal order), each Accepted by an agent under DEC-176 as a tightening, and by
 [DEC-789](../project/decisions/DEC-789.md), Accepted by the founder: a token that cannot be proven
-ends a run `incomplete`, never `pass` and never a false failure. The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
+ends a run `incomplete`, never `pass` and never a false failure. DEC-892 (pending in L5's slice B
+PR, an agent reading under DEC-176, a tightening) folds the hold and connection anchors only from a
+prefix verified from genesis and bound to the range's trusted start. The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
 one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its
 ruling on M2 and M3.
