@@ -1,0 +1,24 @@
+[package]
+name = "mandate-robinhood"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The Robinhood equity connector: the BrokerConnector mandate-executor declares, over the MCP tool calls of Robinhood's published contract (backlog E7-6, connections spec §6.2)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-executor.workspace = true
+mandate-mcp.workspace = true
+mandate-num.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+sha2.workspace = true

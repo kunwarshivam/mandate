@@ -41,7 +41,7 @@
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp
-#   7  mandate-alpaca, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
+#   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
 #   8  mandate-shell, the process shell and the `mandate-tracer` binary (E7-7, DEC-138): the lowest
@@ -299,6 +299,13 @@ layer = 7
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
+
+# The Robinhood connector (E7-6): beside mandate-alpaca; pure, behind its tool seam (DEC-860).
+[crates.mandate-robinhood]
+layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["serde_json", "thiserror"]
 
 [crates.mandate-artifacts-fs]
 layer = 6

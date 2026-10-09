@@ -1910,6 +1910,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-robinhood"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-mcp",
+ "mandate-num",
+ "proptest",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-runtime"
 version = "0.0.0"
 dependencies = [
