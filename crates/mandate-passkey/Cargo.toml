@@ -20,4 +20,5 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mandate-identity-testkit.workspace = true
 proptest.workspace = true

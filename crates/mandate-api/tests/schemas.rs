@@ -443,7 +443,6 @@ fn the_plain_responses_match_their_examples() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_plain_requests_match_their_examples() {
     request::<PauseRequest>(cases!("pause-request"));
     request::<HoldRequest>(cases!("hold-request"));

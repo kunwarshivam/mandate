@@ -1,6 +1,6 @@
 //! A journal of several workspaces, built through the append protocol, the record of what was
 //! appended that the tests' oracles read instead of the code under test, and the tenant contexts
-//! the real `authorize` yields for the reads.
+//! the real `authorize` yields, whose `require::<ReadRecords>()` witness the reads take.
 #![allow(
     dead_code,
     reason = "each test crate that includes this module uses a different subset"
@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use mandate_audit::PageLimit;
+use mandate_identity::demand::{Permitted, ReadRecords};
 use mandate_identity::{
     Authorized, MembershipState, OrgId, Permission, Principal, PrincipalId, Role, Scope,
     SessionKind, SessionRef, TenantContext, WorkspaceId, authorize,
@@ -38,32 +39,31 @@ pub fn workspaces() -> [String; 3] {
 /// An Auditor's context for `workspace`, from the real `authorize` for `ReadRecords` (the matrix
 /// grants it WA, AU and SA): the only way a read is handed a workspace (identity spec ID-8).
 pub fn tenant(workspace: WorkspaceId) -> TenantContext {
+    context(workspace, Role::Auditor, Permission::ReadRecords)
+}
+
+/// The context the real `authorize` yields a member holding `role` in `workspace` for
+/// `permission`, which the matrix must grant it.
+pub fn context(workspace: WorkspaceId, role: Role, permission: Permission) -> TenantContext {
     let user = PrincipalId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_0C01);
     let scope = Scope::Workspace {
         org: OrgId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_0001),
         workspace,
     };
     let now = UtcNanos::parse(T).unwrap();
-    let auditor = membership(
-        user,
-        scope,
-        MembershipState::Active,
-        &[(Role::Auditor, now)],
-    );
-    let session = session(SessionRef(0x5E), SessionKind::Full, vec![auditor.clone()]);
+    let member = membership(user, scope, MembershipState::Active, &[(role, now)]);
+    let session = session(SessionRef(0x5E), SessionKind::Full, vec![member.clone()]);
     let principal = Principal::User { id: user };
-    let lookup = StaticLookup(vec![auditor]);
-    match authorize(
-        &lookup,
-        &principal,
-        &session,
-        scope,
-        Permission::ReadRecords,
-        now,
-    ) {
+    let lookup = StaticLookup(vec![member]);
+    match authorize(&lookup, &principal, &session, scope, permission, now) {
         Ok(Authorized::Workspace { tenant, .. }) => tenant,
-        other => panic!("an Auditor reads its workspace's records: {other:?}"),
+        other => panic!("{role:?} is granted {permission:?} in its workspace: {other:?}"),
     }
+}
+
+/// The witness the reads demand (DEC-655): `context`'s `require::<ReadRecords>()`.
+pub fn permitted(context: &TenantContext) -> Permitted<'_, ReadRecords> {
+    context.require::<ReadRecords>().unwrap()
 }
 
 /// The account streams each workspace holds, beside its control stream.

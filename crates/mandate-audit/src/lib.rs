@@ -10,15 +10,18 @@
 )]
 //! Read-only audit reads over the journal, scoped to one workspace (workspace API §4.8.1, backlog
 //! E12-6, journal spec §7). Pure: no I/O of its own, no clock, no randomness, and it writes nothing
-//! to any journal. Every read takes the caller's [`Tenant`], never a bare workspace id (identity
-//! spec ID-8), and reaches only streams whose workspace segment is that tenant's workspace ULID
-//! text (DEC-770 item 4). A stream or event of another workspace, a malformed id, and an absent one
-//! all read as the same [`AuditError::NotFound`] (API-9, AU-1, DEC-760 item 4). Pages follow API-15
-//! and DEC-760: `seq` order, each event's stored canonical body bytes with its `hash` and
-//! `prev_hash`, the stream head read with the page, and the cursor the last `seq` served.
+//! to any journal. Every read takes the caller's [`Permitted<'_, ReadRecords>`], the witness that
+//! its context was authorized for `ReadRecords` (DEC-655), never a bare workspace id or a context
+//! authorized for another permission (identity spec ID-8), and reaches only streams whose
+//! workspace segment is that context's workspace ULID text (DEC-770 item 4). A stream or event of
+//! another workspace, a malformed id, and an absent one all read as the same
+//! [`AuditError::NotFound`] (API-9, AU-1, DEC-760 item 4). Pages follow API-15 and DEC-760: `seq`
+//! order, each event's stored canonical body bytes with its `hash` and `prev_hash`, the stream head
+//! read with the page, and the cursor the last `seq` served.
 
 use mandate_canon::Digest;
 use mandate_identity::Tenant;
+use mandate_identity::demand::{Permitted, ReadRecords};
 use mandate_journal::{MemoryJournal, StoredEvent, StreamId};
 
 mod trace;
@@ -147,16 +150,40 @@ pub struct Page {
 }
 
 /// The journal reads the audit explorer needs, each scoped to the workspace of the caller's
-/// [`Tenant`], which only `mandate_identity::authorize` constructs (identity spec ID-8). A read does
-/// not check the tenant's permission again: the API layer authorizes `ReadRecords` before it calls
-/// (DEC-770 item 4). An adapter implements them over its store: [`MemoryRead`] here, the Postgres
-/// store in `mandate-journal-pg`.
+/// [`Permitted<'_, ReadRecords>`]: only `TenantContext::require` yields it, and only for a context
+/// `mandate_identity::authorize` built for `ReadRecords` (identity spec ID-8, DEC-655), so the
+/// permission is checked by type (DEC-770 item 4). An adapter implements them over its store:
+/// [`MemoryRead`] here, the Postgres store in `mandate-journal-pg`.
+///
+/// A bare context, even one authorized for `ReadRecords`, is not a witness:
+///
+/// ```compile_fail,E0308
+/// use mandate_audit::{JournalRead, MemoryRead, PageLimit};
+/// use mandate_identity::TenantContext;
+/// use mandate_journal::MemoryJournal;
+/// fn read(context: &TenantContext, journal: &MemoryJournal) {
+///     let _ = MemoryRead::new(journal).page(context, "ctl:x", 0, PageLimit::new(None).unwrap());
+/// }
+/// ```
+///
+/// The control: the witness `require` yields reaches the read.
+///
+/// ```
+/// use mandate_audit::{JournalRead, MemoryRead, PageLimit};
+/// use mandate_identity::{demand::ReadRecords, Refusal, TenantContext};
+/// use mandate_journal::MemoryJournal;
+/// fn read(context: &TenantContext, journal: &MemoryJournal) -> Result<(), Refusal> {
+///     let witness = context.require::<ReadRecords>()?;
+///     let _ = MemoryRead::new(journal).page(&witness, "ctl:x", 0, PageLimit::new(None).unwrap());
+///     Ok(())
+/// }
+/// ```
 pub trait JournalRead {
     /// The tenant's streams that hold at least one event, with their heads, in ascending
     /// `stream_id` bytes, those after `after` only, at most `limit` of them (DEC-760 item 6).
     fn streams(
         &self,
-        tenant: &impl Tenant,
+        tenant: &Permitted<'_, ReadRecords>,
         after: Option<&str>,
         limit: PageLimit,
     ) -> Result<Vec<StreamEntry>, AuditError>;
@@ -166,14 +193,18 @@ pub trait JournalRead {
     /// `after_seq` start at index `after_seq` of its rows.
     fn page(
         &self,
-        tenant: &impl Tenant,
+        tenant: &Permitted<'_, ReadRecords>,
         stream_id: &str,
         after_seq: u64,
         limit: PageLimit,
     ) -> Result<Page, AuditError>;
 
     /// The event whose `event_id` is `event_id`, when its stream is in the tenant's workspace.
-    fn event(&self, tenant: &impl Tenant, event_id: &str) -> Result<JournalEvent, AuditError>;
+    fn event(
+        &self,
+        tenant: &Permitted<'_, ReadRecords>,
+        event_id: &str,
+    ) -> Result<JournalEvent, AuditError>;
 }
 
 /// [`JournalRead`] over the in-memory journal. One borrow of the journal is one snapshot.
@@ -233,7 +264,7 @@ fn served(row: &StoredEvent) -> JournalEvent {
 impl JournalRead for MemoryRead<'_> {
     fn streams(
         &self,
-        tenant: &impl Tenant,
+        tenant: &Permitted<'_, ReadRecords>,
         after: Option<&str>,
         limit: PageLimit,
     ) -> Result<Vec<StreamEntry>, AuditError> {
@@ -258,7 +289,7 @@ impl JournalRead for MemoryRead<'_> {
 
     fn page(
         &self,
-        tenant: &impl Tenant,
+        tenant: &Permitted<'_, ReadRecords>,
         stream_id: &str,
         after_seq: u64,
         limit: PageLimit,
@@ -286,7 +317,11 @@ impl JournalRead for MemoryRead<'_> {
         })
     }
 
-    fn event(&self, tenant: &impl Tenant, event_id: &str) -> Result<JournalEvent, AuditError> {
+    fn event(
+        &self,
+        tenant: &Permitted<'_, ReadRecords>,
+        event_id: &str,
+    ) -> Result<JournalEvent, AuditError> {
         let segment = segment(tenant)?;
         self.journal
             .event(event_id)

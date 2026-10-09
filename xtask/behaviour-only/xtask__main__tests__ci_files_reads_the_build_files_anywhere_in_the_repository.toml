@@ -1,9 +1,0 @@
-file = "xtask/src/main.rs"
-test = "tests::ci_files_reads_the_build_files_anywhere_in_the_repository"
-reason = """
-X1's (E7-26; #887's eleventh round, split out by X1 tests correction 5). The test drives
-`ci_files` over a fixture repository, and the live-feature check's stub is not on that path, so
-it fails on what today's code does: `ci_files` reads neither `Makefile`, `*.mk`, `justfile`,
-`Dockerfile*` nor `docker-compose*.yml`, nor the files its sibling's row names. X1's step 3c
-deletes this row with the test's `#[ignore]` line.
-"""

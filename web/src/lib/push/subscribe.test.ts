@@ -24,7 +24,7 @@ function browser(permission: NotificationPermission, json: unknown = { ...SUBSCR
 }
 
 describe("subscribing to push", () => {
-  it.skip("pending E8-14: registers the worker for the whole app, subscribes with the VAPID key, and sends only endpoint and keys", async () => {
+  it("registers the worker for the whole app, subscribes with the VAPID key, and sends only endpoint and keys", async () => {
     const send = vi.fn(async () => {});
     const { fake, register, subscribe } = browser("granted");
     expect(await subscribeToPush(VAPID, send, fake)).toEqual({ kind: "subscribed" });
@@ -33,7 +33,7 @@ describe("subscribing to push", () => {
     expect(send).toHaveBeenCalledWith(SUBSCRIPTION);
   });
 
-  it.skip("pending E8-14: sends nothing when permission is refused or dismissed", async () => {
+  it("sends nothing when permission is refused or dismissed", async () => {
     for (const permission of ["denied", "default"] as const) {
       const send = vi.fn(async () => {});
       const { fake, register } = browser(permission);
@@ -43,7 +43,7 @@ describe("subscribing to push", () => {
     }
   });
 
-  it.skip("pending E8-14: is unsupported without a service worker, a permission prompt, a push manager, or a valid key", async () => {
+  it("is unsupported without a service worker, a permission prompt, a push manager, or a valid key", async () => {
     const send = vi.fn(async () => {});
     const { fake } = browser("granted");
     expect(await subscribeToPush(VAPID, send, { requestPermission: fake.requestPermission })).toEqual({ kind: "unsupported" });
@@ -56,7 +56,7 @@ describe("subscribing to push", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E8-14: fails without sending when the browser's subscription is malformed or a step throws", async () => {
+  it("fails without sending when the browser's subscription is malformed or a step throws", async () => {
     const send = vi.fn(async () => {});
     for (const json of [null, { endpoint: "http://push.example/x", keys: SUBSCRIPTION.keys }, { endpoint: SUBSCRIPTION.endpoint }, { endpoint: SUBSCRIPTION.endpoint, keys: { p256dh: "a b", auth: "x" } }]) {
       expect(await subscribeToPush(VAPID, send, browser("granted", json).fake)).toEqual({ kind: "failed" });
@@ -67,14 +67,14 @@ describe("subscribing to push", () => {
     expect(await subscribeToPush(VAPID, async () => Promise.reject(new Error("api down")), browser("granted").fake)).toEqual({ kind: "failed" });
   });
 
-  it.skip("pending E8-14: reads the key as the 65 octets of an uncompressed point and the subscription as endpoint and keys only", () => {
+  it("reads the key as the 65 octets of an uncompressed point and the subscription as endpoint and keys only", () => {
     const bytes = vapidKeyBytes(VAPID);
     expect(bytes?.length).toBe(65);
     expect(bytes?.[0]).toBe(4);
     expect(subscriptionJson({ ...SUBSCRIPTION, expirationTime: 1, extra: "x" })).toEqual(SUBSCRIPTION);
   });
 
-  it.skip("pending E8-14: accepts an endpoint only on the browsers' push services, and sends nothing otherwise (DEC-792)", async () => {
+  it("accepts an endpoint only on the browsers' push services, and sends nothing otherwise (DEC-792)", async () => {
     const allowed = [
       "https://fcm.googleapis.com/fcm/send/abc",
       "https://fcm.googleapis.com:443/fcm/send/abc",
@@ -136,7 +136,7 @@ describe("the subscription stays out of the console (NT-2)", () => {
   });
   afterEach(() => spies.forEach((spy) => spy.mockRestore()));
 
-  it.skip("pending E8-14: writes no endpoint or key to the console on any path", async () => {
+  it("writes no endpoint or key to the console on any path", async () => {
     const leaky = new Error(`push failed for ${SUBSCRIPTION.endpoint} ${SUBSCRIPTION.keys.auth}`);
     await subscribeToPush(VAPID, async () => {}, browser("granted").fake);
     await subscribeToPush(VAPID, async () => {}, browser("granted", { endpoint: SUBSCRIPTION.endpoint, keys: { p256dh: "a b", auth: SUBSCRIPTION.keys.auth } }).fake);

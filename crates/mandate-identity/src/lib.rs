@@ -1152,13 +1152,6 @@ pub enum Refusal {
     /// The change leaves the workspace with no active workspace admin.
     #[error("the workspace would have no active admin")]
     LastAdmin,
-    /// The stub of a story not yet implemented. It goes when E9-8 is implemented, so no
-    /// caller matches on it.
-    #[error("{story} has not been implemented yet")]
-    Unimplemented {
-        /// The story.
-        story: &'static str,
-    },
 }
 
 impl Refusal {
@@ -1174,7 +1167,6 @@ impl Refusal {
             Self::OwnerRoleReserved => "owner_role_reserved",
             Self::LastOwner => "last_owner",
             Self::LastAdmin => "last_admin",
-            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }

@@ -13,7 +13,6 @@ fn at(offset_s: i64) -> UtcNanos {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_session_keeps_only_a_digest_of_its_refresh_token() {
     let limits = SessionLimits::resolve(OrgKind::Business, SessionPolicy::default()).unwrap();
     let s = SessionRecord::open(limits, &RefreshSecret([1; 32]), at(0)).unwrap();
@@ -66,7 +65,6 @@ fn a_refresh_secret_prints_nothing_and_each_end_reason_has_its_spec_code() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_backwards_clock_never_refuses_pause_or_the_kill_switch() {
     let limits = SessionLimits::resolve(OrgKind::Business, SessionPolicy::default()).unwrap();
     let reductions = [Request::Pause, Request::KillSwitch];

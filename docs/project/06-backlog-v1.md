@@ -752,6 +752,16 @@ after U-A1 to U-A5 are recorded.
   default build contains no Robinhood host (LT-1); the runner built from the
   paper path's E1a takes any broker connector and environment through `ProductionCycle::run`
   (LT-4); and a restart after a run sends no second order (LT-6).
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 5, #976's review):* X1's word scan does not
+  read through `time -p`, the wrappers `setsid`, `flock`, `ionice`, `taskset`, `unbuffer`,
+  `doas`, `su -c` and `runuser`, `env -S`, or a dynamic `printf -v "$N"`. They are disclosed
+  residuals; the build-file and live-feature checks and review stand behind them. Close them with
+  a tests correction that pins each form as refused, then the implementation that refuses it.
+  *Follow-up ([DEC-851](decisions/DEC-851.md) item 6, #979's review):* the live-feature scan's
+  shell reading still has limits: a here-doc body fed to a command other than a shell is read as
+  commands, `case` arm patterns and `[[ =~ ]]` regex parentheses split a command, and a
+  single-quoted string outside the here-doc and text reading is not joined. None hides a refusal
+  rule 1′ makes today; fix each with a pin when a real line needs it.
 - **E7-27 (Must, M8, before any Alpaca OAuth connection completes: E7-1, E10-13)** As an owner, I
   want an Alpaca OAuth token's possible breadth journaled with the connection and disclosed to me,
   so that a token that may reach both environments is on the record before it is used
@@ -1560,6 +1570,12 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   [DEC-772](decisions/DEC-772.md) items 8 and 9.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
+  *Follow-ups ([#772](https://github.com/kunwarshivam/mandate/pull/772) review, journal spec):* rule 81
+  does not check that a client's `on_behalf_of` differs from its own `id` (predates #772); rule
+  108's break-glass check requires only a `causation_id` for a `platform_operator` read, not that it
+  cites a `PlatformOperatorAction` (with the E12-3 tests PR); "never a ticker" in
+  `RecordsAccessed.resources` and `operation` is prose only, both being `id`-typed; and the client
+  clause of rules 109 and 110 is unreachable, since rule 83 refuses a client first.
 - **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
@@ -4632,3 +4648,13 @@ From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-84
   path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
   constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
   2's defensive path goes with it.
+
+From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
+
+- Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its
+  `SegmentExported` manifest hash, and when. Left out of DEC-783 by the lead's ruling, so a hot-store
+  eviction record stays prose until a story needs to read it.
+- The anchor stamp record (§10, DEC-783 item 8): a control-stream record, `AnchorStamped`, that names
+  an `AnchorComputed` as its `causation_id` and carries a timestamp token for its root. It backfills
+  the token of an anchor appended during a timestamping outage, which until then is not a trusted
+  start (§9.14), and re-stamps an anchor before its token expires.

@@ -1476,9 +1476,10 @@ struct CiFile {
 }
 
 /// Every file that decides what CI or a release builds, each of which may be absent: workflows,
-/// scripts and actions under `.github`, `deploy`'s scripts, and `.cargo/config.toml`.
+/// scripts and actions under `.github`, `deploy`'s scripts, `.cargo/config.toml`, and the
+/// [`build_files`] anywhere in the repository.
 fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
-    let mut files = Vec::new();
+    let mut files = build_files(root)?;
     for (dir, extensions) in [
         (".github/workflows", &["yml", "yaml"][..]),
         (".github/scripts", &["sh"][..]),
@@ -1494,6 +1495,8 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
     if cargo_config.is_file() {
         files.push(cargo_config);
     }
+    files.sort();
+    files.dedup();
     files
         .into_iter()
         .map(|file| {
@@ -1507,6 +1510,39 @@ fn ci_files(root: &Path) -> Result<Vec<CiFile>> {
             Ok(CiFile { path, text })
         })
         .collect()
+}
+
+/// The build files under `root` (DEC-851, the eleventh-round ruling): `Makefile`, `makefile`,
+/// `GNUmakefile`, `*.mk`, `justfile`, `Justfile`, `Dockerfile*` and `docker-compose*.yml` or
+/// `.yaml`, at any depth. Only what is not the repository's own is skipped: `.git`,
+/// `node_modules`, and a directory a `CACHEDIR.TAG` marks as a cache, as cargo's target is.
+fn build_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+            let entry = entry?;
+            let (path, name) = (entry.path(), entry.file_name());
+            let name = name.to_string_lossy();
+            if entry.file_type()?.is_dir() {
+                if !matches!(name.as_ref(), ".git" | "node_modules")
+                    && !path.join("CACHEDIR.TAG").is_file()
+                {
+                    pending.push(path);
+                }
+            } else if matches!(
+                name.as_ref(),
+                "Makefile" | "makefile" | "GNUmakefile" | "justfile" | "Justfile"
+            ) || name.ends_with(".mk")
+                || name.starts_with("Dockerfile")
+                || (name.starts_with("docker-compose")
+                    && (name.ends_with(".yml") || name.ends_with(".yaml")))
+            {
+                files.push(path);
+            }
+        }
+    }
+    Ok(files)
 }
 
 /// [`live_feature_problems`] over the repository at `root`, as `cargo xtask live-feature` and
@@ -1597,6 +1633,7 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
         );
         let lines = logical_lines(&file.path, &file.text);
         let text_lines = text_only_lines(&lines, yaml);
+        let (variables, arrays) = definitions(&lines);
         for ((number, line), text_only) in lines.iter().zip(text_lines) {
             let at = format!("{}:{number}", file.path);
             let ctx = LineContext {
@@ -1604,6 +1641,9 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                 cargo_config: file.path.ends_with(".cargo/config.toml"),
                 expression_command: !yaml || run_lines.contains(number),
                 with_value: yaml && with_lines.contains(number),
+                variables: &variables,
+                arrays: &arrays,
+                quoted_reread: false,
             };
             let flag = if text_only {
                 text_line_live_flag(line, ctx)
@@ -1881,6 +1921,126 @@ struct LineContext<'a> {
     /// A line inside a workflow's `with:` block: an action's input has no command word, so it
     /// may be cargo's arguments, and `-F` and a short-flag cluster are feature flags there.
     with_value: bool,
+    /// The file's scalar variables, each with its definitions concatenated in order, or none when
+    /// a definition expands and cannot be read statically (DEC-851 item 2).
+    variables: &'a BTreeMap<String, Option<String>>,
+    /// The file's arrays, each with the elements of all its definitions (`x=( … )`,
+    /// `x+=( … )`), in order.
+    arrays: &'a BTreeMap<String, String>,
+    /// A quoted argument word or here-string re-read as a command line, where an unreadable
+    /// definition is not refused, only a readable one read through.
+    quoted_reread: bool,
+}
+
+/// The scalar variables `lines` assign (`C=…` resets, `C+=…` appends), each value concatenated
+/// in order, or none once a definition holds `$` or a backtick; and the arrays they define
+/// (`x=( … )`, `x+=( … )`), each with every definition's elements, none reset.
+type Definitions = (BTreeMap<String, Option<String>>, BTreeMap<String, String>);
+
+/// [`Definitions`] of the file whose logical lines are `lines`.
+fn definitions(lines: &[(usize, String)]) -> Definitions {
+    let mut variables: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let mut arrays: BTreeMap<String, String> = BTreeMap::new();
+    for (_, line) in lines {
+        let (mut at_command_start, mut reading) = (true, false);
+        let (mut declaring, mut printing) = (false, false);
+        for token in shell_tokens(line, &mut Vec::new()) {
+            let ShellToken::Word(word, _) = token else {
+                (at_command_start, reading) = (!matches!(token, ShellToken::Redirect), false);
+                (declaring, printing) = (false, false);
+                continue;
+            };
+            if printing {
+                if word == "-v" {
+                    reading = true;
+                }
+                printing = false;
+                continue;
+            }
+            if at_command_start && word == "printf" {
+                (printing, at_command_start) = (true, false);
+                continue;
+            }
+            if at_command_start
+                && matches!(
+                    word.as_str(),
+                    "export" | "declare" | "local" | "readonly" | "typeset"
+                )
+            {
+                declaring = true;
+                continue;
+            }
+            if declaring && !word.contains('=') {
+                continue;
+            }
+            if reading {
+                if !word.starts_with('-') {
+                    variables.insert(word, None);
+                }
+                continue;
+            }
+            if at_command_start && matches!(word.as_str(), "read" | "mapfile" | "readarray") {
+                reading = true;
+                continue;
+            }
+            let assignment = word.split_once('=').filter(|(name, _)| {
+                !name.trim_end_matches('+').is_empty()
+                    && name
+                        .trim_end_matches('+')
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            });
+            match assignment {
+                Some((name, value)) if at_command_start && value.starts_with('(') => {
+                    let text = arrays
+                        .entry(name.trim_end_matches('+').to_owned())
+                        .or_default();
+                    text.push(' ');
+                    text.push_str(value.trim_start_matches('(').trim_end_matches(')'));
+                }
+                Some((name, value)) if at_command_start => {
+                    let append = name.ends_with('+');
+                    let entry = variables
+                        .entry(name.trim_end_matches('+').to_owned())
+                        .or_insert_with(|| Some(String::new()));
+                    if value.contains(['$', '`']) {
+                        *entry = None;
+                    } else if let Some(text) = entry {
+                        if !append {
+                            text.clear();
+                        }
+                        text.push_str(value);
+                    }
+                }
+                _ if at_command_start && is_skipped_word(&word) => {}
+                _ => at_command_start = false,
+            }
+        }
+    }
+    (variables, arrays)
+}
+
+/// The array a word expands whole when it is solely `${NAME[@]}` or `${NAME[*]}`.
+fn sole_array(word: &str) -> Option<&str> {
+    let name = word.strip_prefix("${").and_then(|rest| {
+        rest.strip_suffix("[@]}")
+            .or_else(|| rest.strip_suffix("[*]}"))
+    })?;
+    sole_variable(&format!("${name}")).is_some().then_some(name)
+}
+
+/// The variable a word expands when it is solely `$NAME` or `${NAME}` with `NAME` a name, not a
+/// positional or special parameter.
+fn sole_variable(word: &str) -> Option<&str> {
+    let name = word
+        .strip_prefix("${")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .or_else(|| word.strip_prefix('$'))?;
+    let mut chars = name.chars();
+    let leads = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    (leads && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')).then_some(name)
 }
 
 /// The numbers of a workflow's `key:` lines and of every line below one that is blank or
@@ -1918,7 +2078,7 @@ const NON_EXECUTING: &[&str] = &[
 fn is_skipped_word(word: &str) -> bool {
     matches!(
         word,
-        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "time"
+        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "time" | "{"
     ) || word.split_once('=').is_some_and(|(name, _)| {
         !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     })
@@ -2197,7 +2357,13 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
     }
     reread
         .iter()
-        .map(|(inner, executes)| live_flag(inner, ctx, *executes))
+        .map(|(inner, executes, quoted)| {
+            let ctx = LineContext {
+                quoted_reread: *quoted,
+                ..ctx
+            };
+            live_flag(inner, ctx, *executes)
+        })
         .fold(verdict, LiveFlag::min)
 }
 
@@ -2207,13 +2373,18 @@ fn live_flag(line: &str, ctx: LineContext, consumer_executes: bool) -> LiveFlag 
 /// non-executing, with every later stage known too and no consumer that executes), each quoted
 /// word holding a space, `cargo` or a `$` or backtick, and each here-string. An executing `awk`
 /// or `sed` builds a command no reading can follow, so it is refused, and so is a command that
-/// runs an expanding argument as a command line ([`runs_expanding_line`]).
+/// runs an expanding argument as a command line ([`runs_expanding_line`]). A command word that,
+/// after its wrappers, is solely a variable the file defines is read through its value, and
+/// refused when a definition cannot be read; one solely a whole array is refused when the file
+/// defines no such array or a definition holds `cargo`, `live` or an expansion. In a quoted word
+/// re-read, an unreadable variable is let through and an array is refused only for `cargo` or
+/// `live`, its elements staying the outer command's arguments (DEC-851 item 2).
 fn pipeline_live_flag(
     pipeline: &[PipelineCommand],
     (line, substitutions): (&str, &[(String, usize)]),
     ctx: LineContext,
     consumer_executes: bool,
-    reread: &mut Vec<(String, bool)>,
+    reread: &mut Vec<(String, bool, bool)>,
 ) -> LiveFlag {
     let mut verdict = LiveFlag::Absent;
     for (index, command) in pipeline.iter().enumerate() {
@@ -2224,8 +2395,44 @@ fn pipeline_live_flag(
             .collect();
         let flag = command_live_flag(&words, ctx);
         let named = command.command();
+        let unwrapped_named = unwrapped(&named);
+        match unwrapped_named
+            .first()
+            .and_then(|word| sole_variable(word))
+            .map(|name| ctx.variables.get(name))
+        {
+            Some(Some(None)) if !ctx.quoted_reread => verdict = verdict.min(LiveFlag::Unreadable),
+            Some(Some(Some(value))) => {
+                let rest = unwrapped_named.get(1..).unwrap_or_default().join(" ");
+                reread.push((format!("{value} {rest}"), false, ctx.quoted_reread));
+            }
+            _ => {}
+        }
+        if let Some(name) = unwrapped_named.first().and_then(|word| sole_array(word)) {
+            let definition = ctx.arrays.get(name);
+            let builds_live =
+                |text: &String| text.to_ascii_lowercase().contains("cargo") || holds_live(text);
+            let refused = if ctx.quoted_reread {
+                definition.is_some_and(builds_live)
+            } else {
+                ctx.variables.get(name) == Some(&None)
+                    || definition.is_none_or(|text| builds_live(text) || text.contains(['$', '`']))
+            };
+            if refused {
+                verdict = verdict.min(LiveFlag::Unreadable);
+            }
+        }
         let builds = (matches!(named.first(), Some(&"awk" | &"sed")) && executing_form(&named))
-            || runs_expanding_line(&named, &command.here_strings);
+            || runs_expanding_line(
+                &named,
+                &command.here_strings,
+                command.words.iter().any(|(text, _, at)| {
+                    text.starts_with(['<', '>'])
+                        && substitutions
+                            .iter()
+                            .any(|(inner, p)| p == at && inner.contains(['$', '`']))
+                }),
+            );
         verdict = verdict.min(flag);
         if builds || (flag != LiveFlag::CompileOnly && feature_values_refused(&words, ctx)) {
             verdict = verdict.min(LiveFlag::Unreadable);
@@ -2247,34 +2454,38 @@ fn pipeline_live_flag(
                             && (text.contains([' ', '\t', '$', '`']) || text.contains("cargo"))
                             && text.len() < line.len()
                     })
-                    .map(|(text, _, _)| (text.clone(), false)),
+                    .map(|(text, _, _)| (text.clone(), false, true)),
             );
             reread.extend(
                 command
                     .here_strings
                     .iter()
-                    .map(|text| (text.clone(), false)),
+                    .map(|text| (text.clone(), false, true)),
             );
         }
         reread.extend(
             substitutions
                 .iter()
                 .filter(|(_, at)| (command.start..=command.end).contains(at))
-                .map(|(inner, at)| (inner.clone(), position == Some(*at) || !captured)),
+                .map(|(inner, at)| (inner.clone(), position == Some(*at) || !captured, false)),
         );
     }
     verdict
 }
 
-/// Whether a command runs an expanding argument as a command line: `eval` with an argument
-/// holding `$` or a backtick, or `sh`, `bash` or `zsh` (by any path) given `-c`, alone or in a
-/// short-flag cluster, and such an argument, or such a here-string (DEC-851 item 1).
-fn runs_expanding_line(named: &[&str], here_strings: &[String]) -> bool {
+/// Whether a command, after its [`unwrapped`] wrappers, runs an expanding argument as a command
+/// line: `eval` with an argument holding `$` or a backtick; `sh`, `bash`, `zsh`, `dash`, `ksh` or
+/// `mksh` (matched by basename) given `-c`, alone or in a short-flag cluster, and such an
+/// argument, or such a here-string; or `.` or `source` reading such a here-string or, when
+/// `sourced_expands`, a process substitution whose text expands (DEC-851 item 1).
+fn runs_expanding_line(named: &[&str], here_strings: &[String], sourced_expands: bool) -> bool {
     let expands = |word: &str| word.contains(['$', '`']);
+    let named = unwrapped(named);
     let arguments = named.get(1..).unwrap_or_default();
     match named.first().and_then(|word| word.rsplit('/').next()) {
         Some("eval") => arguments.iter().any(|word| expands(word)),
-        Some("sh" | "bash" | "zsh") => {
+        Some("." | "source") => sourced_expands || here_strings.iter().any(|text| expands(text)),
+        Some("sh" | "bash" | "zsh" | "dash" | "ksh" | "mksh") => {
             let dash_c = arguments
                 .iter()
                 .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains('c'));
@@ -2282,6 +2493,44 @@ fn runs_expanding_line(named: &[&str], here_strings: &[String]) -> bool {
                 || here_strings.iter().any(|text| expands(text))
         }
         _ => false,
+    }
+}
+
+/// `named` without its leading wrappers: `env` (its options, `-u X` and `VAR=val`), `command`,
+/// `exec`, `nohup`, `xargs`, `sudo`, `nice` and `stdbuf` (each with its options and their
+/// values), `builtin`, and `timeout` (its options and its duration).
+fn unwrapped<'w>(mut named: &'w [&'w str]) -> &'w [&'w str] {
+    loop {
+        let (with_value, takes_word): (&[&str], bool) = match named.first().copied() {
+            Some("env") => (&["-u", "-C", "-S"], false),
+            Some("command" | "exec" | "nohup") => (&["-a"], false),
+            Some("xargs") => (&["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"], false),
+            Some("sudo") => (
+                &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"],
+                false,
+            ),
+            Some("nice") => (&["-n"], false),
+            Some("stdbuf") => (&["-i", "-o", "-e"], false),
+            Some("builtin") => (&[], false),
+            Some("timeout") => (&["-k", "-s"], true),
+            _ => return named,
+        };
+        let mut rest = named.get(1..).unwrap_or_default();
+        while let Some(word) = rest.first() {
+            let skip = if with_value.contains(word) {
+                2
+            } else if word.starts_with('-') || (named.first() == Some(&"env") && word.contains('='))
+            {
+                1
+            } else {
+                break;
+            };
+            rest = rest.get(skip..).unwrap_or_default();
+        }
+        if takes_word {
+            rest = rest.get(1..).unwrap_or_default();
+        }
+        named = rest;
     }
 }
 
@@ -10104,7 +10353,6 @@ jq -r "$filter" "$src"
     /// holds the literal `cargo` or the token `live`, which is refused (ninth round). Split out of
     /// the bypass test so X1's step 3c un-ignores it (X1 tests correction 5).
     #[test]
-    #[ignore = "pending E7-26"]
     fn array_expansions_are_read_through_their_definitions() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -10170,7 +10418,6 @@ jq -r "$filter" "$src"
     /// refuses the expansion as a command word and inside a re-read word, as `cargo` does. And
     /// `${x[*]}` is read as `${x[@]}` is, for a defined and an undefined array.
     #[test]
-    #[ignore = "pending E7-26"]
     fn every_array_definition_and_both_whole_array_forms_are_read() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -10234,7 +10481,6 @@ jq -r "$filter" "$src"
     /// An expansion of a variable the file never assigns, `"$@"`, a positional parameter or an
     /// environment input, is not refused by this rule, and a clean definition stays allowed.
     #[test]
-    #[ignore = "pending E7-26"]
     fn variable_command_words_are_read_through_their_definitions() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -10278,7 +10524,6 @@ jq -r "$filter" "$src"
         }
         let allowed = [
             "\"$@\"",
-            "$TOOL --version",
             "C=echo; $C hi",
             "C=echo\nC+=\" hi\"\n$C",
             "read -r C < f\necho \"$C\"",
@@ -10311,7 +10556,6 @@ jq -r "$filter" "$src"
     /// correction 11). A wrapped script, and `.` of a file path built by a substitution, stay
     /// allowed.
     #[test]
-    #[ignore = "pending E7-26"]
     fn wrapped_shells_and_sourced_expansions_are_refused() -> Result<()> {
         let policy = live_policy();
         let meta = || workspace(live_workspace());
@@ -10488,7 +10732,6 @@ jq -r "$filter" "$src"
     /// repository, beside every file [`ci_files_reads_every_file_that_decides_a_build`] names.
     /// Split out so X1's step 3c un-ignores it (X1 tests correction 5).
     #[test]
-    #[ignore = "pending E7-26"]
     fn ci_files_reads_the_build_files_anywhere_in_the_repository() -> Result<()> {
         let root =
             env::temp_dir().join(format!("mandate-xtask-build-files-{}", std::process::id()));
@@ -10572,7 +10815,6 @@ jq -r "$filter" "$src"
     /// after #979): `makefile`, `GNUmakefile`, `Justfile` and a `docker-compose*.yaml`, each
     /// holding a live build, are each refused at their own path and line.
     #[test]
-    #[ignore = "pending E7-26"]
     fn every_build_file_name_is_judged() -> Result<()> {
         let build = "build:\n\tcargo build --features live\n";
         let paths = [
@@ -10603,7 +10845,6 @@ jq -r "$filter" "$src"
     /// directory a `CACHEDIR.TAG` marks as a cache is not read, while one in `tools/` beside them
     /// is, and a `CACHEDIR.TAG` marks only its own directory.
     #[test]
-    #[ignore = "pending E7-26"]
     fn the_build_file_walk_skips_only_git_node_modules_and_caches() -> Result<()> {
         let build = "build:\n\tcargo build --features live\n";
         let root = fixture_repository(
@@ -10647,6 +10888,200 @@ jq -r "$filter" "$src"
         assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
         assert_eq!(problems.len(), 1, "{problems:?}");
+        Ok(())
+    }
+
+    /// A command word that starts with an expansion fails closed (DEC-851 item 6; X1 tests
+    /// correction 12b, after #979's review): after its wrappers and keywords, it is refused unless
+    /// it is `"$@"`, a sole `$C`/`${C}` or whole array whose definitions are all readable and hold
+    /// neither `cargo` nor `live`, `"$(dirname "$0")/<literal path>"`, or `"${ARR[<digits>]}"` of
+    /// such an array. So the parameter operators (`${C:-}`, `${C:0}`, `${C//zz/}`, `${C@E}`), an
+    /// indirection `${!n}`, a variable no definition in the file gives (`$TOOL`) and a nameref
+    /// (`declare`, `local` or `typeset -n`) are refused. A pipeline that feeds a shell after an
+    /// expanding word is refused, quoted or not, and so is a `set` that expands in a file that runs
+    /// `"$@"`. `$(( … ))` is read whole as arithmetic, its substitutions still read, and is
+    /// refused as a command word like any other expansion; an escaped `\$` expands nothing, a double-quoted string
+    /// runs on across lines, and a job's `outputs:` is not a `run:` step, so the real lines those
+    /// read stay allowed, as do `x+=( … )` and `x[i]=…`, which do not start with an expansion.
+    /// X1 tests correction 12c (after #994's surviving mutants) adds: a `..` segment takes the
+    /// `dirname` path off the allowlist; a wrapped `exec "$@"` runs `"$@"` too; a nameref in a
+    /// cluster (`-rn`) is one; a key at the `outputs:` key's indent ends its block; a `#` that
+    /// starts a comment ends a line however many quotes the comment holds, while one inside a
+    /// double quote does not; and an escaped `\"` neither opens nor closes a quote.
+    /// X1 tests correction 12d (after #994's review) adds: a line ending in `|` or `|&` runs on
+    /// into the next; a numeric descriptor's redirection (`2>&1`) before the command word
+    /// and `time -p` are skipped; a here-string counts as an earlier expanding word for rule 2;
+    /// a wrapper is matched by basename (`/usr/bin/env sh`); a pipeline sink that starts with an
+    /// expansion is refused even when its variable is clean; `zsh` is a sink; `${A[]}` and
+    /// `${ARR[1x]}` are not literal indexes; a `set` with a backtick expands; a nameref needs an
+    /// option holding `n`; an escaped backtick expands nothing; and `...` is not `..`.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn command_words_that_start_with_an_expansion_fail_closed() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let built_across_lines =
+            "C=ca; C+=rgo; C+=\" build -\"; C+=\"-feat\"; C+=\"ures l\"; C+=ive";
+        let refused_at_the_last_line = [
+            format!("{built_across_lines}\n${{C:-}}"),
+            format!("{built_across_lines}\n${{C:0}}"),
+            format!("{built_across_lines}\n${{C//zz/}}"),
+            format!("{built_across_lines}\n${{C@E}}"),
+            format!("{built_across_lines}\nn=C\n${{!n}}"),
+            format!("{built_across_lines}\ndeclare -n R=C\n$R"),
+            format!("{built_across_lines}\nlocal -n R=C\n$R"),
+            format!("{built_across_lines}\ntypeset -n R=C\n$R"),
+            format!("{built_across_lines}\nset -- $C; \"$@\""),
+            format!("{built_across_lines}\necho $C | sh"),
+            format!("{built_across_lines}\necho \"$C\" | /bin/bash -s"),
+            "$TOOL --version".to_owned(),
+            "\"$(cat cmd.txt)\" build".to_owned(),
+            "\"$(dirname \"$0\")/$X\"".to_owned(),
+            "\"$(pwd)/x.sh\"".to_owned(),
+            "\"${ARR[0]}\" build".to_owned(),
+            "ARR=($X tool)\n\"${ARR[0]}\" build".to_owned(),
+            "ARR=(cargo build)\n\"${ARR[1]}\" x".to_owned(),
+            "\"$*\"".to_owned(),
+            "n=$(( $(cargo build --features \"$F\") ))".to_owned(),
+            "\"$(dirname \"$0\")/../x.sh\"".to_owned(),
+            format!("{built_across_lines}\n2>&1 $C"),
+            format!("{built_across_lines}\n3>&1 $C"),
+            format!("{built_across_lines}\ntime -p $C"),
+            "C=$(cat f)\ncat <<< \"$C\" | sh".to_owned(),
+            "C=$(cat f)\ncat <<< $C | sh".to_owned(),
+            "cargo check -p the-runner -F 2>x live".to_owned(),
+            format!("{built_across_lines}\necho $C | /usr/bin/env sh"),
+            format!("{built_across_lines}\necho $C | zsh"),
+            "S=sh\ncurl $U | $S".to_owned(),
+            "A=(echo hi)\n\"${A[]}\" x".to_owned(),
+            "ARR=(echo hi)\n\"${ARR[1x]}\" x".to_owned(),
+            "set -- `cmd`; \"$@\"".to_owned(),
+            format!("{built_across_lines}\nset -- $C; exec \"$@\""),
+            format!("{built_across_lines}\ndeclare -rn R=C\n$R"),
+            "echo hi # see \"docs\ncargo build --features live".to_owned(),
+            "\"$((1 + 2))\"".to_owned(),
+            "ARR=(echo hi)\n\"${ARR[$i]}\" x".to_owned(),
+        ];
+        for text in refused_at_the_last_line {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(&format!(
+                    ".github/scripts/build.sh:{}:",
+                    text.lines().count().saturating_add(1)
+                )),
+                "names the file and the last line: {problems:?}"
+            );
+        }
+        let refused_at_their_first_line = [
+            format!("{built_across_lines}\necho $C |\nsh"),
+            format!("{built_across_lines}\necho $C |&\nsh"),
+        ];
+        for text in refused_at_their_first_line {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(".github/scripts/build.sh:3:"),
+                "a trailing `|` runs the pipeline on into the next line: {problems:?}"
+            );
+        }
+        let allowed = [
+            ".github/scripts/build.sh",
+            "declare -r R=echo\n$R hi",
+            "declare n=echo\n$n hi",
+            "\\`ls\\` x",
+            "\"$(dirname \"$0\")/.../x.sh\"",
+            "\"$@\"",
+            "C=echo\n$C hi",
+            "x=(echo hi)\n\"${x[@]}\"",
+            "base=$(\"$(dirname \"$0\")/base-ref.sh\")",
+            "\"$(dirname \"$0\")/base-ref.sh\"",
+            "ARR=(/usr/local/bin/tool sub)\n\"${ARR[0]}\" --help",
+            "set -- a b; \"$@\"",
+            "set -- $A\necho \"$@\"",
+            "echo hi | sh",
+            "echo \"$X\" | grep y",
+            "a=$((10#$a))",
+            "db_kb=$(($(du -sk \"$D\" | cut -f1) / 1024))",
+            "m=\"${A:-}\n$(git log --format=%B \"$b..HEAD\")\"",
+            "psql <<SQL\nDO \\$\\$\nBEGIN\nEND\n\\$\\$;\nSQL",
+            "case \"$a\" in\n  -*) flags+=(\"$arg\") ;;\n  *) args+=(\"$arg\") ;;\nesac",
+            "values[$1]=\"$2\"",
+            "m=\"say \\\"hi\n$(git log --format=%B)\"",
+            "m=\"a # b\n$(git log --format=%B)\"",
+        ];
+        for text in allowed.iter().skip(1) {
+            let files = [ci_file(allowed[0], &format!("set -e\n{text}\n"))];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let outputs = ci_file(
+            ".github/workflows/x.yml",
+            concat!(
+                "jobs:\n  a:\n    runs-on: ubuntu-latest\n    outputs:\n",
+                "      run: ${{ steps.check.outputs.run }}\n",
+                "    steps:\n      - run: echo hi\n",
+            ),
+        );
+        assert_eq!(
+            live_feature_problems(&policy, &meta(), &[outputs])?,
+            Vec::<String>::new(),
+            "a job's `outputs: run:` is not a `run:` step"
+        );
+        let after_outputs = ci_file(
+            ".github/workflows/x.yml",
+            concat!(
+                "jobs:\n  a:\n    runs-on: ubuntu-latest\n    outputs:\n",
+                "      run: ${{ steps.check.outputs.run }}\n",
+                "    steps:\n      - run: ${{ inputs.cmd }}\n",
+            ),
+        );
+        let problems = live_feature_problems(&policy, &meta(), &[after_outputs])?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with(".github/workflows/x.yml:7:"),
+            "a key at the `outputs:` key's own indent ends its block, so the step's `run:` is read: {problems:?}"
+        );
+        Ok(())
+    }
+
+    /// A build file the check cannot read as text, a dangling symlink or a file that is not
+    /// UTF-8, is reported as a problem naming its path, not an error that aborts the check (X1
+    /// tests correction 12b, after #979's review; DEC-851 item 6), and so is one holding a NUL
+    /// byte (X1 tests correction 12c, after #994's planted NUL).
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn an_unreadable_build_file_is_refused_by_path() -> Result<()> {
+        let root = fixture_repository(
+            "build-file-unreadable",
+            &[(".github/workflows/a.yml", "x\n")],
+        )?;
+        std::os::unix::fs::symlink(root.join("missing"), root.join("Makefile"))?;
+        fs::write(root.join("justfile"), [0xff_u8, 0xfe, b'\n'])?;
+        fs::write(root.join("Dockerfile"), "RUN echo hi\0\n")?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read?)?;
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        for path in ["Makefile", "justfile", "Dockerfile"] {
+            assert!(
+                problems
+                    .iter()
+                    .any(|problem| problem.starts_with(&format!("{path}: "))),
+                "{path} is named: {problems:?}"
+            );
+        }
         Ok(())
     }
 

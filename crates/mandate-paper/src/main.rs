@@ -6,7 +6,7 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match mandate_paper::process(std::env::args().skip(1), std::env::vars()) {
+    match mandate_paper::process(std::env::args().skip(1), std::env::vars_os()) {
         Ok(lines) => {
             for line in lines {
                 println!("{line}");

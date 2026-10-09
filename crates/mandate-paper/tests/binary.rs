@@ -16,6 +16,8 @@ mod conformance;
 #[path = "../../mandate-journal-pg/tests/support/mod.rs"]
 mod support;
 
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Output};
 use std::time::Duration;
 
@@ -54,12 +56,20 @@ const DEPLOYED: &str = r#"{"actor":{"build":null,"id":"user_owner_01","kind":"us
 /// The binary run with `args` after the deployment ids, in a scratch directory, with no Alpaca
 /// variable but `env`.
 fn paper(args: &[&str], env: &[(&str, &str)]) -> Output {
+    let env = env
+        .iter()
+        .map(|(name, value)| (OsStr::new(name), OsStr::new(value)));
+    paper_os(args, env)
+}
+
+/// [`paper`] with variables that need not be Unicode.
+fn paper_os<'a>(args: &[&str], env: impl IntoIterator<Item = (&'a OsStr, &'a OsStr)>) -> Output {
     let dir = std::env::temp_dir().join(format!("mandate-paper-bin-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_mandate-paper"));
     command.current_dir(&dir).args(IDS).args(args);
     command.env_remove(KEY_ID_VAR).env_remove(SECRET_VAR);
-    command.envs(env.iter().copied());
+    command.envs(env);
     command.output().unwrap()
 }
 
@@ -123,7 +133,6 @@ fn the_system_clock_pause_waits_its_whole_duration() {
 
 /// Rule 7, DEC-846 item 6: a usage refusal names the flag, never its value, and exits non-zero.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_usage_refusal_names_no_value() {
     let output = paper(
         &["--confirm-paper", "--journal", DSN, "--journal", DSN],
@@ -137,7 +146,6 @@ fn a_usage_refusal_names_no_value() {
 /// valid here, so this does not show the host check comes before the credentials; that order is
 /// pinned in-process by `run.rs`'s `every_refusal_before_the_credentials_reads_none`.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_configured_host_is_refused_before_any_credential() {
     let host = ("ALPACA_API_BASE", "https://api.alpaca.markets");
     let output = paper(
@@ -155,7 +163,6 @@ fn a_configured_host_is_refused_before_any_credential() {
 /// `AgentDeployed` names a version no store holds refuses that document, both before any
 /// credential, with the keys set, and neither names the DSN's password or a key.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_control_stream_is_read_before_any_credential() {
     let unread = "the control stream could not be read";
     refused(&paper(&["--confirm-paper"], &[]), unread);
@@ -197,4 +204,31 @@ fn the_control_stream_is_read_before_any_credential() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(password.is_none_or(|p| !stderr.contains(p)), "{stderr}");
     }
+}
+
+/// A variable that is not Unicode never panics the binary (DEC-846 item 1: the environment is the
+/// process's own). Each name and value is read lossily, so one the run does not read changes
+/// nothing: the run stops where it would without it, here at the control stream, and its value
+/// is printed nowhere.
+#[test]
+fn a_variable_that_is_not_unicode_changes_nothing() {
+    let value = OsStr::from_bytes(b"nonutf8-sentinel-\xff\xfe");
+    let output = paper_os(
+        &["--confirm-paper"],
+        [(OsStr::new("MANDATE_PAPER_UNRELATED"), value)],
+    );
+    refused(&output, "the control stream could not be read");
+}
+
+/// FT-10, TI-5: an Alpaca variable holding a URL that is not Unicode is still refused by the host
+/// check, read lossily, before the control stream; the refusal names the variable only.
+#[test]
+fn a_host_that_is_not_unicode_is_still_refused() {
+    let value = OsStr::from_bytes(b"https://api.alpaca.markets/\xff-sentinel");
+    let output = paper_os(
+        &["--confirm-paper"],
+        [(OsStr::new("ALPACA_API_BASE"), value)],
+    );
+    let message = "ALPACA_API_BASE looks like a URL; the tracer reaches only the Alpaca paper host";
+    refused(&output, message);
 }

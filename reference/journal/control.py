@@ -18,6 +18,7 @@ streams that write it. This module is their reference implementation, called by 
 import calendar
 import copy
 import functools
+import hashlib
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -80,6 +81,10 @@ RISK_CLOCK = T("risk_clock")
 POINTER = T("pointer")
 ASSET_ID = T("asset_id")
 ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+STREAM_ID = T("stream_id")
+DIGEST_HEX = T("digest")
+DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
+STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
@@ -611,6 +616,76 @@ SCHEMAS[("ctl", "MemberRemoved")] = rec(
     ("session_ref", opt(STR)),
 )
 
+# §9.13 (DEC-780): the records-access, export, and verification records. Each names what it covers
+# as stream ranges of its own workspace, bounded by event hashes, never by instrument or content.
+# A `digest` is bare hex, so it names no stored artifact and stays out of `artifact_refs`.
+GENESIS = "0" * 64
+RANGE = rec(
+    ("stream_id", STREAM_ID),
+    ("from_seq", INT),
+    ("to_seq", INT),
+    ("prev_hash", DIGEST_HEX),
+    ("to_hash", DIGEST_HEX),
+)
+# §11's codes: those reported at an event (checks 1 to 6, the anchored head, and the agent stream's
+# two range checks reported at their event), then those reported for the range as a whole.
+EVENT_CHECKS = (
+    "non_canonical",
+    "column_mismatch",
+    "seq_gap",
+    "rehash_mismatch",
+    "prev_hash_mismatch",
+    "artifact_missing",
+    "artifact_mismatch",
+    "anchor_head_mismatch",
+    "anchor_self_mismatch",
+    "intent_action_mismatch",
+    "mode_event_mismatch",
+)
+RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
+CHECKED_RANGE = rec(
+    *RANGE.fields[:4],
+    ("to_hash", opt(DIGEST_HEX)),
+    ("failure", opt(rec(("check", one_of(*EVENT_CHECKS, *RANGE_CHECKS)), ("seq", opt(INT))))),
+)
+VIEW_FORMS = ("json", "csv")
+TRIGGERS = ("startup", "segment_export", "weekly", "request", "restore_drill")
+SCHEMAS[("ctl", "RecordsAccessed")] = rec(
+    ("accessor", STR),
+    ("operation", IDENT_T),
+    ("ranges", list_of(RANGE)),
+    ("resources", list_of(IDENT_T)),
+    ("result", opt(REF)),
+)
+SCHEMAS[("ctl", "ExportCreated")] = rec(
+    ("form", one_of("canonical", *VIEW_FORMS)),
+    ("ranges", list_of(RANGE)),
+    ("verifier_digest", DIGEST_HEX),
+    ("view", opt(DIGEST_HEX)),
+)
+SCHEMAS[("ctl", "VerificationRun")] = rec(
+    ("trigger", one_of(*TRIGGERS)),
+    ("ranges", list_of(CHECKED_RANGE)),
+    ("result", one_of("pass", "fail")),
+)
+
+# §9.14 (DEC-783): the anchor and segment records, in the shapes the code already reads (the anchor
+# file of DEC-115 item 6, DEC-263's manifest). Every hash is a bare-hex `digest`.
+SCHEMAS[("ctl", "AnchorComputed")] = rec(
+    ("leaves", list_of(rec(("hash", DIGEST_HEX), ("seq", INT), ("stream_id", STREAM_ID)))),
+    ("root", DIGEST_HEX),
+    ("token", opt(REF)),
+)
+SCHEMAS[("ctl", "SegmentExported")] = rec(
+    ("stream_id", STREAM_ID),
+    ("first_seq", INT),
+    ("last_seq", INT),
+    ("first_prev_hash", DIGEST_HEX),
+    ("last_hash", DIGEST_HEX),
+    ("file_sha256", DIGEST_HEX),
+    ("manifest_hash", DIGEST_HEX),
+)
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -749,6 +824,12 @@ def is_pointer(text: str) -> bool:
     return True
 
 
+def is_stream_id(text: str) -> bool:
+    """§2's form: a known stream type and its segment count, each segment an identifier."""
+    parts = text.split(":")
+    return STREAM_SEGMENTS.get(parts[0]) == len(parts) and all(IDENT_RE.match(s) for s in parts[1:])
+
+
 def is_date(text: str) -> bool:
     if len(text) != 10 or text[4] != "-" or text[7] != "-":
         return False
@@ -785,6 +866,12 @@ def nested_record(path: str) -> str:
     """The seeded-bug key of a nested record: `step_up`, a `provenance` entry, or the payload itself."""
     if path == "payload.step_up":
         return "step_up"
+    if path.startswith("payload.ranges[") and path.endswith(".failure"):
+        return "failure"
+    if path.startswith("payload.ranges["):
+        return "range"
+    if path.startswith("payload.leaves["):
+        return "leaf"
     if path.startswith("payload.provenance["):
         return "provenance_entry"
     return "payload"
@@ -812,11 +899,15 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             return [Violation("types", "schema", path)]
         ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
         return [] if ok else [Violation("types", "non_canonical", path)]
-    if ty.kind in ("pointer", "date", "asset_id"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "pointer":
             ok = is_pointer(value)
+        elif ty.kind == "stream_id":
+            ok = is_stream_id(value)
+        elif ty.kind == "digest":
+            ok = bool(DIGEST_HEX_FORM.match(value))
         elif ty.kind == "asset_id":
             ok = bool(ASSET_ID_FORM.match(value)) or (
                 "types.asset_id_trailing_newline" in skip and bool(ASSET_ID_FORM.match(value.removesuffix("\n")))
@@ -1039,6 +1130,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += connection_violations(event_type, draft, skip)
     out += workspace_violations(event_type, draft, skip)
     out += membership_violations(event_type, draft, skip)
+    out += audit_violations(event_type, draft, skip)
+    out += cold_violations(event_type, draft, skip)
     return out
 
 
@@ -1399,6 +1492,227 @@ def cool_off_exact(start: str, end, cooling: bool, skip: frozenset[str]) -> bool
     if "boundary.rule_103_at_least" in skip and cooling:
         return gap >= COOL_OFF_SECONDS * 10**9
     return gap == (COOL_OFF_SECONDS * 10**9 if cooling else 0)
+
+
+def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.13's rules 107 to 112, on a well-typed payload, in number order. A seeded `loose` or
+    `nullable` bug can let a mistyped member through; a clause whose inputs are mistyped is not
+    judged, so the bug shows as the type violation it hid rather than as a rule at the same path."""
+    if event_type not in ("RecordsAccessed", "ExportCreated", "VerificationRun"):
+        return []
+    p = draft["payload"]
+    kind = draft["actor"]["kind"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    ranges = p["ranges"] if isinstance(p["ranges"], list) else None
+    items = [r if isinstance(r, dict) else {} for r in ranges or []]
+    rule("107.empty", ranges is None or bool(ranges), "payload.ranges")
+    workspace = draft["stream_id"].split(":")[1]
+    previous = None
+    for i, r in enumerate(items):
+        at = f"payload.ranges[{i}]"
+        stream, first, last, prev = r.get("stream_id"), r.get("from_seq"), r.get("to_seq"), r.get("prev_hash")
+        named = isinstance(stream, str)
+        rule("107.workspace", not named or stream.split(":")[1:2] == [workspace], f"{at}.stream_id")
+        least = 0 if "boundary.rule_107_from_seq" in skip else 1
+        rule("107.from_seq", not is_integer(first) or first >= least, f"{at}.from_seq")
+        seqs = is_integer(first) and is_integer(last)
+        rule("107.to_seq", not seqs or last >= first, f"{at}.to_seq")
+        typed = isinstance(prev, str) and is_integer(first)
+        rule("107.genesis", not typed or (prev == GENESIS) == (first == 1), f"{at}.prev_hash")
+        if previous is not None and named and isinstance(previous.get("stream_id"), str):
+            here, before = stream.encode(), previous["stream_id"].encode()
+            gap = 0 if "boundary.rule_107_overlap" in skip else 1
+            ends = is_integer(first) and is_integer(previous.get("to_seq"))
+            disjoint = not ends or first >= previous["to_seq"] + gap
+            rule("107.order", here > before or (here == before and disjoint), f"{at}.stream_id")
+        previous = r
+    if event_type == "RecordsAccessed":
+        accessor = p["accessor"]
+        rule("108.accessor", not isinstance(accessor, str) or accessor == draft["actor"]["id"], "payload.accessor")
+        refused = tuple(k for k in ("agent", "broker") if f"kinds.108.{k}" not in skip)
+        rule("108.actor", kind not in refused, "actor.kind")
+        approved = kind != "platform_operator" or draft["causation_id"] is not None
+        rule("108.break_glass", approved, "causation_id")
+        resources = p["resources"] if isinstance(p["resources"], list) else []
+        named = [r.encode() for r in resources if isinstance(r, str)]
+        rule("108.resources", all(a < b for a, b in zip(named, named[1:])), "payload.resources")
+    if event_type == "ExportCreated":
+        widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.109.{k}" in skip)
+        rule("109.actor", kind in ("user", "system", *widened), "actor.kind")
+        if p["form"] in ("canonical", *VIEW_FORMS) and (p["view"] is None or isinstance(p["view"], str)):
+            rule("109.view", (p["view"] is not None) == (p["form"] in VIEW_FORMS), "payload.view")
+    if event_type == "VerificationRun":
+        if p["trigger"] in TRIGGERS:
+            allowed = ("user", "system") if p["trigger"] == "request" else ("system",)
+            widened = tuple(k for k in ("broker", "platform_operator") if f"kinds.110.{k}" in skip)
+            rule("110", kind in (*allowed, *widened), "actor.kind")
+        for i, r in enumerate(items):
+            at = f"payload.ranges[{i}]"
+            failure = r.get("failure")
+            if isinstance(failure, dict):
+                seq, check = failure.get("seq"), failure.get("check")
+                if check in EVENT_CHECKS or check in RANGE_CHECKS:
+                    rule("111.seq", (seq is not None) == (check in EVENT_CHECKS), f"{at}.failure.seq")
+                bounds = (r.get("from_seq"), seq, r.get("to_seq"))
+                if all(is_integer(b) for b in bounds):
+                    rule("111.inside", bounds[0] <= bounds[1] <= bounds[2], f"{at}.failure.seq")
+            rule("111.to_hash", failure is not None or r.get("to_hash") is not None, f"{at}.to_hash")
+        if p["result"] in ("pass", "fail"):
+            passed = all(r.get("failure") is None for r in items)
+            rule("112", (p["result"] == "pass") == passed, "payload.result")
+    return out
+
+
+def merkle_root(leaves: list[dict], skip: frozenset[str] = frozenset()) -> str:
+    """§10's root over `leaves`, as 64 hex: leaf = SHA-256(0x00 ‖ canonical(leaf)), node =
+    SHA-256(0x01 ‖ left ‖ right), split at the largest power of two below the count."""
+    tag = b"\x01" if "boundary.leaf_prefix" in skip else b"\x00"
+    hashes = [hashlib.sha256(tag + canon(leaf).encode()).digest() for leaf in leaves]
+
+    def node(items: list[bytes]) -> bytes:
+        if len(items) == 1:
+            return items[0]
+        split = 1
+        while split * 2 < len(items):
+            split *= 2
+        if "boundary.merkle_split" in skip:
+            split = len(items) // 2
+        return hashlib.sha256(b"\x01" + node(items[:split]) + node(items[split:])).digest()
+
+    return node(hashes).hex()
+
+
+def manifest_hash(p: dict) -> str:
+    """DEC-263 item 3: SHA-256 of the canonical JSON of the six manifest fields, `stream` named so."""
+    manifest = {
+        "stream": p["stream_id"],
+        "first_seq": p["first_seq"],
+        "last_seq": p["last_seq"],
+        "first_prev_hash": p["first_prev_hash"],
+        "last_hash": p["last_hash"],
+        "file_sha256": p["file_sha256"],
+    }
+    return hashlib.sha256(canon(manifest).encode()).hexdigest()
+
+
+def cold_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.14's rules 113 to 118, on a well-typed payload, in number order. A clause whose inputs a
+    seeded `loose` or `nullable` bug let through mistyped is not judged, so the bug shows."""
+    if event_type not in ("AnchorComputed", "SegmentExported"):
+        return []
+    p = draft["payload"]
+    kind = draft["actor"]["kind"]
+    workspace = draft["stream_id"].split(":")[1]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    def mine(stream) -> bool:
+        return not isinstance(stream, str) or stream.split(":")[1:2] == [workspace]
+
+    if event_type == "AnchorComputed":
+        leaves = p["leaves"] if isinstance(p["leaves"], list) else None
+        items = [leaf if isinstance(leaf, dict) else {} for leaf in leaves or []]
+        rule("113.empty", leaves is None or bool(leaves), "payload.leaves")
+        previous = None
+        for i, leaf in enumerate(items):
+            at = f"payload.leaves[{i}]"
+            stream, seq = leaf.get("stream_id"), leaf.get("seq")
+            rule("113.workspace", mine(stream), f"{at}.stream_id")
+            rule("113.seq", not is_integer(seq) or seq >= 1, f"{at}.seq")
+            if previous is not None and isinstance(stream, str) and isinstance(previous, str):
+                rule("113.order", stream.encode() > previous.encode(), f"{at}.stream_id")
+            previous = stream
+        streams = [leaf.get("stream_id") for leaf in items]
+        rule("113.self", not leaves or draft["stream_id"] in streams, "payload.leaves")
+        typed = items and all(
+            isinstance(leaf.get("hash"), str) and is_integer(leaf.get("seq")) and isinstance(leaf.get("stream_id"), str)
+            for leaf in items
+        )
+        if typed and isinstance(p["root"], str):
+            rule("114", p["root"] == merkle_root(items, skip), "payload.root")
+        rule("115", kind == "system", "actor.kind")
+    if event_type == "SegmentExported":
+        first, last = p["first_seq"], p["last_seq"]
+        rule("116.workspace", mine(p["stream_id"]), "payload.stream_id")
+        least = 0 if "boundary.rule_116_first_seq" in skip else 1
+        rule("116.first_seq", not is_integer(first) or first >= least, "payload.first_seq")
+        rule("116.last_seq", not (is_integer(first) and is_integer(last)) or last >= first, "payload.last_seq")
+        if isinstance(p["first_prev_hash"], str) and is_integer(first):
+            genesis = (p["first_prev_hash"] == GENESIS) == (first == 1)
+            rule("116.genesis", genesis, "payload.first_prev_hash")
+        members = ("stream_id", "first_seq", "last_seq", "first_prev_hash", "last_hash", "file_sha256")
+        typed = all(p[m] is not None for m in members) and is_integer(first) and is_integer(last)
+        if typed and isinstance(p["manifest_hash"], str):
+            rule("117", p["manifest_hash"] == manifest_hash(p), "payload.manifest_hash")
+        rule("118", kind == "system", "actor.kind")
+    return out
+
+
+def anchor_self_failure(entries: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
+    """§11's `anchor_self_mismatch` over one control stream's entries in `seq` order: each
+    `AnchorComputed` has a leaf for its own stream naming the event just before it, by `seq` and by
+    `hash`. Returns the first failure, `{seq, check}`, or `None`."""
+    for i, entry in enumerate(entries):
+        body = entry["body"]
+        if body["event_type"] != "AnchorComputed" or i == 0:
+            continue
+        before = entries[i - 1]
+        own = [leaf for leaf in body["payload"]["leaves"] if leaf["stream_id"] == body["stream_id"]]
+        if not own:
+            if "self.missing" in skip:
+                continue
+            return {"seq": entry["seq"], "check": "anchor_self_mismatch"}
+        leaf = own[0]
+        seq_ok = leaf["seq"] == before["seq"] or "self.seq" in skip
+        hash_ok = leaf["hash"] == before["hash"] or "self.hash" in skip
+        if not (seq_ok and hash_ok):
+            return {"seq": entry["seq"], "check": "anchor_self_mismatch"}
+    return None
+
+
+def trusted_start(
+    records: list[dict], stream: str, from_seq: int, request: dict, skip: frozenset[str] = frozenset()
+) -> dict | None:
+    """§9.14's "What a verifier reads": the trusted start of a range of `stream` entered at
+    `from_seq`, resolved from `request` among the control-stream `records` of `stream`'s own
+    workspace, or `None` when the request names no usable start."""
+    workspace = stream.split(":")[1]
+    own = [
+        r
+        for r in records
+        if r["stream_id"].split(":")[1] == workspace or "start.workspace" in skip
+    ]
+    if request["kind"] == "genesis":
+        if from_seq == 1 or "start.genesis_seq" in skip:
+            return {"from_seq": from_seq, "prev_hash": GENESIS}
+        return None
+    if request["kind"] == "manifest":
+        for r in own:
+            p = r["payload"]
+            if r["event_type"] != "SegmentExported" or p["manifest_hash"] != request["manifest_hash"]:
+                continue
+            fits = p["stream_id"] == stream and (p["first_seq"] == from_seq or "start.first_seq" in skip)
+            if fits:
+                return {"from_seq": from_seq, "prev_hash": p["first_prev_hash"]}
+        return None
+    for r in own:
+        if r["event_type"] != "AnchorComputed" or r["event_id"] != request["anchor_event_id"]:
+            continue
+        if r["payload"]["token"] is None and "start.null_token" not in skip:
+            return None
+        for leaf in r["payload"]["leaves"]:
+            fits = leaf["seq"] == from_seq - 1 or "start.anchor_seq" in skip
+            if leaf["stream_id"] == stream and fits:
+                return {"from_seq": from_seq, "prev_hash": leaf["hash"]}
+    return None
 
 
 def act_failure(p: dict, skip: frozenset[str]) -> str | None:

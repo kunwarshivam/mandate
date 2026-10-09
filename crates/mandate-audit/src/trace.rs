@@ -5,7 +5,7 @@
 //! output only in each node's `quoted` list (AU-4, API-18).
 
 use mandate_canon::Digest;
-use mandate_identity::Tenant;
+use mandate_identity::demand::{Permitted, ReadRecords};
 
 use crate::{AuditError, JournalEvent, MemoryRead};
 
@@ -100,14 +100,23 @@ pub struct Trace {
     pub as_of: Vec<Watermark>,
 }
 
-/// The causal trace over a store. A start event outside the tenant's workspace is the one
-/// [`AuditError::NotFound`]; every link that cannot be shown is a hop, never an error.
+/// The causal trace over a store, for the witness of a context authorized for `ReadRecords`
+/// (DEC-655). A start event outside its workspace is the one [`AuditError::NotFound`]; every link
+/// that cannot be shown is a hop, never an error.
 pub trait TraceRead {
-    fn trace(&self, tenant: &impl Tenant, event_id: &str) -> Result<Trace, AuditError>;
+    fn trace(
+        &self,
+        tenant: &Permitted<'_, ReadRecords>,
+        event_id: &str,
+    ) -> Result<Trace, AuditError>;
 }
 
 impl TraceRead for MemoryRead<'_> {
-    fn trace(&self, _tenant: &impl Tenant, _event_id: &str) -> Result<Trace, AuditError> {
+    fn trace(
+        &self,
+        _tenant: &Permitted<'_, ReadRecords>,
+        _event_id: &str,
+    ) -> Result<Trace, AuditError> {
         Err(AuditError::Unimplemented { story: "E12-1" })
     }
 }
