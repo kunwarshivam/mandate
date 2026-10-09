@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{Fixture, T, WS_A, acct, limit, tenant, text};
+use common::{Fixture, T, WS_A, acct, limit, tenant, text, workspaces};
 use mandate_audit::{AuditError, Head, JournalEvent, JournalRead, MemoryRead, PageLimit};
 use mandate_canon::{Digest, parse};
 use mandate_journal::StreamId;
@@ -165,14 +165,10 @@ fn a_cursor_at_or_past_the_head_gives_an_empty_page_at_the_head() {
     }
 }
 
-/// The streams the fuzz appends to: the one it pages, a sibling in the same workspace, and two of
-/// other workspaces, one whose id has the paged workspace's as a prefix.
-const FUZZ_STREAMS: [(&str, &str); 4] = [
-    ("ws_a", "ACCT1"),
-    ("ws_a", "ACCT2"),
-    ("ws_ab", "ACCT1"),
-    ("ws_b", "ACCT1"),
-];
+/// The streams the fuzz appends to, each an index into [`workspaces`] and an account: the one it
+/// pages, of [`WS_A`], a sibling in the same workspace, and two of other workspaces, one whose
+/// segment has the paged workspace's as a prefix.
+const FUZZ_STREAMS: [(usize, &str); 4] = [(0, "ACCT1"), (0, "ACCT2"), (1, "ACCT1"), (2, "ACCT1")];
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -203,14 +199,16 @@ proptest! {
         ops in prop::collection::vec(op(), 1..40),
     ) {
         let mut fx = Fixture::new(initial);
+        let segments = workspaces();
         let (workspace, account) = FUZZ_STREAMS[0];
-        let target = acct(workspace, account);
+        let target = acct(&segments[workspace], account);
+        let me = tenant(WS_A);
         let mut cursor = 0u64;
         let mut served: Vec<JournalEvent> = Vec::new();
         let read_page = |fx: &Fixture, cursor: &mut u64, served: &mut Vec<JournalEvent>, l: u64| {
             let available = fx.appended[&target].event_ids.len() as u64 - *cursor;
             let page = MemoryRead::new(&fx.journal)
-                .page(&ws(workspace), &target, *cursor, limit(l))
+                .page(&me, &target, *cursor, limit(l))
                 .unwrap();
             assert_eq!(page.events.len() as u64, available.min(l), "after {cursor}, limit {l}");
             let first = *cursor + 1;
@@ -226,7 +224,7 @@ proptest! {
             match op {
                 Op::Append { stream, count } => {
                     let (w, a) = FUZZ_STREAMS[stream];
-                    fx.marks(&acct(w, a), count);
+                    fx.marks(&acct(&segments[w], a), count);
                 }
                 Op::Read { limit } => read_page(&fx, &mut cursor, &mut served, limit),
             }
