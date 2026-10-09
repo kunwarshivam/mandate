@@ -2439,13 +2439,18 @@ before `expires_at` and `expired` from it; `MemberInvitationRevoked` makes it `r
 `MemberReactivated` make the member `cooling_off` until their `cool_off_ends_at` and `active` from it;
 `MemberRoleChanged` adds and removes roles, each added role effective from its `cool_off_ends_at`;
 `MemberDeactivated` makes the member `deactivated`, keeping its roles for a reactivation; and
-`MemberRemoved` makes it `removed`. `removed`, `expired`, and `revoked` are terminal: a removed
+`MemberRemoved` makes it `removed`. A `MemberRoleChanged` whose `added` is empty may remove kept
+roles from a `deactivated` member, so an admin can strip a suspended member's roles while offboarding
+([DEC-654](../project/decisions/DEC-654.md) item 7); a grant to a `deactivated` member is still
+refused. A deactivated member whose kept roles are all removed cannot be reactivated, since rule 100
+refuses a `MemberReactivated` with no roles: they return only by removal and a new invitation. `removed`, `expired`, and `revoked` are terminal: a removed
 member comes back only through a new invitation, which starts a new membership with no role of the
 old one. A record that does not fit the state it finds is refused: a second activation of a member
 whose membership is not `removed`; an activation by an invitation that is not `invited` at
 `activated_at` (so `activated_at` < `expires_at`, and an invitation activates at most once) or with
 roles other than the invitation's; a role change for a member who is not `active` or `cooling_off`,
-or that removes a role the member does not hold or adds one it does; a reactivation of a member who
+other than a removal only from a `deactivated` member, or that removes a role the member does not
+hold (for a `deactivated` member, one it does not keep) or adds one it does; a reactivation of a member who
 is not `deactivated`, or with roles other than those kept; a deactivation of one who is not
 `active` or `cooling_off`; a removal of one who is not `deactivated`; and a revocation of an
 invitation that is not `invited`. Such a record is refused by workspace services before it is committed; a fold that meets one anyway reads the
