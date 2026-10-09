@@ -1232,6 +1232,12 @@ story buys a service, and none uses a real identity-provider account in tests (s
   removed members, clients, service accounts, and agents counting zero and an unreadable count reading
   as one (ID-7); and no request authorized after a deactivation commits succeeds, with open streams
   closed within 60 s (ID-3).
+  *Follow-ups* (#789's second review, minors backlogged under the freeze rule):
+  - Identity spec §5.1's state diagram has no edge for removing a role from a `deactivated` member,
+    which journal spec §9.12's fold accepts (DEC-654 item 7); add the self-edge.
+  - DEC-654 item 7 lets `change_roles` remove a role from an `invited` membership, but §9.12 has no
+    record for it: an invitation's roles are fixed by `MemberInvited`. Decide the writer-side
+    mapping (revoke the invitation and invite again, or a new record in a later journal change).
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
