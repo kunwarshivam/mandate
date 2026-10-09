@@ -18,7 +18,8 @@ the owl, the rules and the record.
       remove the ones that only notice the look changed, keep every safety and compliance test
       exactly as it is. Its own PR. (part 1, #882; part 2, #1005)
 - [ ] **A weekly critique.** Screenshots of every screen; one question: what is the worst thing on
-      this screen; fix only that.
+      this screen; fix only that. (first run: #1017, [critique-2026-10-09.md](critique-2026-10-09.md),
+      fixes in section J)
 - [ ] **A golden path.** Sign in, set up an agent, see it ask, approve, read the record, stop it:
       ten minutes that must be perfect on every release.
 - [ ] **Five people, watched.** Twenty minutes each, say nothing, write down where they hesitate.
@@ -218,6 +219,54 @@ process is revised, and decisions already taken may be revised with it.
       lanes; one item per PR; review from pictures; tests pin invariants; one row and one paragraph
       per session; numbers taken across every branch. Waits on the founder's yes for the light
       lane's merge rule.
+
+## J. From the weekly critique (2026-10-09)
+
+The fixes the first weekly critique proposed, one per screen, most severe first. The evidence is
+[critique-2026-10-09.md](critique-2026-10-09.md), cited as C-n. Findings already covered by an
+item above (C-3, C-9) are not repeated.
+
+- [ ] **DESIGN.md names the palette that ships.** Its front matter, Colors table and Meaning Rule
+      say Ink and Volt (DEC-214), while the product ships Azure and Sun with trend-coloured hero
+      lines (DEC-217). DEC-217 is Accepted and supersedes DEC-214, so DESIGN.md is aligned to it
+      with no new DEC. (C-1)
+- [ ] **Stop above the palette's scrim.** Check that Stop takes a press with the command palette
+      open; if not, keep the frame's Stop live as the More sheet does. Safety lane. (C-21)
+- [ ] **A loud Stop says why.** The unknown-order condition joins Needs you as the drawdown and
+      reconciliation conditions do. (C-25)
+- [ ] **A request once on Home.** While a request is open in Needs you, Home's Decisions rail
+      leaves out its "Asked you" row. (C-5)
+- [ ] **"At the limit:" on the overview card**, so a limit's action never reads as the current
+      mode. (C-7)
+- [ ] **A time from another day carries its date**, through one formatter shared with the
+      timeline. (C-23)
+- [ ] **"Who acts: You" says where.** It names, and links to if built, where the owner ends a
+      restriction, keeping its step-up. Safety lane. (C-24)
+- [ ] **Sparklines without the false limit line.** When the limit is below the line's range, the
+      pale sliver alone, with no dashed rule. (C-11)
+- [ ] **Re-scope the account chart's blank paint** (section B): blank in light and dark alike, a
+      draw race after load, not the mode. (C-22)
+- [ ] **Rules by their sentence, not their id.** "low_score" and "large_orders" stay in the record
+      and the audit, not on the request, Home or Approvals. Safety lane for the request. (C-6)
+- [ ] **Positions on a phone as two-line rows**, so the value and the P&L are on screen. (C-14)
+- [ ] **Shots without the scenario panel**, and each scenario captured on the agent it affects.
+      Tooling. (C-27, C-28)
+- [ ] **The mode chip in the desktop agent header**, on every tab. (C-8)
+- [ ] **Owls in the Stop sheet's agent rows.** Safety lane. (C-10)
+- [ ] **The Allowed chip keeps its edge in dark mode**, with its fill in the contrast pairs. (C-18)
+- [ ] **A labelled composer in set-up**, with a flat send button; still no placeholder or example.
+      (C-4)
+- [ ] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13)
+- [ ] **Day headings on the timeline.** (C-19)
+- [ ] **The status strip's state chips outlined**, not ink. (C-26)
+- [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
+      subtitle drops "Rules". (C-20)
+- [ ] **One left edge across densities** on the audit screens. (C-17)
+- [ ] **One paragraph per set of shared rules** on the Approvals rail. (C-12)
+- [ ] **The phone thread header without the slug.** (C-16)
+- [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
+- [ ] **The brand owl never wears an agent's colour.** Waits on the founder: DEC-452 is the
+      founder's "choose the color at random". (C-15)
 
 ## Learnings (not action items)
 
