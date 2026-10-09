@@ -10,6 +10,7 @@ description = "The Model Context Protocol client a broker connector uses inside 
 workspace = true
 
 [dependencies]
+mandate-canon.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true
