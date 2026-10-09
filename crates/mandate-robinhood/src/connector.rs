@@ -69,7 +69,8 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// DEC-860 item 7, DEC-870). A key maps to the one distinct `broker_order_id` its version-2
     /// `OrderStateChanged` records carry, with the instrument and side of its `OrderSubmitted`,
     /// or of the order it `replaces`. A key with no id, or with two different ids, maps to
-    /// nothing, so its cancel is `NotSent` (`no_order_id`) with nothing called.
+    /// nothing, so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the
+    /// stream submitted is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4).
     pub fn restore(
         tools: T,
         account_number: String,

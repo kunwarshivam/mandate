@@ -2,11 +2,10 @@
 //! connector's `ClientOrderId` → `order_id` map rebuilt from the account stream at start. A key
 //! with one distinct id cancels by it; no id, two ids, an in-doubt place, or version-1 records give
 //! `NotSent` (`no_order_id`) with nothing called. Oracles: records typed from §9.16's member list
-//! and a recording tool double; the property counts distinct ids its own way. The restart against
-//! `mandate-rh-sim`, `a_cancel_after_a_restart_finds_its_order_id_from_the_journal`, is part 3.
+//! and a recording tool double. A key the stream submitted is never placed again. Part 3 adds the
+//! restart against `mandate-rh-sim` and the distinct-id property.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
 use std::pin::pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
@@ -14,13 +13,13 @@ use std::task::{Context, Poll, Waker};
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::parse;
 use mandate_executor::{
-    BrokerConnector, BrokerOrder, BrokerOutcome, BrokerRequest, ClientOrderId, ConnectorError,
-    EventId, FoldedEvent, IntentId, Seq,
+    BrokerConnector, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerUnknown, ClientOrderId,
+    ConnectorError, EventId, FoldedEvent, IntentId, OrderType, Purpose, Seq, SubmitOrder,
+    TimeInForce,
 };
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty};
 use mandate_robinhood::{RobinhoodConnector, Tools};
-use proptest::test_runner::{Config, TestRunner};
 use serde_json::{Value, json};
 
 const ACCOUNT: &str = "5QR00001";
@@ -29,7 +28,7 @@ const NO_ORDER_ID: ConnectorError = ConnectorError::NotSent {
     code: "no_order_id",
 };
 
-/// Every call the connector makes, answered for a cancel with the named order in `state`.
+/// Every call the connector makes, answered with an order in `state`: the named one for a cancel.
 struct Recording {
     calls: Calls,
     state: &'static str,
@@ -45,7 +44,7 @@ impl Tools for Recording {
         self.calls
             .borrow_mut()
             .push((class, tool, arguments.clone()));
-        let record = json!({"id": arguments["order_id"], "state": self.state, "quantity": "2",
+        let record = json!({"id": arguments.get("order_id").unwrap_or(&json!("rh-new")), "state": self.state, "quantity": "2",
             "filled_quantity": "0", "limit_price": "499", "stop_price": null});
         Ok(json!({ "structuredContent": record }).to_string())
     }
@@ -73,7 +72,14 @@ fn cancel(
     let request = BrokerRequest::Cancel {
         client_order_id: key.clone(),
     };
-    let mut future = pin!(c.call(&request));
+    call(c, &request)
+}
+
+fn call(
+    c: &mut RobinhoodConnector<Recording>,
+    request: &BrokerRequest,
+) -> Result<BrokerOutcome, ConnectorError> {
+    let mut future = pin!(c.call(request));
     match future
         .as_mut()
         .poll(&mut Context::from_waker(Waker::noop()))
@@ -179,6 +185,9 @@ fn a_restored_key_cancels_by_its_one_journaled_id_with_its_own_instrument_and_si
     s.changed(&spy, "partially_filled", Some(None), NONE);
     s.changed(&spy, "accepted", Some(Some("rh-spy")), NONE);
     s.changed(&spy, "partially_filled", Some(None), NONE);
+    let other =
+        json!({"client_order_id": spy.as_str(), "broker_order_id": "rh-other", "fill_id": "f1"});
+    s.push("ExternalActivityIngested", other);
     let (mut c, calls) = restored(&s.0, "confirmed");
     let outcome = cancel(&mut c, &spy).unwrap();
     assert_eq!(
@@ -319,56 +328,44 @@ fn version_1_records_give_no_recoverable_id() {
     refused_with_nothing_called(&s.0, &[&old, &new]);
 }
 
-/// Random streams over four keys. The oracle counts each key's distinct non-null ids from the
-/// generated choices, never from the records: one id cancels by it, none or two is `NotSent`.
+/// DEC-860 item 4 across a restart: a key the stream submitted, whether its place is in doubt
+/// or answered, is never placed again; a `Submit` of it is `Unknown` with nothing called.
 #[test]
 #[ignore = "pending E7-6"]
-fn a_key_cancels_exactly_when_its_records_carry_one_distinct_id() {
-    let keys: Vec<ClientOrderId> = (0..4).map(|n| key(&format!("01JPROP{n}"))).collect();
-    let choice = (0..keys.len(), 0..6_usize);
-    let mut runner = TestRunner::new(Config::with_cases(256));
-    let verdict = runner.run(&proptest::collection::vec(choice, 0..14), |picks| {
-        let mut s = Stream::default();
-        let mut ids: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
-        for key in &keys {
-            s.submitted(key, "SPY", "buy");
-        }
-        for (n, pick) in picks {
-            let id = format!("rh-{pick}");
-            match pick {
-                0 => s.changed(&keys[n], "accepted", None, NONE),
-                1 => s.changed(&keys[n], "partially_filled", Some(None), NONE),
-                2 => s.push(
-                    "ClockAdvanced",
-                    json!({"risk_clock": "2026-10-09T14:31:00Z"}),
-                ),
-                _ => {
-                    s.changed(&keys[n], "accepted", Some(Some(&id)), NONE);
-                    ids.entry(n).or_default().insert(id);
-                }
-            }
-        }
-        let (mut c, calls) = restored(&s.0, "cancelled");
-        let mut expected = Vec::new();
-        for (n, key) in keys.iter().enumerate() {
-            let one = ids
-                .get(&n)
-                .filter(|set| set.len() == 1)
-                .and_then(|set| set.first());
-            let outcome = cancel(&mut c, key);
-            match one {
-                Some(id) => {
-                    let accepted = BrokerOutcome::CancelAccepted {
-                        client_order_id: key.as_str().to_owned(),
-                    };
-                    proptest::prop_assert_eq!(outcome, Ok(accepted));
-                    expected.push(cancelled_by(id));
-                }
-                None => proptest::prop_assert_eq!(outcome, Err(NO_ORDER_ID)),
-            }
-        }
-        proptest::prop_assert_eq!(&*calls.borrow(), &expected);
-        Ok(())
-    });
-    verdict.unwrap();
+fn a_key_the_journal_submitted_is_never_placed_again() {
+    let (silent, lost, placed, fresh) = (key("01JA"), key("01JB"), key("01JC"), key("01JNEW"));
+    let mut s = Stream::default();
+    for key in [&silent, &lost, &placed] {
+        s.submitted(key, "SPY", "sell");
+    }
+    s.changed(&lost, "unknown", Some(None), NONE);
+    s.changed(&placed, "accepted", Some(Some("rh-c")), NONE);
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    let submit = |key: &ClientOrderId| SubmitOrder {
+        client_order_id: key.clone(),
+        instrument: InstrumentId::new("SPY").unwrap(),
+        side: Side::Sell,
+        qty: Qty::parse("2").unwrap(),
+        order_type: OrderType::StopLimit,
+        tif: TimeInForce::Gtc,
+        limit_price: Some(Price::parse("475").unwrap()),
+        stop_price: Some(Price::parse("480").unwrap()),
+        bracket: None,
+        oco: None,
+        extended_hours: false,
+        purpose: Purpose::Protective,
+    };
+    let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
+    for key in [&silent, &lost, &placed] {
+        let outcome = call(&mut c, &BrokerRequest::Submit(submit(key)));
+        assert_eq!(outcome, Err(in_doubt), "{}", key.as_str());
+    }
+    assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
+    let outcome = call(&mut c, &BrokerRequest::Submit(submit(&fresh)));
+    assert!(
+        matches!(outcome, Ok(BrokerOutcome::Submitted(_))),
+        "{outcome:?}"
+    );
+    let tools: Vec<&str> = calls.borrow().iter().map(|(_, tool, _)| *tool).collect();
+    assert_eq!(tools, ["review_equity_order", "place_equity_order"]);
 }
