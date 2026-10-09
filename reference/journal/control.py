@@ -657,6 +657,9 @@ EVENT_CHECKS = (
     "connection_cause_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
+# v0.38 (DEC-894, pending): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
+# closed list is not edited (§8).
+V2_RANGE_CHECKS = (*RANGE_CHECKS, "segment_rows_mismatch")
 CHECKED_RANGE = rec(
     *RANGE.fields[:4],
     ("to_hash", opt(DIGEST_HEX)),
@@ -694,7 +697,7 @@ CHECKED_RANGE_V2 = rec(
     *CHECKED_RANGE.fields[:5],
     ("start", rec(("kind", one_of(*START_KINDS)), ("manifest_hash", opt(DIGEST_HEX)), ("anchor_event_id", opt(ULID)))),
     ("checked", INT),
-    CHECKED_RANGE.fields[5],
+    ("failure", opt(rec(("check", one_of(*EVENT_CHECKS, *V2_RANGE_CHECKS)), ("seq", opt(INT))))),
     ("incomplete", opt(rec(("check", one_of(*INCOMPLETE_CHECKS)), ("cause", one_of(*INCOMPLETE_CAUSES))))),
 )
 VERIFICATION_RUN_V2 = rec(
@@ -1611,7 +1614,7 @@ def audit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list
             failure = r.get("failure")
             if isinstance(failure, dict):
                 seq, check = failure.get("seq"), failure.get("check")
-                if check in EVENT_CHECKS or check in RANGE_CHECKS:
+                if check in EVENT_CHECKS or check in V2_RANGE_CHECKS:
                     at_event = check in EVENT_CHECKS and f"classify.{check}" not in skip
                     rule("111.seq", (seq is not None) == at_event, f"{at}.failure.seq")
                 bounds = (r.get("from_seq"), seq, r.get("to_seq"))
