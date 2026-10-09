@@ -5,7 +5,9 @@
 //! `MembershipFold`. After every command the fold's effective and kept roles must equal an
 //! accumulator this file keeps from the accepted changes alone, no accepted change may name its
 //! author in a grant or a removal, and the outcome must be the one written here from the
-//! accumulator and the spec's order of refusals (§4.5), never from the crate's own checks.
+//! accumulator and the spec's order of refusals (§4.5), never from the crate's own checks. It runs
+//! at workspace scope only, the scope the fold covers, so the org-scope `last_owner` rule and
+//! `owner_role_reserved` are not exercised here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
