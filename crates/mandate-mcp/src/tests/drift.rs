@@ -384,7 +384,6 @@ fn the_hash_oracle_reproduces_the_pinned_base_hash() {
 
 /// DEC-843 item 1.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_health_check_that_reads_a_malformed_list_halts_openings() {
     let mut float = base();
     float[7]["inputSchema"]["minimum"] = serde_json::from_str("0.5").unwrap();
@@ -417,7 +416,6 @@ async fn a_health_check_that_reads_a_malformed_list_halts_openings() {
 
 /// DEC-843 item 1: no list was read, so nothing halts and the next check reads again.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_failed_health_check_exchange_halts_nothing() {
     let failures = [
         (with_type(500, "application/json", ""), "http_status"),
@@ -444,7 +442,6 @@ async fn a_failed_health_check_exchange_halts_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_throttled_health_check_halts_nothing() {
     let bucket = |capacity, secs| BucketConfig {
         capacity,
@@ -477,7 +474,6 @@ async fn a_throttled_health_check_halts_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_health_check_records_the_hash_it_read() {
     let mut drifted = base();
     drifted[5]["inputSchema"]["properties"]["state"] = json!({"type": "string"});
@@ -495,7 +491,6 @@ async fn a_health_check_records_the_hash_it_read() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_refused_initialized_acknowledgement_fails_the_connect() {
     for status in [500, 200] {
         let mut answers = handshake();
@@ -512,7 +507,6 @@ async fn a_refused_initialized_acknowledgement_fails_the_connect() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_failed_initialize_fails_the_connect_after_one_request() {
     let failures = [
         (
@@ -536,7 +530,6 @@ async fn a_failed_initialize_fails_the_connect_after_one_request() {
 /// DEC-839 item 1: integers of either sign and up to `u64::MAX` are canonical; other numbers
 /// are not, however integral their value.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn integer_bounds_hash_canonically_and_other_numbers_are_malformed() {
     for bound in [json!({"minimum": -5}), json!({"maximum": u64::MAX})] {
         let mut tools = base();

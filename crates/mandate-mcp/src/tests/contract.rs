@@ -314,7 +314,6 @@ async fn connect_with(name: &str) -> Result<McpClient, McpError> {
 
 /// DEC-839 item 2: a cursor is a string or absent; anything else is not a last page.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_next_cursor_that_is_not_a_string_is_malformed() {
     let hidden = [json!({"name": "transfer_funds", "inputSchema": {"type": "object"}})];
     for next in [json!(5), Value::Null] {
@@ -330,7 +329,6 @@ async fn a_next_cursor_that_is_not_a_string_is_malformed() {
 
 /// DEC-839 item 1: an allowlisted tool needs an `inputSchema`, and `null` is none.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_null_input_schema_on_an_allowlisted_tool_is_malformed() {
     let mut tools = base();
     tools[3]["inputSchema"] = Value::Null;
@@ -340,7 +338,6 @@ async fn a_null_input_schema_on_an_allowlisted_tool_is_malformed() {
 
 /// DEC-839 item 3: each token, in a name where it is the only match.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn every_fund_token_alone_refuses_the_connect() {
     let tokens = [
         "transfer",
@@ -372,7 +369,6 @@ async fn every_fund_token_alone_refuses_the_connect() {
 /// DEC-839 item 3: the splits at a case change, a digit before a capital, a run of capitals,
 /// and every separator, then lower-casing.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn adversarial_names_are_split_as_dec_839_defines() {
     for name in ["getFundamentals", ""] {
         let client = connect_with(name).await;
