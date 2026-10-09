@@ -5,7 +5,7 @@
 //! [`crate::verify_events`] passed them, and each reports its first failing event by `seq` (§9.13
 //! rule 111).
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use mandate_canon::{Digest, Value, parse};
 
@@ -91,16 +91,22 @@ pub fn verify_anchor_self(rows: &[StoredEvent]) -> Result<(), ControlVerifyError
 /// §11's `break_glass_cause_mismatch` over `rows` of one control-stream range entered at `start`:
 /// every `RecordsAccessed` whose actor is a `platform_operator` names, as its `causation_id`, a
 /// `PlatformOperatorAction` of the same `stream_id` at a lower `seq`, and the first read that does
-/// not is reported at its own `seq`. A cause that names a later event or one of another type fails;
-/// a cause named by no row fails only when `start.from_seq` is 1, since in a later range it may lie
-/// before the trusted start, which the full chain judges. Reads by any other actor are not judged.
+/// not is reported at its own `seq`. The walk keeps the actions seen so far, by stream and
+/// `event_id`, so a cause the range holds passes only when it is among them: one that names a later
+/// event, the read itself, one of another type, or one of another stream fails. A cause named by no
+/// row fails only when `start.from_seq` is 1, since in a later range it may lie before the trusted
+/// start, which the full chain judges. Reads by any other actor are not judged.
 pub fn verify_break_glass_causes(
     rows: &[StoredEvent],
     start: TrustedStart,
 ) -> Result<(), ControlVerifyError> {
-    let named: BTreeMap<&str, &StoredEvent> =
-        rows.iter().map(|r| (r.event_id.as_str(), r)).collect();
+    let held: BTreeSet<&str> = rows.iter().map(|r| r.event_id.as_str()).collect();
+    let mut opened_by: BTreeSet<(&str, &str)> = BTreeSet::new();
     for row in rows {
+        if row.event_type == "PlatformOperatorAction" {
+            opened_by.insert((row.stream_id.as_str(), row.event_id.as_str()));
+            continue;
+        }
         if row.event_type != "RecordsAccessed" {
             continue;
         }
@@ -118,14 +124,8 @@ pub fn verify_break_glass_causes(
             .get("causation_id")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let opened = match named.get(cause) {
-            None => start.from_seq != 1,
-            Some(action) => {
-                action.event_type == "PlatformOperatorAction"
-                    && action.seq < row.seq
-                    && action.stream_id == row.stream_id
-            }
-        };
+        let opened = opened_by.contains(&(row.stream_id.as_str(), cause))
+            || (!held.contains(cause) && start.from_seq != 1);
         if !opened {
             return Err(break_glass_mismatch(row));
         }
