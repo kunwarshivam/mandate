@@ -1,15 +1,8 @@
-//! The paper adapter's one run (E7-19 slice 5, the first paper trade brief's E1a, DEC-846): SPY
-//! deployed as `mandate-shell`'s tests deploy it, a real artifact store and stored bars, and a
-//! scripted broker. Nothing touches a network (ADR-0001 ES-19, `AGENTS.md` rule 8).
+//! The paper adapter's one run (E7-19 slice 5, E1a, DEC-846): SPY deployed as the shell's tests
+//! deploy it, a real store and bars, a scripted broker, and no network (ES-19, rule 8).
 
 #[path = "../../mandate-shell/tests/common/mod.rs"]
 mod common;
-
-use std::cell::RefCell;
-use std::fs;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::Duration;
 
 use common::{FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
 use mandate_alpaca::{BarsRequest, DataTransport, HttpRequest, Method, Pause, QuoteRequest};
@@ -23,6 +16,11 @@ use mandate_modelhost::Signal;
 use mandate_paper::{Args, Outcome, PaperError, Ports, run};
 use mandate_shell::control::ControlRecord;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+use std::cell::RefCell;
+use std::fs;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::Duration;
 
 /// Tuesday 13:00 in New York: Monday 2026-09-28 is the last completed session.
 const NOW: &str = "2026-09-29T17:00:00Z";
@@ -263,4 +261,13 @@ fn a_flat_model_stores_and_sends_nothing() {
     let counts = (scene.posts().len(), scene.ports.connects);
     assert_eq!(counts, (0, 1), "the host runs after the preflight");
     assert_eq!(scene.stored(&scene.closes_bytes()), None);
+}
+
+/// ES-09 and DEC-139: a stop names what stopped the run, and no value; the crate's live test.
+#[test]
+fn a_stop_names_what_stopped_the_run() {
+    let stub = PaperError::Unimplemented { story: "E7-19" }.to_string();
+    assert_eq!(stub, "E7-19 has not been implemented yet");
+    let store = PaperError::Store.to_string();
+    assert_eq!(store, "the artifact store could not be opened or written");
 }

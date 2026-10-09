@@ -12,14 +12,12 @@
 //! (E7-19 slice 5, the [first paper trade brief](../../../docs/project/tasks/first-paper-trade.md)'s
 //! E1a, [DEC-846](../../../docs/project/decisions/DEC-846.md)).
 //!
-//! The only crate that sees both the model host and the shell (DEC-503 item 2); it decides nothing
-//! itself. A run, in order: the host refusal, the control stream read once, and E19-11's phase 1,
-//! the registrations and the artifacts (DEC-505), all before any credential; the credentials, the
-//! GET-only preflight and phase 2 (V-002); the stored closes through the shell's trust check and
-//! the host's evaluation, where `Flat` or `Undecided` ends the run; then the closes stored, and
-//! only then the observation naming them and the host's output handed to
-//! [`mandate_shell::ProductionCycle::run_observed`], the one door to the broker (FT-1, FT-6). No
-//! product value is a constant here (FT-2).
+//! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
+//! refusal, the control stream, E19-11's phase 1 and the artifacts (DEC-505), before any
+//! credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
+//! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
+//! and output handed to [`mandate_shell::ProductionCycle::run_observed`], the one door (FT-1,
+//! FT-6). No product value is a constant here (FT-2).
 
 use std::path::PathBuf;
 
@@ -38,9 +36,7 @@ pub struct Args {
     /// The journal's DSN; only a placing run appends its cycle there (DEC-157 item 6). `None` is a
     /// scratch in-memory journal.
     pub journal: Option<String>,
-    /// The deployment's artifact store root, shared with the founder's CLI.
     pub store: PathBuf,
-    /// The pinned instrument's stored daily bars.
     pub bars: PathBuf,
     pub place_one_order: bool,
 }
@@ -53,8 +49,7 @@ pub trait Ports {
     /// The workspace control stream's records, read once per run, or [`PaperError::Control`].
     fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError>;
 
-    /// The paper credentials and the one transport, or [`PaperError::Credentials`]: at most once a
-    /// run, after every check that needs no credential.
+    /// The credentials and transport, or [`PaperError::Credentials`]; once, after all else.
     fn connect(&mut self) -> Result<Self::Transport, PaperError>;
 
     /// The clock and the timer; its `now` is the run's one clock read and the binding gate's.
