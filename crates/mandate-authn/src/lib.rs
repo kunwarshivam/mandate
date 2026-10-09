@@ -22,6 +22,14 @@
 //! anything else are refused before a key is looked up, so a public key is never used as an HMAC
 //! secret.
 //!
+//! **A session is a record, not a token** ([`SessionRecord`], §6.2 and §6.4 routes 1 and 2). Access
+//! tokens last five minutes; the idle and absolute limits come from the org kind and an org may
+//! only shorten them; a refresh token rotates on use and a rotated one presented again revokes the
+//! family. An unreachable provider leaves pause and the kill switch only; a provider that answers
+//! and refuses ends the session with every permission. A reduction-only session opened by a local
+//! passkey reaches pause and the kill switch for 15 minutes, and is refused to a subject the
+//! provider refused since its last sign-in.
+//!
 //! **A refusal names the check, never the value** (ID-9). [`Refusal`] and [`SetupError`] carry
 //! static text only: no token, nonce, claim, or key appears in their `Display` or `Debug`.
 //!
@@ -33,12 +41,18 @@
 mod jwks;
 mod oidc;
 mod reduction;
+mod session;
 
 pub use jwks::{Algorithm, Jwks};
 pub use mandate_time::UtcNanos;
 pub use oidc::{CLOCK_SKEW_S, IssuerConfig, MAX_TOKEN_BYTES, TokenKind, VerifiedSubject, verify};
 pub use reduction::{
     CHALLENGE_LIFETIME_S, Challenge, ClientKey, ReductionGate, ReductionLimits, Unauthenticated,
+};
+pub use session::{
+    ACCESS_TOKEN_LIFETIME_S, EndReason, OrgKind, ProviderAnswer, REDUCTION_ONLY_LIFETIME_S, Reach,
+    RefreshDigest, RefreshSecret, Refreshed, Request, SessionLimits, SessionPolicy, SessionRecord,
+    SessionRefusal, SubjectStanding,
 };
 
 /// The part of a compact JWS a [`Refusal::Malformed`] points at.
