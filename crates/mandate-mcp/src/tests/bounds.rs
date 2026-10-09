@@ -55,7 +55,6 @@ impl FrozenClock {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn the_session_the_server_assigns_is_carried_until_it_expires() {
     let server = serve(vec![
         with_session(reply(OK), "s-1~"),
@@ -88,7 +87,6 @@ async fn the_session_the_server_assigns_is_carried_until_it_expires() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_session_id_that_is_not_visible_ascii_is_refused() {
     let visible = serve(vec![with_session(reply(OK), "s-1~"), reply(OK)]).await;
     let transport = visible.transport(TransportConfig::CONSERVATIVE);
@@ -125,7 +123,6 @@ async fn a_session_id_that_is_not_visible_ascii_is_refused() {
 /// A control byte or DEL in a header value never reaches the transport: the HTTP client refuses
 /// the whole answer first. What this pins is that such an id is never carried.
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_session_id_with_a_control_byte_or_del_is_never_carried() {
     for id in ["s\u{1}1", "s\u{7f}1"] {
         let server = serve(vec![with_session(reply(OK), id), reply(OK)]).await;
@@ -142,7 +139,6 @@ async fn a_session_id_with_a_control_byte_or_del_is_never_carried() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_redirect_is_refused_and_never_followed() {
     let elsewhere = serve(vec![reply(OK)]).await;
     let mut redirect = with_type(307, "text/plain", "");
@@ -161,7 +157,6 @@ async fn a_redirect_is_refused_and_never_followed() {
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "pending E7-16"]
 async fn a_timeout_is_typed() {
     let request_timeout = Duration::from_millis(200);
     let config = TransportConfig {
@@ -190,7 +185,6 @@ async fn a_timeout_is_typed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_notification_is_accepted_with_202_and_nothing_else() {
     let server = serve(vec![with_type(202, "text/plain", ""), json("{}")]).await;
     let transport = server.transport(TransportConfig::CONSERVATIVE);
@@ -210,7 +204,6 @@ async fn a_notification_is_accepted_with_202_and_nothing_else() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn reads_that_spend_their_budget_leave_the_exit_budget_whole() {
     let config = TransportConfig {
         budget: BudgetConfig {
@@ -249,7 +242,6 @@ async fn reads_that_spend_their_budget_leave_the_exit_budget_whole() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn server_text_never_appears_in_an_error_or_a_result_printout() {
     let error = format!(r#""error":{{"code":-32000,"message":"{CANARY}","data":"{CANARY}"}}"#);
     let result = format!(r#""result":{{"description":"{CANARY}"}}"#);
@@ -278,7 +270,6 @@ async fn server_text_never_appears_in_an_error_or_a_result_printout() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_zero_timeout_size_cap_or_budget_is_refused() {
     let good = TransportConfig::CONSERVATIVE;
     let zero = Duration::ZERO;
@@ -329,7 +320,6 @@ async fn a_zero_timeout_size_cap_or_budget_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn the_session_id_never_appears_in_the_transport_printout() {
     let server = serve(vec![with_session(reply(OK), "s-secret-9"), reply(OK)]).await;
     let transport = server.transport(TransportConfig::CONSERVATIVE);
@@ -349,7 +339,6 @@ async fn the_session_id_never_appears_in_the_transport_printout() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn a_session_on_a_failed_answer_is_never_kept() {
     let failed = with_session(with_type(500, "text/plain", ""), "s-from-500");
     let server = serve(vec![failed, reply(OK)]).await;
@@ -373,7 +362,6 @@ async fn a_session_on_a_failed_answer_is_never_kept() {
 /// The server sends the head and the first bytes of the body while the clock is frozen, so the
 /// transport has the head before any timer can fire; the rest of the body is due an hour later.
 #[tokio::test(start_paused = true)]
-#[ignore = "pending E7-16"]
 async fn an_answer_that_stalls_mid_body_is_a_timeout() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
@@ -434,7 +422,6 @@ async fn an_answer_that_stalls_mid_body_is_a_timeout() {
 /// An explicit `null` member is present, so a response with `null` beside its result or error,
 /// or with a `null` `method` or `params`, is malformed (DEC-831).
 #[tokio::test]
-#[ignore = "pending E7-16"]
 async fn an_empty_event_is_skipped_and_an_explicit_null_is_present() {
     let empty_event =
         "data:\n\nevent: ping\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n";
