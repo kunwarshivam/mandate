@@ -30,6 +30,41 @@ const ROUTES = [
   { name: "the kill-switch record", path: recordHref("kill", AGENT_IDS.btc) },
 ];
 
+declare global {
+  interface Window {
+    /** How many view transitions are still running; see `countViewTransitions`. */
+    __viewTransitionsRunning: number;
+  }
+}
+
+/** Counts the document's running view transitions from before its first script, inline ones included. */
+function countViewTransitions() {
+  window.__viewTransitionsRunning = 0;
+  const start = document.startViewTransition;
+  if (!start) return;
+  document.startViewTransition = function (this: Document, ...args: Parameters<typeof start>) {
+    const transition = start.apply(this, args);
+    window.__viewTransitionsRunning++;
+    transition.finished.finally(() => window.__viewTransitionsRunning--);
+    return transition;
+  } as typeof start;
+}
+
+/**
+ * The server document has settled: React's inline runtime has revealed every streamed Suspense boundary
+ * (no hidden `S:` segment is left) and the view transition it reveals them in has ended. React holds a
+ * reveal up to 300 ms and starts it in a view transition that waits for the fonts, and while a view
+ * transition captures its snapshot every hit goes to the document element (`e2e/stop-visible.spec.ts`),
+ * so sampling before then measures the transition, not the shell.
+ */
+async function serverDocumentSettled(page: Page) {
+  await page.evaluate(async () => {
+    while (document.querySelector('div[hidden][id^="S:"]') !== null || window.__viewTransitionsRunning > 0) {
+      await new Promise((frame) => requestAnimationFrame(frame));
+    }
+  });
+}
+
 /** The route shows its server markup: every stylesheet has loaded, whether or not any script has. */
 async function stylesLoaded(page: Page) {
   await page.waitForFunction(() =>
@@ -165,6 +200,7 @@ test.describe("With JavaScript on, phones show no desktop flash before hydration
           page.on("console", (m) => {
             if (m.type() === "error") errors.push(m.text());
           });
+          await page.addInitScript(countViewTransitions);
           const held: Route[] = [];
           let release = false;
           await page.route(/\/_next\/static\/.*\.js(\?.*)?$/, (r) => (release ? r.continue() : void held.push(r)));
@@ -173,6 +209,7 @@ test.describe("With JavaScript on, phones show no desktop flash before hydration
           await page.goto(route.path, { waitUntil: "domcontentloaded" });
           await stylesLoaded(page);
           await page.evaluate(() => new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame))));
+          await serverDocumentSettled(page);
           await expect.poll(() => held.length, "the client bundle is held back").toBeGreaterThan(0);
           const record = isRecordRoute(route.path);
           const before = await measureShell(page);
