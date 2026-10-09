@@ -9,7 +9,8 @@ replays to — the restored protection and the request the companion rebuilds �
 every rule and each member-typing case, valid drafts for the cases a rule might be misread to
 refuse, and rule 45's valid and invalid batches. It checks the section with its own oracles,
 including an independent re-derivation of the fold oracle from the chain payloads alone, and shows
-every seeded bug caught.
+every seeded bug caught. It also builds the `protection_shapes` section of v0.33 (DEC-859): the
+`ProtectionChanged` records rules 41 and 44 now admit, and the near misses they still refuse.
 """
 
 from __future__ import annotations
@@ -1159,3 +1160,198 @@ def build_section(genesis: str) -> dict:
         "invalid_batches": invalid_batches(),
         "fold_oracle": fold_oracle(),
     }
+
+
+# --------------------------------------------------------------------------- rules 41 and 44 (DEC-859)
+
+# The `protection_shapes` section: the `ProtectionChanged` records v0.33 admits (DEC-859 item 1's
+# table) and their near misses. It is a section of its own so `mandate-journal`'s tests, which read
+# `account_stream` and count its cases, keep their answers until the code change that accepts these
+# shapes reads this one (ES-22).
+SHAPES_SPEC = "docs/specs/journal.md v0.33 §9.5 rules 41 and 44 (DEC-859)"
+SHAPE_BASES = ("intended", "start")
+NO_PRICES = (change("payload.stop", None), change("payload.take_profit", None))
+NO_TRIO = (change("payload.intent_id", None), change("payload.entry", None), change("payload.agent_id", None))
+ENDS = (*NO_PRICES, *NO_TRIO, change("payload.action", "unprotected_end"), change("payload.orders", []),
+        change("payload.replacing", None))
+SHAPE_VALIDATOR_MUTANTS = (
+    "rule.41",
+    "rule.41.awaiting",
+    "rule.44.trio",
+    "rule.44.replacing_only",
+    "rule.44.pair",
+)
+# Seeded bugs that put back a clause v0.33 removed: each must refuse one of the valid drafts.
+SHAPE_TIGHTEN_MUTANTS = ("tighten.41.starts", "tighten.41.awaiting", "tighten.44.trio")
+SHAPE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "valid_drafts.table")
+# DEC-859 item 1's table, one valid draft or more per row, by row.
+TABLE_ROWS = {
+    "bracket_first_fill_start": 1,
+    "bracket_filled_end": 2,
+    "nothing_to_cover_end": 3,
+    "acknowledged_end": 3,
+    "uncovered_end": 3,
+    "interval_limit_awaiting_nothing": 4,
+    "replacement_before_expiry": 5,
+    "passive_replacement_before_expiry": 5,
+    "handed_on_passive_start": 6,
+    "passive_wait_start": 6,
+    "lost_protection_start": 6,
+}
+
+
+def shape_drafts() -> dict[str, dict]:
+    bodies = {body["event_id"]: body for body in chain_bodies()}
+    return {name: draft_of_body(bodies[ID[name]]) for name in SHAPE_BASES}
+
+
+def shape(name: str, clause: str, base: str, changes: list) -> dict:
+    return {"name": name, "clause": clause, "base_draft": base, "changes": copy.deepcopy(list(changes)), "expect": {"outcome": "Valid"}}
+
+
+def shape_invalid(name: str, clause: str, base: str, changes: list, path: str) -> dict:
+    expect = {"outcome": "Invalid", "reason": "schema", "path": path}
+    return {"name": name, "clause": clause, "base_draft": base, "changes": copy.deepcopy(list(changes)), "expect": expect}
+
+
+def shape_valid_drafts() -> list[dict]:
+    """DEC-859 item 1's table: each record a writer in `protection.rs` needs, now valid."""
+    return [
+        shape("bracket_first_fill_start", "rule 41: a bracket entry's first fill starts an interval naming only its bracket",
+              "start", [*NO_PRICES, *NO_TRIO, change("payload.orders", []), change("payload.replacing", None),
+                        change("payload.bracket", ENTRY)]),
+        shape("bracket_filled_end", "rule 41: the bracket filled after it ends the interval awaiting nothing",
+              "start", [*ENDS, change("payload.bracket", ENTRY)]),
+        shape("nothing_to_cover_end", "rule 41: an interval with nothing to cover ends awaiting nothing", "start", [*ENDS]),
+        shape("acknowledged_end", "rule 41: the owner's acknowledgment ends an interval awaiting nothing",
+              "start", [*ENDS, change("payload.acknowledged", True)]),
+        shape("uncovered_end", "rule 41: an interval ends uncovered, awaiting nothing",
+              "start", [*ENDS, change("payload.uncovered", True)]),
+        shape("interval_limit_awaiting_nothing", "rule 41: the interval's bound, awaiting no cancel",
+              "intended", [*NO_PRICES, change("payload.intent_id", None), change("payload.action", "interval_limit")]),
+        shape("replacement_before_expiry", "rule 44: a re-placement names its entry and owner with no intent",
+              "start", [change("payload.intent_id", None)]),
+        shape("passive_replacement_before_expiry", "rule 44: the same on a passive start",
+              "start", [change("payload.action", "passive_start"), change("payload.intent_id", None)]),
+        shape("handed_on_passive_start", "rule 41: a handed-on passive sequence starts naming no order",
+              "start", [change("payload.action", "passive_start"), change("payload.orders", []), change("payload.replacing", None)]),
+        shape("passive_wait_start", "rule 41: a passive wait starts naming no order and no exit sequence",
+              "start", [change("payload.action", "passive_start"), change("payload.orders", []), *NO_PRICES, *NO_TRIO,
+                        change("payload.replacing", None)]),
+        shape("lost_protection_start", "rule 41: lost protection starts an interval naming no order",
+              "start", [change("payload.orders", []), *NO_PRICES, *NO_TRIO, change("payload.replacing", None)]),
+    ]
+
+
+def shape_invalid_drafts() -> list[dict]:
+    """The near misses: every clause v0.33 keeps still refuses."""
+    return [
+        shape_invalid("placed_still_names_an_order", "rule 41: placed names at least one order", "start",
+                      [change("payload.action", "placed"), change("payload.orders", []), change("payload.qty", "10"),
+                       *NO_TRIO, change("payload.replacing", None)], "payload.orders"),
+        shape_invalid("cancelled_still_names_an_order", "rule 41: cancelled names at least one order", "start",
+                      [change("payload.action", "cancelled"), change("payload.orders", []), *NO_PRICES, *NO_TRIO,
+                       change("payload.replacing", None)], "payload.orders"),
+        shape_invalid("an_end_names_an_order", "rule 41: orders is empty on unprotected_end", "start",
+                      [*ENDS, change("payload.orders", [LEG])], "payload.orders"),
+        shape_invalid("a_start_awaits_a_cancel", "rule 41: awaiting is empty on a start", "start",
+                      [change("payload.awaiting", [LEG])], "payload.awaiting"),
+        shape_invalid("a_passive_start_awaits_a_cancel", "rule 41: awaiting is empty on a start", "start",
+                      [change("payload.action", "passive_start"), change("payload.orders", []), change("payload.awaiting", [LEG])],
+                      "payload.awaiting"),
+        shape_invalid("watchdog_awaits_a_cancel", "rule 41: awaiting is empty but on the two that await", "intended",
+                      [*NO_PRICES, change("payload.intent_id", None), change("payload.action", "watchdog"),
+                       change("payload.awaiting", [LEG])], "payload.awaiting"),
+        shape_invalid("entry_without_intent_not_replacing", "rule 44: replacing false keeps the three together", "start",
+                      [change("payload.intent_id", None), change("payload.replacing", False)], "payload.entry"),
+        shape_invalid("entry_without_intent_replacing_null", "rule 44: a start that replaces nothing keeps the three together",
+                      "start", [change("payload.intent_id", None), change("payload.replacing", None)], "payload.entry"),
+        shape_invalid("passive_entry_without_intent_not_replacing", "rule 44: the same on a passive start", "start",
+                      [change("payload.action", "passive_start"), change("payload.intent_id", None),
+                       change("payload.replacing", False)], "payload.entry"),
+        shape_invalid("replacement_without_its_owner", "rule 44: a re-placement names entry and agent_id together", "start",
+                      [change("payload.intent_id", None), change("payload.agent_id", None)], "payload.agent_id"),
+        shape_invalid("replacement_owner_without_entry", "rule 44: a re-placement names entry and agent_id together", "start",
+                      [change("payload.intent_id", None), change("payload.entry", None)], "payload.agent_id"),
+        shape_invalid("replacing_exit_without_its_entry", "rule 44: with an intent, an exit sequence names all three", "start",
+                      [change("payload.entry", None)], "payload.entry"),
+        shape_invalid("an_end_names_an_entry", "rule 44: entry only on the two starts", "start",
+                      [*ENDS, change("payload.entry", ENTRY)], "payload.entry"),
+        shape_invalid("an_end_replaces", "rule 44: replacing only on the two starts", "start",
+                      [*ENDS, change("payload.replacing", True)], "payload.replacing"),
+    ]
+
+
+def build_shape_section() -> dict:
+    return {
+        "spec": SHAPES_SPEC,
+        "drafts": shape_drafts(),
+        "invalid_drafts": shape_invalid_drafts(),
+        "valid_drafts": shape_valid_drafts(),
+    }
+
+
+def shape_found(check: str, message: str) -> str:
+    if check not in SHAPE_CHECKS:
+        raise ValueError(f"unregistered check {check}")
+    return f"{check}: {message}"
+
+
+def check_shape_section(section: dict) -> list[str]:
+    """Every failure: the bases append, each invalid draft is refused only as listed, each valid
+    draft appends, and every row of DEC-859 item 1's table has a valid draft."""
+    problems: list[str] = []
+    for name, draft in section["drafts"].items():
+        got = violations(copy.deepcopy(draft))
+        if got:
+            problems.append(shape_found("drafts.valid", f"{name}: {got}"))
+    for case in section["invalid_drafts"]:
+        got = violations(draft_for(section, case))
+        if not reported(got, case["expect"]):
+            problems.append(shape_found("invalid_drafts", f"{case['name']}: expected {case['expect']}, got {got}"))
+    for case in section["valid_drafts"]:
+        got = violations(draft_for(section, case))
+        if got:
+            problems.append(shape_found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
+    rows = {TABLE_ROWS.get(case["name"]) for case in section["valid_drafts"]}
+    if not set(range(1, 7)) <= rows:
+        problems.append(shape_found("valid_drafts.table", f"rows {sorted(set(range(1, 7)) - rows)} have no valid draft"))
+    return problems
+
+
+SHAPE_VECTOR_MUTANTS = (
+    ("a base draft breaks rule 41", "drafts.valid",
+     lambda s: s["drafts"]["start"]["payload"].update(awaiting=[LEG])),
+    ("an invalid draft's expectation names another member", "invalid_drafts",
+     lambda s: s["invalid_drafts"][0]["expect"].update(path="payload.awaiting")),
+    ("a valid draft names an order on its end", "valid_drafts",
+     lambda s: s["valid_drafts"][1]["changes"].append(change("payload.orders", [LEG]))),
+    ("the re-placement rows go missing", "valid_drafts.table",
+     lambda s: s.update(valid_drafts=[c for c in s["valid_drafts"] if TABLE_ROWS[c["name"]] != 5])),
+)
+
+
+def run_shape_mutants(section: dict) -> list[str]:
+    """Every seeded bug caught: each dropped clause by an invalid draft, each clause put back by a
+    valid draft, and each vector mutant by the check it is registered against."""
+    escaped: list[str] = []
+    invalid_cases = [(draft_for(section, c), c["expect"]) for c in section["invalid_drafts"]]
+    valid_cases = [draft_for(section, c) for c in section["valid_drafts"]]
+    for mutant in SHAPE_VALIDATOR_MUTANTS:
+        skip = frozenset([mutant])
+        if not any(not reported(violations(d, skip), want) for d, want in invalid_cases):
+            escaped.append(f"protection_shapes validator mutant {mutant}")
+    for mutant in SHAPE_TIGHTEN_MUTANTS:
+        skip = frozenset([mutant])
+        if not any(violations(d, skip) for d in valid_cases):
+            escaped.append(f"protection_shapes tightening mutant {mutant}: no valid draft is refused")
+    for check in SHAPE_CHECKS:
+        if not any(c == check for _, c, _ in SHAPE_VECTOR_MUTANTS):
+            escaped.append(f"protection_shapes check {check} has no vector mutant registered against it")
+    for name, check, fn in SHAPE_VECTOR_MUTANTS:
+        mutated = copy.deepcopy(section)
+        fn(mutated)
+        caught_by = {found_of(p) for p in check_shape_section(mutated)}
+        if check not in caught_by:
+            escaped.append(f"protection_shapes vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
+    return escaped
