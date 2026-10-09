@@ -377,6 +377,11 @@ pub enum Role {
 }
 
 impl Role {
+    /// Whether it is an org role, acting only at an organization's scope (§4.1).
+    fn is_org(self) -> bool {
+        matches!(self, Self::OrgOwner | Self::OrgAdmin | Self::BillingAdmin)
+    }
+
     /// Every role, in §4.2's column order.
     pub const ALL: [Self; 8] = [
         Self::OrgOwner,
@@ -482,6 +487,23 @@ impl Membership {
     pub fn scope(&self) -> Scope {
         self.scope
     }
+
+    /// Whether it holds `role` effective at `now`: its effective-from instant is at or before it.
+    fn effective(&self, role: Role, now: UtcNanos) -> bool {
+        self.roles.get(&role).is_some_and(|from| *from <= now)
+    }
+}
+
+/// The membership of `member` that reaches `scope` (`active` or `cooling_off`, §5.1), if any.
+fn reaching(memberships: &[Membership], member: PrincipalId, scope: Scope) -> Option<&Membership> {
+    memberships.iter().find(|m| {
+        m.member == member
+            && m.scope == scope
+            && matches!(
+                m.state,
+                MembershipState::Active | MembershipState::CoolingOff
+            )
+    })
 }
 
 /// A change to roles or memberships in one scope, checked by [`change_roles`].
@@ -776,8 +798,18 @@ impl PrincipalContext {
     /// permission (DEC-832 item 7); `no_membership` at an organization's or the principal's scope,
     /// whose writes are not the request path's.
     pub fn into_tenant(self) -> Result<TenantContext, Refusal> {
-        let _ = self;
-        Err(Refusal::Unimplemented { story: "E9-2" })
+        match self.scope {
+            Scope::Workspace { org, workspace } => Ok(TenantContext {
+                org,
+                workspace,
+                principal: self.principal,
+                kind: self.kind,
+                session: self.session,
+                permission: self.permission,
+                membership_unverified: self.membership_unverified,
+            }),
+            Scope::Org(_) | Scope::Principal => Err(Refusal::NoMembership),
+        }
     }
 }
 
@@ -1111,7 +1143,7 @@ pub enum Refusal {
     /// The change leaves the workspace with no active workspace admin.
     #[error("the workspace would have no active admin")]
     LastAdmin,
-    /// The stub of a story not yet implemented. It goes when E9-2 and E9-8 are implemented, so no
+    /// The stub of a story not yet implemented. It goes when E9-8 is implemented, so no
     /// caller matches on it.
     #[error("{story} has not been implemented yet")]
     Unimplemented {
@@ -1331,22 +1363,12 @@ impl<L: MembershipLookup> Grant<'_, L> {
                 Err(LookupFailed) => return Err(Refusal::MembershipUnavailable),
             },
         };
-        let reaching = memberships
-            .iter()
-            .find(|m| {
-                m.member == member
-                    && m.scope == self.scope
-                    && matches!(
-                        m.state,
-                        MembershipState::Active | MembershipState::CoolingOff
-                    )
-            })
-            .ok_or(Refusal::NoMembership)?;
+        let reaching = reaching(memberships, member, self.scope).ok_or(Refusal::NoMembership)?;
         let org_scope = matches!(self.scope, Scope::Org(_));
-        let granted = reaching.roles.iter().any(|(role, from)| {
-            *from <= self.now
-                && matches!(role, Role::OrgOwner | Role::OrgAdmin | Role::BillingAdmin) == org_scope
-                && matrix::grants(self.permission, Column::Member(*role))
+        let granted = Role::ALL.into_iter().any(|role| {
+            reaching.effective(role, self.now)
+                && role.is_org() == org_scope
+                && matrix::grants(self.permission, Column::Member(role))
         });
         match granted {
             true => Ok(unverified),
@@ -1363,6 +1385,14 @@ impl<L: MembershipLookup> Grant<'_, L> {
 /// It yields the step-up the whole change needs, resolved (DEC-654 item 1): [`StepUp::Required`]
 /// when a part of it does (a grant at a workspace's scope, ID-4; any change through the org
 /// memberships row), otherwise [`StepUp::NotRequired`]; never `ForInvite` or `ForGrant`.
+///
+/// The rows it uses (DEC-654 item 4): the roles row for a grant or a removal, and for an empty
+/// change, so nothing answers a principal the row would refuse; the members row for deactivating
+/// another member; the leave row for the author's own deactivation. A grant to a principal with no
+/// membership reaching the scope, or a removal from or a deactivation of one with no membership in
+/// the scope (none, or one `removed`, `expired`, or `revoked`), is `forbidden`, before `own_roles`
+/// (DEC-654 item 7). An active owner or admin is a member `active` in the scope with the role
+/// effective at `now`, or granted it in the change (DEC-654 item 2).
 pub fn change_roles(
     lookup: &impl MembershipLookup,
     author: &Principal,
@@ -1371,8 +1401,112 @@ pub fn change_roles(
     change: &RoleChange,
     now: UtcNanos,
 ) -> Result<StepUp, Refusal> {
-    let _ = (lookup, author, session, scope, change, now);
-    Err(Refusal::Unimplemented { story: "E9-2" })
+    let (roles_row, members_row, admin, last) = match scope {
+        Scope::Org(_) => (
+            Permission::OrgMemberships,
+            Permission::OrgMemberships,
+            Role::OrgOwner,
+            Refusal::LastOwner,
+        ),
+        Scope::Workspace { .. } | Scope::Principal => (
+            Permission::WorkspaceRoles,
+            Permission::WorkspaceMembers,
+            Role::WorkspaceAdmin,
+            Refusal::LastAdmin,
+        ),
+    };
+    let (me, _) = identity(author);
+    let entries = || change.grants.iter().chain(&change.removals);
+    let granting = !change.grants.is_empty();
+    let rows = [
+        (
+            entries().next().is_some() || change.deactivations.is_empty(),
+            roles_row,
+        ),
+        (change.deactivations.iter().any(|d| *d != me), members_row),
+        (change.deactivations.contains(&me), Permission::Leave),
+    ];
+    let mut step_up = StepUp::NotRequired;
+    for (used, row) in rows {
+        if used
+            && needs_step_up(
+                authorize(lookup, author, session, scope, row, now)?,
+                granting,
+            )
+        {
+            step_up = StepUp::Required;
+        }
+    }
+    let org_scope = matches!(scope, Scope::Org(_));
+    if entries().any(|(_, role)| role.is_org() != org_scope) {
+        return Err(Refusal::Forbidden);
+    }
+    let memberships: Vec<Membership> = lookup
+        .memberships(&MembershipQuery {
+            member: None,
+            scope,
+        })
+        .map_err(|LookupFailed| Refusal::MembershipUnavailable)?
+        .into_iter()
+        .filter(|m| m.scope == scope)
+        .collect();
+    let mut reduced = change
+        .removals
+        .iter()
+        .map(|(who, _)| who)
+        .chain(&change.deactivations);
+    if change
+        .grants
+        .iter()
+        .any(|(who, _)| reaching(&memberships, *who, scope).is_none())
+        || reduced.any(|who| {
+            !memberships.iter().any(|m| {
+                m.member == *who
+                    && !matches!(
+                        m.state,
+                        MembershipState::Removed
+                            | MembershipState::Expired
+                            | MembershipState::Revoked
+                    )
+            })
+        })
+    {
+        return Err(Refusal::Forbidden);
+    }
+    if entries().any(|(who, _)| *who == me) {
+        return Err(Refusal::OwnRoles);
+    }
+    let takes_owner = entries().any(|(_, role)| *role == Role::OrgOwner)
+        || memberships.iter().any(|m| {
+            m.member != me
+                && change.deactivations.contains(&m.member)
+                && m.roles.contains_key(&Role::OrgOwner)
+        });
+    let owner = reaching(&memberships, me, scope).is_some_and(|m| m.effective(Role::OrgOwner, now));
+    if takes_owner && !owner {
+        return Err(Refusal::OwnerRoleReserved);
+    }
+    let kept = memberships.iter().any(|m| {
+        m.state == MembershipState::Active
+            && !change.deactivations.contains(&m.member)
+            && ((m.effective(admin, now) && !change.removals.contains(&(m.member, admin)))
+                || change.grants.contains(&(m.member, admin)))
+    });
+    match kept {
+        true => Ok(step_up),
+        false => Err(last),
+    }
+}
+
+/// Whether a row [`change_roles`] uses asks for step-up for this change: always for `S`, for
+/// `S for grant` only when the change grants a role, and never for `S for invite`, since a change
+/// invites no one (DEC-654 item 1).
+fn needs_step_up(authorized: Authorized, granting: bool) -> bool {
+    match authorized.step_up() {
+        StepUp::Required => true,
+        StepUp::ForGrant => granting,
+        StepUp::NotRequired | StepUp::ForInvite => false,
+    }
 }
 
 #[cfg(test)]
