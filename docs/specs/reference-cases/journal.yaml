@@ -13005,28 +13005,6 @@ connections:
   - name: connect_revoke_reconnect
     clause: 'rule 66: a reconnect after its revocation, same broker, environment, and account_ref'
     records:
-    - &id028
-      base_draft: established_v2
-      changes:
-      - path: event_id
-        value: 01J8Z4S00A0000000000000000
-      - path: event_type
-        value: ConnectionRequested
-      - path: schema_version
-        value: 1
-      - path: causation_id
-        value: null
-      - path: payload
-        value:
-          connection_id: conn_alpaca_paper
-          account_ref: 01J8Z2ACCT00000000000000A1
-          broker: alpaca
-          environment: paper
-          user: user_owner_01
-          step_up:
-            assertion_id: assert_owner_09
-            authenticated_at: '2026-09-22T12:59:50.000000000Z'
-            method: cli_confirm
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13053,27 +13031,6 @@ connections:
   - name: every_occasion_in_its_place
     clause: rule 67
     records:
-    - base_draft: established_v2
-      changes:
-      - path: event_id
-        value: 01J8Z4S90A0000000000000000
-      - path: event_type
-        value: ConnectionRequested
-      - path: schema_version
-        value: 1
-      - path: causation_id
-        value: null
-      - path: payload
-        value:
-          connection_id: conn_alpaca_paper_2
-          account_ref: 01J8Z2ACCT00000000000000B7
-          broker: alpaca
-          environment: paper
-          user: user_owner_01
-          step_up:
-            assertion_id: assert_owner_09
-            authenticated_at: '2026-09-22T12:59:50.000000000Z'
-            method: cli_confirm
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -13082,7 +13039,6 @@ connections:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13134,7 +13090,6 @@ connections:
       - path: payload
         value:
           connection_id: conn_alpaca_paper
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13166,27 +13121,6 @@ connections:
   - name: a_refused_id_connects_later
     clause: 'rule 67: a refused connect leaves no connection'
     records:
-    - base_draft: established_v2
-      changes:
-      - path: event_id
-        value: 01J8Z4S90A0000000000000000
-      - path: event_type
-        value: ConnectionRequested
-      - path: schema_version
-        value: 1
-      - path: causation_id
-        value: null
-      - path: payload
-        value:
-          connection_id: conn_alpaca_paper
-          account_ref: 01J8Z2ACCT00000000000000B7
-          broker: alpaca
-          environment: paper
-          user: user_owner_01
-          step_up:
-            assertion_id: assert_owner_09
-            authenticated_at: '2026-09-22T12:59:50.000000000Z'
-            method: cli_confirm
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -13195,7 +13129,6 @@ connections:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13205,7 +13138,6 @@ connections:
   - name: rotations_narrow
     clause: 'rule 67: a rotation keeps or narrows the scopes'
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13214,7 +13146,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - &id029
+      - &id028
         path: payload.scopes
         value:
         - trading
@@ -13222,13 +13154,12 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - *id029
+      - *id028
     expect:
       outcome: Valid
   - name: established_twice
     clause: 'rule 66: not revoked'
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13240,12 +13171,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 2
+      index: 1
       rule: '66'
   - name: reconnect_another_account
     clause: rule 66
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13263,18 +13193,17 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id047
+      - &id046
         path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '66'
   - name: reconnect_another_environment
     clause: rule 66
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13292,24 +13221,23 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id037
+      - &id036
         path: payload.environment
         value: live
-      - &id038
+      - &id037
         path: environment
         value: live
-      - &id039
+      - &id038
         path: payload.margin_attestation
         value: cash_account
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '66'
   - name: reconnect_another_broker
     clause: rule 66
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13332,7 +13260,7 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '66'
   - name: version_1_never_reestablished
     clause: rule 66
@@ -13341,19 +13269,19 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - &id030
+      - &id029
         path: schema_version
         value: 1
-      - &id031
+      - &id030
         path: payload.account_ref
         delete: true
-      - &id032
+      - &id031
         path: payload.user
         delete: true
-      - &id033
+      - &id032
         path: payload.step_up
         delete: true
-      - &id034
+      - &id033
         path: payload.margin_attestation
         delete: true
     - base_draft: rotated
@@ -13381,11 +13309,11 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
+      - *id029
       - *id030
       - *id031
       - *id032
       - *id033
-      - *id034
     - base_draft: rotated
       changes:
       - path: event_id
@@ -13399,11 +13327,11 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
+      - *id029
       - *id030
       - *id031
       - *id032
       - *id033
-      - *id034
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -13412,7 +13340,6 @@ connections:
   - name: revoked_on_another_control_stream
     clause: 'rule 66: each rule holds on its own stream; another workspace''s revocation revokes nothing here (DEC-696)'
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13435,37 +13362,15 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '66'
   - name: two_connections_one_account
     clause: 'rule 66: one account_ref, one connection (CN-5)'
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-    - base_draft: established_v2
-      changes:
-      - path: event_id
-        value: 01J8Z4S90A0000000000000000
-      - path: event_type
-        value: ConnectionRequested
-      - path: schema_version
-        value: 1
-      - path: causation_id
-        value: null
-      - path: payload
-        value:
-          connection_id: conn_alpaca_paper_2
-          account_ref: 01J8Z2ACCT00000000000000B7
-          broker: alpaca
-          environment: paper
-          user: user_owner_01
-          step_up:
-            assertion_id: assert_owner_09
-            authenticated_at: '2026-09-22T12:59:50.000000000Z'
-            method: cli_confirm
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13475,12 +13380,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 1
       rule: '66'
   - name: established_again_after_reconnect
     clause: rule 66
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13505,7 +13409,7 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 4
+      index: 3
       rule: '66'
   - name: rotated_never_established
     clause: rule 67
@@ -13522,7 +13426,6 @@ connections:
   - name: rotated_after_revocation
     clause: rule 67
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13543,12 +13446,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '67'
   - name: rotation_widens_the_scopes
     clause: 'rule 67: a rotation never adds a scope'
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13557,7 +13459,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - *id029
+      - *id028
     - base_draft: rotated
       changes:
       - path: event_id
@@ -13565,12 +13467,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '67'
   - name: reauthorize_after_revocation
     clause: rule 67
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13595,12 +13496,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '67'
   - name: reconnect_while_connected
     clause: rule 67
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13616,12 +13516,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 2
+      index: 1
       rule: '67'
   - name: connect_an_established_id
     clause: rule 67
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13646,12 +13545,11 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '67'
   - name: reconnect_refused_for_another_environment
     clause: rule 67
     records:
-    - *id028
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -13680,12 +13578,12 @@ connections:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 3
+      index: 2
       rule: '67'
   - name: degraded_cleared_acknowledged_then_suspended_and_reauthorized
     clause: 'rule 68: the B1 path: a reauthorize after the suspension, accepted by a rotation, then cleared'
     records:
-    - &id035
+    - &id034
       base_draft: checked_start
       changes:
       - path: event_id
@@ -13703,7 +13601,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id036
+    - &id035
       base_draft: established_copy
       changes:
       - path: event_id
@@ -13820,8 +13718,8 @@ connections:
   - name: executor_start_after_binding
     clause: 'rule 68: checks after the binding'
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13887,12 +13785,12 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - &id040
+      - &id039
         path: payload.broker
         value: robinhood
+      - *id036
       - *id037
       - *id038
-      - *id039
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13944,10 +13842,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id040
+      - *id039
+      - *id036
       - *id037
       - *id038
-      - *id039
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -13985,7 +13883,7 @@ connections:
   - name: two_account_streams_interleave
     clause: 'rule 68: each account stream is folded on its own, one connection each (DEC-696)'
     records:
-    - &id041
+    - &id040
       base_draft: checked_start
       changes:
       - path: event_id
@@ -14003,7 +13901,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id042
+    - &id041
       base_draft: checked_start
       changes:
       - path: event_id
@@ -14025,14 +13923,14 @@ connections:
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - &id043
+    - &id042
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-    - &id044
+    - &id043
       base_draft: established_copy
       changes:
       - path: event_id
@@ -14045,7 +13943,7 @@ connections:
         value: conn_alpaca_paper_2
       - path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
-    - &id045
+    - &id044
       base_draft: checked_start
       changes:
       - path: event_id
@@ -14063,7 +13961,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id046
+    - &id045
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -14085,12 +13983,12 @@ connections:
   - name: a_reauthorize_on_another_account_stream_admits_no_rotation
     clause: 'rule 68: the rotation''s reauthorize check is on its own stream (DEC-696)'
     records:
+    - *id040
     - *id041
     - *id042
     - *id043
     - *id044
     - *id045
-    - *id046
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -14235,7 +14133,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id047
+      - *id046
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -14267,10 +14165,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id040
+      - *id039
+      - *id036
       - *id037
       - *id038
-      - *id039
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -14305,10 +14203,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id040
+      - *id039
+      - *id036
       - *id037
       - *id038
-      - *id039
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14334,8 +14232,8 @@ connections:
   - name: rotation_copied_without_a_passing_reauthorize
     clause: 'rule 68: a rotation follows a passing reauthorize check'
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14365,9 +14263,9 @@ connections:
   - name: suspension_cleared_without_a_rotation
     clause: 'rule 68: the clearing cause is the copied rotation'
     records:
+    - *id034
     - *id035
-    - *id036
-    - &id048
+    - &id047
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -14400,9 +14298,9 @@ connections:
   - name: refused_reauth_check_clears
     clause: 'rule 68: a passing reauthorize the control services refused never clears (no rotation names it)'
     records:
+    - *id034
     - *id035
-    - *id036
-    - *id048
+    - *id047
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14440,8 +14338,8 @@ connections:
   - name: stale_check_clears
     clause: 'rule 68: the reauthorize came after the suspension'
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14495,8 +14393,8 @@ connections:
   - name: stale_rotation_clears
     clause: 'rule 68: the rotation came after the suspension'
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -14550,8 +14448,8 @@ connections:
   - name: two_connections_on_one_account_stream
     clause: 'rule 68: one account stream, one connection (CN-5)'
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14578,8 +14476,8 @@ connections:
   - name: first_change_not_from_active
     clause: rule 68
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14600,8 +14498,8 @@ connections:
   - name: from_not_the_last_state
     clause: rule 68
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14634,8 +14532,8 @@ connections:
   - name: acknowledged_before_cleared
     clause: 'rule 68: the acknowledgment never lifts a cause that has not cleared'
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14668,8 +14566,8 @@ connections:
   - name: acknowledged_after_the_cause_returned
     clause: rule 68
     records:
+    - *id034
     - *id035
-    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -14727,7 +14625,7 @@ connections:
   - name: connect_then_reauthorize
     clause: '§11: every cause on its stream, for its connection, passing'
     records:
-    - &id054
+    - &id053
       base_draft: checked_start
       changes:
       - path: event_id
@@ -14745,30 +14643,30 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id049
+    - &id048
       base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - &id050
+    - &id049
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4S02A0000000000000000
-    - &id051
+    - &id050
       base_draft: checked_start
       changes:
-      - &id057
+      - &id056
         path: event_id
         value: 01J8Z4S04A0000000000000000
-      - &id058
+      - &id057
         path: payload.occasion
         value: reauthorize
-      - &id059
+      - &id058
         path: payload.results
         value:
         - check: account
@@ -14780,16 +14678,16 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id052
+    - &id051
       base_draft: rotated
       changes:
-      - &id055
+      - &id054
         path: event_id
         value: 01J8Z4S05A0000000000000000
-      - &id056
+      - &id055
         path: causation_id
         value: 01J8Z4S04A0000000000000000
-    - &id053
+    - &id052
       base_draft: rotated_copy
       changes:
       - path: event_id
@@ -14818,11 +14716,11 @@ connections:
         - check: scope
           result: failed
           reason: scope_mismatch
+    - *id048
     - *id049
     - *id050
     - *id051
     - *id052
-    - *id053
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14847,11 +14745,11 @@ connections:
         - check: scope
           result: passed
           reason: null
+    - *id048
     - *id049
     - *id050
     - *id051
     - *id052
-    - *id053
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14878,11 +14776,11 @@ connections:
           reason: null
       - path: payload.connection_id
         value: conn_alpaca_paper_2
+    - *id048
     - *id049
     - *id050
     - *id051
     - *id052
-    - *id053
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14909,11 +14807,11 @@ connections:
           reason: null
       - path: stream_id
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
+    - *id048
     - *id049
     - *id050
     - *id051
     - *id052
-    - *id053
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14959,17 +14857,17 @@ connections:
   - name: rotated_on_a_connect_check
     clause: '§11: occasion reauthorize'
     records:
-    - *id054
+    - *id053
+    - *id048
     - *id049
     - *id050
-    - *id051
     - base_draft: rotated
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - *id053
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14977,8 +14875,8 @@ connections:
   - name: copy_differs_from_its_original
     clause: '§11: a copy carries its original''s members'
     records:
-    - *id054
-    - *id049
+    - *id053
+    - *id048
     - base_draft: established_copy
       changes:
       - path: event_id
@@ -14988,9 +14886,9 @@ connections:
       - path: payload.scopes
         value:
         - trading
+    - *id050
     - *id051
     - *id052
-    - *id053
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -14998,11 +14896,11 @@ connections:
   - name: copy_of_nothing
     clause: '§11: a copy names its original'
     records:
-    - *id054
+    - *id053
+    - *id048
     - *id049
     - *id050
     - *id051
-    - *id052
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -15124,17 +15022,17 @@ connections:
   - name: rotated_on_another_control_stream
     clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
     records:
-    - *id054
+    - *id053
+    - *id048
     - *id049
     - *id050
-    - *id051
     - base_draft: rotated
       changes:
+      - *id054
       - *id055
-      - *id056
       - path: stream_id
         value: ctl:ws_01J8Z3
-    - *id053
+    - *id052
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -15142,20 +15040,20 @@ connections:
   - name: rotated_in_another_workspace_on_its_check
     clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
     records:
-    - *id054
+    - *id053
+    - *id048
     - *id049
-    - *id050
     - base_draft: checked_start
       changes:
+      - *id056
       - *id057
       - *id058
-      - *id059
       - path: stream_id
         value: acct:ws_01J8Z3:01J8Z2ACCT00000000000000A1
     - base_draft: rotated
       changes:
+      - *id054
       - *id055
-      - *id056
       - path: stream_id
         value: ctl:ws_01J8Z3
     expect:
@@ -15191,7 +15089,7 @@ connection_requests:
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id060
+        step_up: &id059
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -15224,7 +15122,7 @@ connection_requests:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id060
+        step_up: *id059
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -15250,7 +15148,7 @@ connection_requests:
         - data
         - trading
         user: user_owner_01
-        step_up: *id060
+        step_up: *id059
       artifact_refs: []
       pii_refs: []
     requested:
@@ -15530,7 +15428,28 @@ connection_requests:
   - name: requested_then_established
     clause: 'rule 131: the establishment closes its request'
     records:
-    - *id028
+    - &id060
+      base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S00A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+          account_ref: 01J8Z2ACCT00000000000000A1
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15540,7 +15459,7 @@ connection_requests:
   - name: requested_then_refused_by_a_check
     clause: 'rule 131: a connect''s refusal closes its request'
     records:
-    - *id028
+    - *id060
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -15554,7 +15473,7 @@ connection_requests:
   - name: requested_then_torn_down
     clause: 'rule 131: the teardown closes its request (connections spec §5.2 step 6)'
     records:
-    - *id028
+    - *id060
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -15574,7 +15493,7 @@ connection_requests:
   - name: requested_and_still_connecting
     clause: 'rule 131: a connect in progress leaves its request open'
     records:
-    - *id028
+    - *id060
     expect:
       outcome: Valid
   - name: retried_on_a_new_account_ref
@@ -15611,7 +15530,7 @@ connection_requests:
         value: conn_alpaca_paper
       - *id061
       - *id062
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15642,7 +15561,7 @@ connection_requests:
             assertion_id: assert_owner_09
             authenticated_at: '2026-09-22T12:59:50.000000000Z'
             method: cli_confirm
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15660,7 +15579,7 @@ connection_requests:
   - name: reconnect_closes_nothing
     clause: 'rule 131: a reconnect and a reauthorize need no request'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15696,21 +15615,105 @@ connection_requests:
         value: 01J8Z4S05A0000000000000000
     expect:
       outcome: Valid
+  - name: older_journal_with_no_request
+    clause: 'rule 131 is forward-only: a journal written before v0.32 still verifies'
+    records:
+    - base_draft: refused_scope
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+      - *id061
+      - *id062
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+    expect:
+      outcome: Valid
   - name: established_without_a_request
-    clause: rule 131
+    clause: 'rule 131: from the stream''s first request on, every connect closes one'
     records:
     - base_draft: established_v2
       changes:
       - path: event_id
+        value: 01J8Z4S90A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper_2
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: refused_scope
+      changes:
+      - path: event_id
         value: 01J8Z4S01A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.connection_id
+        value: conn_alpaca_paper_2
+      - *id061
+      - *id062
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 0
+      index: 2
       rule: '131'
   - name: refused_without_a_request
-    clause: rule 131
+    clause: 'rule 131: from the stream''s first request on'
     records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S90A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper_2
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -15724,12 +15727,194 @@ connection_requests:
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
-      index: 0
+      index: 1
       rule: '131'
+  - name: range_after_an_unseen_request
+    clause: '§11: a range checks rule 131''s closing requirement only for a request it holds; the full-chain run checks the rest'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S90A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper_2
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    expect:
+      outcome: Valid
+    scope: range
+  - name: full_chain_after_the_same_records
+    clause: 'rule 131: the full-chain run flags the connect with no request'
+    records:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S90A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper_2
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 1
+      rule: '131'
+  - name: revoked_while_connecting
+    clause: 'rule 131: a revocation closes the open request and is never refused'
+    records:
+    - *id060
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S91A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+          account_ref: 01J8Z2ACCT00000000000000B7
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.account_ref
+        value: 01J8Z2ACCT00000000000000B7
+    expect:
+      outcome: Valid
+  - name: established_after_its_request_was_revoked
+    clause: 'rule 131: nothing is established from a revoked request'
+    records:
+    - *id060
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '131'
+  - name: teardown_after_its_request_was_revoked
+    clause: 'rules 67 and 131: the teardown journals nothing after a revocation'
+    records:
+    - *id060
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: refused_scope
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.connection_id
+        value: conn_alpaca_paper
+      - *id061
+      - *id062
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '131'
+  - name: reconnect_of_a_connection_never_established
+    clause: 'rule 67: a revoked request leaves nothing to reconnect'
+    records:
+    - *id060
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+    - base_draft: refused_scope
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.occasion
+        value: reconnect
+      - path: payload.connection_id
+        value: conn_alpaca_paper
+    expect:
+      outcome: Mismatch
+      code: connection_lifecycle_mismatch
+      index: 2
+      rule: '67'
   - name: request_closed_twice
     clause: 'rule 131: a request is closed once'
     records:
-    - *id028
+    - *id060
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -15773,7 +15958,7 @@ connection_requests:
             assertion_id: assert_owner_09
             authenticated_at: '2026-09-22T12:59:50.000000000Z'
             method: cli_confirm
-    - *id028
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -15782,7 +15967,7 @@ connection_requests:
   - name: requested_for_an_established_id
     clause: 'rule 131: a request names a new connection'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15885,7 +16070,7 @@ connection_requests:
   - name: refused_with_another_step_up
     clause: 'rule 131: the refusal repeats its request''s step-up'
     records:
-    - *id028
+    - *id060
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -15908,7 +16093,7 @@ connection_requests:
   - name: established_with_another_account_ref
     clause: 'rule 131: the establishment repeats its request''s account_ref'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15923,7 +16108,7 @@ connection_requests:
   - name: established_with_another_broker
     clause: 'rule 131: the establishment repeats its request''s broker'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15938,7 +16123,7 @@ connection_requests:
   - name: established_with_another_environment
     clause: 'rule 131: the establishment repeats its request''s environment'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15957,7 +16142,7 @@ connection_requests:
   - name: established_with_another_user
     clause: 'rule 131: the establishment repeats its request''s user'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -15972,7 +16157,7 @@ connection_requests:
   - name: established_with_another_step_up
     clause: 'rule 131: the establishment repeats its request''s step_up'
     records:
-    - *id028
+    - *id060
     - base_draft: established_v2
       changes:
       - path: event_id

@@ -45,7 +45,8 @@ their rules hold. The API routes that start a connection are the workspace API s
 - **v0.2, amended by [DEC-699](../project/decisions/DEC-699.md)** ([DEC-694](../project/decisions/DEC-694.md)
   item 4): §5.2 step 1's pending record is journaled as `ConnectionRequested` (journal spec §9.8,
   rule 131), the event the connect's step-up commits with (identity spec §7.2 step 5); step 6's
-  API restart re-reads the open requests; and §9.1 no longer says a refused connect keeps no
+  API restart re-reads the open requests; §9.1 gains a revoke exit from `connecting`, which closes the
+  request and runs the teardown with no `ConnectionRefused`; and §9.1 no longer says a refused connect keeps no
   record beyond the refusal, since its request is kept too. Each only tightens (DEC-176).
 - **v0.2, amended by [DEC-687](../project/decisions/DEC-687.md):** §8.2 states how the health
   signals count (per signal class) and how several causes are tracked; §9.1's halt paragraph no
@@ -337,7 +338,9 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
 
    **Until E7-17 lands, steps 4 to 6 cannot be built**, and for Alpaca OAuth neither can step 5
    until the breadth event above is in the journal spec.
-6. **Teardown, the only exit from `connecting` other than step 5.** The connection manager tears a
+6. **Teardown, the only exit from `connecting` other than step 5 and a revoke.** A revoke while
+   `connecting` (§9.1) runs this teardown too, but journals no `ConnectionRefused`: its
+   `ConnectionRevoked` already closed the request (journal §9.8 rule 131). The connection manager tears a
    pending connection down when any check refuses, or when no passing results arrive within the
    code's lifetime plus one minute (Proposed: 11 minutes). Teardown:
    - deletes the vault entry (code or token) under the pending connection's path (infrastructure
@@ -663,7 +666,7 @@ protective order, a cancel, or the kill switch.
 
 | State | Entered when | Openings | Exits, protection, kill switch | Ends when | Who ends it |
 |---|---|---|---|---|---|
-| `connecting` | Step-up and connect started (`ConnectionRequested`, journal §9.8 rule 131) | No agent yet; the token-exchange process may only exchange the code, and the executor may only run checks and append their results (§5.2 step 4) | — | `ConnectionEstablished` (`active`), or the teardown of §5.2 step 6 on a refusal, a timeout, or a restart past the deadline (refused: the journal keeps the `ConnectionRequested`, the refusal event, and the orphan account stream, and nothing else) | System |
+| `connecting` | Step-up and connect started (`ConnectionRequested`, journal §9.8 rule 131) | No agent yet; the token-exchange process may only exchange the code, and the executor may only run checks and append their results (§5.2 step 4) | — | `ConnectionEstablished` (`active`), or the teardown of §5.2 step 6 on a refusal, a timeout, or a restart past the deadline, or a platform-side revoke (`ConnectionRevoked`, never refused while `connecting`: it closes the request, the teardown runs, and nothing further is journaled for it; journal §9.8 rule 131) (refused: the journal keeps the `ConnectionRequested`, the refusal event, and the orphan account stream, and nothing else) | System |
 | `active` | All §8.1 checks pass | As the gate allows | Yes | Any transition below | — |
 | `degraded` | Network errors, low headroom, or contract drift | **Halted**: account state `closing_only`, agents `exits_only` | Yes, while the broker accepts | Good probes, or for drift a released connector version (not yet decided: until it is, drift clears only as [DEC-687](../project/decisions/DEC-687.md) item 3 says), **then** the owner's acknowledgment (trading §7.3, cause `connection_unavailable`) | Owner, with step-up |
 | `suspended` | Credential invalid: expired, revoked at the broker, refresh failed, or a later permission check failed | **Halted**: account state `closing_only`, agents `exits_only` | Attempted while any call succeeds; otherwise protection rests at the broker | Re-authorization only (DEC-800 item 5, accepted by the founder in DEC-824 item 6): the owner replaces the credential, a `reauthorize` check after the suspension passes every §8.1 check, the control services accept it for the same account as `ConnectionCredentialRotated`, and the executor clears the cause on that rotation (journal §9.8 rule 68); the owner then acknowledges (trading §7.3, cause `connection_unavailable`). A revoke and reconnect of the same account (§3) does not by itself leave `suspended`: the reconnected connection is still `suspended`, and the owner still re-authorizes | Owner, with step-up |

@@ -4043,7 +4043,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(connections.vector_mutants(connections_section))} vector mutants caught; "
         f"{len(request_section['invalid_drafts'])} invalid and {len(request_section['valid_drafts'])} valid connection-request "
         f"drafts, {len(request_section['sequences'])} rule-131 sequences; {len(connections.REQUEST_VALIDATOR_MUTANTS)} "
-        f"validator and {len(connections.REQUEST_STREAM_MUTANTS)} stream mutants caught; "
+        f"validator, {len(connections.REQUEST_STREAM_MUTANTS)} stream, and {connections.REQUEST_VECTOR_MUTANTS} vector mutants caught; "
         f"{len(workspace_section['drafts'])} workspace API drafts, {len(workspace_section['invalid_drafts'])} invalid and "
         f"{len(workspace_section['valid_drafts'])} valid; {len(workspace.VALIDATOR_MUTANTS)} validator and "
         f"{len(workspace.vector_mutants(workspace_section))} vector mutants caught; "

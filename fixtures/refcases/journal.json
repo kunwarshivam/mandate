@@ -21179,42 +21179,6 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
         "value": "01J8Z4S01A0000000000000000"
        }
       ]
@@ -21266,42 +21230,6 @@
     "clause": "rule 67",
     "records": [
      {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S90A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper_2",
-         "account_ref": "01J8Z2ACCT00000000000000B7",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
       "base_draft": "refused_scope",
       "changes": [
        {
@@ -21315,42 +21243,6 @@
        {
         "path": "payload.connection_id",
         "value": "conn_alpaca_paper_2"
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
        }
       ]
      },
@@ -21467,42 +21359,6 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
         "value": "01J8Z4S02A0000000000000000"
        }
       ]
@@ -21564,42 +21420,6 @@
     "clause": "rule 67: a refused connect leaves no connection",
     "records": [
      {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S90A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000B7",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
       "base_draft": "refused_scope",
       "changes": [
        {
@@ -21621,42 +21441,6 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
         "value": "01J8Z4S02A0000000000000000"
        }
       ]
@@ -21670,42 +21454,6 @@
     "name": "rotations_narrow",
     "clause": "rule 67: a rotation keeps or narrows the scopes",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -21759,42 +21507,6 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
         "value": "01J8Z4S01A0000000000000000"
        }
       ]
@@ -21812,7 +21524,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 2,
+     "index": 1,
      "rule": "66"
     }
    },
@@ -21820,42 +21532,6 @@
     "name": "reconnect_another_account",
     "clause": "rule 66",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -21901,7 +21577,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "66"
     }
    },
@@ -21909,42 +21585,6 @@
     "name": "reconnect_another_environment",
     "clause": "rule 66",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -21998,7 +21638,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "66"
     }
    },
@@ -22006,42 +21646,6 @@
     "name": "reconnect_another_broker",
     "clause": "rule 66",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22087,7 +21691,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "66"
     }
    },
@@ -22258,42 +21862,6 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
         "value": "01J8Z4S01A0000000000000000"
        }
       ]
@@ -22334,7 +21902,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "66"
     }
    },
@@ -22347,79 +21915,7 @@
       "changes": [
        {
         "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
         "value": "01J8Z4S01A0000000000000000"
-       }
-      ]
-     },
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S90A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper_2",
-         "account_ref": "01J8Z2ACCT00000000000000B7",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
        }
       ]
      },
@@ -22440,7 +21936,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 1,
      "rule": "66"
     }
    },
@@ -22448,42 +21944,6 @@
     "name": "established_again_after_reconnect",
     "clause": "rule 66",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22534,7 +21994,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 4,
+     "index": 3,
      "rule": "66"
     }
    },
@@ -22563,42 +22023,6 @@
     "name": "rotated_after_revocation",
     "clause": "rule 67",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22640,7 +22064,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "67"
     }
    },
@@ -22648,42 +22072,6 @@
     "name": "rotation_widens_the_scopes",
     "clause": "rule 67: a rotation never adds a scope",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22721,7 +22109,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "67"
     }
    },
@@ -22729,42 +22117,6 @@
     "name": "reauthorize_after_revocation",
     "clause": "rule 67",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22814,7 +22166,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "67"
     }
    },
@@ -22822,42 +22174,6 @@
     "name": "reconnect_while_connected",
     "clause": "rule 67",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22888,7 +22204,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 2,
+     "index": 1,
      "rule": "67"
     }
    },
@@ -22896,42 +22212,6 @@
     "name": "connect_an_established_id",
     "clause": "rule 67",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -22981,7 +22261,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "67"
     }
    },
@@ -22989,42 +22269,6 @@
     "name": "reconnect_refused_for_another_environment",
     "clause": "rule 67",
     "records": [
-     {
-      "base_draft": "established_v2",
-      "changes": [
-       {
-        "path": "event_id",
-        "value": "01J8Z4S00A0000000000000000"
-       },
-       {
-        "path": "event_type",
-        "value": "ConnectionRequested"
-       },
-       {
-        "path": "schema_version",
-        "value": 1
-       },
-       {
-        "path": "causation_id",
-        "value": null
-       },
-       {
-        "path": "payload",
-        "value": {
-         "connection_id": "conn_alpaca_paper",
-         "account_ref": "01J8Z2ACCT00000000000000A1",
-         "broker": "alpaca",
-         "environment": "paper",
-         "user": "user_owner_01",
-         "step_up": {
-          "assertion_id": "assert_owner_09",
-          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
-          "method": "cli_confirm"
-         }
-        }
-       }
-      ]
-     },
      {
       "base_draft": "established_v2",
       "changes": [
@@ -23082,7 +22326,7 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 3,
+     "index": 2,
      "rule": "67"
     }
    },
@@ -28474,15 +27718,147 @@
     }
    },
    {
+    "name": "older_journal_with_no_request",
+    "clause": "rule 131 is forward-only: a journal written before v0.32 still verifies",
+    "records": [
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       },
+       {
+        "path": "payload.check",
+        "value": null
+       },
+       {
+        "path": "payload.reason",
+        "value": "timeout"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S03A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S04A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "established_without_a_request",
-    "clause": "rule 131",
+    "clause": "rule 131: from the stream's first request on, every connect closes one",
     "records": [
      {
       "base_draft": "established_v2",
       "changes": [
        {
         "path": "event_id",
+        "value": "01J8Z4S90A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper_2",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
         "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper_2"
+       },
+       {
+        "path": "payload.check",
+        "value": null
+       },
+       {
+        "path": "payload.reason",
+        "value": "timeout"
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
        }
       ]
      }
@@ -28490,14 +27866,50 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 0,
+     "index": 2,
      "rule": "131"
     }
    },
    {
     "name": "refused_without_a_request",
-    "clause": "rule 131",
+    "clause": "rule 131: from the stream's first request on",
     "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S90A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper_2",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
      {
       "base_draft": "refused_scope",
       "changes": [
@@ -28527,8 +27939,485 @@
     "expect": {
      "outcome": "Mismatch",
      "code": "connection_lifecycle_mismatch",
-     "index": 0,
+     "index": 1,
      "rule": "131"
+    }
+   },
+   {
+    "name": "range_after_an_unseen_request",
+    "clause": "§11: a range checks rule 131's closing requirement only for a request it holds; the full-chain run checks the rest",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S90A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper_2",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "scope": "range"
+   },
+   {
+    "name": "full_chain_after_the_same_records",
+    "clause": "rule 131: the full-chain run flags the connect with no request",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S90A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper_2",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 1,
+     "rule": "131"
+    }
+   },
+   {
+    "name": "revoked_while_connecting",
+    "clause": "rule 131: a revocation closes the open request and is never refused",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S91A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000B7",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.account_ref",
+        "value": "01J8Z2ACCT00000000000000B7"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "established_after_its_request_was_revoked",
+    "clause": "rule 131: nothing is established from a revoked request",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "131"
+    }
+   },
+   {
+    "name": "teardown_after_its_request_was_revoked",
+    "clause": "rules 67 and 131: the teardown journals nothing after a revocation",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "connect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper"
+       },
+       {
+        "path": "payload.check",
+        "value": null
+       },
+       {
+        "path": "payload.reason",
+        "value": "timeout"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "131"
+    }
+   },
+   {
+    "name": "reconnect_of_a_connection_never_established",
+    "clause": "rule 67: a revoked request leaves nothing to reconnect",
+    "records": [
+     {
+      "base_draft": "established_v2",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S00A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRequested"
+       },
+       {
+        "path": "schema_version",
+        "value": 1
+       },
+       {
+        "path": "causation_id",
+        "value": null
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper",
+         "account_ref": "01J8Z2ACCT00000000000000A1",
+         "broker": "alpaca",
+         "environment": "paper",
+         "user": "user_owner_01",
+         "step_up": {
+          "assertion_id": "assert_owner_09",
+          "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+          "method": "cli_confirm"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "rotated",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S01A0000000000000000"
+       },
+       {
+        "path": "event_type",
+        "value": "ConnectionRevoked"
+       },
+       {
+        "path": "payload",
+        "value": {
+         "connection_id": "conn_alpaca_paper"
+        }
+       }
+      ]
+     },
+     {
+      "base_draft": "refused_scope",
+      "changes": [
+       {
+        "path": "event_id",
+        "value": "01J8Z4S02A0000000000000000"
+       },
+       {
+        "path": "payload.occasion",
+        "value": "reconnect"
+       },
+       {
+        "path": "payload.connection_id",
+        "value": "conn_alpaca_paper"
+       }
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Mismatch",
+     "code": "connection_lifecycle_mismatch",
+     "index": 2,
+     "rule": "67"
     }
    },
    {

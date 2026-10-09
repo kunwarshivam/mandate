@@ -20,22 +20,32 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     environment, the user, and the step-up. It carries no credential, code, verifier, account
     number, fingerprint, or vault path. It is the event that commits with the step-up challenge
     marked used (identity spec §7.2 step 5), which the start did not have.
-  - **Stream rule 131.** A request names a connection with no open request and no establishment on
-    its control stream, and an `account_ref` never named there before. A connect's version-2
-    `ConnectionEstablished`, and a `ConnectionRefused` with occasion `connect`, each close that
-    connection's open request, once, and repeat its broker, environment, user, and step-up, and the
-    establishment its `account_ref`. A request stays open while its connect runs; §11 reports no
-    open request. §11's `connection_lifecycle_mismatch` covers rule 131.
+  - **Stream rule 131**, forward-only, as §11's `held_mismatch` is: a control stream is bound
+    from its first request on, so every stream written under v0.20 to v0.31, which holds none,
+    verifies as before, and once a stream holds a request no later connect may skip one. A request
+    names a connection with no open request and no establishment on its control stream, and an
+    `account_ref` never named there before. A connect's version-2 `ConnectionEstablished`, and a
+    `ConnectionRefused` with occasion `connect`, each close that connection's open request, once,
+    and repeat its broker, environment, user, and step-up, and the establishment its
+    `account_ref`. A request stays open while its connect runs; §11 reports no open request. That
+    a closing record has a request is checked in the full-chain run only, since a range's fold
+    starts empty and would not see a request before its trusted start.
+  - **Revoke while `connecting`.** A `ConnectionRevoked` is never refused for it, and closes the
+    open request. Nothing is established or refused from that request afterwards: rule 131
+    reports either. Rule 67 reads such an id as never established, so the teardown's
+    `ConnectionRefused` is judged by rule 131 alone, and a `reconnect` of it breaks rule 67.
+    Connections spec §9.1 gains the revoke exit from `connecting`.
+  - **No earlier outcome changes.** Every rule-131 clause, and rule 67's reading of a revocation
+    while `connecting`, needs a request on the stream, which no stream written before v0.32 holds.
+    The `connections` section is unchanged but its `spec` line.
   - **Sentences reconciled.** "`connecting` leaves no record but a `ConnectionRefused`" and
     "nothing else is kept of a refused connect" now name the request too, as connections spec §9.1
     does.
-  - **Vectors.** The `connections` section's control-stream sequences gain the request each of
-    their connects closes, so every case keeps its answer, one record later where a request comes
-    before its mismatch. A new generated `connection_requests` section holds the record's drafts
-    (23 invalid, 1 valid) and 19 rule-131 sequences, with 14 validator, 10 stream, and 6 vector
-    mutants. It is a section of its own because the E7-17 fold
-    (`crates/mandate-journal/src/connection_fold.rs`) does not check rule 131 yet: its code change
-    follows this one (ES-22) and reads it. The vectors stay version 3.
+  - **Vectors.** A new generated `connection_requests` section holds the record's drafts (23
+    invalid, 1 valid) and 26 rule-131 sequences, one of them a range (`scope: range`), with 14
+    validator, 15 stream, and 6 vector mutants, as `generate.py` prints. It is a section of its own
+    because the E7-17 fold (`crates/mandate-journal/src/connection_fold.rs`) does not check rule
+    131 yet: its code change follows this one (ES-22) and reads it. The vectors stay version 3.
 - **v0.31 ([DEC-659](../project/decisions/DEC-659.md)):** §9.12 gains **Order**, which states a
   reading DEC-659 already took under DEC-176 (it only tightens). The identity crate implements
   `check_order`, and E9-7's writer slice implements `write_membership` (DEC-646).
@@ -1941,14 +1951,20 @@ of the step-up.
 A request is **open** from its commit until the record that closes it (rule 131), and every exit
 from `connecting` closes it: the establishment (connections spec §5.2 step 5), or the
 `ConnectionRefused` of a refused check or of step 6's teardown (`timeout`,
-`restart_past_deadline`, `executor_stopped`, `start_failed`). A callback that is refused, or a
+`restart_past_deadline`, `executor_stopped`, `start_failed`), or a `ConnectionRevoked` (below). A callback that is refused, or a
 vault write that fails, starts nothing, and the deadline's teardown closes the request. After an
 API restart, the open requests are the `connecting` records the connection manager re-reads
 (step 6, Restarts). An open request is a connect in progress, so §11 does not report one; the
 deadline bounds how long it stays open. A writer that records a connect in one step, as the CLI's
 `connection record` does ([DEC-529](../project/decisions/DEC-529.md) item 3), commits the request
-and the establishment in one batch. A `ConnectionRevoked` closes no request: connections spec §9.1
-has no revoke out of `connecting` (DEC-699 item 5).
+and the establishment in one batch.
+
+**A revoke while `connecting`** (connections spec §9.1, DEC-699 item 5) is never refused for it: the
+pending connection has no agent and no position. Its `ConnectionRevoked` closes the open request.
+The connection manager then runs step 6's teardown (vault entry deleted, grant revoked, processes
+stopped) and journals nothing further for that request: no establishment, no `ConnectionRefused`.
+The connection was never established, so it has nothing to reconnect; the owner starts a new
+connect, with a new request and `account_ref`.
 
 **A `causation_id` may name an event on another stream** (§3: it is an event ID). The connect
 sequence uses it from the control stream to the account stream, and the copies the other way, as
@@ -2150,8 +2166,10 @@ own stream:
     `account_ref` (CN-5).
 67. Control stream: a `ConnectionCredentialRotated`, or a `ConnectionRefused` with `occasion`
     `reauthorize`, names a connection established and not since revoked; a `ConnectionRefused` with
-    `reconnect` names one whose latest record is `ConnectionRevoked`; one with `connect` names an id
-    never established. For `reconnect` and `reauthorize`, `broker` and `environment` equal the
+    `reconnect` names one whose latest record is `ConnectionRevoked`, unless that revocation closed
+    its request (rule 131); one with `connect` names an id with no earlier `ConnectionEstablished`
+    or `ConnectionRevoked`, except a revocation that closed its request (rule 131 then judges the
+    refusal). For `reconnect` and `reauthorize`, `broker` and `environment` equal the
     establishment's. A rotation's `scopes` are a subset of the connection's latest scopes, its
     establishment's or the latest rotation's: a replaced credential never widens a grant.
 68. Account stream: every connection record on it names the same `connection_id` (CN-5: one
@@ -2180,7 +2198,11 @@ arrives in §9.10 (v0.22, DEC-671), and these rules count a revocation of either
 **Stream rule 131** ([DEC-699](../project/decisions/DEC-699.md)), held and checked as rules 66 to
 68 are:
 
-131. Control stream, the pending connection: checked after rules 66 and 67 on the same record.
+131. Control stream, the pending connection: checked after rules 66 and 67 on the same record,
+     and only **from the stream's first `ConnectionRequested` on**, as `held_mismatch` judges a
+     stream only from its first version-2 record (§11). A connect before it is not judged by this
+     rule, so a stream written before v0.32 still verifies; after it, every connect closes a
+     request, and a stream never leaves that state.
      - **Opening.** A `ConnectionRequested` names a `connection_id` with no open request and no
        earlier `ConnectionEstablished`, and an `account_ref` that no earlier `ConnectionRequested`
        or `ConnectionEstablished` names: each attempt has an account stream of its own, and an
@@ -2189,8 +2211,14 @@ arrives in §9.10 (v0.22, DEC-671), and these rules count a revocation of either
        `ConnectionEstablished` (a connect), and a `ConnectionRefused` with occasion `connect`, each
        close that id's open request: one exists, and the record repeats its `broker`,
        `environment`, `user`, and `step_up`, and, for the establishment, its `account_ref`. A
-       request is closed once. A reconnect, a credential replacement, a version-1 establishment,
-       and a `ConnectionRevoked` close none.
+       request is closed once. A reconnect, a credential replacement, and a version-1 establishment
+       close none.
+     - **Revocation.** A `ConnectionRevoked` of an id with an open request closes it, and is never
+       refused. A later establishment or `ConnectionRefused` (occasion `connect`) of that id that
+       has no request of its own breaks this rule.
+     - **Ranges.** That a closing record has an open request is checked in the full-chain run
+       only: a range's fold starts empty at its trusted start, and the request may be before it.
+       A range checks the other clauses on the requests it holds.
 
 **No mapping to `JournaledFact`** beyond `ConnectionEstablished`'s (§9.2): the control-stream
 version, never its copy. `ConnectionRequested` maps to none. The executor folds the account-stream records itself, and the connection
@@ -3122,7 +3150,8 @@ On a control or account stream ([§9.8](#98-connection-records-dec-800)):
 
 - `connection_lifecycle_mismatch` — a record that breaks stream rule 66, 67, 68, or 131, reported
   at that record. A `ConnectionRequested` still open at the range's end is a connect in progress,
-  not a mismatch.
+  not a mismatch. Rule 131's requirement that a connect's establishment or refusal has a request is
+  checked in the full-chain run only, since a range may begin after that request.
 
 Across the control stream and its account streams, in the full-chain run only (a range never
 holds the other stream):

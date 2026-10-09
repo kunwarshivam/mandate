@@ -813,15 +813,13 @@ def sequences() -> list[dict]:
         sequence(
             "connect_revoke_reconnect",
             "rule 66: a reconnect after its revocation, same broker, environment, and account_ref",
-            [REQUESTED, established(1), record("rotated", 2), revoked(3), established(4)],
+            [established(1), record("rotated", 2), revoked(3), established(4)],
         ),
         sequence(
             "every_occasion_in_its_place",
             "rule 67",
             [
-                requested(90, OTHER_CONNECTION, OTHER_ACCOUNT_REF),
                 refused(1, "connect", OTHER_CONNECTION),
-                REQUESTED,
                 established(2),
                 refused(3, "reauthorize"),
                 record("rotated", 4),
@@ -833,27 +831,27 @@ def sequences() -> list[dict]:
         sequence(
             "revocation_is_never_refused",
             "§9.8: no rule refuses a ConnectionRevoked",
-            [revoked(1), REQUESTED, established(2), revoked(3), revoked(4), established(5)],
+            [revoked(1), established(2), revoked(3), revoked(4), established(5)],
         ),
         sequence(
             "a_refused_id_connects_later",
             "rule 67: a refused connect leaves no connection",
-            [requested(90, CONNECTION, OTHER_ACCOUNT_REF), refused(1, "connect"), REQUESTED, established(2)],
+            [refused(1, "connect"), established(2)],
         ),
         sequence(
             "rotations_narrow",
             "rule 67: a rotation keeps or narrows the scopes",
-            [REQUESTED, established(1), record("rotated", 2, narrower), record("rotated", 3, narrower)],
+            [established(1), record("rotated", 2, narrower), record("rotated", 3, narrower)],
         ),
-        sequence("established_twice", "rule 66: not revoked", [REQUESTED, established(1), established(2)], (2, "66")),
-        sequence("reconnect_another_account", "rule 66", [REQUESTED, established(1), revoked(2), established(3, other_ref)], (3, "66")),
+        sequence("established_twice", "rule 66: not revoked", [established(1), established(2)], (1, "66")),
+        sequence("reconnect_another_account", "rule 66", [established(1), revoked(2), established(3, other_ref)], (2, "66")),
         sequence(
             "reconnect_another_environment",
             "rule 66",
-            [REQUESTED, established(1), revoked(2), established(3, *mcp[1:])],
-            (3, "66"),
+            [established(1), revoked(2), established(3, *mcp[1:]), ],
+            (2, "66"),
         ),
-        sequence("reconnect_another_broker", "rule 66", [REQUESTED, established(1), revoked(2), established(3, change("payload.broker", "kraken_derivatives_us"))], (3, "66")),
+        sequence("reconnect_another_broker", "rule 66", [established(1), revoked(2), established(3, change("payload.broker", "kraken_derivatives_us"))], (2, "66")),
         sequence("version_1_never_reestablished", "rule 66", [established(1, *v1), revoked(2), established(3)], (2, "66")),
         sequence(
             "version_1_never_reestablished_at_version_1",
@@ -864,38 +862,36 @@ def sequences() -> list[dict]:
         sequence(
             "revoked_on_another_control_stream",
             "rule 66: each rule holds on its own stream; another workspace's revocation revokes nothing here (DEC-696)",
-            [REQUESTED, established(1), with_changes(revoked(2), change("stream_id", f"ctl:{OTHER_WORKSPACE}")), established(3)],
-            (3, "66"),
+            [established(1), with_changes(revoked(2), change("stream_id", f"ctl:{OTHER_WORKSPACE}")), established(3)],
+            (2, "66"),
         ),
         sequence(
             "two_connections_one_account",
             "rule 66: one account_ref, one connection (CN-5)",
-            [REQUESTED, established(1), requested(90, OTHER_CONNECTION, OTHER_ACCOUNT_REF),
-             established(2, change("payload.connection_id", OTHER_CONNECTION))],
-            (3, "66"),
+            [established(1), established(2, change("payload.connection_id", OTHER_CONNECTION))],
+            (1, "66"),
         ),
-        sequence("established_again_after_reconnect", "rule 66", [REQUESTED, established(1), revoked(2), established(3), established(4)], (4, "66")),
+        sequence("established_again_after_reconnect", "rule 66", [established(1), revoked(2), established(3), established(4)], (3, "66")),
         sequence("rotated_never_established", "rule 67", [record("rotated", 1)], (0, "67")),
-        sequence("rotated_after_revocation", "rule 67", [REQUESTED, established(1), revoked(2), record("rotated", 3)], (3, "67")),
+        sequence("rotated_after_revocation", "rule 67", [established(1), revoked(2), record("rotated", 3)], (2, "67")),
         sequence(
             "rotation_widens_the_scopes",
             "rule 67: a rotation never adds a scope",
-            [REQUESTED, established(1), record("rotated", 2, narrower), record("rotated", 3)],
-            (3, "67"),
+            [established(1), record("rotated", 2, narrower), record("rotated", 3)],
+            (2, "67"),
         ),
-        sequence("reauthorize_after_revocation", "rule 67", [REQUESTED, established(1), revoked(2), refused(3, "reauthorize")], (3, "67")),
-        sequence("reconnect_while_connected", "rule 67", [REQUESTED, established(1), refused(2, "reconnect")], (2, "67")),
-        sequence("connect_an_established_id", "rule 67", [REQUESTED, established(1), revoked(2), refused(3, "connect")], (3, "67")),
+        sequence("reauthorize_after_revocation", "rule 67", [established(1), revoked(2), refused(3, "reauthorize")], (2, "67")),
+        sequence("reconnect_while_connected", "rule 67", [established(1), refused(2, "reconnect")], (1, "67")),
+        sequence("connect_an_established_id", "rule 67", [established(1), revoked(2), refused(3, "connect")], (2, "67")),
         sequence(
             "reconnect_refused_for_another_environment",
             "rule 67",
             [
-                REQUESTED,
                 established(1),
                 revoked(2),
                 refused(3, "reconnect", CONNECTION, change("payload.environment", "live"), change("environment", "live")),
             ],
-            (3, "67"),
+            (2, "67"),
         ),
         sequence(
             "degraded_cleared_acknowledged_then_suspended_and_reauthorized",
@@ -1070,7 +1066,7 @@ def new_fold() -> dict:
     return {
         "first": {}, "latest": {}, "scopes": {}, "holder_of": {},
         "owner": None, "binding": None, "current": "active", "cleared": False,
-        "last_check": {}, "rotations": {}, "suspended_at": -1, "open": {}, "requested": set(),
+        "last_check": {}, "rotations": {}, "suspended_at": -1, "open": {}, "requested": set(), "withdrawn": set(),
     }
 
 
@@ -1079,17 +1075,20 @@ CLOSING = {"ConnectionEstablished": ("account_ref", "broker", "environment", "us
            "ConnectionRefused": ("broker", "environment", "user", "step_up")}
 
 
-def unclosed(f: dict, p: dict, kind: str, skip: frozenset[str]) -> bool:
+def unclosed(f: dict, p: dict, kind: str, skip: frozenset[str], full_chain: bool) -> bool:
     """Rule 131: whether a connect's establishment or refusal fails to close its connection's open
-    `ConnectionRequested`, which it closes once, repeating its members."""
+    `ConnectionRequested`, which it closes once, repeating its members. The rule is forward-only: a
+    stream binds it from its first request on, so a journal written before v0.32 still verifies."""
     cid = p["connection_id"]
     request = f["open"].get(cid) if "stream.131.once" in skip else f["open"].pop(cid, None)
     if request is None:
-        return "stream.131.requested" not in skip
+        started = bool(f["requested"]) or "stream.131.forward" in skip
+        judged = full_chain or "stream.131.range" in skip
+        return started and judged and "stream.131.exempt" not in skip and "stream.131.requested" not in skip
     return any(p[m] != request[m] and f"stream.131.{m}" not in skip for m in CLOSING[kind])
 
 
-def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> tuple[int, str] | None:
+def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset(), full_chain: bool = True) -> tuple[int, str] | None:
     """The first record that breaks rule 66, 67, 68, or 131. Each rule holds on its own stream
     (§9.8), so each stream has its own fold."""
     folds: dict[str, dict] = {}
@@ -1112,7 +1111,7 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
                 holder = holder_of.get(p.get("account_ref"))
                 if holder is not None and holder != cid and "stream.66.unique" not in skip:
                     return i, "66"
-                if prior is None and d["schema_version"] == 2 and unclosed(f, p, kind, skip):
+                if prior is None and d["schema_version"] == 2 and unclosed(f, p, kind, skip, full_chain):
                     return i, "131"
                 first.setdefault(cid, p)
                 if p.get("account_ref") is not None:
@@ -1121,6 +1120,8 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
                 scopes[cid] = p["scopes"]
             elif kind == "ConnectionRevoked":
                 latest[cid] = kind
+                if "stream.131.revoke" not in skip and f["open"].pop(cid, None) is not None:
+                    f["withdrawn"].add(cid)
             elif kind == "ConnectionCredentialRotated":
                 if latest.get(cid) != "ConnectionEstablished" and "stream.67.rotated" not in skip:
                     return i, "67"
@@ -1128,14 +1129,20 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
                     return i, "67"
                 scopes[cid] = p["scopes"]
             elif kind == "ConnectionRefused":
-                want = {"connect": None, "reconnect": "ConnectionRevoked", "reauthorize": "ConnectionEstablished"}
-                if latest.get(cid) != want[p["occasion"]] and f"stream.67.{p['occasion']}" not in skip:
+                was = latest.get(cid)
+                withdrawn = cid in f["withdrawn"] and "stream.67.pending_revoke" not in skip
+                fits = {
+                    "connect": was is None or withdrawn,
+                    "reconnect": was == "ConnectionRevoked" and not withdrawn,
+                    "reauthorize": was == "ConnectionEstablished",
+                }
+                if not fits[p["occasion"]] and f"stream.67.{p['occasion']}" not in skip:
                     return i, "67"
                 prior = first.get(cid)
                 if prior is not None and p["occasion"] != "connect" and "stream.67.same" not in skip:
                     if p["broker"] != prior["broker"] or p["environment"] != prior["environment"]:
                         return i, "67"
-                if p["occasion"] == "connect" and unclosed(f, p, kind, skip):
+                if p["occasion"] == "connect" and unclosed(f, p, kind, skip, full_chain):
                     return i, "131"
             elif kind == "ConnectionRequested":
                 if cid in f["open"] and "stream.131.open" not in skip:
@@ -1147,6 +1154,7 @@ def stream_mismatch(drafts: list[dict], skip: frozenset[str] = frozenset()) -> t
                     return i, "131"
                 f["open"][cid] = p
                 f["requested"].add(ref)
+                f["withdrawn"].discard(cid)
             continue
         f["owner"] = cid if f["owner"] is None else f["owner"]
         if cid != f["owner"] and "stream.68.one_connection" not in skip:
@@ -1402,7 +1410,7 @@ def check_section(section: dict) -> list[str]:
 
 
 def sequence_problems(case: dict, drafts: list[dict], skip: frozenset[str]) -> list[str]:
-    got = stream_mismatch(drafts, skip)
+    got = stream_mismatch(drafts, skip, case.get("scope") != "range")
     want = case["expect"]
     expected = None if want["outcome"] == "Valid" else (want["index"], want["rule"])
     if got != expected:
@@ -1608,12 +1616,18 @@ REQUEST_VALIDATOR_MUTANTS = (
     *(f"loose.payload.{m}" for m in REQUEST_NULLED["requested"]),
     *(f"nullable.payload.{m}" for m in REQUEST_NULLED["requested"]),
 )
+REQUEST_VECTOR_MUTANTS = 6
 REQUEST_STREAM_MUTANTS = (
     "stream.131.requested",
     "stream.131.once",
     "stream.131.open",
     "stream.131.established",
     "stream.131.fresh",
+    "stream.131.forward",
+    "stream.131.exempt",
+    "stream.131.revoke",
+    "stream.131.range",
+    "stream.67.pending_revoke",
     *(f"stream.131.{m}" for m in CLOSING["ConnectionEstablished"]),
 )
 
@@ -1674,8 +1688,26 @@ def request_sequences() -> list[dict]:
                  [requested(90, OTHER_CONNECTION, b), REQUESTED, established(1), refused(2, "connect", OTHER_CONNECTION)]),
         sequence("reconnect_closes_nothing", "rule 131: a reconnect and a reauthorize need no request",
                  [REQUESTED, established(1), refused(2, "reauthorize"), revoked(3), refused(4, "reconnect"), established(5)]),
-        sequence("established_without_a_request", "rule 131", [established(1)], (0, "131")),
-        sequence("refused_without_a_request", "rule 131", [refused(1, "connect", CONNECTION, *torn_down)], (0, "131")),
+        sequence("older_journal_with_no_request", "rule 131 is forward-only: a journal written before v0.32 still verifies",
+                 [refused(1, "connect", OTHER_CONNECTION, *torn_down), established(2), revoked(3), established(4)]),
+        sequence("established_without_a_request", "rule 131: from the stream's first request on, every connect closes one",
+                 [requested(90, OTHER_CONNECTION, b), refused(1, "connect", OTHER_CONNECTION, *torn_down), established(2)],
+                 (2, "131")),
+        sequence("refused_without_a_request", "rule 131: from the stream's first request on",
+                 [requested(90, OTHER_CONNECTION, b), refused(1, "connect", CONNECTION, *torn_down)], (1, "131")),
+        {**sequence("range_after_an_unseen_request", "§11: a range checks rule 131's closing requirement only for a "
+                    "request it holds; the full-chain run checks the rest",
+                    [requested(90, OTHER_CONNECTION, b), established(1)]), "scope": "range"},
+        sequence("full_chain_after_the_same_records", "rule 131: the full-chain run flags the connect with no request",
+                 [requested(90, OTHER_CONNECTION, b), established(1)], (1, "131")),
+        sequence("revoked_while_connecting", "rule 131: a revocation closes the open request and is never refused",
+                 [REQUESTED, revoked(1), requested(91, CONNECTION, b), established(2, change("payload.account_ref", b))]),
+        sequence("established_after_its_request_was_revoked", "rule 131: nothing is established from a revoked request",
+                 [REQUESTED, revoked(1), established(2)], (2, "131")),
+        sequence("teardown_after_its_request_was_revoked", "rules 67 and 131: the teardown journals nothing after a revocation",
+                 [REQUESTED, revoked(1), refused(2, "connect", CONNECTION, *torn_down)], (2, "131")),
+        sequence("reconnect_of_a_connection_never_established", "rule 67: a revoked request leaves nothing to reconnect",
+                 [REQUESTED, revoked(1), refused(2, "reconnect")], (2, "67")),
         sequence("request_closed_twice", "rule 131: a request is closed once",
                  [REQUESTED, refused(1, "connect", CONNECTION, *torn_down), established(2)], (2, "131")),
         sequence("requested_twice_while_open", "rule 131: one open request per connection",
@@ -1735,9 +1767,11 @@ def run_request_mutants(section: dict) -> list[str]:
          mutated(lambda s: case(s, "valid_drafts", "requested_live")["changes"].append(change("payload.user", 7)))),
         ("a sequence's expected mismatch moves", "sequences",
          mutated(lambda s: case(s, "sequences", "request_closed_twice")["expect"].update(index=1))),
-        ("a closing record repeats nothing", "sequences",
-         mutated(lambda s: case(s, "sequences", "requested_then_established")["records"].pop(0))),
+        ("a connect after the first request loses its own", "sequences",
+         mutated(lambda s: case(s, "sequences", "two_connects_in_flight")["records"].pop(1))),
     ]
+    if len(registered) != REQUEST_VECTOR_MUTANTS:
+        escaped.append("connection_requests: REQUEST_VECTOR_MUTANTS differs from the registered vector mutants")
     for name, check, bad in registered:
         if check not in {check_of(problem) for problem in check_section(bad)}:
             escaped.append(f"connection_requests vector mutant: {name} (not caught by {check})")
