@@ -10,7 +10,9 @@ use mandate_num::Ratio;
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, is_ident};
-use crate::{Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart};
+use crate::{
+    Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart, VerifiedPrefix,
+};
 
 /// The event types §9.1 closes on the agent stream.
 const CLOSED: [&str; 12] = [
@@ -225,13 +227,12 @@ pub enum HeldAnchorError {
     Unimplemented { story: &'static str },
 }
 
-/// The hold anchor of a range of one agent stream, folded from `prefix`, that stream's stored rows
-/// `seq` 1 to `from_seq − 1` (§11's `held_mismatch`, DEC-787 item 7, DEC-892). Only
-/// `AgentModeChanged` records are read, by the expected-hold rule: a hold sets it, a lift clears
-/// it, every other record keeps it. No version 2 gives `NoVersionTwo`, else `Carried` at the last
-/// version 2. A prefix that breaks `held_mismatch`, or is not the stream's `seq` 1 to `k` in order,
-/// gives `Unknown`, so the range fails closed (DEC-885 I5).
-pub fn held_anchor(prefix: &[StoredEvent]) -> Result<HeldAnchor, HeldAnchorError> {
+/// The hold anchor of a range of one agent stream, folded from its verified prefix (§11's
+/// `held_mismatch`, DEC-787 item 7, DEC-892). Only `AgentModeChanged` records are read, by the
+/// expected-hold rule: a hold sets it, a lift clears it, every other record keeps it. No version 2
+/// gives `NoVersionTwo`, else `Carried` at the last version 2. A prefix that breaks `held_mismatch`,
+/// or is not one agent stream's, gives `Unknown`, so the range fails closed (DEC-885 I5).
+pub fn held_anchor(prefix: &VerifiedPrefix<'_>) -> Result<HeldAnchor, HeldAnchorError> {
     let _ = prefix;
     Err(HeldAnchorError::Unimplemented { story: "E12-3" })
 }

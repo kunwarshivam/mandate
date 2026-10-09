@@ -145,6 +145,46 @@ pub fn verify_events(
     })
 }
 
+/// The stored rows `seq` 1 to `from_seq − 1` of a range's stream, verified by §11's checks 1 to 6
+/// from genesis and bound to the range's trusted start (DEC-892). Every anchor fold takes one, so
+/// none can read history a hot-store rewrite forged; [`VerifiedPrefix::bind`] is its only
+/// constructor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifiedPrefix<'a> {
+    rows: &'a [StoredEvent],
+}
+
+/// Why rows were not bound as a range's prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefixError {
+    /// The first row that fails §11's checks 1 to 6 from genesis.
+    Unverified(EventFailure),
+    /// The rows do not end just before the trusted start: not empty for `from_seq` 1, or else a
+    /// last `seq` that is not `from_seq − 1` or a last `hash` that is not `start.prev_hash`.
+    Unbound,
+    /// `bind` is a DEC-77 stub until `story` lands.
+    Unimplemented { story: &'static str },
+}
+
+impl<'a> VerifiedPrefix<'a> {
+    /// `rows` as the prefix of a range entered at `start`: they pass checks 1 to 6 from genesis
+    /// with no gap, and are empty when `start.from_seq` is 1, else end at `seq` `from_seq − 1`
+    /// with `hash` `start.prev_hash`. A refusal gives the caller no anchor, so its range fails
+    /// closed (DEC-892 item 3).
+    pub fn bind(
+        rows: &'a [StoredEvent],
+        start: TrustedStart,
+        artifacts: &dyn ArtifactSource,
+    ) -> Result<Self, PrefixError> {
+        let _ = (rows, start, artifacts);
+        Err(PrefixError::Unimplemented { story: "E12-3" })
+    }
+
+    pub fn rows(&self) -> &'a [StoredEvent] {
+        self.rows
+    }
+}
+
 /// The stored columns equal the body's fields (spec §11 check 2).
 fn columns_match(row: &StoredEvent, body: &Value) -> bool {
     let text = |name: &str| body.get(name).and_then(Value::as_str);

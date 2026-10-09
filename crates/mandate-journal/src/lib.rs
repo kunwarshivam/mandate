@@ -67,7 +67,8 @@ pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
 pub use start::{StartRequest, TrustedStartError, resolve_trusted_start};
 pub use verify::{
-    EventCheck, EventFailure, RangeCheck, TrustedStart, Verified, verify_anchor, verify_events,
+    EventCheck, EventFailure, PrefixError, RangeCheck, TrustedStart, Verified, VerifiedPrefix,
+    verify_anchor, verify_events,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
