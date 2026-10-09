@@ -28,12 +28,14 @@ enum Interloper {
 }
 
 /// The control stream as a compare-and-append over its rows, `seq` from 1, with the interlopers
-/// that commit, one per append call, just before the writer's own append lands.
+/// that commit, one per append call, just before the writer's own append lands; `read` returns
+/// the rows from index `from` on, which a test keeps at or before the last membership record.
 #[derive(Default)]
 struct Stream {
     rows: Vec<ControlEntry>,
     pending: VecDeque<Interloper>,
     reads: u32,
+    from: usize,
 }
 
 impl Stream {
@@ -66,7 +68,7 @@ impl ControlStream for Stream {
 
     fn read(&mut self) -> Result<ControlView, Infallible> {
         self.reads += 1;
-        let (head, tail) = (self.rows.len() as u64, self.rows.clone());
+        let (head, tail) = (self.rows.len() as u64, self.rows[self.from..].to_vec());
         Ok(ControlView { head, tail })
     }
 
@@ -79,6 +81,52 @@ impl ControlStream for Stream {
         }
         self.rows.push(ControlEntry::Membership(record.clone()));
         Ok(Appended::Committed)
+    }
+}
+
+/// A storage failure the faulty store reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fault;
+
+/// A store over a [`Stream`] whose every append fails, and whose reads fail too when `fail_read`
+/// is set; it counts the appends it is asked for.
+struct Faulty {
+    stream: Stream,
+    fail_read: bool,
+    appends: u32,
+}
+
+impl Faulty {
+    fn new(fail_read: bool) -> Self {
+        let stream = Stream::with(&[Interloper::Member(0)]);
+        Self {
+            stream,
+            fail_read,
+            appends: 0,
+        }
+    }
+
+    /// The writer's answer is `Store`, after these reads and appends, with no row added.
+    fn failed(&mut self, reads: u32, appends: u32) {
+        let before = self.stream.rows.clone();
+        let got = write_membership(self, || t(3_600), event(1));
+        assert_eq!(got, Err(WriteError::Store(Fault)), "the writer's answer");
+        assert_eq!((self.stream.reads, self.appends), (reads, appends));
+        assert_eq!(self.stream.rows, before, "nothing was written");
+    }
+}
+
+impl ControlStream for Faulty {
+    type Error = Fault;
+
+    fn read(&mut self) -> Result<ControlView, Fault> {
+        let view = self.stream.read().map_err(|never| match never {})?;
+        if self.fail_read { Err(Fault) } else { Ok(view) }
+    }
+
+    fn append(&mut self, _: u64, _: &MembershipRecord) -> Result<Appended, Fault> {
+        self.appends += 1;
+        Err(Fault)
     }
 }
 
@@ -283,5 +331,43 @@ fn the_stream_stays_ordered_under_random_interleavings() {
     };
     if let Err(failure) = TestRunner::new(config).run(&writes, body) {
         panic!("{failure}");
+    }
+}
+
+/// DEC-646 item 3: a failed `read` is passed through as `Store`, after one read and no append.
+#[test]
+#[ignore = "pending E9-7"]
+fn a_failed_read_is_a_store_error_and_appends_nothing() {
+    Faulty::new(true).failed(1, 0);
+}
+
+/// DEC-646 item 3: a failed `append` is passed through as `Store`, never retried as a moved head.
+#[test]
+#[ignore = "pending E9-7"]
+fn a_failed_append_is_a_store_error_and_is_not_retried() {
+    Faulty::new(false).failed(1, 1);
+}
+
+/// DEC-646 item 1: `read` returns the records from at least the last membership record on. A tail
+/// cut exactly there, so that record is `tail[0]` and the tail's only membership record, or one
+/// starting at an older record of either type, gives the same `last`, and commits at head + 1.
+#[test]
+#[ignore = "pending E9-7"]
+fn last_is_found_wherever_the_tail_starts() {
+    let rows = [
+        Interloper::Other(0),
+        Interloper::Member(1_000),
+        Interloper::Other(2_000),
+        Interloper::Member(7_200),
+        Interloper::Other(9_000),
+    ];
+    for from in [0, 1, 3] {
+        let mut stream = Stream::with(&rows);
+        stream.from = from;
+        let before = stream.rows.clone();
+        assert_eq!(write(&mut stream, t(3_600)), REFUSED, "tail from {from}");
+        assert_eq!(stream.rows, before, "nothing was written, tail from {from}");
+        let got = write(&mut stream, t(7_200));
+        committed(&stream, got, 6, t(7_200));
     }
 }
