@@ -1582,11 +1582,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `capital.max_loss_from_allocation`, the only path that lifts a latched lifetime floor, is never
   confirmed by my passkey alone ([mandate spec](../specs/mandate.md) V-047, §4.3, §5.7, MI-3;
   [DEC-444](decisions/DEC-444.md)). Until it lands, the web app refuses such a version under the
-  policy, and a neutral one where fewer than two people can approve, and reads an absent or unknown
-  policy value as required (the interim refusal, claim #746).
+  policy, and a neutral one where fewer than two people can approve, refuses every new agent's
+  deployment under the policy, whatever the approver count, and reads an absent or unknown policy
+  value as required (the interim refusal, claim #746).
   *Accepted when:*
   - the request names the version, its hash and its §9.2 classification, and the approver is a
     user other than the requester, with step-up;
+  - the same second-user flow covers the other acts V-047 names under the policy: a deployment
+    (a first version, which DEC-444's exception never covers), a high-water-mark reset
+    ([mandate spec](../specs/mandate.md) §5.8), and lifting a fired tripwire (§6.7), each approved
+    by a user other than the requester, and the web deployment's interim refusal is replaced by it;
   - a one-user workspace is refused as V-047 says, a risk-reducing version aside (DEC-444);
   - the version applies only after the second user's approval, and V-047 is checked again at
     application;
