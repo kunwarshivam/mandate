@@ -149,6 +149,6 @@ fn the_witness_literal_builds_inside_the_crate() {
         context: &reading,
         demanded: PhantomData,
     };
-    assert!(std::ptr::eq(witness.context, &reading));
+    assert!(std::ptr::addr_eq(witness.context, &reading));
     assert_eq!(ReadRecords::PERMISSION, P::ReadRecords);
 }

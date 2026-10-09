@@ -1677,6 +1677,15 @@ name = "mandate-identity-seal"
 version = "0.0.0"
 
 [[package]]
+name = "mandate-identity-system"
+version = "0.0.0"
+dependencies = [
+ "mandate-identity",
+ "mandate-tenant",
+ "proptest",
+]
+
+[[package]]
 name = "mandate-identity-testkit"
 version = "0.0.0"
 dependencies = [
