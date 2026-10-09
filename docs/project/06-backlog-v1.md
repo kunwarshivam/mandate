@@ -1283,10 +1283,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   layer is done: no context is built from a bare ID (compile-fail doctests), every granted context
   carries exactly its route's org and workspace (the ID-2 matrix), a snapshot or fan-out never serves
   another workspace, the `require` witness, `SystemContext` (#1058, #1061, #1070), and a step-up
-  challenge presented in another workspace is refused. Still owed, each by its own lane:
-  - *Step-up presentation* (L1, tests PR in flight): `mandate_passkey::stepup::Presentation` still
-    takes a bare `WorkspaceId` and `PrincipalId`, so a caller can name another workspace's challenge;
-    it is to read both from the request's context instead.
+  challenge presented in another workspace is refused. Step-up presentation is done too:
+  `mandate_passkey::stepup::Presentation` reads its workspace and principal from the request's
+  context and its ID fields are private (DEC-649; #1134, #1144, #1150, #1154). Still owed, each by
+  its own lane:
   - *Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.
   - *Row-level security* (the workspace store): rows keyed on `workspace_id` under a per-transaction
     setting only the context sets, and `no_principal_reads_the_membership_index_of_another`.
