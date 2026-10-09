@@ -705,7 +705,9 @@ spec v0.22 ([DEC-671](../project/decisions/DEC-671.md)). The
 credential, session, service-account, host-CLI, and break-glass records are listed with the members
 the identity spec names and close in their own change, as §9.2's other records do; until then
 `append` refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
-exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4).
+exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor is
+`NotificationAddressChanged`: its row and schema come with the notification records' change
+([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md)).
 
 **Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
 `ClockToleranceExceeded`.
