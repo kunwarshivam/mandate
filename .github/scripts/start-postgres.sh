@@ -5,25 +5,37 @@
 # both jobs run the same digest-pinned image, role, and password that `MANDATE_PG_URL` names.
 set -euo pipefail
 
-image="postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722"
+digest="sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722"
+image="postgres:18.6@$digest"
 
-# A transient registry error would redden a required check DEC-464 forbids retrying automatically,
-# as a release download's 500 did before DEC-498 gave every download a retry. The digest still
-# decides what runs; the retry only decides how often a transient failure costs a job.
-pulled=false
-for delay in 2 4 8 16 0; do
-  if docker pull --quiet "$image"; then
-    pulled=true
-    break
-  fi
+# The same image by digest from three registries, mirrors first. Docker Hub refuses unauthenticated
+# pulls past a rate limit that the runners' shared addresses reach, which failed every
+# Postgres-backed job on 2026-10-09. Docker verifies a pull by digest against the content it
+# receives, so a mirror can only serve the pinned image and cannot substitute another. A transient
+# registry error would redden a required check DEC-464 forbids retrying automatically, as a release
+# download's 500 did before DEC-498 gave every download a retry, so each registry is tried again.
+sources=(
+  "mirror.gcr.io/library/$image"
+  "public.ecr.aws/docker/library/$image"
+  "$image"
+)
+pulled=""
+for delay in 2 4 8 0; do
+  for source in "${sources[@]}"; do
+    if docker pull --quiet "$source"; then
+      pulled="$source"
+      break 2
+    fi
+  done
   sleep "$delay"
 done
-if [ "$pulled" != true ]; then
-  echo "could not pull $image" >&2
+if [ -z "$pulled" ]; then
+  echo "could not pull $image from any registry" >&2
   exit 1
 fi
+echo "pulled $pulled"
 
-docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 "$image"
+docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 "$pulled"
 
 # Ready over TCP, which is how the tests connect. The image's first-start initialisation runs a
 # temporary server that listens on the Unix socket only, so a socket check can pass while that
