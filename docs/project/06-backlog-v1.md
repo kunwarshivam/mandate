@@ -4640,11 +4640,13 @@ From the independent review of the E10-10 A1 implementation, part 1 ([#993](http
   says ("where serde can name it"). The body is still refused, and no sibling is ever named.~~
   Done ([#1104](https://github.com/kunwarshivam/mandate/pull/1104) and
   [#1112](https://github.com/kunwarshivam/mandate/pull/1112), tests, #1112 for a map's last entry
-  and the RFC 6901 escaping of a member's name; the fix on `claude/l2-e10-10-decode-minors-impl`, through
+  and the RFC 6901 escaping of a member's name;
+  [#1117](https://github.com/kunwarshivam/mandate/pull/1117), the fix, through
   `serde_path_to_error`, [DEC-880](decisions/DEC-880.md)).
 - ~~**Refuse invalid UTF-8 inside a string value as `malformed` at `""`.** Today it is refused as
   `type` at the member. It is still refused either way.~~ Done
-  ([#1104](https://github.com/kunwarshivam/mandate/pull/1104), tests; the fix on `claude/l2-e10-10-decode-minors-impl`).
+  ([#1104](https://github.com/kunwarshivam/mandate/pull/1104), tests;
+  [#1117](https://github.com/kunwarshivam/mandate/pull/1117), the fix).
 - **Refuse a tagged object written as a JSON array** (#1104's review). `decode` accepts an
   internally tagged object written as a JSON array (`"who": ["user","a"]`) for `Actor`, `Scope`
   and the problem's tagged violation, which the schema refuses. Leniency only: the array form
