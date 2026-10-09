@@ -8,11 +8,12 @@
   mailbox, is a permanent `provider_error`), DEC-790 item 4 (`exp` 12 hours after the attempt).
 - **Code:** `mandate-dispatcher` (layer 3, safety-critical, over `mandate-notify`,
   `mandate-webpush` and `mandate-push-relay`): `crates/mandate-dispatcher/src/lib.rs` (`prepare`,
-  `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, the closed `DispatchError`).
-  Pending E8-14: every body is a stub.
+  `Attempt`, `Route`, `Prepared`, `Relayed`, `relay_refusal`, the closed `DispatchError`). A
+  relayed attempt checks its subject before it signs; every attempt signs its own header with its
+  own time through `mandate_webpush::vapid_authorization`.
 - **Tests:** `crates/mandate-dispatcher/src/tests.rs`: two attempts sign two headers whose `exp`
   differs by the attempts' gap; no header lapses at its own attempt over the whole 24-hour `safety`
   schedule; a relayed send with a person's subject builds no header and is refused
   `provider_error`; the relay's `address_rejected` marks the address, its `unreachable` is a
   retried timeout, and every other refusal is a permanent `provider_error` that marks nothing; and a canary subject reaches no outcome or error.
-- **Run:** `cargo nextest run -p mandate-dispatcher --run-ignored all`; `cargo xtask ci pending`.
+- **Run:** `cargo nextest run -p mandate-dispatcher`.
