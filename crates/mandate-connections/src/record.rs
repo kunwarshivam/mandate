@@ -238,7 +238,7 @@ impl ConnectionRecord {
         }
     }
 
-    /// The members `ConnectionEstablished` version 2 takes from the record (journal spec §9.12);
+    /// The members `ConnectionEstablished` version 2 takes from the record (journal spec §9.8);
     /// the caller adds the user and the step-up.
     pub fn established_members(&self) -> EstablishedMembers {
         EstablishedMembers {
@@ -263,7 +263,7 @@ pub struct ConnectionView {
     pub state: ConnectionState,
 }
 
-/// `ConnectionEstablished` version 2's members from the record (journal spec §9.12).
+/// `ConnectionEstablished` version 2's members from the record (journal spec §9.8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EstablishedMembers {
     pub connection_id: ConnectionId,

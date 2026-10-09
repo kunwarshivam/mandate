@@ -12,7 +12,6 @@ fn code(build: Build, endpoint: &str) -> &'static str {
 }
 
 #[test]
-#[ignore = "pending E7-16"]
 fn only_the_pinned_host_is_accepted() {
     let cases = [
         ("https://mcp.broker.example/mcp", "ok"),
@@ -43,7 +42,6 @@ fn only_the_pinned_host_is_accepted() {
 }
 
 #[test]
-#[ignore = "pending E7-16"]
 fn plain_http_is_refused_outside_test_builds_and_off_loopback() {
     for loopback in ["http://127.0.0.1:8080/mcp", "http://[::1]:8080/mcp"] {
         let host = if loopback.contains('[') {

@@ -1,19 +1,24 @@
 //! The streamable HTTP transport: one `POST` per message to the pinned endpoint.
 
-use std::fmt::Debug;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
+use std::fmt::{self, Debug};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use reqwest::header::HeaderValue;
+use reqwest::StatusCode;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
 
 use crate::budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
-use crate::endpoint::PinnedEndpoint;
+use crate::endpoint::{Build, PinnedEndpoint};
 use crate::error::{McpError, ServerText};
+use crate::frame;
 
+const SESSION_HEADER: &str = "mcp-session-id";
+const PROTOCOL_HEADER: &str = "mcp-protocol-version";
 /// The MCP revision whose streamable HTTP transport this implements.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
+const USER_AGENT: &str = concat!("mandate-mcp/", env!("CARGO_PKG_VERSION"));
 
 /// A monotonic clock: the time since any fixed origin. The budget paces against it.
 pub trait Monotonic: Debug + Send + Sync {
@@ -73,11 +78,6 @@ impl TransportConfig {
     };
 }
 
-#[derive(Debug)]
-#[expect(
-    dead_code,
-    reason = "read by E7-16's implementation, which replaces the stubs below"
-)]
 pub struct McpTransport {
     client: reqwest::Client,
     endpoint: PinnedEndpoint,
@@ -94,8 +94,32 @@ impl McpTransport {
         config: TransportConfig,
         clock: Box<dyn Monotonic>,
     ) -> Result<Self, McpError> {
-        let _ = (endpoint, config, clock);
-        Err(McpError::Unimplemented { story: "E7-16" })
+        if config.connect_timeout.is_zero()
+            || config.request_timeout.is_zero()
+            || config.max_answer_bytes == 0
+        {
+            return Err(McpError::BadConfig);
+        }
+        let budget = RateBudget::new(config.budget, clock.elapsed())?;
+        let _already_installed = rustls::crypto::ring::default_provider().install_default();
+        let client = reqwest::Client::builder()
+            .https_only(Build::CURRENT == Build::Production)
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .connect_timeout(config.connect_timeout)
+            .timeout(config.request_timeout)
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(|_| McpError::ClientSetup)?;
+        Ok(Self {
+            client,
+            endpoint,
+            max_answer_bytes: config.max_answer_bytes,
+            budget: Mutex::new(budget),
+            clock,
+            session: Mutex::new(None),
+            next_id: AtomicU64::new(1),
+        })
     }
 
     /// Sends request `method` and returns its result, or the server's JSON-RPC error as
@@ -107,8 +131,27 @@ impl McpTransport {
         method: &str,
         params: &Value,
     ) -> Result<ServerText, McpError> {
-        let _ = (class, method, params);
-        Err(McpError::Unimplemented { story: "E7-16" })
+        self.admit(class)?;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let response = self
+            .post(frame::request_body(Some(id), method, params))
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(McpError::HttpStatus {
+                status: response.status().as_u16(),
+            });
+        }
+        let is_stream = match media_type(response.headers()).as_deref() {
+            Some("application/json") => false,
+            Some("text/event-stream") => true,
+            _ => return Err(McpError::ContentType),
+        };
+        let body = self.read_capped(response).await?;
+        if is_stream {
+            frame::parse_sse(&body, id)
+        } else {
+            frame::parse_json(&body, id)
+        }
     }
 
     /// Sends notification `method`, which the server acknowledges with `202 Accepted`.
@@ -118,7 +161,108 @@ impl McpTransport {
         method: &str,
         params: &Value,
     ) -> Result<(), McpError> {
-        let _ = (class, method, params);
-        Err(McpError::Unimplemented { story: "E7-16" })
+        self.admit(class)?;
+        let response = self.post(frame::request_body(None, method, params)).await?;
+        match response.status() {
+            StatusCode::ACCEPTED => Ok(()),
+            other => Err(McpError::HttpStatus {
+                status: other.as_u16(),
+            }),
+        }
+    }
+
+    fn admit(&self, class: CallClass) -> Result<(), McpError> {
+        let now = self.clock.elapsed();
+        self.budget
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .try_acquire(class, now)
+    }
+
+    /// One `POST`, carrying the session the server assigned, if any, and keeping the one its
+    /// answer assigns. A redirect and a session the server no longer knows end here.
+    async fn post(&self, body: String) -> Result<reqwest::Response, McpError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(PROTOCOL_HEADER, HeaderValue::from_static(PROTOCOL_VERSION));
+        let session = self.session().clone();
+        if let Some(session) = &session {
+            headers.insert(SESSION_HEADER, session.clone());
+        }
+        let response = self
+            .client
+            .post(self.endpoint.url().clone())
+            .headers(headers)
+            .body(body)
+            .send()
+            .await
+            .map_err(classify)?;
+        let status = response.status();
+        if status.is_redirection() {
+            return Err(McpError::Redirected);
+        }
+        if status == StatusCode::NOT_FOUND && session.is_some() {
+            *self.session() = None;
+            return Err(McpError::SessionExpired);
+        }
+        if let Some(assigned) = response.headers().get(SESSION_HEADER)
+            && status.is_success()
+        {
+            let visible = assigned
+                .as_bytes()
+                .iter()
+                .all(|b| (0x21..=0x7e).contains(b));
+            if !visible || assigned.is_empty() {
+                return Err(McpError::BadSessionId);
+            }
+            let mut kept = assigned.clone();
+            kept.set_sensitive(true);
+            *self.session() = Some(kept);
+        }
+        Ok(response)
+    }
+
+    fn session(&self) -> std::sync::MutexGuard<'_, Option<HeaderValue>> {
+        self.session.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn read_capped(&self, mut response: reqwest::Response) -> Result<Vec<u8>, McpError> {
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(classify)? {
+            if body.len().saturating_add(chunk.len()) > self.max_answer_bytes {
+                return Err(McpError::TooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+}
+
+/// The media type without parameters, lower case.
+fn media_type(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(CONTENT_TYPE)?.to_str().ok()?;
+    let essence = value.split(';').next()?;
+    Some(essence.trim().to_ascii_lowercase())
+}
+
+fn classify(error: reqwest::Error) -> McpError {
+    if error.is_timeout() {
+        McpError::Timeout
+    } else {
+        McpError::Network
+    }
+}
+
+/// The session id the server assigned is server text and works as a bearer token, so the
+/// printout leaves it out, along with the client and the budget.
+impl fmt::Debug for McpTransport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("McpTransport")
+            .field("endpoint", &self.endpoint)
+            .finish_non_exhaustive()
     }
 }

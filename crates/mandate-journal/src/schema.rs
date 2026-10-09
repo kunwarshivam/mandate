@@ -38,6 +38,8 @@ pub(crate) enum Ty {
     OpenObject,
     /// A member that is always `null` at its record's version (journal spec §9.7).
     Null,
+    /// A personal-data vault reference: `pii_` followed by a ULID (journal spec §9.8, §6.4).
+    PiiRef,
 }
 
 pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
@@ -86,6 +88,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
             normalize_record(fields, value.as_object().ok_or_else(schema)?, path).map(Value::Object)
         }
         Ty::OpenObject => value.as_object().map(|_| value.clone()).ok_or_else(schema),
+        Ty::PiiRef => checked(text()?.strip_prefix("pii_").is_some_and(is_ulid)),
         Ty::Null => match value {
             Value::Null => Ok(Value::Null),
             _ => Err(schema()),
