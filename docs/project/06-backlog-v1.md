@@ -1287,10 +1287,12 @@ story buys a service, and none uses a real identity-provider account in tests (s
   `mandate_passkey::stepup::Presentation` reads its workspace and principal from the request's
   context and its ID fields are private (DEC-649; #1134, #1144, #1150, #1154). Still owed, each by
   its own lane:
-  - *Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.
-    Lenient API-7 operations (DEC-682 item 27) drop and list a workspace member and never apply
-    it, which the lenient decoder's tests (`crates/mandate-api/tests/lenient.rs`, DEC-886) pin as
-    pending E10-10.
+  - ~~*Workspace API* (L2, `mandate-api`): a request body naming another workspace is refused.~~
+    Done for the strict decoder: pinned by `crates/mandate-api/tests/body_workspace.rs` (E10-10,
+    tests only; every request shape was already closed, and a kill switch's workspace scope takes
+    `id: null`). Lenient API-7 operations (DEC-682 item 27) drop and list a workspace member and
+    never apply it, which the lenient decoder's tests (`crates/mandate-api/tests/lenient.rs`,
+    DEC-886) pin as pending E10-10.
   - *Row-level security* (the workspace store): rows keyed on `workspace_id` under a per-transaction
     setting only the context sets, and `no_principal_reads_the_membership_index_of_another`.
   - *Own-credential API* (the workspace store): `own_credential_api_takes_no_principal_id`, a
@@ -4659,8 +4661,9 @@ From the round-1 review of the workspace services API spec ([#560](https://githu
   client issues workspace-scope calls. Name the principal and route.
 - **Cite the notice payload, do not restate it** (minor 5). Spec §3.9 should point at the
   notifications spec §4.2 for the payload's members.
-- **API-2's test reads the workspace from the path only** (minor 6). Assert no route reads the
-  workspace from a body member.
+- ~~**API-2's test reads the workspace from the path only** (minor 6). Assert no route reads the
+  workspace from a body member.~~ Done at the body layer: `crates/mandate-api/tests/body_workspace.rs`
+  refuses a workspace member in every request body; the route half is the server crate's (DEC-680).
 - **One wording for a client's reads** (minor 7). §3.7's client column and §3.8's `read` scope say
   the same rule two ways; keep one.
 
