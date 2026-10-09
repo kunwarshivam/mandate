@@ -206,6 +206,123 @@ fn nothing_that_can_move_funds_out_is_accepted() {
     );
 }
 
+/// Fund movement is judged by whole tokens (DEC-676, amending DEC-839 item 3): a name is split at
+/// every character that is not a letter or digit and at each lower-to-upper case change, lowercased,
+/// and refused when a token is one of DEC-839's and DEC-676's. A word that only contains one, such
+/// as `fundamentals`, is another word.
+#[test]
+#[ignore = "pending E7-12"]
+fn fund_movement_is_judged_by_whole_tokens() {
+    for tool in [
+        "ach_debit",
+        "sendMoney",
+        "initiate-ach-transfer",
+        "get_transfers",
+        "link_ach",
+        "createAchRelationship",
+        "request_payout",
+        "disburse_now",
+        "get_deposits",
+        "add_funds",
+    ] {
+        let mut input = robinhood();
+        input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
+        assert_eq!(
+            outcome(&run(&input).unwrap(), Check::Scope),
+            Some(Outcome::Failed(Reason::FundMovement)),
+            "{tool} has a fund-movement token"
+        );
+    }
+    for tool in [
+        "get_fundamentals",
+        "refund_status",
+        "wireless",
+        "resend",
+        "teacher",
+    ] {
+        let mut input = robinhood();
+        input.granted = Granted::Tools(set(&["get_accounts", "place_equity_order", tool]));
+        assert_eq!(
+            outcome(&run(&input).unwrap(), Check::Scope),
+            Some(Outcome::Passed),
+            "{tool} has no fund-movement token"
+        );
+    }
+}
+
+/// A pin is made at the first connect only; at every later occasion a missing pin fails closed as
+/// drift (DEC-676 item 3, AGENTS.md rule 3), never as a pass.
+#[test]
+#[ignore = "pending E7-12"]
+fn a_later_contract_check_without_a_pin_fails_closed() {
+    for occasion in [
+        Occasion::Reconnect,
+        Occasion::Reauthorize,
+        Occasion::ExecutorStart,
+        Occasion::Daily,
+    ] {
+        let mut unpinned = robinhood();
+        unpinned.occasion = occasion;
+        unpinned.pinned_contract = None;
+        assert_eq!(
+            outcome(&run(&unpinned).unwrap(), Check::Contract),
+            Some(Outcome::Failed(Reason::ContractDrift)),
+            "{occasion:?}"
+        );
+    }
+    let first = robinhood();
+    assert_eq!(first.pinned_contract, None);
+    assert_eq!(
+        outcome(&run(&first).unwrap(), Check::Contract),
+        Some(Outcome::Passed),
+        "the first connect pins"
+    );
+}
+
+/// What the broker reported must be the kind the credential is: an API key's permissions, OAuth
+/// scopes, or MCP tools. Any other pairing fails closed as `scope_mismatch` (DEC-676 item 4).
+#[test]
+#[ignore = "pending E7-12"]
+fn a_grant_of_another_kind_than_the_credential_is_refused() {
+    let key = Granted::KeyPermissions(Some(set(&["trade"])));
+    let scopes = Granted::OAuth(GrantedScopes(set(&["data", "trading"])));
+    let tools = Granted::Tools(set(&["get_accounts", "place_equity_order"]));
+    let kraken = CheckInput {
+        broker: Broker::KrakenDerivativesUs,
+        auth_kind: AuthKind::ApiKey,
+        granted: key.clone(),
+        ..alpaca()
+    };
+    let alpaca_key = CheckInput {
+        auth_kind: AuthKind::ApiKey,
+        granted: key.clone(),
+        ..alpaca()
+    };
+    let cases: [(CheckInput, Granted); 9] = [
+        (robinhood(), key.clone()),
+        (robinhood(), Granted::KeyPermissions(None)),
+        (robinhood(), scopes.clone()),
+        (alpaca(), key.clone()),
+        (alpaca(), tools.clone()),
+        (alpaca_key.clone(), scopes.clone()),
+        (alpaca_key, tools.clone()),
+        (kraken.clone(), scopes),
+        (kraken, tools),
+    ];
+    for (base, granted) in cases {
+        let input = CheckInput {
+            granted: granted.clone(),
+            ..base
+        };
+        assert_eq!(
+            outcome(&run(&input).unwrap(), Check::Scope),
+            Some(Outcome::Failed(Reason::ScopeMismatch)),
+            "{:?} given {granted:?}",
+            input.auth_kind
+        );
+    }
+}
+
 #[test]
 #[ignore = "pending E7-12"]
 fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
