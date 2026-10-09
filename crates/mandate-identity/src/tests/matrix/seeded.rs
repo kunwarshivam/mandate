@@ -11,10 +11,10 @@ use std::collections::BTreeSet;
 use mandate_identity_seal::LookupSeal;
 use mandate_time::UtcNanos;
 
-use super::super::{ByMember, Failing, W1, hosted_in, paired, record_of};
+use super::super::{ByMember, Failing, W1, hosted_in, record_of};
 use super::{
-    Expected, OTHER, Row, SCOPES, SESSION_KINDS, USER, WS1, a_day_before_now, expected_in, matrix,
-    memberships_since, now, session, subsets, wide_snapshot,
+    Expected, OTHER, Row, SCOPES, SESSION_KINDS, USER, a_day_before_now, expected_in, matrix,
+    memberships_since, now, outage_expected, session, subsets, wide_snapshot,
 };
 use crate::{
     Authorized, LookupFailed, Membership, MembershipLookup, MembershipQuery, MembershipState,
@@ -93,27 +93,6 @@ fn id2_sweep(planted: Answer<'_>) -> Tally {
         }
     }
     tally
-}
-
-/// The ID-5 oracle over a failed membership read, as `matrix.rs`'s outage test states it: a row
-/// that reads memberships is answered from the session's snapshot when it is risk-reducing and
-/// refused `membership_unavailable` otherwise; a row that reads none answers as with no outage.
-fn outage_expected(
-    row: &Row,
-    principal: &Principal,
-    snapshot: &[Membership],
-    scope: Scope,
-    kind: SessionKind,
-) -> Expected {
-    let client_outside = matches!(principal, Principal::Client { .. }) && scope != WS1;
-    let read = scope != Scope::Principal && !client_outside && paired(scope);
-    match (row.inactive, read, row.risk_reducing) {
-        (true, _, _) => Err(Refusal::InactivePermission),
-        (false, false, _) | (false, true, true) => {
-            expected_in(row, principal, snapshot, scope, kind)
-        }
-        (false, true, false) => Err(Refusal::MembershipUnavailable),
-    }
 }
 
 /// The ID-5 oracle over every role set, settled a day before `now` or with the reviewable roles

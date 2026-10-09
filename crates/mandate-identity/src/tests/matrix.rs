@@ -338,6 +338,27 @@ fn expected_in(
     reduction_limited(row, expected(row, principal, ms, scope), kind)
 }
 
+/// The ID-5 oracle over a failed membership read, as `matrix.rs`'s outage test states it: a row
+/// that reads memberships is answered from the session's snapshot when it is risk-reducing and
+/// refused `membership_unavailable` otherwise; a row that reads none answers as with no outage.
+fn outage_expected(
+    row: &Row,
+    principal: &Principal,
+    snapshot: &[Membership],
+    scope: Scope,
+    kind: SessionKind,
+) -> Expected {
+    let client_outside = matches!(principal, Principal::Client { .. }) && scope != WS1;
+    let read = scope != Scope::Principal && !client_outside && paired(scope);
+    match (row.inactive, read, row.risk_reducing) {
+        (true, _, _) => Err(Refusal::InactivePermission),
+        (false, false, _) | (false, true, true) => {
+            expected_in(row, principal, snapshot, scope, kind)
+        }
+        (false, true, false) => Err(Refusal::MembershipUnavailable),
+    }
+}
+
 /// A reduction-only session's limit to its own rows, applied to an answer.
 fn reduction_limited(row: &Row, answer: Expected, kind: SessionKind) -> Expected {
     match answer {
@@ -724,13 +745,8 @@ fn a_failed_membership_read_never_refuses_risk_reduction_and_refuses_the_rest() 
                                 matches!(principal, Principal::Client { .. }) && scope != WS1;
                             let read =
                                 scope != Scope::Principal && !client_outside && paired(scope);
-                            let want = match (row.inactive, read, row.risk_reducing) {
-                                (true, _, _) => Err(Refusal::InactivePermission),
-                                (false, false, _) | (false, true, true) => {
-                                    expected_in(row, principal, &snapshot, scope, kind_of_session)
-                                }
-                                (false, true, false) => Err(Refusal::MembershipUnavailable),
-                            };
+                            let want =
+                                outage_expected(row, principal, &snapshot, scope, kind_of_session);
                             let got = authorize(
                                 &Failing,
                                 principal,
