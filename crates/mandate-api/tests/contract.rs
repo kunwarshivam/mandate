@@ -750,11 +750,12 @@ fn misjudged<T: DeserializeOwned + Validate + Debug>(cases: &[Judged]) -> Vec<St
 /// in order, so `["user", "a"]` would decode as the user `a`. `decode` refuses the array form as
 /// `type` at the tagged object, as a member (`/who`) and as an array item (`/crowd/<index>`), and
 /// an empty array as `type` too, not as a `kind` that is `missing` (DEC-881, DEC-681 item 10).
-/// The controls: the object form is accepted, and a scalar is `type` at the same pointer.
+/// The controls: the object form is accepted, `kind` first or last, a one-item array that serde
+/// already refuses is `type`, and a scalar is `type` at the same pointer.
 #[test]
 #[ignore = "pending E10-10"]
 fn an_actor_given_as_an_array_is_refused_as_type_at_its_member() {
-    let cases: [Judged; 10] = [
+    let cases: [Judged; 11] = [
         (
             br#"{"effect": "none", "who": ["user", "a"]}"#,
             Some(("/who", "type")),
@@ -778,6 +779,10 @@ fn an_actor_given_as_an_array_is_refused_as_type_at_its_member() {
         ),
         (
             br#"{"effect": "none", "who": {"kind": "user", "id": "a"}}"#,
+            None,
+        ),
+        (
+            br#"{"effect": "none", "who": {"id": "a", "kind": "user"}}"#,
             None,
         ),
         (
