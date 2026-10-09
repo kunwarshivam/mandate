@@ -11056,6 +11056,151 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A pipeline whose line expands may feed only a filter, and a wrapper's options are read by
+    /// arity (DEC-851 item 6, the coordinator's thirteenth-round rulings; X1 tests correction 12e,
+    /// after #994's review). On a logical line holding `$` or a backtick, every pipeline sink after
+    /// its wrappers must be `sha256sum`, `tee`, `tr`, `sort`, `grep`, `cut`, `tail`, `paste`,
+    /// `cat`, `head`, `uniq`, `wc`, `read` (`while read`), `awk` or `sed` (whose executing forms
+    /// are refused anyway), or, in `deploy/` only, `put_file` or `sql`; any other sink, a compound command's
+    /// shell, a variable, and an empty sink (one a comment swallowed) are refused, unless the
+    /// line is on the interim exact-line list of parser-limited lines. Finding the command word
+    /// skips every unquoted word of a redirection (`2>&1`, `{fd}>&1`) wherever it stands before
+    /// it, and each wrapper's options by their arity, `/usr/bin/time -f FMT` and `--` included; an
+    /// option of unknown arity is refused. A `#` starts a comment only at a word's start, and a
+    /// backslash escapes nothing inside single quotes, so those lines still run on.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn pipeline_sinks_and_wrapper_options_fail_closed() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let built_across_lines =
+            "C=ca; C+=rgo; C+=\" build -\"; C+=\"-feat\"; C+=\"ures l\"; C+=ive";
+        let refused_at = [
+            (format!("{built_across_lines}\necho $C | # c\nsh"), 3),
+            (format!("{built_across_lines}\necho $C |\n# comment\nsh"), 3),
+            (format!("{built_across_lines}\necho $C | # c \\\nsh"), 3),
+            (format!("{built_across_lines}\ntime -p 2>&1 $C"), 3),
+            (format!("{built_across_lines}\n{{fd}}>&1 $C"), 3),
+            (format!("{built_across_lines}\necho $C | {{fd}}>&1 sh"), 3),
+            (format!("{built_across_lines}\ntime -p -- $C"), 3),
+            (format!("{built_across_lines}\n/usr/bin/time -f %e $C"), 3),
+            (format!("{built_across_lines}\n{{ echo $C; }} | sh"), 3),
+            (format!("{built_across_lines}\n( echo $C ) | sh"), 3),
+            (
+                format!("{built_across_lines}\nif true; then echo $C; fi | sh"),
+                3,
+            ),
+            (
+                format!("{built_across_lines}\n{{ echo $C; }} | cat | sh"),
+                3,
+            ),
+            (
+                format!("{built_across_lines}\nfor x in a; do echo $C; done | sh"),
+                3,
+            ),
+            (format!("{built_across_lines}\necho $C | rbash"), 3),
+            (format!("{built_across_lines}\necho $C | ksh93"), 3),
+            ("sudo --bogus echo $X".to_owned(), 2),
+            ("timeout --weird 5 echo $X".to_owned(), 2),
+            ("echo a#b |\nsh -c \"$C\"".to_owned(), 2),
+            ("echo 'a\\' |\nsh -c \"$C\"".to_owned(), 2),
+            ("echo \"$X\" | awk '{ system($0) }'".to_owned(), 2),
+            ("echo \"$X\" | sed 's/x/y/e'".to_owned(), 2),
+            ("echo \"$X\" | python3".to_owned(), 2),
+            ("echo \"$X\" | xargs echo".to_owned(), 2),
+            ("echo \"$X\" | env".to_owned(), 2),
+            ("echo \"$X\" | put_file /tmp/f 0600 root:root".to_owned(), 2),
+            ("echo \"$X\" | sql db".to_owned(), 2),
+        ];
+        for (text, line) in refused_at {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(
+                problems[0].starts_with(&format!(".github/scripts/build.sh:{line}:")),
+                "{text}: {problems:?}"
+            );
+        }
+        let allowed = [
+            "echo \"$X\" | sha256sum",
+            "echo \"$X\" | tee out.txt",
+            "echo \"$X\" | tr a b",
+            "echo \"$X\" | sort -u",
+            "echo \"$X\" | grep x",
+            "echo \"$X\" | cut -f1",
+            "echo \"$X\" | tail -1",
+            "echo \"$X\" | sort | paste -sd ' ' -",
+            "echo \"$X\" | cat",
+            "echo \"$X\" | head -1",
+            "echo \"$X\" | uniq",
+            "echo \"$X\" | wc -l",
+            "printf '%s\\n' \"$X\" | sort -u | while read -r a; do echo \"$a\"; done",
+            "getent ahosts \"$X\" | awk '{ print $1 }' | sort -u",
+            "gpg --show-keys --with-colons \"$X\" | awk -F: '$1 == \"fpr\" { print $10; exit }'",
+            "sed -n '2,/^set -euo/p' \"$0\" | sed '$d; s/^# \\{0,1\\}//'",
+            "\"2\">&1 $X",
+            "2a>&1 $X",
+            "export -n R=echo\n$R hi",
+            "echo hi | sh",
+            "time -p -- echo hi",
+            "/usr/bin/time -f %e echo hi",
+        ];
+        for text in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        let systemd_run = concat!(
+            "printf '%s' \"$answer\" | systemd-run --quiet --wait --pipe --collect \\\n",
+            "  -p User=owlhead_exec -p Group=owlhead_exec -p UMask=0077 \\\n",
+            "  -p LoadCredential=vault-pending-key:\"$CREDENTIALS/vault-pending-key\" \\\n",
+            "  -p LoadCredential=vault-token-key:\"$CREDENTIALS/vault-token-key\" \\\n",
+            "  -p EnvironmentFile=\"$EXEC_ENV\" \\\n",
+            "  \"${VAULT_IMPORT[@]}\"\n",
+        );
+        let regex = "if [[ \"${line%%=*}\" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then\n  echo x\nfi\n";
+        let deploy_only = [
+            "echo \"$X\" | put_file /tmp/f 0600 root:root\n",
+            "openssl rand -base64 32 | put_file \"$C/$key\" 0600 root:root\n",
+            "{ echo \"$X\"; } | sql \"$DB\"\n",
+            systemd_run,
+            regex,
+        ];
+        for text in deploy_only {
+            let files = [ci_file("deploy/set-secrets.sh", text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "deploy/'s own sinks and its exact parser-limited lines: {text}"
+            );
+        }
+        for text in [systemd_run, regex] {
+            let files = [ci_file("deploy/other.sh", text)];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?.len(),
+                1,
+                "an exact line is allowed only in its own file: {text}"
+            );
+        }
+        let edited = systemd_run.replace("--collect", "--collect sh");
+        let files = [ci_file("deploy/set-secrets.sh", &edited)];
+        assert_eq!(
+            live_feature_problems(&policy, &meta(), &files)?.len(),
+            1,
+            "an edited exact line is judged again"
+        );
+        Ok(())
+    }
+
     /// A build file the check cannot read as text, a dangling symlink or a file that is not
     /// UTF-8, is reported as a problem naming its path, not an error that aborts the check (X1
     /// tests correction 12b, after #979's review; DEC-851 item 6), and so is one holding a NUL
