@@ -85,7 +85,6 @@ fn the_connect_vector_is_the_sha256_of_its_canonical_bytes() {
 /// DEC-693 items 2 and 5: the connect digest is the vector, binds the workspace, and a non-paper
 /// environment is refused for every broker, never digested.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_connect_digest_is_dec_693_s_vector_and_paper_only() {
     let paper = connect_digest("ws_01", Alpaca, Paper).unwrap();
     assert_eq!(shown(paper), CONNECT_DIGEST);
@@ -99,7 +98,6 @@ fn the_connect_digest_is_dec_693_s_vector_and_paper_only() {
 
 /// DEC-693 item 1 for any workspace and broker: the canonical object written out by hand here.
 #[test]
-#[ignore = "pending E10-13"]
 fn every_connect_digest_binds_workspace_and_broker() {
     let inputs = (
         "[A-Za-z0-9_-]{1,64}",
@@ -122,7 +120,6 @@ fn every_connect_digest_binds_workspace_and_broker() {
 /// Connections spec §5.2 step 1 and rule 131: exactly one `ConnectionRequested` with the start's
 /// connection id, account ref, broker, environment, user, and step-up evidence.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_clear_start_plans_exactly_its_request() {
     let plan = plan_start(&start_of(&request(), true), &CLEAR).unwrap();
     let expected = StartPlan::Commit(vec![ManagerEffect::Requested(request())]);
@@ -132,7 +129,6 @@ fn a_clear_start_plans_exactly_its_request() {
 /// Each start precondition alone refuses, with its own reason, and commits nothing. The route
 /// serves Alpaca paper OAuth only (connections spec §5.2, DEC-821 item 7, DEC-883 item 2).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_is_refused_for_each_reason_alone() {
     let cases = [
         (Paper, Alpaca, false, Free, Unused, R::StepUpNotVerified),
@@ -224,7 +220,6 @@ fn first_refusal(start: &StartRequest, facts: StartFacts) -> Option<R> {
 /// that holds, in DEC-883's order, and otherwise commits exactly its request, every member
 /// repeated. Only a verified, paper, Alpaca start with both folds answering clear commits.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_refuses_with_the_first_reason_or_commits_only_its_request() {
     TestRunner::deterministic()
         .run(&members(), |members| {
@@ -346,7 +341,6 @@ fn finish(fold: &RequestFold, outcome: &ConnectOutcome) -> FinishPlan {
 /// Connections spec §5.2 step 5 and rule 131 (closing): exactly one version-2
 /// `ConnectionEstablished` repeating every member of the request, `account_ref` among them.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_passed_connect_plans_exactly_its_establishment() {
     let plan = finish(
         &RequestFold::Open(request()),
@@ -362,7 +356,6 @@ fn a_passed_connect_plans_exactly_its_establishment() {
 /// Connections spec §5.2 steps 5 and 6, journal spec §9.8 rules 54, 55, and 131: each cause alone
 /// closes the request with exactly one `ConnectionRefused` and its own check and reason.
 #[test]
-#[ignore = "pending E10-13"]
 fn each_refusal_plans_exactly_its_connect_refused() {
     let none = None;
     let cases = [
@@ -436,7 +429,6 @@ fn each_refusal_plans_exactly_its_connect_refused() {
 /// DEC-699 item 5 and DEC-884: a request a revoke closed plans nothing for any outcome, and no
 /// open request, or a fold that cannot answer, refuses; neither ever carries an effect.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_request_that_is_not_open_plans_no_effect() {
     let mut outcomes = vec![ConnectOutcome::Passed { scopes: scopes() }];
     outcomes.extend(
@@ -460,7 +452,6 @@ fn a_request_that_is_not_open_plans_no_effect() {
 /// DEC-884 item 2 (rule 64) and rule 55: a live request is not established here but is still
 /// refused and torn down, and `already_connected` naming the request itself is refused.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_establishment_and_a_self_conflict_are_refused() {
     let live = RequestMembers {
         environment: Live,
@@ -524,7 +515,6 @@ fn expected_finish(fold: &RequestFold, outcome: &ConnectOutcome) -> FinishPlan {
 /// existing id, over every fold and every outcome, a finish is the oracle's plan: one effect
 /// repeating every member, or a plan with none.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_finish_closes_its_request_once_or_plans_no_effect() {
     let scope_sets = prop::collection::btree_set("[a-z_]{1,12}", 0..4);
     let inputs = (members(), scope_sets, "[A-Za-z0-9_-]{1,8}");
