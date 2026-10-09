@@ -174,6 +174,7 @@ pub mod demand;
 mod matrix;
 mod membership;
 mod permission;
+mod writer;
 
 use matrix::Column;
 pub use membership::{
@@ -181,6 +182,9 @@ pub use membership::{
     RecordRefusal, check_independence, check_order,
 };
 pub use permission::Permission;
+pub use writer::{
+    ATTEMPTS, Appended, ControlEntry, ControlStream, ControlView, WriteError, write_membership,
+};
 
 /// A principal's opaque ID, a ULID (identity spec §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

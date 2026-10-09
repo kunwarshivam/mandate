@@ -95,6 +95,21 @@ impl MembershipRecord {
             event,
         }
     }
+
+    /// Its `seq` on the control stream.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Its envelope's `event_time`, the record's own instant (rule 106).
+    pub fn event_time(&self) -> UtcNanos {
+        self.event_time
+    }
+
+    /// What it says.
+    pub fn event(&self) -> &MembershipEvent {
+        &self.event
+    }
 }
 
 /// A workspace's membership records, folded. A reading at *t* folds, in `seq` order, only the
