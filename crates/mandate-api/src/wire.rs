@@ -33,22 +33,27 @@ use crate::problem::Violation;
 /// # Errors
 /// [`Refused::Invalid`], which the server answers as `invalid` (422).
 pub fn decode<T: DeserializeOwned + Validate>(body: &[u8]) -> Result<T, Refused> {
+    let value: T = parse(body)?;
+    value.validate()?;
+    Ok(value)
+}
+
+/// [`decode`] without [`Validate`]: every refusal but a shape's own rules, for a value no rule
+/// constrains, such as one member of a lenient body (DEC-886).
+pub(crate) fn parse<T: DeserializeOwned>(body: &[u8]) -> Result<T, Refused> {
     std::str::from_utf8(body).map_err(|_| refuse(String::new(), "malformed"))?;
     if let Some(path) = duplicate(body)? {
         return Err(refuse(path, "duplicate_member"));
     }
     let mut reader = serde_json::Deserializer::from_slice(body);
-    let value: T =
-        serde_path_to_error::deserialize(&mut reader).map_err(|error| located(&error))?;
-    value.validate()?;
-    Ok(value)
+    serde_path_to_error::deserialize(&mut reader).map_err(|error| located(&error))
 }
 
 /// The one message every schema violation carries: the code and the pointer say what and where,
 /// and nothing from the body is echoed (rule 6).
 const MESSAGE: &str = "The body does not match its schema.";
 
-fn refuse(path: String, code: &str) -> Refused {
+pub(crate) fn refuse(path: String, code: &str) -> Refused {
     Refused::Invalid {
         violations: vec![violation(path, code)],
     }
@@ -366,10 +371,6 @@ pub struct EncodeError;
 pub enum Refused {
     #[error("the body is invalid")]
     Invalid { violations: Vec<Violation> },
-    /// What [`crate::lenient::decode_lenient`]'s stub returns until E10-10 implements it (DEC-77,
-    /// DEC-886 item 13).
-    #[error("E10-10 has not been implemented yet")]
-    Unimplemented,
 }
 
 /// Why a scalar's text was refused.
