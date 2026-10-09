@@ -1150,7 +1150,6 @@ impl Executor for Recording {
 /// connector's own capability profile once, after the replay's fold and before `Started`, so
 /// protection never reads a profile the broker did not declare.
 #[test]
-#[ignore = "pending E7-23"]
 fn every_start_hands_the_executor_the_connectors_profile_after_the_fold() -> Result<(), String> {
     let world = World::default();
     let profile = equities_only()?;

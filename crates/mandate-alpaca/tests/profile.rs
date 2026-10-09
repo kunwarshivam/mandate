@@ -167,7 +167,6 @@ fn the_connector_hands_the_executor_its_profile_without_calling_the_broker() {
 /// E7-23 B2a (DEC-838 items 3 and 5): Alpaca's profile is the equities row and crypto's, exactly,
 /// and the connector hands over crypto's one resting stop-limit, whole and fractional.
 #[test]
-#[ignore = "pending E7-23"]
 fn alpacas_profile_declares_cryptos_one_resting_stop_limit() {
     let profile = alpaca_profile().unwrap();
     let Ok(Value::Object(mut expected)) = parse(ALPACA.as_bytes()) else {
@@ -211,7 +210,6 @@ fn alpacas_profile_declares_cryptos_one_resting_stop_limit() {
 /// a take-profit by a GTC OCO, and crypto, whole or fractional, by one GTC stop-limit at
 /// stop x (1 - offset), whatever the clock's session.
 #[test]
-#[ignore = "pending E7-23"]
 fn alpacas_profile_protects_an_equity_by_oco_and_crypto_by_one_stop_limit() {
     let profile = alpaca_profile().unwrap();
     let price = |text| Price::parse(text).unwrap();

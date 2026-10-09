@@ -10410,6 +10410,64 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// Every definition of an array is read, and both whole-array forms are (X1 tests correction
+    /// 12, after #979's planted bug A4; DEC-851 item 2). An `x+=( … )` append counts as a
+    /// definition of `x`, so `x=(echo)` then `x+=(cargo build --features live)` is refused at
+    /// the expansion, not only at the append. An array `mapfile` sets beside an `x=( … )` cannot
+    /// be read, so its whole-array command word is refused. The token `live` in a definition
+    /// refuses the expansion as a command word and inside a re-read word, as `cargo` does. And
+    /// `${x[*]}` is read as `${x[@]}` is, for a defined and an undefined array.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn every_array_definition_and_both_whole_array_forms_are_read() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let refused = [
+            (
+                "x=(echo)\nx+=(cargo build --features live)\n\"${x[@]}\"",
+                &[3, 4][..],
+            ),
+            ("x=(echo)\nmapfile -t x < f\n\"${x[@]}\"", &[4][..]),
+            ("x=(echo)\nx+=(--features live)\n\"${x[@]}\"", &[4][..]),
+            ("x=(--features live)\nrun_it \"${x[@]}\"", &[3][..]),
+            ("x=(cargo build)\n\"${x[*]}\"", &[3][..]),
+            ("x=(cargo build)\nrun_it \"${x[*]}\"", &[3][..]),
+            ("\"${undefined[*]}\" build", &[2][..]),
+        ];
+        for (text, lines) in refused {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            let expected: Vec<String> = lines
+                .iter()
+                .map(|line| format!(".github/scripts/build.sh:{line}:"))
+                .collect();
+            assert_eq!(problems.len(), expected.len(), "{text}: {problems:?}");
+            for (problem, at) in problems.iter().zip(&expected) {
+                assert!(problem.starts_with(at), "{text}: {problems:?}");
+            }
+        }
+        let allowed = [
+            "x=(echo)\nx+=(hi)\n\"${x[@]}\"",
+            "x=(echo hi)\n\"${x[*]}\"",
+            "mapfile -t x < f\nrun_it \"${x[@]}\"",
+        ];
+        for text in allowed {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{text}"
+            );
+        }
+        Ok(())
+    }
+
     /// A command word that is solely the expansion of a scalar variable (`$C`, `"$C"`, `${C}`)
     /// the file assigns (`C=…`, `C+=…`) is read through those definitions, concatenated in order,
     /// as arrays are: it is refused when that value builds or runs `live`, and when a definition
@@ -10735,6 +10793,105 @@ jq -r "$filter" "$src"
                 "tools/build.mk",
             ]
         );
+        Ok(())
+    }
+
+    /// A fixture repository under the temporary directory, named for `name`, with `files` written
+    /// as `(path, text)`, removed first if a run left it behind.
+    fn fixture_repository(name: &str, files: &[(&str, &str)]) -> Result<PathBuf> {
+        let root = env::temp_dir().join(format!("mandate-xtask-{name}-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        for (path, text) in files {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, text)?;
+        }
+        Ok(root)
+    }
+
+    /// Every build-file name the check reads is judged, not only listed (X1 tests correction 12,
+    /// after #979): `makefile`, `GNUmakefile`, `Justfile` and a `docker-compose*.yaml`, each
+    /// holding a live build, are each refused at their own path and line.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn every_build_file_name_is_judged() -> Result<()> {
+        let build = "build:\n\tcargo build --features live\n";
+        let paths = [
+            "makefile",
+            "tools/GNUmakefile",
+            "Justfile",
+            "docker/docker-compose.ci.yaml",
+        ];
+        let files: Vec<(&str, &str)> = paths.iter().map(|path| (*path, build)).collect();
+        let root = fixture_repository("build-file-names", &files)?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read?)?;
+        assert_eq!(problems.len(), paths.len(), "{problems:?}");
+        for path in paths {
+            assert!(
+                problems
+                    .iter()
+                    .any(|problem| problem.starts_with(&format!("{path}:2:"))),
+                "{path} is refused at its live build: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The build-file walk skips only what is not the repository's own (DEC-851 item 5; X1 tests
+    /// correction 12): a live build in a `Makefile` under `.git`, under `node_modules`, or in a
+    /// directory a `CACHEDIR.TAG` marks as a cache is not read, while one in `tools/` beside them
+    /// is, and a `CACHEDIR.TAG` marks only its own directory.
+    #[test]
+    #[ignore = "pending E7-26"]
+    fn the_build_file_walk_skips_only_git_node_modules_and_caches() -> Result<()> {
+        let build = "build:\n\tcargo build --features live\n";
+        let root = fixture_repository(
+            "build-file-skips",
+            &[
+                (".git/Makefile", build),
+                ("web/node_modules/x/Makefile", build),
+                (
+                    "target/CACHEDIR.TAG",
+                    "Signature: 8a477f597d28d172789f06886806bc55\n",
+                ),
+                ("target/Makefile", build),
+                ("target/debug/Makefile", build),
+                ("cache/Makefile", build),
+                ("tools/Makefile", build),
+            ],
+        )?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let mut read: Vec<String> = read?.into_iter().map(|file| file.path).collect();
+        read.sort();
+        assert_eq!(read, ["cache/Makefile", "tools/Makefile"]);
+        Ok(())
+    }
+
+    /// A file both the `.github` scan and the build-file walk find is read once, so its live
+    /// build is one problem, not two (X1 tests correction 12, after #979).
+    #[test]
+    fn a_file_both_scans_find_is_read_once() -> Result<()> {
+        let root = fixture_repository(
+            "build-file-dedup",
+            &[(
+                ".github/workflows/docker-compose.yml",
+                "jobs:\n  a:\n    steps:\n      - run: cargo build --features live\n",
+            )],
+        )?;
+        let read = ci_files(&root);
+        fs::remove_dir_all(&root).ok();
+        let read = read?;
+        let paths: Vec<&str> = read.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
+        let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
+        assert_eq!(problems.len(), 1, "{problems:?}");
         Ok(())
     }
 
