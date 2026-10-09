@@ -213,10 +213,14 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     /// Cancels one of our orders. Alpaca cancels by **its** order id, so the order is looked up by
     /// our client order id first, and an order that is not there answers what the lookup said.
     ///
-    /// An accepted `DELETE` is [`BrokerOutcome::CancelAccepted`], which is **not** a confirmation:
-    /// the executor waits for the order's own `canceled` state (trading-domain spec §5.4). A
-    /// refused `DELETE` — the order filled first — is answered with the order's own state, read
-    /// back at once, because that is the fact the executor folds (§5.7's
+    /// An accepted `DELETE` is only a request taken, not a confirmation, so the order is read back
+    /// once (DEC-867 item 3). A read-back that shows the order `canceled` answers
+    /// [`BrokerOutcome::CancelAccepted`], the confirmation of trading-domain spec §5.7's
+    /// `PendingCancel --> Canceled: confirmed`. Any other read-back is answered as read, for
+    /// example the order still in `pending_cancel`, which can yet fill, so the executor keeps the
+    /// cancel unconfirmed (§5.4). A read-back that fails is that error, an unknown outcome, never
+    /// a confirmation. A refused `DELETE` — the order filled first — is answered with the order's
+    /// own state, read back at once, because that is the fact the executor folds (§5.7's
     /// `PendingCancel --> Filled`).
     async fn cancel(&self, client_order_id: &str) -> Result<BrokerOutcome, ClientError> {
         let order = match self.order_by_client_id(client_order_id).await? {
@@ -226,9 +230,14 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
         let path = format!("/v2/orders/{}", order.broker_order_id);
         let response = self.send(Method::Delete, path, None).await?;
         match response.status {
-            200..=299 => Ok(BrokerOutcome::CancelAccepted {
-                client_order_id: client_order_id.to_owned(),
-            }),
+            200..=299 => match self.order_by_client_id(client_order_id).await? {
+                BrokerOutcome::Order(read_back) if read_back.status == "canceled" => {
+                    Ok(BrokerOutcome::CancelAccepted {
+                        client_order_id: client_order_id.to_owned(),
+                    })
+                }
+                read_back => Ok(read_back),
+            },
             429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
             _ => self.order_by_client_id(client_order_id).await,
         }

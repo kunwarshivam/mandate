@@ -655,6 +655,10 @@ pub enum BrokerOutcome {
         fills: Vec<BrokerFill>,
         cursor: ActivityCursor,
     },
+    /// The broker confirmed the order canceled: trading-domain spec §5.7's
+    /// `PendingCancel --> Canceled: confirmed` (DEC-867 item 4). A connector returns it only when
+    /// the broker's own answer shows the order canceled; a cancel request the broker merely
+    /// accepted is answered with the order as the broker shows it, never with this.
     CancelAccepted {
         client_order_id: String,
     },
