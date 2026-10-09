@@ -39,6 +39,10 @@ const TUESDAY_CLOSE: &str = "2026-09-29T20:00:00.000000000Z";
 const WEDNESDAY_CLOSE: &str = "2026-09-30T20:00:00.000000000Z";
 
 type Store = BTreeMap<Digest, Vec<u8>>;
+type Ran = (Result<Report, ShellError>, Stages, usize);
+
+/// The refusal of an observation whose data is not stored under its `data_ref` (H3).
+const UNTRUSTED: &str = "market_data_untrusted";
 
 /// The confirmed document as the file the run's mandate stage reads, written once per process so
 /// parallel test threads never read it half written.
@@ -120,7 +124,6 @@ impl Observed {
             days.extend(calendar.is_trading_day(day).unwrap().then_some(day));
             day = day.next().unwrap();
         }
-        let days = &days[days.len() - 25..];
         let closes: Vec<(Date, Price)> = (first_close..)
             .zip(&days[days.len() - 25..])
             .map(|(close, day)| (*day, Price::parse(&format!("{close}.2")).unwrap()))
@@ -222,11 +225,7 @@ fn cycle(now: &str, store: Option<Store>) -> (Stages, Setup, Rc<Cell<usize>>) {
 }
 
 /// One run at `now` over `observed`, appending against `store`.
-fn run_at(
-    now: &str,
-    observed: &Observed,
-    store: Option<Store>,
-) -> (Result<Report, ShellError>, Stages, usize) {
+fn run_at(now: &str, observed: &Observed, store: Option<Store>) -> Ran {
     let (mut stages, setup, posts) = cycle(now, store);
     let (observation, output) = observed.parts();
     let outcome = run_observed(&mut stages, &setup, observation, output);
@@ -247,10 +246,7 @@ fn types(rows: &[StoredEvent]) -> Vec<&str> {
 
 /// The payload of the one `event_type` record in `rows`, failing when there is none or several.
 fn only(rows: &[StoredEvent], event_type: &str) -> Value {
-    let found: Vec<&StoredEvent> = rows
-        .iter()
-        .filter(|row| row.event_type == event_type)
-        .collect();
+    let found: Vec<_> = rows.iter().filter(|r| r.event_type == event_type).collect();
     assert_eq!(found.len(), 1, "{event_type} in {:?}", types(rows));
     let body = mandate_canon::parse(&found[0].body).unwrap();
     body.get("payload").cloned().unwrap()
@@ -302,7 +298,8 @@ fn the_observation_is_journaled_before_the_output_and_names_its_artifact() {
 /// names them is appended. A run with no store, a store without them, or other bytes under their
 /// digest journals neither record, decides nothing and sends nothing; the same run with them
 /// stored places its one order through the paper adapter's door, `ProductionCycle::run_observed`
-/// (DEC-503 item 2), which sends nothing without them.
+/// (DEC-503 item 2), which sends nothing without them. Each refusal is `market_data_untrusted`:
+/// the observed data is not the run's, so nothing is appended for it.
 #[test]
 #[ignore = "pending E15-13"]
 fn an_observation_whose_artifact_is_not_stored_stops_the_run_before_any_order() {
@@ -311,28 +308,22 @@ fn an_observation_whose_artifact_is_not_stored_stops_the_run_before_any_order() 
         let (sources, setup, posts) = sources(TUESDAY, Some(store));
         let (observation, output) = observed.parts();
         let outcome = production_cycle(sources, setup).run_observed(observation, output);
-        (outcome.map(|report| report.submitted.len()), posts.get())
+        (outcome, posts.get())
     };
     let (placed, posts) = door(observed.stored());
-    assert_eq!((placed.unwrap(), posts), (1, 1));
+    assert_eq!((placed.unwrap().submitted.len(), posts), (1, 1));
     let (refused, posts) = door(Store::new());
-    assert!(
-        refused.is_err() && posts == 0,
-        "the door: {refused:?}, {posts} sent"
-    );
+    let code = refused.as_ref().map_err(ShellError::code).err();
+    assert_eq!((code, posts), (Some(UNTRUSTED), 0), "the door: {refused:?}");
     let other = BTreeMap::from([(Digest::of(&observed.bytes), b"other closes".to_vec())]);
-    let cases = [
-        ("no store", None),
-        ("not stored", Some(Store::new())),
-        ("other bytes", Some(other)),
-    ];
-    for (name, store) in cases {
+    let cases = [None, Some(Store::new()), Some(other)];
+    let names = ["no store", "not stored", "other bytes"];
+    for (name, store) in names.into_iter().zip(cases) {
         let (outcome, stages, posts) = run_at(TUESDAY, &observed, store);
-        assert!(outcome.is_err(), "{name}: {outcome:?}");
-        assert_eq!(posts, 0, "{name}");
+        let code = outcome.as_ref().map_err(ShellError::code).err();
+        assert_eq!((code, posts), (Some(UNTRUSTED), 0), "{name}: {outcome:?}");
         let agent = types(&agent(&stages)).join(" ");
-        let account = rows(&stages, "acct:ws_spy:acct_spy");
-        let account = types(&account).join(" ");
+        let account = types(&rows(&stages, "acct:ws_spy:acct_spy")).join(" ");
         assert!(agent.starts_with("StreamOpened"), "{name}: {agent}");
         for kind in ["Observation", "ModelOutput", "Decision", "Intent"] {
             assert!(!agent.contains(kind), "{name}: {agent}");
@@ -367,10 +358,9 @@ fn the_cycle_records_the_hosts_output_for_each_observation() {
         let expected = [as_of, expires_at, SPY, pinned.as_str()].map(Some);
         assert_eq!(recorded, expected, "{now}");
         let observation = only(&agent, "ObservationRecorded");
-        assert_eq!(text(&observation, "as_of"), Some(as_of), "{now}");
-        let data_ref = text(&observation, "data_ref").map(str::to_owned);
         let digest = format!("sha256:{}", Digest::of(&observed.bytes));
-        assert_eq!(data_ref.as_deref(), Some(digest.as_str()), "{now}");
+        let seen = ["as_of", "data_ref"].map(|m| text(&observation, m));
+        assert_eq!(seen, [Some(as_of), Some(digest.as_str())], "{now}");
         refs.push(digest);
     }
     assert_ne!(refs[0], refs[1], "the two runs observed different closes");
@@ -394,18 +384,14 @@ fn the_order_holds_on_replay() {
     assert_eq!(code.err(), Some("cycle_already_open"), "{again:?}");
     assert_eq!(posts.get(), 1);
     let replayed = agent(&stages);
-    assert!(replayed.len() >= before.len());
-    assert_eq!(
-        replayed[..before.len()],
-        before[..],
-        "the replayed prefix is unchanged"
-    );
+    let kinds = types(&replayed);
+    assert_eq!(replayed[..before.len()], before[..], "{kinds:?}");
     only(&replayed, "ObservationRecorded");
     only(&replayed, "ModelOutputRecorded");
-    let kinds = types(&replayed);
     let position = |kind: &str| kinds.iter().position(|k| *k == kind);
-    assert!(
-        position("ObservationRecorded") < position("ModelOutputRecorded"),
-        "{kinds:?}"
+    let (seen, output) = (
+        position("ObservationRecorded"),
+        position("ModelOutputRecorded"),
     );
+    assert!(seen < output, "{kinds:?}");
 }
