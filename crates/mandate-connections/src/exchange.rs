@@ -10,7 +10,7 @@ use secrecy::SecretString;
 use crate::ConnectError;
 use crate::grant::GrantedScopes;
 use crate::hosts::LiveTokenRequest;
-use crate::start::{ClientId, Environment};
+use crate::start::{ClientId, Environment, PkceVerifier};
 use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey};
 
 /// The platform's OAuth client secret (infrastructure §5.1).
@@ -23,9 +23,11 @@ impl fmt::Debug for ClientSecret {
 }
 
 /// The form body of the exchange: `grant_type=authorization_code`, the code, the client id and
-/// secret, and the redirect URI of the authorization request.
+/// secret, the redirect URI of the authorization request, and the PKCE `code_verifier`, which is
+/// sent but never relied on (connections spec §5.2 step 4; DEC-690 item 9).
 pub struct ExchangeForm<'a> {
     pub code: &'a AuthorizationCode,
+    pub code_verifier: &'a PkceVerifier,
     pub client_id: &'a ClientId,
     pub client_secret: &'a ClientSecret,
     pub redirect_uri: &'a str,
@@ -67,15 +69,18 @@ pub struct ExchangedGrant {
     pub vault_key: VaultKey,
 }
 
-/// Exchanges the waiting code for a token, in this order:
+/// Exchanges the waiting code for a token, in this order (connections spec §5.2 step 4):
 ///
 /// 1. A connection that is not paper is refused before the vault or the endpoint is touched
 ///    (DEC-821 items 3 and 4).
-/// 2. The code is taken from the vault, so it is never used twice.
-/// 3. The endpoint receives the [`LiveTokenRequest`] and the form.
+/// 2. The code and PKCE verifier are read once from the vault; with none waiting, the exchange
+///    is refused and nothing is written.
+/// 3. The endpoint receives the [`LiveTokenRequest`] and the form, verifier included.
 /// 4. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
-///    On any refusal the token is dropped unstored and the vault entry is deleted.
-/// 5. The token is stored in the vault, and the grant, without it, is returned.
+///    On any refusal the token is dropped before any vault write, and the vault entry is
+///    deleted, since a read code is never tried again.
+/// 5. The token is stored with the granted scopes, then the code and verifier are deleted, and
+///    the grant, without the token, is returned.
 pub fn exchange_code(
     pending: &PendingConnect,
     client_id: &ClientId,

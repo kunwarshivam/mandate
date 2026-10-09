@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use secrecy::SecretString;
 
 use super::support::{
-    CANARIES, CODE, Call, FixtureProvider, FixtureVault, SECRET, TOKEN, client, key,
+    CANARIES, CODE, Call, FixtureProvider, FixtureVault, SECRET, TOKEN, VERIFIER, client, key,
 };
 use crate::ConnectError;
 use crate::exchange::{ClientSecret, ExchangedGrant, PendingConnect, exchange_code};
@@ -58,6 +58,7 @@ fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token()
         vec![Call {
             request: LiveTokenRequest::token_endpoint(),
             code: CODE.to_owned(),
+            code_verifier: VERIFIER.to_owned(),
             client_id: "client-1".to_owned(),
             client_secret: SECRET.to_owned(),
             redirect_uri: REDIRECT_URI.to_owned(),
@@ -73,12 +74,41 @@ fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token()
         }
     );
     assert_eq!(vault.token(), Some(TOKEN.to_owned()));
-    assert!(!vault.has_code(), "the code is spent");
+    assert_eq!(
+        vault.scopes(),
+        Some(GrantedScopes(BTreeSet::from([
+            "data".to_owned(),
+            "trading".to_owned()
+        ]))),
+        "the granted scope is stored with the token"
+    );
+    assert!(!vault.has_code(), "the code and verifier are deleted");
+    assert_eq!(
+        vault.ops,
+        ["read_code", "put_token", "delete_code"],
+        "read once, store the token, then delete the code and verifier"
+    );
     assert_eq!(
         run(Environment::Paper, &mut vault, &mut provider),
         Err(ConnectError::CodeMissing)
     );
     assert_eq!(provider.calls.len(), 1, "a spent code is never sent again");
+}
+
+#[test]
+#[ignore = "pending E10-13"]
+fn with_no_code_waiting_nothing_is_sent_or_written() {
+    let mut vault = FixtureVault::default();
+    let mut provider = FixtureProvider::granting("bearer", "trading data");
+    assert_eq!(
+        run(Environment::Paper, &mut vault, &mut provider),
+        Err(ConnectError::CodeMissing)
+    );
+    assert!(provider.calls.is_empty());
+    assert_eq!(vault.ops.first(), Some(&"read_code"));
+    assert_eq!(vault.writes(), Vec::<&str>::new());
+    assert_eq!(vault.token(), None);
+    assert!(!vault.has_code());
 }
 
 #[test]
@@ -107,6 +137,7 @@ fn a_refused_grant_stores_no_token_and_deletes_the_entry() {
             Err(refusal.clone())
         );
         assert_eq!(vault.token(), None, "{refusal:?}");
+        assert_eq!(vault.writes(), Vec::<&str>::new(), "{refusal:?}");
         assert!(!vault.has_code(), "{refusal:?}");
         assert_eq!(vault.ops.last(), Some(&"delete"), "{refusal:?}");
     }
