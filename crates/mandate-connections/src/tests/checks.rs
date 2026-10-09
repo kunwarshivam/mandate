@@ -408,7 +408,8 @@ fn a_live_key_whose_permissions_cannot_be_read_is_refused() {
 
 /// A key whose permissions were read and are empty (DEC-685): a live one cannot show fund
 /// movement absent, so it is refused as `permissions_unreadable` (CN-2, DEC-441 item 4); a paper
-/// one cannot move money and still passes.
+/// one cannot move money and still passes. A live key whose read permissions are not empty and
+/// show no fund movement passes.
 #[test]
 #[ignore = "pending E7-12"]
 fn a_live_key_that_reports_no_permissions_is_refused() {
@@ -428,6 +429,15 @@ fn a_live_key_that_reports_no_permissions_is_refused() {
         outcome(&run(&empty_key(Environment::Paper)).unwrap(), Check::Scope),
         Some(Outcome::Passed),
         "a paper key that reports no permissions is recorded, not refused (DEC-685)"
+    );
+    let trade_only = CheckInput {
+        granted: Granted::KeyPermissions(Some(BTreeSet::from(["trade".to_owned()]))),
+        ..empty_key(Environment::Live)
+    };
+    assert_eq!(
+        outcome(&run(&trade_only).unwrap(), Check::Scope),
+        Some(Outcome::Passed),
+        "a live key whose read permissions show no fund movement passes check 1"
     );
 }
 
