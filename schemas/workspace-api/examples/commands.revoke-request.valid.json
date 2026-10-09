@@ -1,0 +1,22 @@
+[
+  {
+    "label": "an empty body is the ordinary revoke",
+    "remove": [
+      "/compromised",
+      "/record",
+      "/step_up"
+    ]
+  },
+  {
+    "label": "auto: /record null",
+    "set": {
+      "/record": null
+    }
+  },
+  {
+    "label": "auto: /step_up null",
+    "set": {
+      "/step_up": null
+    }
+  }
+]

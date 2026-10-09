@@ -24,8 +24,8 @@ So this path builds only things the product keeps:
 
 [DEC-529](../decisions/DEC-529.md) holds only what is the founder's: the live order itself and
 the few narrowings it needs. The coordinator reports the founder accepted every recommendation
-on 2026-10-08; the status reads Accepted once the founder confirms on #706 or the coordinator
-records it at merge. The founder's answers, as relayed:
+on 2026-10-08, and DEC-529 now reads Accepted, so nothing below waits on its status. The founder's
+answers, as relayed:
 
 - **Instrument and cap:** `max_order_usd` 100 USD, on a cheap broad ETF priced under about
   90 USD a share. The founder chose the cap and the class of instrument; the ticker is the
@@ -34,8 +34,8 @@ records it at merge. The founder's answers, as relayed:
   gates any customer use. The founder's call, not a legal conclusion.
 - **SP1:** approved as DEC-529 states it.
 
-Every slice is product work and is built either way; implementations that DEC-529 item 4
-governs (B2b, C1) and the live run wait until it reads Accepted.
+Every slice is product work. DEC-529 reads Accepted, so the implementations that its item 4
+governs (B2b, C1) and the live run are no longer held by its status.
 
 This path needs the [first paper trade](first-paper-trade.md)'s runner (E1a, E1b, built
 generic) and its manual run (E2).
@@ -72,7 +72,7 @@ oracle is shown to fail on a seeded bug before it is trusted.
 | LT-2 | **No broker branch in shared code** (DEC-531). The builder, executor, gate and reconciliation never name a broker, and never read the asset class to learn a broker rule; a property test runs them against generated profiles and checks every order sent is one the profile allows. Reads of the asset class for **market** rules stay: the builder's closing-window check (`builder.rs`, US equities in the close window are marketable, a session rule) and the autonomy rule language's `asset_class` condition (`autonomy.rs`, the owner's policy). The executor's `asset_class == Crypto` choice of one stop-limit (`protection.rs`) is a **broker** rule and moves to the profile (B2a) |
 | LT-3 | **Policy and profile intersect, never override.** An order is sent only if both the platform policy (limit openings in the regular session, no short sale) and the profile allow it; an empty intersection is a refusal before the intent, never a fallback to another order type |
 | LT-4 | **One door, one grant.** An order reaches Robinhood only through `ProductionCycle::run`; with `ask` it is sent only after a grant whose content hash equals the hash of the request sent; any difference is a refusal with nothing sent |
-| LT-5 | **Journal before acting.** `OrderSubmitted`, carrying the deterministic `ref_id`, commits before `place_equity_order`; `review_equity_order` runs first and any pre-trade alert refuses |
+| LT-5 | **Journal before acting.** `OrderSubmitted`, carrying the deterministic `ref_id`, commits before `place_equity_order`; `review_equity_order` runs first; a pre-trade alert refuses an opening or an increase, while a sell or protective order is placed with the alert journaled (rule 13) |
 | LT-6 | **No re-send.** After a lost answer the order is `Unknown`; no second `place_equity_order` for that intent; recovery follows the profile (DEC-529 item 4); zero or several matches stay `Unknown` and block the instrument. The response shapes are assumed from the contract, so an unparsable or unexpected answer to a place call is `Unknown`, never treated as rejected and never re-sent |
 | LT-7 | **Only the agentic account** (CN-8). Every request names the recorded account; data about any other account is dropped in the connector before redaction, hashing or storage |
 | LT-8 | **Allowlist, pinned contract, pinned profile** (CN-2, CN-9). The connector calls only the nine allowlisted tools; a contract or profile hash that differs halts openings; a fund-movement tool refuses the connection |
@@ -143,7 +143,7 @@ Robinhood code.
 
 | State | Entered | Blocks | Ends | Who | Session close, midnight, restart, version change |
 |---|---|---|---|---|---|
-| DEC-529 not yet recorded Accepted | Now | B2b's and C1's implementations, and the live run | The founder confirms, or the coordinator records it at merge | Founder, coordinator | — |
+| DEC-529 not yet recorded Accepted (ended: it reads Accepted) | — | Nothing now | The founder accepted it on 2026-10-08 | Founder, coordinator | — |
 | Logged out | Run start | Every Robinhood call | OAuth login in the founder's browser | Founder | Restart logs out (no token on disk) |
 | Logged in | Token in memory | Nothing | Expiry, revocation, exit | Robinhood, founder | Expiry mid-run: `closing_only`; the resting stop is unaffected |
 | Contract or profile drift | Hash differs at login | Every opening | A released connector version | Agents, founder | Checked at every login |
@@ -177,15 +177,15 @@ Robinhood code.
 
 | Reference | Scope | Outcome | Matches? |
 |---|---|---|---|
-| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | **No** until SP1 renames it and adds Robinhood's profile |
+| Trading §5.2 "Alpaca capability matrix" ↔ DEC-531 | Every broker | Profiles as data | Yes, by SP1 (trading spec v0.16) |
 | Executor `protection.rs` (`asset_class == Crypto` picks one stop-limit) ↔ DEC-531 item 2 | Protection | Strongest form the profile offers | **No**: B2a replaces the branch |
 | DEC-441 item 10 ↔ U-R1, U-R2 ↔ the contract | Idempotency | Submit with id, query by id | **No**: no query by `ref_id`; DEC-529 item 4 resolves it for this order only (B2b, C3) |
 | DEC-441 item 15 ↔ U-R10 | Platform terms | Written answer before any connection | Resolved for this order only by DEC-529 item 5; customers still blocked |
 | FR-2.6 (1× verified) ↔ U-R7 | Account | Margin field | **No** field; DEC-529 item 11's attestation for this order |
-| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | **No**: SP1, DEC-529 item 7 (founder) |
-| Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | **No**: DEC-529 item 12, SP1 |
-| Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | **No**: SP1 |
-| Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | **No**: DEC-529 item 3, until E9-4 |
+| Trading §5.4 (OCO or bracket for equities) ↔ Robinhood's profile | Protection | One GTC stop-limit | Yes, by SP1 (DEC-529 item 7); the stop-limit's limit is `stop_limit_offset` (DEC-539) |
+| Trading §4.2 (`sip` for live equities) | Live quote | Collar and risk mark | Yes, by SP1 (DEC-529 item 12) |
+| Trading §7.2 (account type and regime per broker) | Account | Robinhood rows | Yes, by SP1 |
+| Mandate §6.1 `cli_confirm` paper only ↔ DEC-155 item 4 | Live grant | Method field | Yes, by SP1 (DEC-529 item 3), until E9-4 |
 | ES-23 ↔ the runner's `live` feature | Build | — | **No**: DEC-529 item 3; X1 adds the check ES-23 assumes |
 | Connections §6.2 rule 5 ↔ ES-23 numbers | Prices, quantities | Decimal strings via `mandate-num` | Yes |
 | CN-8 ↔ `get_accounts` | Reads | Other accounts dropped | Yes, by C2 |
@@ -327,7 +327,7 @@ Relayed as accepted on 2026-10-08; each reads Accepted once DEC-529's status doe
 |---|---|---|
 | F-1 | The live order and its narrowings of rule 8, ES-23, DEC-155 item 4, V-001, FR-2.6, trading §4.2 and the tracker's counsel line | Accepted as recommended. Nothing live runs before the status reads Accepted |
 | F-2 | The cap and the instrument class (whole shares, so one share must fit) | The founder chose them: `max_order_usd` 100 USD, a cheap broad ETF under about 90 USD a share; the ticker in the mandate |
-| F-3 | Recovery without a query by `ref_id` (DEC-529 item 4), resolving DEC-441 item 10 for this order only | Accepted as recommended. B2b's and C1's implementations wait for the status |
+| F-3 | Recovery without a query by `ref_id` (DEC-529 item 4), resolving DEC-441 item 10 for this order only | Accepted as recommended; DEC-529 reads Accepted, so B2b's and C1's implementations may land |
 | F-4 | DEC-441 items 15, 16, 17 and 20 as DEC-529 reads them; counsel | Accepted as recommended; counsel not required for this own-account order and still required for any customer use |
 | F-5 | The live quote source (DEC-529 item 12) | Accepted as recommended |
 | F-6 | Founder-owned files (new crates' entries, the `getrandom` row) and SP1 | SP1 approved as DEC-529 states it; each PR names its founder-owned files |

@@ -6,8 +6,10 @@ members = ["xtask", "crates/*"]
 [workspace.dependencies]
 mandate-accounting = { path = "crates/mandate-accounting", version = "0.0.0" }
 mandate-alpaca = { path = "crates/mandate-alpaca", version = "0.0.0" }
+mandate-api = { path = "crates/mandate-api", version = "0.0.0" }
 mandate-approval = { path = "crates/mandate-approval", version = "0.0.0" }
 mandate-artifacts-fs = { path = "crates/mandate-artifacts-fs", version = "0.0.0" }
+mandate-authn = { path = "crates/mandate-authn", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
 mandate-builder = { path = "crates/mandate-builder", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
@@ -22,7 +24,10 @@ mandate-journal-pg = { path = "crates/mandate-journal-pg", version = "0.0.0" }
 mandate-liquidity = { path = "crates/mandate-liquidity", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-mcp = { path = "crates/mandate-mcp", version = "0.0.0" }
+mandate-connections = { path = "crates/mandate-connections", version = "0.0.0" }
+mandate-vault-local = { path = "crates/mandate-vault-local", version = "0.0.0" }
 mandate-modelhost = { path = "crates/mandate-modelhost", version = "0.0.0" }
+mandate-notify = { path = "crates/mandate-notify", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
@@ -32,13 +37,18 @@ mandate-research = { path = "crates/mandate-research", version = "0.0.0" }
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-spec = { path = "crates/mandate-spec", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
+mandate-webpush = { path = "crates/mandate-webpush", version = "0.0.0" }
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc"] }
 anyhow = "1.0.104"
 arrow-array = { version = "60.0.0", default-features = false }
 arrow-schema = { version = "60.0.0", default-features = false }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+base64ct = { version = "1.8.3", default-features = false, features = ["alloc"] }
 clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+hkdf = { version = "0.13.0", default-features = false }
 jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libtest-mimic = "0.8.2"
+p256 = { version = "0.14.0", default-features = false }
 parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }
 proptest = "1.11.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }

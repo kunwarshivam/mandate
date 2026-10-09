@@ -25,7 +25,7 @@ def journ(x):
 for c in d["cases"]:
     cid, k, e = c["id"], c["kind"], c.get("expect")
     if k == "schema":
-        req(cid, e["schema_valid"] == (cid == "MC-S01"), "only S01 is valid")
+        req(cid, e["schema_valid"] == (cid in ("MC-S01", "MC-K01")), "only S01 and K01 (version 2) are valid")
     if k == "semantic":
         code = {"V-01": None}
         t = c["title"].lower()
@@ -708,6 +708,34 @@ req("MC-J06", au_of("MC-J06")["rules"][0]["then"] == "auto" and C["MC-J06"]["pat
 req("MC-J09", au_of("MC-J09")["rules"][0]["then"] == "auto" and au_of("MC-J09")["rules"][0]["when"]["op"] == "lt"
     and int(C["MC-J09"]["patch"][0]["value"]) < int(au_of("MC-J09")["rules"][0]["when"]["value"]), "an auto rule narrowed")
 req("MC-J", sum(c.startswith("MC-J") for c in C) == 10, "10 routing cases")
+# DEC-539: the offset is required where the connection's profile protects with a stop-limit, and W-002 adds it there.
+SL = {"stop_limit_asset_classes": ["crypto", "us_equity"]}
+req("MC-K05", C["MC-K05"]["context"] == SL and C["MC-K05"]["expect"]["violations"] == ["V-008"], "equities need the offset")
+req("MC-K06", C["MC-K06"]["context"] == SL
+    and Decimal(C["MC-K06"]["expect"]["worst_case"]["one_position_at_stop_usd"])
+    > Decimal(C["MC-K07"]["expect"]["worst_case"]["one_position_at_stop_usd"]), "the worst case adds the offset")
+PAPER = {"stop_limit_asset_classes": ["crypto"]}
+ABSENT = {"stop_limit_asset_classes": None}
+req("MC-K", d["validation_context_defaults"]["stop_limit_asset_classes"] == ["crypto"],
+    "the defaults state the bases' Alpaca profile, so no case relies on an absent one")
+req("MC-K07", C["MC-K07"]["context"] == PAPER and C["MC-K07"]["expect"]["violations"] == [], "the Alpaca profile needs none")
+req("MC-K08", C["MC-K08"]["context"] == SL and C["MC-K08"]["expect"]["worst_case"]
+    == C["MC-K06"]["expect"]["worst_case"], "version 1's field reads as version 2's")
+req("MC-K10", C["MC-K10"]["expect"]["changed_paths"] == ["/protection/stop_limit_offset"], "only the offset changed")
+req("MC-K11", C["MC-K11"]["expect"]["classification"] == "neutral" and C["MC-K11"]["expect"]["changed_paths"] == [],
+    "a move to version 2 alone changes nothing")
+req("MC-K12", C["MC-K12"]["context"] == ABSENT and C["MC-K12"]["expect"]["violations"] == ["V-008"]
+    and C["MC-K07"]["patch"] == C["MC-K12"]["patch"], "absent, the profile fails closed: the equity needs the offset")
+req("MC-K13", C["MC-K13"]["context"] == ABSENT and C["MC-K13"]["expect"]["warnings"] == ["W-002"]
+    and Decimal(C["MC-K13"]["expect"]["worst_case"]["one_position_at_stop_usd"])
+    > Decimal(C["MC-K13"]["expect"]["worst_case"]["daily_loss_budget_usd"]), "absent, the worst case adds the offset")
+req("MC-K14", C["MC-K14"]["context"] == PAPER and C["MC-K14"]["patch"] == C["MC-K13"]["patch"]
+    and C["MC-K14"]["expect"]["warnings"] == []
+    and Decimal(C["MC-K14"]["expect"]["worst_case"]["one_position_at_stop_usd"])
+    < Decimal(C["MC-K13"]["expect"]["worst_case"]["one_position_at_stop_usd"]), "the Alpaca profile leaves it out")
+req("MC-K15", C["MC-K15"]["context"]["previous_version"]["mandate_schema_version"] == 2
+    and C["MC-K15"]["expect"]["violations"] == ["V-031"], "no move back to version 1")
+req("MC-K", sum(c.startswith("MC-K") for c in C) == 15, "15 stop-limit offset cases")
 # §11 states how many cases the file holds; nothing else compares that prose with the file (#530 review, m2).
 SPEC = (pathlib.Path(__file__).resolve().parents[2] / "docs/specs/mandate.md").read_text()
 stated = re.findall(r"signal-model registry, and (\d+) cases that implementations must", SPEC)

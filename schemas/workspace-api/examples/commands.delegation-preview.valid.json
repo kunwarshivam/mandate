@@ -1,0 +1,39 @@
+[
+  {
+    "label": "auto: /classification = \"risk_increasing\"",
+    "set": {
+      "/classification": "risk_increasing"
+    }
+  },
+  {
+    "label": "auto: /delegation/shape = \"until_close\"",
+    "set": {
+      "/delegation/shape": "until_close"
+    }
+  },
+  {
+    "label": "auto: /delegation/shape = \"instrument_for_time\"",
+    "set": {
+      "/delegation/shape": "instrument_for_time"
+    }
+  },
+  {
+    "label": "auto: /delegation/shape = \"kind_for_time\"",
+    "set": {
+      "/delegation/shape": "kind_for_time"
+    }
+  },
+  {
+    "label": "auto: /delegation/expires_at null",
+    "set": {
+      "/delegation/expires_at": null
+    }
+  },
+  {
+    "label": "a timed delegation's expiry",
+    "set": {
+      "/delegation/shape": "kind_for_time",
+      "/delegation/expires_at": "2026-10-09T00:00:00.000000000Z"
+    }
+  }
+]

@@ -16,7 +16,7 @@ use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent, usd};
-use crate::control::{Configuration, ConfirmedVersion};
+use crate::control::{Configuration, ConfirmedVersion, SnapshotExchange};
 use crate::error::Cause;
 
 /// The largest quote-age bound the rule-set artifact may name: a minute-old quote is already older
@@ -108,11 +108,13 @@ impl Artifacts {
 
     /// The run's artifacts from the confirmed version and the effective registrations on the
     /// control stream (E19-11, DEC-505), never from a file: the mandate and its one pinned model,
-    /// the registered fee schedule, calendar and rule set, each judged as `load_production` judges
-    /// its file, and the instrument from the DEC-523 snapshot, which must be the mandate's pinned
-    /// asset and symbol. The config references hash the registered bytes, so the executor journals
-    /// the objects the stream names (E7-19 slice 2 remainder, the brief's Q1, X-8). It needs no
-    /// credential, so it runs before the preflight.
+    /// whose registered content is a DEC-504 content object (`kind` `quant_model_content`) naming
+    /// the pin's own `model_id` and `model_version` under the pinned hash, with no fallback to the
+    /// E7-7 file's shape; the registered fee schedule, calendar and rule set, each judged as
+    /// `load_production` judges its file; and the instrument from the DEC-523 snapshot, which must
+    /// be the mandate's pinned asset and symbol. The config references hash the registered bytes,
+    /// so the executor journals the objects the stream names (E7-19 slice 2 remainder, the brief's
+    /// Q1, X-8). It needs no credential, so it runs before the preflight.
     ///
     /// # Errors
     /// [`Cause::Absent`] for a registered object the run cannot use, as for its file.
@@ -120,8 +122,80 @@ impl Artifacts {
         confirmed: &ConfirmedVersion,
         configuration: &Configuration,
     ) -> Result<Self, Cause> {
-        let _ = (confirmed, configuration);
-        Err(Cause::Unimplemented { story: "E7-19" })
+        let mandate = confirmed.mandate().clone();
+        if mandate.environment != mandate_domain::Environment::Paper {
+            return Err(absent("a paper mandate"));
+        }
+        let [pinned] = mandate.universe.pinned_instruments.as_slice() else {
+            return Err(absent("one pinned production instrument"));
+        };
+        let [model] = mandate.behavior.signal_models.as_slice() else {
+            return Err(absent("the one reviewed signal model"));
+        };
+        let registered = &configuration.model_version;
+        let content = mandate_canon::parse(&registered.bytes)
+            .map_err(|_| absent("the registered model content"))?;
+        let member = |name: &str| content.get(name).and_then(Value::as_str);
+        if model.content_hash != registered.content_hash
+            || member("kind") != Some("quant_model_content")
+            || member("model_id") != Some(model.id.as_str())
+            || member("model_version") != Some(model.version.as_str())
+        {
+            return Err(absent("the registered model"));
+        }
+        let snapshot = &configuration.instrument;
+        if pinned.asset_class != DomainAssetClass::UsEquity
+            || snapshot.instrument_id != pinned.asset_id.as_str()
+            || snapshot.symbol != pinned.symbol
+        {
+            return Err(absent("the registered instrument"));
+        }
+        let (broker_exchange, gate_exchange) = exchanges(match snapshot.exchange {
+            SnapshotExchange::Arca => "arca",
+            SnapshotExchange::Nasdaq => "nasdaq",
+        })?;
+        let instrument = ReviewedInstrument {
+            asset_id: pinned.asset_id.clone(),
+            symbol: InstrumentId::new(&pinned.symbol)
+                .map_err(|_| absent("the registered instrument symbol"))?,
+            asset_class: DomainAssetClass::UsEquity,
+            broker_exchange,
+            gate_exchange,
+            increment: ShareIncrement::Whole,
+            increment_qty: Qty::parse(WHOLE_SHARE)?,
+            etp: EtpClass::Plain,
+            etp_classified_at: snapshot.etp_classified_at,
+        };
+        let fee = artifact_from(configuration.fee_config.bytes.clone(), FEE_MEMBERS)?;
+        let calendar = artifact_from(
+            configuration.trading_calendar.bytes.clone(),
+            CALENDAR_MEMBERS,
+        )?;
+        let rules = artifact_from(configuration.rule_set.bytes.clone(), RULE_MEMBERS)?;
+        let fees = fees(&fee, &calendar)?;
+        let (quote_max_age, gate_config, executor_config) = rule_set(&rules)?;
+        let canonical_mandate = mandate
+            .canonical_bytes()
+            .map_err(|_| absent("the mandate's canonical artifact"))?;
+        let config_refs = BindingGateConfigRefs::complete(
+            reference(&fee.bytes),
+            reference(&calendar.bytes),
+            reference(&configuration.instrument_snapshot.bytes),
+            reference(&rules.bytes),
+            reference(&canonical_mandate),
+        );
+        Ok(Self {
+            model_id: model.id.as_str().to_owned(),
+            model_version: model.version.clone(),
+            model_hash: model.content_hash,
+            mandate,
+            fees,
+            instrument,
+            quote_max_age,
+            config_refs,
+            gate_config,
+            executor_config,
+        })
     }
 
     /// Loads the temporary E7-7 AAPL adapter's reviewed artifacts.
@@ -165,31 +239,9 @@ impl Artifacts {
         let model_version = model.version.clone();
         let model_hash = model.content_hash;
 
-        let fee = artifact(
-            config_dir,
-            "fee-config.json",
-            &["effective_from", "environment", "schedule"],
-        )?;
-        require_text(&fee.value, "schedule", "conservative_v1")?;
-        let calendar_artifact = artifact(
-            config_dir,
-            "trading-calendar.json",
-            &["first", "holidays", "last", "special_sessions"],
-        )?;
-        let first = Date::parse(required_text(&calendar_artifact.value, "first")?)
-            .map_err(|_| absent("the trading calendar's first date"))?;
-        let last = Date::parse(required_text(&calendar_artifact.value, "last")?)
-            .map_err(|_| absent("the trading calendar's last date"))?;
-        require_empty_array(&calendar_artifact.value, "holidays")?;
-        require_empty_array(&calendar_artifact.value, "special_sessions")?;
-        let calendar = TradingCalendar::new(first, last, [], [])
-            .map_err(|_| absent("the effective trading calendar"))?;
-        let fees = mandate_executor::paper_only_fee_config(
-            required_text(&fee.value, "environment")?,
-            calendar,
-            required_text(&fee.value, "effective_from")?,
-        )
-        .map_err(Cause::Executor)?;
+        let fee = artifact(config_dir, "fee-config.json", FEE_MEMBERS)?;
+        let calendar_artifact = artifact(config_dir, "trading-calendar.json", CALENDAR_MEMBERS)?;
+        let fees = fees(&fee, &calendar_artifact)?;
 
         let instrument_artifact = artifact(
             config_dir,
@@ -227,29 +279,8 @@ impl Artifacts {
             etp_classified_at,
         };
 
-        let rules = artifact(
-            config_dir,
-            "rule-set.json",
-            &[
-                "executor",
-                "gate",
-                "gate_config",
-                "iex_quote_max_age_s",
-                "ruleset_version",
-                "story",
-            ],
-        )?;
-        require_text(&rules.value, "gate", "trading-domain-9.1")?;
-        require_text(&rules.value, "ruleset_version", "v1")?;
-        require_text(&rules.value, "story", "E7-7")?;
-        let quote_max_age_s = rules
-            .value
-            .get("iex_quote_max_age_s")
-            .and_then(Value::as_int)
-            .filter(|seconds| (1..=MAX_QUOTE_AGE_S).contains(seconds))
-            .ok_or_else(|| absent("a reviewed IEX quote age of 1 to 60 seconds"))?;
-        let gate_config = gate_configuration(&rules.value)?;
-        let executor_config = executor_configuration(&rules.value)?;
+        let rules = artifact(config_dir, "rule-set.json", RULE_MEMBERS)?;
+        let (quote_max_age, gate_config, executor_config) = rule_set(&rules)?;
 
         let canonical_mandate = mandate
             .canonical_bytes()
@@ -268,7 +299,7 @@ impl Artifacts {
             model_hash,
             fees,
             instrument,
-            quote_max_age: Duration::from_secs(quote_max_age_s),
+            quote_max_age,
             config_refs,
             gate_config,
             executor_config,
@@ -454,10 +485,62 @@ fn require_opaque_id(text: &str, fact: &'static str) -> Result<(), Cause> {
     }
 }
 
+const FEE_MEMBERS: &[&str] = &["effective_from", "environment", "schedule"];
+const CALENDAR_MEMBERS: &[&str] = &["first", "holidays", "last", "special_sessions"];
+const RULE_MEMBERS: &[&str] = &[
+    "executor",
+    "gate",
+    "gate_config",
+    "iex_quote_max_age_s",
+    "ruleset_version",
+    "story",
+];
+
+/// The reviewed fee schedule over the reviewed calendar.
+fn fees(fee: &Artifact, calendar: &Artifact) -> Result<mandate_accounting::Config, Cause> {
+    require_text(&fee.value, "schedule", "conservative_v1")?;
+    let first = Date::parse(required_text(&calendar.value, "first")?)
+        .map_err(|_| absent("the trading calendar's first date"))?;
+    let last = Date::parse(required_text(&calendar.value, "last")?)
+        .map_err(|_| absent("the trading calendar's last date"))?;
+    require_empty_array(&calendar.value, "holidays")?;
+    require_empty_array(&calendar.value, "special_sessions")?;
+    let calendar = TradingCalendar::new(first, last, [], [])
+        .map_err(|_| absent("the effective trading calendar"))?;
+    mandate_executor::paper_only_fee_config(
+        required_text(&fee.value, "environment")?,
+        calendar,
+        required_text(&fee.value, "effective_from")?,
+    )
+    .map_err(Cause::Executor)
+}
+
+/// The reviewed rule set's quote age bound and its gate and executor configurations.
+fn rule_set(rules: &Artifact) -> Result<(Duration, GateConfig, ExecutorConfig), Cause> {
+    require_text(&rules.value, "gate", "trading-domain-9.1")?;
+    require_text(&rules.value, "ruleset_version", "v1")?;
+    require_text(&rules.value, "story", "E7-7")?;
+    let quote_max_age_s = rules
+        .value
+        .get("iex_quote_max_age_s")
+        .and_then(Value::as_int)
+        .filter(|seconds| (1..=MAX_QUOTE_AGE_S).contains(seconds))
+        .ok_or_else(|| absent("a reviewed IEX quote age of 1 to 60 seconds"))?;
+    Ok((
+        Duration::from_secs(quote_max_age_s),
+        gate_configuration(&rules.value)?,
+        executor_configuration(&rules.value)?,
+    ))
+}
+
 /// Reads `name` once. Its members must be exactly `members`, which are listed in canonical order.
 fn artifact(config_dir: &Path, name: &str, members: &[&str]) -> Result<Artifact, Cause> {
     let bytes =
         fs::read(config_dir.join(name)).map_err(|_| absent("a required config artifact"))?;
+    artifact_from(bytes, members)
+}
+
+fn artifact_from(bytes: Vec<u8>, members: &[&str]) -> Result<Artifact, Cause> {
     let value = mandate_canon::parse(&bytes).map_err(|_| absent("a canonical config artifact"))?;
     let exact = value
         .as_object()
