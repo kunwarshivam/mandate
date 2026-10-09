@@ -27,14 +27,14 @@
 //!   response and before the vault write.
 //! - [`record`] is the connection record and the account-fingerprint uniqueness check, kept by the
 //!   **connection manager, in the API process** (E7-11).
+//! - [`checks`] runs the permission checks (E7-12), in the **connection's executor process**.
 //! - [`hosts`] is the guard every outbound Alpaca request passes. The only request to the live
 //!   host that can exist is [`hosts::LiveTokenRequest`], `POST /oauth/token` (DEC-821 item 2),
 //!   and only the token-exchange process sends it. Every other request is a
 //!   [`hosts::PaperRequest`], which can address only the paper host; the executor sends only
 //!   those, and its egress contains no live host (DEC-821 item 4).
-//!
-//! The permission checks (E7-12) are added beside these.
 
+pub mod checks;
 pub mod error;
 pub mod exchange;
 pub mod grant;

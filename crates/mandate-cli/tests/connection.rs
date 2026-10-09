@@ -6,6 +6,9 @@
 
 mod common;
 
+use std::cell::RefCell;
+use std::time::Duration;
+
 use clap::Parser;
 use common::{ACCOUNT, ACCOUNT_STREAM, CONTROL, FixedIds, Journal, OWNER, WORKSPACE};
 use common::{at, body, int, member, member_text, object, stream, text};
@@ -15,7 +18,8 @@ use mandate_cli::connection::{record, run};
 use mandate_cli::control::{ControlError, ControlJournal, Owner, Submitted};
 use mandate_cli::postgres::JournalArgs;
 use mandate_cli::{Cli, Command};
-use mandate_journal::{AppendOutcome, Environment};
+use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
+use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
 
@@ -103,6 +107,12 @@ fn seed(j: &mut Journal, on: &str, id: &str, kind: (&str, i64, &str), payload: V
 /// A `ConnectionChecked` on `on`: `results` names each listed check by its initial, `+` passed
 /// and `-` failed, as in `a+c+e+s+`; listed by check, as rule 57 has them.
 fn check(j: &mut Journal, on: &str, occasion: &str, results: &str, pii: bool, env: &str) {
+    check_as(j, CHECK, (on, occasion), results, pii, env);
+}
+
+/// [`check`] under the event id `id`.
+fn check_as(j: &mut Journal, id: &str, place: (&str, &str), results: &str, pii: bool, env: &str) {
+    let (on, occasion) = place;
     let listed = results.as_bytes().chunks(2).map(|pair| {
         let check = REQUIRED
             .iter()
@@ -128,7 +138,7 @@ fn check(j: &mut Journal, on: &str, occasion: &str, results: &str, pii: bool, en
         ("results", Value::Array(listed.collect())),
         ("risk_clock", text(&at(NOW).at.to_string())),
     ]);
-    seed(j, on, CHECK, ("ConnectionChecked", 1, env), payload);
+    seed(j, on, id, ("ConnectionChecked", 1, env), payload);
 }
 
 fn passing(occasion: &str) -> Journal {
@@ -140,8 +150,13 @@ fn passing(occasion: &str) -> Journal {
 /// Control-stream history in words: `E:<conn>:<A|B|1>` a Robinhood live establishment of this
 /// account (`A`), the other (`B`), or version 1 with none (`1`); `R:<conn>` a revocation.
 fn history(j: &mut Journal, events: &str) {
+    history_from(j, 0, events);
+}
+
+/// [`history`], numbering its event ids from `first`.
+fn history_from(j: &mut Journal, first: usize, events: &str) {
     for (n, event) in events.split_whitespace().enumerate() {
-        let id = format!("2{n:025}");
+        let id = format!("2{:025}", first + n);
         let words: Vec<&str> = event.split(':').collect();
         let mut members = vec![("connection_id", text(words[1]))];
         if words[0] == "R" {
@@ -232,7 +247,6 @@ fn untouched(j: &Journal, ids: &FixedIds, out: &str, control_rows: usize) -> boo
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn records_a_checked_live_robinhood_connection_as_version_2() {
     let mut j = passing("connect");
     let alpaca = r#"{"broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper","scopes":["data","trading"]}"#;
@@ -277,7 +291,6 @@ fn records_a_checked_live_robinhood_connection_as_version_2() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn a_rerun_with_the_same_code_answers_the_committed_event() {
     let mut j = passing("connect");
     let mut ids = FixedIds::default();
@@ -294,7 +307,6 @@ fn a_rerun_with_the_same_code_answers_the_committed_event() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn the_code_binds_the_record_it_shows() {
     let mut j = passing("connect");
     let mut ids = FixedIds::default();
@@ -324,7 +336,6 @@ fn the_code_binds_the_record_it_shows() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn refusals_on_the_request_touch_nothing() {
     let cases = "connection conn*rh live connection_id_invalid
                  account not-a-ulid live account_ref_invalid
@@ -353,7 +364,6 @@ fn refusals_on_the_request_touch_nothing() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn the_cause_is_the_passing_connect_check_on_the_bound_stream() {
     let other_stream = format!("acct:{WORKSPACE}:{OTHER_ACCOUNT}");
     let cases = "other connect a+c+e+s+ pii live check_missing
@@ -404,7 +414,6 @@ fn the_cause_is_the_passing_connect_check_on_the_bound_stream() {
 }
 
 #[test]
-#[ignore = "pending E7-11"]
 fn one_account_one_connection_on_the_control_stream() {
     let cases = "E:conn_rh_live_01:A connection_exists
                  E:conn_rh_live_01:A R:conn_rh_live_01 E:conn_rh_live_01:A connection_exists
@@ -440,7 +449,6 @@ fn one_account_one_connection_on_the_control_stream() {
 /// Whatever the check recorded, the command commits exactly when every check it needs is listed
 /// and passed and the account was read; the oracle reads the drawn results itself.
 #[test]
-#[ignore = "pending E7-11"]
 fn commits_exactly_when_every_needed_check_passed() {
     let drawn = (prop::collection::vec(0..3u8, 4), any::<bool>());
     TestRunner::deterministic()
@@ -464,8 +472,205 @@ fn commits_exactly_when_every_needed_check_passed() {
         .unwrap();
 }
 
+/// The id the rival's event takes, after any history a case starts from.
+const RIVAL: &str = "20000000000000000000000009";
+
+/// A journal on which a rival `record` commits on the control stream at the command's first append
+/// to it, just before that append lands (taking the stream's writer epoch, as its writer would):
+/// two concurrent records that both read, however often, before either appends, without threads.
+/// So a command that only reads again before appending still appends behind the rival; only one
+/// that appends at the head its checked rows were read at sees the race (#915 review). The rival is history words ([`history`]), or `alpaca` for Alpaca's paper connection,
+/// which binds nothing the command records.
+struct Racing {
+    inner: RefCell<Journal>,
+    rival: RefCell<Option<String>>,
+}
+
+impl Racing {
+    fn commit_rival(&self) {
+        let Some(rival) = self.rival.borrow_mut().take() else {
+            return;
+        };
+        let j = &mut self.inner.borrow_mut();
+        if rival != "alpaca" {
+            history_from(j, 9, &rival);
+            return;
+        }
+        let payload = object(&[
+            ("broker", text("alpaca")),
+            ("connection_id", text("conn_alpaca_paper_01")),
+            ("environment", text("paper")),
+            ("scopes", Value::Array(vec![text("trading")])),
+        ]);
+        seed(
+            j,
+            CONTROL,
+            RIVAL,
+            ("ConnectionEstablished", 1, "paper"),
+            payload,
+        );
+    }
+}
+
+impl ControlJournal for Racing {
+    fn rows(&self, s: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
+        self.inner.borrow().rows(s)
+    }
+
+    fn head(&self, s: &StreamId) -> Result<Head, ControlError> {
+        self.inner.borrow().head(s)
+    }
+
+    fn take_ownership(&mut self, s: &StreamId) -> Result<u64, ControlError> {
+        self.inner.get_mut().take_ownership(s)
+    }
+
+    fn append(
+        &mut self,
+        s: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+    ) -> Result<AppendOutcome, ControlError> {
+        if s.as_str() == CONTROL {
+            self.commit_rival();
+        }
+        let j = self.inner.get_mut();
+        j.append(s, expected_head, writer_epoch, recorded_at, drafts)
+    }
+
+    fn wait(&mut self, delay: Duration) {
+        self.inner.get_mut().wait(delay);
+    }
+}
+
+/// CN-5 and journal spec §9.8 rule 66 under a race (#907 review): whatever lands between the
+/// command's read of the control stream and its append, the command commits only what it would
+/// commit after it, and refuses as it would refuse after it. Each case: the history the control
+/// stream starts with, the rival that commits concurrently, the control stream's length after, and
+/// the outcome. One account, one connection, one establishment.
 #[test]
 #[ignore = "pending E7-11"]
+fn concurrent_records_bind_one_connection_and_one_establishment() {
+    let cases = "- | E:conn_rh_live_02:A | 1 account_ref_bound
+                 - | E:conn_rh_live_02:B | 1 account_maybe_connected
+                 - | E:conn_rh_live_01:A | 1 check_missing
+                 E:conn_rh_live_01:A R:conn_rh_live_01 | E:conn_rh_live_01:A | 3 connection_exists
+                 - | alpaca | 2 commits";
+    for case in cases.lines() {
+        let [prior, rival, after] = case.split('|').map(str::trim).collect::<Vec<_>>()[..] else {
+            panic!("{case}");
+        };
+        let (length, outcome) = after.split_once(' ').unwrap();
+        let reconnect = prior.starts_with("E:conn_rh_live_01");
+        let mut j = passing(if reconnect { "reconnect" } else { "connect" });
+        history(&mut j, prior.trim_start_matches('-'));
+        let code = shown(&mut j, &request());
+        let mut racing = Racing {
+            inner: RefCell::new(j),
+            rival: RefCell::new(Some(rival.to_owned())),
+        };
+        let mut ids = FixedIds::default();
+        let mut out = Vec::new();
+        let owner = Owner {
+            workspace: WORKSPACE.to_owned(),
+            user: OWNER.to_owned(),
+            environment: Environment::Live,
+        };
+        let req = request();
+        let result = record(
+            &mut racing,
+            &mut ids,
+            &owner,
+            &req,
+            Some(&code),
+            at(NOW),
+            &mut out,
+        );
+        let j = racing.inner.into_inner();
+        assert!(
+            racing.rival.into_inner().is_none(),
+            "the rival raced: {case}"
+        );
+        let rows = j.rows(&stream(CONTROL)).unwrap();
+        assert_eq!(rows.len().to_string(), length, "{case}");
+        if outcome != "commits" {
+            assert_eq!(result, refused(outcome), "{case}");
+            assert!(out.is_empty(), "{case}");
+            assert_eq!(rows.last().unwrap().event_id, RIVAL, "{case}");
+            continue;
+        }
+        assert_eq!(rows[0].event_id, RIVAL, "{case}");
+        let last = rows.last().unwrap();
+        let (event_id, seq) = (last.event_id.clone(), 2);
+        assert_eq!(result, Ok(Recorded::Committed(Submitted { event_id, seq })));
+        assert_eq!(member_text(&body(last), "causation_id"), Some(CHECK));
+        assert_eq!(
+            member_text(&body(last), "payload.account_ref"),
+            Some(ACCOUNT)
+        );
+    }
+}
+
+/// Journal spec §9.8 rule 68 (#907 review): the record binds the latest `ConnectionChecked` of its
+/// occasion on the account stream, `connect`, or `reconnect` for a revoked connection; a check of
+/// another occasion after it does not count. Each case: the control stream's history, the account
+/// stream's checks in order (the first is [`CHECK`]), which of them `--checked` names, and the
+/// outcome.
+#[test]
+#[ignore = "pending E7-11"]
+fn the_latest_check_of_its_occasion_decides() {
+    let reconnecting = "E:conn_rh_live_01:A R:conn_rh_live_01";
+    let cases = format!(
+        "- | connect:a+c+e+s+ connect:a+c+e+s- | 1 check_missing
+         - | connect:a+c+e+s+ connect:a+c+e+s+ | 1 check_missing
+         - | connect:a+c+e+s- connect:a+c+e+s+ | 2 commits
+         - | connect:a+c+e+s+ reauthorize:a+c+e+s- | 1 commits
+         - | connect:a+c+e+s+ reconnect:a+c+e+s- | 1 commits
+         {reconnecting} | reconnect:a+c+e+s+ reconnect:a+c+e+s- | 1 check_missing
+         {reconnecting} | reconnect:a+c+e+s+ connect:a+c+e+s- | 1 commits"
+    );
+    for case in cases.lines() {
+        let [prior, checks, named] = case.split('|').map(str::trim).collect::<Vec<_>>()[..] else {
+            panic!("{case}");
+        };
+        let (named, outcome) = named.split_once(' ').unwrap();
+        let mut j = Journal::default();
+        for (n, checked) in checks.split_whitespace().enumerate() {
+            let (occasion, results) = checked.split_once(':').unwrap();
+            let id = format!("1{:025}", n + 1);
+            check_as(
+                &mut j,
+                &id,
+                (ACCOUNT_STREAM, occasion),
+                results,
+                true,
+                "live",
+            );
+        }
+        history(&mut j, prior.trim_start_matches('-'));
+        let before = j.rows(&stream(CONTROL)).unwrap().len();
+        let id = format!("1{:025}", named.parse::<usize>().unwrap());
+        let mut ids = FixedIds::default();
+        let (result, out) = confirmed(&mut j, &mut ids, &with("checked", &id));
+        if outcome != "commits" {
+            assert_eq!(result, refused(outcome), "{case}");
+            assert!(untouched(&j, &ids, &out, before), "{case}");
+            continue;
+        }
+        let rows = j.rows(&stream(CONTROL)).unwrap();
+        assert_eq!(rows.len(), before + 1, "{case}");
+        let last = rows.last().unwrap();
+        assert!(
+            matches!(result, Ok(Recorded::Committed(ref s)) if s.event_id == last.event_id),
+            "{case}: {result:?}"
+        );
+        assert_eq!(member_text(&body(last), "causation_id"), Some(id.as_str()));
+    }
+}
+
+#[test]
 fn run_refuses_a_bad_request_before_opening_the_journal() {
     let store = std::env::temp_dir().join(format!("mandate-cli-k1b-{}", std::process::id()));
     std::fs::remove_dir_all(&store).ok();

@@ -45,6 +45,10 @@
 //! }
 //! ```
 //!
+//! **A sensitive data API can demand the permission too** (DEC-655): it takes a
+//! [`demand::Permitted`] witness, which only [`TenantContext::require`] yields, and only for a
+//! context authorized for the witness's permission ([`demand`]).
+//!
 //! **Org scope and one's own data get sealed contexts too** (DEC-832). An org-scope authorization
 //! yields an [`OrgContext`], carrying the organization's workspaces as the store enumerated them,
 //! never a caller's list; it is not a [`Tenant`], so no data API takes it, and it reaches a
@@ -159,6 +163,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 
+pub mod demand;
 mod matrix;
 mod permission;
 
@@ -560,6 +565,16 @@ impl TenantContext {
     pub fn permission(&self) -> Permission {
         self.permission
     }
+
+    /// The witness a sensitive data API demands (DEC-655 item 2): `Ok` exactly when this context
+    /// was authorized for `P`'s permission, and otherwise [`Refusal::Forbidden`]. The witness
+    /// borrows this context, so it reports this context's workspace, organization, and principal.
+    pub fn require<P: demand::RequiredPermission>(
+        &self,
+    ) -> Result<demand::Permitted<'_, P>, Refusal> {
+        let _ = self;
+        Err(Refusal::Unimplemented { story: "E9-8" })
+    }
 }
 
 /// What every data API over a workspace takes: a [`TenantContext`] for a request, or, from E9-8,
@@ -590,6 +605,7 @@ pub trait Tenant: sealed::Sealed {
 mod sealed {
     pub trait Sealed {}
     impl Sealed for super::TenantContext {}
+    impl<P: super::demand::RequiredPermission> Sealed for super::demand::Permitted<'_, P> {}
 }
 
 /// What an authorization at an organization's scope yields (identity spec §4.5, DEC-832 items 1 to
@@ -800,6 +816,25 @@ impl Tenant for TenantContext {
     }
     fn kind(&self) -> PrincipalKind {
         self.kind
+    }
+}
+
+#[expect(
+    clippy::todo,
+    reason = "a getter has no error to carry, so its stub is todo!(), the other form DEC-137 names"
+)]
+impl<P: demand::RequiredPermission> Tenant for demand::Permitted<'_, P> {
+    fn workspace(&self) -> WorkspaceId {
+        todo!()
+    }
+    fn org(&self) -> OrgId {
+        todo!()
+    }
+    fn principal(&self) -> PrincipalId {
+        todo!()
+    }
+    fn kind(&self) -> PrincipalKind {
+        todo!()
     }
 }
 
@@ -1103,6 +1138,13 @@ pub enum Refusal {
     /// The change leaves the workspace with no active workspace admin.
     #[error("the workspace would have no active admin")]
     LastAdmin,
+    /// The stub of a story not yet implemented. It goes when E9-8 is implemented, so no
+    /// caller matches on it.
+    #[error("{story} has not been implemented yet")]
+    Unimplemented {
+        /// The story.
+        story: &'static str,
+    },
 }
 
 impl Refusal {
@@ -1118,6 +1160,7 @@ impl Refusal {
             Self::OwnerRoleReserved => "owner_role_reserved",
             Self::LastOwner => "last_owner",
             Self::LastAdmin => "last_admin",
+            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
