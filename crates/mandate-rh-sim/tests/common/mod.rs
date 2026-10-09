@@ -5,6 +5,8 @@
     reason = "each test binary uses a different part of the shared fixtures"
 )]
 
+pub mod wire;
+
 use mandate_num::{Price, Qty, Usd};
 use mandate_rh_sim::{Account, Event, OrderRequest, Session, Sim, SimError};
 

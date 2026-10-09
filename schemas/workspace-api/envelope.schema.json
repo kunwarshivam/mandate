@@ -57,7 +57,9 @@
         "last_admin",
         "reduction_only",
         "membership_unavailable",
-        "outcome_unknown"
+        "outcome_unknown",
+        "address_limit",
+        "busy"
       ],
       "x-planned": {
         "outcome_unknown": "E10-10",
@@ -65,7 +67,9 @@
         "step_up_stale": "E10-10",
         "step_up_reused": "E10-10",
         "step_up_method": "E10-10",
-        "step_up_mismatch": "E10-10"
+        "step_up_mismatch": "E10-10",
+        "address_limit": "E8-14",
+        "busy": "E8-14"
       }
     },
     "Effect": {
@@ -992,6 +996,62 @@
               },
               "type": {
                 "const": "https://mandate.dev/problems/step_up_mismatch"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "address_limit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Too many notification addresses"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/address_limit"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "busy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 503
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": true
+              },
+              "title": {
+                "const": "Try again"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/busy"
               }
             }
           }

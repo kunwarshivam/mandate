@@ -11,11 +11,70 @@
 //! - **A public client only.** `S256` must be offered and a registration endpoint must exist; a
 //!   registration answer that issues a secret or changes the redirect is refused.
 
-use reqwest::Url;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, WWW_AUTHENTICATE};
+use reqwest::{RequestBuilder, Response, StatusCode, Url};
+use serde::de::{DeserializeOwned, IgnoredAny};
+use serde::{Deserialize, Deserializer};
+use serde_json::{Value, json};
 
-use crate::endpoint::PinnedEndpoint;
+use crate::endpoint::{Build, PinnedEndpoint, scheme_allowed};
 use crate::error::McpError;
-use crate::transport::TransportConfig;
+use crate::frame;
+use crate::transport::{
+    PROTOCOL_VERSION, TransportConfig, classify, http_client, is_visible_ascii, read_capped,
+};
+
+/// The JSON-RPC id of the unauthenticated `initialize` that draws the challenge.
+const PROBE_ID: u64 = 1;
+const RESOURCE_WELL_KNOWN: &str = "/.well-known/oauth-protected-resource";
+const SERVER_WELL_KNOWN: &str = "/.well-known/oauth-authorization-server";
+const JSON: &str = "application/json";
+
+/// The members of RFC 9728 protected-resource metadata discovery reads.
+#[derive(Deserialize)]
+struct ResourceMetadata {
+    resource: String,
+    authorization_servers: Vec<String>,
+}
+
+/// The members of RFC 8414 authorization server metadata discovery reads.
+#[derive(Deserialize)]
+struct ServerMetadata {
+    issuer: String,
+    authorization_endpoint: String,
+    token_endpoint: String,
+    registration_endpoint: Option<String>,
+    response_types_supported: Vec<String>,
+    #[serde(default)]
+    code_challenge_methods_supported: Vec<String>,
+}
+
+/// The members of an RFC 7591 registration answer the login reads. A client secret is noted only
+/// as present, `null` included, and its value is never kept.
+#[derive(Deserialize)]
+struct Registered {
+    client_id: Option<Value>,
+    #[serde(default, deserialize_with = "noted")]
+    client_secret: bool,
+    #[serde(default, deserialize_with = "kept")]
+    token_endpoint_auth_method: Option<Value>,
+    #[serde(default, deserialize_with = "kept")]
+    redirect_uris: Option<Value>,
+    #[serde(default, deserialize_with = "kept")]
+    grant_types: Option<Value>,
+    #[serde(default, deserialize_with = "kept")]
+    response_types: Option<Value>,
+}
+
+/// A member that is in the answer, whatever its value, which is skipped unread.
+fn noted<'de, D: Deserializer<'de>>(member: D) -> Result<bool, D::Error> {
+    IgnoredAny::deserialize(member).map(|_| true)
+}
+
+/// A member that is in the answer, `null` included.
+fn kept<'de, D: Deserializer<'de>>(member: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(member).map(Some)
+}
 
 /// The authorization server discovery found, with the endpoints the login dials.
 #[cfg_attr(
@@ -80,23 +139,233 @@ impl AuthServer {
         auth_hosts: &[&str],
         config: &TransportConfig,
     ) -> Result<Self, McpError> {
-        let _ = (endpoint, auth_hosts, config);
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let client = http_client(config)?;
+        let max_bytes = config.max_answer_bytes;
+        let metadata_url = challenge(&client, endpoint).await?;
+        let resource: ResourceMetadata = get_json(&client, metadata_url, max_bytes).await?;
+        if resource.resource != endpoint.url().as_str() {
+            return Err(McpError::ResourceMismatch);
+        }
+        let named = resource
+            .authorization_servers
+            .first()
+            .ok_or(McpError::Malformed)?;
+        let issuer = on_auth_host(named, auth_hosts)?;
+        if issuer.query().is_some() {
+            return Err(McpError::EndpointShape);
+        }
+        let metadata_url = well_known(&issuer, SERVER_WELL_KNOWN);
+        let server: ServerMetadata = get_json(&client, metadata_url, max_bytes).await?;
+        if server.issuer != *named {
+            return Err(McpError::IssuerMismatch);
+        }
+        let authorization_endpoint = on_auth_host(&server.authorization_endpoint, auth_hosts)?;
+        let token_endpoint = on_auth_host(&server.token_endpoint, auth_hosts)?;
+        let registration = server
+            .registration_endpoint
+            .ok_or(McpError::RegistrationUnavailable)?;
+        let registration_endpoint = on_auth_host(&registration, auth_hosts)?;
+        if !server.response_types_supported.iter().any(|t| t == "code") {
+            return Err(McpError::Malformed);
+        }
+        if !server
+            .code_challenge_methods_supported
+            .iter()
+            .any(|m| m == "S256")
+        {
+            return Err(McpError::PkceUnsupported);
+        }
+        Ok(Self {
+            resource: endpoint.url().clone(),
+            issuer,
+            authorization_endpoint,
+            token_endpoint,
+            registration_endpoint,
+        })
     }
 
     /// RFC 7591 registration at the registration endpoint, as a public client: `client_name`
     /// `Mandate`, `authorization_code` only, response type `code`, `token_endpoint_auth_method`
     /// `none`, and `redirect` as the one redirect, with no other member and no `authorization`
-    /// header. An answer carrying a client secret (even empty) or another auth method is
-    /// [`McpError::ClientSecretIssued`]; one listing any other redirect set is
-    /// [`McpError::RedirectChanged`]; a `client_id` that is missing or not visible ASCII is
-    /// [`McpError::Malformed`]. No redirect is followed, and no server text reaches an error.
+    /// header. Only `201 Created` is a registration. An answer carrying a `client_secret` member
+    /// (even empty or `null`) or another auth method is [`McpError::ClientSecretIssued`], and the
+    /// secret is never read; one whose `redirect_uris` is anything but the one-element list sent
+    /// is [`McpError::RedirectChanged`]; one without `token_endpoint_auth_method`, with
+    /// `grant_types` or `response_types` other than those sent, or with a `client_id` that is
+    /// missing or not non-empty visible ASCII is [`McpError::Malformed`]. No redirect is
+    /// followed, and no server text reaches an error (DEC-847 items 5, 6 and 8).
     pub async fn register(
         &self,
         redirect: LoopbackRedirect,
         config: &TransportConfig,
     ) -> Result<ClientRegistration, McpError> {
-        let _ = (redirect, config);
-        Err(McpError::Unimplemented { story: "E7-24" })
+        let client = http_client(config)?;
+        let redirect_uris = json!([redirect.uri()]);
+        let asked = json!({
+            "client_name": "Mandate",
+            "redirect_uris": redirect_uris,
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+        });
+        let request = client
+            .post(self.registration_endpoint.clone())
+            .header(ACCEPT, JSON)
+            .header(CONTENT_TYPE, JSON)
+            .body(asked.to_string());
+        let response = send(request).await?;
+        let registered: Registered =
+            read_json(response, StatusCode::CREATED, config.max_answer_bytes).await?;
+        let method = registered.token_endpoint_auth_method;
+        let other_method = method.as_ref().is_some_and(|method| method != "none");
+        if registered.client_secret || other_method {
+            return Err(McpError::ClientSecretIssued);
+        }
+        if registered
+            .redirect_uris
+            .is_some_and(|listed| listed != redirect_uris)
+        {
+            return Err(McpError::RedirectChanged);
+        }
+        let other_grants = registered
+            .grant_types
+            .is_some_and(|grants| grants != json!(["authorization_code"]));
+        let other_types = registered
+            .response_types
+            .is_some_and(|types| types != json!(["code"]));
+        if method.is_none() || other_grants || other_types {
+            return Err(McpError::Malformed);
+        }
+        let client_id = registered
+            .client_id
+            .as_ref()
+            .and_then(Value::as_str)
+            .filter(|id| is_visible_ascii(id.as_bytes()))
+            .ok_or(McpError::Malformed)?;
+        Ok(ClientRegistration {
+            client_id: client_id.to_owned(),
+            redirect,
+        })
     }
+}
+
+/// The unauthenticated `initialize`, which must draw a `401`; the URL of the protected-resource
+/// metadata its challenge names, which must be on the pinned MCP host, or else the endpoint's
+/// RFC 9728 well-known URL.
+async fn challenge(client: &reqwest::Client, endpoint: &PinnedEndpoint) -> Result<Url, McpError> {
+    let params = json!({
+        "protocolVersion": PROTOCOL_VERSION,
+        "capabilities": {},
+        "clientInfo": {"name": "mandate-mcp", "version": env!("CARGO_PKG_VERSION")},
+    });
+    let request = client
+        .post(endpoint.url().clone())
+        .header(ACCEPT, "application/json, text/event-stream")
+        .header(CONTENT_TYPE, JSON)
+        .header("mcp-protocol-version", PROTOCOL_VERSION)
+        .body(frame::request_body(Some(PROBE_ID), "initialize", &params));
+    let response = send(request).await?;
+    if response.status() != StatusCode::UNAUTHORIZED {
+        return Err(McpError::HttpStatus {
+            status: response.status().as_u16(),
+        });
+    }
+    let named = response
+        .headers()
+        .get_all(WWW_AUTHENTICATE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(resource_metadata);
+    match named {
+        Some(url) => {
+            let host = endpoint.url().host_str().ok_or(McpError::HostNotPinned)?;
+            Ok(PinnedEndpoint::new(host, url)?.url().clone())
+        }
+        None => Ok(well_known(endpoint.url(), RESOURCE_WELL_KNOWN)),
+    }
+}
+
+/// The `resource_metadata` parameter of a challenge, a quoted string since a URL is no token
+/// (RFC 9110 §11.2), matched only where a parameter starts: at the start or after a space or a
+/// comma, and outside any quoted value. Quoted pairs are not read (DEC-847 item 8).
+fn resource_metadata(challenge: &str) -> Option<&str> {
+    const PARAMETER: &str = "resource_metadata=\"";
+    let mut quoted = false;
+    let mut boundary = true;
+    for (at, byte) in challenge.bytes().enumerate() {
+        if !quoted && boundary {
+            let rest = challenge.get(at..)?;
+            let named = rest
+                .get(..PARAMETER.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(PARAMETER));
+            if named {
+                return rest.get(PARAMETER.len()..)?.split('"').next();
+            }
+        }
+        if byte == b'"' {
+            quoted = !quoted;
+        }
+        boundary = byte == b' ' || byte == b',';
+    }
+    None
+}
+
+/// The well-known URL inserted before the path, any terminating slash removed (RFC 9728 §3.1,
+/// RFC 8414 §3.1).
+fn well_known(url: &Url, prefix: &str) -> Url {
+    let mut at = url.clone();
+    at.set_path(&format!("{prefix}{}", url.path().trim_end_matches('/')));
+    at
+}
+
+/// A URL the authorization server names: no credentials or fragment, `https` (loopback `http` in
+/// this crate's test build), on one of `auth_hosts`. Nothing of the text reaches the error.
+fn on_auth_host(text: &str, auth_hosts: &[&str]) -> Result<Url, McpError> {
+    let url = Url::parse(text).map_err(|_| McpError::EndpointShape)?;
+    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+        return Err(McpError::EndpointShape);
+    }
+    if !scheme_allowed(&url, Build::CURRENT) {
+        return Err(McpError::NotHttps);
+    }
+    if !url
+        .host_str()
+        .is_some_and(|host| auth_hosts.contains(&host))
+    {
+        return Err(McpError::AuthHostNotPinned);
+    }
+    Ok(url)
+}
+
+/// A `3xx` ends the exchange: no redirect is followed.
+async fn send(request: RequestBuilder) -> Result<Response, McpError> {
+    let response = request.send().await.map_err(classify)?;
+    if response.status().is_redirection() {
+        return Err(McpError::Redirected);
+    }
+    Ok(response)
+}
+
+async fn get_json<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    url: Url,
+    max_bytes: usize,
+) -> Result<T, McpError> {
+    let response = send(client.get(url).header(ACCEPT, JSON)).await?;
+    read_json(response, StatusCode::OK, max_bytes).await
+}
+
+/// The answer as `T` when its status is `expected`; any other status carries only its number.
+async fn read_json<T: DeserializeOwned>(
+    response: Response,
+    expected: StatusCode,
+    max_bytes: usize,
+) -> Result<T, McpError> {
+    if response.status() != expected {
+        return Err(McpError::HttpStatus {
+            status: response.status().as_u16(),
+        });
+    }
+    let body = read_capped(response, max_bytes).await?;
+    serde_json::from_slice(&body).map_err(|_| McpError::Malformed)
 }

@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::io::Write;
 
 use clap::{Args, Subcommand};
-use mandate_canon::Value;
+use mandate_canon::{Value, is_ulid};
 use mandate_journal::{Environment, StreamId};
 
 use crate::control::{
@@ -200,15 +200,6 @@ fn needed(broker: Broker) -> &'static [&'static str] {
         Broker::Alpaca => &["account", "environment", "scope"],
         Broker::Robinhood => &["account", "contract", "environment", "scope"],
     }
-}
-
-/// Journal spec §2's ULID: 26 Crockford base-32 digits, the first at most `7`.
-fn is_ulid(s: &str) -> bool {
-    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-    let mut digits = s.bytes();
-    let first_fits = matches!(digits.next(), Some(b'0'..=b'7'));
-    let rest = digits.filter(|b| ALPHABET.contains(b)).count();
-    first_fits && rest == 25 && s.len() == 26
 }
 
 /// The refusals `record` makes from the request alone, in [`record`]'s order, and what the record's

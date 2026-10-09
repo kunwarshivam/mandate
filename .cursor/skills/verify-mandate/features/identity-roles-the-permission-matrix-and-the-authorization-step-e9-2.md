@@ -8,21 +8,22 @@
   two consumptions, `PrincipalContext`, the sealed `Tenant`
   and `MembershipLookup`, `MembershipQuery`, `Session`, `Membership`, `Refusal`, `ClientScope`,
   `StepUpActionKind`, `StepUpEvidence`) and `src/permission.rs` (one `Permission` per §4.2 row).
+  `change_roles` checks a role or membership change through its rows, then ID-13, the reserved
+  owner role, and §5.2's last active owner and admin, and yields the change's resolved step-up
+  (DEC-654); `PrincipalContext::into_tenant` yields the workspace context its membership reached.
   `src/demand.rs` holds what a sensitive data API demands (DEC-655, E9-8): the sealed
   `RequiredPermission`, its one marker `ReadRecords`, and the `Permitted<'a, P>` witness, which
   only `TenantContext::require` yields and which is a `Tenant`; `require` and the witness's
-  `Tenant` methods are implemented (E9-8). `change_roles` (which yields the change's resolved
-  step-up, DEC-654) and `PrincipalContext::into_tenant` are stubs.
+  `Tenant` methods are implemented (E9-8).
 - **Tests:** in the crate, because its session, membership, and lookup types are sealed to it:
-  `crates/mandate-identity/src/tests/matrix.rs` (ID-2 and the failed membership read, pending
-  E9-2: every role set, membership state, cool-off, session kind, principal kind, permission, and
+  `crates/mandate-identity/src/tests/matrix.rs` (ID-2 and the failed membership read: every role set, membership state, cool-off, session kind, principal kind, permission, and
   scope, workspace pairs the store does not hold included, and each grant's context, against §4.2 parsed from `docs/specs/identity.md` at test time by the grammar its doc
   states; the grammar check is live), with the hand-written row map in
   `crates/mandate-identity/src/tests/rows.rs` and the test doubles in
   `crates/mandate-identity/src/tests/mod.rs`; `crates/mandate-identity/src/tests/wire.rs` (each
   refusal's code, and the step-up kinds and client scopes read from workspace API §3.6 and §3.8,
   live); `org_fanout_workspaces_come_from_the_store` in `matrix.rs`;
-  `crates/mandate-identity/src/tests/roles.rs` (pending E9-2: ID-13's own roles, the leave row,
+  `crates/mandate-identity/src/tests/roles.rs` (ID-13's own roles, the leave row,
   the last active owner and admin of §5.2, and §4.2's role-change rows, read as DEC-654 says, with
   a property for each of ID-13 and §5.2; and `into_tenant`'s workspace, DEC-832 item 7); and the
   `compile_fail` doctests in `src/lib.rs` (a `TenantContext` cannot be built, defaulted, or cloned,
@@ -39,4 +40,4 @@
   and `LookupSeal`, closed by its `allowed_dependents` list in `xtask/layers.toml`, which
   `cargo xtask layers` checks, DEC-642 item 7) and `mandate-identity-testkit` (layer 11, so only
   dev-dependencies reach it, and `dev_only` in `xtask/layers.toml`; `StaticLookup`, `FailingLookup`, `session`, `membership`; DEC-645).
-  The ULID text codecs are pending in `crates/mandate-identity/src/tests/ulid.rs`.
+  The ULID text codecs are tested in `crates/mandate-identity/src/tests/ulid.rs`.
