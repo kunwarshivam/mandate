@@ -8,10 +8,13 @@ use std::fmt;
 use secrecy::SecretString;
 
 use crate::ConnectError;
-use crate::grant::GrantedScopes;
+use crate::grant::{GrantedScopes, check_scope};
 use crate::hosts::LiveTokenRequest;
-use crate::start::{ClientId, Environment, PkceVerifier};
+use crate::start::{ClientId, Environment, PkceVerifier, REDIRECT_URI};
 use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey};
+
+/// The only token type accepted, matched exactly (connections spec §5.2 step 4).
+const BEARER: &str = "bearer";
 
 /// The platform's OAuth client secret (infrastructure §5.1).
 pub struct ClientSecret(pub SecretString);
@@ -88,6 +91,45 @@ pub fn exchange_code(
     vault: &mut impl Vault,
     endpoint: &mut impl TokenEndpoint,
 ) -> Result<ExchangedGrant, ConnectError> {
-    let _ = (pending, client_id, client_secret, vault, endpoint);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    if pending.environment != Environment::Paper {
+        return Err(ConnectError::EnvironmentRefused);
+    }
+    let key = &pending.vault_key;
+    let waiting = vault.read_code(key)?.ok_or(ConnectError::CodeMissing)?;
+    let form = ExchangeForm {
+        code: &waiting.code,
+        code_verifier: &waiting.verifier,
+        client_id,
+        client_secret,
+        redirect_uri: REDIRECT_URI,
+    };
+    let checked = endpoint
+        .post(LiveTokenRequest::token_endpoint(), &form)
+        .and_then(checked_grant);
+    drop(waiting);
+    let (token, scopes) = match checked {
+        Ok(grant) => grant,
+        Err(refusal) => {
+            vault.delete(key)?;
+            return Err(refusal);
+        }
+    };
+    vault.put_token(key, token, &scopes)?;
+    vault.delete_code(key)?;
+    Ok(ExchangedGrant {
+        connection_id: pending.connection_id.clone(),
+        environment: pending.environment,
+        scopes,
+        vault_key: key.clone(),
+    })
+}
+
+/// Accepts a bearer token whose scope is exactly the request; any other response is refused
+/// and its token dropped here, before any vault write (CN-2).
+fn checked_grant(response: TokenResponse) -> Result<(AccessToken, GrantedScopes), ConnectError> {
+    if response.token_type != BEARER {
+        return Err(ConnectError::TokenType);
+    }
+    let scopes = check_scope(&response.scope)?;
+    Ok((response.access_token, scopes))
 }

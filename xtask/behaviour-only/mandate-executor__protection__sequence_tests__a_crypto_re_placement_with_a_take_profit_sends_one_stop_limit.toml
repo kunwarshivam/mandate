@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/src/protection.rs"
+test = "sequence_tests::a_crypto_re_placement_with_a_take_profit_sends_one_stop_limit"
+reason = """
+E7-23 B2a's (DEC-838). Today's re_place reads a recorded take-profit as an OCO whatever the
+asset class, so the test fails on the OCO it sends, not at a stub: no stub is on this path until
+the implementation wires protective_shape into re_place. The implementation PR deletes this file
+with the #[ignore] line.
+"""

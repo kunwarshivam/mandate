@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
+use mandate_domain::CapabilityProfile;
 use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
 
@@ -303,6 +304,14 @@ impl ExecutorState {
             switches: BTreeMap::new(),
             now: None,
         }
+    }
+
+    /// This state with the connector's capability profile, which protection reads in place of the
+    /// transitional Alpaca default (DEC-838 item 5). A stub until E7-23 B2a: the profile is not
+    /// kept.
+    pub fn with_profile(self, profile: CapabilityProfile) -> Self {
+        let _ = profile;
+        self
     }
 
     /// Which broker account this executor owns the ledger for.
