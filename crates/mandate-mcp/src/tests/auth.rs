@@ -157,7 +157,7 @@ async fn the_resource_must_be_the_endpoint_exactly() {
 #[tokio::test]
 #[ignore = "pending E7-24"]
 async fn only_the_first_authorization_server_on_the_pins_is_contacted() {
-    let cases: [(&[&str], &[&str], &str); 3] = [
+    let cases: [(&[&str], &[&str], &str); 5] = [
         (&["@BASE@/as"], &["as.example"], "auth_host_not_pinned"),
         (
             &["https://as.example/canary", "@BASE@/as"],
@@ -165,6 +165,8 @@ async fn only_the_first_authorization_server_on_the_pins_is_contacted() {
             "auth_host_not_pinned",
         ),
         (&[], PINS, "malformed"),
+        (&["@BASE@/as#canary"], PINS, "endpoint_shape"),
+        (&["http://canary@127.0.0.1:1/as"], PINS, "endpoint_shape"),
     ];
     for (servers, pins, code) in cases {
         let answers = vec![challenge(CHALLENGE), resource("@BASE@/mcp", servers)];
@@ -262,4 +264,12 @@ async fn an_unreadable_or_redirected_document_is_refused() {
         let (found, _) = discover(answers, PINS).await;
         assert_eq!(refused(found), code);
     }
+}
+
+#[tokio::test]
+#[ignore = "pending E7-24"]
+async fn a_code_flow_among_other_response_types_is_accepted() {
+    let meta = edited("response_types_supported", Some(json!(["token", "code"])));
+    let (found, server) = discover(flow(&meta), PINS).await;
+    assert_eq!(found.unwrap().token_endpoint, at(&server, "/token"));
 }

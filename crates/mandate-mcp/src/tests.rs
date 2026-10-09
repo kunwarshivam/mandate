@@ -9,4 +9,5 @@ mod contract;
 mod drift;
 mod endpoint;
 mod errors;
+mod register;
 mod server;
