@@ -801,6 +801,14 @@ def sequences() -> list[dict]:
            change("payload.margin_attestation", "cash_account")]
     narrower = change("payload.scopes", ["trading"])
     suspended = [*BOUND, moved(3, "active", "suspended", "authorization_failed")]
+    twice = [
+        *suspended,
+        checked(4),
+        rotation_copy(5),
+        moved(6, "suspended", "suspended", "condition_cleared", record_id(5)),
+        moved(7, "suspended", "active", "acknowledged"),
+        moved(8, "active", "suspended", "credential_expired"),
+    ]
     interleaved = [
         checked(1, "connect"),
         on_b(checked(2, "connect")),
@@ -1045,6 +1053,24 @@ def sequences() -> list[dict]:
             ],
             (5, "68"),
         ),
+        sequence(
+            "suspended_twice_cleared_after_the_second_entry",
+            "rule 68: a reauthorize after the latest entry into suspended, and its rotation, clear it (#1174)",
+            [*twice, checked(9), rotation_copy(10), moved(11, "suspended", "suspended", "condition_cleared", record_id(10)),
+             moved(12, "suspended", "active", "acknowledged")],
+        ),
+        sequence(
+            "suspended_twice_cleared_by_the_first_rotation",
+            "rule 68: the first suspension's rotation does not clear the second (#1174)",
+            [*twice, moved(9, "suspended", "suspended", "condition_cleared", record_id(5))],
+            (8, "68"),
+        ),
+        sequence(
+            "suspended_twice_cleared_on_the_first_check",
+            "rule 68: a rotation after the second entry that rests on the first suspension's check (#1174)",
+            [*twice, rotation_copy(9), moved(10, "suspended", "suspended", "condition_cleared", record_id(9))],
+            (9, "68"),
+        ),
     ]
 
 
@@ -1163,6 +1189,8 @@ def stream_mismatch(
                 if "stream.67.discard" in skip and latest.get(cid) == "ConnectionRevoked":
                     f["plain"].add(cid)
             continue
+        if kind == "ConnectionRevoked" and "stream.68.revoked" not in skip:
+            return i, "68"
         f["owner"] = cid if f["owner"] is None else f["owner"]
         if cid != f["owner"] and "stream.68.one_connection" not in skip:
             return i, "68"
@@ -1210,7 +1238,7 @@ def stream_mismatch(
                 return i, "68"
             if check_at is not None and check_at < f["suspended_at"] and "stream.68.after" not in skip:
                 return i, "68"
-        if p["to"] == "suspended" and p["from"] != "suspended":
+        if p["to"] == "suspended" and p["from"] != "suspended" and (f["suspended_at"] < 0 or "stream.68.latest" not in skip):
             f["suspended_at"] = start + i
         f["cleared"] = p["reason"] == "condition_cleared"
         f["current"] = p["to"]
@@ -1615,6 +1643,7 @@ STREAM_MUTANTS = (
     "stream.68.account_ref",
     "stream.68.mcp",
     "stream.68.reauthorized",
+    "stream.68.latest",
 )
 CHAIN_MUTANTS = (
     "chain.stream",
@@ -1928,6 +1957,61 @@ def run_range_mutants(section: dict, request_section: dict) -> list[str]:
     cases = [(section, c) for c in section["sequences"]] + [(request_section, c) for c in request_section["sequences"]]
     return [f"connection_ranges mutant {m}" for m in RANGE_MUTANTS
             if not any(sequence_problems(s, c, frozenset([m])) for s, c in cases)]
+
+
+# --------------------------------------------------------------------------- account-stream revocations (DEC-888)
+
+REVOCATION_SPEC = "docs/specs/journal.md v0.37 §9.8 rule 68 and §11 (DEC-888)"
+REVOCATION_MUTANTS = ("stream.68.revoked",)
+
+
+def revoked_on_account(index: int) -> dict:
+    """A `ConnectionRevoked` on the account stream: `append` refuses it (`wrong_stream`), and a
+    stored one is refused by rule 68, since the record belongs to the control stream (DEC-888)."""
+    return with_changes(revoked(index), change("stream_id", ACCOUNT_STREAM))
+
+
+def revocation_cases() -> list[dict]:
+    """Each case with its control: the same revocation on the control stream passes."""
+    return [
+        sequence("account_stream_revocation", "rule 68: a ConnectionRevoked belongs to the control stream (DEC-888)",
+                 [*BOUND, revoked_on_account(3), checked(4, "daily")], (2, "68")),
+        sequence("account_stream_revocation_unbound", "rule 68 (DEC-888)", [revoked_on_account(1)], (0, "68")),
+        sequence("control_stream_revocation_beside_a_bound_stream", "§9.8: no rule refuses a control-stream ConnectionRevoked",
+                 [*BOUND, revoked(3), checked(4, "daily")]),
+        range_case("anchored_account_stream_revocation", "rule 68: an anchored range judges it as the full chain does (DEC-888)",
+                   list(BOUND), [revoked_on_account(3)], (0, "68")),
+        range_case("unanchored_account_stream_revocation", "§11: an account-stream connection record fails closed (DEC-888)",
+                   None, [revoked_on_account(3)], (0, "unanchored")),
+        range_case("unanchored_control_stream_revocation", "§11, §9.8: a control-stream revocation never fails closed",
+                   None, [revoked(3)]),
+    ]
+
+
+def build_revocation_section() -> dict:
+    """The `connection_revocations` section (DEC-888): a section of its own, as `connection_ranges`
+    is, so the fold's tests keep their answers until its code change reads it (ES-22)."""
+    return {"spec": REVOCATION_SPEC, "drafts": base_drafts(), "invalid_drafts": [], "valid_drafts": [],
+            "sequences": revocation_cases(), "chains": []}
+
+
+def check_revocation_section(section: dict) -> list[str]:
+    """Every record but the account-stream revocation is a valid draft, and that one is refused at
+    `append` as `wrong_stream`; then each case's answer is its vector's."""
+    problems = []
+    for case in section["sequences"]:
+        for i, r in enumerate([*(case.get("before") or ()), *case["records"]]):
+            d = draft_for(section, r)
+            want = [("wrong_stream", "event_type")] if d["event_type"] == "ConnectionRevoked" and d["stream_id"].startswith("acct:") else []
+            if [(v.reason, v.path) for v in violations(d)] != want:
+                problems.append(found("sequences.drafts", f"{case['name']}[{i}]: expected {want}, got {violations(d)}"))
+        problems += sequence_problems(section, case, frozenset())
+    return problems
+
+
+def run_revocation_mutants(section: dict) -> list[str]:
+    return [f"connection_revocations mutant {m}" for m in REVOCATION_MUTANTS
+            if not any(sequence_problems(section, c, frozenset([m])) for c in section["sequences"])]
 
 
 # --------------------------------------------------------------------------- output
