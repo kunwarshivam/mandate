@@ -8,7 +8,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import type { Workspace } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";
-import { PURPOSE_LABEL } from "@/lib/labels";
+import { MODE_MEANING, PURPOSE_LABEL } from "@/lib/labels";
 import { headroomLine } from "@/lib/limits";
 import { decisionHref } from "@/lib/screens";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
@@ -215,13 +215,14 @@ describe("D1 dashboard", () => {
 describe("D2 agent detail", () => {
   const rails = (el: Element) => [...el.querySelectorAll("[data-slot=limit-rail]")];
 
-  it("keeps only a compact mandate beside the story: mode, rails in dollars, the next level, and a way to the rest", () => {
+  it("keeps only a compact mandate beside the story: what the mode means, rails in dollars, the next level, and a way to the rest", () => {
     renderScreen(`/agents/${AGENT_IDS.swing}`, <AgentDetailScreen agentId={AGENT_IDS.swing} />);
     const rail = main().querySelector("[data-layout=rail]") as HTMLElement;
     const card = within(rail).getByRole("region", { name: "Your mandate" });
     expect(card).toHaveAttribute("data-slot", "mandate-card");
     expect([...rail.children]).toEqual([card]);
-    expect(card.querySelector("[data-slot=mode-badge]")).not.toBeNull();
+    expect(within(card).getByRole("group", { name: "Mode" })).toHaveTextContent(MODE_MEANING.normal);
+    expect(card.querySelector("[data-slot=mode-badge]")).toBeNull();
     expect(rails(card).length).toBeGreaterThan(0);
     for (const r of rails(card)) expect(r).toHaveTextContent(/\$[\d,]+\.\d{2} of \$[\d,]+\.\d{2}/);
     expect(rails(card).some((r) => /profit/i.test(r.textContent ?? ""))).toBe(false);
