@@ -7901,6 +7901,13 @@ jq -r "$filter" "$src"
     /// which sets the feature without `--features`. A flag right after a list, a lone opening
     /// quote, `--all` and `--workspace` are read too, and a quoted list ends at its closing quote,
     /// so a flag inside it and a `$` after it are not read as features (#738's mutants).
+    ///
+    /// A command is read whole, not a physical line at a time (#738 review, second round): a
+    /// backslash continuation, or a YAML folded `>` scalar, that carries `--features live` on a
+    /// later line is refused; so is `--cfg feature = "live"` with spaces or tabs around the
+    /// `=`, in a command, `RUSTFLAGS` or `rustflags`; and so is a cargo command that takes
+    /// arguments from a variable, `${...}`, `$(...)` or a backtick (`cargo build $FLAGS`), which
+    /// cannot be read. A quoted `--features` list followed by `--target $TARGET` stays allowed.
     #[test]
     #[ignore = "pending E7-26"]
     fn ci_bypasses_of_the_compile_only_form_are_refused() -> Result<()> {
@@ -7943,6 +7950,89 @@ jq -r "$filter" "$src"
         ];
         for line in refused {
             let files = [ci_file(".cargo/config.toml", &format!("[alias]\n{line}\n"))];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".cargo/config.toml:2"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        let refused_across_lines = [
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build --release \\\n  --features live\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner \\\n  --features \\\n  live\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo run -p the-runner \\\n  -F live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: |\n      cargo build --release \\\n        --features live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: >\n      cargo build --release\n      --features live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: >-\n      cargo test -p the-runner\n      --features other,live\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "steps:\n  - run: cargo build -p the-runner\n      --features live\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nFLAGS=\"--features live\"\ncargo build $FLAGS\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\nFLAGS='-F live'\ncargo build -p the-runner ${FLAGS}\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner $EXTRA_ARGS\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner \"$@\"\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner `cat flags.txt`\n",
+            ),
+            (
+                ".github/scripts/build.sh",
+                "set -e\ncargo build -p the-runner $(cat flags.txt)\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "env:\n  FLAGS: --features live\nsteps:\n  - run: cargo build $FLAGS\n",
+            ),
+        ];
+        for (path, text) in refused_across_lines {
+            let files = [ci_file(path, text)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{text}: {problems:?}");
+            assert!(problems[0].contains(path), "names the file: {problems:?}");
+        }
+        let refused_spaced_cfg = [
+            "cargo rustc -p the-runner -- --cfg 'feature = \"live\"'",
+            "cargo rustc -p the-runner -- --cfg 'feature  =  \"live\"'",
+            "cargo rustc -p the-runner -- --cfg \"feature =\\\"live\\\"\"",
+            "RUSTFLAGS=\"--cfg feature = \\\"live\\\"\" cargo build -p the-runner",
+            "RUSTFLAGS='--cfg feature =\"live\"' cargo build -p the-runner",
+            "rustflags = [\"--cfg\", 'feature = \"live\"']",
+            "rustflags = [\"--cfg\", \"feature = \\\"live\\\"\"]",
+            "rustflags = [\"--cfg\", 'feature\t=\t\"live\"']",
+        ];
+        for line in refused_spaced_cfg {
+            let files = [ci_file(".cargo/config.toml", &format!("[build]\n{line}\n"))];
             let problems = live_feature_problems(&policy, &meta(), &files)?;
             assert_eq!(problems.len(), 1, "{line}: {problems:?}");
             assert!(
