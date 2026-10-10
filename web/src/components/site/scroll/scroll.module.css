@@ -134,6 +134,11 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* A star on the lock screen's night blinks now and then. */
+  .twinkle {
+    animation: twinkle 3.1s steps(1) infinite;
+  }
+
   .stage > :not(.cue) {
     transform-origin: 50% 35%;
   }
@@ -274,5 +279,18 @@
   }
   to {
     translate: 0 6%;
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  71% {
+    opacity: 0;
+  }
+  84% {
+    opacity: 1;
   }
 }

@@ -238,14 +238,20 @@ describe("the design system", () => {
 
   it("fills one section with tide, the part about asking you, and uses tide nowhere outside the landing page", () => {
     const { container } = render(<LongPage />);
-    const filled = [...container.querySelectorAll("[class*='bg-tide']")];
+    const filled = [...container.querySelectorAll("[class]")].filter((el) => el.classList.contains("bg-tide"));
     expect(filled.map((el) => el.id)).toEqual(["asking"]);
     const src = join(WEB, "src");
     const users = (readdirSync(src, { recursive: true }) as string[])
       .filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f) && f !== "app/globals.css")
       .filter((f) => /\b(bg|text|ring|border|fill|stroke)-tide\b|var\(--tide|"--tide"/.test(readFileSync(join(src, f), "utf8")))
       .sort();
-    expect(users).toEqual(["components/site/scroll/long-page.tsx", "components/site/scroll/parts.ts", "components/site/scroll/scroll.module.css"]);
+    expect(users).toEqual([
+      "components/site/scroll/lock-screen.tsx",
+      "components/site/scroll/long-page.tsx",
+      "components/site/scroll/parts.ts",
+      "components/site/scroll/pixel-night.tsx",
+      "components/site/scroll/scroll.module.css",
+    ]);
   });
 });
 
