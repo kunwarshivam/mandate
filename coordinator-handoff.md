@@ -89,19 +89,21 @@ anything here.
 - **#1254:** bracket-leg tests (DEC-878). Head `f4cc05d8`.
 - **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
 
+- **#1258:** E1b part 2 tests correction. Head `d48973d5`.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
 
 **New lane PRs to check:** Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
 
 **Open PRs needing a review verdict, then approval:**
-- **#1258 + #1261** (E1b part 2 tests-correction plus implementation, stacked; paper path).
-  - A Sonnet review was running; if no verdict appears in the bodies, run one.
-  - Once #1258 squash-merges, merge `main` into #1261 and re-check that its test diff is only
-    the 5 ignore deletions plus the 5 deleted rows.
-  - Judge the edge case in #1261's body: a wake past both the bound and the session end stops
-    without cancelling. It needs a clock jump to happen at a 5 s interval.
-- **#1242** (L2, E7-17 implementation): needs main merged in (now that #1247 has landed), one
-  more ignore line deleted, a doc rewrap and a delta verdict from L2.
+- **#1261** (E1b part 2 implementation, stacked on #1258). The review passed at `4bd31c44`.
+  Approve it once #1258 has merged:
+  1. merge `main` into `claude/e1b-part2-impl`;
+  2. re-delete any resurrected `#[ignore = "pending E7-19"]` lines and behaviour-only rows;
+  3. check that the test diff is exactly the 5 ignore deletions plus the 5 deleted rows, and that
+     the `src` patch-id matches `4bd31c44`'s;
+  4. approve the new head.
+  The review's minors are recorded in #1258's body: the suspend-past-the-end edge case, and the
+  untested check order.
 
 **Being reworked:**
 - **#1254: bracket-leg tests (DEC-878).** APPROVED at `f4cc05d8` after round 2 passed. **Next:**
