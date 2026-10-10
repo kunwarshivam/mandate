@@ -91,6 +91,7 @@ anything here.
 
 - **#1242:** L2, E7-17 implementation (round-2 delta passed). Head `5f9093e7`.
 - **#1267:** L2, DEC-900 implementation (approved; already merged).
+- **#1268:** L5, PR 4b; completes slice C. Head `afac5664`.
 - **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
 
@@ -125,8 +126,7 @@ anything here.
 - **L3:** DEC-706 step 2 (`notices.rs` pending tests), then step 3: register v2, refuse v1, and
   move `step.rs`'s writer to v2 in one PR. Then D4 (retries), whose writer derives `verdict` from
   the `Outcome` variant.
-- **L5:** PR 4a (pin tests first, then delete the old `resolve_trusted_start`), then 4b (old
-  vectors), then the CLI judged-types pair after #1231, then run-logic T1/I1. T1/I1 includes
+- **L5:** slice C is done once #1268 merges. Next: the CLI judged-types pair after #1231, then run-logic T1/I1. T1/I1 includes
   DEC-896's start-token cases (re-sequenced; backlog E12-8) and DEC-787 item 8.
 
 **Paths:**
