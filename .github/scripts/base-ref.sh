@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints the commit a change is compared against, the choice xtask's `choose_base` makes, so the
-# short path (DEC-112) diffs the same range as `cargo xtask ci`:
+# short path (DEC-112) diffs the same range as `xtask ci`:
 #   1. `MANDATE_BASE_REF` when it is set; all zeros means there is no base;
 #   2. on a `pull_request` event, the first parent of the merge commit CI checks out: main's tip
 #      the PR was merged onto, not the PR's `base.sha`, which misses main's later changes;
