@@ -33429,139 +33429,6 @@ cold_records:
       seq: 4
       check: anchor_self_mismatch
   trusted_starts:
-    records:
-    - event_id: 01J8Z3C4A000000000000000G1
-      event_type: SegmentExported
-      stream_id: ctl:ws_01J8Z2
-      payload:
-        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-        first_seq: 4
-        last_seq: 9
-        first_prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
-        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
-        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
-        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
-    - event_id: 01J8Z3C4A000000000000000S1
-      event_type: AnchorComputed
-      stream_id: ctl:ws_01J8Z2
-      payload:
-        leaves:
-        - hash: '1111111111111111111111111111111111111111111111111111111111111111'
-          seq: 9
-          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-        - hash: '2222222222222222222222222222222222222222222222222222222222222222'
-          seq: 3
-          stream_id: ctl:ws_01J8Z2
-        root: bdc1de83e8b91718fc143aae7ce5069976ff385c79d7c0cc58a030a3fabf1435
-        token: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    - event_id: 01J8Z3C4A000000000000000U1
-      event_type: AnchorComputed
-      stream_id: ctl:ws_01J8Z2
-      payload:
-        leaves:
-        - hash: '3333333333333333333333333333333333333333333333333333333333333333'
-          seq: 12
-          stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-        - hash: '4444444444444444444444444444444444444444444444444444444444444444'
-          seq: 5
-          stream_id: ctl:ws_01J8Z2
-        root: 43ba4c738cb4ff4ec68eb127b9aca6088c6d28bd945bcec15491542f0fda894f
-        token: null
-    - event_id: 01J8Z3C4A000000000000000F1
-      event_type: SegmentExported
-      stream_id: ctl:ws_01J8Z9
-      payload:
-        stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-        first_seq: 20
-        last_seq: 30
-        first_prev_hash: '9999999999999999999999999999999999999999999999999999999999999999'
-        last_hash: '6666666666666666666666666666666666666666666666666666666666666666'
-        file_sha256: '7777777777777777777777777777777777777777777777777777777777777777'
-        manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
-    cases:
-    - name: genesis_at_seq_one
-      clause: '§11: the genesis start'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 1
-      request: &id100
-        kind: genesis
-      expect:
-        from_seq: 1
-        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
-    - name: genesis_after_seq_one
-      clause: '§11: genesis is seq 1 only'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 2
-      request: *id100
-      expect: null
-    - name: segment_at_its_first_seq
-      clause: '§9.14: a SegmentExported''s start'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 4
-      request: &id101
-        kind: manifest
-        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
-      expect:
-        from_seq: 4
-        prev_hash: '5555555555555555555555555555555555555555555555555555555555555555'
-    - name: segment_entered_inside
-      clause: '§9.14: a segment starts at its first_seq'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 5
-      request: *id101
-      expect: null
-    - name: segment_of_another_stream
-      clause: '§9.14: the segment''s own stream'
-      stream_id: agent:ws_01J8Z2:agent_a
-      from_seq: 4
-      request: *id101
-      expect: null
-    - name: manifest_not_recorded
-      clause: '§9.14: an absent manifest'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 4
-      request:
-        kind: manifest
-        manifest_hash: '8888888888888888888888888888888888888888888888888888888888888888'
-      expect: null
-    - name: stamped_anchor_after_its_leaf
-      clause: '§9.14: a stamped anchor''s leaf at n - 1'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 10
-      request: &id102
-        kind: anchor
-        anchor_event_id: 01J8Z3C4A000000000000000S1
-      expect:
-        from_seq: 10
-        prev_hash: '1111111111111111111111111111111111111111111111111111111111111111'
-    - name: stamped_anchor_at_its_leaf
-      clause: '§9.14: the leaf is the event before the start'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 9
-      request: *id102
-      expect: null
-    - name: unstamped_anchor_is_no_start
-      clause: '§9.14, DEC-783 item 8: a null token vouches for nothing'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 13
-      request:
-        kind: anchor
-        anchor_event_id: 01J8Z3C4A000000000000000U1
-      expect: null
-    - name: anchor_without_the_stream
-      clause: '§9.14: the anchor has no leaf for the stream'
-      stream_id: agent:ws_01J8Z2:agent_a
-      from_seq: 10
-      request: *id102
-      expect: null
-    - name: another_workspaces_segment
-      clause: '§9.14, DEC-767: only the workspace''s own records'
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      from_seq: 20
-      request:
-        kind: manifest
-        manifest_hash: 0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d
-      expect: null
     rows:
     - stream_id: ctl:ws_01J8Z2
       seq: 1
@@ -34135,6 +34002,341 @@ cold_records:
       expect:
         outcome: refused
         cause: anchor_root_mismatch
+    - name: anchor_unstamped_and_rehashed
+      clause: 'DEC-896, §9.14, DEC-783 item 8: a null token vouches for nothing, the row otherwise sound'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: abd5ddb2e2287697af92c320f589a543091aa67381a125d112f5f1a070b76e4e
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":null},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: segment_of_another_stream_than_requested
+      clause: '§9.14: a SegmentExported of `s`; this one is the account''s, the agent stream asked'
+      stream_id: agent:ws_01J8Z2:agent_a
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: segment_requested_before_its_first_seq
+      clause: '§9.14: a segment starts at its first_seq, not the seq before'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 3
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: segment_requested_after_its_last_seq
+      clause: '§9.14: a segment starts at its first_seq, not past its last_seq'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: manifest
+        manifest_hash: 660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_requested_at_its_leaf_seq
+      clause: '§9.14: the leaf''s seq is n − 1, not n'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 9
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_requested_from_seq_zero
+      clause: '§9.14: no leaf is at seq 0 − 1, though one is stored at seq 0'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 0
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: b24f84380815029432c1f123c4b0ba63611c5ea5248d75f2ab9297ecceccfff0
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":0,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"4e6bf02ecfa84dca5551aeed9a545c97dd4138f08041433666fe99be6937fd83","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_without_a_leaf_for_the_stream
+      clause: '§9.14: the leaf for `s`; the agent stream has none, the leaf at n − 1 is the account''s'
+      stream_id: agent:ws_01J8Z2:agent_a
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_leaf_at_the_seq_is_another_streams
+      clause: '§9.14: the leaf for `s`; the account''s is at 9, the one at 3 the control stream''s'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_moved_to_another_workspace
+      clause: '§9.14, DEC-767: an anchor of another workspace''s control stream, stored consistently'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z9
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: 5f6ac814482f4b0501cbb4edb80b4675d6b285499ec2481311bf8ad58375881c
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z9"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_id_names_a_segment
+      clause: '§9.14: the AnchorComputed with this event_id; it names a SegmentExported'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R3
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_id_names_the_stream_opened
+      clause: '§9.14: the AnchorComputed with this event_id; it names a StreamOpened'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 2
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R1
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_payload_under_another_event_type
+      clause: '§9.14: an AnchorComputed; a VerificationRun holding an anchor''s payload, chained'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R8
+      replace:
+        index: 4
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 5
+          event_id: 01J8Z3C6A000000000000000R8
+          event_type: VerificationRun
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+          hash: cc60c06fa1d26b713d908a477d107c2b054f1afb272ef7720700ecd773bf15c8
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R8","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"VerificationRun","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":5,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: segment_for_a_stream_without_a_workspace
+      clause: '§9.14, DEC-767: `s` has no workspace, so no control stream is its own'
+      stream_id: acct::A1
+      from_seq: 1
+      request:
+        kind: manifest
+        manifest_hash: 6e72f784161c19eabc6391cd71a8930ba98502d42511f191e90ab0cabcc9b8f8
+      replace:
+        index: 4
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 5
+          event_id: 01J8Z3C6A000000000000000R9
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da
+          hash: ff036904201fc3f5e0ba9403826748ea7d7ec82276301fa1ae901999f3421b25
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R9","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","first_seq":1,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":3,"manifest_hash":"6e72f784161c19eabc6391cd71a8930ba98502d42511f191e90ab0cabcc9b8f8","stream_id":"acct::A1"},"pii_refs":[],"prev_hash":"c93a6fd2860c04211bdda4e4068a556808393264af0c80fd1ff095b0cb40f0da","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":5,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","first_seq":1,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":3,"stream":"acct::A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_for_a_stream_without_a_workspace
+      clause: '§9.14, DEC-767: `s` has no workspace, so no control stream is its own'
+      stream_id: 'acct:'
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: c455411eb6a9383cd36591dc88c0a6c3470dd3fb792a2325419567512bf87985
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:"},{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"b88acc7b70cc8c758750c078739f65025b6b95fe4894d1d27056b4c6fc8856ac","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: segment_first_prev_hash_not_a_digest
+      clause: '§9.14, §2: first_prev_hash is 63 hex digits, rule 117 and the row hash hold'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: 9c0f58e8333cf05cee6b17374a736cee67ca8ec1f8567a9039d1131878291ef1
+      replace:
+        index: 2
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 3
+          event_id: 01J8Z3C6A000000000000000R3
+          event_type: SegmentExported
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d
+          hash: 5c244d19bda7b804bac10b9d46676e3abe6b1ea454d5cb085c2f5069a10ed2bc
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R3","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"SegmentExported","payload":{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"manifest_hash":"9c0f58e8333cf05cee6b17374a736cee67ca8ec1f8567a9039d1131878291ef1","stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"pii_refs":[],"prev_hash":"de6b23b710ea3c1b12ae430f5e05992af0b35907eaa4ecb585c55577a4e89e1d","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":3,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: anchor_leaf_hash_not_a_digest
+      clause: '§9.14, §2: the start leaf''s hash is not hex, the root and the row hash hold'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: c6bb0d6ba050978177bcaa101ad0b871b6c4bd2b8534d83d5ad46d0046663a38
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"50782d91beeb82f9670d3c00d0d08e396332e5af2468f0c2f5541a69ae44d514","token":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: genesis_after_seq_one
+      clause: '§11: genesis is seq 1 only'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 2
+      request:
+        kind: genesis
+      replace: null
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
+    - name: manifest_not_recorded
+      clause: '§9.14: a manifest hash that no row records'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: '8888888888888888888888888888888888888888888888888888888888888888'
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
 verification_runs:
   spec: docs/specs/journal.md v0.36 §9.13 and §11 (DEC-788, DEC-789)
   drafts:
@@ -36089,8 +36291,8 @@ segment_rows:
   ranges:
   - name: rows_match_their_files
     clause: '§11 segment_rows_mismatch: passes'
-    rows: &id108
-    - &id103
+    rows: &id105
+    - &id100
       body:
         envelope_version: 1
         environment: paper
@@ -36119,7 +36321,7 @@ segment_rows:
         pii_refs: []
         prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
       hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
-    - &id104
+    - &id101
       body:
         envelope_version: 1
         environment: paper
@@ -36155,7 +36357,7 @@ segment_rows:
         pii_refs: []
         prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
       hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
-    - &id105
+    - &id102
       body:
         envelope_version: 1
         environment: paper
@@ -36197,7 +36399,7 @@ segment_rows:
         pii_refs: []
         prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
       hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
-    - &id106
+    - &id103
       body:
         envelope_version: 1
         environment: paper
@@ -36255,7 +36457,7 @@ segment_rows:
         pii_refs: []
         prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
       hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
-    - &id107
+    - &id104
       body:
         envelope_version: 1
         environment: paper
@@ -37565,11 +37767,11 @@ segment_rows:
   - name: start_segment_held_in_part
     clause: 'workspace API §4.8.1 step 2.3a: a segment the snapshot does not hold in full fails'
     rows:
+    - *id100
+    - *id101
+    - *id102
     - *id103
     - *id104
-    - *id105
-    - *id106
-    - *id107
     segments:
     - manifest:
         stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
@@ -37624,7 +37826,7 @@ segment_rows:
       seq: null
   - name: start_segment_past_to_seq_matches
     clause: 'workspace API §4.8.1 step 2.3a: the whole start segment is compared, not the range''s part'
-    rows: *id108
+    rows: *id105
     segments:
     - manifest:
         stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2

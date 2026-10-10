@@ -1238,8 +1238,11 @@ def loss_answer_fields(answer, allocation_usd):
     fields it alone maps to. Dollars become a fraction of the allocation; either is rounded down to whole basis points,
     so the limit is never looser than the words. No loss, or the whole allocation or more, is refused (None) and asked
     again. `max_drawdown` and `max_daily_loss` are `platform_proposed`, at the base mandates' ratios to the floor. An
-    answer too small for `proposed_ladder` to fit a ladder beneath it is refused too."""
+    answer too small for `proposed_ladder` to fit a ladder beneath it is refused too, and so is any answer of an allocation
+    of 0 or less (DEC-901)."""
     kind, value = answer
+    if D(allocation_usd) <= 0:
+        return None
     f = D(value) if kind == "fraction" else D(value) / D(allocation_usd)
     f = f.quantize(D("0.0001"), rounding=ROUND_DOWN)
     if not D(0) < f < D(1) or proposed_ladder(f * D("0.8")) is None:
@@ -1253,11 +1256,11 @@ def proposed_ladder(max_drawdown):
     beneath a proposed `max_drawdown` D, at the base mandates' fractions of it: a halving at 0.375 D, exits only at
     0.75 D, the flatten rung at exactly D (V-011), and hysteresis 0.125 D, each but the last rounded down to whole
     basis points. None, and the answer is asked again, when rounding leaves a value at 0 or breaks V-010's strict
-    order or V-012."""
+    order or V-012, or when D is not strictly between 0 and 1, as `open_fraction` requires (DEC-901)."""
     dd = D(max_drawdown)
     bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_DOWN)
     halve, exits, hyst = bp(D("0.375")), bp(D("0.75")), bp(D("0.125"))
-    if not D(0) < hyst < halve < exits < dd:
+    if not D(0) < hyst < halve < exits < dd < D(1):
         return None
     return {"/risk/drawdown_ladder": ("platform_proposed", [
                 {"at": norm(halve), "action": "scale_sizes", "factor": "0.5"},

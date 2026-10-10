@@ -21,7 +21,7 @@ import { GAP_NOTE, summaryLines } from "./summary";
 const main = () => screen.getByRole("main");
 const heading = () => screen.getByRole("heading", { level: 1 });
 const button = (name: string | RegExp) => screen.getByRole("button", { name });
-const composer = () => screen.getByRole("textbox", { name: "Your message" });
+const composer = () => screen.getByRole("textbox", { name: "Your answer" });
 const log = () => screen.getByRole("log", { name: "Conversation" });
 const thinking = () => main().querySelector<HTMLElement>("[data-slot=thinking]")!;
 
@@ -110,6 +110,17 @@ describe("one conversation, as in any chat", () => {
     expect(main().textContent).not.toMatch(EXAMPLES);
     expect(main().querySelectorAll("input, textarea")).toHaveLength(1);
     expect(button("Send")).toBeDisabled();
+  });
+
+  it("names the composer by a label written above it, not by an attribute alone (C-4)", () => {
+    renderFlow();
+    const field = composer();
+    expect(field).not.toHaveAttribute("aria-label");
+    const labels = [...(field as HTMLTextAreaElement).labels!];
+    expect(labels.map((l) => l.textContent)).toEqual(["Your answer"]);
+    expect(labels[0].compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(labels[0].textContent).not.toMatch(EXAMPLES);
+    expect(button("Send")).toHaveAccessibleName("Send");
   });
 
   it("says what it understood in a sentence, then asks the next thing, with no cards to confirm", async () => {

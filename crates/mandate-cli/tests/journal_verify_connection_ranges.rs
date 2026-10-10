@@ -6,6 +6,7 @@
 //! Oracles: the single-stream `connection*` sequences of `fixtures/refcases/journal.json`: a full
 //! chain answers its `expect`, an anchored range's prefix plus records its `expect` moved past the
 //! prefix (DEC-885 I1), and a tail a scan of §11's "No anchor" list, checked against the vectors.
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,12 +15,13 @@ use clap::Parser;
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_cli::journal::{self, JournalCommand, cold};
 use mandate_cli::{Cli, Command};
-use mandate_journal::{Anchor, AnchorLeaf, ArtifactRef};
+use mandate_journal::{Anchor, AnchorLeaf, ArtifactRef, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL};
 use serde_json::{Value as Json, json};
 
 const SECTIONS: [&str; 3] = ["connections", "connection_requests", "connection_ranges"];
 const AGENT: &str = "agent:ws_01J8Z2:agent_a";
 const ACCOUNT: &str = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1";
+const CONTROL: &str = "ctl:ws_01J8Z2";
 const BOTH: [&str; 2] = ["verify", "verify-cold"];
 const CODE: &str = "connection_lifecycle_mismatch";
 const GLASS: &str = "break_glass_cause_mismatch";
@@ -28,13 +30,15 @@ const NO_TOKEN: &[u8] = b"no imprint";
 const OPERATOR_READ: &str = "operator_read_fails_until_dec_261_item_9";
 const NOT_RUN: &str = "not run: connection_cause_mismatch (needs the control stream and its account streams together)";
 /// §11's "No anchor" list (journal spec lines 3382-3384): what rules 66, 67 and 131 judge on a
-/// control stream. A `ConnectionRevoked` is never judged (I6).
+/// control stream. A `ConnectionRevoked` on a control stream is never judged (I6).
 const CONTROL_JUDGED: &str = "ConnectionRequested ConnectionEstablished \
     ConnectionCredentialRotated ConnectionRefused";
 /// "Any connection record on an account stream" (same lines), as §9.8's "Who writes what" lists
-/// them (lines 2005-2008): checks, state, refreshes, and the two copies; rule 68 judges each.
+/// them (lines 2005-2008): checks, state, refreshes, and the two copies; rule 68 judges each. Since
+/// journal spec v0.37 (DEC-888) rule 68 also refuses a `ConnectionRevoked` there, so it is judged.
 const ACCOUNT_JUDGED: &str = "ConnectionChecked ConnectionStateChanged \
-    ConnectionCredentialRefreshed ConnectionEstablished ConnectionCredentialRotated";
+    ConnectionCredentialRefreshed ConnectionEstablished ConnectionCredentialRotated \
+    ConnectionRevoked";
 
 fn vectors() -> Json {
     let path =
@@ -195,11 +199,21 @@ fn result(ran: &Ran) -> &str {
 /// just before `result:` exactly when `line`.
 #[track_caller]
 fn assert_form(command: &str, ran: &Ran, line: bool, what: &str) {
+    assert_eq!(
+        form(command, ran, line),
+        (true, true),
+        "{command} {what}: {:?}",
+        ran.0
+    );
+}
+
+/// [`assert_form`]'s two answers: whether the report has its line count, and whether the line
+/// before `result:` is the last input's or DEC-890's, as `line` says.
+fn form(command: &str, ran: &Ran, line: bool) -> (bool, bool) {
     let (inputs, last) = [(6, "anchor: "), (7, "token: ")][usize::from(command != "verify")];
     let before = &ran.0[ran.0.len() - 2];
     let fits = [before.starts_with(last), before == NOT_RUN][usize::from(line)];
-    let (form, want) = ((ran.0.len(), fits), (inputs + usize::from(line), true));
-    assert_eq!(form, want, "{command} {what}: {:?}", ran.0);
+    (ran.0.len() == inputs + usize::from(line), fits)
 }
 
 fn put(dir: &Path, name: &str, bytes: &[u8]) -> String {
@@ -393,4 +407,94 @@ fn a_check_one_to_six_is_reported_before_a_later_connection_check() {
         let what = format!("{name}: {want:?}, an artifact missing at {last}");
         expect(&range, Some((last, "artifact_missing")), false, &what);
     }
+}
+
+/// One record of each connection type the vectors draft: every `connection_ranges` draft and the
+/// `client_actor` owner's `ConnectionRevoked` (the only revocation drafted), as stored bodies.
+fn one_of_each_connection_type() -> Vec<Json> {
+    let vectors = vectors();
+    let drafts = vectors["connection_ranges"]["drafts"]
+        .as_object()
+        .unwrap()
+        .values();
+    let revoked = &vectors["client_actor"]["drafts"]["revoked_compromised"];
+    let mut bodies: Vec<Json> = drafts.chain([revoked]).cloned().collect();
+    bodies
+        .iter_mut()
+        .for_each(|b| b["recorded_at"] = b["event_time"].clone());
+    bodies
+}
+
+/// This file's §11 lists, an oracle kept apart from the library's, name the same types as the
+/// journal's exports, each once.
+#[test]
+fn the_judged_lists_here_match_the_journals_exports() {
+    let set = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<BTreeSet<_>>();
+    for (here, export) in [
+        (CONTROL_JUDGED, JUDGED_ON_CONTROL),
+        (ACCOUNT_JUDGED, JUDGED_ON_ACCOUNT),
+    ] {
+        let here: Vec<&str> = here.split(' ').collect();
+        assert_eq!(set(&here), set(export), "{here:?}");
+        assert_eq!(
+            (here.len(), export.len()),
+            (set(&here).len(), set(export).len()),
+            "no type twice"
+        );
+    }
+}
+
+/// E12-3, after #1231 (DEC-888): rule 68 refuses an account-stream `ConnectionRevoked`, so an
+/// account export whose only connection record is one fails `connection_lifecycle_mismatch`, and
+/// the record is judged there, so DEC-890 item 4's line is printed just before `result:`.
+#[test]
+fn an_account_export_of_a_revocation_alone_reports_the_cause_check_not_run() {
+    let revoked = one_of_each_connection_type().pop().unwrap();
+    assert_eq!(revoked["event_type"], "ConnectionRevoked");
+    let range = Range::from(1, vec![revoked]).on(ACCOUNT);
+    expect(
+        &range,
+        Some((1, CODE)),
+        true,
+        "a revocation alone on an account stream",
+    );
+}
+
+/// E12-3: DEC-890's line is printed, once and in [`assert_form`]'s form, on a one-record export
+/// from `seq` 1 exactly when the record's type is in the journal's own judged list for its stream
+/// type (`JUDGED_ON_CONTROL`, `JUDGED_ON_ACCOUNT`), so the CLI's lists cannot drift from the
+/// library's. Every type of each list is drafted, and every run reaches the stream checks.
+#[test]
+fn the_cause_check_line_follows_the_journals_judged_lists() {
+    let bodies = one_of_each_connection_type();
+    let drafted = |list: &[&str]| {
+        list.iter()
+            .all(|t| bodies.iter().any(|b| b["event_type"] == *t))
+    };
+    assert!(
+        drafted(JUDGED_ON_CONTROL) && drafted(JUDGED_ON_ACCOUNT),
+        "a judged type undrafted"
+    );
+    let mut printed = Vec::new();
+    for (stream, judged) in [(CONTROL, JUDGED_ON_CONTROL), (ACCOUNT, JUDGED_ON_ACCOUNT)] {
+        for body in &bodies {
+            let kind = body["event_type"].as_str().unwrap();
+            let range = Range::from(1, vec![body.clone()]).on(stream);
+            for command in BOTH {
+                let ran = run(command, &range, &[]);
+                let reached = result(&ran).starts_with("verified") || ran.1 == Some(CODE);
+                assert!(reached, "{command} {kind} on {stream}: {:?}", ran.0);
+                let judged = judged.contains(&kind);
+                let times = ran.0.iter().filter(|l| *l == NOT_RUN).count();
+                let fits =
+                    form(command, &ran, judged) == (true, true) && times == usize::from(judged);
+                printed.push((command, stream, kind, times, judged, fits));
+            }
+        }
+    }
+    let differ: Vec<_> = printed.into_iter().filter(|p| !p.5).collect();
+    assert!(
+        differ.is_empty(),
+        "(command, stream, type, lines printed, judged, in form): {differ:?}"
+    );
 }

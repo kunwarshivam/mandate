@@ -49,7 +49,12 @@ fn mandate() -> String {
 }
 
 fn stream() -> Stream {
-    let snapshot = SNAPSHOT.replace("2026-09-21", "2026-09-25");
+    classified_on("2026-09-25")
+}
+
+/// The stream with SPY's snapshot classified on `day`, so it is fresh for a run a few days later.
+fn classified_on(day: &str) -> Stream {
+    let snapshot = SNAPSHOT.replace("2026-09-21", day);
     Stream::of(&mandate(), &snapshot, RULES, FEE, &model())
 }
 
@@ -77,35 +82,84 @@ impl Pause for Clock {
     }
 }
 
-/// More pauses than any case here needs (the longest takes four), so a watch that never ends
-/// fails at once rather than running until the harness times it out (#1041 review).
-const PAUSE_BUDGET: usize = 20;
+/// More pauses than any case here needs (the longest, the cap's, takes 124 from 15:49:40 to 16:00,
+/// and as many from 12:49:40 to 13:00 on an early close),
+/// so a watch that never ends fails at once rather than running until the harness times it out
+/// (#1041 review).
+const PAUSE_BUDGET: usize = 130;
 
-/// A paper broker that accepts the one submission and then reads it back as `accepted`, or as
-/// `canceled` once deleted. It logs every request after the submission with the clock's second.
+/// How the scripted broker reads the entry back (DEC-858 items 4 and 5).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fill {
+    /// `accepted`, then `canceled` once deleted.
+    Rests,
+    /// `filled` for its whole quantity at the first read.
+    Whole,
+    /// `accepted`, then `filled` once deleted: the fill wins the race with the bound's cancel.
+    Races,
+    /// `accepted`, then `pending_cancel` for ever once deleted: the cancel is never confirmed.
+    Stuck,
+    /// `accepted` at the first read, then `filled` for its whole quantity from the second.
+    Second,
+    /// `expired` at the first read.
+    Expires,
+    /// `rejected` at the first read.
+    Rejected,
+}
+
+/// A paper broker that accepts every submission and reads the entry, the first, back as `fill`
+/// says. It logs every request after the entry with the clock's second, and keeps every body
+/// posted.
 #[derive(Clone)]
 struct Broker {
     clock: Rc<Cell<i64>>,
+    fill: Fill,
     submitted: Rc<RefCell<Option<String>>>,
     deleted: Rc<Cell<bool>>,
+    /// How many times the entry has been read back.
+    reads: Rc<Cell<usize>>,
     log: Rc<RefCell<Vec<(Method, String, i64)>>>,
+    posts: Rc<RefCell<Vec<Value>>>,
 }
 
 impl Broker {
-    fn order(&self, id: &str, status: &str) -> Vec<u8> {
+    fn order(&self, sent: &Value, status: &str, filled: &str) -> Vec<u8> {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tracer/alpaca");
         let order = fs::read_to_string(format!("{dir}/order.json")).unwrap();
-        let order = order.replace("md-e144b97773a6f87c1978cc2831", id);
+        let field = |name: &str| sent.get(name).and_then(Value::as_str).unwrap().to_owned();
+        let order = order.replace("md-e144b97773a6f87c1978cc2831", &field("client_order_id"));
         let order = order.replace(AAPL, SPY).replace(r#""AAPL""#, r#""SPY""#);
+        let order = order.replace(r#""qty":"1""#, &format!(r#""qty":"{}""#, field("qty")));
+        let order = order.replace(r#""side":"buy""#, &format!(r#""side":"{}""#, field("side")));
+        let order = order.replace(
+            r#""filled_qty":"0""#,
+            &format!(r#""filled_qty":"{filled}""#),
+        );
         order
             .replace(r#""status":"accepted""#, &format!(r#""status":"{status}""#))
             .into_bytes()
     }
 
+    /// The entry as `fill` reads it now.
+    fn entry(&self, entry: &Value) -> Vec<u8> {
+        let qty = entry.get("qty").and_then(Value::as_str).unwrap().to_owned();
+        self.reads.set(self.reads.get() + 1);
+        let first = self.reads.get() == 1;
+        let (status, filled) = match (self.fill, self.deleted.get()) {
+            (Fill::Whole, _) | (Fill::Races, true) => ("filled", qty.as_str()),
+            (Fill::Second, _) if !first => ("filled", qty.as_str()),
+            (Fill::Expires, _) => ("expired", "0"),
+            (Fill::Rejected, _) => ("rejected", "0"),
+            (Fill::Rests, true) => ("canceled", "0"),
+            (Fill::Stuck, true) => ("pending_cancel", "0"),
+            (Fill::Rests | Fill::Races | Fill::Stuck | Fill::Second, _) => ("accepted", "0"),
+        };
+        self.order(entry, status, filled)
+    }
+
     fn answer(&self, request: &HttpRequest) -> (u16, Vec<u8>) {
         let path = request.path_and_query();
-        let submitted = self.submitted.borrow().clone();
-        if let Some(id) = &submitted {
+        if self.submitted.borrow().is_some() {
             self.log
                 .borrow_mut()
                 .push((request.method(), path.to_owned(), self.clock.get()));
@@ -113,13 +167,13 @@ impl Broker {
                 self.deleted.set(true);
                 return (204, Vec::new());
             }
-            if path.starts_with("/v2/orders:by_client_order_id") {
-                let status = if self.deleted.get() {
-                    "canceled"
-                } else {
-                    "accepted"
-                };
-                return (200, self.order(id, status));
+            let entry = self.posts.borrow()[0].clone();
+            let id = entry
+                .get("client_order_id")
+                .and_then(Value::as_str)
+                .unwrap();
+            if path.starts_with("/v2/orders:by_client_order_id") && path.ends_with(id) {
+                return (200, self.entry(&entry));
             }
         }
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tracer/alpaca");
@@ -131,8 +185,9 @@ impl Broker {
         } else if request.method() == Method::Post && path == "/v2/orders" {
             let sent = json(request.body().unwrap());
             let id = sent.get("client_order_id").and_then(Value::as_str).unwrap();
-            *self.submitted.borrow_mut() = Some(id.to_owned());
-            (200, self.order(id, "accepted"))
+            self.submitted.borrow_mut().get_or_insert(id.to_owned());
+            self.posts.borrow_mut().push(sent.clone());
+            (200, self.order(&sent, "accepted", "0"))
         } else if ["/v2/positions", "/v2/orders?", "/v2/account/activities?"]
             .iter()
             .any(|prefix| path.starts_with(prefix))
@@ -224,12 +279,21 @@ enum Door {
 }
 
 fn watched(now: &str, place: bool) -> Watched {
-    watched_through(now, place, Door::Function)
+    watched_through(now, place, Door::Function, Fill::Rests)
 }
 
-fn watched_through(now: &str, place: bool, door: Door) -> Watched {
+fn watched_through(now: &str, place: bool, door: Door, fill: Fill) -> Watched {
+    watched_to(now, BOUND, place, door, fill)
+}
+
+/// One watched run at `now`, bounded at `bound`.
+fn watched_to(now: &str, bound: &str, place: bool, door: Door, fill: Fill) -> Watched {
     let day = Date::parse(&now[..10]).unwrap();
-    let artifacts = stream().artifacts_on(day).unwrap();
+    let stream = match &now[..10] {
+        "2026-12-24" => classified_on("2026-12-22"),
+        _ => stream(),
+    };
+    let artifacts = stream.artifacts_on(day).unwrap();
     let deployed = artifacts.deployment("ws_spy".into(), "agent_spy".into(), "acct_spy".into());
     let deployed = deployed.unwrap();
     let agent = deployed.deployment().agent.clone();
@@ -248,9 +312,12 @@ fn watched_through(now: &str, place: bool, door: Door) -> Watched {
     };
     let broker = Broker {
         clock: secs,
+        fill,
         submitted: Rc::default(),
         deleted: Rc::default(),
+        reads: Rc::default(),
         log: Rc::default(),
+        posts: Rc::default(),
     };
     let (observation, output, store) = observed(now);
     let sources = Sources {
@@ -275,7 +342,7 @@ fn watched_through(now: &str, place: bool, door: Door) -> Watched {
     };
     let watch = Watch {
         pause: clock.clone(),
-        bound: at(BOUND),
+        bound: at(bound),
         interval: Duration::from_secs(5),
     };
     let (outcome, stages) = match door {
@@ -307,6 +374,16 @@ impl Watched {
         log.iter()
             .filter(|(m, path, _)| keep(m, path))
             .map(|(.., secs)| *secs)
+            .collect()
+    }
+
+    /// The account stream's rows, each as its type and its body's text.
+    fn account(&self) -> Vec<(String, String)> {
+        let stages = self.stages.as_ref().unwrap();
+        let rows: Vec<StoredEvent> = stages.journal.read("acct:ws_spy:acct_spy").unwrap();
+        let text = |row: &StoredEvent| String::from_utf8_lossy(&row.body).into_owned();
+        rows.iter()
+            .map(|row| (row.event_type.clone(), text(row)))
             .collect()
     }
 
@@ -472,7 +549,7 @@ fn a_working_entry_is_cancelled_at_the_bound_through_the_executor() {
 /// stages, so the journal is the free function's test's to read.
 #[test]
 fn the_production_door_watches_as_the_function_does() {
-    let run = watched_through(LATE, true, Door::Cycle);
+    let run = watched_through(LATE, true, Door::Cycle, Fill::Rests);
     assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
     let bound = at(BOUND).secs();
     assert_eq!(run.at(delete), [bound], "one cancel, at the bound");
@@ -499,4 +576,245 @@ fn a_dry_run_watches_nothing() {
     );
     assert!(run.clock.pauses.borrow().is_empty());
     assert!(run.broker.log.borrow().is_empty());
+}
+
+/// The `client_order_id` of the `index`th order posted.
+fn posted(run: &Watched, index: usize) -> String {
+    let posts = run.broker.posts.borrow();
+    let id = posts[index].get("client_order_id").and_then(Value::as_str);
+    id.unwrap().to_owned()
+}
+
+/// The second of each read of the entry, the first order posted, by its client order id.
+fn entry_reads(run: &Watched) -> Vec<i64> {
+    let entry = posted(run, 0);
+    let log = run.broker.log.borrow();
+    let of_entry = |(m, path, _): &&(Method, String, i64)| read(m, path) && path.ends_with(&entry);
+    log.iter()
+        .filter(of_entry)
+        .map(|(.., secs)| *secs)
+        .collect()
+}
+
+/// The event time of each `ProtectionChanged placed` the account stream records for `entry`.
+fn placed_at(run: &Watched, entry: &str) -> Vec<String> {
+    let placed = |(kind, body): &(String, String)| {
+        kind == "ProtectionChanged" && body.contains(r#""action":"placed""#) && body.contains(entry)
+    };
+    let time = |(_, body): (String, String)| {
+        let tail = &body[body.find(r#""event_time":""#).unwrap() + 14..];
+        tail[..tail.find('"').unwrap()].to_owned()
+    };
+    run.account().into_iter().filter(placed).map(time).collect()
+}
+
+/// DEC-858 item 4, FT-11, trading spec §5.4, rule 13: an entry the broker reads back `filled` ends
+/// the watch at that wake, its bracket's legs recorded `placed` at that wake's time, never held for
+/// the watch's end; the entry is read once, nothing is sent after that second, and nothing is
+/// posted or cancelled after the submission.
+#[test]
+fn a_filled_entry_ends_the_watch_with_its_legs_placed_at_once() {
+    let run = watched_through(TUESDAY, true, Door::Function, Fill::Whole);
+    assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
+    let wake = at(TUESDAY).secs() + 5;
+    assert_eq!(
+        entry_reads(&run),
+        [wake],
+        "one read of the entry, five seconds in"
+    );
+    let later = run.at(|_, _| true).into_iter().filter(|secs| *secs != wake);
+    assert_eq!(later.count(), 0, "nothing is sent after the fill's wake");
+    let sent = run.at(|m, _| *m != Method::Get);
+    assert!(sent.is_empty(), "nothing posted or cancelled: {sent:?}");
+    let entry = posted(&run, 0);
+    let wake = "2026-09-29T17:00:05.000000000Z";
+    assert_eq!(
+        placed_at(&run, &entry),
+        [wake],
+        "the legs, placed once, at the wake"
+    );
+}
+
+/// Rule 13, trading spec §5.4, DEC-858 items 3 and 4, DEC-877 item 2: an entry that fills as the
+/// bound's cancel leaves is protected at once: the cancel's own read-back at 15:50 finds it
+/// `filled`, the reconciliation that asks for is gathered rather than stepped answer by answer, its
+/// legs are recorded `placed` at that wake, the next wake's read ends the run cleanly, and nothing
+/// is posted after the entry.
+#[test]
+fn a_fill_that_beats_the_bounds_cancel_is_protected_at_once() {
+    let run = watched_through(LATE, true, Door::Function, Fill::Races);
+    assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
+    let bound = at(BOUND).secs();
+    assert_eq!(run.at(delete), [bound], "one cancel, at the bound");
+    assert_eq!(entry_reads(&run).last(), Some(&(bound + 5)), "read filled");
+    let entry = posted(&run, 0);
+    let wake = "2026-09-29T19:50:00.000000000Z";
+    assert_eq!(
+        placed_at(&run, &entry),
+        [wake],
+        "the legs, placed at the bound's wake"
+    );
+    let posts = run.at(|m, _| *m == Method::Post);
+    assert!(
+        posts.is_empty(),
+        "nothing posted after the entry: {posts:?}"
+    );
+}
+
+/// DEC-858 item 5, DEC-877 item 1, rules 3 and 6: past the bound the watch runs at most to the
+/// regular session's end, 16:00. A cancel the broker never confirms ends the run failing closed at
+/// the first wake at or past it, before any read there: the stop's code is `cancel_unconfirmed` and
+/// its message names no order; the entry's last journaled state stays the executor's
+/// `pending_cancel`, for the next start's reconciliation; the one `DELETE` at the bound is the only
+/// request but GETs, and the entry is read at every wake to 15:59:55 (at the bound by the cancel's
+/// own read-back) and never after.
+#[test]
+fn an_unconfirmed_cancel_fails_closed_at_the_sessions_end() {
+    let run = watched_through(LATE, true, Door::Function, Fill::Stuck);
+    let error = run.outcome.as_ref().err();
+    assert_eq!(
+        error.map(ShellError::code),
+        Some("cancel_unconfirmed"),
+        "{:?}",
+        run.outcome
+    );
+    let entry = posted(&run, 0);
+    assert!(
+        !error.unwrap().to_string().contains(&entry),
+        "no order is named"
+    );
+    let (bound, end) = (at(BOUND).secs(), at("2026-09-29T20:00:00Z").secs());
+    assert_eq!(run.at(delete), [bound], "one cancel, at the bound");
+    let mut reads = entry_reads(&run);
+    reads.dedup();
+    let every_wake: Vec<i64> = (bound - 15..end).step_by(5).collect();
+    assert_eq!(
+        reads, every_wake,
+        "a read at every wake to 15:59:55, none at 16:00"
+    );
+    assert_eq!(
+        run.clock.pauses.borrow().len(),
+        124,
+        "the last wake is 16:00"
+    );
+    let other = run.at(|m, path| *m != Method::Get && !delete(m, path));
+    assert!(
+        other.is_empty(),
+        "nothing placed after the submission: {other:?}"
+    );
+    let states: Vec<String> = run
+        .account()
+        .into_iter()
+        .filter(|(kind, body)| kind == "OrderStateChanged" && body.contains(&entry))
+        .map(|(_, body)| body)
+        .collect();
+    let last = states.last().unwrap();
+    assert!(last.contains(r#""state":"pending_cancel""#), "{last}");
+}
+
+/// DEC-858 item 5, DEC-877 item 1, rule 3: on a short day the cap is the early close, never 16:00.
+/// On Thursday 2026-12-24 (an early close at 13:00 New York, 18:00 UTC), bounded at 12:50, a cancel
+/// the broker never confirms ends the run failing closed at the first wake at or past 13:00, before
+/// any read there: the entry is read at every wake to 12:59:55 and never after, the one `DELETE`
+/// is at 12:50, and the stop's code is `cancel_unconfirmed`.
+#[test]
+fn on_an_early_close_the_cap_stops_at_the_early_close() {
+    let (late, bound) = ("2026-12-24T17:49:40Z", "2026-12-24T17:50:00Z");
+    let run = watched_to(late, bound, true, Door::Function, Fill::Stuck);
+    let error = run.outcome.as_ref().err();
+    assert_eq!(
+        error.map(ShellError::code),
+        Some("cancel_unconfirmed"),
+        "{:?}",
+        run.outcome
+    );
+    let (bound, end) = (at(bound).secs(), at("2026-12-24T18:00:00Z").secs());
+    assert_eq!(run.at(delete), [bound], "one cancel, at the bound");
+    let mut reads = entry_reads(&run);
+    reads.dedup();
+    let every_wake: Vec<i64> = (bound - 15..end).step_by(5).collect();
+    assert_eq!(
+        reads, every_wake,
+        "a read at every wake to 12:59:55, none at 13:00"
+    );
+    assert_eq!(
+        run.clock.pauses.borrow().len(),
+        124,
+        "the last wake is 13:00"
+    );
+    let other = run.at(|m, path| *m != Method::Get && !delete(m, path));
+    assert!(
+        other.is_empty(),
+        "nothing placed after the submission: {other:?}"
+    );
+}
+
+/// The `risk_clock` each account record for `entry` in `state` carries.
+fn risk_clocks(run: &Watched, entry: &str, state: &str) -> Vec<String> {
+    let state = format!(r#""state":"{state}""#);
+    let of = |(kind, body): &(String, String)| {
+        kind == "OrderStateChanged" && body.contains(entry) && body.contains(&state)
+    };
+    let clock = |(_, body): (String, String)| {
+        let tail = &body[body.find(r#""risk_clock":""#).unwrap() + 14..];
+        tail[..tail.find('"').unwrap()].to_owned()
+    };
+    run.account().into_iter().filter(of).map(clock).collect()
+}
+
+/// DEC-858 item 3: each wake reads the entry, hands the answer to the executor, then ticks it at the
+/// clock's second, so the executor's clock follows the watch, never stays at the run's start. An
+/// entry read `accepted` at 13:00:05 and `filled` at 13:00:10 is recorded `filled` at 13:00:10 with
+/// the executor's clock at 13:00:05, the first wake's tick; the watch then ends at that wake.
+#[test]
+fn each_wake_ticks_the_executor_at_the_clocks_second() {
+    let run = watched_through(TUESDAY, true, Door::Function, Fill::Second);
+    assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
+    let start = at(TUESDAY).secs();
+    assert_eq!(entry_reads(&run), [start + 5, start + 10], "two wakes");
+    let entry = posted(&run, 0);
+    assert_eq!(
+        risk_clocks(&run, &entry, "filled"),
+        ["2026-09-29T17:00:05.000000000Z"],
+        "the fill carries the first wake's tick, not the run's start"
+    );
+}
+
+/// DEC-858 item 4: `expired` and `rejected` are terminal, as `filled` and `canceled` are. An entry
+/// read back either way at the first wake ends the watch there: one read of the entry, at 13:00:05,
+/// nothing sent after that second, nothing posted or cancelled, and the run ends `Ok`.
+#[test]
+fn an_expired_or_rejected_entry_ends_the_watch_at_once() {
+    for fill in [Fill::Expires, Fill::Rejected] {
+        let run = watched_through(TUESDAY, true, Door::Function, fill);
+        let status = if fill == Fill::Expires {
+            "expired"
+        } else {
+            "rejected"
+        };
+        let report = run.outcome.as_ref();
+        assert_eq!(
+            report.map(|r| r.submitted.len()).ok(),
+            Some(1),
+            "{status}: {report:?}"
+        );
+        let wake = at(TUESDAY).secs() + 5;
+        assert_eq!(
+            entry_reads(&run),
+            [wake],
+            "{status}: one read, five seconds in"
+        );
+        let later = run.at(|_, _| true).into_iter().filter(|secs| *secs != wake);
+        assert_eq!(
+            later.count(),
+            0,
+            "{status}: nothing is sent after that wake"
+        );
+        let sent = run.at(|m, _| *m != Method::Get);
+        assert!(
+            sent.is_empty(),
+            "{status}: nothing posted or cancelled: {sent:?}"
+        );
+        assert_eq!(run.clock.pauses.borrow().len(), 1, "{status}: one wake");
+    }
 }

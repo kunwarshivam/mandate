@@ -352,6 +352,11 @@ fn written(
     records: &[(&'static str, String)],
     verify: fn(&[StoredEvent]) -> Result<(), ConnectionVerifyError>,
 ) -> Result<(), ConnectionVerifyError> {
+    verify(&written_rows(records))
+}
+
+/// The rows of a case written here, each record a base draft and its changes after its event id.
+fn written_rows(records: &[(&'static str, String)]) -> Vec<StoredEvent> {
     let records: Vec<String> = records
         .iter()
         .enumerate()
@@ -362,7 +367,7 @@ fn written(
         })
         .collect();
     let case = parse(format!(r#"{{"records":[{}]}}"#, records.join(",")).as_bytes()).unwrap();
-    verify(&rows(&section(), &case))
+    rows(&section(), &case)
 }
 
 fn refused(index: usize, rule: ConnectionStreamRule) -> Result<(), ConnectionVerifyError> {
@@ -1113,7 +1118,6 @@ fn verified_start(prefix: &[StoredEvent], start: TrustedStart) -> ConnectionStar
 /// bound through `bind` at the range's own trusted start. An unanchored vector's range starts at
 /// `seq` 101 with no rows before it, so `bind` refuses the empty prefix and the range fails closed.
 #[test]
-#[ignore = "pending E7-17"]
 fn every_range_vector_is_judged_from_its_verified_anchor_as_its_vector_says() {
     let mut judged_cases = 0;
     for name in ["connection_ranges", "connection_requests"] {
@@ -1177,7 +1181,6 @@ fn per_stream(chain: &[StoredEvent]) -> Vec<Vec<StoredEvent>> {
 /// through `bind` (DEC-885 I1, I4, I5; DEC-889). A chain of several streams is first checked to be
 /// judged as its streams are, at the earliest row any of them fails.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_verified_anchor_agrees_with_the_full_chain_on_every_split_of_every_stream() {
     let chains = full_chains();
     assert!(chains.len() >= 66, "{} full chains", chains.len());
@@ -1232,7 +1235,6 @@ fn attacked() -> (Vec<StoredEvent>, StoredEvent) {
 /// another tail, or given for a range from `seq` 1 does not bind, so the range runs unanchored and
 /// fails closed at its first judged record; the sound prefix anchors it as the full chain judges.
 #[test]
-#[ignore = "pending E7-17"]
 fn a_forged_short_or_unbound_prefix_runs_the_range_unanchored() {
     let (chain, forged_row) = attacked();
     let (prefix, range) = chain.split_at(3);
@@ -1292,7 +1294,6 @@ fn a_forged_short_or_unbound_prefix_runs_the_range_unanchored() {
 /// DEC-889 item 2: an anchored run judges its anchor's stream only, and fails closed at the first
 /// judged record of another; an empty prefix's anchor takes the range's first judged record's stream.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_anchored_run_fails_closed_at_another_streams_record() {
     let records = ["request X A1", "establish X A1", "revoke Y"];
     let foreign = "establish Z A2 ws=ws_01J8Z3";
@@ -1309,10 +1310,29 @@ fn an_anchored_run_fails_closed_at_another_streams_record() {
     }
 }
 
+/// DEC-889 item 2 and DEC-888: an account stream's judged record is another stream's, so an
+/// anchored control run fails closed at it, an account-stream `ConnectionRevoked` included, from
+/// an empty anchor, a part of the prefix, or the whole of it.
+#[test]
+fn an_anchored_run_fails_closed_at_an_account_streams_record() {
+    let own = control(&["request X A1", "establish X A1"]);
+    let revoked_on_account = ("checked_start", set("event_type", r#""ConnectionRevoked""#));
+    for foreign in [check("connect"), revoked_on_account] {
+        let chain = sealed(&[own.clone(), written_rows(&[foreign])].concat());
+        assert!(chain[2].stream_id.starts_with("acct:"), "an account stream");
+        for k in 0..=2 {
+            let (prefix, range) = chain.split_at(k);
+            let start = verified_start(prefix, start_after(prefix));
+            let got = verify_connection_lifecycle_from(start, range);
+            let want = at(&chain[2], ConnectionCheck::Unanchored);
+            assert_eq!(got, want, "{} after a split at {k}", chain[2].event_type);
+        }
+    }
+}
+
 /// DEC-889 item 2 and DEC-885 I6: another control stream's `ConnectionRevoked` is never judged, so
 /// it never fails an anchored run, which still fails closed at that stream's next judged record.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_anchored_run_passes_another_streams_revocation() {
     let records = ["request X A1", "establish X A1", "revoke Y"];
     let foreign = ["revoke X ws=ws_01J8Z3", "establish Z A2 ws=ws_01J8Z3"];
@@ -1331,7 +1351,6 @@ fn an_anchored_run_passes_another_streams_revocation() {
 /// not of a leading revocation on another control stream, so that stream is judged as the full
 /// chain judges it, and a later judged record of the revoking stream fails closed.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_empty_anchor_takes_the_stream_of_the_first_judged_record() {
     let own = ["revoke Y ws=ws_01J8Z3", "request X A1", "establish X A1"];
     let rotated = ConnectionCheck::LifecycleMismatch(ConnectionStreamRule::Rotated);

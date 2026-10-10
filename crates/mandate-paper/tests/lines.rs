@@ -8,8 +8,8 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_executor::{ClientOrderId, OrderType, Purpose, SubmitOrder, TimeInForce};
 use mandate_modelhost::Signal;
 use mandate_num::{Price, Qty};
-use mandate_paper::{Outcome, lines};
-use mandate_shell::Report;
+use mandate_paper::{Outcome, PaperError, lines, stderr_line};
+use mandate_shell::{Report, ShellError};
 
 const ENTRY: &str = "md-01JPAPERENTRY0000000000001";
 
@@ -71,4 +71,28 @@ fn no_output_names_the_signal_and_that_nothing_was_sent() {
     assert_eq!(flat, ["the model output Flat; nothing sent"]);
     let undecided = lines(&Outcome::NoOutput(Signal::Undecided)).unwrap();
     assert_eq!(undecided, ["the model output Undecided; nothing sent"]);
+}
+
+/// DEC-877 item 1, rule 6: the cap's fail-closed stop prints its stable code alone on stderr, the
+/// key-only alert DEC-858 item 5 asks for, and no message that could grow to name an order.
+#[test]
+fn the_caps_stop_prints_its_code_alone_on_stderr() {
+    let stop = PaperError::Shell(ShellError::CancelUnconfirmed);
+    assert_eq!(stderr_line(&stop), "cancel_unconfirmed");
+}
+
+/// DEC-846 item 6: every other stop still prints its message alone on stderr, a shell refusal
+/// included, as the binary's tests pin for the refusals before the credentials.
+#[test]
+fn every_other_stop_prints_its_message_on_stderr() {
+    let cases = [
+        (PaperError::Control, "the control stream could not be read"),
+        (
+            PaperError::Shell(ShellError::SecondSubmission),
+            "the tracer places one order per run, and the executor asked for another",
+        ),
+    ];
+    for (error, message) in cases {
+        assert_eq!(stderr_line(&error), message);
+    }
 }
