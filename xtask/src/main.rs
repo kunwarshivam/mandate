@@ -12668,7 +12668,8 @@ jq -r "$filter" "$src"
     /// An `env:` key, at workflow, job, step or service level, and a command-prefix assignment
     /// are read only when the name is one the repository's workflows set or one of the five
     /// `CARGO_*` names: `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and
-    /// `NODE_OPTIONS`, in any case, cannot be read, nor can an inline `env:` mapping, an
+    /// `NODE_OPTIONS`, in any case, cannot be read, nor can a listed name in another case, an
+    /// inline `env:` mapping, an
     /// uppercase name assigned by a command of its own or a `for` loop, or `printf -v`; a
     /// lowercase local can (#1169 round 5 review, B3).
     #[test]
@@ -12691,6 +12692,7 @@ jq -r "$filter" "$src"
             ("job-env", "ENV"),
             ("job-toolchain", "RUSTUP_TOOLCHAIN"),
             ("job-lowercase", "bash_env"),
+            ("job-listed-lowercase", "gh_token"),
         ] {
             text.push_str(&job_env(job, name));
         }
@@ -12710,6 +12712,10 @@ jq -r "$filter" "$src"
                 "RUSTUP_TOOLCHAIN=nightly cargo test -p a-lib",
             ),
             ("prefix-bash-env", "BASH_ENV=x.txt cargo test -p a-lib"),
+            (
+                "prefix-listed-lowercase",
+                "cargo_term_color=never cargo test -p a-lib",
+            ),
             ("standalone", "PATH=/tmp/bin; cargo test -p a-lib"),
             (
                 "loop-variable",
@@ -12751,6 +12757,7 @@ jq -r "$filter" "$src"
                 "job-env",
                 "job-toolchain",
                 "job-lowercase",
+                "job-listed-lowercase",
                 "step-path",
                 "step-preload",
                 "step-node",
@@ -12759,6 +12766,7 @@ jq -r "$filter" "$src"
                 "prefix-lowercase",
                 "prefix-toolchain",
                 "prefix-bash-env",
+                "prefix-listed-lowercase",
                 "standalone",
                 "loop-variable",
                 "printf-variable",
@@ -13061,8 +13069,8 @@ jq -r "$filter" "$src"
     /// `npx`, `npm exec`, `npm pkg set`, `npm config set`, `npm install`, a missing script, a
     /// script given arguments and a `package.json` naming cargo cannot be read. Working
     /// directories are resolved first, so `web/..`, `web/../`, `../crates` and `web/../crates`
-    /// are not under `web`, and neither is a step's own `working-directory: .` (#1169 round 5
-    /// review, B7; DEC-873 item 3).
+    /// are not under `web`, and neither is a step's own `working-directory: .`, while
+    /// `./web/app/..` is `web` (#1169 round 5 review, B7; DEC-873 item 3).
     #[test]
     #[ignore = "pending E7-28"]
     fn npm_and_npx_run_only_in_the_repository_forms() -> Result<()> {
@@ -13090,7 +13098,7 @@ jq -r "$filter" "$src"
             ("npm-install", "web", "npm install left-pad"),
             ("npm-run-missing", "web", "npm run nope"),
             ("npm-run-arguments", "web", "npm run build -- --debug"),
-            ("cargo-package", "web/app", "npm run build"),
+            ("package-naming-it", "web/app", "npm run build"),
             ("dir-up", "web/..", "npm ci"),
             ("dir-up-slash", "web/../", "npm ci"),
             ("dir-crates", "../crates", "npm ci"),
@@ -13111,6 +13119,7 @@ jq -r "$filter" "$src"
              chromium\n      - run: npx playwright install-deps chromium\n      - run: npx --yes \
              impeccable@4.1.0 detect src/\n      - working-directory: web\n        run: npm ci\n",
         );
+        text.push_str(&job("dir-resolved", "./web/app/..", "npm ci"));
         let flows = [
             ci_file(".github/workflows/ci.yml", &text),
             ci_file(
@@ -13127,7 +13136,7 @@ jq -r "$filter" "$src"
         let mut jobs: Vec<&str> = refused.iter().map(|(name, ..)| *name).collect();
         jobs.push("step-root");
         unreadable(&problems, &jobs);
-        names(&problems, &["npx-other"], &["web-ok"]);
+        names(&problems, &["npx-other"], &["web-ok", "dir-resolved"]);
         Ok(())
     }
 
