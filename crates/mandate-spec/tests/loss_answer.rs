@@ -158,7 +158,6 @@ const LADDER: [(&str, Expected<Rungs>); 19] = [
 /// the daily loss 0.2 F are `platform_proposed`; no loss, the whole allocation, and an F too small
 /// for a ladder are asked again.
 #[test]
-#[ignore = "pending E10-7"]
 fn the_loss_answer_matches_the_reference_model() {
     for (kind, value, allocation, expect) in LOSS {
         let got = loss_answer_fields(&answer(kind, value), dollars(allocation))
@@ -175,7 +174,6 @@ fn the_loss_answer_matches_the_reference_model() {
 /// rounded down to basis points, the flatten rung is exactly D (V-011), and a ladder that rounding
 /// collapses is refused, never proposed with a rung dropped.
 #[test]
-#[ignore = "pending E10-7"]
 fn the_proposed_ladder_matches_the_reference_model() {
     for (drawdown, expect) in LADDER {
         let got = proposed_ladder(&dec(drawdown)).unwrap_or_else(|e| panic!("{drawdown}: {e:?}"));
@@ -268,7 +266,6 @@ fn drafted_mandate(f: &LossFields, l: &ProposedLadder) -> (Mandate, ProvenanceMa
 /// half with F at most 20 bp, where ladders collapse): each is asked again exactly when the oracle
 /// says so, else its fields and ladder are the oracle's and the draft breaks no V-rule.
 #[test]
-#[ignore = "pending E10-7"]
 fn a_drafted_loss_answer_and_its_ladder_validate() {
     let mut config = ProptestConfig::with_cases(1024);
     config.failure_persistence = None;
@@ -363,7 +360,6 @@ fn assert_all_unanswered(failures: Vec<String>) {
 /// below zero itself. Each is refused or asked again, never drafted, and never a panic, whether it
 /// is a share or dollars.
 #[test]
-#[ignore = "pending E10-7"]
 fn a_loss_answer_without_a_positive_allocation_or_amount_is_never_drafted() {
     let cases = [
         (Kind::Fraction, "0.1", "0"),
@@ -391,7 +387,6 @@ fn a_loss_answer_without_a_positive_allocation_or_amount_is_never_drafted() {
 /// signed `decimal` grammar is the only one that holds all three. Each is refused or asked again,
 /// never drafted, and never a panic.
 #[test]
-#[ignore = "pending E10-7"]
 fn a_drawdown_outside_zero_to_one_proposes_no_ladder() {
     let failures = ["0", "-0.08", "-1", "1", "1.5", "2"]
         .into_iter()
