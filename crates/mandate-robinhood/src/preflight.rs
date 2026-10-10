@@ -3,7 +3,7 @@
 //! the answers of `get_portfolio`, `get_equity_positions`, `get_equity_orders`,
 //! `get_equity_tradability` and `get_equity_quotes`. Every account read goes through
 //! [`RobinhoodConnector::read`], so each one is scoped to the agentic account and checks it
-//! afresh. A record of an assumed shape (DEC-875 item 4, DEC-902 items 1 to 6) with a field
+//! afresh. A record of an assumed shape (DEC-875 item 4, DEC-902 items 1 to 7) with a field
 //! missing, a field it does not list, a value of another type, or a number that is not canonical
 //! decimal text refuses the whole read (`AGENTS.md` rule 3). Nothing here is defaulted.
 
@@ -28,7 +28,7 @@ pub struct AccountSnapshot {
     pub open_orders: Vec<BrokerOrder>,
 }
 
-/// `get_equity_quotes`'s one record for the symbol (DEC-902 item 5): an uncrossed quote.
+/// `get_equity_quotes`'s one record for the symbol (DEC-902 item 7): an uncrossed quote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Quote {
     pub symbol: InstrumentId,
@@ -57,7 +57,7 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// [`Self::read`], and `get_equity_quotes` for `symbol` alone, which names no account. A
     /// symbol the account may not trade is [`RobinhoodError::NotTradable`]; a quote that is not
     /// exactly one record for `symbol`, or is crossed, is [`RobinhoodError::Unreadable`]
-    /// (DEC-902 items 5 and 6).
+    /// (DEC-902 items 6 and 7).
     pub async fn preflight_facts(
         &self,
         symbol: &InstrumentId,
