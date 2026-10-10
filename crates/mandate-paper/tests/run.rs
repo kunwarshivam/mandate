@@ -19,7 +19,7 @@ use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -31,6 +31,8 @@ type Moment = (&'static str, &'static str);
 const TUESDAY: Moment = ("2026-09-29T17:00:00Z", "2026-09-29T16:5");
 /// Tuesday 15:50 in New York, the first instant of the closing window (trading spec §9.6).
 const CLOSING: Moment = ("2026-09-29T19:50:00Z", "2026-09-29T19:4");
+/// Tuesday 15:40 in New York, ten minutes before the close window opens at 15:50.
+const LATE: Moment = ("2026-09-29T19:40:00Z", "2026-09-29T19:3");
 /// Wednesday 13:00 in New York: Tuesday is the last completed session, so bars through Monday
 /// are stale.
 const WEDNESDAY: Moment = ("2026-09-30T17:00:00Z", "2026-09-30T16:5");
@@ -49,13 +51,19 @@ type Answer = Result<Response, TransportError>;
 
 /// A paper broker whose answers are `mandate-shell`'s recorded AAPL ones moved to `equity` and
 /// to the run's minute. It accepts a submission and keeps every `POST /v2/orders` body it is
-/// handed; `holds` makes it report one share already held, as after a first run.
+/// handed; `holds` makes it report one share already held, as after a first run. It reads the
+/// entry back `filled` (DEC-858 item 6), or with `rests` `accepted` until deleted and then
+/// `canceled`, and logs every request after the entry with the clock's second.
 #[derive(Clone)]
 struct Broker {
     equity: Equity,
     holds: bool,
+    rests: bool,
     minutes: &'static str,
     posts: Rc<RefCell<Vec<Value>>>,
+    clock: Clock,
+    deleted: Rc<Cell<bool>>,
+    log: Rc<RefCell<Vec<(Method, String, i64)>>>,
 }
 
 impl Broker {
@@ -66,6 +74,36 @@ impl Broker {
         let text = text.replace("NASDAQ", exchange);
         text.replace("2026-09-28T16:5", self.minutes).into_bytes()
     }
+
+    /// The order fixture as the entry `sent`, at `status` with `filled` shares filled.
+    fn order(&self, sent: &Value, status: &str, filled: &str) -> Vec<u8> {
+        let field = |name: &str| sent.get(name).and_then(Value::as_str).unwrap().to_owned();
+        let order = String::from_utf8(self.file("order.json")).unwrap();
+        let order = order.replace("md-e144b97773a6f87c1978cc2831", &field("client_order_id"));
+        let order = order.replace(r#""qty":"1""#, &format!(r#""qty":"{}""#, field("qty")));
+        let order = order.replace(
+            r#""filled_qty":"0""#,
+            &format!(r#""filled_qty":"{filled}""#),
+        );
+        let status = format!(r#""status":"{status}""#);
+        order
+            .replace(r#""status":"accepted""#, &status)
+            .into_bytes()
+    }
+
+    /// The entry's read-back, when `path` reads the entry by its client order id.
+    fn entry(&self, path: &str) -> Option<Vec<u8>> {
+        let entry = self.posts.borrow().first()?.clone();
+        let id = entry.get("client_order_id").and_then(Value::as_str)?;
+        let lookup = path.starts_with("/v2/orders:by_client_order_id") && path.ends_with(id);
+        let qty = entry.get("qty").and_then(Value::as_str)?.to_owned();
+        let (status, filled) = match (self.rests, self.deleted.get()) {
+            (false, _) => ("filled", qty.as_str()),
+            (true, false) => ("accepted", "0"),
+            (true, true) => ("canceled", "0"),
+        };
+        lookup.then(|| self.order(&entry, status, filled))
+    }
 }
 
 async fn answer(status: u16, body: Vec<u8>) -> Answer {
@@ -75,6 +113,12 @@ async fn answer(status: u16, body: Vec<u8>) -> Answer {
 impl TradingTransport for Broker {
     fn send(&self, request: &HttpRequest) -> impl Future<Output = Answer> {
         let path = request.path_and_query();
+        if !self.posts.borrow().is_empty() {
+            let at = self.clock.now().secs();
+            self.log
+                .borrow_mut()
+                .push((request.method(), path.to_owned(), at));
+        }
         let lists = ["/v2/positions", "/v2/orders?", "/v2/account/activities?"];
         let asset = format!("/v2/assets/{}", self.equity.1);
         let file = |name| self.file(name);
@@ -84,12 +128,15 @@ impl TradingTransport for Broker {
             (Method::Get, path) if path == asset => (200, file("asset-aapl.json")),
             (Method::Post, "/v2/orders") => {
                 let sent = json(request.body().unwrap());
-                let id = sent.get("client_order_id").and_then(Value::as_str).unwrap();
-                let order = String::from_utf8(file("order.json")).unwrap();
-                let order = order.replace("md-e144b97773a6f87c1978cc2831", id);
+                let order = self.order(&sent, "accepted", "0");
                 self.posts.borrow_mut().push(sent);
-                (200, order.into_bytes())
+                (200, order)
             }
+            (Method::Delete, _) => {
+                self.deleted.set(true);
+                (204, Vec::new())
+            }
+            (_, lookup) if self.entry(lookup).is_some() => (200, self.entry(lookup).unwrap()),
             (_, lookup) if lookup.starts_with("/v2/orders:by_client_order_id") => {
                 (404, file("order-absent.json"))
             }
@@ -112,15 +159,34 @@ impl DataTransport for Broker {
     }
 }
 
-#[derive(Clone, Copy)]
-struct Clock(&'static str);
+/// The run's clock: it starts at a moment and moves on by each pause (DEC-858 item 6).
+#[derive(Clone)]
+struct Clock {
+    start: &'static str,
+    waited: Rc<Cell<u64>>,
+}
+
+impl Clock {
+    fn at(start: &'static str) -> Clock {
+        let waited = Rc::default();
+        Clock { start, waited }
+    }
+}
 
 impl Pause for Clock {
     fn now(&self) -> UtcNanos {
-        UtcNanos::parse_rfc3339(self.0).unwrap()
+        let start = UtcNanos::parse_rfc3339(self.start).unwrap();
+        let secs = start.secs() + i64::try_from(self.waited.get()).unwrap();
+        UtcNanos::from_parts(secs, start.nanos()).unwrap()
     }
 
-    async fn pause(&self, _: Duration) {}
+    async fn pause(&self, duration: Duration) {
+        assert!(
+            self.waited.get() < 3_600,
+            "the run watched for over an hour"
+        );
+        self.waited.set(self.waited.get() + duration.as_secs());
+    }
 }
 
 struct Fake {
@@ -145,7 +211,7 @@ impl Ports for Fake {
     }
 
     fn pause(&self) -> Clock {
-        self.clock
+        self.clock.clone()
     }
 }
 
@@ -224,15 +290,20 @@ impl Scene {
             place_one_order: true,
         };
         let (holds, minutes, posts) = (false, TUESDAY.1, Rc::default());
+        let clock = Clock::at(TUESDAY.0);
         let ports = Fake {
             records: stream.records,
             broker: Broker {
                 equity,
                 holds,
+                rests: false,
                 minutes,
                 posts,
+                clock: clock.clone(),
+                deleted: Rc::default(),
+                log: Rc::default(),
             },
-            clock: Clock(TUESDAY.0),
+            clock,
             connects: 0,
         };
         Scene {
@@ -250,7 +321,8 @@ impl Scene {
 
     /// Moves the run to `moment`: its clock, and the broker's fresh quote and minute bars.
     fn at(&mut self, (now, minutes): Moment) {
-        (self.ports.clock, self.ports.broker.minutes) = (Clock(now), minutes);
+        (self.ports.clock, self.ports.broker.minutes) = (Clock::at(now), minutes);
+        self.ports.broker.clock = self.ports.clock.clone();
     }
 
     fn posts(&self) -> Vec<Value> {
@@ -499,4 +571,44 @@ fn the_closes_are_the_full_trusted_span_in_order() {
             "{symbol}: {refused:?}"
         );
     }
+}
+
+/// E1b part 2, FT-11, DEC-858 items 3 and 6, DEC-853 items 5 and 6: a placing run watches its
+/// entry through the cycle at the registered rule set's interval (5 s) and cancels it through the
+/// executor at the registered close window's start: from 15:40 the entry is read at every wake
+/// from 15:40:05, the one `DELETE` is at 15:50:00, and the last read, at 15:50:05, reads it
+/// canceled and ends the run.
+#[test]
+#[ignore = "pending E7-19"]
+fn a_placing_run_watches_its_entry_to_the_registered_bound() {
+    let mut scene = Scene::new("watch", 231..256);
+    scene.at(LATE);
+    scene.ports.broker.rests = true;
+    let outcome = scene.run();
+    let Ok(Outcome::Cycle(report)) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!((report.submitted.len(), scene.posts().len()), (1, 1));
+    let secs = |text| UtcNanos::parse_rfc3339(text).unwrap().secs();
+    let log = scene.ports.broker.log.borrow().clone();
+    let at = |keep: fn(&Method, &str) -> bool| -> Vec<i64> {
+        log.iter()
+            .filter(|(m, p, _)| keep(m, p))
+            .map(|(.., s)| *s)
+            .collect()
+    };
+    let deletes = at(|m, _| *m == Method::Delete);
+    assert_eq!(
+        deletes,
+        [secs("2026-09-29T19:50:00Z")],
+        "one cancel, at the bound"
+    );
+    let mut reads = at(|m, p| *m == Method::Get && p.starts_with("/v2/orders:by_client_order_id"));
+    reads.dedup();
+    let wakes = secs("2026-09-29T19:40:05Z")..=secs("2026-09-29T19:50:05Z");
+    let wakes: Vec<i64> = wakes.step_by(5).collect();
+    assert_eq!(
+        reads, wakes,
+        "reads at every five-second wake, and none after the cancel's"
+    );
 }

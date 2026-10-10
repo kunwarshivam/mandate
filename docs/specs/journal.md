@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.38 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, DEC-892 (pending); v0.38 scopes a connection anchor to one stream, DEC-889 (pending), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, DEC-894 (pending)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.40 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, DEC-892 (pending); v0.38 scopes a connection anchor to one stream, DEC-889 (pending), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, DEC-894 (pending); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, and `segment_rows` section of §11's `segment_rows_mismatch`; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,6 +12,50 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.40 ([DEC-706](../project/decisions/DEC-706.md); E8-10, E8-9):** §9.15's `NoticeAttempted`
+  gains version 2, which records the provider's verdict on a `failed` attempt. It records more and
+  refuses more; it admits nothing version 1 refused, and it changes no send, mark, or
+  `channel_lost` (DEC-176).
+  - **Version 2.** Version 1's members in their order, and `verdict` (`retryable` \| `permanent`,
+    nullable) last. `reason` alone cannot say whether a channel is tried again: `provider_error` is
+    `permanent` for a relay refusal ([DEC-728](../project/decisions/DEC-728.md) item 1) and a push
+    `400`, `401`, or `403` ([DEC-729](../project/decisions/DEC-729.md) item 4) and `retryable` for a
+    `5xx` or an unknown status (DEC-729 items 7 and 8), and `too_large` is `permanent` for a push
+    `413` (DEC-729 item 5) and `retryable` as [DEC-725](../project/decisions/DEC-725.md) item 6.3
+    reads it. DEC-725 item 6.3 says the verdict decides, so a reader of the notice stream alone (the
+    dispatcher's restart, notifications spec §5.1 step 4, and NT-8's journal-only oracle) needs it.
+  - **Rule 134**, numbered on after rule 133: `verdict` is non-null exactly when `status` is
+    `failed`, and agrees with every reason whose verdict notifications spec §5.2 to §5.4 fix
+    (`permanent` for the five marking reasons, `recipient_not_permitted`, and `address_missing`;
+    `retryable` for `timeout` and `rate_limited`). An absent or extra member is `schema` at it, and
+    a value outside the two is `non_canonical` (§9.1's types).
+  - **Version 1.** Not edited (§8); it still replays, and a stored version-1 `failed` attempt reads
+    as `permanent`. From v0.40 `append` refuses version 1 as `unknown_schema` at `payload`, so a
+    writer cannot leave the verdict out by writing the older shape. No deployment holds a version-1
+    record: only the dispatcher's step tests have appended one, and no dispatcher process runs
+    (E8-10 slice D10).
+  - **Lifecycle.** §9.15 names a terminal attempt: `delivered`, `suppressed_quiet_hours`,
+    `abandoned`, or `failed` with the verdict `permanent`, as notifications spec §7's diagram has
+    it.
+  - **Vectors.** None: `reference/journal` does not model §9.15, which
+    `crates/mandate-journal/tests/notices.rs` pins (DEC-720 item 7), and the vectors stay version
+    3. The tests and then the `notices.rs` registration of version 2, with the dispatcher's writer
+    moved to it, follow in their own code changes (DEC-77, ES-22).
+- **v0.39 ([DEC-896](../project/decisions/DEC-896.md), [DEC-789](../project/decisions/DEC-789.md); E12-3):** §9.14 and
+  §11 state that the run verifies the timestamp token of an anchor a range starts from. Text only,
+  following the decision; each reading only refuses more (DEC-176): a start whose token nothing
+  checked before now ends `fail` or `incomplete` on it, never `pass`.
+  - **The start anchor's token** (DEC-896 item 1). A range whose trusted start is an
+    `AnchorComputed` runs §11's token check on that anchor, as on an in-range anchor. §9.14's "What
+    a verifier reads" says so, and §11's per-range list names the trusted-start anchor among the
+    anchors `tsa_token_invalid` reads. Workspace API §4.8.1 step 2.2 already lists it and is
+    unchanged.
+  - **An absent or unreadable token** (DEC-896 items 2 and 3). §11's "Incomplete" first bullet
+    says that a start anchor's token whose artifact is absent from a store that answers, or does
+    not re-hash, fails `tsa_token_invalid`, and that an artifact store that cannot be read leaves
+    the check incomplete, cause `token_unverifiable`, which §9.13's `incomplete` row now names too.
+    Rules 132 and 133 are unchanged. The vectors are unchanged; the token vectors follow in
+    DEC-896's sequence.
 - **v0.38 (DEC-889 pending in #1210, DEC-894 pending in lane L5's slice C PR; E7-17, E12-3):** §11
   scopes the connection anchor to one stream, and adds the range-level `segment_rows_mismatch`.
   Each item only refuses more (DEC-176): an anchored run fails closed where it used to judge, and a
@@ -1036,7 +1080,7 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 |---|---|---|
 | `StreamOpened` | — | stream type, workspace; closed in §9.15 |
 | `NoticeIssued` | — | notice id (random, notifications spec §4.2), kind, class, cause (the `OwnerAlertSent`, `ApprovalRequested`, or (for `channel_lost`) `NoticeAttempted` it answers, with its stream), recipients (opaque); closed in §9.15 |
-| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into`; closed in §9.15 |
+| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into`; closed in §9.15, whose version 2 adds a `failed` attempt's `verdict` ([DEC-706](../project/decisions/DEC-706.md)) |
 
 ### 9.1 Agent-stream payload schemas ([DEC-177](../project/04-decision-log.md#decisions))
 
@@ -3019,7 +3063,7 @@ A `checked_range` is a `range` whose `to_hash` is `digest?` (the head the run ve
 | `start` | `{kind: genesis \| manifest \| anchor, manifest_hash: digest?, anchor_event_id: ulid?}` | Version 2. The trusted start the range was entered from (§9.14 "What a verifier reads"): seq 1 with 64 zeros, the `SegmentExported` whose `manifest_hash` this is, or the `AnchorComputed` whose `event_id` this is. The member of the kind named is non-null and the other is `null`: rule 132 |
 | `checked` | `integer` | Version 2. The number of events the run walked from `from_seq` (§11; workspace API AU-8): rule 132 |
 | `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `anchor_self_mismatch`, `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, `connection_lifecycle_mismatch`, `connection_cause_mismatch`, and at version 2 only `segment_rows_mismatch` (§11, DEC-894, pending); `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 111 |
-| `incomplete` | `{check: tsa_token_invalid, cause: token_unverifiable \| anchor_unstamped}?` | Version 2. The check §11 could not finish for the range, named by its code, and why, or `null` (§11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md) items 7 and 9). At this version only the token check can be incomplete. `cause` is `token_unverifiable` for a stamped token whose imprint matches and `anchor_unstamped` for an anchor the range checks whose `token` is `null`; a range with both records `anchor_unstamped`. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
+| `incomplete` | `{check: tsa_token_invalid, cause: token_unverifiable \| anchor_unstamped}?` | Version 2. The check §11 could not finish for the range, named by its code, and why, or `null` (§11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md) items 7 and 9). At this version only the token check can be incomplete. `cause` is `token_unverifiable` for a stamped token whose imprint matches, or a start anchor's token whose artifact store cannot be read ([DEC-896](../project/decisions/DEC-896.md) item 3), and `anchor_unstamped` for an anchor the range checks whose `token` is `null`; a range with both records `anchor_unstamped`. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
 
 A verification a principal requested for an export names that export's `ExportCreated` as its
 `causation_id`. A failed run does not repair anything and does not replace §11's incident path:
@@ -3139,7 +3183,9 @@ or `{from_seq: n, prev_hash: hash}` of the leaf for `s` in an `AnchorComputed` *
 `token`** and whose leaf `seq` is `n − 1`. An anchor whose `token` is `null` is not a trusted start:
 without the timestamp nothing outside the journal vouches for it, and a start the journal vouches
 for alone is what [DEC-115](../project/04-decision-log.md#decisions) item 5 refused. A range is then
-entered from genesis, from a `SegmentExported`, or from a stamped anchor. A later record that
+entered from genesis, from a `SegmentExported`, or from a stamped anchor. The run verifies an
+anchor start's token by §11's token check, as it does an in-range anchor's
+([DEC-896](../project/decisions/DEC-896.md) item 1). A later record that
 supplies the missing token (the anchor stamp record, backlog) makes such an anchor a start; this
 version has none. A manifest start is one the cold store vouches for: the run reads that segment's manifest
 and file from the cold store (§6.2) and checks them; a start that only the hot store's
@@ -3176,8 +3222,9 @@ so a record that is absent and one of another workspace give the same refusal (w
 
 The notice stream of §2 and v0.12, and the records that feed it ([notifications spec §5.5](notifications.md#55-records)):
 the subject stream owner's `OwnerAlertSent`, and the dispatcher's `StreamOpened`, `NoticeIssued`,
-and `NoticeAttempted` on `ntf:{workspace_id}`. Each is closed at schema version 1, as §9.6 closes
-its records: every listed member is present, `null` only where the type is nullable, and any other
+and `NoticeAttempted` on `ntf:{workspace_id}`. Each is closed at schema version 1, and
+`NoticeAttempted` also at version 2 (v0.40, [DEC-706](../project/decisions/DEC-706.md)), as §9.6
+closes its records: every listed member is present, `null` only where the type is nullable, and any other
 member is `schema` at that member. §9.1's types and report order apply. None of the four holds free
 text: every string is an identifier, a closed vocabulary, or a provider's opaque token, so nothing
 about an order, a position, a mandate, or an address can reach them (`AGENTS.md` rule 6,
@@ -3246,6 +3293,24 @@ stream type of `stream_id`.
 | `reason` | `timeout` \| `rate_limited` \| `provider_error` \| `address_rejected` \| `auth_failed` \| `too_large` \| `recipient_not_permitted` \| `address_missing` \| `bounced` \| `complained` \| `unsubscribed` \| `not_pending` \| `retry_window_ended` (nullable) | Notifications spec §5.2's closed enum, with the receipts `bounced`, `complained`, and `unsubscribed` (§5.6) and the dispatcher's own `address_missing` (§5.1, [DEC-795](../project/decisions/DEC-795.md) item 7), then §5.3's two stops: rule 127 |
 | `provider_message_id` | `opaque?` | The provider's id for the accepted message, which a later receipt names: rule 128 |
 | `coalesced_into` | `opaque?` | For a notice combined into one message (notifications spec §5.4), that message's provider id: rule 129 |
+| `verdict` | `retryable` \| `permanent` (nullable) | Version 2. For a `failed` attempt, the provider's verdict of notifications spec §5.2, which decides whether that channel is tried again for the notice ([DEC-725](../project/decisions/DEC-725.md) item 6.3); `null` for every other status: rule 134 |
+
+**Versions.** Version 2 (v0.40, [DEC-706](../project/decisions/DEC-706.md)) is version 1's
+members in their order, and `verdict` last, so a reader of the notice stream alone, the dispatcher
+after a restart (notifications spec §5.1 step 4) and NT-8's journal-only oracle among them, can tell
+a `failed` attempt to retry from one that ended its channel. `provider_error` and `too_large` are
+each `retryable` under one accepted decision and `permanent` under another (DEC-725 item 6.3,
+[DEC-728](../project/decisions/DEC-728.md) item 1, [DEC-729](../project/decisions/DEC-729.md)
+items 4, 5, 7, and 8), so `reason` cannot say which. The verdict is the outcome §5.2's `send`
+returned: `permanent { reason }` is `permanent`; `retryable { reason }`, and a timeout with no
+answer (the caller's `retryable { timeout }`), are `retryable`. A receipt's `failed` record is
+`permanent`. `delivered`, `suppressed_quiet_hours`, `deferred_quiet_hours`, and `abandoned` carry
+none. Every writer appends version 2, and from v0.40 `append` refuses `NoticeAttempted` at version
+1 as `unknown_schema` at `payload`, so no writer can leave the verdict out by writing the older
+shape. Version 1 is not edited (§8) and still replays: a stored version-1 `failed` attempt reads as
+`permanent`, so that channel is finished for that notice and nothing is sent again on a guess. No
+deployment holds one: before v0.40 only the dispatcher's own step tests appended `NoticeAttempted`,
+and no dispatcher process runs yet (E8-10).
 
 A `NoticeAttempted` whose `reason` is `address_rejected`, `auth_failed`, `bounced`, `complained`, or
 `unsubscribed` is the record that marks the address on that channel `unreachable` (notifications
@@ -3290,15 +3355,28 @@ causes nothing (§5.2).
      the batch names the same subject (`payload.subject`, at the first alert that breaks it):
      notifications spec §3.2's "in the subject's own batch" and §3.4's "one subject, one kind",
      checked at append.
+134. `NoticeAttempted` version 2 ([DEC-706](../project/decisions/DEC-706.md)), numbered on after
+     rule 133 and renumbering none: `verdict` is non-null exactly when `status` is `failed`, and
+     where notifications spec §5.2 to §5.4 fix a reason's verdict, it is that one
+     (`payload.verdict`, both clauses): `permanent` for `address_rejected`, `auth_failed`,
+     `recipient_not_permitted`, `address_missing`, and the receipts `bounced`, `complained`, and
+     `unsubscribed`, and `retryable` for `timeout` and `rate_limited`. `provider_error` and
+     `too_large` take either, as the adapter answered. So a record never marks an address
+     `unreachable` while its channel is still retried, and never stops a channel on a timeout or a
+     rate limit.
 
 The first violation is reported in §9.1's order: unlisted members, the listed members in the order
-given, then rules 119, 120, 122 to 124, and 126 to 129 (only on a well-typed payload), then
-`artifact_refs` and `pii_refs`, then the subject rules 121 and 125. Rule 130 spans a batch, so it is
+given, then rules 119, 120, 122 to 124, 126 to 129, and at version 2 rule 134 (only on a
+well-typed payload), then `artifact_refs` and `pii_refs`, then the subject rules 121 and 125. Rule 130 spans a batch, so it is
 checked once every draft in the batch passes these, as rule 10's second clause is.
 
 **Lifecycle.** A cause is issued once: a cause that already has a `NoticeIssued` is skipped, and on
 restart the dispatcher issues every cause without one and attempts again every notice that has no
-terminal attempt (notifications spec §5.1). A later receipt for a delivered message is a new
+terminal attempt (notifications spec §5.1). On a recipient's channel, an attempt is terminal when it
+is `delivered`, `suppressed_quiet_hours`, or `abandoned`, or `failed` with the verdict `permanent`
+(a version-1 `failed` reads as `permanent`); a `deferred_quiet_hours` attempt, or a `failed` one
+with the verdict `retryable`, leaves that channel due (notifications spec §7's diagram,
+[DEC-706](../project/decisions/DEC-706.md)). A later receipt for a delivered message is a new
 `NoticeAttempted` naming the same `provider_message_id`; it never retracts the earlier `delivered`
 (notifications spec §5.5). Nothing on the notice stream is a risk input, and no trading path waits on it (NT-9).
 
@@ -3381,6 +3459,12 @@ rule 111):
 
 - **for the range**, with no `seq`: `anchor_root_mismatch`, `tsa_token_invalid`,
   `segment_manifest_mismatch`, `segment_rows_mismatch`, and `segment_gap`;
+  - `tsa_token_invalid`: the token of an anchor the range reads does not carry that anchor's
+    `root` as its imprint, or does not verify. The anchors it reads include the trusted-start
+    anchor of a range entered from an `AnchorComputed`, not only the anchors inside the range
+    ([DEC-896](../project/decisions/DEC-896.md) item 1). Range-level; `seq` null. Workspace API
+    §4.8.1's run order checks them at step 2.2, after `anchor_root_mismatch`. A token that cannot
+    yet be proven either way is incomplete, not this failure ("Incomplete", below, [DEC-789](../project/decisions/DEC-789.md));
   - `segment_rows_mismatch`: the hot rows of a segment named by a manifest the range starts from
     or holds do not export (§6.2) to the bytes its `file_sha256` names. A hot-store rewrite that
     keeps the chain consistent from the trusted start onward is caught here, and by no per-event
@@ -3511,7 +3595,15 @@ incomplete, the token check whose failure is `tsa_token_invalid`:
   only that output form and its non-zero exit; this spec does not count it as a failure (no `fail`
   result, no SEV-1), and this version does not change the CLI. The CLI journals
   nothing, so no record holds its word; a `VerificationRun` records
-  `incomplete: {check: tsa_token_invalid, cause: token_unverifiable}`.
+  `incomplete: {check: tsa_token_invalid, cause: token_unverifiable}`. This holds for every
+  anchor the token check reads, the trusted-start anchor among them
+  ([DEC-896](../project/decisions/DEC-896.md) item 1). The start anchor lies before the range,
+  so check 6 does not read its token: a start anchor's token whose artifact is absent from an
+  artifact store that answers, or does not re-hash to its ref, cannot carry the imprint, so it
+  fails `tsa_token_invalid`, a `fail` (DEC-896 item 2). An artifact store that cannot be read is
+  an outage, not a failure: the check is incomplete with cause `token_unverifiable`, on which a
+  restore drill passes as it does on the first cause (DEC-896 item 3, a reading of its own rather
+  than DEC-789's).
 - **An anchor the range must check whose `token` is `null`** (DEC-789 item 7). Nothing outside the
   journal vouches for it (§9.14), so its token check cannot finish either. It is not a failure: the
   outage is §10's journaled gap, already alerted. A `VerificationRun` records it with

@@ -15,10 +15,12 @@
 //! `Cancel` goes by the broker's `order_id`. Numbers are decimal text read by `mandate-num`.
 
 mod connector;
+mod preflight;
 mod profile;
 mod scope;
 
 pub use connector::{RobinhoodConnector, Tools};
+pub use preflight::{AccountSnapshot, PreflightFacts, Quote};
 pub use profile::robinhood as robinhood_profile;
 pub use scope::AccountRead;
 
@@ -42,9 +44,16 @@ pub enum RobinhoodError {
     /// A read whose arguments name another account; nothing was sent (CN-8).
     #[error("the read names another account and was not sent")]
     OtherAccount,
+    /// A read whose filters carry a key its tool does not list; nothing was sent (DEC-879).
+    #[error("the read carries a filter its tool does not list and was not sent")]
+    UnlistedFilter,
     /// A read's answer is lost, or cannot be read and attributed to one account (rule 3).
     #[error("the read could not be read ({code})")]
     Unreadable { code: &'static str },
+    /// `get_equity_tradability` says the agentic account may not trade the symbol (DEC-902
+    /// item 6).
+    #[error("the agentic account may not trade the symbol")]
+    NotTradable,
 }
 
 /// The `ref_id` for the order with this idempotency key (DEC-860 item 1): a UUID version 8

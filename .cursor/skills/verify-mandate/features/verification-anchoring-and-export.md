@@ -9,7 +9,7 @@
   genesis, a `SegmentExported`, or a stamped `AnchorComputed` on the workspace's own control
   stream only, and a malformed `stream_id` refused, DEC-784; and `anchor_record`, an
   `AnchorComputed` row read as recorded; E12-3; and `resolve_start_from_rows`, the start row
-  checked and a `ManifestStart` confirmed against the cold manifest, DEC-893, DEC-894, pending), `walk_range` in `verify.rs` (a range walked
+  checked and a `ManifestStart` confirmed against the cold manifest, DEC-893, DEC-894, DEC-895), `walk_range` in `verify.rs` (a range walked
   position by position with its count, AU-8; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
   run from its connection anchor or failing closed without one, DEC-885; an account-stream
@@ -18,10 +18,13 @@
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
-  their vectors and independent random walks), `crates/mandate-journal/tests/trusted_start.rs`
-  (the trusted-start resolver against its vectors, each §9.14 clause, and a random oracle),
-  `crates/mandate-journal/tests/trusted_start_rows.rs` (pending E12-3: the resolver over stored
-  rows and `ManifestStart::confirm` against `row_cases`, and random row variants by an oracle),
+  their vectors and independent random walks), `crates/mandate-journal/tests/trusted_start_rows.rs`
+  (the trusted-start resolver over stored rows and `ManifestStart::confirm` against `row_cases`,
+  and random row variants by an oracle), `crates/mandate-journal/tests/trusted_start_row_pins.rs`
+  (an anchor starts every stream it has a leaf for; no start of any kind for a stream id with no
+  workspace; a non-hex leaf anywhere refuses its anchor) and
+  `crates/mandate-journal/tests/trusted_start_row_scope.rs` (another workspace's streams start
+  from its own control rows only; a segment's payload under another `event_type` is no start),
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
   and every split of every full chain against the full-chain run and an independent scan;
   `JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT`, the judged-record lists, against §11's sets; and

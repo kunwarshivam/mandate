@@ -1,0 +1,8 @@
+file = "crates/mandate-shell/tests/watch.rs"
+test = "a_fill_that_beats_the_bounds_cancel_is_protected_at_once"
+reason = """
+E1b part 1's watch gathers only the reconciliation an executor step asks for directly; the one the
+cancel's read-back asks for is stepped answer by answer, so the executor refuses with
+AppendUnresolved before the legs are placed (DEC-858 item 3). A behaviour failure, not a stub. E1b
+part 2's implementation PR (E7-19) gathers it and deletes this row.
+"""
