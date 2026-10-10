@@ -5,7 +5,7 @@
 //! account are dropped; a record naming none refuses the read; and none of it holds an exit on
 //! the agentic account (`AGENTS.md` rule 13). A shorter prefix of the recorded number, and an
 //! empty or blank one, is a near miss like any other (DEC-875 item 3). A filter key the read's
-//! tool does not list is refused with nothing called (DEC-879, pending E7-6). Oracles: outcomes
+//! tool does not list is refused with nothing called (DEC-879). Oracles: outcomes
 //! computed from the generated account choices, the contract's parameters written out here, and a
 //! recording tool double. The account fingerprint (CN-5) is not C2's.
 
