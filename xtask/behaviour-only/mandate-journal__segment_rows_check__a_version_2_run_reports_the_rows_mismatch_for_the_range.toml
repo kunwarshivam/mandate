@@ -1,9 +1,0 @@
-file = "crates/mandate-journal/tests/segment_rows_check.rs"
-test = "a_version_2_run_reports_the_rows_mismatch_for_the_range"
-reason = """
-E12-3 (journal spec v0.38, DEC-894): `Draft::parse` is already implemented, and its closed list
-of checks does not yet name `segment_rows_mismatch` at either version, so it refuses the code as
-`non_canonical` at `failure.check`, and this test fails on that answer rather than at a stub.
-The code PR that adds the check to version 2's list and to the range-level checks deletes this
-file with the test's `#[ignore]` line.
-"""
