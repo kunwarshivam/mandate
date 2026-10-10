@@ -48,9 +48,9 @@ for (const width of [390, 1440]) {
       await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
       // The retro desktop's Start menu carries a third Sign in among its scenery, and the page's
       // own header and footer sit inside the desktop window's region landmark, so they are scoped
-      // structurally: the hero's action row and the footer element.
+      // structurally: the hero's action row and the homepage's footer element.
       const header = page.locator("[data-slot=hero-actions]").getByRole("link", { name: "Sign in" });
-      const footer = page.locator("footer").getByRole("link", { name: "Sign in" });
+      const footer = page.locator("[data-slot=landing-page] footer").getByRole("link", { name: "Sign in" });
       await expect(header).toHaveAttribute("href", "/login");
       await expect(footer).toHaveAttribute("href", "/login");
     });

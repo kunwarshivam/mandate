@@ -11,9 +11,20 @@ import { type Page, expect, test } from "@playwright/test";
 const PATH = "/welcome";
 const WIDTHS = [320, 390, 1024, 1440];
 
-/** Waits out the desktop's power-on (DEC-905), so what a test measures is where things rest; the endless drift and blink go on. */
+/**
+ * Waits out the desktop's power-on (DEC-905), so what a test measures is where things rest; the endless
+ * drift and blink go on, and so do the long page's scroll-driven pieces (DEC-907), which finish only
+ * when the visitor scrolls.
+ */
 const settled = (page: Page) =>
-  page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => undefined))));
+  page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.timeline instanceof DocumentTimeline && a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
 
 /** Opens the landing page with its home page in front; `app` leaves the app's tab in front, as a visit opens (DEC-906). */
 async function open(page: Page, width: number, height = 900, { app = false } = {}) {
@@ -47,7 +58,7 @@ for (const width of WIDTHS) {
 test("opens on the app itself, live: a press inside moves the address, the browser's Back and a typed address drive it, and it wears the page's theme", async ({ page }) => {
   await open(page, 1440, 900, { app: true });
   await expect(page.getByRole("tab", { name: "Inside the app" })).toHaveAttribute("aria-selected", "true");
-  const address = page.getByRole("textbox", { name: "Address" });
+  const address = page.getByRole("textbox", { name: "Address", exact: true });
   const frame = page.locator("iframe[title='Owlhead app, example workspace']");
   await expect(frame).toHaveAttribute("data-ready", "true");
   await expect(address).toHaveValue("https://app.owlhead.ai/");
@@ -280,7 +291,7 @@ test("the keyboard goes skip link, the app's address, then the guide links, with
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => (document.activeElement as HTMLElement).innerText.trim())).toBe("Skip to content");
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("textbox", { name: "Address" }), "the app's address takes a typed one").toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Address", exact: true }), "the app's address takes a typed one").toBeFocused();
   await page.keyboard.press("Tab");
   const first = await page.evaluate(() => {
     const el = document.activeElement as HTMLElement;

@@ -1,0 +1,158 @@
+/*
+ * The long page under the desktop. Every movement here is tied to the scroll and lives inside
+ * `prefers-reduced-motion: no-preference` and a check for scroll-driven animations, so a browser
+ * without them, or a visitor who asked for less motion, sees each piece in its finished state.
+ */
+
+/* The desktop stays where it is while the page rises over it. */
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  background: var(--background);
+}
+
+/*
+ * Gascogne Serial is the heading face asked for; it is sold under a paid web licence, and spending
+ * is the founder's call (DEC-79), so Sorts Mill Goudy, a free revival of the same Goudy design,
+ * stands in until one is bought and self-hosted here.
+ */
+.page {
+  --font-page-display: "Sorts Mill Goudy", "Iowan Old Style", Georgia, serif;
+  font-family: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+.display {
+  font-family: var(--font-page-display);
+}
+
+.bar {
+  border-bottom: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+  background: var(--card);
+}
+
+/* A picture of the app, in the theme the page is in. */
+.shot {
+  overflow: hidden;
+  border-radius: 1rem;
+  background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.dark {
+  display: none !important;
+}
+
+:global(html[data-mode="dark"]) .dark {
+  display: block !important;
+}
+
+:global(html[data-mode="dark"]) .light {
+  display: none !important;
+}
+
+/* A phone's bezel around the request and the lock screen. */
+.phone {
+  border-radius: 2.75rem;
+  padding: 0.625rem;
+  background: var(--foreground);
+}
+
+.phone > * {
+  border-radius: 2.125rem;
+  overflow: hidden;
+}
+
+/* What it won't do, struck through as it scrolls past. */
+.struck {
+  position: relative;
+  display: inline-block;
+}
+
+.struck::after {
+  content: "";
+  position: absolute;
+  inset-inline: -0.06em;
+  top: 54%;
+  height: 0.07em;
+  background: currentColor;
+  transform-origin: 0 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stage > * {
+    transform-origin: 50% 35%;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    .stage > * {
+      animation: recede linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 100vh;
+    }
+
+    .rise {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 70%;
+    }
+
+    .struck::after {
+      animation: strike linear both;
+      animation-timeline: view();
+      animation-range: entry 100% cover 36%;
+    }
+
+    .plate {
+      animation: drift-up linear both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+  }
+}
+
+@keyframes recede {
+  from {
+    transform: none;
+    border-radius: 0;
+  }
+  to {
+    transform: scale(0.9);
+    border-radius: 1.25rem;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0.001;
+    translate: 0 3rem;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes strike {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes drift-up {
+  from {
+    translate: 0 -6%;
+  }
+  to {
+    translate: 0 6%;
+  }
+}
