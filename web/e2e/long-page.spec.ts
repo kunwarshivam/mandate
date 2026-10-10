@@ -96,3 +96,45 @@ test("with motion reduced, nothing on the page moves with the scroll and every p
   );
   expect(moved).toEqual([]);
 });
+
+test("the Scroll cue shows on the first screen, takes the visitor to the opening, and is covered once the page has risen", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, 1440);
+  const cue = page.locator("[data-slot=scroll-cue]");
+  await expect(cue).toBeInViewport({ ratio: 1 });
+  await expect(cue).toHaveAttribute("data-at", /status|edge/);
+  await cue.click();
+  await expect(page.locator("#intro-title")).toBeInViewport();
+  const box = (await cue.boundingBox())!;
+  const top = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-slot=scroll-cue]") !== null, [box.x + box.width / 2, box.y + box.height / 2]);
+  expect(top, "the risen page covers the cue").toBe(false);
+});
+
+test("with motion allowed, the owl flies down the page and the pieces settle as they come into view", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await open(page, 1440);
+  const owl = page.locator("[data-slot=flying-owl]");
+  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect(owl).toHaveAttribute("aria-hidden", "true");
+  const where = () => owl.evaluate((el) => getComputedStyle(el).transform);
+  await page.locator("#threads").scrollIntoViewIfNeeded();
+  const at = await where();
+  await page.locator("#limits").scrollIntoViewIfNeeded();
+  await expect.poll(where).not.toBe(at);
+  await expect(page.locator("#limits-title")).toHaveAttribute("data-shown", "");
+  expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBe("on");
+});
+
+test("with motion reduced, the owl stands still on the first perch and asks for no frame", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, 1440);
+  const owl = page.locator("[data-slot=flying-owl]");
+  await expect(owl).toHaveAttribute("data-owl", "resting");
+  const at = await owl.boundingBox();
+  await page.evaluate(() => window.scrollTo({ top: window.innerHeight * 1.2, behavior: "instant" }));
+  const perch = await page.locator("[data-perch]").first().boundingBox();
+  const now = (await owl.boundingBox())!;
+  expect(now.y, "it scrolls with the page, not on its own").toBeCloseTo(at!.y - (await page.evaluate(() => window.scrollY)), 0);
+  expect(Math.abs(now.y + now.height / 2 - perch!.y), "it stands on the first perch's top edge").toBeLessThan(now.height);
+  expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBeNull();
+});
