@@ -127,8 +127,8 @@ the owl, the rules and the record.
       under reduced motion it is simply there. (DEC-514)
 - [x] **Silence as a feature.** Already shipped: the all-clear is the brand owl and "All clear.
       Nothing needs you."
-- [x] **One era of type on the landing page:** a bitmap wordmark on the owls' pixel grid, not the
-      figlet ASCII; the founder asked to move on from it. (DEC-903)
+- [x] **One name on the landing page:** the product's own logo, the owl beside the wordmark, not
+      the figlet ASCII; the founder asked to move on from it and picked the lockup. (DEC-903)
 
 ## F. Home and the agent page (DEC)
 

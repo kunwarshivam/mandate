@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WORDMARK_PATH } from "@/components/brand/Logo";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
@@ -12,7 +13,6 @@ import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
 import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
 import { EDITED, TRACE } from "./record-trace";
-import { COLUMNS, GLYPHS, WORDMARK_TEXT } from "./wordmark";
 
 /**
  * The landing page (DEC-213): one homepage set as the web looked in the late 1990s. Real headings and
@@ -53,27 +53,17 @@ afterEach(() => {
 });
 
 describe("the landing page's structure", () => {
-  it("has one h1 named Owlhead, with the bitmap wordmark hidden from assistive technology", () => {
+  it("has one h1 named Owlhead, with the product's owl and wordmark beside it hidden from assistive technology", () => {
     const { container } = renderLanding();
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s).toHaveLength(1);
     expect(h1s[0]).toHaveAccessibleName(HEADLINE);
-    const mark = h1s[0].querySelector("[data-slot=wordmark]");
+    const mark = h1s[0].querySelector<HTMLElement>("[data-slot=wordmark]");
     expect(mark).toHaveAttribute("aria-hidden", "true");
-    expect(mark?.querySelectorAll("path")).toHaveLength(2);
+    expect(mark?.querySelector("[data-slot=brand-owl]"), "the brand owl leads").not.toBeNull();
+    expect(mark?.querySelector("[data-slot=owlhead-wordmark] path")).toHaveAttribute("d", WORDMARK_PATH);
+    expect(mark?.style.color, "in the logo's colour, as the app's header has it").toBe("var(--logo)");
     expect(container).toHaveTextContent(SUBHEAD);
-  });
-
-  it("draws the wordmark in sentence case, nine pixels tall, as narrow as the old block letters", () => {
-    expect(WORDMARK_TEXT).toBe(HEADLINE);
-    for (const { char, rows } of GLYPHS) {
-      expect(rows, char).toHaveLength(9);
-      expect(new Set(rows.map((r) => r.length)).size, `${char}: every row the same width`).toBe(1);
-      expect(rows.join(""), char).toMatch(/^[.#]+$/);
-    }
-    const lowerTop = GLYPHS.filter((g) => ["w", "e", "a"].includes(g.char)).map((g) => g.rows.slice(0, 3).join(""));
-    lowerTop.forEach((top) => expect(top, "x-height letters leave the ascender rows empty").toMatch(/^\.+$/));
-    expect(COLUMNS).toBeLessThanOrEqual(56);
   });
 
   it("numbers every section and labels it by its heading", () => {
