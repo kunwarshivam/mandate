@@ -14,9 +14,6 @@ use mandate_journal::{
 };
 
 const REFUSED: Result<ResolvedStart, TrustedStartError> = Err(TrustedStartError::Refused);
-const OWN_CONTROL: &str = "ctl:ws_01J8Z2";
-const ACCOUNT: &str = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1";
-const AGENT: &str = "agent:ws_01J8Z2:agent_a";
 
 fn text<'a>(value: &'a Value, name: &str) -> &'a str {
     value.get(name).and_then(Value::as_str).unwrap_or_default()
@@ -55,11 +52,43 @@ fn vector_rows() -> Vec<StoredEvent> {
     rows.unwrap().iter().map(stored).collect()
 }
 
+/// The vectors' own workspace's streams, read from their rows rather than named here, so the tests
+/// follow whichever workspace the vectors are keyed to: its control stream is the one the
+/// `StreamOpened` row opens, its account stream the one that control stream's first
+/// `SegmentExported` exports, and its agent stream `agent_a` of the same workspace.
+struct OwnStreams {
+    control: String,
+    account: String,
+    agent: String,
+}
+
+fn own_streams(rows: &[StoredEvent]) -> OwnStreams {
+    let opened = rows.iter().find(|r| r.event_type == "StreamOpened");
+    let control = opened.unwrap().stream_id.clone();
+    let exported = rows
+        .iter()
+        .find(|r| r.stream_id == control && r.event_type == "SegmentExported");
+    let body = parse(&exported.unwrap().body).unwrap();
+    let account = text(body.get("payload").unwrap(), "stream_id").to_owned();
+    let workspace = control.strip_prefix("ctl:").unwrap_or_default();
+    assert!(
+        !workspace.is_empty() && account.starts_with(&format!("acct:{workspace}:")),
+        "the vectors' own control stream {control} exports its own account stream, not {account}"
+    );
+    let agent = format!("agent:{workspace}:agent_a");
+    OwnStreams {
+        control,
+        account,
+        agent,
+    }
+}
+
 /// The index of the first row of `event_type` on the workspace's own control stream.
 fn own(rows: &[StoredEvent], event_type: &str) -> usize {
+    let control = own_streams(rows).control;
     let found = rows
         .iter()
-        .position(|r| r.stream_id == OWN_CONTROL && r.event_type == event_type);
+        .position(|r| r.stream_id == control && r.event_type == event_type);
     found.unwrap()
 }
 
@@ -175,18 +204,19 @@ fn ready(from_seq: u64, prev_hash: &str) -> Result<ResolvedStart, TrustedStartEr
 #[test]
 fn an_anchor_starts_every_stream_it_has_a_leaf_for() {
     let rows = vector_rows();
+    let streams = own_streams(&rows);
     let anchor = &rows[own(&rows, "AnchorComputed")];
     let (id, payload) = (anchor.event_id.clone(), payload_of(anchor));
     let leaves = leaves_of(&payload);
-    let streams: Vec<&str> = leaves.iter().map(|l| l.stream.as_str()).collect();
+    let leaf_streams: Vec<&str> = leaves.iter().map(|l| l.stream.as_str()).collect();
     assert_eq!(
-        streams,
-        [ACCOUNT, OWN_CONTROL],
+        leaf_streams,
+        [streams.account.as_str(), streams.control.as_str()],
         "the vector anchor's leaves"
     );
     assert_eq!(root(&leaves), hex(&payload, "root"), "the root oracle");
     let agent = Leaf {
-        stream: AGENT.to_owned(),
+        stream: streams.agent.clone(),
         seq: 6,
         hash: Digest::of(b"agent head").to_hex(),
     };
@@ -229,6 +259,8 @@ fn an_anchor_starts_every_stream_it_has_a_leaf_for() {
 #[test]
 fn a_stream_id_with_no_workspace_refuses_every_kind() {
     let base = vector_rows();
+    let account_stream = own_streams(&base).account;
+    let account_stream = account_stream.as_str();
     let malformed = [
         "", ":", "acct", "acct:", "acct::", "acct::A1", "ctl:", "ctl::",
     ];
@@ -247,7 +279,11 @@ fn a_stream_id_with_no_workspace_refuses_every_kind() {
     };
     let zeros = Digest::ZERO.to_hex();
     let mut manifests = Vec::new();
-    for (stream, first) in malformed.iter().map(|s| (*s, 1)).chain([(ACCOUNT, 30)]) {
+    for (stream, first) in malformed
+        .iter()
+        .map(|s| (*s, 1))
+        .chain([(account_stream, 30)])
+    {
         let (row, manifest) = segment(&base, stream, first, &zeros);
         let mut copy = row.clone();
         copy.stream_id = "ctl:".to_owned();
@@ -257,13 +293,13 @@ fn a_stream_id_with_no_workspace_refuses_every_kind() {
     let by = |manifest_hash| StartRequest::Manifest { manifest_hash };
     let account = manifests.pop().unwrap();
     let resolve = |s, n, request| resolve_start_from_rows(&rows, s, n, request);
-    let leaf = leaves.iter().find(|l| l.stream == ACCOUNT).unwrap();
+    let leaf = leaves.iter().find(|l| l.stream == account_stream).unwrap();
     assert_eq!(
-        resolve(ACCOUNT, 10, at),
+        resolve(account_stream, 10, at),
         ready(10, &leaf.hash),
         "the anchor"
     );
-    match resolve(ACCOUNT, 30, by(account)) {
+    match resolve(account_stream, 30, by(account)) {
         Ok(ResolvedStart::Manifest(m)) => assert!(m.confirm(ColdRead::Absent).is_err()),
         other => panic!("the account segment is a manifest start: {other:?}"),
     }
@@ -293,6 +329,7 @@ fn a_stream_id_with_no_workspace_refuses_every_kind() {
 #[test]
 fn a_non_hex_leaf_anywhere_refuses_the_anchor() {
     let rows = vector_rows();
+    let account_stream = own_streams(&rows).account;
     let at = own(&rows, "AnchorComputed");
     let (id, payload) = (rows[at].event_id.clone(), payload_of(&rows[at]));
     let request = StartRequest::Anchor {
@@ -344,10 +381,14 @@ fn a_non_hex_leaf_anywhere_refuses_the_anchor() {
         ("upper", prev.to_uppercase(), false),
     ] {
         let mut rows = rows.clone();
-        let (row, manifest_hash) = segment(&rows, ACCOUNT, 30, &prev);
+        let (row, manifest_hash) = segment(&rows, &account_stream, 30, &prev);
         rows.push(row);
-        let got =
-            resolve_start_from_rows(&rows, ACCOUNT, 30, StartRequest::Manifest { manifest_hash });
+        let got = resolve_start_from_rows(
+            &rows,
+            &account_stream,
+            30,
+            StartRequest::Manifest { manifest_hash },
+        );
         assert_eq!(
             matches!(got, Ok(ResolvedStart::Manifest(_))),
             starts,
