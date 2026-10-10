@@ -277,6 +277,7 @@ describe("the design system", () => {
       "components/site/scroll/long-page.tsx",
       "components/site/scroll/parts.ts",
       "components/site/scroll/pixel-night.tsx",
+      "components/site/scroll/pixel-sea.tsx",
       "components/site/scroll/scroll.module.css",
     ]);
   });

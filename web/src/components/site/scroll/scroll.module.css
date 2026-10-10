@@ -113,6 +113,62 @@
   --thread: var(--tide);
 }
 
+/* The opening's pixel sea (`pixel-sea.tsx`): the thread's knot on it is pale, as on tide. Its islands
+   and geese are ink by day and a muted grey by night, so they never vanish into a dark page. */
+.sea {
+  --thread: var(--tide-muted);
+  --sea-land: var(--foreground);
+}
+
+:global(html[data-mode="dark"]) .sea {
+  --sea-land: var(--muted-foreground);
+}
+
+/* At rest the moon is half risen, the light lies still and each gull holds its wings up. */
+.moon {
+  translate: 0 50%;
+}
+
+.foam {
+  left: calc(-1 * var(--cell));
+  width: calc(100% + 2 * var(--cell));
+}
+
+.wingsDown,
+.glintB {
+  opacity: 0;
+}
+
+/* How many steps the sea's movements take: one a pixel, or one a device pixel on a dense screen,
+   from the counts `pixel-sea.tsx` gives for each. */
+.wave {
+  --glide-steps: var(--tile-px);
+  --heave-steps: var(--heave-px);
+}
+
+.foam {
+  --lap-steps: var(--cell-px);
+}
+
+.moon {
+  --rise-steps: var(--rise-px);
+}
+
+@media (min-resolution: 2x) {
+  .wave {
+    --glide-steps: var(--tile-dpx);
+    --heave-steps: var(--heave-dpx);
+  }
+
+  .foam {
+    --lap-steps: var(--cell-dpx);
+  }
+
+  .moon {
+    --rise-steps: var(--rise-dpx);
+  }
+}
+
 .thread {
   position: fixed;
   top: 0;
@@ -156,6 +212,38 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* The sea (`pixel-sea.tsx`). Each row of waves glides one wave's length every `--glide`, the
+     nearer rows faster, and heaves up and back on a swell that reaches each row a beat after the
+     one above, so it rolls down the sea. The foam laps. Each moves a whole pixel a step (a device
+     pixel on a dense screen), so it is smooth without a stroke ever landing between pixels and
+     blurring. The moon's
+     light glints and the gulls beat a frame at a time. */
+  .wave {
+    animation:
+      glide var(--glide) steps(var(--glide-steps)) infinite,
+      heave 3.6s steps(var(--heave-steps)) var(--beat) infinite alternate;
+  }
+
+  .foam {
+    animation: lap 2.4s steps(var(--lap-steps)) infinite alternate;
+  }
+
+  .glintA {
+    animation: glint-a 1.4s steps(1) infinite;
+  }
+
+  .glintB {
+    animation: glint-b 1.4s steps(1) infinite;
+  }
+
+  .wingsUp {
+    animation: wings-up 2.6s steps(1) calc(var(--i) * -0.9s) infinite;
+  }
+
+  .wingsDown {
+    animation: wings-down 2.6s steps(1) calc(var(--i) * -0.9s) infinite;
+  }
+
   /* A star on the lock screen's night blinks now and then. */
   .twinkle {
     animation: twinkle 3.1s steps(1) infinite;
@@ -192,6 +280,13 @@
       animation: drift-up linear both;
       animation-timeline: view();
       animation-range: cover 0% cover 100%;
+    }
+
+    /* The moon rises out of the sea, a pixel a step, as the opening comes into view. */
+    .moon {
+      animation: rise steps(var(--rise-steps)) both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 45%;
     }
   }
 
@@ -301,6 +396,67 @@
   }
   to {
     translate: 0 6%;
+  }
+}
+
+@keyframes glide {
+  to {
+    translate: calc(-1 * var(--tile)) 0;
+  }
+}
+
+@keyframes heave {
+  to {
+    transform: translateY(calc(-1 * var(--heave)));
+  }
+}
+
+@keyframes lap {
+  to {
+    translate: var(--cell) 0;
+  }
+}
+
+@keyframes glint-a {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes glint-b {
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes wings-up {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  10%,
+  30% {
+    opacity: 1;
+  }
+}
+
+@keyframes wings-down {
+  0%,
+  20% {
+    opacity: 1;
+  }
+  10%,
+  30% {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    translate: 0 100%;
+  }
+  to {
+    translate: 0 50%;
   }
 }
 
