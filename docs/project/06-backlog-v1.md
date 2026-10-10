@@ -3106,14 +3106,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   containing it, shown failing under the do-nothing plant (#244 round 1, finding 3). Until then
   `Input::Journal` answers a loud `Unimplemented { story: "E7-4" }` naming slice 5, landing first in
   E7-4 slice 1 rather than dropping the fact (the coordinator's ruling on #244, 5861479849).
-- **E7-4, the slice that reconciles protective legs (stream K):** make `mandate-alpaca`'s `wire.rs`
-  keep each leg's `client_order_id` instead of reading `legs[].id` only, with its own `ready()` tests
-  correction first, since `BrokerOrder.legs` changes type (#229's pattern). E7-4 slice 1 aligns
-  `ClientOrderId::for_protection` to the §2.3 grammar (`{entry}-p{protection}`, legs `-tp` and `-sl`)
-  and reads no leg id from a `BrokerOrder`, which an in-module test pins. Until the wire change lands,
-  a broker-reported leg is attributed by the single holder or fails closed for openings; exits are
-  untouched ([DEC-160](04-decision-log.md#decisions) 3a, #243 round 1, the coordinator's ruling (b)
-  on #174, 5861764910).
+- **E7-4, the slice that reconciles protective legs (stream K; blocks FT-11 in E2):** find a filled
+  bracket's placement through its entry at reconciliation, by a live sell leg nested under it, and
+  never by the leg's own id, which Alpaca names itself ([DEC-878](decisions/DEC-878.md)). The tests
+  PR changed `BrokerOrder.legs` to whole legs with its tests correction and left three pending
+  tests in `mandate-executor/tests/bracket_legs.rs`; the code PR deletes their behaviour-only rows
+  and `protection.rs`'s `no_leg_id_is_read_from_a_broker_order`, whose #174 ruling (b) ends with
+  this slice. Still open after it (DEC-878, "Not decided here"): the Alpaca cancel of a bracket's
+  placement, which looks up `{entry}-p{record}` and gets a 404, must resolve through the entry's
+  legs before any exit runs against a filled bracket; the in-doubt lookup should ask by the entry's
+  id; and the hand-built `submit_oco_accepted` scenario's leg ids should be Alpaca's.
 - **E7-4 slices 2 and 3 (stream K):** `properties::protective_sell_quantity_never_exceeds_the_position_in_any_script`
   wants the `ProtectionChanged placed` at or after the entry's completion with no lag. That is right
   on the normal path (§5.4's legs activate at completion), but a re-placement after a

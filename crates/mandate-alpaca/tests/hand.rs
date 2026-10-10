@@ -10,6 +10,7 @@
 mod common;
 
 use common::{FakeClock, FakeTransport, scenario};
+use mandate_accounting::Side;
 use mandate_alpaca::client::{RetryPolicy, TradingClient};
 use mandate_alpaca::error::WireError;
 use mandate_alpaca::http::{Credentials, HttpRequest, Method, is_paper_trading_path};
@@ -509,11 +510,19 @@ fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
         );
         let mut legged: serde_json::Value =
             serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
+        let leg_with = |leg_id: &str| {
+            let mut leg = legged.clone();
+            if let Some(object) = leg.as_object_mut() {
+                object.insert("id".to_owned(), serde_json::json!(leg_id));
+            }
+            leg
+        };
+        let legs = serde_json::json!([
+            leg_with("e02fc2d2-0ff3-444f-a0ab-6253613302ff"),
+            leg_with(id)
+        ]);
         if let Some(object) = legged.as_object_mut() {
-            object.insert(
-                "legs".to_owned(),
-                serde_json::json!([{ "id": "e02fc2d2-0ff3-444f-a0ab-6253613302ff" }, { "id": id }]),
-            );
+            object.insert("legs".to_owned(), legs);
         }
         let text = serde_json::to_vec(&legged).expect("re-serialises");
         let error = wire::order(&text).expect_err("a hostile leg id is not an order's leg");
@@ -912,6 +921,53 @@ fn a_bracket_shares_one_tif_and_carries_no_extended_hours() {
     );
     let parsed = wire::order(&body_of("submit_bracket_accepted", 0)).expect("the recording parses");
     assert_eq!(parsed.legs.len(), 2, "a take-profit and a stop leg");
+}
+
+/// DEC-878 item 1, from the recording: Alpaca nests a bracket's two legs under the entry and names
+/// each with its own `client_order_id`, a UUID, never one of ours, so the read keeps each leg
+/// whole (side, prices, status) for reconciliation to find it through its parent, by side and
+/// status (§11), and never by that id.
+#[test]
+fn a_brackets_legs_are_read_whole_and_named_by_the_broker() {
+    let parsed = wire::order(&body_of("submit_bracket_accepted", 0)).expect("the recording parses");
+    let legs: Vec<(Side, Option<String>, Option<String>, &str)> = parsed
+        .legs
+        .iter()
+        .map(|leg| {
+            (
+                leg.side,
+                leg.limit_price.map(|p| p.to_string()),
+                leg.stop_price.map(|p| p.to_string()),
+                leg.status.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        legs,
+        vec![
+            (Side::Sell, Some("999".to_owned()), None, "held"),
+            (Side::Sell, None, Some("0.8".to_owned()), "held"),
+        ],
+        "the take-profit and the stop, each a sell, held until the entry fills (§5.4)"
+    );
+    let named: Vec<Option<&str>> = parsed
+        .legs
+        .iter()
+        .map(|leg| leg.client_order_id.as_deref())
+        .collect();
+    assert_eq!(
+        named,
+        vec![
+            Some("86942a5e-a11d-4464-872b-05f671c148ac"),
+            Some("94969c96-b018-47e9-a6fc-c3faa85b65af"),
+        ],
+        "the broker names each leg itself; neither is the entry's id or one of ours"
+    );
+    assert_eq!(
+        parsed.client_order_id.as_deref(),
+        Some("md-daea915c1fc0042bcc19a4caed"),
+        "the bracket's parent is the entry, under the entry's own id"
+    );
 }
 
 #[test]

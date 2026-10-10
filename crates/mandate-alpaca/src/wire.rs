@@ -495,7 +495,7 @@ fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
         None | Some(Value::Null) => Vec::new(),
         Some(legs) => list(legs, "legs")?
             .iter()
-            .map(|leg| broker_id(text(object(leg, "legs")?, "id")?, "id"))
+            .map(order_from)
             .collect::<Result<_, WireError>>()?,
     };
     let filled_qty = qty(fields, "filled_qty")?;

@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/bracket_legs.rs"
+test = "only_a_live_sell_leg_under_the_entry_keeps_the_placement"
+reason = """
+E7-4, the slice that reconciles protective legs (DEC-878): reconciliation's step 1 is already
+implemented and adopts a filled bracket's placement `Unknown` because no open order carries its
+`{entry}-p{record}` name, so this test fails on that adoption rather than at a stub. The code PR
+that finds the legs under their entry deletes this file with the test's `#[ignore]` line.
+"""

@@ -1235,7 +1235,21 @@ impl Shell {
                     reject_code: None,
                     replaced_by_broker_order_id: None,
                     legs: match (&take_profit, &stop) {
-                        (Some(_), Some(_)) => vec![format!("b-{id}-sl")],
+                        (Some(_), Some(stop)) => vec![BrokerOrder {
+                            broker_order_id: format!("b-{id}-sl"),
+                            client_order_id: Some(format!("broker-named-{id}-sl")),
+                            instrument: order.instrument.clone(),
+                            side: Side::Sell,
+                            qty: order.qty,
+                            filled_qty: Qty::ZERO,
+                            limit_price: None,
+                            stop_price: Some(price(stop)),
+                            status: "held".to_owned(),
+                            reject_code: None,
+                            replaced_by_broker_order_id: None,
+                            legs: Vec::new(),
+                            created_on: None,
+                        }],
                         _ => Vec::new(),
                     },
                     created_on: Some(
