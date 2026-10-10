@@ -105,7 +105,7 @@ function Thread({ agent, view }: { agent: Agent; view: ThreadView }) {
 
 function NoThreadOpen() {
   return (
-    <div data-slot="no-thread" className="grid place-content-center justify-items-center gap-3 px-8 pb-(--dock-clearance) text-center max-lg:hidden lg:col-span-2">
+    <div data-slot="no-thread" className="grid place-content-center justify-items-center gap-3 px-8 pb-(--dock-clearance) text-center max-lg:hidden xl:col-span-2">
       <MessageText aria-hidden className="size-12 text-muted-foreground" />
       <p className="text-h3">Pick a thread</p>
       <p className="max-w-measure text-pretty text-muted-foreground">
