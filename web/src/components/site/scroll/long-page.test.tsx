@@ -129,6 +129,12 @@ describe("what it says", () => {
     expect(document.getElementById("limits")).toHaveTextContent(GAP_CAVEAT);
   });
 
+  it("says under the first buttons that it is free in the beta and starts on paper money", () => {
+    render(<LongPage />);
+    const intro = document.querySelector<HTMLElement>("[data-slot=intro]")!;
+    expect(within(intro).getByText("Free during the beta. It starts on paper money.")).toHaveAttribute("data-slot", "reassure");
+  });
+
   it("marks the brokers that are not connected yet as coming, and Alpaca as paper", () => {
     render(<LongPage />);
     const brokers = document.querySelector<HTMLElement>("[data-slot=brokers]")!;
@@ -185,6 +191,13 @@ describe("the pictures", () => {
       for (const mode of ["light", "dark"]) {
         expect(pngSize(join(WEB, "public", "landing", `${name}-${mode}.png`)), `${name}-${mode}`).toEqual([width * 2, height * 2]);
       }
+    }
+  });
+
+  it("draws no picture wider than it was taken, so the app's words read at their own size", () => {
+    const { container } = render(<LongPage />);
+    for (const shot of container.querySelectorAll<HTMLElement>("[data-slot=shot]")) {
+      expect(shot.style.maxWidth, shot.dataset.shot).toBe(`${SHOTS[shot.dataset.shot as keyof typeof SHOTS].width}px`);
     }
   });
 

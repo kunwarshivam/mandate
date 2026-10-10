@@ -53,19 +53,26 @@ test("the bar's Sign up brings the request form into view with the cursor in its
   await expect(page.getByRole("heading", { level: 2, name: "Put an agent to work." })).toBeInViewport();
 });
 
-test("each picture of the app has loaded, and it is the one for the page's theme", async ({ page }) => {
+/** The pictures cut to one piece of a screen, which a wide window draws at the size they were taken. */
+const PIECES = ["verdict", "check", "ask", "ladder"];
+
+test("each picture of the app has loaded, it is the one for the page's theme, and none is drawn larger than it was taken", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, 1440);
   const mode = await page.evaluate(() => document.documentElement.dataset.mode);
   expect(mode === "light" || mode === "dark").toBe(true);
   const shots = page.locator("[data-slot=long-page] [data-slot=shot]");
-  expect(await shots.count()).toBe(5);
+  expect(await shots.count()).toBe(6);
   for (const shot of await shots.all()) {
     await shot.scrollIntoViewIfNeeded();
     const shown = shot.locator("img:visible");
     await expect(shown).toHaveCount(1);
     await expect.poll(() => shown.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     expect(decodeURIComponent((await shown.getAttribute("src")) ?? "")).toContain(`-${mode}.png`);
+    const name = (await shot.getAttribute("data-shot"))!;
+    const [drawn, taken] = await shown.evaluate((img: HTMLImageElement) => [img.getBoundingClientRect().width, Number(img.getAttribute("width"))]);
+    expect(drawn, `${name} is drawn no wider than it was taken`).toBeLessThanOrEqual(taken + 0.5);
+    if (PIECES.includes(name)) expect(drawn, `${name} is drawn at the size it was taken`).toBeGreaterThanOrEqual(taken - 0.5);
   }
 });
 

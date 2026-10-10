@@ -28,8 +28,6 @@ export const BROKERS: { name: string; status: string }[] = [
   { name: "Kraken Derivatives US", status: "Coming" },
 ];
 
-const HALF = "(min-width: 64rem) 46rem, 100vw";
-
 /** The order a piece settles in among its neighbours, as `scroll.module.css` staggers it. */
 const nth = (i: number) => ({ "--i": i }) as CSSProperties;
 
@@ -118,6 +116,9 @@ export function LongPage() {
               Sign in
             </Link>
           </p>
+          <p className="-mt-2 text-[0.9375rem] text-muted-foreground" style={nth(4)} data-reveal="" data-slot="reassure">
+            Free during the beta. It starts on paper money.
+          </p>
         </div>
         <div className={cn(WRAP, "pt-24 sm:pt-28")} data-reveal="tilt">
           <Shot
@@ -150,7 +151,10 @@ export function LongPage() {
         }
         lead="Every order is held up against what you wrote before it goes anywhere. If it doesn't fit, it doesn't go, however good the idea looked."
       >
-        <Shot name="gate" alt="A gate decision: buying 0.02 BTC/USD was not allowed, with each check listed in the order it ran." sizes={HALF} perch={{ at: 0.12, yaw: 0.6 }} />
+        <div className="mx-auto grid w-full max-w-[38rem] gap-4">
+          <Shot name="verdict" alt="An order to buy 0.02 BTC/USD at $56,650.00, marked Not allowed." perch={{ at: 0.12, yaw: 0.6 }} />
+          <Shot name="check" alt="The checks it met: re-entry cooldown passed, and order size, at most $1,000.00, not allowed." className="justify-self-end lg:me-[-2rem]" />
+        </div>
       </Feature>
 
       <Feature
@@ -182,7 +186,12 @@ export function LongPage() {
         }
         lead="Every move comes with its reason, kept from the moment it was made. Ask your agent about any of them in plain words, whenever you like."
       >
-        <Shot name="thread" alt="Agent 2's thread: a request waiting, a new version of its rules applied, and an approved order the gate then held back." sizes={HALF} perch={{ at: 0.88, yaw: -0.6 }} />
+        <Shot
+          name="ask"
+          alt="Agent 2 asks to buy 2 XYZ at a limit of $141.30, with why it asked, and questions to ask it next, such as Why did it ask?"
+          className="mx-auto"
+          perch={{ at: 0.88, yaw: -0.6 }}
+        />
       </Feature>
 
       <Feature
@@ -196,7 +205,7 @@ export function LongPage() {
         lead="Decide what it can spend and where it steps back, in amounts you can picture. You can tighten them any time, and only you can loosen them."
         after={<p className="max-w-[36rem] text-[0.9375rem] leading-[1.55] text-pretty text-muted-foreground">{GAP_CAVEAT}</p>}
       >
-        <Shot name="mandate" alt="Agent 1's limits: each level in dollars, what the agent does there, and the headroom left on each limit." sizes={HALF} perch={{ at: 0.1, yaw: 0.6 }} />
+        <Shot name="ladder" alt="Agent 1's limits as a ladder in dollars, from $10,150.00 down to a floor of $9,000.00, with what the agent does at each." className="mx-auto" perch={{ at: 0.1, yaw: 0.6 }} />
       </Feature>
 
       <Wont />
