@@ -1,0 +1,9 @@
+file = "crates/mandate-dispatcher/src/step/tests/verdict.rs"
+test = "an_outcome_whose_variant_contradicts_its_reasons_fixed_verdict_stops_the_step"
+reason = """
+E8-10 (journal spec v0.40, DEC-706): the step is already implemented and journals
+`NoticeAttempted` at version 1 with no `verdict`, which the journal still admits, so this test
+fails on that answer rather than at a stub. The code PR that moves the step's writer to version 2,
+in the same change that registers version 2 in the journal, deletes this file with the test's
+`#[ignore]` line.
+"""
