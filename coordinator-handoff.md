@@ -79,6 +79,7 @@ anything here.
 - **#1169** (E7-28 implementation). Head `46f63d0b`.
 - **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
 - **#1275** (L2, links merged DECs in place of the stale "pending" words; docs only). Head `1b86398c`.
+- **#1279** (L5, E12-3 T1a part A: run-plan stub plus tests). Head `6a3fca0c`. Part B (already reviewed, PASS at `bd8ea682`) opens after it merges.
 - **#1278** (L5, `segment_rows_mismatch` implementation). Head `60997566`.
 - **#1270** (bracket-leg implementation). Head `020b6904`.
 - **#1277** (L5, DEC-897: verification-run tightenings; docs only). Head `38a9d6b4`.
