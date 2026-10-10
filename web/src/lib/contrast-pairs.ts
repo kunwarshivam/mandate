@@ -67,6 +67,8 @@ export const PAIRS: Pair[] = [
   { fg: "mandate-strong", bg: "background", kind: "body", use: "A mandate label on the page, the focus ring there, and the post that ends a phone headroom meter" },
   { fg: "foreground", bg: "selection", kind: "body", use: "Selected text" },
   { fg: "highlight-foreground", bg: "highlight", kind: "body", use: "A call to action on the highlight, and any label on the sun fill" },
+  { fg: "tide-foreground", bg: "tide", kind: "body", use: "A heading on the landing page's one tide section" },
+  { fg: "tide-muted", bg: "tide", kind: "body", use: "Body text on the landing page's one tide section" },
   { fg: "ink-foreground", bg: "ink", kind: "body", use: "The loud Stop control, a paused or stopped mode pill, a proposal's axis label" },
   { fg: "ink", bg: "card", kind: "body", use: "The quiet Stop control's label and octagon on the dock and the tab bar" },
   { fg: "ink", bg: "background", kind: "body", use: "The quiet Stop control's label and octagon, hovered" },
