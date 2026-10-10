@@ -84,6 +84,8 @@ impl<T: Tools> RobinhoodConnector<T> {
         let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
         let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
         let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();
+        let mut parents: BTreeMap<ClientOrderId, ClientOrderId> = BTreeMap::new();
+        let mut odd: BTreeSet<ClientOrderId> = BTreeSet::new();
         for record in records {
             let text = |member: &str| record.payload.get(member).and_then(Canon::as_str);
             let Some(key) = text("client_order_id").and_then(|k| ClientOrderId::parse(k).ok())
@@ -111,18 +113,39 @@ impl<T: Tools> RobinhoodConnector<T> {
                     named.extend(link("replaced_by"));
                     let old = link("replaces");
                     named.extend(old.clone());
-                    if let Some(origin) = old.and_then(|old| submitted.get(&old).cloned()) {
-                        submitted.entry(key.clone()).or_insert(origin);
+                    if let Some(old) = old {
+                        parents.entry(key.clone()).or_insert(old);
                     }
-                    let known = ids.entry(key).or_default();
-                    if let Some(id) = text("broker_order_id") {
-                        known.insert(id.to_owned());
+                    let known = ids.entry(key.clone()).or_default();
+                    match record.payload.get("broker_order_id") {
+                        None | Some(Canon::Null) => {}
+                        Some(Canon::Str(id)) if !id.is_empty() => {
+                            known.insert(id.clone());
+                        }
+                        Some(_) => {
+                            odd.insert(key);
+                        }
                     }
                 }
                 _ => {}
             }
         }
         connector.in_doubt = named;
+        for start in ids.keys() {
+            let (mut at, mut path) = (start.clone(), BTreeSet::new());
+            let found = loop {
+                if let Some(read) = submitted.get(&at) {
+                    break read.clone();
+                }
+                match parents.get(&at) {
+                    Some(parent) if path.insert(at.clone()) => at = parent.clone(),
+                    _ => break None,
+                }
+            };
+            for key in path {
+                submitted.insert(key, found.clone());
+            }
+        }
         let (mut seen, mut shared) = (BTreeSet::new(), BTreeSet::new());
         for id in ids.values().flatten() {
             if !seen.insert(id) {
@@ -134,7 +157,7 @@ impl<T: Tools> RobinhoodConnector<T> {
             let (Some(id), None) = (only.next(), only.next()) else {
                 continue;
             };
-            if shared.contains(id) {
+            if shared.contains(id) || odd.contains(&key) {
                 continue;
             }
             let Some(Some((instrument, side))) = submitted.get(&key) else {
