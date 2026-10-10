@@ -85,6 +85,7 @@ anything here.
   Head `dce20280`.
 - **#1262:** the DEC-876 implementation (finishes C3). The Sonnet review passed. Head `e1c1cf06`.
 - **#1257:** L4, C-26 web chips; web-e2e green. Head `b76f3965`.
+- **#1264:** C4 tests (DEC-902). Head `367f1cb5`.
 
 **Open PRs needing a review verdict, then approval:**
 - **#1258 + #1261** (E1b part 2 tests-correction plus implementation, stacked; paper path).
@@ -137,14 +138,12 @@ anything here.
   - Builder branches: `claude/live-e7-28-tests-7` and `claude/live-e7-28-v2`. Review against
     that scope; don't reopen the obfuscation chase.
 
-**C4 tests: #1264** (live path, E7-6, head `367f1cb5`, adds DEC-902). A Sonnet review was
-running; if no verdict appears in the body, run one.
-- **Content:** 8 pending tests; preflight facts and the account snapshot mapped to DEC-470 item 1.
-  Any unknown field, non-canonical number or next-page cursor refuses.
-- **Builder's scratch implementation** (~190 lines) was at `scratchpad/c4-scratch.diff`. That is
-  not reachable from Cursor; the PR body describes it.
-- **Founder FYI:** strict key and decimal readings will likely refuse real Robinhood answers
-  (e.g. `"100.00"`) until R0 records the real shapes. This fails closed.
+**C4 (live path):** the tests PR **#1264** is approved (head `367f1cb5`, DEC-902). **Next:**
+1. a C4 tests correction for the review minors listed in #1264's "Not done": trailing zeros on
+   every money and quantity field, a sell order, an empty order id, and the DEC-902 item 6
+   citation;
+2. the C4 implementation, plus `mandate-rh-sim` serving `get_portfolio`, `get_equity_positions`,
+   `get_equity_tradability` and `get_equity_quotes`, plus the end-to-end preflight test.
 
 **Lanes' next items:**
 - **L2:** #1242 delta, then the DEC-900 fix.
