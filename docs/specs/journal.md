@@ -24,8 +24,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **An absent or unreadable token** (DEC-896 items 2 and 3). §11's "Incomplete" first bullet
     says that a start anchor's token whose artifact is absent from a store that answers, or does
     not re-hash, fails `tsa_token_invalid`, and that an artifact store that cannot be read leaves
-    the check incomplete, cause `token_unverifiable`. Rules 132 and 133 are unchanged. The vectors
-    are unchanged; the token vectors follow in DEC-896's sequence.
+    the check incomplete, cause `token_unverifiable`, which §9.13's `incomplete` row now names too.
+    Rules 132 and 133 are unchanged. The vectors are unchanged; the token vectors follow in
+    DEC-896's sequence.
 - **v0.38 (DEC-889 pending in #1210, DEC-894 pending in lane L5's slice C PR; E7-17, E12-3):** §11
   scopes the connection anchor to one stream, and adds the range-level `segment_rows_mismatch`.
   Each item only refuses more (DEC-176): an anchored run fails closed where it used to judge, and a
@@ -3033,7 +3034,7 @@ A `checked_range` is a `range` whose `to_hash` is `digest?` (the head the run ve
 | `start` | `{kind: genesis \| manifest \| anchor, manifest_hash: digest?, anchor_event_id: ulid?}` | Version 2. The trusted start the range was entered from (§9.14 "What a verifier reads"): seq 1 with 64 zeros, the `SegmentExported` whose `manifest_hash` this is, or the `AnchorComputed` whose `event_id` this is. The member of the kind named is non-null and the other is `null`: rule 132 |
 | `checked` | `integer` | Version 2. The number of events the run walked from `from_seq` (§11; workspace API AU-8): rule 132 |
 | `failure` | `{check, seq: integer?}?` | The first failure §11 reports for the range, or `null`. `check` is one of §11's codes: `non_canonical`, `column_mismatch`, `seq_gap`, `rehash_mismatch`, `prev_hash_mismatch`, `artifact_missing`, `artifact_mismatch`, `anchor_head_mismatch`, `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_mismatch`, `segment_gap`, `anchor_self_mismatch`, `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, `connection_lifecycle_mismatch`, `connection_cause_mismatch`, and at version 2 only `segment_rows_mismatch` (§11, DEC-894, pending); `seq` is where it was reported, for a per-event check the position walked (the previous `seq` plus 1, or `from_seq` first), whatever the body there says: rule 111 |
-| `incomplete` | `{check: tsa_token_invalid, cause: token_unverifiable \| anchor_unstamped}?` | Version 2. The check §11 could not finish for the range, named by its code, and why, or `null` (§11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md) items 7 and 9). At this version only the token check can be incomplete. `cause` is `token_unverifiable` for a stamped token whose imprint matches and `anchor_unstamped` for an anchor the range checks whose `token` is `null`; a range with both records `anchor_unstamped`. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
+| `incomplete` | `{check: tsa_token_invalid, cause: token_unverifiable \| anchor_unstamped}?` | Version 2. The check §11 could not finish for the range, named by its code, and why, or `null` (§11 "Incomplete", [DEC-789](../project/decisions/DEC-789.md) items 7 and 9). At this version only the token check can be incomplete. `cause` is `token_unverifiable` for a stamped token whose imprint matches, or a start anchor's token whose artifact store cannot be read ([DEC-896](../project/decisions/DEC-896.md) item 3), and `anchor_unstamped` for an anchor the range checks whose `token` is `null`; a range with both records `anchor_unstamped`. It names a check reported for the range, so it carries no `seq` (rule 111's classes); a range that failed records its failure instead: rule 132 |
 
 A verification a principal requested for an export names that export's `ExportCreated` as its
 `causation_id`. A failed run does not repair anything and does not replace §11's incident path:
@@ -3539,8 +3540,9 @@ incomplete, the token check whose failure is `tsa_token_invalid`:
   so check 6 does not read its token: a start anchor's token whose artifact is absent from an
   artifact store that answers, or does not re-hash to its ref, cannot carry the imprint, so it
   fails `tsa_token_invalid`, a `fail` (DEC-896 item 2). An artifact store that cannot be read is
-  an outage, not a failure: the check is incomplete with cause `token_unverifiable`, which a
-  restore drill reads as this first cause (DEC-896 item 3's own reading, not DEC-789's).
+  an outage, not a failure: the check is incomplete with cause `token_unverifiable`, on which a
+  restore drill passes as it does on the first cause (DEC-896 item 3, a reading of its own rather
+  than DEC-789's).
 - **An anchor the range must check whose `token` is `null`** (DEC-789 item 7). Nothing outside the
   journal vouches for it (§9.14), so its token check cannot finish either. It is not a failure: the
   outage is §10's journaled gap, already alerted. A `VerificationRun` records it with
