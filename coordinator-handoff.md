@@ -86,6 +86,7 @@ anything here.
 - **#1262:** the DEC-876 implementation (finishes C3). The Sonnet review passed. Head `e1c1cf06`.
 - **#1257:** L4, C-26 web chips; web-e2e green. Head `b76f3965`.
 - **#1264:** C4 tests (DEC-902). Head `367f1cb5`.
+- **#1254:** bracket-leg tests (DEC-878). Head `f4cc05d8`.
 - **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
 
 **New lane PRs to check:** #1265 (L3, DEC-706 step 2 pending tests). Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
@@ -101,27 +102,13 @@ anything here.
   more ignore line deleted, a doc rewrap and a delta verdict from L2.
 
 **Being reworked:**
-- **#1254: bracket-leg reconciliation tests (DEC-878).** This blocks FT-11 for the founder's E2
-  paper run.
-  - **The defect:** after a bracket fill, reconciliation matches orders only by our client id.
-    Alpaca's legs carry broker-assigned ids nested under the entry, so the protection is adopted
-    as `Unknown`, and later risk exits are held as `unknown_order_in_flight`.
-  - **Review 1 failed.** "At least one live leg" would hide a missing stop.
-  - **Coordinator ruling** (a tightening): the protection counts as present only when all of
-    these hold:
-    - the entry is ours, was sent as a bracket, and is `filled`;
-    - both legs are nested and live per §5.7: one stop leg with `stop_price`, and one
-      take-profit limit leg;
-    - each leg's qty and price match the placement.
-    Anything else stays `Unknown`, as on main.
-  - **Tests to add:** cases for a sent OCO with an absent order, a restricted status, an unknown
-    status, TP-only, stop-only, a qty mismatch, a price mismatch, and a cancelled or rejected
-    entry.
-  - **DEC-878** gets a "Not settled" item: what a half-legged bracket becomes. If the answer
-    loosens anything, it goes to the founder.
-  - **Round 2** is pushed at `f4cc05d8`: the rule above, plus 20 listing cases and the round-1
-    survivors now caught. A Sonnet delta review was running; if there's no verdict in the body,
-    run one, then approve.
+- **#1254: bracket-leg tests (DEC-878).** APPROVED at `f4cc05d8` after round 2 passed. **Next:**
+  the bracket-leg implementation PR, using the scratch fix in #1254's body. That PR must:
+  - delete `no_leg_id_is_read_from_a_broker_order` deliberately, with its helper and imports;
+  - add the two round-2 minor cases (a stop leg carrying a limit; a nonzero leg `filled_qty`)
+    first, as a tests correction or inside its own tests PR;
+  - pass mutants on the `reconcile.rs` and `wire.rs` diff with 0 missed.
+  This blocks FT-11 for E2.
 - **E7-28 round 6** (CI live-feature reader; #1234 tests, #1169 implementation; close #1219 as
   superseded when #1234 lands).
   - **Scope ruling:** DEC-851's threat model covers accidents and careless changes, not
