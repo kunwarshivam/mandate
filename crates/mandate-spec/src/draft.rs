@@ -122,6 +122,11 @@ pub fn loss_answer_fields(
 /// A hysteresis of 0 is the only collapse that can happen. Once it is at least 1 bp, D is at least
 /// 8 bp, so 0.125 D, 0.375 D, 0.75 D and D lie at least 2 bp apart; rounding the first three down
 /// moves each by less than 1 bp, which keeps hysteresis < halving < exits only < D (V-010, V-012).
+///
+/// The three shares are taken in whole basis points first, as ⌊x / n⌋ = ⌊⌊x⌋ / n⌋ for a whole n:
+/// 0.375 D is ⌊3 D⌋ / 8, 0.75 D is ⌊3 D⌋ / 4, and 0.125 D is ⌊D⌋ / 8, each ⌊⌋ to basis points.
+/// The same floors come out, and a D of all 28 places `open_fraction` allows never overflows the
+/// scale, as multiplying it by 0.375 or 0.125 would.
 pub fn proposed_ladder(max_drawdown: &SchemaDec) -> Result<Draft<ProposedLadder>, SpecError> {
     let flatten =
         SchemaDec::parse(max_drawdown.as_str(), DecGrammar::OpenFraction).map_err(|_| {
@@ -130,22 +135,25 @@ pub fn proposed_ladder(max_drawdown: &SchemaDec) -> Result<Draft<ProposedLadder>
             }
         })?;
     let drawdown = flatten.to_usd()?;
-    let share_of_drawdown = |share: &str| -> Result<Usd, SpecError> {
-        round_down_to_bp(drawdown.times_fraction(Fraction::parse(share)?)?)
+    let whole_bp = round_down_to_bp(drawdown)?;
+    let three_drawdowns_bp =
+        round_down_to_bp(drawdown.checked_add(drawdown)?.checked_add(drawdown)?)?;
+    let part = |of: Usd, share: &str| -> Result<Usd, SpecError> {
+        round_down_to_bp(of.times_fraction(Fraction::parse(share)?)?)
     };
-    let hysteresis = share_of_drawdown("0.125")?;
+    let hysteresis = part(whole_bp, "0.125")?;
     if hysteresis <= Usd::ZERO {
         return Ok(Draft::AskAgain(AskAgain::LadderCollapses));
     }
     let rung = |at: SchemaDec, action, factor| LadderRung { at, action, factor };
     let rungs = vec![
         rung(
-            open_fraction(share_of_drawdown("0.375")?)?,
+            open_fraction(part(three_drawdowns_bp, "0.125")?)?,
             LadderAction::ScaleSizes,
             Some(open_fraction(Usd::parse("0.5")?)?),
         ),
         rung(
-            open_fraction(share_of_drawdown("0.75")?)?,
+            open_fraction(part(three_drawdowns_bp, "0.25")?)?,
             LadderAction::ExitsOnly,
             None,
         ),
