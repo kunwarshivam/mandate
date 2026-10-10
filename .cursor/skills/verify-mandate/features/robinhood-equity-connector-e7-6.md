@@ -3,14 +3,14 @@
 - **Spec:** connections spec §6.2; trading spec §5.2 and §5.7; the first live trade brief's C1.
 - **Code:** `mandate-robinhood`, `crates/mandate-robinhood/` (layer 7, safety-critical, pure;
   C1 implemented: the profile, `ref_id`, the states, `Submit` and `Cancel`; DEC-860; C3
-  implemented: `RobinhoodConnector::restore`, DEC-870, DEC-872, DEC-874; C2
+  implemented: `RobinhoodConnector::restore`, DEC-870, DEC-872, DEC-874, DEC-876; C2
   implemented: `agentic_account` and `read`, the reads scoped to the agentic account, CN-8,
   DEC-875, and their filter-key allowlist, DEC-879).
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),
-  `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870, DEC-872 and DEC-874: the `order_id`
-  map rebuilt from the account stream, the distinct-id property, the odd-id and record-order
-  tests, and the interleaving property; DEC-876's two-`replaces` tests and its interleaving
-  property are pending E7-6, each with a `xtask/behaviour-only/` row),
+  `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870, DEC-872, DEC-874 and DEC-876: the
+  `order_id` map rebuilt from the account stream, the distinct-id property, the odd-id and
+  record-order tests, the interleaving property, and DEC-876's two-`replaces` tests and its
+  interleaving property),
   `crates/mandate-robinhood/tests/scope.rs` (C2, CN-8 and DEC-875: the byte-equal account
   check, run afresh on every read, the filtered reads, the shorter-prefix and empty near misses,
   DEC-879's filter-key allowlist, and rule 13's exits beside them), and

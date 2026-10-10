@@ -1,9 +1,0 @@
-file = "crates/mandate-robinhood/tests/restore.rs"
-test = "its_own_submit_does_not_rescue_a_key_naming_two_different_origins"
-reason = """
-DEC-876: main lets a key's own readable `OrderSubmitted` place a key whose records name two
-different `replaces` targets, so it cancels by its id where it must be in doubt.
-`RobinhoodConnector::restore` is implemented on main (E7-6, #1200, #1236), so there is no stub to
-stop at: the test fails on the answer the implementation gives. The E7-6 change that adopts DEC-876
-deletes the marker and this file.
-"""

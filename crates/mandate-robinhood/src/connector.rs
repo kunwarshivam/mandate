@@ -72,7 +72,10 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// instrument and side of its own readable `OrderSubmitted`, or else of the order it
     /// `replaces`. A key with no id, two different ids, an id another key carries, or no readable
     /// instrument and side (two of its `OrderSubmitted` that disagree included) maps to nothing,
-    /// so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the stream names
+    /// and so does a key whose records name two or more different `replaces` targets, whatever its
+    /// own `OrderSubmitted` says, with every successor that reaches its instrument and side only
+    /// through it; one target named twice is one link (DEC-876). Such a key's cancel is `NotSent`
+    /// (`no_order_id`) with nothing called. Every key the stream names
     /// (an `OrderSubmitted` or `OrderStateChanged` key, or a `replaces` or `replaced_by` target)
     /// is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4, DEC-872).
     pub fn restore(
@@ -84,7 +87,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
         let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
         let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();
-        let mut parents: BTreeMap<ClientOrderId, ClientOrderId> = BTreeMap::new();
+        let mut parents: BTreeMap<ClientOrderId, BTreeSet<ClientOrderId>> = BTreeMap::new();
         let mut odd: BTreeSet<ClientOrderId> = BTreeSet::new();
         for record in records {
             let text = |member: &str| record.payload.get(member).and_then(Canon::as_str);
@@ -114,7 +117,7 @@ impl<T: Tools> RobinhoodConnector<T> {
                     let old = link("replaces");
                     named.extend(old.clone());
                     if let Some(old) = old {
-                        parents.entry(key.clone()).or_insert(old);
+                        parents.entry(key.clone()).or_default().insert(old);
                     }
                     let known = ids.entry(key.clone()).or_default();
                     match record.payload.get("broker_order_id") {
@@ -131,13 +134,18 @@ impl<T: Tools> RobinhoodConnector<T> {
             }
         }
         connector.in_doubt = named;
+        for (key, origins) in &parents {
+            if origins.len() > 1 {
+                submitted.insert(key.clone(), None);
+            }
+        }
         for start in ids.keys() {
             let (mut at, mut path) = (start.clone(), BTreeSet::new());
             let found = loop {
                 if let Some(read) = submitted.get(&at) {
                     break read.clone();
                 }
-                match parents.get(&at) {
+                match parents.get(&at).and_then(BTreeSet::first) {
                     Some(parent) if path.insert(at.clone()) => at = parent.clone(),
                     _ => break None,
                 }
