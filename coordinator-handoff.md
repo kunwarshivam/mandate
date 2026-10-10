@@ -112,13 +112,15 @@ anything here.
        (DEC-878 item 7);
     4. approve #1270.
 
-- **E7-28 round 6 is pushed:** #1234 at `6e4e47a1`, #1169 at `0ec45247`.
-  - Closed: B1 to B8 and the round-5 mutants. All 45 planted bugs are caught, and the real
-    repository passes.
-  - A Sonnet review against the accident-only scope was running. If there is no verdict in the
-    bodies, run one, then approve both and close #1219 as superseded once #1234 lands.
-  - Open point for the reviewer: a job under `crates/` can still write a plain file such as
-    `lib.rs`; only build-input names are refused.
+- **E7-28 round 6: both PRs passed review.** #1234 (tests) is APPROVED at `6e4e47a1`. Once it
+  merges:
+  1. merge `main` into `claude/live-e7-28-v2` (#1169, reviewed at `0ec45247`);
+  2. re-delete any resurrected `pending E7-28` ignore lines and the `ci_files` row;
+  3. check that #1169's test text equals main's minus those lines, and that the non-test patch-id
+     matches `0ec45247`'s;
+  4. approve #1169;
+  5. close #1219 as superseded.
+  The review minors are listed in #1234's "Not done", for a follow-up.
 
 **C4 (live path):** the tests PR **#1264** is approved (head `367f1cb5`, DEC-902). **Next:**
 1. a C4 tests correction for the review minors listed in #1264's "Not done": trailing zeros on
