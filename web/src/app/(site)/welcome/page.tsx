@@ -13,10 +13,10 @@ export const metadata: Metadata = { ...landingMetadata, alternates: { canonical:
 export default function WelcomePage() {
   return (
     <>
-      <div id="desktop" className={scroll.stage} style={SPRING_VARS as CSSProperties} data-slot="desktop-stage">
+      <section id="desktop" aria-label="Desktop" className={scroll.stage} style={SPRING_VARS as CSSProperties} data-slot="desktop-stage">
         <Landing />
         <ScrollCue />
-      </div>
+      </section>
       <LongPage />
     </>
   );

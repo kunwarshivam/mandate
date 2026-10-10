@@ -155,6 +155,26 @@ test("the Scroll cue follows the browser window's status bar when the window is 
   await expect(cue).toHaveAttribute("data-at", "status");
 });
 
+test("every part of the desktop and the page's bar sits in a landmark", async ({ page }) => {
+  await open(page, 1440);
+  const outside = await page.evaluate(() => {
+    const LANDMARK = "main, header, footer, nav, aside, section[aria-label], section[aria-labelledby], [role=region][aria-label], form[aria-label]";
+    const parts = [
+      "[data-slot=desktop-icons]",
+      "[data-slot=desktop-icons-right]",
+      "[data-slot=taskbar] ul",
+      "[data-slot=taskbar] a",
+      "[data-slot=scroll-cue]",
+      "[data-slot=page-bar] a",
+    ];
+    return parts.flatMap((p) => [...document.querySelectorAll(p)].filter((el) => !el.parentElement?.closest(LANDMARK)).map(() => p));
+  });
+  expect(outside).toEqual([]);
+  await expect(page.getByRole("region", { name: "Desktop" })).toHaveCount(1);
+  await expect(page.getByRole("banner")).toHaveCount(1);
+  await expect(page.getByRole("banner").getByRole("link", { name: "Sign in" })).toBeVisible();
+});
+
 test("with motion allowed, the owl peeks over the Scroll cue in the middle of the screen", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
