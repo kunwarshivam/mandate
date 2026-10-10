@@ -89,7 +89,9 @@ anything here.
 - **#1254:** bracket-leg tests (DEC-878). Head `f4cc05d8`.
 - **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
 
-**New lane PRs to check:** #1265 (L3, DEC-706 step 2 pending tests). Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
+- **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
+
+**New lane PRs to check:** Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
 
 **Open PRs needing a review verdict, then approval:**
 - **#1258 + #1261** (E1b part 2 tests-correction plus implementation, stacked; paper path).
