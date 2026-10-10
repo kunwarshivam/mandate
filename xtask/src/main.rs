@@ -11228,7 +11228,8 @@ jq -r "$filter" "$src"
             "on: push\npermissions: {}\njobs:\n  setup:\n    runs-on: ubuntu-24.04\n    steps:\n      \
              - run: echo ready\n  lib-tests:\n    runs-on: ubuntu-24.04\n    permissions: {}\n    \
              needs: [setup]\n    strategy:\n      matrix:\n        shard: [\"0/2\", \"1/2\"]\n    \
-             steps:\n      - uses: actions/checkout@v4 # a comment naming cargo\n      - name: Test \
+             steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # a \
+             comment naming cargo\n      - name: Test \
              the library\n        run: cargo test -p a-lib\n      - run: |\n          # cargo test \
              in a comment\n          cargo test -p a-lib\n          cargo clippy -p a-lib\n",
         )];
@@ -11425,6 +11426,2003 @@ jq -r "$filter" "$src"
         ];
         unreadable(&problems, &jobs);
         names(&problems, &["quoted-run"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// `.github/workflows/ci.yml` whose text is `lines`, each ended by a newline.
+    fn yaml_lines(lines: &[&str]) -> CiFile {
+        let mut text = lines.join("\n");
+        text.push('\n');
+        ci_file(".github/workflows/ci.yml", &text)
+    }
+
+    /// Asserts that some problem starts with `path` and says it cannot be read (DEC-868 item 3).
+    fn unreadable_file(problems: &[String], path: &str) {
+        let named = problems
+            .iter()
+            .any(|p| p.starts_with(path) && p.contains("cannot be read"));
+        assert!(named, "{path} cannot be read: {problems:?}");
+    }
+
+    /// A backslash-newline that splits a word (`ca\` then `rgo`, `-\` then `p`) joins it with
+    /// nothing, as the shell does, so the line cannot be read; a continuation after a space is
+    /// read as before (#1169 round 3 review, bypass 1; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_continuation_that_splits_a_word_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  split-cargo:",
+            "    steps:",
+            "      - run: |",
+            "          ca\\",
+            "          rgo test -p rh-host",
+            "  split-flag:",
+            "    steps:",
+            "      - run: |",
+            "          cargo test -p a-lib -\\",
+            "          p rh-host",
+            "  lib-tests:",
+            "    steps:",
+            "      - run: |",
+            "          cargo test -p a-lib \\",
+            "            --locked",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["split-cargo", "split-flag"]);
+        names(&problems, &["split-cargo"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A redirection ends no command: only its target word is skipped, and the words after it
+    /// (`> /dev/null -p rh-host`, `2>&1`, `>&2`, `<<< x`) are still the command's (#1169 round 3
+    /// review, bypass 2; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_words_after_a_redirection_are_read() -> Result<()> {
+        let flows = [workflow(&[
+            ("redirect-out", "cargo test -p a-lib > /dev/null -p rh-host"),
+            ("redirect-dup", "cargo test -p a-lib 2>&1 -p rh-host"),
+            ("redirect-err", "cargo test -p a-lib >&2 -p rh-host"),
+            ("here-string", "cargo test -p a-lib <<< x -p rh-host"),
+            ("lib-tests", "cargo test -p a-lib > out.log 2>&1"),
+        ])];
+        let jobs = [
+            "rh-host",
+            "redirect-out",
+            "redirect-dup",
+            "redirect-err",
+            "here-string",
+        ];
+        names(&host_problems(&flows)?, &jobs, &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A short-flag cluster selects its package as cargo reads it: after `p`, the rest of the
+    /// cluster or the next word (`-qp rh-host`, `-vprh-host`); a cluster the check cannot read
+    /// selects every member; and a cluster naming a package keeps a build out of the
+    /// compile-only form (#1169 round 3 review, bypass 3; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_short_flag_cluster_selects_its_package() -> Result<()> {
+        let flows = [workflow(&[
+            ("quiet-cluster", "cargo test -p a-lib -qp rh-host"),
+            ("verbose-cluster", "cargo test -p a-lib -vp rh-host"),
+            ("glued-cluster", "cargo test -p a-lib -vprh-host"),
+            ("unknown-cluster", "cargo test -p a-lib -k"),
+            (
+                "compile-cluster",
+                "cargo check -p the-runner -qp rh-host --features live",
+            ),
+            ("lib-tests", "cargo test -qp a-lib"),
+        ])];
+        let jobs = [
+            "rh-host",
+            "quiet-cluster",
+            "verbose-cluster",
+            "glued-cluster",
+            "unknown-cluster",
+            "compile-cluster",
+        ];
+        names(&host_problems(&flows)?, &jobs, &["lib-tests"]);
+        Ok(())
+    }
+
+    /// `cargo-<subcommand>` binaries and `cargo.exe` are cargo: their invocations are judged as
+    /// builds, and one hidden in a shell string or a substitution cannot be read; a `cargo-*` file named as a plain argument
+    /// (`tar xzf cargo-mutants.tgz cargo-mutants`) is not an invocation (#1169 round 3 review,
+    /// bypass 4; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn cargo_subcommand_binaries_and_cargo_exe_are_cargo() -> Result<()> {
+        let flows = [workflow(&[
+            ("nextest-binary", "cargo-nextest nextest run -p rh-host"),
+            ("exe", "cargo.exe test -p rh-host"),
+            ("exe-path", "/usr/bin/cargo.exe test -p rh-host"),
+            ("hidden-binary", "bash -c 'cargo-nextest nextest run'"),
+            (
+                "substituted-binary",
+                "echo \"$(cargo-nextest nextest run -p rh-host)\"",
+            ),
+            ("substituted-exe", "echo \"$(cargo.exe test -p rh-host)\""),
+            ("lib-tests", "cargo-nextest nextest run -p a-lib"),
+            (
+                "unpack",
+                "tar xzf cargo-mutants.tgz cargo-mutants && rm cargo-mutants",
+            ),
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &["hidden-binary", "substituted-binary", "substituted-exe"],
+        );
+        for job in ["nextest-binary", "exe", "exe-path"] {
+            let judged = problems
+                .iter()
+                .any(|p| p.contains(&format!("`{job}`")) && p.contains("`rh-host`"));
+            assert!(judged, "`{job}` is judged as a build: {problems:?}");
+        }
+        names(&problems, &["rh-host"], &["lib-tests", "unpack"]);
+        Ok(())
+    }
+
+    /// A cargo alias is read where it can be: an `[alias]` of the root `.cargo/config.toml` or
+    /// `.cargo/config`, a string or an array, chained or not, is expanded and its build judged
+    /// beside the literal one. What cannot be read is a problem: an alias of another shape, an
+    /// `[alias]` in a `.cargo` below the root (which a directory change picks up), a
+    /// `CARGO_ALIAS_*` variable in a workflow, and `--config` on a cargo line (#1169 round 3
+    /// review, bypass 5; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_cargo_alias_is_expanded_or_cannot_be_read() -> Result<()> {
+        let flows = [
+            ci_file(
+                ".cargo/config.toml",
+                "[alias]\nhost = \"test -p rh-host\"\nhost-list = [\"test\", \"-p\", \
+                 \"rh-host\"]\nchain = \"host\"\n",
+            ),
+            ci_file(
+                ".cargo/config",
+                "[alias]\nother = \"test -p rh-host\"\nodd = 3\n",
+            ),
+            ci_file(
+                "crates/a-lib/.cargo/config.toml",
+                "[alias]\nnear = \"test -p rh-host\"\n",
+            ),
+            yaml_lines(&[
+                "on: push",
+                "jobs:",
+                "  alias-string:",
+                "    steps:",
+                "      - run: cargo host -p a-lib",
+                "  alias-array:",
+                "    steps:",
+                "      - run: cargo host-list -p a-lib",
+                "  alias-chain:",
+                "    steps:",
+                "      - run: cargo chain -p a-lib",
+                "  alias-config:",
+                "    steps:",
+                "      - run: cargo other -p a-lib",
+                "  env-alias:",
+                "    env:",
+                "      CARGO_ALIAS_LIB: test -p rh-host",
+                "    steps:",
+                "      - run: cargo lib -p a-lib",
+                "  config-alias:",
+                "    steps:",
+                "      - run: cargo --config 'alias.lib=\"test -p rh-host\"' lib -p a-lib",
+                "  config-file:",
+                "    steps:",
+                "      - run: cargo --config=extra.toml test -p a-lib",
+                "  lib-tests:",
+                "    steps:",
+                "      - run: cargo test -p a-lib",
+            ]),
+            ci_file(
+                ".github/workflows/env.yml",
+                "on: push\nenv:\n  CARGO_ALIAS_LIB: test -p rh-host\njobs:\n  lib:\n    steps:\n      \
+                 - run: cargo lib -p a-lib\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["env-alias", "config-alias", "config-file"]);
+        unreadable_file(&problems, ".cargo/config:");
+        unreadable_file(&problems, "crates/a-lib/.cargo/config.toml");
+        unreadable_file(&problems, ".github/workflows/env.yml:3");
+        let jobs = [
+            "rh-host",
+            "alias-string",
+            "alias-array",
+            "alias-chain",
+            "alias-config",
+        ];
+        names(&problems, &jobs, &["lib-tests"]);
+        Ok(())
+    }
+
+    /// The cargo configurations a cargo alias may come from are read: `.cargo/config` beside
+    /// `.cargo/config.toml`, at the root and in any directory below it (#1169 round 3 review,
+    /// bypass 5; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn ci_files_reads_every_cargo_configuration() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-cargo-configs-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        for path in [
+            ".github/workflows/a.yml",
+            ".cargo/config",
+            "crates/x/.cargo/config.toml",
+            "crates/y/.cargo/config",
+            "crates/z/config.toml",
+        ] {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(file, "x\n")?;
+        }
+        let read: Result<BTreeSet<String>> =
+            ci_files(&root).map(|files| files.into_iter().map(|file| file.path).collect());
+        fs::remove_dir_all(&root).ok();
+        let read = read?;
+        for path in [
+            ".cargo/config",
+            "crates/x/.cargo/config.toml",
+            "crates/y/.cargo/config",
+        ] {
+            assert!(read.contains(path), "reads {path}: {read:?}");
+        }
+        assert!(!read.contains("crates/z/config.toml"), "{read:?}");
+        Ok(())
+    }
+
+    /// Cargo reached without a literal `cargo` word cannot be read, and neither can the triggers
+    /// that make it possible: `eval`, a pipe into a shell or an interpreter, `sh -c`,
+    /// `python -c`, `perl -e`, `node -e`, a glob in a command word, a double-quoted `run:` with a
+    /// `\` (a line continuation, or an escape such as `\x67`), and a step `shell:` that is not
+    /// exactly bash (#1169 round 3 review, bypass 6, and round 5 review, B4; DEC-176
+    /// tightening). The control holds only programs DEC-873's closed world reads.
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn cargo_without_a_cargo_word_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  eval-split:",
+            "    steps:",
+            "      - run: eval \"car\"\"go test -p rh-host\"",
+            "  quoted-continuation:",
+            "    steps:",
+            "      - run: \"car\\",
+            "          go test -p rh-host\"",
+            "  quoted-escape:",
+            "    steps:",
+            "      - run: \"car\\x67o test -p rh-host\"",
+            "  pipe-sh:",
+            "    steps:",
+            "      - run: printf '%s%s test -p rh-host' car go | sh",
+            "  pipe-python:",
+            "    steps:",
+            "      - run: echo x | python3",
+            "  bash-c:",
+            "    steps:",
+            "      - run: bash -c \"car\"\"go test -p rh-host\"",
+            "  python-c:",
+            "    steps:",
+            "      - run: python3 -c \"import os; os.system('ca' + 'rgo test -p rh-host')\"",
+            "  perl-e:",
+            "    steps:",
+            "      - run: perl -e 'system(\"ca\" . \"rgo test -p rh-host\")'",
+            "  node-e:",
+            "    steps:",
+            "      - run: node -e \"require('child_process').execSync('ca' + 'rgo test')\"",
+            "  glob-word:",
+            "    steps:",
+            "      - run: ~/.cargo/bin/car* test -p rh-host",
+            "  python-shell:",
+            "    steps:",
+            "      - shell: python {0}",
+            "        run: import os",
+            "  lib-tests:",
+            "    steps:",
+            "      - shell: bash",
+            "        run: cargo test -p a-lib | tee out.log",
+            "      - run: if [ -f x ]; then echo found; fi",
+        ])];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "eval-split",
+            "quoted-continuation",
+            "quoted-escape",
+            "pipe-sh",
+            "pipe-python",
+            "bash-c",
+            "python-c",
+            "perl-e",
+            "node-e",
+            "glob-word",
+            "python-shell",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["eval-split"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A `case … in` block's pattern words (`'' | *[!0-9]* | 0?*)`, `0)`, `*)`) are patterns,
+    /// not command words, so their globs are read; a glob in a command position stays
+    /// unreadable, in a `case` arm's body and in a pattern-shaped line outside any `case`
+    /// (#1169 round 4 ruling 1; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_case_pattern_is_no_command_word() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  case-ok:",
+            "    steps:",
+            "      - run: |",
+            "          case \"$PLANNED\" in",
+            "            '' | *[!0-9]* | 0?*) exit 1 ;;",
+            "            0) test \"$RESULT\" = skipped ;;",
+            "            *) test \"$RESULT\" = success ;;",
+            "          esac",
+            "          cargo test -p a-lib",
+            "  glob-in-arm:",
+            "    steps:",
+            "      - run: |",
+            "          case \"$X\" in",
+            "            x) car* test -p rh-host ;;",
+            "          esac",
+            "  no-case:",
+            "    steps:",
+            "      - run: |",
+            "          car*|x) echo",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["glob-in-arm", "no-case"]);
+        names(&problems, &["glob-in-arm"], &["case-ok"]);
+        Ok(())
+    }
+
+    /// The one interpreter line a person has read, `web-e2e.yml`'s `node -p` version probe, is
+    /// read only byte for byte: the same line with one character changed, or with a cargo
+    /// command added, cannot be read (#1169 round 4 ruling 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_read_interpreter_line_is_read_only_exactly() -> Result<()> {
+        let probe = r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##;
+        let flow = |run: &str| {
+            ci_file(
+                ".github/workflows/web-e2e.yml",
+                &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {run}\n"),
+            )
+        };
+        assert_eq!(host_problems(&[flow(probe)])?, Vec::<String>::new());
+        let changed = [
+            probe.replace("node -p", "node -e"),
+            probe.replace(".version", ".versions"),
+            format!("{probe}; cargo test -p rh-host"),
+        ];
+        for run in changed {
+            unreadable(&host_problems(&[flow(&run)])?, &["web-e2e"]);
+        }
+        let elsewhere = ci_file(
+            ".github/workflows/ci.yml",
+            &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {probe}\n"),
+        );
+        unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
+        Ok(())
+    }
+
+    /// The repository's own `xtask` alias expands to `run --quiet --locked --package xtask --`,
+    /// whose build selects `xtask` alone; the literal `cargo xtask ci lint` is judged beside it
+    /// and, naming no package, selects every member. An alias chain that loops cannot be read
+    /// (#1169 round 4 ruling 3; DEC-176 tightening).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_xtask_alias_selects_xtask_and_a_loop_cannot_be_read() -> Result<()> {
+        let runner = member(RUNNER, &[("rh-host", None)]);
+        let mut meta = workspace(vec![
+            with_features(runner, &[("live", &["dep:rh-host"])]),
+            member("xtask", &[]),
+            member("rh-host", &[]),
+        ]);
+        meta.workspace_default_members
+            .retain(|id| id != "rh-host 0.0.0");
+        let flows = [
+            ci_file(
+                ".cargo/config.toml",
+                "[alias]\nxtask = \"run --quiet --locked --package xtask --\"\nloop-a = \
+                 \"loop-b\"\nloop-b = \"loop-a\"\n",
+            ),
+            workflow(&[
+                ("lint", "cargo xtask ci lint"),
+                ("looping", "cargo loop-a -p xtask"),
+            ]),
+        ];
+        let asked = RefCell::new(Vec::new());
+        let problems = resolved_live_problems(&live_policy(), &meta, &flows, &|w| {
+            asked.borrow_mut().push(w.to_vec());
+            Ok(resolved(&[
+                (RUNNER, &[], &[]),
+                ("xtask", &[], &[]),
+                ("rh-host", &[], &[]),
+            ]))
+        })?;
+        let asked = asked.into_inner();
+        for expected in [
+            words("xtask ci lint"),
+            words("run --quiet --locked --package xtask -- ci lint"),
+        ] {
+            assert!(asked.contains(&expected), "asks {expected:?}: {asked:?}");
+        }
+        let lint_host: Vec<&String> = problems
+            .iter()
+            .filter(|p| p.contains("`lint`") && p.contains("`rh-host`"))
+            .collect();
+        assert_eq!(
+            lint_host.len(),
+            1,
+            "only the literal build holds it: {problems:?}"
+        );
+        unreadable(&problems, &["looping"]);
+        Ok(())
+    }
+
+    /// The four repository scripts as clean fixtures: each a shell script naming no cargo.
+    fn clean_scripts() -> Vec<CiFile> {
+        [
+            "docs-only.sh",
+            "docs-checks.sh",
+            "start-postgres.sh",
+            "merge-approved.sh",
+        ]
+        .iter()
+        .map(|name| {
+            ci_file(
+                &format!(".github/scripts/{name}"),
+                "#!/usr/bin/env bash\n# Checks the change.\nset -euo pipefail\necho ok\n",
+            )
+        })
+        .collect()
+    }
+
+    /// Asserts that each of `jobs` has a problem naming it and `rh-host`: a build the check judged
+    /// and found holding the live-only member.
+    fn judged_with_host(problems: &[String], jobs: &[&str]) {
+        assert!(!jobs.is_empty(), "a check names something");
+        for job in jobs {
+            let judged = problems
+                .iter()
+                .any(|p| p.contains(&format!("`{job}`")) && p.contains("`rh-host`"));
+            assert!(judged, "`{job}` is judged holding `rh-host`: {problems:?}");
+        }
+    }
+
+    /// The closed world's control: a workflow shaped like the repository's own (downloads checked
+    /// and installed, `rustup`, cargo with `-p`, `test`, `if`/`case`/`for` blocks, `gh` and `jq`,
+    /// a here-string into `jq`, writes to `$GITHUB_OUTPUT`, the four repository scripts, the five
+    /// allowed `CARGO_*` names, and `npm`/`npx` in a `web` job beside its `package.json`) is not
+    /// flagged (DEC-873).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_repository_shaped_workflow_passes_the_closed_world() -> Result<()> {
+        let mut flows = clean_scripts();
+        flows.push(yaml_lines(&[
+            "on: push",
+            "env:",
+            "  CARGO_TERM_COLOR: always",
+            "  CARGO_MUTANTS_VERSION: 27.0.0",
+            "  CARGO_MUTANTS_SHA256: abc",
+            "jobs:",
+            "  lint:",
+            "    env:",
+            "      CARGO_PROFILE_DEV_DEBUG: 0",
+            "      CARGO_PROFILE_TEST_DEBUG: 0",
+            "    steps:",
+            "      - id: change",
+            "        run: .github/scripts/docs-only.sh | tee -a \"$GITHUB_OUTPUT\"",
+            "      - run: .github/scripts/docs-checks.sh",
+            "      - run: .github/scripts/start-postgres.sh",
+            "      - run: |",
+            "          curl -sSfL --retry 5 -o tool.tgz \"https://example.com/v${CARGO_MUTANTS_VERSION}/tool.tgz\"",
+            "          echo \"${CARGO_MUTANTS_SHA256}  tool.tgz\" | sha256sum --check",
+            "          tar xzf tool.tgz tool && sudo install tool /usr/local/bin/ && rm tool tool.tgz",
+            "      - run: rustup show active-toolchain || rustup toolchain install",
+            "      - run: cargo test -p a-lib",
+            "      - run: |",
+            "          if [ \"$DOCS_ONLY\" = true ]; then",
+            "            echo \"docs-only change\"",
+            "            printf 'mutants=0\\n' >> \"$GITHUB_OUTPUT\"",
+            "          else",
+            "            cargo test -p a-lib >> \"$GITHUB_OUTPUT\"",
+            "          fi",
+            "      - run: |",
+            "          test \"$RESULT\" = success",
+            "          case \"$PLANNED\" in",
+            "            '' | *[!0-9]* | 0?*) exit 1 ;;",
+            "            *) test \"$RESULT\" = success ;;",
+            "          esac",
+            "      - run: |",
+            "          prs=$(gh pr list --state open --json number --jq '.[].number')",
+            "          more=$(jq -r '.[]' <<<\"$RUN_PRS\")",
+            "          failed=0",
+            "          for pr in $prs $more; do",
+            "            .github/scripts/merge-approved.sh \"$pr\" || failed=1",
+            "          done",
+            "          if grep -rnEi 'gradient' src/; then echo \"no\" >&2; exit 1; fi",
+            "          exit \"$failed\"",
+            "  web:",
+            "    defaults:",
+            "      run:",
+            "        working-directory: web",
+            "    steps:",
+            "      - run: npm ci",
+            "      - run: npx --yes impeccable@4.1.0 detect src/",
+            "      - run: npm run build",
+        ]));
+        flows.push(ci_file(
+            "web/package.json",
+            "{\"scripts\": {\"build\": \"next build\"}}\n",
+        ));
+        assert_eq!(host_problems(&flows)?, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A command word the shell computes cannot be read, whatever it spells: an expansion
+    /// (`${C}go`, `$CARGO`, `${CARGO}`, `${NOPE:-ca}rgo`), ANSI-C quoting (`$'\x63argo'`), a
+    /// substitution, brace expansion (`{c,}argo`), a quoted word, and any of them in a `case`
+    /// arm after its `)` (#1169 round 4 review, bypasses 1 to 3; DEC-873 item 1).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_computed_command_word_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("brace-var", "${C}go test -p rh-host"),
+            ("plain-var", "$CARGO test -p rh-host"),
+            ("braced-var", "${CARGO} test -p rh-host"),
+            ("ansi-c", "$'\\x63argo' test -p rh-host"),
+            ("substituted", "$(printf 'ca%s' rgo) test -p rh-host"),
+            ("defaulted", "${NOPE:-ca}rgo test -p rh-host"),
+            ("brace-expansion", "{c,}argo test -p rh-host"),
+            ("quoted-word", "\"car\"\"go\" test -p rh-host"),
+            (
+                "case-arm",
+                "case \"$X\" in x) ${C}go test -p rh-host ;; esac",
+            ),
+            ("computed-binary", "cargo-$SUB nextest run -p a-lib"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("lib-tests", "cargo test -p a-lib"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["brace-var"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A program fed by a heredoc, a process substitution or a file it was just given, an
+    /// interpreter, `find -exec`, `env -S` and any `xargs` but the one read line cannot be read; a
+    /// here-string into `jq` and a heredoc `cat` writes to a plain file can (#1169 round 4
+    /// review, bypass 4; DEC-873 item 4).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_interpreter_or_a_fed_program_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  python-heredoc:",
+            "    steps:",
+            "      - run: |",
+            "          python3 - <<'EOF'",
+            "          import os",
+            "          EOF",
+            "  node-heredoc:",
+            "    steps:",
+            "      - run: |",
+            "          node <<EOF",
+            "          process.exit(0)",
+            "          EOF",
+            "  perl-heredoc:",
+            "    steps:",
+            "      - run: |",
+            "          perl <<EOF",
+            "          print 1;",
+            "          EOF",
+            "  bash-substitution:",
+            "    steps:",
+            "      - run: bash <(curl -s https://example.com/x)",
+            "  source-substitution:",
+            "    steps:",
+            "      - run: source <(echo x)",
+            "  dot-script:",
+            "    steps:",
+            "      - run: . ./setup.sh",
+            "  awk-system:",
+            "    steps:",
+            "      - run: awk 'BEGIN { system(\"x\") }'",
+            "  find-exec:",
+            "    steps:",
+            "      - run: find . -name x -exec sh -c x \\;",
+            "  env-split:",
+            "    steps:",
+            "      - run: env -S 'x y'",
+            "  written-script:",
+            "    steps:",
+            "      - run: echo x > x.sh; sh x.sh",
+            "  other-xargs:",
+            "    steps:",
+            "      - run: echo x | xargs rm",
+            "  grep-substitution:",
+            "    steps:",
+            "      - run: grep x <(echo y)",
+            "  grep-heredoc:",
+            "    steps:",
+            "      - run: |",
+            "          grep x <<EOF",
+            "          data",
+            "          EOF",
+            "  grep-here-string:",
+            "    steps:",
+            "      - run: grep x <<< \"$Y\"",
+            "  read-tools:",
+            "    steps:",
+            "      - run: |",
+            "          more=$(jq -r '.[]' <<<\"$RUN_PRS\")",
+            "          cat > notes.txt <<'EOF'",
+            "          some notes",
+            "          EOF",
+            "          cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "python-heredoc",
+            "node-heredoc",
+            "perl-heredoc",
+            "bash-substitution",
+            "source-substitution",
+            "dot-script",
+            "awk-system",
+            "find-exec",
+            "env-split",
+            "written-script",
+            "other-xargs",
+            "grep-substitution",
+            "grep-heredoc",
+            "grep-here-string",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["python-heredoc"], &["read-tools"]);
+        Ok(())
+    }
+
+    /// Configuration written at runtime cannot be read: a `CARGO_*` name built from pieces into
+    /// `$GITHUB_ENV`, a file copied or catted into `$GITHUB_ENV`, `$GITHUB_PATH`, a `.cargo`
+    /// directory, `CARGO_HOME` inline or in step or job `env`, `RUSTFLAGS`, a write to a
+    /// repository script, `tar` extracting every member, and `sudo install` of a `cargo`; the five
+    /// allowed `CARGO_*` names and writes to `$GITHUB_OUTPUT` or a plain file can (#1169 round 4
+    /// review, bypasses 5 and 6; DEC-873 item 5).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn configuration_written_at_runtime_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  env-file:",
+            "    steps:",
+            "      - run: echo \"CARGO_ALI\"\"AS_T=test -p rh-host\" >> \"$GITHUB_ENV\"",
+            "  cat-env:",
+            "    steps:",
+            "      - run: cat env.txt >> \"$GITHUB_ENV\"",
+            "  copy-env:",
+            "    steps:",
+            "      - run: cp env.txt \"$GITHUB_ENV\"",
+            "  path-file:",
+            "    steps:",
+            "      - run: echo /tmp/bin >> \"$GITHUB_PATH\"",
+            "  cargo-dir:",
+            "    steps:",
+            "      - run: printf '[alias]\\n' > .cargo/config.toml",
+            "  home-inline:",
+            "    steps:",
+            "      - run: CARGO_HOME=ch cargo test -p a-lib",
+            "  home-step:",
+            "    steps:",
+            "      - env:",
+            "          CARGO_HOME: ch",
+            "        run: cargo test -p a-lib",
+            "  home-job:",
+            "    env:",
+            "      CARGO_HOME: ch",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "  rustflags:",
+            "    env:",
+            "      RUSTFLAGS: --cfg x",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "  tee-script:",
+            "    steps:",
+            "      - run: echo x | tee .github/scripts/docs-only.sh",
+            "  curl-script:",
+            "    steps:",
+            "      - run: curl -sSfL -o .github/scripts/docs-only.sh https://example.com/x",
+            "  redirect-script:",
+            "    steps:",
+            "      - run: echo x > .github/scripts/docs-only.sh",
+            "  github-env-arg:",
+            "    steps:",
+            "      - run: grep x \"$GITHUB_ENV\"",
+            "  cargo-dir-arg:",
+            "    steps:",
+            "      - run: grep x .cargo/config.toml",
+            "  tar-everything:",
+            "    steps:",
+            "      - run: tar xzf tool.tgz",
+            "  install-cargo:",
+            "    steps:",
+            "      - run: sudo install cargo /usr/local/bin/",
+            "  allowed:",
+            "    env:",
+            "      CARGO_TERM_COLOR: always",
+            "    steps:",
+            "      - run: |",
+            "          cargo test -p a-lib >> \"$GITHUB_OUTPUT\"",
+            "          cargo test -p a-lib > out.log 2>&1",
+            "          curl -sSfL -o tool.tgz https://example.com/tool.tgz",
+            "          tar xzf tool.tgz tool && sudo install tool /usr/local/bin/ && rm tool tool.tgz",
+        ])];
+        let problems = host_problems(&flows)?;
+        let jobs = [
+            "env-file",
+            "cat-env",
+            "copy-env",
+            "path-file",
+            "cargo-dir",
+            "home-inline",
+            "home-step",
+            "home-job",
+            "rustflags",
+            "tee-script",
+            "curl-script",
+            "redirect-script",
+            "github-env-arg",
+            "cargo-dir-arg",
+            "tar-everything",
+            "install-cargo",
+        ];
+        unreadable(&problems, &jobs);
+        names(&problems, &["env-file"], &["allowed"]);
+        Ok(())
+    }
+
+    /// A program not on the closed world's list cannot be read, and neither can a wrapper but
+    /// `sudo install`, a script not on the list, or `rustup` and `gh` running anything but their
+    /// listed subcommands (DEC-873 item 1).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_unknown_program_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("make", "make build"),
+            ("just", "just test"),
+            ("dot-slash", "./run.sh"),
+            ("other-script", ".github/scripts/other.sh"),
+            ("true", "true"),
+            ("cd", "cd crates"),
+            ("rustup-run", "rustup run nightly cargo test -p a-lib"),
+            ("gh-extension", "gh extension exec x"),
+            ("env-wrapper", "env FOO=1 cargo test -p a-lib"),
+            ("timeout-wrapper", "timeout 5 cargo test -p a-lib"),
+            ("sudo-rm", "sudo rm -rf target"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("lib-tests", "cargo test -p a-lib"));
+        let mut flows = clean_scripts();
+        flows.push(workflow(&all));
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["make"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A listed repository script is read only while its whole text, comments included, holds no
+    /// `cargo` word, no `.cargo` and no `CARGO_`; one that does, or one the check was not given,
+    /// cannot be read, and the problem names the script (DEC-873 item 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_repository_script_is_read_only_while_it_names_no_cargo() -> Result<()> {
+        let mut flows: Vec<CiFile> = clean_scripts()
+            .into_iter()
+            .filter(|file| !file.path.ends_with("merge-approved.sh"))
+            .map(|file| match file.path.as_str() {
+                ".github/scripts/docs-checks.sh" => ci_file(
+                    &file.path,
+                    "#!/usr/bin/env bash\nset -euo pipefail\ncargo build\n",
+                ),
+                ".github/scripts/start-postgres.sh" => ci_file(
+                    &file.path,
+                    "#!/usr/bin/env bash\n# reads CARGO_HOME\necho ok\n",
+                ),
+                _ => file,
+            })
+            .collect();
+        flows.push(workflow(&[
+            ("clean", ".github/scripts/docs-only.sh"),
+            ("planted", ".github/scripts/docs-checks.sh"),
+            ("commented", ".github/scripts/start-postgres.sh"),
+            ("missing", ".github/scripts/merge-approved.sh \"$PR\""),
+        ]));
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["planted", "commented", "missing"]);
+        for script in ["docs-checks.sh", "start-postgres.sh", "merge-approved.sh"] {
+            let named = problems
+                .iter()
+                .any(|p| p.contains(&format!("`.github/scripts/{script}`")));
+            assert!(named, "names `{script}`: {problems:?}");
+        }
+        names(&problems, &["planted"], &["clean"]);
+        Ok(())
+    }
+
+    /// `npm` and `npx` are read only in a job whose `defaults.run.working-directory` is `web` or
+    /// below it, that holds no cargo word, and beside the `package.json` of that directory; in
+    /// any other job they cannot be read (DEC-873 item 3).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn npm_runs_only_in_a_web_job_without_cargo() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  web:",
+            "    defaults:",
+            "      run:",
+            "        working-directory: web",
+            "    steps:",
+            "      - run: npm ci",
+            "      - run: npx playwright install-deps chromium",
+            "  web-app:",
+            "    defaults:",
+            "      run:",
+            "        working-directory: web/app",
+            "    steps:",
+            "      - run: npm test --if-present",
+            "  root-npm:",
+            "    steps:",
+            "      - run: npm ci",
+            "  step-web:",
+            "    steps:",
+            "      - working-directory: web",
+            "        run: npx playwright test",
+            "  web-with-cargo:",
+            "    defaults:",
+            "      run:",
+            "        working-directory: web",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "      - run: npm run build",
+            "  other-dir:",
+            "    defaults:",
+            "      run:",
+            "        working-directory: webapp",
+            "    steps:",
+            "      - run: npm ci",
+        ])];
+        let package = "{\"scripts\": {\"build\": \"next build\", \"test\": \"vitest run\"}}\n";
+        let [workflow_file] = flows;
+        let flows = [
+            workflow_file,
+            ci_file("web/package.json", package),
+            ci_file("web/app/package.json", package),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &["root-npm", "step-web", "web-with-cargo", "other-dir"],
+        );
+        names(&problems, &["root-npm"], &["web", "web-app"]);
+        Ok(())
+    }
+
+    /// The one `xargs` line a person has read, `web-e2e.yml`'s removal of the Microsoft apt
+    /// source, is read only byte for byte and only in that file (DEC-873 item 4).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_read_xargs_line_is_read_only_exactly() -> Result<()> {
+        let line = "grep -rls 'packages\\.microsoft\\.com' /etc/apt/sources.list \
+                    /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f";
+        let flow = |path: &str, run: &str| {
+            ci_file(
+                path,
+                &format!(
+                    "on: push\njobs:\n  web-e2e:\n    defaults:\n      run:\n        \
+                     working-directory: web\n    steps:\n      - run: {run}\n"
+                ),
+            )
+        };
+        let read = flow(".github/workflows/web-e2e.yml", line);
+        assert_eq!(host_problems(&[read])?, Vec::<String>::new());
+        let changed = flow(
+            ".github/workflows/web-e2e.yml",
+            &line.replace("rm -f", "rm -rf"),
+        );
+        unreadable(&host_problems(&[changed])?, &["web-e2e"]);
+        let elsewhere = flow(".github/workflows/ci.yml", line);
+        unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
+        Ok(())
+    }
+
+    /// A local action or reusable workflow, `uses: ./…` on a step or a job, quoted or not, cannot
+    /// be read; a listed remote action, pinned as the repository pins it, can (DEC-873 item 6).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_local_action_or_workflow_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  local-action:",
+            "    steps:",
+            "      - uses: ./.github/actions/setup",
+            "  local-workflow:",
+            "    uses: ./.github/workflows/other.yml",
+            "  quoted-local:",
+            "    steps:",
+            "      - uses: \"./.github/actions/setup\"",
+            "  remote:",
+            "    steps:",
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "      - run: cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &["local-action", "local-workflow", "quoted-local"],
+        );
+        names(&problems, &["local-action"], &["remote"]);
+        Ok(())
+    }
+
+    /// Alias expansion finds the subcommand past a `+toolchain` and past the value of `-Z` and
+    /// `--color`, so the alias behind it is expanded and its build judged (#1169 round 4 review,
+    /// mutants P8 and P9).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_alias_is_found_past_a_toolchain_and_global_flag_values() -> Result<()> {
+        let flows = [
+            ci_file(
+                ".cargo/config.toml",
+                "[alias]\nhost = \"test -p rh-host\"\n",
+            ),
+            workflow(&[
+                ("toolchain", "cargo +nightly host -p a-lib"),
+                ("color", "cargo --color never host -p a-lib"),
+                ("unstable", "cargo -Z unstable-options host -p a-lib"),
+                ("lib-tests", "cargo test -p a-lib"),
+            ]),
+        ];
+        let problems = host_problems(&flows)?;
+        judged_with_host(&problems, &["toolchain", "color", "unstable"]);
+        names(&problems, &["toolchain"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A command word built by a backtick substitution cannot be read, whether the substitution
+    /// is the whole word or a piece of it (#1169 round 4 review, bypass 3; DEC-873 item 1).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_backtick_command_word_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  backtick-piece:",
+            "    steps:",
+            "      - run: |",
+            "          `printf ca`rgo test -p rh-host",
+            "  backtick-whole:",
+            "    steps:",
+            "      - run: |",
+            "          `echo cargo` test -p rh-host",
+            "  lib-tests:",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["backtick-piece", "backtick-whole"]);
+        names(&problems, &["backtick-piece"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A path to cargo that the shell computes cannot be read, though its last piece reads
+    /// `cargo`: brace expansion (`/usr/{bin,local}/cargo`, two words), a backtick substitution
+    /// and an expansion in the path. The backtick runs only `echo`, which the closed world reads,
+    /// so only its computed-word rule refuses these, and dropping `{`, `` ` `` or `$` from it is
+    /// caught; a literal path to cargo is read (DEC-873 item 1).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_computed_path_to_cargo_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  brace-path:",
+            "    steps:",
+            "      - run: /usr/{bin,local}/cargo test -p a-lib",
+            "  backtick-path:",
+            "    steps:",
+            "      - run: |",
+            "          `echo /usr/bin`/cargo test -p a-lib",
+            "  dollar-path:",
+            "    steps:",
+            "      - run: $BIN/cargo test -p a-lib",
+            "  literal-path:",
+            "    steps:",
+            "      - run: /usr/bin/cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["brace-path", "backtick-path", "dollar-path"]);
+        names(&problems, &["brace-path"], &["literal-path"]);
+        Ok(())
+    }
+
+    /// The five allowed `CARGO_*` names are read only exactly: a name that extends one
+    /// (`CARGO_PROFILE_DEV_DEBUG_ASSERTIONS`, `CARGO_TERM_COLORS`) or holds one after a prefix
+    /// (`XCARGO_TERM_COLOR`), in job `env`, step `env` or inline, cannot be read (DEC-873 item 5).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_allowed_cargo_name_is_read_only_exactly() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  extended-job-env:",
+            "    env:",
+            "      CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: false",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "  extended-step-env:",
+            "    steps:",
+            "      - env:",
+            "          CARGO_TERM_COLORS: always",
+            "        run: cargo test -p a-lib",
+            "  extended-inline:",
+            "    steps:",
+            "      - run: CARGO_MUTANTS_VERSIONS=1 cargo test -p a-lib",
+            "  prefixed:",
+            "    env:",
+            "      XCARGO_TERM_COLOR: always",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+            "  exact:",
+            "    env:",
+            "      CARGO_TERM_COLOR: always",
+            "      CARGO_PROFILE_DEV_DEBUG: 0",
+            "    steps:",
+            "      - run: cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "extended-job-env",
+                "extended-step-env",
+                "extended-inline",
+                "prefixed",
+            ],
+        );
+        names(&problems, &["extended-job-env"], &["exact"]);
+        Ok(())
+    }
+
+    /// A listed repository script whose comment alone names `cargo` or `.cargo` cannot be read,
+    /// and the problem names the script: a comment is one edit from code (DEC-873 item 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_repository_script_comment_naming_cargo_cannot_be_read() -> Result<()> {
+        let flows: Vec<CiFile> = clean_scripts()
+            .into_iter()
+            .map(|file| match file.path.as_str() {
+                ".github/scripts/docs-only.sh" => ci_file(
+                    &file.path,
+                    "#!/usr/bin/env bash\n# the same check cargo runs\necho ok\n",
+                ),
+                ".github/scripts/docs-checks.sh" => ci_file(
+                    &file.path,
+                    "#!/usr/bin/env bash\n# see .cargo/config.toml\necho ok\n",
+                ),
+                _ => file,
+            })
+            .chain([workflow(&[
+                ("word", ".github/scripts/docs-only.sh"),
+                ("dot-cargo", ".github/scripts/docs-checks.sh"),
+                ("clean", ".github/scripts/start-postgres.sh"),
+            ])])
+            .collect();
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["word", "dot-cargo"]);
+        for script in ["docs-only.sh", "docs-checks.sh"] {
+            let named = problems
+                .iter()
+                .any(|p| p.contains(&format!("`.github/scripts/{script}`")));
+            assert!(named, "names `{script}`: {problems:?}");
+        }
+        names(&problems, &["word"], &["clean"]);
+        Ok(())
+    }
+
+    /// A redirection before the command word, glued or spaced, to a file or appended, and a
+    /// descriptor number before it, is skipped as the shell skips it, so the cargo word after it
+    /// is judged; a `run:` value that starts with `>` is no block scalar header and cannot be read
+    /// (#1169 round 5 review, B1; DEC-851 item 6's structural skip).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_redirection_before_the_command_word_is_skipped() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  glued:",
+            "    steps:",
+            "      - run: |",
+            "          >/dev/null cargo build --workspace",
+            "  spaced:",
+            "    steps:",
+            "      - run: |",
+            "          > /dev/null cargo build --workspace",
+            "  to-a-file:",
+            "    steps:",
+            "      - run: |",
+            "          >out cargo build --workspace",
+            "  appended:",
+            "    steps:",
+            "      - run: |",
+            "          >>out cargo build --workspace",
+            "  descriptor:",
+            "    steps:",
+            "      - run: |",
+            "          2>/dev/null cargo build --workspace",
+            "  after-a-command:",
+            "    steps:",
+            "      - run: echo start; >/dev/null cargo build --workspace",
+            "  inline:",
+            "    steps:",
+            "      - run: >/dev/null cargo build --workspace",
+            "  lib-tests:",
+            "    steps:",
+            "      - run: |",
+            "          >/dev/null cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        judged_with_host(
+            &problems,
+            &[
+                "glued",
+                "spaced",
+                "to-a-file",
+                "appended",
+                "descriptor",
+                "after-a-command",
+            ],
+        );
+        unreadable(&problems, &["inline"]);
+        names(&problems, &["glued"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// An unquoted heredoc's body expands, so a command substitution in it, `$(` or a backtick,
+    /// cannot be read, whatever it runs; a quoted delimiter, a parameter expansion and an escaped
+    /// `\$(` can (#1169 round 5 review, B2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_substitution_in_an_unquoted_heredoc_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  substituted:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<EOF",
+            "          $(cargo build --workspace)",
+            "          EOF",
+            "  backtick:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<EOF",
+            "          `cargo build --workspace`",
+            "          EOF",
+            "  any-substitution:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<EOF",
+            "          built on $(date)",
+            "          EOF",
+            "  dashed:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<-EOF",
+            "          built on $(date)",
+            "          EOF",
+            "  read-heredocs:",
+            "    steps:",
+            "      - run: |",
+            "          cat > a.txt <<'EOF'",
+            "          $(date) and `date`",
+            "          EOF",
+            "          cat > b.txt <<\"EOF\"",
+            "          $(date)",
+            "          EOF",
+            "          cat > c.txt <<EOF",
+            "          ${HOME} and \\$(date)",
+            "          EOF",
+            "          cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &["substituted", "backtick", "any-substitution", "dashed"],
+        );
+        names(&problems, &["substituted"], &["read-heredocs"]);
+        Ok(())
+    }
+
+    /// An `env:` key, at workflow, job, step or service level, and a command-prefix assignment
+    /// are read only when the name is one the repository's workflows set or one of the five
+    /// `CARGO_*` names: `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and
+    /// `NODE_OPTIONS`, in any case, cannot be read, nor can a listed name in another case, an
+    /// inline `env:` mapping, an
+    /// uppercase name assigned by a command of its own or a `for` loop, or `printf -v`; a
+    /// lowercase local can (#1169 round 5 review, B3).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_environment_name_off_the_list_cannot_be_read() -> Result<()> {
+        let job_env = |job: &str, name: &str| {
+            format!(
+                "  {job}:\n    env:\n      {name}: x\n    steps:\n      - run: cargo test -p a-lib\n"
+            )
+        };
+        let step_env = |job: &str, name: &str| {
+            format!(
+                "  {job}:\n    steps:\n      - env:\n          {name}: x\n        run: cargo test -p \
+                 a-lib\n"
+            )
+        };
+        let mut text = String::from("on: push\njobs:\n");
+        for (job, name) in [
+            ("job-bash-env", "BASH_ENV"),
+            ("job-env", "ENV"),
+            ("job-toolchain", "RUSTUP_TOOLCHAIN"),
+            ("job-lowercase", "bash_env"),
+            ("job-listed-lowercase", "gh_token"),
+        ] {
+            text.push_str(&job_env(job, name));
+        }
+        for (job, name) in [
+            ("step-path", "PATH"),
+            ("step-preload", "LD_PRELOAD"),
+            ("step-node", "NODE_OPTIONS"),
+            ("step-mixed-case", "Path"),
+        ] {
+            text.push_str(&step_env(job, name));
+        }
+        for (job, run) in [
+            ("prefix-path", "PATH=/tmp/bin cargo test -p a-lib"),
+            ("prefix-lowercase", "path=/tmp/bin cargo test -p a-lib"),
+            (
+                "prefix-toolchain",
+                "RUSTUP_TOOLCHAIN=nightly cargo test -p a-lib",
+            ),
+            ("prefix-bash-env", "BASH_ENV=x.txt cargo test -p a-lib"),
+            (
+                "prefix-listed-lowercase",
+                "cargo_term_color=never cargo test -p a-lib",
+            ),
+            ("standalone", "PATH=/tmp/bin; cargo test -p a-lib"),
+            (
+                "loop-variable",
+                "for PATH in /tmp/bin; do cargo test -p a-lib; done",
+            ),
+            ("printf-variable", "printf -v PATH '%s' /tmp/bin"),
+        ] {
+            text.push_str(&format!("  {job}:\n    steps:\n      - run: {run}\n"));
+        }
+        text.push_str(
+            "  service-env:\n    services:\n      db:\n        image: \
+             postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f\n        \
+             env:\n          LD_PRELOAD: x\n    steps:\n      - run: cargo test -p a-lib\n",
+        );
+        text.push_str(
+            "  allowed:\n    env:\n      MANDATE_PG_URL: postgres://localhost/x\n      \
+             CARGO_TERM_COLOR: always\n    services:\n      db:\n        image: \
+             postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f\n        \
+             env:\n          POSTGRES_PASSWORD: postgres\n    steps:\n      - env:\n          \
+             GH_TOKEN: x\n        run: MANDATE_TEST_PARTITION=1/2 cargo test -p a-lib\n      - run: \
+             |\n          failed=0\n          for pr in 1 2; do echo \"$pr\"; done\n",
+        );
+        let flows = [
+            ci_file(".github/workflows/ci.yml", &text),
+            ci_file(
+                ".github/workflows/top.yml",
+                "on: push\nenv:\n  BASH_ENV: x.txt\njobs:\n  a:\n    steps:\n      - run: echo ok\n",
+            ),
+            ci_file(
+                ".github/workflows/inline.yml",
+                "on: push\nenv: { NODE_OPTIONS: x }\njobs:\n  b:\n    steps:\n      - run: echo ok\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "job-bash-env",
+                "job-env",
+                "job-toolchain",
+                "job-lowercase",
+                "job-listed-lowercase",
+                "step-path",
+                "step-preload",
+                "step-node",
+                "step-mixed-case",
+                "prefix-path",
+                "prefix-lowercase",
+                "prefix-toolchain",
+                "prefix-bash-env",
+                "prefix-listed-lowercase",
+                "standalone",
+                "loop-variable",
+                "printf-variable",
+                "service-env",
+            ],
+        );
+        unreadable_file(&problems, ".github/workflows/top.yml");
+        unreadable_file(&problems, ".github/workflows/inline.yml");
+        names(&problems, &["job-env"], &["allowed"]);
+        Ok(())
+    }
+
+    /// Every `CARGO_*` name but the five the workflows need cannot be read, as an `env:` key or
+    /// as a prefix assignment, so adding any one of these to the list is caught (#1169 round 5
+    /// review, mutant M04; DEC-873 item 5).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn every_cargo_name_but_the_five_cannot_be_read() -> Result<()> {
+        let names_refused = [
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+            "CARGO_BUILD_TARGET",
+            "CARGO_BUILD_TARGET_DIR",
+            "CARGO_BUILD_RUSTC",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_BUILD_RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_JOBS",
+            "CARGO_INCREMENTAL",
+            "CARGO_NET_OFFLINE",
+            "CARGO_HTTP_PROXY",
+            "CARGO_REGISTRIES_CRATES_IO_PROTOCOL",
+            "CARGO_UNSTABLE_BUILD_STD",
+            "CARGO_PROFILE_RELEASE_DEBUG",
+            "CARGO_PROFILE_DEV_OPT_LEVEL",
+            "CARGO_PROFILE_TEST_OPT_LEVEL",
+            "CARGO_PROFILE_DEV_DEBUG_ASSERTIONS",
+            "CARGO_TERM_VERBOSE",
+            "CARGO_TERM_QUIET",
+            "CARGO_FEATURE_LIVE",
+            "CARGO_CFG_FEATURE",
+            "CARGO_MAKEFLAGS",
+            "CARGO_LOG",
+            "CARGO_CACHE_RUSTC_INFO",
+            "CARGO_ALIAS_B",
+            "CARGO_INSTALL_ROOT",
+            "CARGO_MUTANTS_JOBS",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
+        ];
+        let mut text = String::from("on: push\njobs:\n");
+        let mut jobs = Vec::new();
+        for name in names_refused {
+            let job = name.to_ascii_lowercase().replace('_', "-");
+            text.push_str(&format!(
+                "  env-{job}:\n    env:\n      {name}: x\n    steps:\n      - run: echo ok\n"
+            ));
+            text.push_str(&format!(
+                "  prefix-{job}:\n    steps:\n      - run: {name}=x cargo test -p a-lib\n"
+            ));
+            jobs.push(format!("env-{job}"));
+            jobs.push(format!("prefix-{job}"));
+        }
+        text.push_str(
+            "  allowed:\n    env:\n      CARGO_TERM_COLOR: always\n      CARGO_MUTANTS_VERSION: \
+             1\n      CARGO_MUTANTS_SHA256: x\n      CARGO_PROFILE_DEV_DEBUG: 0\n      \
+             CARGO_PROFILE_TEST_DEBUG: 0\n    steps:\n      - run: CARGO_TERM_COLOR=never cargo \
+             test -p a-lib\n",
+        );
+        let problems = host_problems(&[ci_file(".github/workflows/ci.yml", &text)])?;
+        let jobs: Vec<&str> = jobs.iter().map(String::as_str).collect();
+        unreadable(&problems, &jobs);
+        names(&problems, &["env-cargo-home"], &["allowed"]);
+        Ok(())
+    }
+
+    /// A step's or a default `shell:` is read only as exactly `bash`, the form the repository
+    /// uses: one with any argument (`bash -c …`, `bash --rcfile x {0}`, `bash -e {0}`, `sh -c
+    /// …`), a bare `sh` and a quoted `"bash"` cannot be read (#1169 round 5 review, B4).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_shell_with_arguments_cannot_be_read() -> Result<()> {
+        let mut text = String::from("on: push\njobs:\n");
+        for (job, shell) in [
+            ("bash-c", "bash -c x {0}"),
+            ("rcfile", "bash --rcfile x.txt {0}"),
+            ("bash-e", "bash -e {0}"),
+            ("sh-c", "sh -c x"),
+            ("plain-sh", "sh"),
+            ("quoted", "\"bash\""),
+        ] {
+            text.push_str(&format!(
+                "  {job}:\n    steps:\n      - shell: {shell}\n        run: echo ok\n"
+            ));
+        }
+        text.push_str(
+            "  job-defaults:\n    defaults:\n      run:\n        shell: bash --noprofile {0}\n    \
+             steps:\n      - run: echo ok\n",
+        );
+        text.push_str(
+            "  plain-bash:\n    defaults:\n      run:\n        shell: bash\n    steps:\n      - \
+             shell: bash\n        run: cargo test -p a-lib\n",
+        );
+        let flows = [
+            ci_file(".github/workflows/ci.yml", &text),
+            ci_file(
+                ".github/workflows/defaults.yml",
+                "on: push\ndefaults:\n  run:\n    shell: bash -c x\njobs:\n  a:\n    steps:\n      \
+                 - run: echo ok\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "bash-c",
+                "rcfile",
+                "bash-e",
+                "sh-c",
+                "plain-sh",
+                "quoted",
+                "job-defaults",
+            ],
+        );
+        unreadable_file(&problems, ".github/workflows/defaults.yml");
+        names(&problems, &["bash-c"], &["plain-bash"]);
+        Ok(())
+    }
+
+    /// A write to a build input cannot be read, by any writer the closed world reads: a
+    /// redirection, `tee`, `curl -o`, a `tar` member, `cp`, `mv`, `install` and a heredoc `cat`
+    /// writes, to `Cargo.toml`, `Cargo.lock`, `rust-toolchain*`, `config.toml`, `build.rs` or a
+    /// path under `crates/` or `xtask/`; nor can `curl -O`, `--remote-name`, `--output-dir` or
+    /// `-K`, whose targets are not named, `tar` with no member or a flag, or a write to a hidden
+    /// file (#1169 round 5 review, B5 and mutants M05, M10 and M11).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_write_to_a_build_input_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("redirect-manifest", "echo x > Cargo.toml"),
+            ("append-lock", "echo x >> Cargo.lock"),
+            ("toolchain-file", "echo x > rust-toolchain"),
+            ("toolchain-toml", "echo x > rust-toolchain.toml"),
+            ("config-toml", "echo x > config.toml"),
+            ("build-script", "echo x > build.rs"),
+            ("under-crates", "echo x > crates/a-lib/src/lib.rs"),
+            ("under-xtask", "echo x >> xtask/src/main.rs"),
+            ("tee-manifest", "echo x | tee Cargo.toml"),
+            ("tee-append", "echo x | tee -a build.rs"),
+            (
+                "curl-output",
+                "curl -sSfL -o Cargo.toml https://example.com/x",
+            ),
+            (
+                "curl-long-output",
+                "curl -sSfL --output build.rs https://example.com/x",
+            ),
+            ("curl-glued", "curl -sSfLobuild.rs https://example.com/x"),
+            (
+                "curl-remote-cluster",
+                "curl -sSfLO https://example.com/Cargo.toml",
+            ),
+            ("curl-remote", "curl -O https://example.com/x"),
+            (
+                "curl-remote-long",
+                "curl --remote-name https://example.com/x",
+            ),
+            (
+                "curl-output-dir",
+                "curl --output-dir crates -o x https://example.com/x",
+            ),
+            ("curl-config", "curl -K curl.txt https://example.com/x"),
+            (
+                "curl-config-long",
+                "curl --config curl.txt https://example.com/x",
+            ),
+            ("tar-manifest", "tar xzf t.tgz Cargo.toml"),
+            ("tar-build-script", "tar xzf t.tgz build.rs"),
+            ("tar-path", "tar xzf t.tgz src/lib.rs"),
+            ("tar-directory", "tar xzf t.tgz crates"),
+            ("tar-no-members", "tar xzf t.tgz"),
+            ("tar-flags", "tar xzf t.tgz -C crates tool"),
+            ("hidden-redirect", "echo x > .npmrc"),
+            ("hidden-tee", "echo x | tee .profile"),
+            ("hidden-curl", "curl -sSfL -o .bashrc https://example.com/x"),
+            ("hidden-tar", "tar xzf t.tgz .profile"),
+            ("copy", "cp x.txt Cargo.toml"),
+            ("move", "mv x.txt build.rs"),
+            ("install", "install x.txt crates/a-lib/build.rs"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push((
+            "writes",
+            "echo x > notes.txt && curl -sSfL -o tool.tgz https://example.com/x && tar xzf \
+             tool.tgz tool && echo x | tee -a \"$GITHUB_OUTPUT\" && cargo test -p a-lib",
+        ));
+        let flows = [
+            workflow(&all),
+            ci_file(
+                ".github/workflows/heredoc.yml",
+                "on: push\njobs:\n  heredoc-build-script:\n    steps:\n      - run: |\n          \
+                 cat > build.rs <<'EOF'\n          fn main() {}\n          EOF\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        let mut refused: Vec<&str> = jobs.iter().map(|(job, _)| *job).collect();
+        refused.push("heredoc-build-script");
+        unreadable(&problems, &refused);
+        names(&problems, &["redirect-manifest"], &["writes"]);
+        Ok(())
+    }
+
+    /// A non-local `uses:` is read only when it names an action the repository's workflows use,
+    /// pinned as they pin it, and the tag-pinned CodeQL actions only in `codeql.yml`: another
+    /// action, another pin, a quoted pin, a `docker://` image and a remote reusable workflow cannot
+    /// be read, nor can a job `container:` or a `services:` image off the list (#1169 round 5
+    /// review, B6; DEC-873 item 6).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_remote_action_or_image_off_the_list_cannot_be_read() -> Result<()> {
+        let postgres = "postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f";
+        let service = format!("        image: {postgres}");
+        let flows = [
+            yaml_lines(&[
+                "on: push",
+                "jobs:",
+                "  unpinned:",
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "  other-action:",
+                "    steps:",
+                "      - uses: someone/action@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "  other-pin:",
+                "    steps:",
+                "      - uses: actions/checkout@0000000000000000000000000000000000000000",
+                "  docker:",
+                "    steps:",
+                "      - uses: docker://alpine:3.20",
+                "  quoted-pin:",
+                "    steps:",
+                "      - uses: \"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\"",
+                "  codeql-tag:",
+                "    steps:",
+                "      - uses: actions/checkout@v7",
+                "  remote-workflow:",
+                "    uses: someone/repo/.github/workflows/build.yml@main",
+                "  container-inline:",
+                "    container: node:22",
+                "    steps:",
+                "      - run: echo ok",
+                "  container-image:",
+                "    container:",
+                "      image: node:22",
+                "    steps:",
+                "      - run: echo ok",
+                "  service-image:",
+                "    services:",
+                "      db:",
+                "        image: postgres:16",
+                "    steps:",
+                "      - run: echo ok",
+                "  listed:",
+                "    services:",
+                "      db:",
+                &service,
+                "    steps:",
+                "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+                "      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2",
+                "      - run: cargo test -p a-lib",
+            ]),
+            ci_file(
+                ".github/workflows/codeql.yml",
+                "on: push\njobs:\n  analyze:\n    steps:\n      - uses: actions/checkout@v7\n      \
+                 - uses: github/codeql-action/init@v4\n      - uses: \
+                 github/codeql-action/analyze@v4\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "unpinned",
+                "other-action",
+                "other-pin",
+                "docker",
+                "quoted-pin",
+                "codeql-tag",
+                "remote-workflow",
+                "container-inline",
+                "container-image",
+                "service-image",
+            ],
+        );
+        names(&problems, &["unpinned"], &["listed", "analyze"]);
+        Ok(())
+    }
+
+    /// In a `web` job, `npm` runs only as `npm ci`, `npm run <script>` of a script its
+    /// `package.json` holds, and `npm test`, and `npx` only in the forms the repository uses:
+    /// `npx`, `npm exec`, `npm pkg set`, `npm config set`, `npm install`, a missing script, a
+    /// script given arguments and a `package.json` naming cargo cannot be read. Working
+    /// directories are resolved first, so `web/..`, `web/../`, `../crates` and `web/../crates`
+    /// are not under `web`, and neither is a step's own `working-directory: .`, while
+    /// `./web/app/..` is `web` (#1169 round 5 review, B7; DEC-873 item 3).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn npm_and_npx_run_only_in_the_repository_forms() -> Result<()> {
+        let job = |name: &str, dir: &str, run: &str| {
+            format!(
+                "  {name}:\n    defaults:\n      run:\n        working-directory: {dir}\n    \
+                 steps:\n      - run: {run}\n"
+            )
+        };
+        let refused = [
+            ("npx-other", "web", "npx cowsay hi"),
+            (
+                "npx-other-version",
+                "web",
+                "npx --yes impeccable@4.2.0 detect src/",
+            ),
+            ("npx-playwright-test", "web", "npx playwright test"),
+            ("npm-exec", "web", "npm exec cowsay"),
+            ("npm-pkg-set", "web", "npm pkg set scripts.build=x"),
+            (
+                "npm-config-set",
+                "web",
+                "npm config set registry https://example.com",
+            ),
+            ("npm-install", "web", "npm install left-pad"),
+            ("npm-run-missing", "web", "npm run nope"),
+            ("npm-run-arguments", "web", "npm run build -- --debug"),
+            ("package-naming-it", "web/app", "npm run build"),
+            ("dir-up", "web/..", "npm ci"),
+            ("dir-up-slash", "web/../", "npm ci"),
+            ("dir-crates", "../crates", "npm ci"),
+            ("dir-through", "web/../crates", "npm ci"),
+        ];
+        let mut text = String::from("on: push\njobs:\n");
+        for (name, dir, run) in refused {
+            text.push_str(&job(name, dir, run));
+        }
+        text.push_str(
+            "  step-root:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
+             - working-directory: .\n        run: npm ci\n",
+        );
+        text.push_str(
+            "  web-ok:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
+             - run: npm ci\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
+             test --if-present\n      - run: npx playwright install --with-deps --only-shell \
+             chromium\n      - run: npx playwright install-deps chromium\n      - run: npx --yes \
+             impeccable@4.1.0 detect src/\n      - working-directory: web\n        run: npm ci\n",
+        );
+        text.push_str(&job("dir-resolved", "./web/app/..", "npm ci"));
+        let flows = [
+            ci_file(".github/workflows/ci.yml", &text),
+            ci_file(
+                "web/package.json",
+                "{\"scripts\": {\"build\": \"next build\", \"lint\": \"eslint\", \"test\": \"vitest \
+                 run\"}}\n",
+            ),
+            ci_file(
+                "web/app/package.json",
+                "{\"scripts\": {\"build\": \"cargo build --workspace\"}}\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        let mut jobs: Vec<&str> = refused.iter().map(|(name, ..)| *name).collect();
+        jobs.push("step-root");
+        unreadable(&problems, &jobs);
+        names(&problems, &["npx-other"], &["web-ok", "dir-resolved"]);
+        Ok(())
+    }
+
+    /// A listed repository script is read with every repository script it runs, by
+    /// `"$(dirname "$0")/<name>"`, transitively and under the same rules: a callee that names
+    /// cargo, is missing, writes a build input or runs an interpreter makes the caller unreadable,
+    /// and so does a call the check cannot resolve to a file (`../`, `./`, an expansion) and an
+    /// `eval`, `bash -c` or `awk` in the script itself; a clean chain, and a cycle, can be read
+    /// (#1169 round 5 review, B8; DEC-873 item 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_repository_script_is_read_with_the_scripts_it_runs() -> Result<()> {
+        let run = |docs_only: &str, base_ref: Option<&str>| {
+            let mut flows: Vec<CiFile> = clean_scripts()
+                .into_iter()
+                .map(|file| {
+                    if file.path == ".github/scripts/docs-only.sh" {
+                        ci_file(&file.path, docs_only)
+                    } else {
+                        file
+                    }
+                })
+                .collect();
+            if let Some(text) = base_ref {
+                flows.push(ci_file(".github/scripts/base-ref.sh", text));
+            }
+            flows.push(workflow(&[("docs", ".github/scripts/docs-only.sh")]));
+            host_problems(&flows)
+        };
+        let calls = "#!/usr/bin/env bash\nset -euo pipefail\nbase=$(\"$(dirname \"$0\")/base-ref.sh\")\necho \"$base\"\n";
+        let clean = "#!/usr/bin/env bash\necho main\n";
+        assert_eq!(run(calls, Some(clean))?, Vec::<String>::new());
+        let cycle = "#!/usr/bin/env bash\n\"$(dirname \"$0\")/docs-only.sh\"\n";
+        assert_eq!(run(calls, Some(cycle))?, Vec::<String>::new());
+        for (case, base_ref) in [
+            (
+                "callee-cargo",
+                Some("#!/usr/bin/env bash\ncargo build --workspace\n"),
+            ),
+            ("callee-missing", None),
+            (
+                "callee-interpreter",
+                Some("#!/usr/bin/env bash\npython3 x.py\n"),
+            ),
+            (
+                "callee-write",
+                Some("#!/usr/bin/env bash\necho x > Cargo.toml\n"),
+            ),
+            (
+                "callee-environment",
+                Some("#!/usr/bin/env bash\necho \"RUSTFLAGS=x\" >> \"$GITHUB_ENV\"\n"),
+            ),
+        ] {
+            let problems = run(calls, base_ref)?;
+            unreadable(&problems, &["docs"]);
+            let named = problems
+                .iter()
+                .any(|p| p.contains("`.github/scripts/base-ref.sh"));
+            assert!(named, "{case} names base-ref.sh: {problems:?}");
+        }
+        for (case, docs_only) in [
+            (
+                "climbing",
+                "#!/usr/bin/env bash\n\"$(dirname \"$0\")/../base-ref.sh\"\n",
+            ),
+            ("dot-slash", "#!/usr/bin/env bash\n./helper.sh\n"),
+            ("expansion", "#!/usr/bin/env bash\n\"$TOOL\" run\n"),
+            ("eval", "#!/usr/bin/env bash\neval \"$X\"\n"),
+            ("bash-c", "#!/usr/bin/env bash\nbash -c 'echo x'\n"),
+            ("awk", "#!/usr/bin/env bash\nawk '{ print }' x.txt\n"),
+        ] {
+            let problems = run(docs_only, Some(clean))?;
+            unreadable(&problems, &["docs"]);
+            let named = problems
+                .iter()
+                .any(|p| p.contains("`.github/scripts/docs-only.sh"));
+            assert!(named, "{case} names docs-only.sh: {problems:?}");
+        }
+        Ok(())
+    }
+
+    /// The two `awk` programs of `merge-approved.sh` a person has read are read only byte for
+    /// byte and only in that script: the same text in another script, or one changed by a
+    /// word, cannot be read (#1169 round 5 review, B8).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_read_script_lines_are_read_only_exactly() -> Result<()> {
+        let approvals = r##"approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<"$body" |
+  sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\2/p' |
+  tr 'A-F' 'a-f')"##;
+        let kept = r##"kept=$(awk '
+  /^<!-- CURSOR_AGENT_PR_BODY_BEGIN -->$/ { inside = 1; marked = 1; next }
+  /^<!-- CURSOR_AGENT_PR_BODY_END -->$/ { inside = 0; next }
+  { line[++n] = $0; kept[n] = inside }
+  END { for (i = 1; i <= n; i++) if (!marked || kept[i]) print line[i] }
+' <<<"$body")"##;
+        let run = |script: &str, text: &str| {
+            let mut flows: Vec<CiFile> = clean_scripts()
+                .into_iter()
+                .map(|file| {
+                    if file.path == script {
+                        ci_file(&file.path, text)
+                    } else {
+                        file
+                    }
+                })
+                .collect();
+            flows.push(workflow(&[
+                ("merge", ".github/scripts/merge-approved.sh \"$PR\""),
+                ("checks", ".github/scripts/docs-checks.sh"),
+            ]));
+            host_problems(&flows)
+        };
+        let both = format!("#!/usr/bin/env bash\nbody=x\n{approvals}\n{kept}\necho ok\n");
+        assert_eq!(
+            run(".github/scripts/merge-approved.sh", &both)?,
+            Vec::<String>::new()
+        );
+        let elsewhere = run(".github/scripts/docs-checks.sh", &both)?;
+        unreadable(&elsewhere, &["checks"]);
+        names(&elsewhere, &["checks"], &["merge"]);
+        let changed = both.replace("print line[i]", "system(line[i])");
+        let changed = run(".github/scripts/merge-approved.sh", &changed)?;
+        unreadable(&changed, &["merge"]);
+        Ok(())
+    }
+
+    /// A here-string feeds only `jq` and a heredoc only `cat`: a here-string into `cat` and a
+    /// heredoc into `echo` cannot be read (#1169 round 5 review, mutants M03 and M20).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_heredoc_or_here_string_feeds_only_its_one_program() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  here-string-cat:",
+            "    steps:",
+            "      - run: cat <<< \"$X\"",
+            "  heredoc-echo:",
+            "    steps:",
+            "      - run: |",
+            "          echo <<EOF",
+            "          text",
+            "          EOF",
+            "  fed:",
+            "    steps:",
+            "      - run: |",
+            "          more=$(jq -r '.[]' <<< \"$X\")",
+            "          cat > notes.txt <<'EOF'",
+            "          text",
+            "          EOF",
+            "          cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["here-string-cat", "heredoc-echo"]);
+        names(&problems, &["here-string-cat"], &["fed"]);
+        Ok(())
+    }
+
+    /// `rustup` is read only as the repository runs it, `rustup show active-toolchain` and a bare
+    /// `rustup toolchain install`: `rustup run`, `default`, `override`, `toolchain link`, a named
+    /// install and any other form cannot be read (#1169 round 5 review, mutant M07).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn rustup_runs_only_in_the_repository_forms() -> Result<()> {
+        let jobs = [
+            ("run", "rustup run stable echo x"),
+            ("default", "rustup default nightly"),
+            ("override", "rustup override set nightly"),
+            ("link", "rustup toolchain link dev /tmp/dev"),
+            ("named-install", "rustup toolchain install nightly"),
+            ("show-home", "rustup show home"),
+            ("bare", "rustup"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push((
+            "repository",
+            "rustup show active-toolchain || rustup toolchain install",
+        ));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["run"], &["repository"]);
+        Ok(())
+    }
+
+    /// `--all-features` beside the compile-only form makes it no compile-only job: it resolves
+    /// `live` in the runner, which is named, and the one plain compile-only job after it is still
+    /// the first and passes (#1169 round 5 review, mutant M13).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn all_features_never_counts_as_the_compile_only_form() -> Result<()> {
+        let flows = [workflow(&[
+            (
+                "check-all-features",
+                "cargo check -p the-runner --features live --all-features",
+            ),
+            ("check-live", COMPILE_ONLY),
+        ])];
+        let problems = check(&live_policy(), with_runner(vec![]), &flows, by_flags)?;
+        let resolves = problems
+            .iter()
+            .any(|p| p.contains("`check-all-features`") && p.contains("resolves `live`"));
+        assert!(resolves, "the all-features job resolves live: {problems:?}");
+        names(&problems, &["check-all-features"], &["check-live"]);
+        Ok(())
+    }
+
+    /// `sudo install` is read only into exactly `/usr/local/bin/`: a sibling such as
+    /// `/usr/local/bin2/`, a directory below it, a path that climbs out of it and a name sharing
+    /// its prefix cannot be read (#1169 round 5 review, mutant M18).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn sudo_install_writes_only_into_usr_local_bin() -> Result<()> {
+        let jobs = [
+            ("sibling", "sudo install tool /usr/local/bin2/"),
+            ("below", "sudo install tool /usr/local/bin/sub/"),
+            ("climbing", "sudo install tool /usr/local/bin/../lib/"),
+            ("prefix", "sudo install tool /usr/local/binx"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("listed", "sudo install tool /usr/local/bin/"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["sibling"], &["listed"]);
+        Ok(())
+    }
+
+    /// `--manifest-path`, in either spelling and on either side of `-p`, makes the build select
+    /// every member even beside a `-p` naming another crate, so it holds the live-only member
+    /// (#1169 round 5 review, mutant M19).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_manifest_path_beside_a_package_selects_every_member() -> Result<()> {
+        let flows = [workflow(&[
+            (
+                "after-package",
+                "cargo test -p a-lib --manifest-path crates/rh-host/Cargo.toml",
+            ),
+            (
+                "glued-after-package",
+                "cargo test -p a-lib --manifest-path=crates/rh-host/Cargo.toml",
+            ),
+            (
+                "before-package",
+                "cargo test --manifest-path crates/rh-host/Cargo.toml -p a-lib",
+            ),
+            ("lib-tests", "cargo test -p a-lib"),
+        ])];
+        let problems = host_problems(&flows)?;
+        judged_with_host(
+            &problems,
+            &["after-package", "glued-after-package", "before-package"],
+        );
+        names(&problems, &["after-package"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// A flow sequence under `jobs:` is read only when it is flat: one that holds a `:`, a nested
+    /// `[`, `{` or `]`, or an `&`, `*` or `!`, even inside a quoted scalar, cannot be read. One
+    /// case for each character, so dropping any one from the rule is caught (#1169 round 3
+    /// review, bypass 7).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_flow_sequence_that_is_not_flat_cannot_be_read() -> Result<()> {
+        let cases = [
+            ("pair", "[a: b]"),
+            ("nested-sequence", "[a, [b]]"),
+            ("nested-mapping", "[a, {b: c}]"),
+            ("quoted-colon", "[\"a:b\"]"),
+            ("bare-brace", "[a, {b}]"),
+            ("quoted-open", "[\"a[\"]"),
+            ("quoted-close", "[\"a]\"]"),
+            ("alias-item", "[*a]"),
+            ("anchor-item", "[&a b]"),
+            ("tagged-item", "[!!str a]"),
+        ];
+        let mut text = String::from("on: push\njobs:\n  setup:\n    steps:\n      - run: echo\n");
+        for (job, flow) in cases {
+            text.push_str(&format!(
+                "  {job}:\n    needs: {flow}\n    steps:\n      - run: echo\n"
+            ));
+        }
+        text.push_str("  lib-tests:\n    needs: [setup]\n    steps:\n      - run: echo\n");
+        let problems = host_problems(&[ci_file(".github/workflows/ci.yml", &text)])?;
+        unreadable(&problems, &cases.map(|(job, _)| job));
+        names(&problems, &["pair"], &["lib-tests", "setup"]);
         Ok(())
     }
 
