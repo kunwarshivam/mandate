@@ -195,7 +195,8 @@ describe("the frame's glass", () => {
 });
 
 // DEC-213: the signed-out landing is a period piece and loads its own faces; the product stays in Public Sans.
-const LANDING_FONTS = ["@fontsource-variable/pixelify-sans", "@fontsource/dotgothic16", "@fontsource/vt323"];
+// DEC-907: the long page under its desktop adds Manrope and Sorts Mill Goudy, through the same faces file.
+const LANDING_FONTS = ["@fontsource-variable/pixelify-sans", "@fontsource/dotgothic16", "@fontsource/vt323", "@fontsource-variable/manrope", "@fontsource/sorts-mill-goudy"];
 
 describe("figures with a plain zero", () => {
   const theme = block("@theme inline");
