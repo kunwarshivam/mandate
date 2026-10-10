@@ -59131,6 +59131,23 @@
       "outcome": "refused",
       "cause": "no_start"
      }
+    },
+    {
+     "name": "genesis_after_seq_one",
+     "clause": "§11: genesis is seq 1 only",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+     "from_seq": 2,
+     "request": {
+      "kind": "genesis"
+     },
+     "replace": null,
+     "cold": {
+      "state": "unreadable"
+     },
+     "expect": {
+      "outcome": "refused",
+      "cause": "no_start"
+     }
     }
    ]
   }

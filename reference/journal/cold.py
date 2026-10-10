@@ -626,6 +626,8 @@ def more_row_specs(rows: list[dict], by_hash: dict, by_anchor: dict, seg: dict) 
          manifest(unhex), (SEGMENT, edited(rows[SEGMENT], lambda b: b.update(payload=unhex), True)), cold_read(unhex), "no_start"),
         ("anchor_leaf_hash_not_a_digest", "§9.14, §2: the start leaf's hash is not hex, the root and the row hash hold", acct, 10,
          by_anchor, anchor_with(leaf_set(0, hash="g" * 64)), unread, "no_start"),
+        ("genesis_after_seq_one", "§11: genesis is seq 1 only", acct, 2, {"kind": "genesis"}, None, unread,
+         "no_start"),
     ]
 
 
@@ -967,7 +969,8 @@ ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace
                "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest",
                "row.skip_unparsed", "row.anchor_root", "row.anchor_order", "row.unstamped_ok", "row.segment_stream",
                "start.first_seq", "row.anchor_leaf_seq", "row.anchor_seq_floor",
-               "row.anchor_leaf_stream", "row.anchor_foreign", "row.anchor_type", "row.bad_stream_id", "row.bad_hex")
+               "row.anchor_leaf_stream", "row.anchor_foreign", "row.anchor_type", "row.bad_stream_id", "row.bad_hex",
+               "start.genesis_seq", "start.anchor_seq", "start.workspace")
 
 
 def row_mutant_killers(section: dict, mutant: str) -> list[str]:
