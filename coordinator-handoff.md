@@ -121,8 +121,14 @@ anything here.
 - **L3+L4** (`session_01BtCufaGcvxBnm9h6eebWxE`):
   - L3: DEC-706 step 3 (register `NoticeAttempted` v2, refuse v1, move `step.rs`'s writer to v2), then D4 (retries).
   - L4: C-2, C-16 and C-17.
-- **L5** (`session_01GiEDxyxqyByvuwCrETeC6G`): run-logic T1/I1, including DEC-896's start-token cases and DEC-787
-  item 8.
+- **L5** (`session_01GiEDxyxqyByvuwCrETeC6G`): run logic, in this order:
+  1. T1a/I1a: plan, refusals, trusted start, replay.
+  2. T1b/I1b: walk, `draft`, `from_event`, `served`.
+  3. V2: run vectors, including DEC-787 item 8 and DEC-896's token cases.
+  4. T2/I2: anchors, segments, incomplete.
+  5. T3/I3: prefix bind, hold, connection, control.
+  Before I2, a journal T/I pair adds `segment_rows_mismatch` to `CHECKS`/`RANGE_CHECKS` (L5, coordinated with L2).
+  L2 owes the pending spec text for DEC-892, DEC-889 and DEC-894.
 - **DEC numbers in use tonight:** 873–879 (coordinator), 878 (bracket legs), 879 (C2 allowlist), 896 (L5), 900–903
   (L2), 902 (C4, inside L2's range), 706 (L3). Reserve new numbers per the decisions README.
 
@@ -147,6 +153,10 @@ anything here.
 7. **FYI: #1212** moved a `layers.toml` entry (a founder-owned file).
 8. **FYI:** `merge.yml`'s cron sweep isn't firing; direct merges were used.
 9. **Still held for the founder:** #878 (Cloudflare cutover).
+11. **FYI: an artifact-store outage during a verification walk.** This is check 6, `artifact_missing`. It is a
+    fail with a SEV-1, not `incomplete` (DEC-896 treats the same outage as `incomplete`, but only for the start
+    token). That is the stricter reading, so a restore drill fails, not passes, if the store is down mid-walk.
+    Loosening it is yours.
 10. **FYI: a truncation bug in ref.py's §6.2 decision.** Whole-second truncation can lift an ask up to 1 s before a
     delegation's sub-second `starts_at`, which §6.2 forbids. It is recorded in DEC-903 for E8-8's owner, and E8-8's
     Rust must compare instants exactly. It exists only in the reference model; no Rust order path uses it yet.
