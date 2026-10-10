@@ -31,8 +31,8 @@ export const BOLD = `${styles.pixel} text-[1.1em] leading-none font-semibold`;
 
 const BEVEL = `press inline-flex cursor-pointer items-center justify-center gap-1.5 ${RAISED} ${styles.pixel} active:border-t-foreground/60 active:border-l-foreground/60 active:border-r-card active:border-b-card disabled:cursor-wait disabled:opacity-70 outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground`;
 
-/** The default button: sun, with the extra dark ring a window's default button had. */
-export const BUTTON = `${BEVEL} h-9 min-w-32 bg-highlight px-4 text-[0.9375rem] text-highlight-foreground ring-1 ring-foreground`;
+/** The default button: the same grey as every other, set apart by the extra ink ring a window's default button had. */
+export const BUTTON = `${BEVEL} h-9 min-w-32 bg-muted px-4 text-[0.9375rem] text-foreground ring-1 ring-foreground`;
 
 export const PLAIN_BUTTON = `${BEVEL} h-8 bg-muted px-3 text-[0.9375rem] text-foreground`;
 
