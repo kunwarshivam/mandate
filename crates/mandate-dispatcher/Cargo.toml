@@ -10,11 +10,13 @@ description = "The notification dispatcher: turns committed causes into sends th
 workspace = true
 
 [dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
 mandate-notify.workspace = true
 mandate-push-relay.workspace = true
+mandate-time.workspace = true
 mandate-webpush.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 base64ct.workspace = true
-mandate-time.workspace = true

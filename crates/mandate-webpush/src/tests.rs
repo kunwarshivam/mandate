@@ -870,7 +870,6 @@ mod bridge {
     /// planted as the bits of a notice id, the one field through which data could enter, under
     /// every text key; the oracle is first shown to find each in the planted bits.
     #[test]
-    #[ignore = "pending E8-14"]
     fn the_plaintext_carries_only_the_notice_id_and_its_text_key() -> Checked {
         let kind_keys: Vec<&str> = NoticeKind::ALL
             .iter()
@@ -906,7 +905,6 @@ mod bridge {
     /// record, whose body is 230 octets under the relay's 512, carrying the text key its row names;
     /// the kinds with no text key are exactly the five pull-only `info` kinds. Every class is met.
     #[test]
-    #[ignore = "pending E8-14"]
     fn every_kind_that_pushes_fits_one_record_under_the_relays_cap() -> Checked {
         assert_eq!(PADDED_RECORD_LEN, PLAINTEXT_BOUND + 1, "DEC-790 item 2");
         let mut classes = Vec::new();
@@ -963,7 +961,6 @@ mod bridge {
     /// Replay: the same notification gives the same bytes, however often and from whichever copy;
     /// a different id or text key gives different bytes, so the sameness is not a constant.
     #[test]
-    #[ignore = "pending E8-14"]
     fn the_same_notification_gives_the_same_plaintext() -> Checked {
         for (row, text) in TextKey::ALL.into_iter().enumerate() {
             let bits = [u8::try_from(row)?.wrapping_add(0x5a); 16];
@@ -1007,7 +1004,6 @@ mod bridge {
     /// link a tap opens is the service worker's, the fixed origin, `/n/`, and the notice id, and
     /// the id the plaintext carries rebuilds exactly that link.
     #[test]
-    #[ignore = "pending E8-14"]
     fn the_only_link_is_the_fixed_origin_and_the_notice_id() -> Checked {
         let origin = Origin::parse(APP_ORIGIN)?;
         let prefix = r#"{"notice":""#;

@@ -12,8 +12,9 @@
   checked and a `ManifestStart` confirmed against the cold manifest, DEC-893, DEC-894, pending), `walk_range` in `verify.rs` (a range walked
   position by position with its count, AU-8; E12-3),
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
-  run from its connection anchor or failing closed without one, DEC-885; and an account-stream
-  `ConnectionRevoked` refused under rule 68, DEC-888; E7-17).
+  run from its connection anchor or failing closed without one, DEC-885; an account-stream
+  `ConnectionRevoked` refused under rule 68, DEC-888; and one stream's anchor folded by
+  `ConnectionAnchor::from_verified` from a `VerifiedPrefix` only, DEC-889, DEC-892; E7-17).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
@@ -22,8 +23,10 @@
   `crates/mandate-journal/tests/trusted_start_rows.rs` (pending E12-3: the resolver over stored
   rows and `ManifestStart::confirm` against `row_cases`, and random row variants by an oracle),
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
-  and every split of every full chain against the full-chain run and an independent scan; and
-  `JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT`, the judged-record lists, against §11's sets),
+  and every split of every full chain against the full-chain run and an independent scan;
+  `JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT`, the judged-record lists, against §11's sets; and
+  the pending E7-17 tests bind each prefix first, and a forged, short, or unbound prefix fails
+  closed),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
   vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3),
   `crates/mandate-journal/tests/range_walk.rs` (seeded faults against an independent comparison)
