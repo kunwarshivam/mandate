@@ -202,6 +202,8 @@ movement and keeps the colour and opacity changes that help comprehension. The t
 - Don't gamify, and don't use colour, motion or size to steer a decision or animate a deadline.
 - Don't show anything as approved or submitted until the runtime records it.
 - Don't let a sign-in message say whether an account or an email address exists.
+- Don't explain on the landing page: no line that says what a screen shows, vouches that it is
+  real, or narrates what the visitor is looking at (DEC-906).
 - Don't pulse, glow, badge or resize Stop, make it loud for a waiting request, or fill anything else
   on the dock or the tab bar with ink.
 
