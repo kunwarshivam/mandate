@@ -1894,8 +1894,9 @@ def start_from_rows(
     prev_hash}`, `{outcome: refused, cause}`, or `{outcome: cold_unreadable}`. Before the lookup, a row
     of the workspace's control stream whose `event_type` is the one the request needs and whose
     body fails §11 check 1 refuses the request: its payload cannot be known (DEC-895 item 1). An
-    anchor whose `token` is `null` was never stamped and is no start, as in `trusted_start`; the
-    seeded bug `row.unstamped_ok` drops that guard on this path (DEC-896)."""
+    anchor whose `token` is `null` was never stamped and is no start, as in `trusted_start`'s
+    `start.null_token` guard; the seeded bug `row.unstamped_ok` drops that guard on this path
+    (DEC-896)."""
     refused = {"outcome": "refused", "cause": "no_start"}
     if request["kind"] == "genesis":
         got = trusted_start([], stream, from_seq, request, skip)
