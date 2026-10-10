@@ -14,10 +14,14 @@ export interface ComposerHandle {
 /**
  * The one message field: Enter sends, Shift+Enter breaks the line, and the field keeps focus after
  * sending. `status` sits above it for what is happening now; `note`, when there is one, sits below it
- * for what a message can and cannot do. Where it sticks is the caller's, through `className`.
+ * for what a message can and cannot do. Where it sticks is the caller's, through `className`. The
+ * label names the field; with `labelShown` it is also written above it, where a screen asks a
+ * question and the field must say "type here" (critique C-4). The send button is flat, with an even
+ * edge: a heavier foot on a round button draws an arc that reads as a loading spinner.
  */
 export function Composer({
   label,
+  labelShown = false,
   note,
   status,
   disabled = false,
@@ -30,6 +34,7 @@ export function Composer({
   initialText = null,
 }: {
   label: string;
+  labelShown?: boolean;
   note?: ReactNode;
   status?: ReactNode;
   disabled?: boolean;
@@ -70,10 +75,17 @@ export function Composer({
           {status}
         </p>
       ) : null}
-      <div className="flex items-end gap-2 rounded-3xl border border-border bg-card py-1.5 pr-1.5 pl-4 focus-within:ring-3 focus-within:ring-ring">
-        <label htmlFor={`${id}-message`} className="sr-only">
+      {labelShown ? (
+        <label htmlFor={`${id}-message`} className="px-4 text-label text-foreground">
           {label}
         </label>
+      ) : null}
+      <div className="flex items-end gap-2 rounded-3xl border border-border bg-card py-1.5 pr-1.5 pl-4 focus-within:ring-3 focus-within:ring-ring">
+        {labelShown ? null : (
+          <label htmlFor={`${id}-message`} className="sr-only">
+            {label}
+          </label>
+        )}
         <textarea
           ref={field}
           id={`${id}-message`}
@@ -88,7 +100,7 @@ export function Composer({
           onKeyDown={keys}
           className="field-sizing-content max-h-48 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-base leading-normal text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
         />
-        <button type="submit" aria-label="Send" className={cn(KEY, "size-11 shrink-0 rounded-full px-0")} disabled={busy || disabled || text.trim() === ""}>
+        <button type="submit" aria-label="Send" className={cn(KEY, "size-11 shrink-0 rounded-full border-b border-b-foreground/45 px-0 active:not-disabled:pt-0")} disabled={busy || disabled || text.trim() === ""}>
           <ArrowUp className="size-6" aria-hidden />
         </button>
       </div>
