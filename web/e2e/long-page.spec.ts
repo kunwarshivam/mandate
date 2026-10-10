@@ -4,7 +4,8 @@ import { type Page, expect, test } from "@playwright/test";
  * The long page under the desktop (DEC-907) in a real browser, in light and dark (the two projects):
  * the desktop fills the first screen, the page rises over it with Sign in and Sign up in its bar, no
  * width from 320 px scrolls sideways, each picture of the app is the one for the page's theme, and
- * with motion reduced nothing on the page moves with the scroll.
+ * with motion reduced nothing on the page moves with the scroll, the owl rests on its first perch,
+ * and the pixel thread is sewn whole at once.
  */
 
 const PATH = "/welcome";
@@ -137,4 +138,54 @@ test("with motion reduced, the owl stands still on the first perch and asks for 
   expect(now.y, "it scrolls with the page, not on its own").toBeCloseTo(at!.y - (await page.evaluate(() => window.scrollY)), 0);
   expect(Math.abs(now.y + now.height / 2 - perch!.y), "it stands on the first perch's top edge").toBeLessThan(now.height);
   expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBeNull();
+});
+
+const painted = (page: Page) =>
+  page.locator("[data-slot=pixel-thread]").evaluate((canvas: HTMLCanvasElement) => {
+    const { data } = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
+    let n = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i]! > 0) n++;
+    return n;
+  });
+
+for (const width of [390, 1440]) {
+  test(`${width} px: with motion reduced, the thread is sewn the whole way down at once, under the words`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await open(page, width);
+    const thread = page.locator("[data-slot=pixel-thread]");
+    await expect(thread).toHaveAttribute("aria-hidden", "true");
+    await expect(thread).toHaveAttribute("data-thread", "whole");
+    for (const part of ["#threads", "#asking", "#limits"]) {
+      await page.locator(part).scrollIntoViewIfNeeded();
+      await expect.poll(() => painted(page), `stitches beside ${part}`).toBeGreaterThan(0);
+    }
+    const title = (await page.locator("#limits-title").boundingBox())!;
+    const onTop = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("#limits-title") !== null, [title.x + 4, title.y + title.height / 2]);
+    expect(onTop, "the words sit over the thread").toBe(true);
+  });
+}
+
+test("with motion allowed, the thread is sewn on as the visitor reads down", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await open(page, 1440);
+  const thread = page.locator("[data-slot=pixel-thread]");
+  await page.locator("#intro-title").scrollIntoViewIfNeeded();
+  await expect(thread).toHaveAttribute("data-thread", "sewing");
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+  await expect.poll(() => painted(page)).toBeGreaterThan(0);
+});
+
+test("the lock screen behind the notification is a night in pixels, and the notification stays readable over it", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, 1440);
+  await page.locator("#asking").scrollIntoViewIfNeeded();
+  const night = page.locator("#asking [data-slot=pixel-night]");
+  await expect(night).toHaveAttribute("aria-hidden", "true");
+  await expect(night).toBeVisible();
+  expect(await night.locator("rect").count()).toBeGreaterThan(100);
+  const push = page.locator("#asking [data-reveal=drop]");
+  await expect(push).toBeInViewport({ ratio: 1 });
+  const box = (await push.boundingBox())!;
+  const onTop = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-reveal=drop]") !== null, [box.x + box.width / 2, box.y + box.height / 2]);
+  expect(onTop, "the notification sits over the night").toBe(true);
 });
