@@ -99,13 +99,18 @@ anything here.
 
 **Open PRs needing a review verdict, then approval:**
 **Being reworked:**
-- **#1254: bracket-leg tests (DEC-878).** APPROVED at `f4cc05d8` after round 2 passed. **Next:**
-  the bracket-leg implementation PR, using the scratch fix in #1254's body. That PR must:
-  - delete `no_leg_id_is_read_from_a_broker_order` deliberately, with its helper and imports;
-  - add the two round-2 minor cases (a stop leg carrying a limit; a nonzero leg `filled_qty`)
-    first, as a tests correction or inside its own tests PR;
-  - pass mutants on the `reconcile.rs` and `wire.rs` diff with 0 missed.
-  This blocks FT-11 for E2.
+- **The bracket-leg implementation: #1269 (tests correction, head `5ae5a217`) and #1270
+  (implementation, head `9857dfc3`, stacked).** #1254 has merged. This blocks FT-11 for E2.
+  - Builder results: mutants 25 caught, 0 missed; no regressions across executor, alpaca, shell
+    and paper.
+  - A Sonnet review of both was running. If there's no verdict in the bodies, run one.
+  - Approve #1269 first. After it squash-merges:
+    1. merge `main` into `claude/bracket-leg-impl`;
+    2. re-delete any resurrected `pending E7-4` ignore lines and rows;
+    3. check that the test diff is only those 3 deletions plus the deliberate stub-test deletion
+       (DEC-878 item 7);
+    4. approve #1270.
+
 - **E7-28 round 6 is pushed:** #1234 at `6e4e47a1`, #1169 at `0ec45247`.
   - Closed: B1 to B8 and the round-5 mutants. All 45 planted bugs are caught, and the real
     repository passes.
