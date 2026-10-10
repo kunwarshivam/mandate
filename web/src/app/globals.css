@@ -711,6 +711,13 @@ html:root[data-mode="dark"] [data-slot="owl"] {
   animation: assistant-bob 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
+/* The app in the welcome page's browser window holds every loop still while the page covers the
+   desktop (`components/site/scroll/ambient.tsx`). Each loop's `animation` shorthand sets it
+   running, so this must outrank them. */
+:root[data-ambient="paused"] :is(*, ::before, ::after) {
+  animation-play-state: paused !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;

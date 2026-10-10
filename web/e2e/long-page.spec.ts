@@ -118,6 +118,41 @@ test("the Scroll cue shows on the first screen, takes the visitor to the opening
   expect(top, "the risen page covers the cue").toBe(false);
 });
 
+test("once the page has covered the desktop, nothing on it or in its app moves, it stays readable, and it moves again before it shows", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await open(page, 1440);
+  await expect(page.locator("[data-slot=app-frame]")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
+  const cue = page.locator("[data-slot=scroll-cue]");
+  const desktop = page.locator("[data-slot=desktop-stage]");
+  const running = () =>
+    desktop.evaluate((stage) => {
+      const app = stage.querySelector("iframe")!.contentDocument!;
+      const moving = (all: Animation[]) => all.filter((a) => a.playState === "running").length;
+      return { desktop: moving(stage.getAnimations({ subtree: true })), app: moving(app.getAnimations()) };
+    });
+  await expect(desktop).toHaveAttribute("data-ambient", "playing");
+  expect((await running()).app, "the app's owls blink").toBeGreaterThan(0);
+  await page.evaluate(() => window.scrollTo(0, window.innerHeight));
+  await expect(desktop, "just covered, it still moves").toHaveAttribute("data-ambient", "playing");
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(desktop).toHaveAttribute("data-ambient", "paused");
+  expect(await running()).toEqual({ desktop: 0, app: 0 });
+  for (const [role, name] of [["list", "Desktop"], ["tabpanel", "Inside the app"], ["button", "Start"], ["link", "Scroll"]] as const) {
+    await expect(page.getByRole(role, { name, exact: true }), `a screen reader still finds the covered desktop's ${role} ${name}`).toHaveCount(1);
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(desktop).toHaveAttribute("data-ambient", "playing");
+  const back = await running();
+  expect(back.desktop, "the desktop's loops").toBeGreaterThan(0);
+  expect(back.app, "the app's owls").toBeGreaterThan(0);
+  await expect(cue).toBeInViewport({ ratio: 1 });
+  const box = (await cue.boundingBox())!;
+  const shows = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-slot=scroll-cue]") !== null, [box.x + box.width / 2, box.y + box.height / 2]);
+  expect(shows, "back on the first screen, the cue is drawn and on top").toBe(true);
+  expect(errors).toEqual([]);
+});
+
 for (const width of [390, 1024, 1280, 1440]) {
   test(`${width} px: the Scroll cue sits in the middle of the screen`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });

@@ -14,6 +14,13 @@
   background: var(--background);
 }
 
+/* Once the page has covered it, every loop on the desktop holds still until it is about to show
+   again (`ambient.tsx`). It stays drawn, so its heading, its landmarks and the app stay readable to
+   a screen reader. Each loop's `animation` shorthand sets it running, so this must outrank them. */
+.stage[data-ambient="paused"] :is(*, ::before, ::after) {
+  animation-play-state: paused !important;
+}
+
 /*
  * Gascogne Serial is the heading face asked for; it is sold under a paid web licence, and spending
  * is the founder's call (DEC-79), so Sorts Mill Goudy, a free revival of the same Goudy design,
@@ -255,9 +262,9 @@
     animation: twinkle 3.1s steps(1) infinite;
   }
 
-  /* Out of view, the loops hold still (`ambient.tsx`, and the cue once the page covers it). The
-     moon's rise follows the scroll, so it is never held. */
-  [data-ambient="paused"] :is(.wave, .foam, .glintA, .glintB, .wingsUp, .wingsDown, .twinkle, [data-slot="cue-arrow"]) {
+  /* Out of view, the loops hold still (`ambient.tsx`). The moon's rise follows the scroll, so it is
+     never held. */
+  [data-ambient="paused"] :is(.wave, .foam, .glintA, .glintB, .wingsUp, .wingsDown, .twinkle) {
     animation-play-state: paused;
   }
 

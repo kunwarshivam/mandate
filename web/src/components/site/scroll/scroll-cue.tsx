@@ -63,10 +63,7 @@ export function ScrollCue() {
       if (!raf) raf = window.requestAnimationFrame(place);
     };
     const onScroll = () => {
-      const covered = window.scrollY >= window.innerHeight;
-      const ambient = covered ? "paused" : "playing";
-      if (cue.dataset.ambient !== ambient) cue.dataset.ambient = ambient;
-      if (!covered) follow();
+      if (window.scrollY < window.innerHeight) follow();
     };
     const outside = (target: Node | EventTarget | null) => !(target instanceof Node && cue.contains(target));
     const onMotion = (e: Event) => {
@@ -81,7 +78,6 @@ export function ScrollCue() {
     const resizes = new ResizeObserver(follow);
     const motions = ["animationstart", "animationend", "transitionstart", "transitionend"] as const;
     place();
-    onScroll();
     changes.observe(stage, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["style", "class", "hidden"] });
     resizes.observe(stage);
     for (const m of motions) stage.addEventListener(m, onMotion);
