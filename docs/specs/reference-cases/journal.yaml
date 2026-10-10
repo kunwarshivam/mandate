@@ -34135,6 +34135,31 @@ cold_records:
       expect:
         outcome: refused
         cause: anchor_root_mismatch
+    - name: anchor_unstamped_and_rehashed
+      clause: 'DEC-896, §9.14, DEC-783 item 8: a null token vouches for nothing, the row otherwise sound'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 10
+      request:
+        kind: anchor
+        anchor_event_id: 01J8Z3C6A000000000000000R4
+      replace:
+        index: 3
+        row:
+          stream_id: ctl:ws_01J8Z2
+          seq: 4
+          event_id: 01J8Z3C6A000000000000000R4
+          event_type: AnchorComputed
+          schema_version: 1
+          environment: paper
+          recorded_at: '2026-09-21T16:00:00.000000000Z'
+          prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
+          hash: abd5ddb2e2287697af92c320f589a543091aa67381a125d112f5f1a070b76e4e
+          body: '{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3C6A000000000000000R4","event_time":"2026-09-21T16:00:00.000000000Z","event_type":"AnchorComputed","payload":{"leaves":[{"hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":9,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},{"hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","seq":3,"stream_id":"ctl:ws_01J8Z2"}],"root":"e1dcdef4be357a4c522d472dd31bdcb2b8029506ea5536152e1a0d1ba03e976d","token":null},"pii_refs":[],"prev_hash":"d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9","recorded_at":"2026-09-21T16:00:00.000000000Z","schema_version":1,"seq":4,"stream_id":"ctl:ws_01J8Z2"}'
+      cold:
+        state: unreadable
+      expect:
+        outcome: refused
+        cause: no_start
 verification_runs:
   spec: docs/specs/journal.md v0.36 §9.13 and §11 (DEC-788, DEC-789)
   drafts:
