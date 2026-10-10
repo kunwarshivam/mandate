@@ -352,6 +352,11 @@ fn written(
     records: &[(&'static str, String)],
     verify: fn(&[StoredEvent]) -> Result<(), ConnectionVerifyError>,
 ) -> Result<(), ConnectionVerifyError> {
+    verify(&written_rows(records))
+}
+
+/// The rows of a case written here, each record a base draft and its changes after its event id.
+fn written_rows(records: &[(&'static str, String)]) -> Vec<StoredEvent> {
     let records: Vec<String> = records
         .iter()
         .enumerate()
@@ -362,7 +367,7 @@ fn written(
         })
         .collect();
     let case = parse(format!(r#"{{"records":[{}]}}"#, records.join(",")).as_bytes()).unwrap();
-    verify(&rows(&section(), &case))
+    rows(&section(), &case)
 }
 
 fn refused(index: usize, rule: ConnectionStreamRule) -> Result<(), ConnectionVerifyError> {
@@ -1306,6 +1311,27 @@ fn an_anchored_run_fails_closed_at_another_streams_record() {
             at(&chain[3], ConnectionCheck::Unanchored),
             "split at {k}"
         );
+    }
+}
+
+/// DEC-889 item 2 and DEC-888: an account stream's judged record is another stream's, so an
+/// anchored control run fails closed at it, an account-stream `ConnectionRevoked` included, from
+/// an empty anchor, a part of the prefix, or the whole of it.
+#[test]
+#[ignore = "pending E7-17"]
+fn an_anchored_run_fails_closed_at_an_account_streams_record() {
+    let own = control(&["request X A1", "establish X A1"]);
+    let revoked_on_account = ("checked_start", set("event_type", r#""ConnectionRevoked""#));
+    for foreign in [check("connect"), revoked_on_account] {
+        let chain = sealed(&[own.clone(), written_rows(&[foreign])].concat());
+        assert!(chain[2].stream_id.starts_with("acct:"), "an account stream");
+        for k in 0..=2 {
+            let (prefix, range) = chain.split_at(k);
+            let start = verified_start(prefix, start_after(prefix));
+            let got = verify_connection_lifecycle_from(start, range);
+            let want = at(&chain[2], ConnectionCheck::Unanchored);
+            assert_eq!(got, want, "{} after a split at {k}", chain[2].event_type);
+        }
     }
 }
 
