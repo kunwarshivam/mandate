@@ -148,4 +148,35 @@ describe("its shading", () => {
     expect(g.fill.mock.calls.length).toBeLessThan(faces.length);
     expect(g.fill.mock.calls.length).toBeGreaterThan(faces.length / 4);
   });
+
+  it("puts every corner where turning it with the head, then the yaw, pitch and roll of the body, puts it in perspective", () => {
+    const pose: Pose = { ...FRONT, yaw: 0.5, pitch: 0.3, roll: -0.2, head: 0.9, flap: 0 };
+    const turn = ([x, y, z]: readonly number[], head: boolean) => {
+      const h = head ? pose.head : 0;
+      const [x0, z0] = [x! * Math.cos(h) + z! * Math.sin(h), -x! * Math.sin(h) + z! * Math.cos(h)];
+      const [x1, z1] = [x0 * Math.cos(pose.yaw) + z0 * Math.sin(pose.yaw), -x0 * Math.sin(pose.yaw) + z0 * Math.cos(pose.yaw)];
+      const [y2, z2] = [y! * Math.cos(pose.pitch) - z1 * Math.sin(pose.pitch), y! * Math.sin(pose.pitch) + z1 * Math.cos(pose.pitch)];
+      const [x3, y3] = [x1 * Math.cos(pose.roll) - y2 * Math.sin(pose.roll), x1 * Math.sin(pose.roll) + y2 * Math.cos(pose.roll)];
+      const k = 70 / (70 - z2);
+      return `${(40 + x3 * k * 2).toFixed(6)},${(40 - y3 * k * 2).toFixed(6)}`;
+    };
+    const faces = skin(owlVoxels());
+    const expected = new Set(faces.flatMap((f) => f.corners.map((c) => turn(c, f.part === "head"))));
+    const drawn: string[] = [];
+    const at = (x: number, y: number) => drawn.push(`${x.toFixed(6)},${y.toFixed(6)}`);
+    const g = { beginPath: vi.fn(), moveTo: at, lineTo: at, closePath: vi.fn(), fill: vi.fn(), stroke: vi.fn(), lineJoin: "", lineWidth: 0, strokeStyle: "", fillStyle: "" };
+    drawOwl(g as unknown as CanvasRenderingContext2D, faces, pose, INKS, 40, 40, 2);
+    expect(drawn.length).toBeGreaterThan(100);
+    expect(drawn.filter((p) => !expected.has(p))).toEqual([]);
+  });
+
+  it("turns each part once a frame, not once for every corner, so a frame of flight stays cheap", () => {
+    const cos = vi.spyOn(Math, "cos");
+    const faces = skin(owlVoxels());
+    const g = { beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(), stroke: vi.fn(), lineJoin: "", lineWidth: 0, strokeStyle: "", fillStyle: "" };
+    drawOwl(g as unknown as CanvasRenderingContext2D, faces, { ...FRONT, yaw: 0.6, pitch: 0.2, head: -0.4, flap: 0.9 }, INKS, 80, 80, 5);
+    expect(faces.length * 4, "corners").toBeGreaterThan(1000);
+    expect(cos.mock.calls.length, "four parts, each read off four points").toBeLessThanOrEqual(64);
+    cos.mockRestore();
+  });
 });
