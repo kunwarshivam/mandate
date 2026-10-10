@@ -127,8 +127,8 @@ the owl, the rules and the record.
       under reduced motion it is simply there. (DEC-514)
 - [x] **Silence as a feature.** Already shipped: the all-clear is the brand owl and "All clear.
       Nothing needs you."
-- [ ] **One era of type on the landing page:** the Pixelify wordmark, not the figlet ASCII. Waits
-      on the founder: DEC-467 chose the upright block letters on 2026-10-05.
+- [x] **One era of type on the landing page:** a bitmap wordmark on the owls' pixel grid, not the
+      figlet ASCII; the founder asked to move on from it. (DEC-903)
 
 ## F. Home and the agent page (DEC)
 
