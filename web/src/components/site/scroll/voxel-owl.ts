@@ -230,6 +230,33 @@ function rotate([x0, y0, z0]: Vec, { yaw, pitch, roll }: Pose): Vec {
   return [x1 * c - y2 * s, x1 * s + y2 * c, z2];
 }
 
+/** A turn as the three columns of its matrix. */
+type Turn = readonly [Vec, Vec, Vec];
+
+/** Where a part's points go in a pose: turned with the part and then the body, and shifted by the part's pivot. */
+interface Move {
+  turn: Turn;
+  shift: Vec;
+}
+
+function apply([cx, cy, cz]: Turn, [x, y, z]: Vec): Vec {
+  return [cx[0] * x + cy[0] * y + cz[0] * z, cx[1] * x + cy[1] * y + cz[1] * z, cx[2] * x + cy[2] * y + cz[2] * z];
+}
+
+function add(a: Vec, b: Vec): Vec {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+/**
+ * A part's move in a pose, read off `withPart` and `rotate` once: both are linear but for the wing's
+ * pivot, so the images of the three axes and of the origin give every point's. The owl is redrawn
+ * every frame it flies, and this turns each part once a frame rather than once a corner.
+ */
+function moveOf(part: OwlPart, pose: Pose): Move {
+  const column = (e: Vec) => rotate(withPart(e, part, pose, false), pose);
+  return { turn: [column([1, 0, 0]), column([0, 1, 0]), column([0, 0, 1])], shift: rotate(withPart([0, 0, 0], part, pose, true), pose) };
+}
+
 /** The light comes from the upper left, in front; a face takes one of four tones by how squarely it meets it. */
 const LIGHT: Vec = (() => {
   const v = [-0.45, 0.75, 0.55] as const;
@@ -264,12 +291,18 @@ export function drawOwl(g: CanvasRenderingContext2D, faces: Face[], pose: Pose, 
   const sy = pose.stretch;
   const visible: { pts: [number, number][]; depth: number; fill: string }[] = [];
   const tones = new Map<string, string>();
+  const moves = new Map<OwlPart, Move>();
   for (const f of faces) {
-    const n = rotate(withPart(f.normal, f.part, pose, false), pose);
+    let move = moves.get(f.part);
+    if (!move) {
+      move = moveOf(f.part, pose);
+      moves.set(f.part, move);
+    }
+    const n = apply(move.turn, f.normal);
     if (n[2] <= 0) continue;
     let depth = 0;
     const pts = f.corners.map((corner) => {
-      const [x, y, z] = rotate(withPart(corner, f.part, pose, true), pose);
+      const [x, y, z] = add(apply(move.turn, corner), move.shift);
       depth += z;
       const k = EYE_DISTANCE / (EYE_DISTANCE - z);
       return [cx + x * k * unit * sx, cy - y * k * unit * sy] as [number, number];

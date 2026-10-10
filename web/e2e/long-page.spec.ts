@@ -118,6 +118,41 @@ test("the Scroll cue shows on the first screen, takes the visitor to the opening
   expect(top, "the risen page covers the cue").toBe(false);
 });
 
+test("once the page has covered the desktop, nothing on it or in its app moves, it stays readable, and it moves again before it shows", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await open(page, 1440);
+  await expect(page.locator("[data-slot=app-frame]")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
+  const cue = page.locator("[data-slot=scroll-cue]");
+  const desktop = page.locator("[data-slot=desktop-stage]");
+  const running = () =>
+    desktop.evaluate((stage) => {
+      const app = stage.querySelector("iframe")!.contentDocument!;
+      const moving = (all: Animation[]) => all.filter((a) => a.playState === "running").length;
+      return { desktop: moving(stage.getAnimations({ subtree: true })), app: moving(app.getAnimations()) };
+    });
+  await expect(desktop).toHaveAttribute("data-ambient", "playing");
+  expect((await running()).app, "the app's owls blink").toBeGreaterThan(0);
+  await page.evaluate(() => window.scrollTo(0, window.innerHeight));
+  await expect(desktop, "just covered, it still moves").toHaveAttribute("data-ambient", "playing");
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(desktop).toHaveAttribute("data-ambient", "paused");
+  expect(await running()).toEqual({ desktop: 0, app: 0 });
+  for (const [role, name] of [["list", "Desktop"], ["tabpanel", "Inside the app"], ["button", "Start"], ["link", "Scroll"]] as const) {
+    await expect(page.getByRole(role, { name, exact: true }), `a screen reader still finds the covered desktop's ${role} ${name}`).toHaveCount(1);
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(desktop).toHaveAttribute("data-ambient", "playing");
+  const back = await running();
+  expect(back.desktop, "the desktop's loops").toBeGreaterThan(0);
+  expect(back.app, "the app's owls").toBeGreaterThan(0);
+  await expect(cue).toBeInViewport({ ratio: 1 });
+  const box = (await cue.boundingBox())!;
+  const shows = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-slot=scroll-cue]") !== null, [box.x + box.width / 2, box.y + box.height / 2]);
+  expect(shows, "back on the first screen, the cue is drawn and on top").toBe(true);
+  expect(errors).toEqual([]);
+});
+
 for (const width of [390, 1024, 1280, 1440]) {
   test(`${width} px: the Scroll cue sits in the middle of the screen`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -129,11 +164,57 @@ for (const width of [390, 1024, 1280, 1440]) {
   });
 }
 
+test("the Scroll cue follows the browser window's status bar when the window is dragged", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, 1440);
+  const cue = page.locator("[data-slot=scroll-cue]");
+  const status = page.locator("[data-window=home] [data-slot=status-text]");
+  await expect(cue).toHaveAttribute("data-at", "status");
+  const middle = async () => {
+    const box = (await status.boundingBox())!;
+    return Math.round(box.y + box.height / 2);
+  };
+  const cueMiddle = async () => {
+    const box = (await cue.boundingBox())!;
+    return Math.round(box.y + box.height / 2);
+  };
+  const before = await middle();
+  expect(await cueMiddle()).toBe(before);
+  const bar = (await page.locator("[data-window=home] [data-slot=title-bar]").first().boundingBox())!;
+  await page.mouse.move(bar.x + bar.width / 3, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + bar.width / 3, bar.y + bar.height / 2 - 30, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(middle, "the window moved up").toBeLessThan(before - 10);
+  await expect.poll(async () => (await cueMiddle()) - (await middle()), "the cue stays on the status bar's row").toBe(0);
+  await expect(cue).toHaveAttribute("data-at", "status");
+});
+
+test("every part of the desktop and the page's bar sits in a landmark", async ({ page }) => {
+  await open(page, 1440);
+  const outside = await page.evaluate(() => {
+    const LANDMARK = "main, header, footer, nav, aside, section[aria-label], section[aria-labelledby], [role=region][aria-label], form[aria-label]";
+    const parts = [
+      "[data-slot=desktop-icons]",
+      "[data-slot=desktop-icons-right]",
+      "[data-slot=taskbar] ul",
+      "[data-slot=taskbar] a",
+      "[data-slot=scroll-cue]",
+      "[data-slot=page-bar] a",
+    ];
+    return parts.flatMap((p) => [...document.querySelectorAll(p)].filter((el) => !el.parentElement?.closest(LANDMARK)).map(() => p));
+  });
+  expect(outside).toEqual([]);
+  await expect(page.getByRole("region", { name: "Desktop" })).toHaveCount(1);
+  await expect(page.getByRole("banner")).toHaveCount(1);
+  await expect(page.getByRole("banner").getByRole("link", { name: "Sign in" })).toBeVisible();
+});
+
 test("with motion allowed, the owl peeks over the Scroll cue in the middle of the screen", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect(owl).toHaveAttribute("data-owl", "peeking");
   await expect.poll(async () => {
     const box = (await owl.boundingBox())!;
     return Math.round(box.x + box.width / 2);
@@ -144,7 +225,7 @@ test("with motion allowed, the owl flies down the page and the pieces settle as 
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect(owl).toHaveAttribute("data-owl", "peeking");
   await expect(owl).toHaveAttribute("aria-hidden", "true");
   const where = () => owl.evaluate((el) => getComputedStyle(el).transform);
   await page.locator("#threads").scrollIntoViewIfNeeded();
@@ -153,6 +234,37 @@ test("with motion allowed, the owl flies down the page and the pieces settle as 
   await expect.poll(where).not.toBe(at);
   await expect(page.locator("#limits-title")).toHaveAttribute("data-shown", "");
   expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBe("on");
+});
+
+test("with motion allowed, the owl lands, then draws nothing but a blink until the page moves again", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() => {
+    const clear = CanvasRenderingContext2D.prototype.clearRect;
+    (window as unknown as { owlPaints: number }).owlPaints = 0;
+    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+      if (this.canvas.dataset.slot === "flying-owl") (window as unknown as { owlPaints: number }).owlPaints++;
+      return clear.apply(this, args);
+    };
+  });
+  await open(page, 1440);
+  const owl = page.locator("[data-slot=flying-owl]");
+  const paints = () => page.evaluate(() => (window as unknown as { owlPaints: number }).owlPaints);
+  await page.locator("#threads").scrollIntoViewIfNeeded();
+  await expect
+    .poll(() => page.evaluate(() => document.getAnimations().filter((a) => a instanceof CSSTransition && a.playState === "running").length), { message: "the pieces have settled", timeout: 10_000 })
+    .toBe(0);
+  const phase = await page.evaluate(() => performance.now() % 6800);
+  if (phase < 2700 || phase > 4000) await page.waitForTimeout((2700 - phase + 6800) % 6800);
+  await expect(owl, "a glance starts every 6.8 s and ends 1.5 s in; these two seconds are clear of both").toHaveAttribute("data-owl", "perched");
+  const landed = await paints();
+  await page.waitForTimeout(2000);
+  expect((await paints()) - landed, "in two seconds, at most a blink's two paints").toBeLessThanOrEqual(2);
+  const bobs = await owl.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName));
+  expect(bobs, "it bobs in CSS").toHaveLength(1);
+  expect(bobs[0]).toMatch(/owl-bob$/);
+  await page.mouse.wheel(0, 400);
+  await expect(owl).not.toHaveAttribute("data-owl", "perched");
+  await expect(owl).toHaveAttribute("data-owl", "perched", { timeout: 10_000 });
 });
 
 test("with motion reduced, the owl stands still on the first perch and asks for no frame", async ({ page }) => {
@@ -236,7 +348,11 @@ test("with motion allowed, the water moves and the moon rises out of it as the o
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const sea = page.locator("[data-slot=long-page] [data-slot=pixel-sea]");
+  const looping = () => sea.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.timeline instanceof DocumentTimeline && a.playState === "running").length);
+  await expect(sea, "out of view, the sea holds still").toHaveAttribute("data-ambient", "paused");
+  expect(await looping()).toBe(0);
   await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - window.innerHeight + 20, behavior: "instant" }));
+  await expect(sea).toHaveAttribute("data-ambient", "playing");
   await expect.poll(() => risen(page), "the moon is still under the water as the sea comes in").toBeLessThan(0.3);
   await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 200, behavior: "instant" }));
   await expect.poll(() => risen(page), "and half risen once the opening is in view").toBeCloseTo(0.5, 2);

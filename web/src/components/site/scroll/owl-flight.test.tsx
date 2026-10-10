@@ -1,7 +1,10 @@
-import { render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LongPage } from "./long-page";
 import { OwlFlight, nearestPerch, owlSize, perchOn } from "./owl-flight";
+import { CUE_MOVED } from "./scroll-cue";
 
 /**
  * The flying owl (DEC-907): decoration only, it stands on the perches the page marks, wears its
@@ -45,7 +48,7 @@ describe("the owl's canvas", () => {
     expect(canvas.dataset.owl).toBe("resting");
     expect(canvas.style.position).toBe("absolute");
     expect(g.fill).toHaveBeenCalled();
-    expect(frames.mock.calls.filter(([cb]) => cb.name === "frame")).toHaveLength(0);
+    expect(frames.mock.calls.filter(([cb]) => cb.name === "fly")).toHaveLength(0);
   });
 
   it("with motion allowed, flies on animation frames and stops when it leaves the page", () => {
@@ -54,9 +57,116 @@ describe("the owl's canvas", () => {
     const frames = vi.spyOn(window, "requestAnimationFrame");
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
     const { unmount } = render(<LongPage />);
-    expect(frames.mock.calls.some(([cb]) => cb.name === "frame")).toBe(true);
+    expect(frames.mock.calls.some(([cb]) => cb.name === "fly")).toBe(true);
     unmount();
     expect(cancel).toHaveBeenCalled();
+  });
+
+  it("with motion reduced, nothing that moves the page asks for a frame", () => {
+    motion(true);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context() as unknown as RenderingContext);
+    const frames = vi.spyOn(window, "requestAnimationFrame");
+    render(<LongPage />);
+    for (const type of ["scroll", "resize"]) window.dispatchEvent(new Event(type));
+    document.dispatchEvent(new Event(CUE_MOVED));
+    expect(frames.mock.calls.filter(([cb]) => cb.name === "fly")).toHaveLength(0);
+  });
+});
+
+/**
+ * A clock the owl's frames, timers and `performance.now` all run on, starting at 0, so the times of
+ * its blinks (every 4.7 s, for 130 ms) and glances (every 6.8 s, for 1.5 s) are known.
+ */
+function clock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  motion(false);
+  const g = context();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(g as unknown as RenderingContext);
+  const frames = vi.spyOn(window, "requestAnimationFrame");
+  render(<LongPage />);
+  const canvas = document.querySelector<HTMLCanvasElement>("[data-slot=flying-owl]")!;
+  const asked = () => frames.mock.calls.filter(([cb]) => cb.name === "fly").length;
+  const until = (at: number) => act(() => vi.advanceTimersByTime(at - performance.now()));
+  return { g, canvas, frames, asked, until };
+}
+
+describe("when it has nowhere to go", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stands perched once every spring has come to rest, and asks for no more frames", () => {
+    const { canvas, frames, asked, until } = clock();
+    until(4000);
+    expect(canvas.dataset.owl).toBe("perched");
+    frames.mockClear();
+    until(4600);
+    expect(asked(), "a standing owl asks for no frame").toBe(0);
+  });
+
+  it("blinks while it stands with two paints and no frame, and turns its head to glance on its springs, then stands again", () => {
+    const { g, canvas, frames, asked, until } = clock();
+    until(4600);
+    expect(canvas.dataset.owl).toBe("perched");
+    frames.mockClear();
+    g.clearRect.mockClear();
+    until(4700);
+    expect(g.clearRect, "its eyes shut at the blink").toHaveBeenCalledTimes(1);
+    until(4900);
+    expect(g.clearRect, "and open again").toHaveBeenCalledTimes(2);
+    expect(asked(), "a blink is no flight").toBe(0);
+    until(6900);
+    expect(asked(), "a glance turns the head on its springs").toBeGreaterThan(0);
+    until(8250);
+    expect(canvas.dataset.owl, "it holds the glance standing").toBe("perched");
+    frames.mockClear();
+    until(8350);
+    expect(asked(), "and looks back when the glance is over").toBeGreaterThan(0);
+    until(10000);
+    expect(canvas.dataset.owl).toBe("perched");
+  }, 20_000);
+
+  it("flies again when the page scrolls or resizes, the pointer moves, the cue moves, the theme changes, or the page shifts under it", async () => {
+    const { canvas, frames, asked, until } = clock();
+    const wakes: [string, () => void][] = [
+      ["scroll", () => window.dispatchEvent(new Event("scroll"))],
+      ["resize", () => window.dispatchEvent(new Event("resize"))],
+      ["pointer", () => window.dispatchEvent(Object.assign(new Event("pointermove"), { pointerType: "mouse", clientX: 10, clientY: 10 }))],
+      ["cue", () => document.querySelector("[data-slot=long-page]")!.dispatchEvent(new Event(CUE_MOVED, { bubbles: true }))],
+      ["transition", () => document.querySelector("[data-reveal]")!.dispatchEvent(new Event("transitionstart", { bubbles: true }))],
+      ["theme", () => document.documentElement.setAttribute("data-mode", document.documentElement.dataset.mode === "dark" ? "light" : "dark")],
+    ];
+    const standing = [4000, 6000, 10000, 16500, 18000, 19500];
+    for (const [i, [what, wake]] of wakes.entries()) {
+      until(standing[i]!);
+      expect(canvas.dataset.owl, `standing before the ${what}`).toBe("perched");
+      frames.mockClear();
+      wake();
+      await act(() => Promise.resolve());
+      expect(asked(), `the ${what} wakes it`).toBe(1);
+    }
+    document.documentElement.removeAttribute("data-mode");
+  }, 30_000);
+
+  it("a touch does not wake it, as it has no pointer to follow", () => {
+    const { canvas, frames, asked, until } = clock();
+    until(4000);
+    expect(canvas.dataset.owl).toBe("perched");
+    frames.mockClear();
+    window.dispatchEvent(Object.assign(new Event("pointermove"), { pointerType: "touch", clientX: 10, clientY: 10 }));
+    expect(asked()).toBe(0);
+  });
+
+  it("bobs on the air in CSS as it flies and stands, by its own size, and only with motion allowed and not while peeking", () => {
+    const { canvas, until } = clock();
+    until(100);
+    expect(canvas.style.getPropertyValue("--owl-bob")).toBe(`${(owlSize(window.innerWidth) * 0.035).toFixed(2)}px`);
+    const css = readFileSync(join(__dirname, "scroll.module.css"), "utf8");
+    const at = css.indexOf("@media (prefers-reduced-motion: no-preference)");
+    expect(css.indexOf("owl-bob 3.27s"), "the bob runs with motion allowed").toBeGreaterThan(at);
+    expect(css.slice(0, at)).not.toContain("animation: owl-bob");
+    expect(css).toMatch(/\.owl:is\(\[data-owl="flying"\], \[data-owl="perched"\]\) \{\s*animation: owl-bob/);
+    expect(css).toContain("translate: 0 calc(-1 * var(--owl-bob))");
   });
 });
 

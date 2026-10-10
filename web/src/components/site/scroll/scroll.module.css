@@ -14,6 +14,13 @@
   background: var(--background);
 }
 
+/* Once the page has covered it, every loop on the desktop holds still until it is about to show
+   again (`ambient.tsx`). It stays drawn, so its heading, its landmarks and the app stay readable to
+   a screen reader. Each loop's `animation` shorthand sets it running, so this must outrank them. */
+.stage[data-ambient="paused"] :is(*, ::before, ::after) {
+  animation-play-state: paused !important;
+}
+
 /*
  * Gascogne Serial is the heading face asked for; it is sold under a paid web licence, and spending
  * is the founder's call (DEC-79), so Sorts Mill Goudy, a free revival of the same Goudy design,
@@ -244,9 +251,21 @@
     animation: wings-down 2.6s steps(1) calc(var(--i) * -0.9s) infinite;
   }
 
+  /* The flying owl bobs on the air as it flies and stands, here rather than in its script, so a
+     standing owl asks for no frame. Peeking over the cue, it sways and bobs in its script. */
+  .owl:is([data-owl="flying"], [data-owl="perched"]) {
+    animation: owl-bob 3.27s infinite;
+  }
+
   /* A star on the lock screen's night blinks now and then. */
   .twinkle {
     animation: twinkle 3.1s steps(1) infinite;
+  }
+
+  /* Out of view, the loops hold still (`ambient.tsx`). The moon's rise follows the scroll, so it is
+     never held. */
+  [data-ambient="paused"] :is(.wave, .foam, .glintA, .glintB, .wingsUp, .wingsDown, .twinkle) {
+    animation-play-state: paused;
   }
 
   .stage > :not(.cue) {
@@ -457,6 +476,24 @@
   }
   to {
     translate: 0 50%;
+  }
+}
+
+/* A sine wave in four quarters: quick through the middle, slow at the top and the bottom. */
+@keyframes owl-bob {
+  0%,
+  50%,
+  100% {
+    translate: 0 0;
+    animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
+  }
+  25% {
+    translate: 0 calc(-1 * var(--owl-bob));
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
+  }
+  75% {
+    translate: 0 var(--owl-bob);
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
   }
 }
 

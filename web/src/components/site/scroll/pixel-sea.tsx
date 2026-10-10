@@ -280,7 +280,7 @@ function Sea({ cell, className }: { cell: 6 | 8; className: string }) {
 
 export function PixelSea({ className }: { className?: string }) {
   return (
-    <div aria-hidden className={`${styles.sea} pointer-events-none ${className ?? ""}`} data-slot="pixel-sea" data-thread-band="">
+    <div aria-hidden className={`${styles.sea} pointer-events-none ${className ?? ""}`} data-slot="pixel-sea" data-thread-band="" data-ambient="">
       <Sea cell={6} className="absolute inset-0 sm:hidden" />
       <Sea cell={8} className="absolute inset-0 max-sm:hidden" />
     </div>

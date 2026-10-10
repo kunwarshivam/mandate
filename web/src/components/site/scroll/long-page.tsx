@@ -6,6 +6,7 @@ import { LOGIN_PATH } from "@/lib/auth-routes";
 import { cn } from "@/lib/utils";
 import { artwork } from "../art";
 import { BetaForm } from "../beta-form";
+import { Ambient } from "./ambient";
 import { LockScreen } from "./lock-screen";
 import { OwlFlight } from "./owl-flight";
 import { DISPLAY, DISPLAY_MD, INTRO_ID, LEAD, LEAD_ON_TIDE, PAGE_FORM_ID, PRIMARY, SECONDARY, SIGN_UP_ID, WRAP } from "./parts";
@@ -249,6 +250,7 @@ export function LongPage() {
       <PixelThread />
       <OwlFlight />
       <Reveals />
+      <Ambient />
     </div>
   );
 }

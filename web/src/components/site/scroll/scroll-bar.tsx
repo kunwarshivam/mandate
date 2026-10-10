@@ -25,7 +25,7 @@ export function toSignUp() {
  */
 export function ScrollBar() {
   return (
-    <div className={cn(styles.bar, "sticky top-0 z-20")} data-slot="page-bar">
+    <header className={cn(styles.bar, "sticky top-0 z-20")} data-slot="page-bar">
       <div className="mx-auto flex h-14 w-full max-w-[80rem] items-center gap-2 px-3 sm:px-6 lg:px-10">
         <a href="#desktop" className="flex shrink-0 items-center gap-2 rounded-md px-1 outline-none focus-visible:ring-3 focus-visible:ring-ring" style={{ color: "var(--logo)" }}>
           <span className="sr-only">Owlhead, back to the desktop</span>
@@ -41,6 +41,6 @@ export function ScrollBar() {
           </button>
         </div>
       </div>
-    </div>
+    </header>
   );
 }

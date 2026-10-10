@@ -284,21 +284,23 @@ describe("the design system", () => {
 });
 
 describe("the motion", () => {
+  /** Stands in for every observer the page makes, and tells the one watching an element when it comes into view or leaves. */
   function observe() {
+    type Report = (entries: { target: Element; isIntersecting: boolean }[]) => void;
     const seen: Element[] = [];
-    let report: (entries: { target: Element; isIntersecting: boolean }[]) => void = () => {};
+    const watcher = new Map<Element, Report>();
     class Observer {
-      constructor(cb: typeof report) {
-        report = cb;
-      }
+      constructor(private readonly report: Report) {}
       observe(el: Element) {
         seen.push(el);
+        watcher.set(el, this.report);
       }
       unobserve() {}
       disconnect() {}
     }
     vi.stubGlobal("IntersectionObserver", Observer);
-    return { seen, show: (el: Element) => act(() => report([{ target: el, isIntersecting: true }])) };
+    const tell = (el: Element, isIntersecting: boolean) => act(() => watcher.get(el)?.([{ target: el, isIntersecting }]));
+    return { seen, show: (el: Element) => tell(el, true), hide: (el: Element) => tell(el, false) };
   }
 
   it("with motion reduced, leaves every piece where the server drew it", () => {
@@ -313,11 +315,90 @@ describe("the motion", () => {
     const { seen, show } = observe();
     const { container } = render(<LongPage />);
     expect(container.querySelector("[data-slot=long-page]")).toHaveAttribute("data-motion", "on");
-    expect(seen.length).toBe(container.querySelectorAll("[data-reveal]").length);
+    expect(seen.filter((el) => el.matches("[data-reveal]")).length).toBe(container.querySelectorAll("[data-reveal]").length);
     const notification = container.querySelector("[data-slot=lock-screen] [data-reveal=drop]")!;
     expect(notification).not.toHaveAttribute("data-shown");
     show(notification);
     expect(notification).toHaveAttribute("data-shown");
+  });
+
+  it("with motion allowed, holds the sea's and the night's loops still while each is out of view, and lets them go as it comes back", () => {
+    const { seen, show, hide } = observe();
+    const { container } = render(<LongPage />);
+    const pictures = [...container.querySelectorAll<HTMLElement>("[data-ambient]")];
+    expect(pictures.map((p) => p.dataset.slot).sort()).toEqual(["pixel-night", "pixel-sea"]);
+    expect(seen.filter((el) => el.matches("[data-ambient]"))).toEqual(pictures);
+    for (const picture of pictures) {
+      hide(picture);
+      expect(picture.dataset.ambient, picture.dataset.slot).toBe("paused");
+      show(picture);
+      expect(picture.dataset.ambient, picture.dataset.slot).toBe("playing");
+    }
+  });
+
+  it("pauses only the looping animations of a picture out of view, never the moon's rise, which follows the scroll", () => {
+    const css = readFileSync(join(__dirname, "scroll.module.css"), "utf8");
+    const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
+    const rule = motion.match(/\[data-ambient="paused"\] :is\(([^)]*)\) \{\s*animation-play-state: paused;/);
+    expect(rule, "a paused picture's loops hold still, with motion allowed").not.toBeNull();
+    const held = rule![1]!.split(",").map((s) => s.trim());
+    expect(held).toEqual(expect.arrayContaining([".wave", ".foam", ".glintA", ".glintB", ".wingsUp", ".wingsDown", ".twinkle"]));
+    expect(held).not.toContain(".moon");
+  });
+
+  it("holds the desktop's loops and its app's still once the page has risen 200 px past covering it, and lets them go before it shows", () => {
+    const { show } = observe();
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(900);
+    const scrollTo = (y: number) => {
+      vi.spyOn(window, "scrollY", "get").mockReturnValue(y);
+      fireEvent.scroll(window);
+    };
+    const { unmount } = render(
+      <>
+        <section data-slot="desktop-stage">
+          <iframe title="app" />
+        </section>
+        <LongPage />
+      </>,
+    );
+    const desktop = document.querySelector<HTMLElement>("[data-slot=desktop-stage]")!;
+    const frame = desktop.querySelector("iframe")!;
+    const app = () => frame.contentDocument!.documentElement;
+    const states = () => [desktop.dataset.ambient, app().dataset.ambient];
+    expect(states()).toEqual(["playing", "playing"]);
+    scrollTo(1099);
+    expect(states(), "covered, but within 200 px").toEqual(["playing", "playing"]);
+    scrollTo(1100);
+    expect(states()).toEqual(["paused", "paused"]);
+    show(document.querySelector("[data-slot=pixel-sea]")!);
+    expect(states(), "a picture coming into view does not wake the desktop").toEqual(["paused", "paused"]);
+    const root = app();
+    frame.contentDocument!.removeChild(root);
+    const errors: unknown[] = [];
+    const caught = (e: ErrorEvent) => {
+      errors.push(e.error);
+      e.preventDefault();
+    };
+    window.addEventListener("error", caught);
+    scrollTo(1200);
+    window.removeEventListener("error", caught);
+    expect(errors, "an app part way through loading has no root yet").toEqual([]);
+    delete root.dataset.ambient;
+    frame.contentDocument!.appendChild(root);
+    fireEvent.load(frame);
+    expect(app().dataset.ambient, "an app that loads again while covered is held at once").toBe("paused");
+    scrollTo(1099);
+    expect(states()).toEqual(["playing", "playing"]);
+    unmount();
+    expect(desktop).not.toHaveAttribute("data-ambient");
+    expect(app()).not.toHaveAttribute("data-ambient");
+
+    const held = /animation-play-state: paused !important;/;
+    const page = readFileSync(join(__dirname, "scroll.module.css"), "utf8");
+    const stageRule = page.slice(0, page.indexOf("@media")).match(/\.stage\[data-ambient="paused"\] :is\(\*, ::before, ::after\) \{([^}]*)\}/);
+    expect(stageRule?.[1], "whatever motion the visitor asked for, and over each loop's shorthand").toMatch(held);
+    const globals = readFileSync(join(WEB, "src", "app", "globals.css"), "utf8");
+    expect(globals.match(/:root\[data-ambient="paused"\] :is\(\*, ::before, ::after\) \{([^}]*)\}/)?.[1], "the app's own document").toMatch(held);
   });
 
   it("strikes each thing it won't do in turn, and settles every picture of the app with a tilt", () => {
