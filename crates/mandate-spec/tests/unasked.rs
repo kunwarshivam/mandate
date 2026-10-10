@@ -317,7 +317,6 @@ fn reference_cases() -> Vec<Case> {
 /// §4.2 items 1 to 6 as the reference model computes them: unknown inputs, the known zeros, each
 /// condition's order bound, delegation slices, the count, and rounding up to the cent.
 #[test]
-#[ignore = "pending E10-7"]
 fn the_figure_matches_the_reference_model() {
     for case in reference_cases() {
         let usage = case.usage.as_ref().map(|rows| {
@@ -592,7 +591,6 @@ fn known(figure: Result<Option<Usd>, SpecError>) -> Result<Usd, TestCaseError> {
 /// DEC-695 items 2 and 4: no risk day runs more unasked than the figure, whatever its orders'
 /// values and times, while marks, cancels, and exits free gross headroom within the day.
 #[test]
-#[ignore = "pending E10-7"]
 fn no_day_runs_more_unasked_than_the_figure() {
     run(512, |rng| {
         let mut m = Model::base();
@@ -631,7 +629,6 @@ fn no_day_runs_more_unasked_than_the_figure() {
 /// DEC-695's rationale: where every condition is a catch-all or an `lte` bound and no `ask` or
 /// `deny` rule comes before an `auto` one, a greedy day reaches the figure, to the cent above.
 #[test]
-#[ignore = "pending E10-7"]
 fn a_greedy_day_reaches_the_figure() {
     run(512, |rng| {
         let lte = |rng: &mut Rng| C::Cmp("lte", rng.pick(&[300_000, 450_505, 500_000, 900_000]));
