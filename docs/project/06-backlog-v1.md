@@ -1725,7 +1725,9 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   anchor's root, or whose artifact is absent fails `tsa_token_invalid`; an unverifiable one ends
   the range `incomplete`, cause `token_unverifiable`, never `pass`; token vectors with an oracle and
   seeded bugs land before the pending tests, and those before the implementation (DEC-896's
-  sequence); the journal spec text is lane L2's.
+  sequence); the journal spec text is lane L2's. By the coordinator's ruling, the start-anchor
+  token cases are re-sequenced into the run's reference vectors in T1/I1, no longer a standalone
+  step-2 PR.
 
 ### E13 Hybrid deployment
 
