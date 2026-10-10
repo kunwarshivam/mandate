@@ -76,7 +76,6 @@ fn no_output_names_the_signal_and_that_nothing_was_sent() {
 /// DEC-877 item 1, rule 6: the cap's fail-closed stop prints its stable code alone on stderr, the
 /// key-only alert DEC-858 item 5 asks for, and no message that could grow to name an order.
 #[test]
-#[ignore = "pending E7-19"]
 fn the_caps_stop_prints_its_code_alone_on_stderr() {
     let stop = PaperError::Shell(ShellError::CancelUnconfirmed);
     assert_eq!(stderr_line(&stop), "cancel_unconfirmed");

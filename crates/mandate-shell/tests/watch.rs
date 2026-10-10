@@ -641,7 +641,6 @@ fn a_filled_entry_ends_the_watch_with_its_legs_placed_at_once() {
 /// legs are recorded `placed` at that wake, the next wake's read ends the run cleanly, and nothing
 /// is posted after the entry.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_fill_that_beats_the_bounds_cancel_is_protected_at_once() {
     let run = watched_through(LATE, true, Door::Function, Fill::Races);
     assert_eq!(run.outcome.as_ref().unwrap().submitted.len(), 1);
@@ -670,7 +669,6 @@ fn a_fill_that_beats_the_bounds_cancel_is_protected_at_once() {
 /// request but GETs, and the entry is read at every wake to 15:59:55 (at the bound by the cancel's
 /// own read-back) and never after.
 #[test]
-#[ignore = "pending E7-19"]
 fn an_unconfirmed_cancel_fails_closed_at_the_sessions_end() {
     let run = watched_through(LATE, true, Door::Function, Fill::Stuck);
     let error = run.outcome.as_ref().err();
@@ -720,7 +718,6 @@ fn an_unconfirmed_cancel_fails_closed_at_the_sessions_end() {
 /// any read there: the entry is read at every wake to 12:59:55 and never after, the one `DELETE`
 /// is at 12:50, and the stop's code is `cancel_unconfirmed`.
 #[test]
-#[ignore = "pending E7-19"]
 fn on_an_early_close_the_cap_stops_at_the_early_close() {
     let (late, bound) = ("2026-12-24T17:49:40Z", "2026-12-24T17:50:00Z");
     let run = watched_to(late, bound, true, Door::Function, Fill::Stuck);
