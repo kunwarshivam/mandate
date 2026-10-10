@@ -159,7 +159,7 @@ test("with motion allowed, the owl peeks over the Scroll cue in the middle of th
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect(owl).toHaveAttribute("data-owl", "peeking");
   await expect.poll(async () => {
     const box = (await owl.boundingBox())!;
     return Math.round(box.x + box.width / 2);
@@ -170,7 +170,7 @@ test("with motion allowed, the owl flies down the page and the pieces settle as 
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect(owl).toHaveAttribute("data-owl", "peeking");
   await expect(owl).toHaveAttribute("aria-hidden", "true");
   const where = () => owl.evaluate((el) => getComputedStyle(el).transform);
   await page.locator("#threads").scrollIntoViewIfNeeded();
@@ -179,6 +179,30 @@ test("with motion allowed, the owl flies down the page and the pieces settle as 
   await expect.poll(where).not.toBe(at);
   await expect(page.locator("#limits-title")).toHaveAttribute("data-shown", "");
   expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBe("on");
+});
+
+test("with motion allowed, the owl lands, then draws nothing but a blink until the page moves again", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() => {
+    const clear = CanvasRenderingContext2D.prototype.clearRect;
+    (window as unknown as { owlPaints: number }).owlPaints = 0;
+    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+      if (this.canvas.dataset.slot === "flying-owl") (window as unknown as { owlPaints: number }).owlPaints++;
+      return clear.apply(this, args);
+    };
+  });
+  await open(page, 1440);
+  const owl = page.locator("[data-slot=flying-owl]");
+  const paints = () => page.evaluate(() => (window as unknown as { owlPaints: number }).owlPaints);
+  await page.locator("#threads").scrollIntoViewIfNeeded();
+  await expect(owl).toHaveAttribute("data-owl", "perched", { timeout: 10_000 });
+  const landed = await paints();
+  await page.waitForTimeout(2000);
+  expect((await paints()) - landed, "in two seconds, at most a blink's two paints").toBeLessThanOrEqual(2);
+  expect(await owl.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName)), "it bobs in CSS").toEqual(["owl-bob"]);
+  await page.mouse.wheel(0, 400);
+  await expect(owl).not.toHaveAttribute("data-owl", "perched");
+  await expect(owl).toHaveAttribute("data-owl", "perched", { timeout: 10_000 });
 });
 
 test("with motion reduced, the owl stands still on the first perch and asks for no frame", async ({ page }) => {

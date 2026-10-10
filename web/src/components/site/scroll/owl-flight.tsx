@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { CUE_MOVED } from "./scroll-cue";
 import { type Spring, type SpringParams, stepSpring } from "./spring";
 import { OWL_HEIGHT, type OwlInks, type Pose, type VoxelInk, drawOwl, owlVoxels, skin } from "./voxel-owl";
 import styles from "./scroll.module.css";
@@ -15,6 +16,15 @@ const LIFT = 1.75;
 /** At rest the owl looks over its shoulder this often, for this long, in milliseconds. */
 const GLANCE_EVERY = 6800;
 const GLANCE_FOR = 1500;
+/** It blinks this often, with its eyes shut this long, in milliseconds. */
+const BLINK_EVERY = 4700;
+const BLINK_FOR = 130;
+/** Frames in a row with every spring at rest before it stops asking for frames, and how near rest counts, in pixels and radians. */
+const SETTLE_FRAMES = 12;
+const STILL_PX = 0.25;
+const STILL_RAD = 0.002;
+/** How far it bobs while it stands, in owl heights; `scroll.module.css` moves it, so standing costs no script. */
+const BOB = 0.035;
 /** The long page's bar, which the owl never flies under. */
 const BAR = 56;
 
@@ -23,6 +33,15 @@ const HOP: SpringParams = { stiffness: 60, damping: 9 };
 const TURN: SpringParams = { stiffness: 90, damping: 11 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Whether a spring sits within `by` of its target and has all but stopped. */
+const still = (s: Spring, target: number, by: number) => Math.abs(s.x - target) < by && Math.abs(s.v) < by * 10;
+
+/**
+ * What the owl is doing, on its canvas's `data-owl`: peeking over the Scroll cue, flying, standing
+ * still with no frame asked for, or, with motion reduced, resting on the first perch.
+ */
+export type OwlState = "peeking" | "flying" | "perched" | "resting";
 
 /** The owl's height in CSS pixels at a viewport width. */
 export function owlSize(width: number): number {
@@ -77,7 +96,10 @@ export function nearestPerch(perches: HTMLElement[], height: number, current: HT
  * The brand owl in three dimensions, flying down the long page (DEC-907). It peeks over the scroll
  * cue on the first screen, rides the top edge of the page as it rises, then hops from perch to perch
  * on springs: it leans into its travel, stretches when it moves fast, turns its head to the pointer,
- * bobs when it rests, and blinks. With motion reduced it stands still on the first perch.
+ * bobs when it stands, and blinks. Once every spring has come to rest it asks for no more frames: it
+ * blinks and glances on timers and bobs in CSS, and flies again when the page scrolls, resizes or
+ * shifts, the pointer moves, the theme changes, or the cue moves. Peeking, it sways, so it never
+ * rests there. With motion reduced it stands still on the first perch.
  */
 export function OwlFlight() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -100,6 +122,11 @@ export function OwlFlight() {
     let owl = owlSize(window.innerWidth);
     let box = Math.round(owl * ROOM);
     let raf = 0;
+    let timer = 0;
+
+    const mark = (state: OwlState) => {
+      if (canvas.dataset.owl !== state) canvas.dataset.owl = state;
+    };
 
     const size = () => {
       owl = owlSize(window.innerWidth);
@@ -109,6 +136,7 @@ export function OwlFlight() {
       canvas.height = box * dpr;
       canvas.style.width = `${box}px`;
       canvas.style.height = `${box}px`;
+      canvas.style.setProperty("--owl-bob", `${(owl * BOB).toFixed(2)}px`);
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
@@ -134,7 +162,7 @@ export function OwlFlight() {
       wear(p.coat);
       canvas.style.transform = `translate(${p.x - box / 2}px, ${p.y - box / 2}px)`;
       paint({ yaw: p.yaw, pitch: 0.18, roll: 0, head: -p.yaw * 0.6, flap: 0, stretch: 1, blink: false });
-      canvas.dataset.owl = "resting";
+      mark("resting");
     };
 
     const x: Spring = { x: window.innerWidth / 2, v: 0 };
@@ -149,8 +177,39 @@ export function OwlFlight() {
     let pointer: { x: number; y: number; at: number } | null = null;
     let current: HTMLElement | null = null;
     let last = 0;
+    let quiet = 0;
+    let pose: Pose = { yaw: 0, pitch: 0.18, roll: 0, head: 0, flap: 0, stretch: 1, blink: false };
+    let clipTop = Infinity;
 
-    const frame = (now: number) => {
+    const wake = () => {
+      if (raf || reduce.matches) return;
+      window.clearTimeout(timer);
+      last = 0;
+      quiet = 0;
+      raf = window.requestAnimationFrame(fly);
+    };
+
+    /** Asks for no frame until the next blink, which is two paints, or the next glance, which turns the head on its springs. */
+    const doze = () => {
+      const now = performance.now();
+      const toBlink = BLINK_EVERY - (now % BLINK_EVERY);
+      const phase = now % GLANCE_EVERY;
+      const toGlance = (phase < GLANCE_FOR ? GLANCE_FOR : GLANCE_EVERY) - phase;
+      if (toGlance <= toBlink + BLINK_FOR) {
+        timer = window.setTimeout(wake, toGlance + 1);
+        return;
+      }
+      timer = window.setTimeout(() => {
+        paint({ ...pose, blink: true }, clipTop);
+        timer = window.setTimeout(() => {
+          paint(pose, clipTop);
+          doze();
+        }, BLINK_FOR);
+      }, toBlink);
+    };
+
+    const fly = (now: number) => {
+      raf = 0;
       const dt = last ? (now - last) / 1000 : 0;
       last = now;
       const vw = window.innerWidth;
@@ -158,7 +217,6 @@ export function OwlFlight() {
       const sheet = page.getBoundingClientRect().top;
       const cue = document.querySelector<HTMLElement>("[data-slot=scroll-cue][data-at]");
       const cueBox = cue?.getBoundingClientRect();
-      const list = perches();
       let tx: number;
       let ty: number;
       let tyaw = 0;
@@ -172,14 +230,15 @@ export function OwlFlight() {
         tyaw = Math.sin(now / 1100) * 0.7;
         clip = cueBox.top;
       } else if (sheet > vh * 0.4) {
+        const first = page.querySelector<HTMLElement>("[data-perch]");
         const from = cueBox && cueBox.width > 0 ? cueBox.left + cueBox.width / 2 : vw / 2;
-        const to = list[0] ? perchOn(list[0], owl).x : vw * 0.8;
+        const to = first ? perchOn(first, owl).x : vw * 0.8;
         const risen = clamp((vh - sheet) / (vh * 0.6), 0, 1);
         tx = from + (to - from) * risen;
         ty = vw >= 1024 || sheet < vh - owl * 1.2 ? sheet - owl * FEET : vh + owl;
         if (cueBox && cueBox.width > 0 && sheet > cueBox.top) clip = cueBox.top;
       } else {
-        current = nearestPerch(list, vh, current);
+        current = nearestPerch(perches(), vh, current);
         const p: Perch = current ? perchOn(current, owl) : { x: vw * 0.8, y: vh * 0.5, yaw: 0, coat: "ink" };
         tcoat = p.coat;
         tx = clamp(p.x, owl * 0.6, vw - owl * 0.6);
@@ -198,59 +257,103 @@ export function OwlFlight() {
       const glance = !peeking && speed < 40 && !watching && now % GLANCE_EVERY < GLANCE_FOR ? (Math.floor(now / GLANCE_EVERY) % 2 ? 1.1 : -1.1) : 0;
       const look = watching && pointer ? clamp(((pointer.x - x.x) / vw) * 2.6, -1.2, 1.2) : glance;
       stepSpring(yaw, tyaw, dt, TURN);
-      stepSpring(head, look - yaw.x * 0.5, dt, TURN);
-      stepSpring(pitch, 0.18 + clamp(vy / 2400, -0.3, 0.3) + (watching && pointer ? clamp(((pointer.y - y.x) / vh) * 0.6, -0.2, 0.2) : 0), dt, TURN);
-      stepSpring(roll, clamp(-vx / 1400, -0.45, 0.45), dt, TURN);
+      const thead = look - yaw.x * 0.5;
+      const tpitch = 0.18 + clamp(vy / 2400, -0.3, 0.3) + (watching && pointer ? clamp(((pointer.y - y.x) / vh) * 0.6, -0.2, 0.2) : 0);
+      const troll = clamp(-vx / 1400, -0.45, 0.45);
+      stepSpring(head, thead, dt, TURN);
+      stepSpring(pitch, tpitch, dt, TURN);
+      stepSpring(roll, troll, dt, TURN);
       const effort = peeking ? 0 : clamp((speed - 30) / 420, 0, 1);
       lift += (effort - lift) * Math.min(1, dt * 6);
       beat = lift > 0.02 ? beat + dt * BEATS * Math.PI * 2 : 0;
-      const flap = lift * LIFT * (0.5 - 0.5 * Math.cos(beat));
-      const bob = peeking ? 0 : (1 - clamp(speed / 240, 0, 1)) * Math.sin(now / 520) * owl * 0.035;
-      const top = y.x + hop.x + bob - box / 2;
+      const blink = now % BLINK_EVERY < BLINK_FOR;
+      const settled =
+        !peeking &&
+        !watching &&
+        !blink &&
+        lift < 0.01 &&
+        still(x, tx, STILL_PX) &&
+        still(y, ty, STILL_PX) &&
+        still(hop, up, STILL_PX) &&
+        still(yaw, tyaw, STILL_RAD) &&
+        still(head, thead, STILL_RAD) &&
+        still(pitch, tpitch, STILL_RAD) &&
+        still(roll, troll, STILL_RAD);
+      quiet = settled ? quiet + 1 : 0;
+      const resting = quiet >= SETTLE_FRAMES;
+      if (resting) {
+        for (const [s, to] of [[x, tx], [y, ty], [hop, up], [yaw, tyaw], [head, thead], [pitch, tpitch], [roll, troll]] as const) {
+          s.x = to;
+          s.v = 0;
+        }
+        lift = 0;
+      }
+      const top = y.x + hop.x - box / 2;
+      pose = { yaw: yaw.x, pitch: pitch.x, roll: roll.x, head: head.x, flap: lift * LIFT * (0.5 - 0.5 * Math.cos(beat)), stretch: 1 + clamp(Math.abs(y.v + hop.v) / 5000, 0, 0.14), blink: false };
+      clipTop = clip - top;
       canvas.style.transform = `translate3d(${x.x - box / 2}px, ${top}px, 0)`;
-      paint(
-        { yaw: yaw.x, pitch: pitch.x, roll: roll.x, head: head.x, flap, stretch: 1 + clamp(Math.abs(vy) / 5000, 0, 0.14), blink: now % 4700 < 130 },
-        clip - top,
-      );
-      canvas.dataset.owl = "flying";
-      raf = window.requestAnimationFrame(frame);
+      paint({ ...pose, blink }, clipTop);
+      if (resting) {
+        mark("perched");
+        doze();
+        return;
+      }
+      mark(peeking ? "peeking" : "flying");
+      raf = window.requestAnimationFrame(fly);
     };
 
     const onPointer = (e: PointerEvent) => {
-      if (e.pointerType === "mouse") pointer = { x: e.clientX, y: e.clientY, at: performance.now() };
+      if (e.pointerType !== "mouse") return;
+      pointer = { x: e.clientX, y: e.clientY, at: performance.now() };
+      wake();
     };
     const onResize = () => {
       size();
       if (reduce.matches) rest();
+      else wake();
     };
     const theme = new MutationObserver(() => {
       inks = inksOf(canvas, coat);
       if (reduce.matches) rest();
+      else wake();
     });
+    const shifts = new ResizeObserver(wake);
 
     const start = () => {
       window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+      raf = 0;
       size();
       if (reduce.matches) {
         rest();
         return;
       }
       canvas.style.position = "";
-      last = 0;
-      raf = window.requestAnimationFrame(frame);
+      wake();
     };
 
     start();
     reduce.addEventListener("change", start);
     window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", wake, { passive: true });
     window.addEventListener("pointermove", onPointer, { passive: true });
+    document.addEventListener(CUE_MOVED, wake);
+    page.addEventListener("transitionstart", wake);
+    page.addEventListener("transitionend", wake);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-mode"] });
+    shifts.observe(page);
     return () => {
       window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
       reduce.removeEventListener("change", start);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", wake);
       window.removeEventListener("pointermove", onPointer);
+      document.removeEventListener(CUE_MOVED, wake);
+      page.removeEventListener("transitionstart", wake);
+      page.removeEventListener("transitionend", wake);
       theme.disconnect();
+      shifts.disconnect();
     };
   }, []);
 

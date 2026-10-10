@@ -244,6 +244,12 @@
     animation: wings-down 2.6s steps(1) calc(var(--i) * -0.9s) infinite;
   }
 
+  /* The flying owl bobs on the air as it flies and stands, here rather than in its script, so a
+     standing owl asks for no frame. Peeking over the cue, it sways and bobs in its script. */
+  .owl:is([data-owl="flying"], [data-owl="perched"]) {
+    animation: owl-bob 3.27s infinite;
+  }
+
   /* A star on the lock screen's night blinks now and then. */
   .twinkle {
     animation: twinkle 3.1s steps(1) infinite;
@@ -457,6 +463,24 @@
   }
   to {
     translate: 0 50%;
+  }
+}
+
+/* A sine wave in four quarters: quick through the middle, slow at the top and the bottom. */
+@keyframes owl-bob {
+  0%,
+  50%,
+  100% {
+    translate: 0 0;
+    animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
+  }
+  25% {
+    translate: 0 calc(-1 * var(--owl-bob));
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
+  }
+  75% {
+    translate: 0 var(--owl-bob);
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
   }
 }
 
