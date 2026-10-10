@@ -110,6 +110,14 @@ describe("what it says", () => {
     for (const s of sentences) expect(desktop, s).not.toContain(s);
   });
 
+  it("sells what the visitor gets and leaves the machinery to the app and the desktop (DEC-908)", () => {
+    const { container } = render(<LongPage />);
+    const pitch = said(container).join(" ");
+    for (const term of ["limit order", "safe point", "headroom", "passkey", "regular session", "buying power", "margin", "checks", "thread", "mode", "Nothing more"]) {
+      expect(pitch, term).not.toMatch(new RegExp(`\\b${term}\\b`, "i"));
+    }
+  });
+
   it("says losses can pass a limit, beside the limits", () => {
     render(<LongPage />);
     expect(document.getElementById("limits")).toHaveTextContent(GAP_CAVEAT);

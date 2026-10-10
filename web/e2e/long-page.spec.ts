@@ -50,7 +50,7 @@ test("the bar's Sign up brings the request form into view with the cursor in its
   await page.evaluate(() => window.scrollTo({ top: window.innerHeight * 1.5, behavior: "instant" }));
   await page.locator("[data-slot=page-bar]").getByRole("button", { name: "Sign up" }).click();
   await expect(page.getByLabel("Email address", { exact: true })).toBeFocused();
-  await expect(page.getByRole("heading", { level: 2, name: "Ask for a place in the beta." })).toBeInViewport();
+  await expect(page.getByRole("heading", { level: 2, name: "Put an agent to work." })).toBeInViewport();
 });
 
 test("each picture of the app has loaded, and it is the one for the page's theme", async ({ page }) => {
