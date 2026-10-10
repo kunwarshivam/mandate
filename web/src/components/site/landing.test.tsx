@@ -1,15 +1,16 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORDMARK_PATH } from "@/components/brand/Logo";
+import { DEMO_PATH, DEMO_SOURCE } from "@/components/demo/demo-messages";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
 import { DISCARDED, QUESTIONS } from "./apps";
 import { WALLPAPERS, randomWallpaper } from "./art";
-import { APP_ORIGIN, APP_SCREENS } from "./app-tab";
+import { APP_ORIGIN } from "./app-tab";
 import { GREETING, TIPS } from "./assistant";
 import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
@@ -23,8 +24,11 @@ import { EDITED, TRACE } from "./record-trace";
  * copy that makes no claim of performance and no promise.
  */
 
+/** The landing page with its home page in front; the app's tab opens first, and has tests of its own. */
 function renderLanding() {
-  return render(<Landing />);
+  const result = render(<Landing />);
+  fireEvent.click(screen.getByRole("tab", { name: "Owlhead Home Page" }));
+  return result;
 }
 
 function readable(container: HTMLElement): string {
@@ -307,58 +311,116 @@ describe("links", () => {
 describe("the browser's tabs", () => {
   const tabs = () => screen.getByRole("tablist", { name: "Pages" });
   const address = () => screen.getByRole("textbox", { name: "Address" });
+  const appFrame = () => screen.getByTitle("Owlhead app, example workspace") as HTMLIFrameElement;
+  const tool = (name: string) => within(screen.getByRole("toolbar", { name: "Browser" })).getByRole("button", { name });
+  const status = () => document.querySelector("[data-slot=status-text]")!;
 
-  it("opens on the home page, with the app in a second tab whose screens are the app's own, captured at both themes", async () => {
-    renderLanding();
-    const [site, app] = within(tabs()).getAllByRole("tab");
-    expect(site).toHaveAccessibleName("Owlhead Home Page");
-    expect(site).toHaveAttribute("aria-selected", "true");
+  async function report(path: string, back: boolean, forward: boolean, from: MessageEventSource | null = appFrame().contentWindow, origin = window.location.origin) {
+    await act(async () => window.dispatchEvent(new MessageEvent("message", { data: { source: DEMO_SOURCE, type: "at", path, back, forward }, origin, source: from })));
+  }
+
+  it("opens on the app itself, live in a frame on the example workspace, with the home page in the second tab", () => {
+    render(<Landing />);
+    const [app, site] = within(tabs()).getAllByRole("tab");
     expect(app).toHaveAccessibleName("Inside the app");
-    const appPanel = document.getElementById(app.getAttribute("aria-controls")!)!;
-    expect(appPanel).not.toBeVisible();
-    expect(address()).toHaveValue("http://www.owlhead.ai/");
-    await press(app);
     expect(app).toHaveAttribute("aria-selected", "true");
-    expect(home(), "the home page stays in the document while hidden").toBeInTheDocument();
+    expect(site).toHaveAccessibleName("Owlhead Home Page");
+    const appPanel = document.getElementById(app.getAttribute("aria-controls")!)!;
     expect(appPanel).toBeVisible();
     expect(appPanel).toHaveAccessibleName("Inside the app");
+    expect(within(appPanel).getByTitle("Owlhead app, example workspace")).toHaveAttribute("src", DEMO_PATH);
+    expect(document.getElementById(site.getAttribute("aria-controls")!)).not.toBeVisible();
+    expect(home(), "the home page stays in the document while hidden").toBeInTheDocument();
     expect(address()).toHaveValue(`${APP_ORIGIN}/`);
-    const stage = document.querySelector<HTMLElement>("[data-slot=app-stage]")!;
-    const sources = [...stage.querySelectorAll("img")].map((img) => decodeURIComponent(img.getAttribute("src") ?? ""));
-    for (const s of APP_SCREENS)
-      for (const theme of ["light", "dark"]) {
-        expect(sources.some((src) => src.includes(`/app/${s.id}-${theme}.jpg`)), `${s.id} ${theme}`).toBe(true);
-        expect(existsSync(join(process.cwd(), "public", "app", `${s.id}-${theme}.jpg`)), `public/app/${s.id}-${theme}.jpg is captured`).toBe(true);
-      }
+    expect(address(), "the app's address takes a typed one").not.toHaveAttribute("readonly");
+    expect(status()).toHaveTextContent("Contacting host: app.owlhead.ai…");
+    expect(appFrame()).toHaveAttribute("data-ready", "false");
   });
 
-  it("steps through the screens, the address following, and says what each one shows", async () => {
-    renderLanding();
-    await press(within(tabs()).getByRole("tab", { name: "Inside the app" }));
-    const screens = screen.getByRole("list", { name: "Screens" });
-    expect(within(screens).getAllByRole("button").map((b) => b.textContent)).toEqual(APP_SCREENS.map((s) => s.title));
-    for (const s of APP_SCREENS) {
-      await press(within(screens).getByRole("button", { name: s.title }));
-      expect(within(screens).getByRole("button", { name: s.title })).toHaveAttribute("aria-pressed", "true");
-      expect(address()).toHaveValue(`${APP_ORIGIN}${s.path}`);
-      expect(screen.getByRole("img", { name: `${s.title}, in the Owlhead app` })).toBeInTheDocument();
-      expect(screen.getByText(s.caption)).toBeInTheDocument();
+  it("follows where the app goes, and hears only its own frame on this origin", async () => {
+    render(<Landing />);
+    await report("/agents", true, false);
+    expect(address()).toHaveValue(`${APP_ORIGIN}/agents`);
+    expect(appFrame()).toHaveAttribute("data-ready", "true");
+    expect(status()).toHaveTextContent("Document: Done");
+    expect(tool("Back")).toBeEnabled();
+    expect(tool("Forward")).toBeDisabled();
+    await report("/positions", false, true, window);
+    await report("/positions", false, true, appFrame().contentWindow, "https://elsewhere.example");
+    expect(address()).toHaveValue(`${APP_ORIGIN}/agents`);
+  });
+
+  it("sends the app back, forward, home, to a typed address, or to start over, and nowhere it has no path for", async () => {
+    render(<Landing />);
+    const sent = vi.fn();
+    appFrame().contentWindow!.postMessage = sent;
+    await report("/agents", true, true);
+    const asked = () => sent.mock.calls.map(([data, origin]) => (expect(origin).toBe(window.location.origin), data));
+    sent.mockClear();
+    await press(tool("Back"));
+    await press(tool("Forward"));
+    await press(tool("Home"));
+    await press(tool("Reload"));
+    for (const typed of ["app.owlhead.ai/approvals", "https://app.owlhead.ai/alerts", "/positions", "https://elsewhere.example/x", "//elsewhere.example", "app.owlhead.ai.elsewhere.example/x"]) {
+      fireEvent.change(address(), { target: { value: typed } });
+      fireEvent.submit(address().closest("form")!);
     }
+    expect(asked()).toEqual([
+      { source: DEMO_SOURCE, type: "go", to: "back" },
+      { source: DEMO_SOURCE, type: "go", to: "forward" },
+      { source: DEMO_SOURCE, type: "open", path: "/" },
+      { source: DEMO_SOURCE, type: "go", to: "restart" },
+      { source: DEMO_SOURCE, type: "open", path: "/approvals" },
+      { source: DEMO_SOURCE, type: "open", path: "/alerts" },
+      { source: DEMO_SOURCE, type: "open", path: "/positions" },
+    ]);
+    fireEvent.change(address(), { target: { value: "half typed" } });
+    fireEvent.keyDown(address(), { key: "Escape" });
+    expect(address()).toHaveValue(`${APP_ORIGIN}/agents`);
   });
 
-  it("moves between the tabs with the arrow keys, and comes back to the home page from the hero or a link to one of its parts", async () => {
-    renderLanding();
+  it("dresses the app in the page's theme, and keeps it in step", async () => {
+    render(<Landing />);
+    const root = document.documentElement;
+    root.dataset.mode = "light";
+    const doc = appFrame().contentDocument!;
+    const inside = doc.documentElement ?? doc.appendChild(doc.createElement("html"));
+    await report("/", false, false);
+    expect(inside.dataset.mode).toBe("light");
+    await act(async () => {
+      root.dataset.mode = "dark";
+      root.classList.add("dark");
+      await frame();
+    });
+    expect(inside.dataset.mode).toBe("dark");
+    expect(inside).toHaveClass("dark");
+    root.classList.remove("dark");
+    root.dataset.mode = "light";
+  });
+
+  it("moves between the tabs with the arrow keys, and comes back to the home page from the hero, a guide, or the skip link", async () => {
+    render(
+      <>
+        <a href="#main">Skip to content</a>
+        <Landing />
+      </>,
+    );
     const site = within(tabs()).getByRole("tab", { name: "Owlhead Home Page" });
     const app = within(tabs()).getByRole("tab", { name: "Inside the app" });
+    await press(screen.getByRole("link", { name: "Skip to content" }));
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(home()).toBeVisible();
+    expect(address()).toHaveValue("http://www.owlhead.ai/");
+    expect(address(), "the home page's address is read-only").toHaveAttribute("readonly");
     await press(within(document.querySelector<HTMLElement>("[data-slot=hero-actions]")!).getByRole("button", { name: "Look inside the app" }));
     expect(app).toHaveAttribute("aria-selected", "true");
     expect(app, "the keyboard follows the tab").toHaveFocus();
     expect(app).toHaveAttribute("tabindex", "0");
     expect(site).toHaveAttribute("tabindex", "-1");
-    fireEvent.keyDown(app, { key: "ArrowLeft" });
+    fireEvent.keyDown(app, { key: "ArrowRight" });
     expect(site).toHaveAttribute("aria-selected", "true");
     expect(site).toHaveFocus();
-    fireEvent.keyDown(site, { key: "ArrowRight" });
+    fireEvent.keyDown(site, { key: "ArrowLeft" });
     expect(app).toHaveAttribute("aria-selected", "true");
     await press(within(screen.getByRole("navigation", { name: "Guides" })).getByRole("link", { name: "Handbook" }));
     expect(site).toHaveAttribute("aria-selected", "true");

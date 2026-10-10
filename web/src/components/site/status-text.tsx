@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 
 const IDLE = "Document: Done";
+const BUSY = "Contacting host: app.owlhead.ai…";
 
 /**
  * The status bar's message. As a browser of the time did, it shows the address of the link under the
- * pointer or the keyboard, and says the document is done otherwise.
+ * pointer or the keyboard, says it is still contacting the host while the tab in front loads, and
+ * says the document is done otherwise.
  */
-export function StatusText({ origin, className }: { origin: string; className?: string }) {
+export function StatusText({ origin, busy = false, className }: { origin: string; busy?: boolean; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [text, setText] = useState(IDLE);
 
@@ -37,7 +39,7 @@ export function StatusText({ origin, className }: { origin: string; className?: 
 
   return (
     <span ref={ref} className={className} data-slot="status-text">
-      {text}
+      {busy ? BUSY : text}
     </span>
   );
 }

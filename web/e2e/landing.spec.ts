@@ -15,11 +15,14 @@ const WIDTHS = [320, 390, 1024, 1440];
 const settled = (page: Page) =>
   page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => undefined))));
 
-async function open(page: Page, width: number, height = 900) {
+/** Opens the landing page with its home page in front; `app` leaves the app's tab in front, as a visit opens (DEC-906). */
+async function open(page: Page, width: number, height = 900, { app = false } = {}) {
   await page.setViewportSize({ width, height });
   await page.goto(PATH, { waitUntil: "load" });
-  await page.locator("[data-slot=landing]").waitFor();
   await settled(page);
+  if (app) return;
+  await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
+  await page.locator("[data-slot=landing]").waitFor();
 }
 
 /** Opens one of the desktop's windows from the hero's buttons, as a visitor would, and returns it. */
@@ -31,13 +34,52 @@ async function openWindow(page: Page, button: "See why it traded" | "Sign the gu
 }
 
 for (const width of WIDTHS) {
-  test(`${width} px: nothing scrolls sideways`, async ({ page }) => {
-    await open(page, width);
+  test(`${width} px: nothing scrolls sideways, on either tab`, async ({ page }) => {
+    await open(page, width, 900, { app: true });
     await page.evaluate(() => document.fonts.ready);
-    const { scroll, inner } = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
-    expect(scroll).toBeLessThanOrEqual(inner);
+    const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(await sideways()).toBeLessThanOrEqual(0);
+    await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
+    expect(await sideways()).toBeLessThanOrEqual(0);
   });
 }
+
+test("opens on the app itself, live: a press inside moves the address, the browser's Back and a typed address drive it, and it wears the page's theme", async ({ page }) => {
+  await open(page, 1440, 900, { app: true });
+  await expect(page.getByRole("tab", { name: "Inside the app" })).toHaveAttribute("aria-selected", "true");
+  const address = page.getByRole("textbox", { name: "Address" });
+  const frame = page.locator("iframe[title='Owlhead app, example workspace']");
+  await expect(frame).toHaveAttribute("data-ready", "true");
+  await expect(address).toHaveValue("https://app.owlhead.ai/");
+  const app = page.frameLocator("iframe[title='Owlhead app, example workspace']");
+  await expect(app.getByText("Account equity").first()).toBeVisible();
+  await app.getByRole("link", { name: "Agents" }).first().click();
+  await expect(address).toHaveValue("https://app.owlhead.ai/agents");
+  await expect(app.getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
+  const tools = page.getByRole("toolbar", { name: "Browser" });
+  await tools.getByRole("button", { name: "Back" }).click();
+  await expect(address).toHaveValue("https://app.owlhead.ai/");
+  await expect(tools.getByRole("button", { name: "Forward" })).toBeEnabled();
+  await address.fill("app.owlhead.ai/approvals");
+  await address.press("Enter");
+  await expect(address).toHaveValue("https://app.owlhead.ai/approvals");
+  await expect(app.getByRole("heading", { level: 1, name: "Approvals" })).toBeVisible();
+  expect(page.url(), "the page's own address stays where it was").toMatch(/\/welcome$/);
+  const modes = () => Promise.all([page.evaluate(() => document.documentElement.dataset.mode), frame.evaluate((f: HTMLIFrameElement) => f.contentDocument!.documentElement.dataset.mode)]);
+  const [pageMode, appMode] = await modes();
+  expect(appMode).toBe(pageMode);
+  await page.getByRole("button", { name: "Dark" }).click();
+  await expect.poll(async () => new Set(await modes()).size, "the app follows the page's theme").toBe(1);
+  expect((await modes())[0]).not.toBe(pageMode);
+});
+
+test("the skip link brings the home page to the front and lands on it", async ({ page }) => {
+  await open(page, 1440, 900, { app: true });
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tab", { name: "Owlhead Home Page" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#main")).toBeFocused();
+});
 
 test("no element draws a gradient", async ({ page }) => {
   await open(page, 1440);
@@ -158,7 +200,7 @@ test("the Mac on the desktop redraws it as System 7, which the server keeps draw
 
   await page.locator("[data-bar=special]").click();
   await page.getByRole("menu", { name: "Special" }).getByRole("menuitem", { name: "Change wallpaper…" }).click();
-  await page.getByRole("radio", { name: "Windows 98" }).check({ force: true });
+  await page.getByRole("radio", { name: "Windows 98" }).dispatchEvent("click");
   await expect(page.locator("[data-slot=taskbar]")).toBeVisible();
 });
 
@@ -210,10 +252,12 @@ test("the page barely shifts while it and its fonts load", async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { __cls: number }).__cls)).toBeLessThan(0.1);
 });
 
-test("the keyboard goes skip link, then the guide links, with a visible outline", async ({ page }) => {
-  await open(page, 1440);
+test("the keyboard goes skip link, the app's address, then the guide links, with a visible outline", async ({ page }) => {
+  await open(page, 1440, 900, { app: true });
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => (document.activeElement as HTMLElement).innerText.trim())).toBe("Skip to content");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("textbox", { name: "Address" }), "the app's address takes a typed one").toBeFocused();
   await page.keyboard.press("Tab");
   const first = await page.evaluate(() => {
     const el = document.activeElement as HTMLElement;

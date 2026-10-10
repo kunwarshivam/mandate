@@ -553,7 +553,7 @@ export function Desktop({ home }: { home: ReactNode }) {
         <li key={s.id} className={cn(styles.bootIcon, "grid justify-items-center", mac && "[direction:ltr]")} style={{ "--i": from + i } as CSSProperties} data-app={"app" in s ? s.app : undefined}>
           {/* Desktop icons are pointer affordances, out of the tab cycle as on the real desktop: the
               keyboard reaches the apps through the Start menu, and the page's content comes first
-              (`e2e/landing.spec.ts`: skip link, then the guide links). */}
+              (`e2e/landing.spec.ts`: skip link, the app's address, then the guide links). */}
           <ShortcutItem
             s={s}
             onOpen={launch}

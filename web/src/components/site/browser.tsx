@@ -1,12 +1,12 @@
 "use client";
 
-import { type KeyboardEvent, type MouseEvent, type ReactNode, createContext, useContext, useState } from "react";
+import { type KeyboardEvent, type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Key } from "pixelarticons/react/Key.js";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
-import { APP_ORIGIN, APP_SCREENS, AppTab } from "./app-tab";
-import { type Guide, LocationField, MenuBar, Toolbar } from "./browser-chrome";
+import { APP_ORIGIN, AppFrame, useAppTab } from "./app-tab";
+import { BrowserNav, type Guide, LocationField, MenuBar, Toolbar } from "./browser-chrome";
 import { PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
 import { OpenApp } from "./open-app";
 import { StatusText } from "./status-text";
@@ -14,13 +14,20 @@ import { StatusText } from "./status-text";
 type Tab = "site" | "app";
 
 const TABS: { id: Tab; title: string }[] = [
-  { id: "site", title: "Owlhead Home Page" },
   { id: "app", title: "Inside the app" },
+  { id: "site", title: "Owlhead Home Page" },
 ];
 
 const ShowTab = createContext<(tab: Tab) => void>(() => {});
 
 const tabId = (tab: Tab) => `browser-tab-${tab}`;
+
+/** The element a same-page link points at, when it is on the home page. */
+function onHomePage(hash: string): HTMLElement | null {
+  if (hash.length < 2) return null;
+  const target = document.getElementById(decodeURIComponent(hash.slice(1)));
+  return target?.closest(`#${tabId("site")}-panel`) ? target : null;
+}
 
 /** A control in the page that brings one of the browser's tabs to the front, and the keyboard with it. */
 export function TabLink({ tab, className, children }: { tab: Tab; className?: string; children: ReactNode }) {
@@ -42,24 +49,37 @@ export const DIRECTORY: Guide[] = [
 
 /**
  * The page open in a browser of 1996, inside its desktop window: menus, toolbar, the address, the
- * guide buttons, two tabs, and a status bar that shows where a link goes. The first tab is the home
- * page, which scrolls on its own; the second is the app itself (DEC-905). What a browser could do
- * for this page works; what it could not is greyed out, as it was then. The status bar alone is
- * scenery, hidden from assistive technology. A link to a part of the home page brings its tab back.
+ * guide buttons, two tabs, and a status bar that shows where a link goes. The tab in front is the app
+ * itself, live on the example workspace (DEC-906): Back, Forward, Home, Reload and the address drive
+ * it. The other is the home page, which scrolls on its own. What a browser could do for the tab in
+ * front works; what it could not is greyed out, as it was then. The status bar alone is scenery,
+ * hidden from assistive technology. A link to a part of the home page, from anywhere on the page,
+ * the skip link included, brings its tab to the front first, as does an address that names one.
  */
 export function Browser({ address, bookmarks, children }: { address: string; bookmarks: { id: string; title: string }[]; children: ReactNode }) {
-  const [tab, setTab] = useState<Tab>("site");
-  const [at, setAt] = useState(0);
-  const shown = tab === "site" ? address : `${APP_ORIGIN}${APP_SCREENS[at].path}`;
+  const [tab, setTab] = useState<Tab>("app");
+  const frame = useRef<HTMLIFrameElement>(null);
+  const app = useAppTab(frame);
+  const shown = tab === "site" ? address : `${APP_ORIGIN}${app.where.path}`;
 
   const show = (next: Tab) => {
     flushSync(() => setTab(next));
     document.getElementById(tabId(next))?.focus({ preventScroll: true });
   };
 
-  const backToPage = (e: MouseEvent<HTMLDivElement>) => {
-    if (tab !== "site" && e.target instanceof Element && e.target.closest('a[href^="#"]')) flushSync(() => setTab("site"));
-  };
+  useEffect(() => {
+    const named = onHomePage(window.location.hash);
+    if (named) {
+      flushSync(() => setTab("site"));
+      named.scrollIntoView();
+    }
+    const backToPage = (e: MouseEvent) => {
+      const link = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href^="#"]') : null;
+      if (link && onHomePage(link.hash)) flushSync(() => setTab("site"));
+    };
+    document.addEventListener("click", backToPage, true);
+    return () => document.removeEventListener("click", backToPage, true);
+  }, []);
 
   const tabKeys = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -69,42 +89,44 @@ export function Browser({ address, bookmarks, children }: { address: string; boo
 
   return (
     <ShowTab value={show}>
-      <div className="flex min-h-0 flex-1 flex-col" data-slot="browser" onClickCapture={backToPage}>
-        <MenuBar bookmarks={bookmarks} directory={DIRECTORY} />
+      <div className="flex min-h-0 flex-1 flex-col" data-slot="browser" data-tab={tab}>
+        <BrowserNav value={tab === "app" ? app.nav : null}>
+          <MenuBar bookmarks={bookmarks} directory={DIRECTORY} />
 
-        <div className="shrink-0 border-t border-b border-t-card border-b-foreground/40 px-1.5 py-1.5">
-          <div className="flex items-stretch justify-between gap-2">
-            <Toolbar />
-            <span aria-hidden className={cn(SUNKEN, "grid w-14 shrink-0 place-items-center bg-foreground text-highlight")}>
-              <BrandOwl className="size-8" />
-            </span>
+          <div className="shrink-0 border-t border-b border-t-card border-b-foreground/40 px-1.5 py-1.5">
+            <div className="flex items-stretch justify-between gap-2">
+              <Toolbar />
+              <span aria-hidden className={cn(SUNKEN, "grid w-14 shrink-0 place-items-center bg-foreground text-highlight")}>
+                <BrandOwl className="size-8" />
+              </span>
+            </div>
+
+            <div className="mt-1.5 flex items-center gap-2">
+              <span aria-hidden className={cn("shrink-0 text-[0.9375rem]", PIXEL)}>
+                Location:
+              </span>
+              <LocationField address={shown} onGo={tab === "app" ? app.go : undefined} />
+            </div>
+
+            <nav aria-label="Guides" className="mt-1.5">
+              <ul className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap">
+                {DIRECTORY.map((d) => (
+                  <li key={d.label} className="grid">
+                    {"href" in d ? (
+                      <a href={d.href} className={PLAIN_BUTTON}>
+                        {d.label}
+                      </a>
+                    ) : (
+                      <OpenApp app={d.app} className={PLAIN_BUTTON}>
+                        {d.label}
+                      </OpenApp>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </nav>
           </div>
-
-          <div className="mt-1.5 flex items-center gap-2">
-            <span aria-hidden className={cn("shrink-0 text-[0.9375rem]", PIXEL)}>
-              Location:
-            </span>
-            <LocationField address={shown} />
-          </div>
-
-          <nav aria-label="Guides" className="mt-1.5">
-            <ul className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap">
-              {DIRECTORY.map((d) => (
-                <li key={d.label} className="grid">
-                  {"href" in d ? (
-                    <a href={d.href} className={PLAIN_BUTTON}>
-                      {d.label}
-                    </a>
-                  ) : (
-                    <OpenApp app={d.app} className={PLAIN_BUTTON}>
-                      {d.label}
-                    </OpenApp>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </div>
+        </BrowserNav>
 
         <div role="tablist" aria-label="Pages" onKeyDown={tabKeys} className={cn("flex shrink-0 gap-1 pt-1 pb-0.5", PIXEL)} data-slot="browser-tabs">
           {TABS.map((t) => {
@@ -146,17 +168,17 @@ export function Browser({ address, bookmarks, children }: { address: string; boo
           id={`${tabId("app")}-panel`}
           aria-labelledby={tabId("app")}
           hidden={tab !== "app"}
-          className={cn(SUNKEN, "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-card")}
+          className={cn(SUNKEN, "relative min-h-0 flex-1 overflow-hidden bg-card")}
         >
-          <AppTab at={at} onAt={setAt} />
+          <AppFrame frame={frame} tab={app} />
         </div>
 
         <div aria-hidden className={cn("mt-0.5 flex shrink-0 gap-0.5 text-[0.875rem]", PIXEL)}>
           <span className={cn(SUNKEN, "grid w-8 shrink-0 place-items-center")}>
             <Key className="size-6" />
           </span>
-          <StatusText origin={shown} className={cn(SUNKEN, "min-w-0 flex-1 truncate px-2 py-0.5")} />
-          <span className={cn(SUNKEN, "hidden w-56 truncate px-2 py-0.5 sm:block")}>{tab === "site" ? "Private beta" : "Example workspace, paper money"}</span>
+          <StatusText origin={shown} busy={tab === "app" && !app.ready} className={cn(SUNKEN, "min-w-0 flex-1 truncate px-2 py-0.5")} />
+          <span className={cn(SUNKEN, "hidden w-56 truncate px-2 py-0.5 sm:block")}>{tab === "site" ? "Private beta" : "Paper"}</span>
         </div>
       </div>
     </ShowTab>
