@@ -1,0 +1,7 @@
+file = "crates/mandate-shell/tests/watch.rs"
+test = "on_an_early_close_the_cap_stops_at_the_early_close"
+reason = """
+E1b part 1's watch has no cap (DEC-858 item 5): with the cancel never confirmed on 2026-12-24 it keeps
+reading past the 13:00 early close until the test clock's pause budget stops it, so it fails on
+behaviour, not at a stub. E1b part 2's implementation PR (E7-19) adds the cap and deletes this row.
+"""

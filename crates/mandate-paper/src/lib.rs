@@ -462,3 +462,11 @@ pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
         }
     })
 }
+
+/// The one line the binary prints on stderr for `error` before it exits non-zero: the stop's
+/// message. DEC-877 item 1 has the cap's fail-closed stop print its stable code
+/// `cancel_unconfirmed` alone; E1b part 2's implementation PR (E7-19) does that. No line names an
+/// order, a DSN or a key (rules 6 and 7).
+pub fn stderr_line(error: &PaperError) -> String {
+    error.to_string()
+}
