@@ -557,7 +557,6 @@ fn every_listed_filter_key_reaches_its_tool_as_given() {
 /// such as `accountNumber` or `account_id` included, is `UnlistedFilter` with nothing called,
 /// whether or not the recorded `account_number` stands beside it.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_filter_key_its_tool_does_not_list_is_refused_with_nothing_called() {
     let spellings = [
         "accountNumber",

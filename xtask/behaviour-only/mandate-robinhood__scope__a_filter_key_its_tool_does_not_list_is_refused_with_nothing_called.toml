@@ -1,9 +1,0 @@
-file = "crates/mandate-robinhood/tests/scope.rs"
-test = "a_filter_key_its_tool_does_not_list_is_refused_with_nothing_called"
-reason = """
-DEC-879: main forwards every filter key but `account_number` to the read's tool verbatim, so a key
-the tool does not list, `accountNumber` or `account_id` among them, is sent where it must be
-refused with nothing called. `RobinhoodConnector::read` is implemented on main (E7-6, #1246), so
-there is no stub to stop at: the test fails on the answer the implementation gives. The E7-6 change
-that adopts DEC-879 deletes the marker and this file.
-"""
