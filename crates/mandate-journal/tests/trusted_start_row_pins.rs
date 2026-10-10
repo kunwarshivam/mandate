@@ -285,8 +285,9 @@ fn a_stream_id_with_no_workspace_refuses_every_kind() {
 /// §9.14, §2, DEC-895 item 2: an anchor is read whole, so a leaf hash that is not 64 lowercase hex
 /// digits refuses it even when the start comes from another, good leaf. Each bad form, the good
 /// hash in upper case among them where it has letters, is written into the other leaf of the
-/// vector anchor, with the root over the leaves' text (as the reference reads it) or the recorded
-/// root (as a reader that repairs the hash would), the row re-hashed so check 4 holds. A
+/// vector anchor, with the root over the leaves' text (as the reference reads it), the recorded
+/// root (as a reader that repairs the hash would), or the root with that hash zero-filled (as a
+/// reader that zero-fills it would), the row re-hashed so check 4 holds. A
 /// `first_prev_hash` in upper case is refused the same way; `row_cases` on the coverage branch
 /// already hold a short one.
 #[test]
@@ -320,7 +321,13 @@ fn a_non_hex_leaf_anywhere_refuses_the_anchor() {
         for (name, bad) in forms.into_iter().filter(|(_, bad)| bad != good) {
             let mut edited = leaves.clone();
             edited[other].hash = bad;
-            for (root_name, root) in [("text root", root(&edited)), ("recorded root", recorded)] {
+            let mut zeroed = edited.clone();
+            zeroed[other].hash = Digest::ZERO.to_hex();
+            for (root_name, root) in [
+                ("text root", root(&edited)),
+                ("recorded root", recorded),
+                ("zero-filled root", root(&zeroed)),
+            ] {
                 let mut rows = rows.clone();
                 rows[at] = anchor_over(&rows, &edited, root);
                 let got = resolve_start_from_rows(&rows, s, n, request);
