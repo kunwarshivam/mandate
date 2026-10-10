@@ -106,6 +106,11 @@ export const OWL_SCROLL: Artwork = {
   height: 1600,
 };
 
+/** A painting at random, for the server to open a visit on (DEC-905). `roll` is in [0, 1). */
+export function randomWallpaper(roll: number = Math.random()): string {
+  return WALLPAPERS[Math.min(WALLPAPERS.length - 1, Math.floor(roll * WALLPAPERS.length))].id;
+}
+
 export function artwork(id: string): Artwork {
   return WALLPAPERS.find((w) => w.id === id) ?? WALLPAPERS[0];
 }

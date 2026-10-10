@@ -64,6 +64,7 @@ describe("the style switch", () => {
     expect(document.querySelector("[data-slot=taskbar]")).not.toBeNull();
     expect(menuBar()).toBeNull();
     const mac = computer("Mac");
+    expect(mac.textContent, "on screen it is a computer, with no name under it").toBe("");
     expect(mac, "assistive technology hears what it does").toHaveAccessibleDescription("Changes the desktop to a 1990s Mac's.");
     expect(document.querySelector("[data-slot=tray]")?.textContent, "nothing at the bottom names it").not.toMatch(/Mac|style/i);
     await press(mac);
@@ -73,17 +74,26 @@ describe("the style switch", () => {
     expect(menuBar()?.textContent, "nor does the menu bar").not.toMatch(/Windows|style/i);
     expect(document.cookie).toContain(`${DESKTOP_COOKIE}=mac`);
     const pc = computer("PC");
+    expect(pc.textContent).toBe("");
     expect(pc).toHaveAccessibleDescription("Changes the desktop back to Windows 98.");
     await press(pc);
     expect(os()).toBe("windows");
     expect(document.cookie).toContain(`${DESKTOP_COOKIE}=windows`);
   });
 
-  it("is in the Start menu too, since the icons are out of the tab order", async () => {
+  it("is in Display for the keyboard, since the icons are out of the tab order, as the two computers' pictures, and in no menu", async () => {
     renderOn("windows");
     await press(screen.getByRole("button", { name: "Start" }));
-    await press(within(screen.getByRole("menu", { name: "Start" })).getByRole("menuitem", { name: "Mac" }));
+    expect(within(screen.getByRole("menu", { name: "Start" })).queryByRole("menuitem", { name: /Mac|PC|Windows/ })).toBeNull();
+    await press(within(screen.getByRole("menu", { name: "Start" })).getByRole("menuitem", { name: "Display" }));
+    const choice = document.querySelector<HTMLElement>("[data-slot=desktop-choice]")!;
+    expect(choice.textContent, "neither computer is written").toBe("Desktop");
+    expect(within(choice).getByRole("radio", { name: "Windows 98" })).toBeChecked();
+    await act(async () => fireEvent.click(within(choice).getByRole("radio", { name: "System 7" })));
     expect(os()).toBe("mac");
+    expect(document.cookie).toContain(`${DESKTOP_COOKIE}=mac`);
+    await press(barTitle("Owlhead"));
+    expect(within(screen.getByRole("menu", { name: "Owlhead" })).queryByRole("menuitem", { name: /Mac|PC|Windows/ })).toBeNull();
   });
 
   it("leaves the windows where they were", async () => {

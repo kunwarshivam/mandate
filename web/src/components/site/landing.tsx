@@ -5,13 +5,14 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { OwlheadWordmark } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
 import { BetaForm } from "./beta-form";
+import { Browser, TabLink } from "./browser";
 import { Contents } from "./contents";
 import { Desktop } from "./desktop";
 import type { AppId } from "./windows";
 import { BODY, BOLD, BUTTON, H2, LINK, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
-import { Blink, Browser, UnderConstruction, Window } from "./retro";
+import { Blink, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
@@ -227,6 +228,9 @@ export function Landing() {
               <OpenApp app="record" className={BUTTON}>
                 See why it traded
               </OpenApp>
+              <TabLink tab="app" className={cn(PLAIN_BUTTON, "h-9")}>
+                Look inside the app
+              </TabLink>
               <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in
               </Link>

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
@@ -8,10 +8,13 @@ import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
 import { DISCARDED, QUESTIONS } from "./apps";
+import { WALLPAPERS, randomWallpaper } from "./art";
+import { APP_ORIGIN, APP_SCREENS } from "./app-tab";
 import { GREETING, TIPS } from "./assistant";
 import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
 import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
+import { WallpaperProvider } from "./wallpaper";
 import { EDITED, TRACE } from "./record-trace";
 
 /**
@@ -268,7 +271,7 @@ describe("links", () => {
   it("puts See why it traded beside Sign the guestbook in the hero, and it opens the record's window", async () => {
     renderLanding();
     const hero = document.querySelector<HTMLElement>("[data-slot=hero-actions]")!;
-    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See why it traded"]);
+    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See why it traded", "Look inside the app"]);
     const see = within(hero).getByRole("button", { name: "See why it traded" });
     expect(see.className).toBe(within(hero).getByRole("button", { name: "Sign the guestbook" }).className);
     expect(screen.queryByRole("region", { name: RECORD })).toBeNull();
@@ -298,6 +301,68 @@ describe("links", () => {
     const away = hrefs.filter((h) => !h.startsWith("#") && h !== "/login");
     expect(away.length).toBeGreaterThan(0);
     for (const h of away) expect(h).toMatch(/^https:\/\/www\.metmuseum\.org\/art\/collection\/search\/\d+$/);
+  });
+});
+
+describe("the browser's tabs", () => {
+  const tabs = () => screen.getByRole("tablist", { name: "Pages" });
+  const address = () => screen.getByRole("textbox", { name: "Address" });
+
+  it("opens on the home page, with the app in a second tab whose screens are the app's own, captured at both themes", async () => {
+    renderLanding();
+    const [site, app] = within(tabs()).getAllByRole("tab");
+    expect(site).toHaveAccessibleName("Owlhead Home Page");
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(app).toHaveAccessibleName("Inside the app");
+    const appPanel = document.getElementById(app.getAttribute("aria-controls")!)!;
+    expect(appPanel).not.toBeVisible();
+    expect(address()).toHaveValue("http://www.owlhead.ai/");
+    await press(app);
+    expect(app).toHaveAttribute("aria-selected", "true");
+    expect(home(), "the home page stays in the document while hidden").toBeInTheDocument();
+    expect(appPanel).toBeVisible();
+    expect(appPanel).toHaveAccessibleName("Inside the app");
+    expect(address()).toHaveValue(`${APP_ORIGIN}/`);
+    const stage = document.querySelector<HTMLElement>("[data-slot=app-stage]")!;
+    const sources = [...stage.querySelectorAll("img")].map((img) => decodeURIComponent(img.getAttribute("src") ?? ""));
+    for (const s of APP_SCREENS)
+      for (const theme of ["light", "dark"]) {
+        expect(sources.some((src) => src.includes(`/app/${s.id}-${theme}.jpg`)), `${s.id} ${theme}`).toBe(true);
+        expect(existsSync(join(process.cwd(), "public", "app", `${s.id}-${theme}.jpg`)), `public/app/${s.id}-${theme}.jpg is captured`).toBe(true);
+      }
+  });
+
+  it("steps through the screens, the address following, and says what each one shows", async () => {
+    renderLanding();
+    await press(within(tabs()).getByRole("tab", { name: "Inside the app" }));
+    const screens = screen.getByRole("list", { name: "Screens" });
+    expect(within(screens).getAllByRole("button").map((b) => b.textContent)).toEqual(APP_SCREENS.map((s) => s.title));
+    for (const s of APP_SCREENS) {
+      await press(within(screens).getByRole("button", { name: s.title }));
+      expect(within(screens).getByRole("button", { name: s.title })).toHaveAttribute("aria-pressed", "true");
+      expect(address()).toHaveValue(`${APP_ORIGIN}${s.path}`);
+      expect(screen.getByRole("img", { name: `${s.title}, in the Owlhead app` })).toBeInTheDocument();
+      expect(screen.getByText(s.caption)).toBeInTheDocument();
+    }
+  });
+
+  it("moves between the tabs with the arrow keys, and comes back to the home page from the hero or a link to one of its parts", async () => {
+    renderLanding();
+    const site = within(tabs()).getByRole("tab", { name: "Owlhead Home Page" });
+    const app = within(tabs()).getByRole("tab", { name: "Inside the app" });
+    await press(within(document.querySelector<HTMLElement>("[data-slot=hero-actions]")!).getByRole("button", { name: "Look inside the app" }));
+    expect(app).toHaveAttribute("aria-selected", "true");
+    expect(app, "the keyboard follows the tab").toHaveFocus();
+    expect(app).toHaveAttribute("tabindex", "0");
+    expect(site).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(app, { key: "ArrowLeft" });
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(site).toHaveFocus();
+    fireEvent.keyDown(site, { key: "ArrowRight" });
+    expect(app).toHaveAttribute("aria-selected", "true");
+    await press(within(screen.getByRole("navigation", { name: "Guides" })).getByRole("link", { name: "Handbook" }));
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(home()).toBeVisible();
   });
 });
 
@@ -422,6 +487,23 @@ describe("the desktop", () => {
     expect(screen.queryByRole("region", { name: "Owlhead Home Page" })).toBeNull();
   });
 
+  it("opens on the painting the server picked for the visit, offers no grey pattern, and picks among every painting", async () => {
+    const { container } = render(
+      <WallpaperProvider initial="kiso-snow">
+        <Landing />
+      </WallpaperProvider>,
+    );
+    expect(container.querySelector("[data-slot=wallpaper]")).toHaveAttribute("data-wallpaper", "kiso-snow");
+    expect(container.querySelector("[data-slot=desktop-pattern]")).toBeNull();
+    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
+    const display = win("Display Properties");
+    expect(within(display).getByRole("radio", { name: "The Kiso Mountains in Snow" })).toBeChecked();
+    expect(within(display).queryAllByRole("radio", { name: /pattern/i })).toHaveLength(0);
+    const rolls = Array.from({ length: 600 }, (_, i) => randomWallpaper(i / 600));
+    expect(new Set(rolls), "every painting can open a visit, and nothing else").toEqual(new Set(WALLPAPERS.map((w) => w.id)));
+    expect(randomWallpaper(0.999999)).toBe(WALLPAPERS.at(-1)?.id);
+  });
+
   it("changes the wallpaper in Display, credits the painting, and keeps the choice out of browser storage", async () => {
     const { container } = renderLanding();
     const wallpaper = container.querySelector("[data-slot=wallpaper]")!;
@@ -455,7 +537,6 @@ describe("the desktop", () => {
       "Winamp",
       "Tour.mp4",
       "Recycle Bin",
-      "Mac",
       "Sign in",
       "Shut down…",
     ]);

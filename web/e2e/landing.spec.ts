@@ -11,10 +11,15 @@ import { type Page, expect, test } from "@playwright/test";
 const PATH = "/welcome";
 const WIDTHS = [320, 390, 1024, 1440];
 
+/** Waits out the desktop's power-on (DEC-905), so what a test measures is where things rest; the endless drift and blink go on. */
+const settled = (page: Page) =>
+  page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => undefined))));
+
 async function open(page: Page, width: number, height = 900) {
   await page.setViewportSize({ width, height });
   await page.goto(PATH, { waitUntil: "load" });
   await page.locator("[data-slot=landing]").waitFor();
+  await settled(page);
 }
 
 /** Opens one of the desktop's windows from the hero's buttons, as a visitor would, and returns it. */
@@ -117,16 +122,21 @@ test("the Mac on the desktop redraws it as System 7, which the server keeps draw
   expect(html, "the server draws the chosen desktop, so nothing swaps after the page paints").toContain('data-os="mac"');
   await page.reload({ waitUntil: "load" });
   await expect(page.locator("[data-slot=menu-bar]")).toBeVisible();
+  await settled(page);
   const look = await page.evaluate(() => ({
     shadow: getComputedStyle(document.getElementById("win-home")!).boxShadow,
     radius: getComputedStyle(document.querySelector("[data-slot=hero-actions] button")!).borderRadius,
     menus: getComputedStyle(document.querySelector("[data-slot=browser-menus]")!).display,
     pattern: document.querySelector("[data-slot=desktop-pattern]") !== null,
+    painting: document.querySelector("[data-slot=wallpaper] img") !== null,
+    named: document.querySelector("[data-slot=desktop-icons-right] li:has([aria-describedby]) button")?.textContent,
   }));
   expect(look.shadow, "a window casts System 7's hard shadow").toMatch(/2px 2px 0px/);
   expect(look.radius, "its buttons are round").toBe("6px");
   expect(look.menus, "the browser's menus leave its window for the menu bar").toBe("none");
-  expect(look.pattern, "and the desktop is the grey pattern").toBe(true);
+  expect(look.pattern, "the desktop is a painting, never the grey pattern").toBe(false);
+  expect(look.painting).toBe(true);
+  expect(look.named, "the other computer's icon writes no name").toBe("");
 
   const frames = await track(page);
   await page.locator("[data-slot=desktop-icons] li[data-app=guestbook] button").click();
@@ -146,8 +156,9 @@ test("the Mac on the desktop redraws it as System 7, which the server keeps draw
   const { scroll, inner } = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
   expect(scroll, "nothing scrolls sideways at 320 px").toBeLessThanOrEqual(inner);
 
-  await page.locator("[data-bar=owl]").click();
-  await page.getByRole("menu", { name: "Owlhead" }).getByRole("menuitem", { name: "PC" }).click();
+  await page.locator("[data-bar=special]").click();
+  await page.getByRole("menu", { name: "Special" }).getByRole("menuitem", { name: "Change wallpaper…" }).click();
+  await page.getByRole("radio", { name: "Windows 98" }).check({ force: true });
   await expect(page.locator("[data-slot=taskbar]")).toBeVisible();
 });
 

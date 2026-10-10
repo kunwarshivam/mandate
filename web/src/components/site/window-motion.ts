@@ -118,6 +118,54 @@ export function leave(el: HTMLElement, to: Box | null, done: () => void): void {
   );
 }
 
+/** How far a dragged window leans, in degrees per pixel per millisecond of sideways speed, and at most. */
+const LEAN = 1.6;
+const MAX_LEAN = 2.5;
+
+/** A window let go faster than this, in pixels per millisecond, glides on; how long it glides for, and at most how far. */
+const THROWN = 0.35;
+const GLIDE = 140;
+const MAX_GLIDE = 220;
+
+/** Whether a window should lean and glide as it is dragged: only with the Web Animations API and without reduced motion. */
+export function physical(el: HTMLElement): boolean {
+  return animates(el) && !still();
+}
+
+/** The lean for a sideways speed, in pixels per millisecond: into the direction of travel, as a card dragged across a table. */
+export function leanFor(speed: number): number {
+  return Math.max(-MAX_LEAN, Math.min(MAX_LEAN, speed * LEAN));
+}
+
+/** How much further a window let go at `speed` (pixels per millisecond, each axis) glides. */
+export function glideFor(speed: { x: number; y: number }): { x: number; y: number } {
+  const fast = Math.hypot(speed.x, speed.y);
+  if (fast < THROWN) return { x: 0, y: 0 };
+  const scale = Math.min(GLIDE, MAX_GLIDE / fast);
+  return { x: speed.x * scale, y: speed.y * scale };
+}
+
+/**
+ * Settles a window just let go: it glides the last `glide` pixels into the place it has already
+ * been moved to, decelerating, and its lean springs back to level. The lean was turned about the
+ * point it was held by, which is put back once it is level.
+ */
+export function settle(el: HTMLElement, glide: { x: number; y: number }, lean: number): void {
+  const held = el.style.transformOrigin;
+  el.style.rotate = "";
+  el.style.transition = "";
+  if (!physical(el)) {
+    el.style.transformOrigin = "";
+    return;
+  }
+  const t = timing();
+  const motions = [el.animate([{ rotate: `${lean}deg` }, { rotate: "0deg" }], { duration: 650, easing: token("--ease-spring") || t.ease })];
+  if (glide.x !== 0 || glide.y !== 0) motions.push(el.animate([{ transform: `translate(${-glide.x}px, ${-glide.y}px)` }, { transform: "none" }], { duration: 480, easing: t.ease }));
+  Promise.allSettled(motions.map((m) => m.finished)).then(() => {
+    if (el.style.transformOrigin === held) el.style.transformOrigin = "";
+  });
+}
+
 /** Morphs a window from the frame it has to the one `change` gives it (maximize and restore). */
 export function reframe(el: HTMLElement, change: () => void): void {
   if (!animates(el) || still()) return change();

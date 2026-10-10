@@ -96,7 +96,7 @@ export const HIDE_PANEL_CSS = `[data-slot="${SWITCHER_MARKER}"] { display: none 
  * `e2e/chart-paint.spec.ts` uses: the plot's first pixel is its background, and more than 200
  * pixels differ from it. A chart that never draws is captured as it is, with a warning.
  */
-async function chartsDrawn(page, file) {
+export async function chartsDrawn(page, file) {
   try {
     await page.waitForFunction(
       () => {

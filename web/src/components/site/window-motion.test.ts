@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { leave, leaving, millis, moving, onto, openFrom, reframe } from "./window-motion";
+import { glideFor, leanFor, leave, leaving, millis, moving, onto, openFrom, reframe, settle } from "./window-motion";
 
 /** Applies `translate(dx, dy) scale(s)` from a top-left origin to a box, as the browser would. */
 function apply(box: { left: number; top: number; width: number; height: number }, transform: string) {
@@ -47,5 +47,34 @@ describe("window motion", () => {
     expect(moving(el)).toBe(false);
     expect(leaving(el)).toBe(false);
     expect(moving(null)).toBe(false);
+  });
+
+  it("leans a dragged window into its travel, never past a few degrees, and level when it is still", () => {
+    expect(leanFor(0)).toBe(0);
+    expect(leanFor(0.5)).toBeGreaterThan(0);
+    expect(leanFor(-0.5)).toBe(-leanFor(0.5));
+    for (const speed of [3, 10, 1e6]) {
+      expect(leanFor(speed)).toBe(2.5);
+      expect(leanFor(-speed)).toBe(-2.5);
+    }
+  });
+
+  it("glides a window let go fast along its travel, a bounded distance, and not at all when let go slowly", () => {
+    expect(glideFor({ x: 0.2, y: 0.1 })).toEqual({ x: 0, y: 0 });
+    const g = glideFor({ x: 1, y: 0.5 });
+    expect(g.x).toBeGreaterThan(0);
+    expect(g.y / g.x, "along the direction it was thrown").toBeCloseTo(0.5, 6);
+    for (const speed of [{ x: 4, y: 0 }, { x: -30, y: 12 }, { x: 0, y: 1e5 }]) expect(Math.hypot(glideFor(speed).x, glideFor(speed).y)).toBeLessThanOrEqual(220 + 1e-9);
+  });
+
+  it("puts a let-go window level at once without the Web Animations API", () => {
+    const el = document.createElement("div");
+    el.style.rotate = "2deg";
+    el.style.transformOrigin = "10px 10px";
+    el.style.transition = "rotate 180ms ease-out";
+    settle(el, { x: 40, y: 0 }, 2);
+    expect(el.style.rotate).toBe("");
+    expect(el.style.transformOrigin).toBe("");
+    expect(el.style.transition).toBe("");
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal, flushSync } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -12,13 +12,14 @@ import { DISCARDED, Guestbook, Help, Notepad, PictureViewer, RecordViewer, Recyc
 import { Assistant } from "./assistant";
 import { useDesktopStyle, useSetDesktopStyle } from "./desktop-style";
 import { ETCHED, MENU_ITEM, MENU_PANEL, MONO, PIXEL, RAISED, SUNKEN, WINDOW_FRAME } from "./letter";
+import styles from "./letter.module.css";
 import { MediaPlayer } from "./media-player";
 import { OpenAppContext } from "./open-app";
 import { BIN, BIN_EMPTY, BOLT, BOOK, DISK, FILM, HELP, KEY, LEDGER, MAC, MONITOR, NOTE, PC, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { ThemeSwitch, useThemeMode } from "./theme-switch";
 import { Glyph, TitleBar } from "./title-bar";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
-import { leave, leaving, moving, openFrom, reframe } from "./window-motion";
+import { glideFor, leanFor, leave, leaving, moving, openFrom, physical, reframe, settle } from "./window-motion";
 import { type AppId, TASK } from "./windows";
 import type { AmpState } from "./winamp";
 
@@ -218,7 +219,20 @@ function Window({ id, win, layer, front, dispatch, controls, children }: { id: A
   const { icon, frame, mac } = APPS[id];
   const title = nameOn(style, id, APPS[id].title);
   const ref = useRef<HTMLElement>(null);
-  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
+  const drag = useRef<{
+    sx: number;
+    sy: number;
+    ox: number;
+    oy: number;
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    at: { x: number; y: number; t: number };
+    speed: { x: number; y: number };
+    lean: number;
+    level: ReturnType<typeof setTimeout> | undefined;
+  } | null>(null);
 
   const grab = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || win.max || (e.target as Element).closest("button")) return;
@@ -237,18 +251,49 @@ function Window({ id, win, layer, front, dispatch, controls, children }: { id: A
       maxX: win.x + d.right - r.left - GRIP,
       minY: win.y + d.top - r.top,
       maxY: win.y + d.bottom - r.top - 28,
+      at: { x: e.clientX, y: e.clientY, t: e.timeStamp },
+      speed: { x: 0, y: 0 },
+      lean: 0,
+      level: undefined,
     };
+    if (physical(el)) {
+      el.style.transformOrigin = `${e.clientX - r.left}px ${e.clientY - r.top}px`;
+      el.style.transition = "rotate 180ms ease-out";
+    }
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
   const pull = (e: PointerEvent<HTMLDivElement>) => {
     const g = drag.current;
-    if (!g) return;
+    const el = ref.current;
+    if (!g || !el) return;
+    const dt = Math.max(1, e.timeStamp - g.at.t);
+    g.speed = { x: 0.6 * g.speed.x + (0.4 * (e.clientX - g.at.x)) / dt, y: 0.6 * g.speed.y + (0.4 * (e.clientY - g.at.y)) / dt };
+    g.at = { x: e.clientX, y: e.clientY, t: e.timeStamp };
     dispatch({ type: "move", id, x: clamp(g.ox + e.clientX - g.sx, g.minX, g.maxX), y: clamp(g.oy + e.clientY - g.sy, g.minY, g.maxY) });
+    if (!physical(el)) return;
+    g.lean = leanFor(g.speed.x);
+    el.style.rotate = `${g.lean}deg`;
+    clearTimeout(g.level);
+    g.level = setTimeout(() => {
+      g.speed = { x: 0, y: 0 };
+      g.lean = 0;
+      el.style.rotate = "0deg";
+    }, 90);
   };
 
-  const drop = () => {
+  const drop = (e: PointerEvent<HTMLDivElement>) => {
+    const g = drag.current;
+    const el = ref.current;
     drag.current = null;
+    if (!g || !el) return;
+    clearTimeout(g.level);
+    const fresh = e.type === "pointerup" && e.timeStamp - g.at.t < 60;
+    const flung = fresh ? glideFor(g.speed) : { x: 0, y: 0 };
+    const to = { x: clamp(win.x + flung.x, g.minX, g.maxX), y: clamp(win.y + flung.y, g.minY, g.maxY) };
+    const glide = { x: to.x - win.x, y: to.y - win.y };
+    if (glide.x !== 0 || glide.y !== 0) flushSync(() => dispatch({ type: "move", id, ...to }));
+    settle(el, glide, g.lean);
   };
 
   return (
@@ -264,7 +309,7 @@ function Window({ id, win, layer, front, dispatch, controls, children }: { id: A
       data-maximized={win.max || undefined}
       onPointerDownCapture={() => dispatch({ type: "focus", id })}
       onFocusCapture={() => dispatch({ type: "focus", id })}
-      className={cn(WINDOW_FRAME, "absolute inset-0 flex origin-top-left flex-col outline-none max-sm:translate-none!", !win.max && (style === "mac" && mac ? mac : frame))}
+      className={cn(WINDOW_FRAME, "absolute inset-0 flex origin-top-left flex-col outline-none max-sm:translate-none!", id === "home" && styles.bootWindow, !win.max && (style === "mac" && mac ? mac : frame))}
       style={{ zIndex: layer, translate: win.max ? undefined : `${win.x}px ${win.y}px` }}
     >
       <TitleBar
@@ -351,13 +396,17 @@ function Check({ on }: { on: boolean }) {
   );
 }
 
-/** What the Start menu and the owl menu list: the home page first, then every shortcut but its icon. */
-const LAUNCHER: Shortcut[] = [{ id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" }, ...SHORTCUTS.slice(1)];
+/**
+ * What the Start menu and the owl menu list: the home page first, then every shortcut but its icon.
+ * The other desktop's computer is left out, since a menu would have to write its name; the keyboard
+ * reaches it in Display, where it is a picture too.
+ */
+const LAUNCHER: Shortcut[] = [{ id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" }, ...SHORTCUTS.slice(1).filter((s) => !("os" in s))];
 
 /** What the other desktop's icon does, for assistive technology only; on screen it is just a computer. */
 const SWAP_NOTE = "desktop-swap";
 
-function ShortcutItem({ s, onOpen, role, className, tabIndex, children }: { s: Shortcut; onOpen: (s: Shortcut, e: Click) => void; role?: "menuitem"; className?: string; tabIndex?: number; children: ReactNode }) {
+function ShortcutItem({ s, onOpen, role, label, className, tabIndex, children }: { s: Shortcut; onOpen: (s: Shortcut, e: Click) => void; role?: "menuitem"; label?: string; className?: string; tabIndex?: number; children: ReactNode }) {
   if ("href" in s)
     return (
       <Link href={s.href} role={role} tabIndex={tabIndex} className={className}>
@@ -365,7 +414,7 @@ function ShortcutItem({ s, onOpen, role, className, tabIndex, children }: { s: S
       </Link>
     );
   return (
-    <button type="button" role={role} tabIndex={tabIndex} aria-describedby={"os" in s ? SWAP_NOTE : undefined} onClick={(e) => onOpen(s, e)} className={className}>
+    <button type="button" role={role} tabIndex={tabIndex} aria-label={label} aria-describedby={"os" in s ? SWAP_NOTE : undefined} onClick={(e) => onOpen(s, e)} className={className}>
       {children}
     </button>
   );
@@ -496,25 +545,34 @@ export function Desktop({ home }: { home: ReactNode }) {
     return own ? sprite(own) : s.icon;
   };
 
-  const icons = (list: Shortcut[]) =>
-    list.map((s) => {
+  const icons = (list: Shortcut[], from = 0) =>
+    list.map((s, i) => {
       const on = selected === s.id;
+      const unnamed = "os" in s;
       return (
-        <li key={s.id} className={cn("grid justify-items-center", mac && "[direction:ltr]")} data-app={"app" in s ? s.app : undefined}>
+        <li key={s.id} className={cn(styles.bootIcon, "grid justify-items-center", mac && "[direction:ltr]")} style={{ "--i": from + i } as CSSProperties} data-app={"app" in s ? s.app : undefined}>
           {/* Desktop icons are pointer affordances, out of the tab cycle as on the real desktop: the
               keyboard reaches the apps through the Start menu, and the page's content comes first
               (`e2e/landing.spec.ts`: skip link, then the guide links). */}
-          <ShortcutItem s={s} onOpen={launch} tabIndex={-1} className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none">
-            <span className={cn("grid size-8 place-items-center", on && "opacity-80")}>{iconFor(s)}</span>
-            <span
-              className={cn(
-                "px-1 text-center text-[0.875rem] leading-tight group-focus-visible:outline-1 group-focus-visible:outline-dotted group-focus-visible:outline-offset-1 group-focus-visible:outline-card",
-                PIXEL,
-                mac ? (on ? "bg-foreground text-card" : "bg-card text-foreground") : on ? "bg-highlight text-highlight-foreground" : "bg-foreground text-card",
-              )}
-            >
-              {nameOn(style, s.id, s.label)}
-            </span>
+          <ShortcutItem
+            s={s}
+            onOpen={launch}
+            tabIndex={-1}
+            label={unnamed ? nameOn(style, s.id, s.label) : undefined}
+            className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none"
+          >
+            <span className={cn(styles.desktopIcon, "grid size-8 place-items-center", on && "opacity-80")}>{iconFor(s)}</span>
+            {!unnamed && (
+              <span
+                className={cn(
+                  "px-1 text-center text-[0.875rem] leading-tight group-focus-visible:outline-1 group-focus-visible:outline-dotted group-focus-visible:outline-offset-1 group-focus-visible:outline-card",
+                  PIXEL,
+                  mac ? (on ? "bg-foreground text-card" : "bg-card text-foreground") : on ? "bg-highlight text-highlight-foreground" : "bg-foreground text-card",
+                )}
+              >
+                {nameOn(style, s.id, s.label)}
+              </span>
+            )}
           </ShortcutItem>
         </li>
       );
@@ -573,7 +631,7 @@ export function Desktop({ home }: { home: ReactNode }) {
     );
 
   const menuBar = (
-    <div className={cn("relative z-[70] flex h-7 shrink-0 items-stretch border-b border-foreground bg-card text-[0.9375rem] font-semibold text-foreground", PIXEL)} data-slot="menu-bar">
+    <div className={cn(styles.bootBar, "relative z-[70] flex h-7 shrink-0 items-stretch border-b border-foreground bg-card text-[0.9375rem] font-semibold text-foreground", PIXEL)} data-slot="menu-bar">
       {barMenu(
         "owl",
         "Owlhead",
@@ -721,7 +779,7 @@ export function Desktop({ home }: { home: ReactNode }) {
           className={cn("grid content-start gap-1 px-2 max-sm:grid-cols-4 sm:absolute sm:right-0 sm:py-2", mac ? "sm:bottom-0 sm:flex sm:flex-row-reverse" : "sm:inset-y-0 sm:w-[7.5rem]")}
           data-slot="desktop-icons-right"
         >
-          {icons(SHORTCUTS.filter((s) => s.right))}
+          {icons(SHORTCUTS.filter((s) => s.right), SHORTCUTS.filter((s) => !s.right).length)}
         </ul>
 
         <OpenAppContext value={openApp}>
@@ -765,7 +823,7 @@ export function Desktop({ home }: { home: ReactNode }) {
       </div>
 
       {!mac && (
-        <div className={cn("relative z-[70] flex h-10 shrink-0 items-center gap-1 border-t-2 border-t-card bg-muted px-1", PIXEL)} data-slot="taskbar">
+        <div className={cn(styles.bootBar, "relative z-[70] flex h-10 shrink-0 items-center gap-1 border-t-2 border-t-card bg-muted px-1", PIXEL)} data-slot="taskbar">
           <div data-slot="start" className="contents">
             <button
               type="button"
