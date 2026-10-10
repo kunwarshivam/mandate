@@ -98,7 +98,6 @@ fn manifest(resolved: Result<ResolvedStart, TrustedStartError>, name: &str) -> M
 /// is `confirm`'s with the case's cold state; a refusal for the cold manifest, and a cold store
 /// that cannot answer, come from `confirm`, every other refusal from the resolver itself.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_row_case_resolves_and_confirms_as_its_vector_says() {
     let section = section();
     let base: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
@@ -138,7 +137,6 @@ fn every_row_case_resolves_and_confirms_as_its_vector_says() {
 /// are refused, an absent or unreadable object is `ColdUnreadable`, and only the exact bytes give
 /// the start, each from a fresh resolution of the same rows.
 #[test]
-#[ignore = "pending E12-3"]
 fn only_the_exact_cold_bytes_confirm_a_manifest_start() {
     let section = section();
     let rows: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
@@ -176,7 +174,6 @@ fn only_the_exact_cold_bytes_confirm_a_manifest_start() {
 /// stored re-hashed beside the good row. `parse` reads no payload from it, so which segment it
 /// records cannot be known, and the manifest start is refused rather than taken from the good row.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_duplicate_key_copy_beside_the_start_segment_refuses_it() {
     let section = section();
     let mut rows: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
@@ -268,7 +265,6 @@ fn digits(body: &[u8], key: &str, rng: &mut Rng) -> usize {
 /// parsing (DEC-895 item 1) and exactly one row on the control stream serves it and that row is
 /// intact, one seq later nothing serves it, and genesis is seq 1 alone, with no cold read.
 #[test]
-#[ignore = "pending E12-3"]
 fn random_row_variants_resolve_as_built() {
     let section = section();
     let base: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();

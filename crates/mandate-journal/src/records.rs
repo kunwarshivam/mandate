@@ -317,7 +317,7 @@ fn segment_rules(payload: &Value, stream: &StreamId, actor: Option<&Value>) -> R
 
 /// DEC-263 item 3: the SHA-256 of the canonical JSON of the six manifest fields this record
 /// carries, or `None` when one is missing.
-fn manifest_hash(payload: &Value) -> Option<Digest> {
+pub(crate) fn manifest_hash(payload: &Value) -> Option<Digest> {
     let mut manifest = Object::new();
     for (field, member) in MANIFEST {
         manifest.insert(Key::new(field).ok()?, payload.get(member)?.clone());
