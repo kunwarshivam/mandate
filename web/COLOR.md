@@ -207,7 +207,7 @@ Every token names a ramp step in each theme.
 | `--hatch-ink` | ink-950 at 0.3 | paper-500 at 0.4 |
 | `--ring` | `--mandate-strong` | the same |
 | `--logo` | the foreground: ink | the foreground: off-white |
-| `--tide` / `--tide-foreground` / `--tide-muted` (the landing page's third colour: one section, the flying owl's trim and the lock screen's night, never in the product) | teal-800 #064d4b / paper-50 #fbfdfe / teal-200 #b5eeeb | the same |
+| `--tide` / `--tide-foreground` / `--tide-muted` (the landing page's third colour: one section, the opening's pixel sea, the flying owl's trim and the lock screen's night, never in the product) | teal-800 #064d4b / paper-50 #fbfdfe / teal-200 #b5eeeb | the same |
 | `--tide-line` (the long page's pixel thread on the page and on cards) | teal-800 #064d4b | teal-400 #43cfcb |
 
 ## Azure and sun usage rules
@@ -235,7 +235,7 @@ Azure and sun are allowed only through their tokens, and the tests hold each rul
 - **Tide is the landing page's third colour, and it is spent sparingly** ([DEC-907](../docs/project/decisions/DEC-907.md)).
   - Ink and sun leave a third leg of the triad to choose. Sun's complement, violet, is banned (hue 280 to 330), and of the two remaining legs teal (192, the existing teal ramp) was chosen over rose (345), which sits too near crimson and the colour-blind loss.
   - Teal-800 is deep enough to carry paper type (9.49:1) and pale teal type (7.59:1), and it is the same in both themes, as the highlight is.
-  - It fills exactly one section, the long page's part about asking you. Beyond it, tide is the flying owl's trim (its facial rim, wing edges and chest marks), the dithered sea of the lock screen's pixel night, and the long page's pixel thread. `long-page.test.tsx` fails on a second tide section or on tide in any file outside the long page.
+  - It fills exactly one section, the long page's part about asking you, and the pixel sea the opening's picture floats on ([DEC-908](../docs/project/decisions/DEC-908.md) item 6), whose crests and foam are `tide-muted` (7.59:1, as a mark). Beyond them, tide is the flying owl's trim (its facial rim, wing edges and chest marks), the dithered sea of the lock screen's pixel night, and the long page's pixel thread. `long-page.test.tsx` fails on a second tide section or on tide in any file outside the long page.
   - The thread is the one line in tide: `tide-line` on the page and on cards (9.03:1 or more in light, 9.94:1 or more in dark), `tide-muted` across the tide section, and `tide` across the sun part (6.74:1). It is decoration, so it is measured as a mark.
   - It is never in the product and never text on paper.
 - **Azure means an action, the mandate, or the account's line.** The account's azure is a line, a bar, or the current tab's rule. On a chart, a mandate level is never azure: it is a dashed grey line whose axis label is a pale azure tag in deep azure type.
