@@ -91,7 +91,8 @@ anything here.
 
 - **#1242:** L2, E7-17 implementation (round-2 delta passed). Head `5f9093e7`.
 - **#1267:** L2, DEC-900 implementation (approved; already merged).
-- **#1268:** L5, PR 4b; completes slice C. Head `afac5664`.
+- **#1268:** L5, PR 4b; completes slice C (merged).
+- **#1271:** L5, CLI judged-types pair PR 1 (tests). Head `770e9f45`. PR 2 (the switch) follows.
 - **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
 
