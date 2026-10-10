@@ -65,12 +65,12 @@ describe("safeNext keeps `next` on this site (no open redirect)", () => {
 });
 
 describe("public paths", () => {
-  it.each(["/welcome", "/login", "/api/beta", "/auth/callback", "/auth/passkey", "/_next/static/chunks/a.js", "/favicon.ico", "/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/pwa-maskable-512.png", "/og-image.png", "/site.webmanifest", "/robots.txt"])(
+  it.each(["/welcome", "/login", "/api/beta", "/demo", "/auth/callback", "/auth/passkey", "/_next/static/chunks/a.js", "/favicon.ico", "/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/pwa-maskable-512.png", "/og-image.png", "/site.webmanifest", "/robots.txt"])(
     "%s is public",
     (path) => expect(isPublicPath(path)).toBe(true),
   );
 
-  it.each(["/", "/agents", "/approvals/apr_01", "/settings/profile", "/design", "/welcome/x", "/login/x", "/auth", "/loginx", "/og-image.png.html", "/agents/x.png", "/site", "/sitex/a.png"])("%s is not public", (path) => {
+  it.each(["/", "/agents", "/approvals/apr_01", "/settings/profile", "/design", "/welcome/x", "/login/x", "/auth", "/loginx", "/og-image.png.html", "/agents/x.png", "/site", "/sitex/a.png", "/demo/", "/demo/agents", "/demox", "/demo.html", "/agents/demo"])("%s is not public", (path) => {
     expect(isPublicPath(path)).toBe(false);
   });
 });
@@ -92,6 +92,11 @@ describe("authRoute", () => {
 
   it("keeps the query of the screen a signed-out visitor asked for", () => {
     expect(at("/approvals?filter=open", false)).toEqual({ kind: "redirect", to: "/login?next=/approvals%3Ffilter%3Dopen" });
+  });
+
+  it("serves the example app to a signed-out visitor at /demo alone, and no app address behind it (DEC-906)", () => {
+    expect(at("/demo", false)).toEqual({ kind: "pass" });
+    for (const path of ["/demo/agents", "/demo/approvals/apr_01", "/demo/../agents"]) expect(at(path, false).kind, path).toBe("redirect");
   });
 
   it("shows the sign-in page to a signed-out visitor", () => {

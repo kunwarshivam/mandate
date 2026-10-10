@@ -6,6 +6,12 @@ export const LOGIN_PATH = "/login";
 export const WELCOME_PATH = "/welcome";
 export const CALLBACK_PATH = "/auth/callback";
 export const PASSKEY_PATH = "/auth/passkey";
+/**
+ * The app over the example workspace, shown in the landing page's browser tab (DEC-906). Only this
+ * exact path is public: it renders fixtures alone, and moves between screens in memory, so no other
+ * app address ever opens signed out.
+ */
+export const DEMO_PATH = "/demo";
 /** The private beta's request form posts here signed out (`@/lib/beta`). */
 export const BETA_REQUEST_PATH = "/api/beta";
 
@@ -31,6 +37,7 @@ export function isPublicPath(pathname: string): boolean {
     pathname === WELCOME_PATH ||
     pathname === LOGIN_PATH ||
     pathname === BETA_REQUEST_PATH ||
+    pathname === DEMO_PATH ||
     pathname.startsWith("/auth/") ||
     pathname.startsWith("/_next/") ||
     PUBLIC_FILES.has(pathname)
