@@ -6,7 +6,7 @@ import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { HealthState, Workspace } from "@/fixtures/types";
 import { clock } from "@/lib/format";
-import { Age } from "@/components/domain/as-of";
+import { Age, StateChip } from "@/components/domain/as-of";
 import { FixtureTag } from "@/components/domain/placeholders";
 
 interface Item {
@@ -50,7 +50,7 @@ export function healthItems(ws: Workspace, now: string): Item[] {
 
 /**
  * System health carries no meaning colour and no "healthy" dot: every line says when it was last
- * true, and a degraded one is labelled.
+ * true, and a degraded one is labelled with the chart footer's outlined chip, never an ink fill.
  */
 const STATE_LABEL: Record<Item["state"], string | null> = {
   ok: null,
@@ -136,11 +136,7 @@ export function StatusStrip({
               data-state={i.state}
               className={cn("shrink-0 sm:min-w-0 sm:truncate", label ? "font-medium text-foreground sm:shrink" : "sm:shrink-[4]")}
             >
-              {label ? (
-                <span className="mr-1.5 rounded-sm bg-foreground px-1.5 text-xs font-semibold text-background" aria-hidden>
-                  {label}
-                </span>
-              ) : null}
+              {label ? <StateChip className="mr-1.5">{label}</StateChip> : null}
               {i.text}
             </span>
           );

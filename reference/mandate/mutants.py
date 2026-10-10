@@ -427,7 +427,11 @@ UNASKED_MUTANTS = {
         '    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_DOWN)',
         '    bp = lambda x: (x * dd).quantize(D("0.0001"), rounding=ROUND_UP)'),
     "loss answer: collapsed rungs are proposed": (
-        '    if not D(0) < hyst < halve < exits < dd:', '    if not D(0) < dd:'),
+        '    if not D(0) < hyst < halve < exits < dd < D(1):', '    if not D(0) < dd < D(1):'),
+    "loss answer: an allocation of 0 or less drafts or raises (DEC-901)": (
+        '    if D(allocation_usd) <= 0:\n        return None\n', ''),
+    "loss answer: a drawdown of 1 or more is proposed (DEC-901)": (
+        '    if not D(0) < hyst < halve < exits < dd < D(1):', '    if not D(0) < hyst < halve < exits < dd:'),
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "

@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.6, draft)
+# Notifications and Approval Channels Spec (v0.7, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.6: what a relay refusal means to the deployment ([DEC-728](../project/decisions/DEC-728.md), §4.6, §5.2); v0.5: a relayed send's VAPID `sub` is a role mailbox, never a person's address ([DEC-727](../project/decisions/DEC-727.md), §4.6); v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
+| **Status** | Draft v0.7: a failed attempt's record carries the provider's verdict, and §7's provider-down row ends `abandoned` ([DEC-706](../project/decisions/DEC-706.md), §5.1, §5.5, §7); v0.6: what a relay refusal means to the deployment ([DEC-728](../project/decisions/DEC-728.md), §4.6, §5.2); v0.5: a relayed send's VAPID `sub` is a role mailbox, never a person's address ([DEC-727](../project/decisions/DEC-727.md), §4.6); v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent); v0.5's relayed subject, [DEC-727](../project/decisions/DEC-727.md) (Accepted, agent); v0.6's relay refusals, [DEC-728](../project/decisions/DEC-728.md) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent); v0.5's relayed subject, [DEC-727](../project/decisions/DEC-727.md) (Accepted, agent); v0.6's relay refusals, [DEC-728](../project/decisions/DEC-728.md) (Accepted, agent); v0.7's verdict on a failed attempt, [DEC-706](../project/decisions/DEC-706.md) (Accepted, agent) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -467,7 +467,9 @@ The dispatcher **tails the journal**, which is its outbox:
    (§5.6).
 4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
-   while the approval is still pending.
+   while the approval is still pending. A `failed` attempt is terminal only when its verdict is
+   `permanent`; a `retryable` one leaves that channel due on §5.3's schedule (journal spec §9.15,
+   [DEC-706](../project/decisions/DEC-706.md)).
 
 **A process of its own, from M7.** The dispatcher runs in its own process, not inside the runtime or
 the executor, so no trading process does provider I/O or waits on it (NT-9). At M7 that is one more
@@ -559,7 +561,7 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 | `ApprovalDelivered` | Agent (the runtime) | The pull channels' `delivered`, in the request's own batch, at every stage. Push outcomes are not copied here: check 4 is met by the pull channel | As journal spec §9: approval, channel, status, message id |
 | `OwnerAlertSent` | The subject's own stream (its owner) | With the subject, in the same batch | Subject event, kind, and for a kill switch the owner command it carries out (journal spec v0.12) |
 | `NoticeIssued` | Notice (the dispatcher) | Before the first send | Notice id, kind, class, cause and its stream, recipients (opaque) |
-| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, plus the dispatcher's own `not_pending` for `action` and `retry_window_ended` for `safety` and `info`, both only with `abandoned`), `provider_message_id`, `coalesced_into` |
+| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, plus the dispatcher's own `not_pending` for `action` and `retry_window_ended` for `safety` and `info`, both only with `abandoned`), `provider_message_id`, `coalesced_into`, and `verdict` (`retryable` or `permanent`, the outcome §5.2's `send` returned, only with `failed`; journal spec v0.40, [DEC-706](../project/decisions/DEC-706.md)) |
 
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
@@ -689,7 +691,7 @@ stateDiagram-v2
 
 | Situation | What happens | Effect on trading | Recorded as |
 |---|---|---|---|
-| **A provider is down** | Retries per §5.3; other channels unaffected; after the window, `failed` | None. An approval stays grantable through the pull channels and otherwise times out to `skip` | `NoticeAttempted`, `failed`, per attempt |
+| **A provider is down** | Retries per §5.3; other channels unaffected; after the window, `abandoned` with reason `retry_window_ended` (for an `action` notice, once the approval is no longer pending, `not_pending`) | None. An approval stays grantable through the pull channels and otherwise times out to `skip` | `NoticeAttempted`, `failed` with verdict `retryable`, per attempt; then `abandoned` |
 | **The relay is down** | Relayed web push fails and retries; email and chat leave the deployment directly and are unaffected; managed web push does not use the relay | None (NT-9, OPS-12). The status strip says relay push is unavailable (09-product-experience §7) | `failed`, reason `provider_error` |
 | **The dispatcher is down** | Nothing is sent; on restart it replays from the journal and sends what is still due; an operator alert fires when its lag passes 60 seconds | None. Approvals stay listed in the pull channels; any that expire meanwhile are skipped | Outcomes appear late; the lag is an operator metric |
 | **A crash between send and record** | The notice is re-sent with the same idempotency key | None | Two attempts, one possibly a duplicate the recipient sees |
@@ -718,7 +720,7 @@ stateDiagram-v2
 |---|---|---|
 | Mandate spec §6.4 | Payload is exactly a random notice id and one generic text; quiet hours suppress push only; a request is grantable once delivered on one channel; risk-limit alerts ignore quiet hours | Amended in this change (notice id for approval id, DEC-438 item 10, a tightening under DEC-176). This spec adds `web_inbox` as a second pull channel under the same reading as `cli_inbox` (DEC-438 item 3) |
 | Mandate spec §6.5, §6.7 | Delegation ends and fired tripwires produce `OwnerAlertSent` (written by the stream owner) with opaque text; a fired tripwire is a risk-limit alert | Consistent: `delegation_ended` is `info`, a tripwire is `risk_limit` (`safety`); §6.7's sentence amended for the notice id |
-| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); journal spec v0.28 §9.15 closes the payload schemas (DEC-720) |
+| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); journal spec v0.28 §9.15 closes the payload schemas (DEC-720), and v0.40 adds `NoticeAttempted` version 2 with a failed attempt's verdict (DEC-706) |
 | Identity spec (DEC-437) | Sign-in from a deep link; step-up per grant within 300 seconds for live; **account recovery for an approver never relies on email or chat alone** (identity spec §10.1 meets it with passkeys, OIDC, recovery codes, and a 24-hour enrolment cool-off); the **receive** column of the roles table (§4.1, settlement X1); the membership and credential events §3.2's account-security rows read (§12.1) | The receive column is owed by #556 under X1; §3.3's interim reading holds until it merges |
 | Workspace API spec (DEC-436) | Resolve a notice id across the user's workspaces with no existence oracle (§3.9, `GET /notices/{notice_id}`); serve approval content; commit `ApprovalResponseSubmitted`; write `OwnerAlertSent` with an owner kill-switch command (§3.4); list the pull channels | Consistent with #560 §3.9 (settlement X3) |
 | Threat model (DEC-439) | Includes §9's attackers; item 5's out-of-band notices for a risk-increasing version, a new connection, going live, a new delegation, and a newly connected client are §3.2's rows | §3.2 now carries the list (settlement X4) |
@@ -818,7 +820,11 @@ one field); its items 2 to 8 only tighten (DEC-176). v0.5 records
 never a person's address), which only tightens (DEC-176). v0.6 records
 [DEC-728](../project/decisions/DEC-728.md) (the deployment's own faults the relay refuses are a
 permanent `provider_error` that marks no address), a gap closed by the reading that adds no risk
-(DEC-176); it supersedes nothing.
+(DEC-176); it supersedes nothing. v0.7 records [DEC-706](../project/decisions/DEC-706.md) (a
+`failed` attempt's record carries §5.2's verdict, so a reader of the notice stream tells a retry
+from a stop), which adds information and changes no send, mark, or `channel_lost` (DEC-176); it
+also corrects §7's provider-down row, which said `failed` where §5.3 and journal spec rule 127 say
+`abandoned` with `retry_window_ended`.
 
 ---
 

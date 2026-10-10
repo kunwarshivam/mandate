@@ -269,7 +269,7 @@ pub fn walk_range(
 }
 
 /// The stored columns equal the body's fields (spec §11 check 2).
-fn columns_match(row: &StoredEvent, body: &Value) -> bool {
+pub(crate) fn columns_match(row: &StoredEvent, body: &Value) -> bool {
     let text = |name: &str| body.get(name).and_then(Value::as_str);
     let int = |name: &str| body.get(name).and_then(Value::as_int);
     text("stream_id") == Some(row.stream_id.as_str())
@@ -301,14 +301,20 @@ pub fn verify_anchor(
             return Err(RangeCheck::AnchorHeadMismatch);
         }
     }
+    if !root_holds(anchor) {
+        return Err(RangeCheck::AnchorRootMismatch);
+    }
+    Ok(())
+}
+
+/// §11's `anchor_root_mismatch` holds: the leaves are in strictly rising `stream_id` order and
+/// the root is §10's over them.
+pub(crate) fn root_holds(anchor: &Anchor) -> bool {
     let sorted = anchor
         .leaves
         .windows(2)
         .all(|w| matches!(w, [a, b] if a.stream_id < b.stream_id));
-    if !sorted || merkle_root(&anchor.leaves) != Some(anchor.root) {
-        return Err(RangeCheck::AnchorRootMismatch);
-    }
-    Ok(())
+    sorted && merkle_root(&anchor.leaves) == Some(anchor.root)
 }
 
 #[cfg(test)]

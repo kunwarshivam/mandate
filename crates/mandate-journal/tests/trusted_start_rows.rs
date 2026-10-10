@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, ParseErrorKind, Value, parse};
 use mandate_journal::{
     ColdRead, ManifestStart, ResolvedStart, StartRequest, StoredEvent, TrustedStart,
     TrustedStartError, resolve_start_from_rows,
@@ -98,7 +98,6 @@ fn manifest(resolved: Result<ResolvedStart, TrustedStartError>, name: &str) -> M
 /// is `confirm`'s with the case's cold state; a refusal for the cold manifest, and a cold store
 /// that cannot answer, come from `confirm`, every other refusal from the resolver itself.
 #[test]
-#[ignore = "pending E12-3"]
 fn every_row_case_resolves_and_confirms_as_its_vector_says() {
     let section = section();
     let base: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
@@ -138,7 +137,6 @@ fn every_row_case_resolves_and_confirms_as_its_vector_says() {
 /// are refused, an absent or unreadable object is `ColdUnreadable`, and only the exact bytes give
 /// the start, each from a fresh resolution of the same rows.
 #[test]
-#[ignore = "pending E12-3"]
 fn only_the_exact_cold_bytes_confirm_a_manifest_start() {
     let section = section();
     let rows: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
@@ -171,7 +169,60 @@ fn only_the_exact_cold_bytes_confirm_a_manifest_start() {
     assert_eq!(resolve().confirm(ColdRead::Read(bytes)), want);
 }
 
-/// A small deterministic generator (xorshift64), as `trusted_start.rs` uses.
+/// DEC-895 item 1, the row built here rather than read from `row_cases`: a copy of the start
+/// segment's `SegmentExported` whose payload writes `first_prev_hash` twice, the forged value first,
+/// stored re-hashed beside the good row. `parse` reads no payload from it, so which segment it
+/// records cannot be known, and the manifest start is refused rather than taken from the good row.
+#[test]
+fn a_duplicate_key_copy_beside_the_start_segment_refuses_it() {
+    let section = section();
+    let mut rows: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
+    let cases = list(&section, "row_cases");
+    let case = cases
+        .iter()
+        .find(|c| text(c, "name") == "manifest_start_cold_confirmed")
+        .unwrap();
+    let (stream, from_seq) = (text(case, "stream_id"), int(case, "from_seq"));
+    let req = case.get("request").unwrap();
+    let named = text(req, "manifest_hash");
+    let good = rows
+        .iter()
+        .find(|r| {
+            r.event_type == "SegmentExported" && String::from_utf8_lossy(&r.body).contains(named)
+        })
+        .unwrap()
+        .clone();
+    let head = b"\"payload\":{";
+    let at = good
+        .body
+        .windows(head.len())
+        .position(|w| w == head)
+        .unwrap()
+        + head.len();
+    let forged = format!("\"first_prev_hash\":\"{}\",", "e".repeat(64));
+    let body = [&good.body[..at], forged.as_bytes(), &good.body[at..]].concat();
+    let kind = parse(&body).map_err(|e| e.kind);
+    assert_eq!(
+        kind,
+        Err(ParseErrorKind::DuplicateKey),
+        "the copy is built as intended"
+    );
+    let resolve =
+        |rows: &[StoredEvent]| resolve_start_from_rows(rows, stream, from_seq, request(req));
+    match resolve(&rows) {
+        Ok(ResolvedStart::Manifest(_)) => {}
+        other => panic!("the good row alone starts, got {other:?}"),
+    }
+    let hash = Digest::of(&body);
+    rows.push(StoredEvent { hash, body, ..good });
+    assert_eq!(
+        resolve(&rows),
+        Err(REFUSED),
+        "a candidate that does not parse is never skipped"
+    );
+}
+
+/// A small deterministic generator (xorshift64), so the random variants need no dependency.
 struct Rng(u64);
 
 impl Rng {
@@ -184,12 +235,16 @@ impl Rng {
 }
 
 /// What the oracle knows of a row: the vector start case it serves, if any, whether it is still on
-/// its control stream, and whether an edit has broken one of its checks.
+/// its control stream (any, and the workspace's own), its type, whether an edit has broken one of
+/// its checks, and whether its body still parses.
 #[derive(Clone)]
 struct Known {
     serves: Option<usize>,
     on_ctl: bool,
+    own_ctl: bool,
+    event_type: String,
     broken: bool,
+    unreadable: bool,
 }
 
 /// A position among the 64 hex digits after `key` in `body`: the actor's `build` digest (after its
@@ -202,13 +257,14 @@ fn digits(body: &[u8], key: &str, rng: &mut Rng) -> usize {
 }
 
 /// Random variants of the vector rows: a body byte flipped under the old hash, a byte edited and
-/// re-hashed (outside the payload, or in a segment's `first_prev_hash`, which breaks rule 117), a
-/// row duplicated, and a row's `stream_id` column moved to an account stream. The oracle reads which
-/// row serves each vector start from the vector cases and tracks each edit's effect itself: a
-/// request starts only when exactly one row on the control stream serves it and that row is intact,
-/// one seq later nothing serves it, and genesis is seq 1 alone, with no cold read.
+/// re-hashed (outside the payload, in a segment's `first_prev_hash`, which breaks rule 117, or in an
+/// anchor's first leaf `hash`, which breaks its root), a row duplicated, a row's `stream_id` column
+/// moved to an account stream, and a body given a repeated `seq` key and re-hashed. The oracle reads
+/// which row serves each vector start from the vector cases and tracks each edit's effect itself: a
+/// request starts only when no row of its type on the workspace's control stream has stopped
+/// parsing (DEC-895 item 1) and exactly one row on the control stream serves it and that row is
+/// intact, one seq later nothing serves it, and genesis is seq 1 alone, with no cold read.
 #[test]
-#[ignore = "pending E12-3"]
 fn random_row_variants_resolve_as_built() {
     let section = section();
     let base: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
@@ -234,7 +290,10 @@ fn random_row_variants_resolve_as_built() {
         .map(|r| Known {
             serves: serving(r),
             on_ctl: r.stream_id.starts_with("ctl:"),
+            own_ctl: r.stream_id == "ctl:ws_01J8Z2",
+            event_type: r.event_type.clone(),
             broken: false,
+            unreadable: false,
         })
         .collect();
     assert_eq!(known.iter().filter(|k| k.serves.is_some()).count(), 3);
@@ -244,7 +303,8 @@ fn random_row_variants_resolve_as_built() {
         for _ in 0..1 + rng.below(3) {
             let i = rng.below(rows.len());
             let segment = rows[i].event_type == "SegmentExported";
-            match rng.below(5) {
+            let anchor = rows[i].event_type == "AnchorComputed";
+            match rng.below(6) {
                 0 if !known[i].broken => {
                     let at = digits(&rows[i].body, "build", &mut rng) + 7;
                     rows[i].body[at] = b'x';
@@ -255,8 +315,9 @@ fn random_row_variants_resolve_as_built() {
                     rows[i].body[at] = if rows[i].body[at] == b'd' { b'e' } else { b'd' };
                     rows[i].hash = Digest::of(&rows[i].body);
                 }
-                2 if !known[i].broken && segment => {
-                    let at = digits(&rows[i].body, "first_prev_hash", &mut rng);
+                2 if !known[i].broken && (segment || anchor) => {
+                    let key = if segment { "first_prev_hash" } else { "hash" };
+                    let at = digits(&rows[i].body, key, &mut rng);
                     rows[i].body[at] = if rows[i].body[at] == b'a' { b'b' } else { b'a' };
                     rows[i].hash = Digest::of(&rows[i].body);
                     known[i].broken = true;
@@ -265,9 +326,15 @@ fn random_row_variants_resolve_as_built() {
                     rows.push(rows[i].clone());
                     known.push(known[i].clone());
                 }
-                _ => {
+                4 => {
                     rows[i].stream_id = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1".to_owned();
                     known[i].on_ctl = false;
+                    known[i].own_ctl = false;
+                }
+                _ => {
+                    rows[i].body.splice(1..1, b"\"seq\":0,".iter().copied());
+                    rows[i].hash = Digest::of(&rows[i].body);
+                    known[i].unreadable = true;
                 }
             }
         }
@@ -276,7 +343,14 @@ fn random_row_variants_resolve_as_built() {
                 .iter()
                 .filter(|k| k.on_ctl && k.serves == Some(s))
                 .collect();
-            let starts = matches!(serving.as_slice(), [only] if !only.broken);
+            let needed = match text(case.get("request").unwrap(), "kind") {
+                "anchor" => "AnchorComputed",
+                _ => "SegmentExported",
+            };
+            let blocked = known
+                .iter()
+                .any(|k| k.unreadable && k.own_ctl && k.event_type == needed);
+            let starts = !blocked && matches!(serving.as_slice(), [only] if !only.broken);
             let (stream, from_seq) = (text(case, "stream_id"), int(case, "from_seq"));
             let req = case.get("request").unwrap();
             let want = start_at(case.get("expect").unwrap());

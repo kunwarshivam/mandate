@@ -507,7 +507,6 @@ fn push_rows() -> Vec<(u16, Outcome)> {
 /// The founder may change the `401` and `403` rows under DEC-729 item 4, now Proposed; until then
 /// they are its interim, `permanent { provider_error }`.
 #[test]
-#[ignore = "pending E8-14"]
 fn each_push_status_maps_to_its_section_5_2_outcome() -> Checked {
     for (status, outcome) in push_rows() {
         assert_eq!(push_status(status, MESSAGE_ID)?, outcome, "status {status}");
@@ -522,7 +521,6 @@ fn each_push_status_maps_to_its_section_5_2_outcome() -> Checked {
 /// That no status is `auth_failed` is DEC-729 item 4's interim for `401` and `403`, which the
 /// founder may change; a change there corrects this assertion in a tests-correction PR.
 #[test]
-#[ignore = "pending E8-14"]
 fn only_a_redirect_or_a_gone_subscription_marks_the_address() -> Checked {
     for status in 0..=u16::MAX {
         let outcome = push_status(status, MESSAGE_ID)?;
@@ -552,7 +550,6 @@ fn only_a_redirect_or_a_gone_subscription_marks_the_address() -> Checked {
 /// (any `3xx`, `400`, `401`, `403`, `404`, `410`, `413`) is retryable, so a `safety` notice's next
 /// attempt is 15 s later, inside its 24-hour window; each named one stops that channel.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_unexpected_status_is_retried_inside_the_safety_window() -> Checked {
     let at = UtcNanos::from_parts(1_791_000_000, 0)?;
     let retry_at = Retry::At(UtcNanos::from_parts(1_791_000_015, 0)?);
@@ -581,7 +578,6 @@ fn an_unexpected_status_is_retried_inside_the_safety_window() -> Checked {
 /// the closed `NoMessageId`, never an `accepted` with no id; any other status maps as it would with
 /// an id, so an empty id never loses a `404`'s mark or a `5xx`'s retry.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_accepted_push_with_no_message_id_is_refused() -> Checked {
     for status in [200, 201, 202, 204, 299] {
         match push_status(status, "") {

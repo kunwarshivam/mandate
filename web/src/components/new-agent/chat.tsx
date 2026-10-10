@@ -183,7 +183,8 @@ export function Chat({
 
       <Composer
         ref={composer}
-        label="Your message"
+        label="Your answer"
+        labelShown
         initialText={initialText}
         busy={busy}
         disabled={done}

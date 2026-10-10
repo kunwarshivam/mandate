@@ -2409,6 +2409,16 @@ def fuzz_loss_answer(n):
               "loss answer: the ladder sits at the base fractions of the drawdown, rounded down", (ans, lad))
         check([out[p][0] for p in sorted(out)] == ["user_stated", "platform_proposed", "platform_proposed"],
               "loss answer: only the floor is the owner's words", (out,))
+    for ans, a in [(("fraction", "0.1"), "0"), (("usd", "100"), "0"), (("usd", "0"), "0"), (("usd", "-100"), "10000"),
+                   (("fraction", "-0.1"), "10000"), (("fraction", "0.1"), "-10000"), (("usd", "100"), "-10000"),
+                   (("usd", "-100"), "-10000")]:
+        try:
+            out = loss_answer_fields(ans, a)
+        except ArithmeticError as e:
+            out = e
+        check(out is None, "loss answer: no allocation, or a negative answer, is asked again, never drafted (DEC-901)", (ans, a, out))
+    for d in ["0", "-0.08", "-1", "1", "1.5", "2"]:
+        check(proposed_ladder(d) is None, "loss answer: no ladder beneath a drawdown outside (0, 1) (DEC-901)", (d,))
 
 if __name__ == "__main__":
     fuzz_ladder_precision(300)

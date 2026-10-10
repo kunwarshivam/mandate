@@ -25,10 +25,16 @@
 //! Nothing here keeps, journals, or logs a header: [`PushRequest`] and [`Relayed`] have no
 //! `Debug`, and an [`Outcome`] or a [`DispatchError`] holds no input (NT-2).
 //!
+//! [`step`] turns committed alerts into journaled notices and sends (spec §5.1, E8-10, DEC-704).
+//!
 //! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
-//! (DEC-77); [`push_status`] does until its tests are live.
+//! (DEC-77).
 
-use mandate_notify::{Outcome, Reason};
+mod step;
+
+pub use step::{Config, Journal, NoticeWriter, step};
+
+use mandate_notify::{NotifyError, Outcome, Reason};
 use mandate_push_relay::{RelayError, RelayRequest};
 use mandate_webpush::{
     NoticeClass, PushAllowlist, PushEndpoint, PushRequest, VapidSigner, VapidSubject, WebPushError,
@@ -49,6 +55,18 @@ pub enum DispatchError {
     /// refuses `delivered` without one, so no `accepted` is formed (DEC-729 item 1).
     #[error("an accepted push needs a message id")]
     NoMessageId,
+    /// A [`NoticeWriter`] takes only a notice stream `ntf:{workspace_id}` (DEC-701 item 3).
+    #[error("the dispatcher appends only to a notice stream")]
+    NotANoticeStream,
+    /// A newer dispatcher owns the notice stream, so this one sends nothing more (spec §5.1).
+    #[error("fenced by writer epoch {current_epoch}")]
+    Fenced { current_epoch: u64 },
+    /// An append did not commit, so nothing after it is sent; only the outcome's name is kept.
+    #[error("the notice-stream append returned {outcome}")]
+    NotCommitted { outcome: &'static str },
+    /// The closed notice could not be formed, or the random source failed.
+    #[error("the notice could not be formed: {0}")]
+    Notify(#[from] NotifyError),
 }
 
 /// How a deployment reaches the push service (spec §4.6, HLD §4).
@@ -198,14 +216,44 @@ pub fn relay_refusal(refusal: RelayError) -> Result<Outcome, DispatchError> {
 /// - `413` is `permanent { too_large }`.
 /// - `429` is `retryable { rate_limited }` (§5.3) and any `5xx` is `retryable { provider_error }`.
 /// - Every other status, one outside `100..=599` included, is `retryable { provider_error }`: an
-///   unknown answer is retried inside the class's window and marks no address.
+///   unknown answer is retried inside the class's window and marks no address (DEC-729 item 8).
+///
+/// The `match` has no wildcard: each arm names its statuses, the last one lists every status no
+/// other arm names, and the compiler checks that together they cover every `u16`, so no status
+/// reaches an outcome by falling through.
 ///
 /// # Errors
-/// [`DispatchError::NoMessageId`] for a `2xx` with an empty `message_id`. The stub reports
-/// [`DispatchError::Unimplemented`] (DEC-77).
+/// [`DispatchError::NoMessageId`] for a `2xx` with an empty `message_id`.
 pub fn push_status(status: u16, message_id: &str) -> Result<Outcome, DispatchError> {
-    let _ = (status, message_id);
-    Err(DispatchError::Unimplemented { story: "E8-14" })
+    Ok(match status {
+        200..=299 if message_id.is_empty() => return Err(DispatchError::NoMessageId),
+        200..=299 => Outcome::Accepted {
+            provider_message_id: message_id.to_owned(),
+        },
+        300..=399 | 404 | 410 => Outcome::Permanent {
+            reason: Reason::AddressRejected,
+        },
+        400 => Outcome::Permanent {
+            reason: Reason::ProviderError,
+        },
+        401 | 403 => Outcome::Permanent {
+            reason: Reason::ProviderError,
+        },
+        413 => Outcome::Permanent {
+            reason: Reason::TooLarge,
+        },
+        429 => Outcome::Retryable {
+            reason: Reason::RateLimited,
+        },
+        500..=599 => Outcome::Retryable {
+            reason: Reason::ProviderError,
+        },
+        0..=199 | 402 | 405..=409 | 411 | 412 | 414..=428 | 430..=499 | 600..=u16::MAX => {
+            Outcome::Retryable {
+                reason: Reason::ProviderError,
+            }
+        }
+    })
 }
 
 #[cfg(test)]

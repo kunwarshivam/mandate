@@ -43,8 +43,8 @@ pub trait Tools {
 /// The connector for one agentic account, whose number the founder typed (CN-8). It has no
 /// `Debug`: the account number is personal data (journal spec §6.4).
 pub struct RobinhoodConnector<T> {
-    tools: T,
-    account_number: String,
+    pub(crate) tools: T,
+    pub(crate) account_number: String,
     /// The order each place answered, by our key: its broker `order_id` is what a `Cancel` goes
     /// by, and its instrument and side are what a cancel's answer is read against. After a restart
     /// it is rebuilt from the journal by [`Self::restore`] (DEC-860 item 7).
@@ -72,7 +72,10 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// instrument and side of its own readable `OrderSubmitted`, or else of the order it
     /// `replaces`. A key with no id, two different ids, an id another key carries, or no readable
     /// instrument and side (two of its `OrderSubmitted` that disagree included) maps to nothing,
-    /// so its cancel is `NotSent` (`no_order_id`) with nothing called. Every key the stream names
+    /// and so does a key whose records name two or more different `replaces` targets, whatever its
+    /// own `OrderSubmitted` says, with every successor that reaches its instrument and side only
+    /// through it; one target named twice is one link (DEC-876). Such a key's cancel is `NotSent`
+    /// (`no_order_id`) with nothing called. Every key the stream names
     /// (an `OrderSubmitted` or `OrderStateChanged` key, or a `replaces` or `replaced_by` target)
     /// is never placed again: a `Submit` of it is `Unknown` (DEC-860 item 4, DEC-872).
     pub fn restore(
@@ -84,6 +87,8 @@ impl<T: Tools> RobinhoodConnector<T> {
         let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
         let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
         let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();
+        let mut parents: BTreeMap<ClientOrderId, BTreeSet<ClientOrderId>> = BTreeMap::new();
+        let mut odd: BTreeSet<ClientOrderId> = BTreeSet::new();
         for record in records {
             let text = |member: &str| record.payload.get(member).and_then(Canon::as_str);
             let Some(key) = text("client_order_id").and_then(|k| ClientOrderId::parse(k).ok())
@@ -111,18 +116,44 @@ impl<T: Tools> RobinhoodConnector<T> {
                     named.extend(link("replaced_by"));
                     let old = link("replaces");
                     named.extend(old.clone());
-                    if let Some(origin) = old.and_then(|old| submitted.get(&old).cloned()) {
-                        submitted.entry(key.clone()).or_insert(origin);
+                    if let Some(old) = old {
+                        parents.entry(key.clone()).or_default().insert(old);
                     }
-                    let known = ids.entry(key).or_default();
-                    if let Some(id) = text("broker_order_id") {
-                        known.insert(id.to_owned());
+                    let known = ids.entry(key.clone()).or_default();
+                    match record.payload.get("broker_order_id") {
+                        None | Some(Canon::Null) => {}
+                        Some(Canon::Str(id)) if !id.is_empty() => {
+                            known.insert(id.clone());
+                        }
+                        Some(_) => {
+                            odd.insert(key);
+                        }
                     }
                 }
                 _ => {}
             }
         }
         connector.in_doubt = named;
+        for (key, origins) in &parents {
+            if origins.len() > 1 {
+                submitted.insert(key.clone(), None);
+            }
+        }
+        for start in ids.keys() {
+            let (mut at, mut path) = (start.clone(), BTreeSet::new());
+            let found = loop {
+                if let Some(read) = submitted.get(&at) {
+                    break read.clone();
+                }
+                match parents.get(&at).and_then(BTreeSet::first) {
+                    Some(parent) if path.insert(at.clone()) => at = parent.clone(),
+                    _ => break None,
+                }
+            };
+            for key in path {
+                submitted.insert(key, found.clone());
+            }
+        }
         let (mut seen, mut shared) = (BTreeSet::new(), BTreeSet::new());
         for id in ids.values().flatten() {
             if !seen.insert(id) {
@@ -134,7 +165,7 @@ impl<T: Tools> RobinhoodConnector<T> {
             let (Some(id), None) = (only.next(), only.next()) else {
                 continue;
             };
-            if shared.contains(id) {
+            if shared.contains(id) || odd.contains(&key) {
                 continue;
             }
             let Some(Some((instrument, side))) = submitted.get(&key) else {
@@ -345,12 +376,12 @@ fn wire_names(order: &SubmitOrder) -> (&'static str, &'static str) {
 
 /// A tool result: its `structuredContent` when it carries no `isError` or `isError: false`, or
 /// a refusal when `isError` is `true`. `None` for anything else.
-enum ToolResult {
+pub(crate) enum ToolResult {
     Content(Map<String, Value>),
     Refused,
 }
 
-fn tool_result(text: &str) -> Option<ToolResult> {
+pub(crate) fn tool_result(text: &str) -> Option<ToolResult> {
     let Value::Object(mut result) = serde_json::from_str(text).ok()? else {
         return None;
     };

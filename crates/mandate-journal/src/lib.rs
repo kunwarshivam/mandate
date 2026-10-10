@@ -54,10 +54,11 @@ pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
 };
 pub use connection_fold::{
-    ConnectionAnchor, ConnectionCheck, ConnectionCheckError, ConnectionFailure, ConnectionStart,
-    ConnectionStreamRule, ConnectionVerifyError, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL,
-    LocatedConnectionFailure, verify_connection_causes, verify_connection_causes_from_genesis,
-    verify_connection_lifecycle, verify_connection_lifecycle_from,
+    ConnectionAnchor, ConnectionAnchorError, ConnectionCheck, ConnectionCheckError,
+    ConnectionFailure, ConnectionStart, ConnectionStreamRule, ConnectionVerifyError,
+    JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL, LocatedConnectionFailure, verify_connection_causes,
+    verify_connection_causes_from_genesis, verify_connection_lifecycle,
+    verify_connection_lifecycle_from,
 };
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
@@ -67,7 +68,7 @@ pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
 pub use start::{
     AnchorRecord, AnchorRecordError, ColdRead, ManifestStart, ResolvedStart, StartRequest,
-    TrustedStartError, anchor_record, resolve_start_from_rows, resolve_trusted_start,
+    TrustedStartError, anchor_record, resolve_start_from_rows,
 };
 pub use verify::{
     EventCheck, EventFailure, PrefixError, RangeCheck, RangeWalk, RangeWalkError, TrustedStart,

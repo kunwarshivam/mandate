@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Value, parse};
 
-use crate::{StoredEvent, StreamId, StreamType};
+use crate::{StoredEvent, StreamId, StreamType, VerifiedPrefix};
 
 const ESTABLISHED: &str = "ConnectionEstablished";
 const REVOKED: &str = "ConnectionRevoked";
@@ -43,13 +43,15 @@ const ESTABLISHMENT_REPEATS: [&str; 5] =
 /// What a connect's refusal repeats of the request it closes (rule 131).
 const REFUSAL_REPEATS: [&str; 4] = ["broker", "environment", "user", "step_up"];
 
-/// The connection records on an account stream, which its executor folds.
-const ACCOUNT_RECORDS: [&str; 5] = [
+/// The connection records on an account stream, which its executor folds: a `ConnectionRevoked`
+/// among them only so rule 68 refuses it there (journal spec v0.37, DEC-888).
+const ACCOUNT_RECORDS: [&str; 6] = [
     CHECKED,
     "ConnectionStateChanged",
     "ConnectionCredentialRefreshed",
     ESTABLISHED,
     ROTATED,
+    REVOKED,
 ];
 
 /// The control-stream records the range rules judge (rules 66, 67, and 131): the set an unanchored
@@ -59,9 +61,7 @@ pub const JUDGED_ON_CONTROL: &[&str] = &[REQUESTED, ESTABLISHED, ROTATED, REFUSE
 
 /// The connection records on an account stream, every one of which rule 68 judges and an
 /// unanchored range fails closed at (journal spec v0.37 §11, DEC-888): the records the executor's
-/// fold reads, since a type it skips is judged by nothing. Until E7-17's code PR the fold reads no
-/// `ConnectionRevoked` there, so neither does this list; the pending test
-/// `the_exported_judged_lists_are_the_specs` pins the spec's set.
+/// fold reads, since a type it skips is judged by nothing, a `ConnectionRevoked` included.
 pub const JUDGED_ON_ACCOUNT: &[&str] = &ACCOUNT_RECORDS;
 
 /// The occasions an account stream's checks may have before its first binding (rule 68).
@@ -193,7 +193,8 @@ impl Failing<'_> {
 pub enum ConnectionStart {
     /// The rows start at each stream's `seq` 1: the full chain, anchored on nothing.
     Genesis,
-    /// The rows continue the stored chain whose fold [`ConnectionAnchor::fold`] gave.
+    /// The rows continue the stored chain whose fold [`ConnectionAnchor::from_verified`] gave, one
+    /// stream's (DEC-889).
     Anchored(ConnectionAnchor),
     /// The caller cannot read the chain before the range, or that chain breaks a rule: the run
     /// fails closed at the first record a rule judges.
@@ -209,7 +210,10 @@ pub struct ConnectionAnchor(Folds);
 impl ConnectionAnchor {
     /// The anchor after `prefix`, the stored rows of the range's streams from `seq` 1 up to its
     /// trusted start, in commit order; `None` when the prefix breaks rule 66, 67, 68, or 131, since
-    /// a broken chain anchors nothing (DEC-885 item 2, I5).
+    /// a broken chain anchors nothing (DEC-885 item 2, I5). It trusts the rows unverified, so no
+    /// caller may use it: [`ConnectionAnchor::from_verified`] replaces it (DEC-892), and it is
+    /// deleted once that lands.
+    #[deprecated(note = "unverified prefix; use from_verified (DEC-892)")]
     pub fn fold(prefix: &[StoredEvent]) -> Option<ConnectionAnchor> {
         let mut folds = Folds::default();
         folds
@@ -217,6 +221,27 @@ impl ConnectionAnchor {
             .is_none()
             .then_some(ConnectionAnchor(folds))
     }
+
+    /// The anchor of one stream after `prefix`, its rows `seq` 1 to `from_seq − 1` that
+    /// [`VerifiedPrefix::bind`] verified from genesis and bound to the range's trusted start
+    /// (DEC-892, DEC-889). `Broken` when the prefix breaks rule 66, 67, 68, or 131, since a broken
+    /// chain anchors nothing (DEC-885 I5); the caller then runs the range
+    /// [`ConnectionStart::Unanchored`], as it does when `bind` refuses the rows.
+    pub fn from_verified(
+        prefix: &VerifiedPrefix<'_>,
+    ) -> Result<ConnectionAnchor, ConnectionAnchorError> {
+        let _ = prefix;
+        Err(ConnectionAnchorError::Unimplemented { story: "E7-17" })
+    }
+}
+
+/// Why [`ConnectionAnchor::from_verified`] gave no anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionAnchorError {
+    /// The prefix breaks rule 66, 67, 68, or 131 (DEC-885 item 2, I5).
+    Broken,
+    /// The fold is a DEC-77 stub until `story` lands.
+    Unimplemented { story: &'static str },
 }
 
 /// Why a located connection check did not pass.
@@ -246,8 +271,9 @@ impl LocatedConnectionFailure {
 /// chain; anchored, it judges every row as the full chain would, rule 131's closing existence
 /// included; unanchored, it fails closed with [`ConnectionCheck::Unanchored`] at the first
 /// `ConnectionRequested`, `ConnectionEstablished`, `ConnectionCredentialRotated`, or
-/// `ConnectionRefused` on a control stream or connection record on an account stream, and a
-/// `ConnectionRevoked` never fails (DEC-885 items 3 and 4).
+/// `ConnectionRefused` on a control stream or connection record on an account stream, a
+/// `ConnectionRevoked` there included; a control-stream `ConnectionRevoked` never fails (DEC-885
+/// items 3 and 4, I6; DEC-888).
 pub fn verify_connection_lifecycle_from(
     start: ConnectionStart,
     rows: &[StoredEvent],
@@ -607,6 +633,7 @@ struct AccountFold {
 }
 
 impl AccountFold {
+    /// Whether rule 68 admits `row` on this stream; a `ConnectionRevoked` never, bound or not.
     fn admits(&mut self, row: &Row<'_>) -> bool {
         let p = row.payload();
         let id = text(p, "connection_id");
@@ -643,6 +670,7 @@ impl AccountFold {
                         check.passed && (check.contract || !MCP_BROKERS.contains(&broker))
                     })
             }
+            REVOKED => false,
             _ if self.broker.is_none() => false,
             ROTATED => match self.checks.get("reauthorize") {
                 Some(check) if check.passed && (check.contract || !mcp) => {

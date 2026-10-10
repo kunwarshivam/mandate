@@ -1809,10 +1809,12 @@ def trusted_start(
     `from_seq`, resolved from `request` among the control-stream `records` of `stream`'s own
     workspace, or `None` when the request names no usable start."""
     workspace = stream.split(":")[1]
+    lax = "start.workspace" in skip or (not workspace and "row.bad_stream_id" in skip)
     own = [
         r
         for r in records
-        if r["stream_id"].split(":")[1] == workspace or "start.workspace" in skip
+        if r["stream_id"].split(":")[1] == workspace or lax
+        or r["event_type"] == "AnchorComputed" and "row.anchor_foreign" in skip
     ]
     if request["kind"] == "genesis":
         if from_seq == 1 or "start.genesis_seq" in skip:
@@ -1823,22 +1825,27 @@ def trusted_start(
             p = r["payload"]
             if r["event_type"] != "SegmentExported" or p["manifest_hash"] != request["manifest_hash"]:
                 continue
-            fits = p["stream_id"] == stream and (p["first_seq"] == from_seq or "start.first_seq" in skip)
+            ours = p["stream_id"] == stream or "row.segment_stream" in skip
+            fits = ours and (p["first_seq"] == from_seq or "start.first_seq" in skip)
             if fits:
                 return {"from_seq": from_seq, "prev_hash": p["first_prev_hash"]}
         return None
+    leaf_seqs = {from_seq - 1, from_seq} if "row.anchor_leaf_seq" in skip else {from_seq - 1}
+    leaf_seqs |= {max(from_seq - 1, 0)} if "row.anchor_seq_floor" in skip else set()
     for r in own:
-        if r["event_type"] != "AnchorComputed" or r["event_id"] != request["anchor_event_id"]:
+        typed = r["event_type"] == "AnchorComputed" or "row.anchor_type" in skip
+        if not typed or r["event_id"] != request["anchor_event_id"]:
             continue
-        if r["payload"]["token"] is None and "start.null_token" not in skip:
+        if r["payload"].get("token") is None and "start.null_token" not in skip:
             return None
         for leaf in r["payload"]["leaves"]:
-            fits = leaf["seq"] == from_seq - 1 or "start.anchor_seq" in skip
-            if leaf["stream_id"] == stream and fits:
+            fits = leaf["seq"] in leaf_seqs or "start.anchor_seq" in skip
+            if (leaf["stream_id"] == stream or "row.anchor_leaf_stream" in skip) and fits:
                 return {"from_seq": from_seq, "prev_hash": leaf["hash"]}
     return None
 
 
+HEX64 = re.compile("[0-9a-f]{64}")
 ROW_COLUMNS = ("stream_id", "seq", "event_id", "event_type", "schema_version", "environment", "recorded_at", "prev_hash")
 
 
@@ -1848,16 +1855,23 @@ def unique_keys(pairs: list[tuple]) -> dict:
     return dict(pairs)
 
 
-def start_row_failure(row: dict, skip: frozenset[str] = frozenset()) -> str | None:
-    """DEC-787 item 3: the start record's own row against §11 checks 1, 2, and 4, then rule 117
-    for a `SegmentExported`. Returns the first failure's code, or `None`."""
+def strictly_canonical(text: str) -> bool:
+    """§11 check 1: the body parses, duplicate keys rejected, and re-canonicalizes to its own bytes."""
     try:
-        body = json.loads(row["body"], object_pairs_hook=unique_keys)
-        canonical = canon(body) == row["body"]
+        return canon(json.loads(text, object_pairs_hook=unique_keys)) == text
     except (ValueError, TypeError):
-        body, canonical = None, False
-    if not canonical and "row.non_canonical" not in skip:
-        return "non_canonical"
+        return False
+
+
+def start_row_failure(row: dict, skip: frozenset[str] = frozenset()) -> str | None:
+    """DEC-787 item 3: the start record's own row against §11 checks 2 and 4, then rule 117 for a
+    `SegmentExported` and §11's root check for an `AnchorComputed` (DEC-895 item 2). Check 1 ran
+    on every candidate row before the lookup (DEC-895 item 1). Returns the first failure's code, or
+    `None`."""
+    try:
+        body = json.loads(row["body"])
+    except (ValueError, TypeError):
+        body = None
     body = body if isinstance(body, dict) else {}
     for column in ROW_COLUMNS:
         lost = column == "stream_id" and "row.column_workspace" in skip
@@ -1868,6 +1882,12 @@ def start_row_failure(row: dict, skip: frozenset[str] = frozenset()) -> str | No
     p = body.get("payload") or {}
     if row["event_type"] == "SegmentExported" and p.get("manifest_hash") != manifest_hash(p) and "row.rule_117" not in skip:
         return "rule_117"
+    if row["event_type"] == "AnchorComputed":
+        leaves = p.get("leaves") or []
+        if not ascending([leaf["stream_id"].encode() for leaf in leaves]) and "row.anchor_order" not in skip:
+            return "anchor_root_mismatch"
+        if merkle_root(leaves) != p.get("root") and "row.anchor_root" not in skip:
+            return "anchor_root_mismatch"
     return None
 
 
@@ -1878,18 +1898,36 @@ def start_from_rows(
     columns and bodies' `payload`, as `trusted_start` does; the record found is checked, and a
     manifest start holds only when the cold manifest's bytes (`cold`: `{state: read, bytes}`,
     `absent`, or `unreadable`) hash to its `manifest_hash`. Returns `{outcome: start, from_seq,
-    prev_hash}`, `{outcome: refused, cause}`, or `{outcome: cold_unreadable}`."""
+    prev_hash}`, `{outcome: refused, cause}`, or `{outcome: cold_unreadable}`. Before the lookup, a row
+    of the workspace's control stream whose `event_type` is the one the request needs and whose
+    body fails §11 check 1 refuses the request: its payload cannot be known (DEC-895 item 1). An
+    anchor whose `token` is `null` was never stamped and is no start, as in `trusted_start`'s
+    `start.null_token` guard; the seeded bug `row.unstamped_ok` drops that guard on this path
+    (DEC-896). A start whose `prev_hash` is not 64 lowercase hex digits is no start, as the Rust
+    resolver reads no digest from it; the seeded bug `row.bad_hex` takes it."""
     refused = {"outcome": "refused", "cause": "no_start"}
     if request["kind"] == "genesis":
         got = trusted_start([], stream, from_seq, request, skip)
         return {"outcome": "start", **got} if got else refused
+    workspace, needed = stream.split(":")[1], {"manifest": "SegmentExported", "anchor": "AnchorComputed"}[request["kind"]]
+    unread = [
+        row
+        for row in rows
+        if row["stream_id"].startswith("ctl:") and row["stream_id"].split(":")[1] == workspace
+        and row["event_type"] == needed and not strictly_canonical(row["body"]) and "row.non_canonical" not in skip
+    ]
+    if unread and "row.skip_unparsed" not in skip:
+        return {"outcome": "refused", "cause": "non_canonical"}
+    rows = [row for row in rows if row not in unread]
 
     def fits(row: dict) -> dict | None:
         try:
             record = {**{k: row[k] for k in ("event_id", "event_type", "stream_id")}, "payload": json.loads(row["body"])["payload"]}
         except (ValueError, KeyError, TypeError):
             return None
-        return trusted_start([record], stream, from_seq, request, skip) if row["stream_id"].startswith("ctl:") or "row.non_ctl_stream" in skip else None
+        lookup = skip | {"start.null_token"} if "row.unstamped_ok" in skip else skip
+        got = trusted_start([record], stream, from_seq, request, lookup) if row["stream_id"].startswith("ctl:") or "row.non_ctl_stream" in skip else None
+        return got if got and (HEX64.fullmatch(got["prev_hash"]) or "row.bad_hex" in skip) else None
 
     hits = [(row, got) for row in rows if (got := fits(row))]
     if not hits:
