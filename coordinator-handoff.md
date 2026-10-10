@@ -80,6 +80,7 @@ anything here.
 - **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
 - **#1275** (L2, links merged DECs in place of the stale "pending" words; docs only). Head `1b86398c`.
 - **#1279** (L5, E12-3 T1a part A: run-plan stub plus tests). Head `6a3fca0c`. Part B (already reviewed, PASS at `bd8ea682`) opens after it merges.
+- **#1282** (L5, tests-only prep: trusted-start tests read their workspace from the rows). Head `5471c118`. The re-key of the vectors to a valid workspace id (already reviewed, PASS at `486dcd45`) follows; check that every case keeps its outcome.
 - **#1281** (L5, E12-3 T1a part B: trusted-start and refusal-order tests). Head `e07e22c3`.
 - **#1278** (L5, `segment_rows_mismatch` implementation). Head `60997566`.
 - **#1270** (bracket-leg implementation). Head `020b6904`.
