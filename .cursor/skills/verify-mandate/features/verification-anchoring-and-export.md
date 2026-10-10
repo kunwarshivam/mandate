@@ -28,8 +28,10 @@
   `crates/mandate-journal/tests/connection_fold.rs` (the connection checks against their vectors,
   and every split of every full chain against the full-chain run and an independent scan;
   `JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT`, the judged-record lists, against §11's sets; and
-  the verified-anchor tests bind each prefix first, a forged, short, or unbound prefix fails
-  closed, and an anchored run fails closed at another stream's judged record; E7-17),
+  every range vector and every split of every stream run from an anchor whose prefix is bound
+  through `VerifiedPrefix::bind` first, the raw unverified fold deleted, DEC-889 item 3; a forged,
+  short, or unbound prefix fails closed, and an anchored run fails closed at another stream's
+  judged record; E7-17),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
   vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3),
   `crates/mandate-journal/tests/range_walk.rs` (seeded faults against an independent comparison)

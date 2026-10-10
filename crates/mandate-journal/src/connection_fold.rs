@@ -205,36 +205,17 @@ pub enum ConnectionStart {
 }
 
 /// The connection anchor (DEC-885 item 1): the state the full-chain fold of rules 66, 67, 68, and
-/// 131 holds after each stream's records `1` to `from_seq − 1`, derived only by folding the stored
-/// chain, never from a read model.
+/// 131 holds after one stream's records `1` to `from_seq − 1` (DEC-889 item 1), derived only by
+/// folding the stored chain that [`VerifiedPrefix::bind`] verified, never from a read model.
 #[derive(Debug, Clone)]
 pub struct ConnectionAnchor {
-    scope: AnchorScope,
+    /// The prefix's stream, or `None` for an empty prefix, whose stream is that of the range's
+    /// first judged record (DEC-889 item 2).
+    stream: Option<String>,
     folds: Folds,
 }
 
-/// The streams an anchored run judges.
-#[derive(Debug, Clone)]
-enum AnchorScope {
-    /// Every stream the run is given, each from its own fold: the deprecated raw fold's, deleted
-    /// with it (DEC-889 item 3).
-    EveryStream,
-    /// One stream's (DEC-889 item 1): the prefix's, or `None` for an empty prefix, whose stream is
-    /// that of the range's first judged record (DEC-889 item 2).
-    Stream(Option<String>),
-}
-
 impl ConnectionAnchor {
-    /// The anchor after `prefix`, the stored rows of the range's streams from `seq` 1 up to its
-    /// trusted start, in commit order; `None` when the prefix breaks rule 66, 67, 68, or 131, since
-    /// a broken chain anchors nothing (DEC-885 item 2, I5). It trusts the rows unverified, so no
-    /// caller may use it: [`ConnectionAnchor::from_verified`] replaces it (DEC-892), and it is
-    /// deleted once that lands.
-    #[deprecated(note = "unverified prefix; use from_verified (DEC-892)")]
-    pub fn fold(prefix: &[StoredEvent]) -> Option<ConnectionAnchor> {
-        Self::folded(prefix, AnchorScope::EveryStream)
-    }
-
     /// The anchor of one stream after `prefix`, its rows `seq` 1 to `from_seq − 1` that
     /// [`VerifiedPrefix::bind`] verified from genesis and bound to the range's trusted start
     /// (DEC-892, DEC-889). `Broken` when the prefix breaks rule 66, 67, 68, or 131, since a broken
@@ -245,32 +226,25 @@ impl ConnectionAnchor {
     ) -> Result<ConnectionAnchor, ConnectionAnchorError> {
         let rows = prefix.rows();
         let stream = rows.last().map(|row| row.stream_id.clone());
-        Self::folded(rows, AnchorScope::Stream(stream)).ok_or(ConnectionAnchorError::Broken)
-    }
-
-    /// The anchor of `scope` after `rows`, or `None` when they break rule 66, 67, 68, or 131.
-    fn folded(rows: &[StoredEvent], scope: AnchorScope) -> Option<ConnectionAnchor> {
         let mut folds = Folds::default();
         folds
             .run(&connection_rows(rows))
             .is_none()
-            .then_some(ConnectionAnchor { scope, folds })
+            .then_some(ConnectionAnchor { stream, folds })
+            .ok_or(ConnectionAnchorError::Broken)
     }
 
-    /// Continues the anchor's fold over `rows`. Scoped to one stream, it fails closed with
+    /// Continues the anchor's fold over `rows`, the anchor's stream only: it fails closed with
     /// [`ConnectionCheck::Unanchored`] at the first judged record of any other stream, and skips
     /// another stream's control-stream `ConnectionRevoked`, which nothing judges (DEC-889 item 2,
     /// DEC-885 I6).
     fn run<'r>(self, rows: &[Row<'r>]) -> Option<Failing<'r>> {
-        let ConnectionAnchor { scope, mut folds } = self;
-        let stream = match scope {
-            AnchorScope::EveryStream => return folds.run(rows),
-            AnchorScope::Stream(stream) => stream.or_else(|| {
-                rows.iter()
-                    .find(|row| row.judged())
-                    .map(|row| row.stored.stream_id.clone())
-            }),
-        };
+        let ConnectionAnchor { stream, mut folds } = self;
+        let stream = stream.or_else(|| {
+            rows.iter()
+                .find(|row| row.judged())
+                .map(|row| row.stored.stream_id.clone())
+        });
         rows.iter().find_map(|row| {
             if stream.as_ref() == Some(&row.stored.stream_id) {
                 folds.step(row)
