@@ -1823,7 +1823,9 @@ def trusted_start(
     if request["kind"] == "manifest":
         for r in own:
             p = r["payload"]
-            if r["event_type"] != "SegmentExported" or p["manifest_hash"] != request["manifest_hash"]:
+            if r["event_type"] != "SegmentExported":
+                continue
+            if p["manifest_hash"] != request["manifest_hash"] and "start.manifest_hash" not in skip:
                 continue
             ours = p["stream_id"] == stream or "row.segment_stream" in skip
             fits = ours and (p["first_seq"] == from_seq or "start.first_seq" in skip)
