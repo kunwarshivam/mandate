@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; DEC-892, pending, an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; DEC-894, pending, an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -969,7 +969,7 @@ ascending `stream_id` bytes:
     anchor** (a control or account stream, §11 `connection_lifecycle_mismatch`) are folded from the
     stored chain from `seq` 1 to `from_seq − 1`, in the same snapshot, never from a read model. A
     range from `seq` 1 is anchored on nothing before it.
-  - **The prefix is verified first** (DEC-892, pending). Before any anchor is folded, the run
+  - **The prefix is verified first** ([DEC-892](../project/decisions/DEC-892.md)). Before any anchor is folded, the run
     verifies the stored prefix, `seq` 1 to `from_seq − 1`, once: §11 checks 1 to 6 from genesis,
     with no gap. It then binds the prefix to the range's trusted start: when `from_seq` is 1 the
     prefix is empty, and otherwise its last record has `seq` `from_seq − 1` and its hash equals
@@ -1007,7 +1007,7 @@ ascending `stream_id` bytes:
           difference fails `segment_rows_mismatch`, with `seq` null (journal spec rule 111). A trusted-start
           segment begins at `from_seq`, so no prefix row is in it. Rows after `to_seq` come from the
           same snapshot; they are compared but not counted in `checked`. A segment whose rows the snapshot does not hold in full fails
-          `segment_rows_mismatch` too, never passes (DEC-894, pending).
+          `segment_rows_mismatch` too, never passes ([DEC-894](../project/decisions/DEC-894.md)).
      4. `segment_gap`: between consecutive such manifests, including the trusted-start manifest:
         the next one's `first_seq` is not the previous one's `last_seq + 1`, whether they overlap
         or leave a gap. Reported with `seq` `null`.
@@ -1621,8 +1621,7 @@ the reading that adds no risk (DEC-176 item 2). Its Verification is closed furth
 (the run's inputs), and [DEC-788](../project/decisions/DEC-788.md) (the record, the id, and the
 refusal order), each Accepted by an agent under DEC-176 as a tightening, and by
 [DEC-789](../project/decisions/DEC-789.md), Accepted by the founder: a token that cannot be proven
-ends a run `incomplete`, never `pass` and never a false failure. DEC-892 (pending in L5's slice B
-PR, an agent reading under DEC-176, a tightening) folds the hold and connection anchors only from a
+ends a run `incomplete`, never `pass` and never a false failure. [DEC-892](../project/decisions/DEC-892.md) (an agent reading under DEC-176, a tightening) folds the hold and connection anchors only from a
 prefix verified from genesis and bound to the range's trusted start. The rest are recorded in [DEC-436](../project/decisions/DEC-436.md). Items 1 to 16 and 19 to 21 are reversible
 engineering readings an agent accepts (DEC-79, DEC-176): each adds no trading rule, or only tightens
 one. Items 9, 19, 20, and 21 carry the coordinator's round-1 settlements X1, X2, X3, and X5 and its

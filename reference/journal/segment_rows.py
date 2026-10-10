@@ -1,4 +1,4 @@
-"""Journal spec v0.38 §11's `segment_rows_mismatch` reference vectors (DEC-894, pending; workspace API
+"""Journal spec v0.38 §11's `segment_rows_mismatch` reference vectors (DEC-894; workspace API
 §4.8.1 run order step 2.3a).
 
 A range verified from a trusted start can be rewritten in the hot store and stay consistent from that
@@ -31,7 +31,7 @@ from control import invalid as control_invalid
 from control import valid as control_valid
 from verification import BASES, R0, refs_kept, v1_shape
 
-SPEC = "docs/specs/journal.md v0.38 §11 and workspace API §4.8.1 step 2.3a (DEC-894, pending)"
+SPEC = "docs/specs/journal.md v0.38 §11 and workspace API §4.8.1 step 2.3a (DEC-894)"
 CHECK = "segment_rows_mismatch"
 FAILED = {"check": CHECK, "seq": None}
 # The three segments the account stream's eight rows are cut into: (first_seq, last_seq).
