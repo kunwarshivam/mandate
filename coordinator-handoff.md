@@ -79,6 +79,7 @@ anything here.
 - **#1169** (E7-28 implementation). Head `46f63d0b`.
 - **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
 - **#1275** (L2, links merged DECs in place of the stale "pending" words; docs only). Head `1b86398c`.
+- **#1277** (L5, DEC-897: verification-run tightenings; docs only). Head `38a9d6b4`.
 - **#1276** (L5, `segment_rows_mismatch` tests; the implementation follows). Head `0832cfda`.
 
 **Needs action now:**
@@ -150,7 +151,9 @@ anything here.
 11. **FYI: an artifact-store outage during a verification walk.** This is check 6, `artifact_missing`. It is a
     fail with a SEV-1, not `incomplete` (DEC-896 treats the same outage as `incomplete`, but only for the start
     token). That is the stricter reading, so a restore drill fails, not passes, if the store is down mid-walk.
-    Loosening it is yours.
+    Loosening it is yours. **Consequence, now recorded in DEC-897 (#1277):** the SEV-1 pauses agents on the account
+    or agent streams it covers, and under rule 13 a paused agent may hold exits. So an infrastructure outage could
+    hold an exit. Relaxing this needs a §11 change. **Recommended: decide this before live trading.**
 10. **FYI: a truncation bug in ref.py's §6.2 decision.** Whole-second truncation can lift an ask up to 1 s before a
     delegation's sub-second `starts_at`, which §6.2 forbids. It is recorded in DEC-903 for E8-8's owner, and E8-8's
     Rust must compare instants exactly. It exists only in the reference model; no Rust order path uses it yet.
