@@ -10,15 +10,17 @@
 # evaluated before the checkout. The Impeccable detector (Apache-2.0, `docs/dependencies.md`)
 # fails on any primary finding and reads `web/.impeccable/config.json` when it exists. It flags
 # gradient text and AI-typical palettes but not a plain gradient, so the no-gradients rule has its
-# own check. `npm run build` is the production build, and its postbuild checks fail if it contains
-# the scenario switcher or takes a scenario.
+# own check. `npm run cf:build` is the production build: OpenNext runs `npm run build`, whose
+# postbuild checks fail if it contains the scenario switcher or takes a scenario, then turns it into
+# the Cloudflare Worker (DEC-823). Wrangler's dry run writes the bundle it would upload, with no
+# account or credential, and `scripts/workers.mjs size` fails the job when it is over its budget
+# (DEC-731). Cloudflare builds and serves `main` from its own GitHub connection; CI never uploads.
 name: web
 
 on:
   pull_request:
     paths:
       - "web/**"
-      - "vercel.json"
       - ".github/workflows/web.yml"
   workflow_dispatch:
 
@@ -78,5 +80,11 @@ jobs:
       # DEC-750: every pending test fails at its stub when un-skipped.
       - run: npm run pending
         if: steps.app.outputs.present == 'true'
-      - run: npm run build
+      - run: npm run cf:build
+        if: steps.app.outputs.present == 'true'
+      - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
+        if: steps.app.outputs.present == 'true'
+        env:
+          WRANGLER_SEND_METRICS: "false"
+      - run: node scripts/workers.mjs size .wrangler/dry-run
         if: steps.app.outputs.present == 'true'

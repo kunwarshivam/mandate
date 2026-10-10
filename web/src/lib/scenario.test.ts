@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScenarioSwitcher as SwitcherOff } from "@/components/dev/scenario-switcher.off";
-import { proxy } from "@/proxy";
+import { middleware as proxy } from "@/middleware";
 import nextConfig from "../../next.config";
 import { AUTH_E2E_FLAG, E2E_FLAG, distDir, isE2eBuild } from "../../scripts/e2e-build.mjs";
 import { SWITCHER_MARKER } from "../../scripts/no-scenarios.mjs";

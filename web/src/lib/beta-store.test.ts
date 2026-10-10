@@ -48,13 +48,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("the private beta store on Workers (DEC-823): the Supabase table in production, a local file only in development", () => {
-  it.skip("pending E11-9: allows the local file in development and tests, and never in a production build", () => {
+  it("pending E11-9: allows the local file in development and tests, and never in a production build", () => {
     expect(localFileAllowed("development")).toBe(true);
     expect(localFileAllowed("test")).toBe(true);
     for (const nodeEnv of ["production", undefined, "", "Production", "prod"]) expect(localFileAllowed(nodeEnv), String(nodeEnv)).toBe(false);
   });
 
-  it.skip("pending E11-9: answers 503 unavailable in a production build with Supabase unset, and writes no file", async () => {
+  it("pending E11-9: answers 503 unavailable in a production build with Supabase unset, and writes no file", async () => {
     expect(localFileAllowed("production")).toBe(false);
     vi.stubEnv("NODE_ENV", "production");
     const response = await post("ada@example.com");
@@ -66,7 +66,7 @@ describe("the private beta store on Workers (DEC-823): the Supabase table in pro
     expect(disk.appendFile).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E11-9: answers 503 unavailable in a production build whose Supabase has no beta_requests table, and writes no file", async () => {
+  it("pending E11-9: answers 503 unavailable in a production build whose Supabase has no beta_requests table, and writes no file", async () => {
     expect(localFileAllowed("production")).toBe(false);
     vi.stubEnv("NODE_ENV", "production");
     configured({ code: "PGRST205" });
@@ -77,7 +77,7 @@ describe("the private beta store on Workers (DEC-823): the Supabase table in pro
     expect(disk.appendFile).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E11-9: stores a request in the Supabase table in a production build, a repeat address included", async () => {
+  it("pending E11-9: stores a request in the Supabase table in a production build, a repeat address included", async () => {
     expect(localFileAllowed("production")).toBe(false);
     vi.stubEnv("NODE_ENV", "production");
     for (const insertError of [null, { code: "23505" }]) {
@@ -91,7 +91,7 @@ describe("the private beta store on Workers (DEC-823): the Supabase table in pro
     expect(disk.appendFile).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E11-9: answers 503 in development when Supabase refuses the request for another reason, and writes no file", async () => {
+  it("pending E11-9: answers 503 in development when Supabase refuses the request for another reason, and writes no file", async () => {
     expect(localFileAllowed("development")).toBe(true);
     vi.stubEnv("NODE_ENV", "development");
     configured({ code: "08006" });
@@ -101,7 +101,7 @@ describe("the private beta store on Workers (DEC-823): the Supabase table in pro
     expect(disk.appendFile).not.toHaveBeenCalled();
   });
 
-  it.skip("pending E11-9: keeps the local file in development while Supabase is unset or has no table", async () => {
+  it("pending E11-9: keeps the local file in development while Supabase is unset or has no table", async () => {
     expect(localFileAllowed("development")).toBe(true);
     vi.stubEnv("NODE_ENV", "development");
     expect((await post("ada@example.com")).status).toBe(200);

@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 4317",
     "build": "next build",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "postbuild": "node scripts/no-apca.mjs && node scripts/no-scenarios.mjs",
     "start": "next start --hostname 127.0.0.1 --port 4317",
     "lint": "eslint",
@@ -38,6 +40,7 @@
     "webamp": "^2.3.1"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "1.20.6",
     "@playwright/test": "^1.63.0",
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/postcss": "^4",
@@ -53,7 +56,8 @@
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "wrangler": "4.139.0"
   },
   "engines": {
     "node": ">=22.18.0"

@@ -33,24 +33,24 @@ const wrangler = () => real("wrangler.jsonc");
 const only = (fragment: string) => [expect.stringContaining(fragment)];
 
 describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DEC-823)", () => {
-  it.skip("pending E11-9: finds nothing to fix in this tree", () => {
+  it("pending E11-9: finds nothing to fix in this tree", () => {
     expect(hostingProblems(tree())).toEqual([]);
     expect(existsSync(join(WEB, "..", "vercel.json"))).toBe(false);
     expect(existsSync(join(WEB, "src", "proxy.ts"))).toBe(false);
     expect(nextConfig.images).toEqual({ unoptimized: true });
   });
 
-  it.skip("pending E11-9: flags a Vercel configuration left at the repository root", () => {
+  it("pending E11-9: flags a Vercel configuration left at the repository root", () => {
     expect(hostingProblems(tree({ "../vercel.json": '{ "git": {} }' }))).toEqual(only("vercel.json"));
   });
 
-  it.skip("pending E11-9: flags images that the Worker would have to optimise", () => {
+  it("pending E11-9: flags images that the Worker would have to optimise", () => {
     expect(hostingProblems(tree({}, {}))).toEqual(only("images.unoptimized"));
     expect(hostingProblems(tree({}, { images: {} }))).toEqual(only("images.unoptimized"));
     expect(hostingProblems(tree({}, { images: { unoptimized: false } }))).toEqual(only("images.unoptimized"));
   });
 
-  it.skip("pending E11-9: flags a Node proxy, a missing edge middleware, and a middleware that needs Node", () => {
+  it("pending E11-9: flags a Node proxy, a missing edge middleware, and a middleware that needs Node", () => {
     expect(hostingProblems(tree({ "src/proxy.ts": "export function proxy() {}" }))).toEqual(only("src/proxy.ts"));
     expect(hostingProblems(tree({ "src/middleware.ts": null }))).toEqual(only("src/middleware.ts"));
     const edge = real("src/middleware.ts");
@@ -58,7 +58,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ "src/middleware.ts": `${edge}\nexport const runtime = "nodejs";\n` }))).toEqual(only("runtime"));
   });
 
-  it.skip("pending E11-9: flags a wrangler.jsonc without the Worker's name, entry, minification, flags, assets or self-reference, or with workers.dev on", () => {
+  it("pending E11-9: flags a wrangler.jsonc without the Worker's name, entry, minification, flags, assets or self-reference, or with workers.dev on", () => {
     expect(hostingProblems(tree({ "wrangler.jsonc": null }))).toEqual(only("wrangler.jsonc"));
     const config = JSON.parse(wrangler().replace(/^\s*\/\/.*$/gm, ""));
     const broken = (change: (c: Record<string, unknown>) => void) => {
@@ -81,7 +81,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(config).toMatchObject({ name: "owlhead-web", main: ".open-next/worker.js", minify: true, workers_dev: false });
   });
 
-  it.skip("pending E11-9: flags missing build scripts, ignores and adapter config", () => {
+  it("pending E11-9: flags missing build scripts, ignores and adapter config", () => {
     const pkg = JSON.parse(real("package.json"));
     const withScripts = (scripts: Record<string, string>) => JSON.stringify({ ...pkg, scripts }, null, 2);
     const without = (name: string) => Object.fromEntries(Object.entries<string>(pkg.scripts).filter(([key]) => key !== name));
@@ -93,7 +93,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ "open-next.config.ts": "export default {};\n" }))).toEqual(only("defineCloudflareConfig"));
   });
 
-  it.skip("pending E11-9: flags a web workflow that does not build the Worker and check its size, or that holds a Cloudflare token", () => {
+  it("pending E11-9: flags a web workflow that does not build the Worker and check its size, or that holds a Cloudflare token", () => {
     const workflow = "../.github/workflows/web.yml";
     const yml = real(workflow);
     expect(hostingProblems(tree({ [workflow]: yml.replace(/npm run cf:build/g, "true") }))).toEqual(only("cf:build"));
@@ -105,7 +105,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(yml).not.toMatch(/CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)|secrets\./);
   });
 
-  it.skip("pending E11-9: flags a workflow that runs wrangler deploy or wrangler login, and passes one that only dry-runs", () => {
+  it("pending E11-9: flags a workflow that runs wrangler deploy or wrangler login, and passes one that only dry-runs", () => {
     expect(hostingProblems(tree())).toEqual([]);
     const workflow = "../.github/workflows/web.yml";
     const yml = real(workflow);
@@ -118,7 +118,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(yml).not.toMatch(/wrangler login/);
   });
 
-  it.skip("pending E11-9: flags an account ID, a secret-looking value or a vars token committed in wrangler.jsonc, and passes the clean one", () => {
+  it("pending E11-9: flags an account ID, a secret-looking value or a vars token committed in wrangler.jsonc, and passes the clean one", () => {
     expect(hostingProblems(tree())).toEqual([]);
     const text = wrangler();
     expect(hostingProblems(tree({ "wrangler.jsonc": text }))).toEqual([]);
@@ -152,14 +152,14 @@ const SMALL = { "worker.js": "export default {};\n", "README.md": "dry run", "wo
 const NO_MODULES = { "README.md": "dry run", "worker.js.map": "{}" };
 
 describe("the Worker's size budget (DEC-731)", () => {
-  it.skip("pending E11-9: refuses a dry run that left no directory, or no module in it, rather than measuring nothing", () => {
+  it("pending E11-9: refuses a dry run that left no directory, or no module in it, rather than measuring nothing", () => {
     expect(() => workerSize(join(tmpdir(), "owlhead-no-such-dry-run"))).toThrow(/no dry run output/);
     dryRun({}, (dir) => expect(() => workerSize(dir)).toThrow(/no Worker module/));
     dryRun(NO_MODULES, (dir) => expect(() => workerSize(dir)).toThrow(/no Worker module/));
     dryRun(SMALL, (dir) => expect(workerSize(dir).rawBytes).toBe(Buffer.byteLength(SMALL["worker.js"])));
   });
 
-  it.skip("pending E11-9: the size command passes a small Worker and fails one over budget, an empty dry run, and a bad command line", () => {
+  it("pending E11-9: the size command passes a small Worker and fails one over budget, an empty dry run, and a bad command line", () => {
     expect(dryRun(SMALL, (dir) => sizeCommand(["size", dir]).status)).toBe(0);
     const over = { "worker.js": randomBytes(WORKER_BUDGET.gzipBytes + 64 * 1024) };
     const overBudget = dryRun(over, (dir) => sizeCommand(["size", dir]));
@@ -173,7 +173,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     expect(sizeCommand(["measure", "."]).status).toBe(2);
   });
 
-  it.skip("pending E11-9: node scripts/workers.mjs size exits with the size command's status", () => {
+  it("pending E11-9: node scripts/workers.mjs size exits with the size command's status", () => {
     expect(dryRun(SMALL, (dir) => sizeCommand(["size", dir]).status)).toBe(0);
     const cli = (...args: string[]) => spawnSync(process.execPath, [join(WEB, "scripts", "workers.mjs"), ...args], { encoding: "utf8" }).status;
     expect(dryRun(SMALL, (dir) => cli("size", dir))).toBe(0);
@@ -182,7 +182,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     expect(cli()).toBe(2);
   });
 
-  it.skip("pending E11-9: measures every module the dry run wrote, raw and gzip, leaving out source maps and the README", () => {
+  it("pending E11-9: measures every module the dry run wrote, raw and gzip, leaving out source maps and the README", () => {
     const out = mkdtempSync(join(tmpdir(), "worker-size-"));
     try {
       const worker = "export default { fetch() { return new Response('owlhead'); } };\n".repeat(400);
@@ -202,7 +202,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     }
   });
 
-  it.skip("pending E11-9: passes a Worker at its budget and fails one byte over, naming the budget it broke", () => {
+  it("pending E11-9: passes a Worker at its budget and fails one byte over, naming the budget it broke", () => {
     expect(WORKER_BUDGET).toEqual({ gzipBytes: 3 * MIB, rawBytes: 10 * MIB });
     expect(sizeProblems({ rawBytes: 10 * MIB, gzipBytes: 3 * MIB })).toEqual([]);
     expect(sizeProblems({ rawBytes: 7 * MIB, gzipBytes: 2 * MIB })).toEqual([]);
@@ -212,7 +212,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     expect(sizeProblems({ rawBytes: 100, gzipBytes: 60 }, { rawBytes: 99, gzipBytes: 60 })).toEqual(only("raw"));
   });
 
-  it.skip("pending E11-9: records the budget in DEC-731", () => {
+  it("pending E11-9: records the budget in DEC-731", () => {
     expect(sizeProblems({ rawBytes: 0, gzipBytes: 0 })).toEqual([]);
     const decision = readFileSync(join(WEB, "..", "docs", "project", "decisions", "DEC-731.md"), "utf8");
     expect(decision).toContain("| **Status** | Accepted |");

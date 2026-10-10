@@ -22,11 +22,13 @@ function preferenceRedirect(request: NextRequest): NextResponse | null {
 }
 
 /**
- * With sign-in off (`authEnabled`, DEC-211) this is the dev preference switch alone. With it on, it
+ * The edge entry point that replaced `src/proxy.ts` on Cloudflare Workers (DEC-823, DEC-731 item 1):
+ * OpenNext runs edge middleware, not Node's proxy, so this file imports nothing from `node:` and
+ * sets no `runtime`. With sign-in off (`authEnabled`, DEC-211) this is the dev preference switch alone. With it on, it
  * also refreshes the Supabase session and applies `authRoute`: a signed-out visitor sees the welcome
  * page at `/` and is sent to sign in from any other screen.
  */
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest): Promise<NextResponse> {
   const preference = preferenceRedirect(request);
   if (!authEnabled) return preference ?? NextResponse.next();
   const { response, signedIn } = await updateSession(request);
