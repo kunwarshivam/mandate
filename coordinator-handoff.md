@@ -93,7 +93,8 @@ anything here.
 - **#1267:** L2, DEC-900 implementation (approved; already merged).
 - **#1268:** L5, PR 4b; completes slice C (merged).
 - **#1273:** L2, S1a tests correction. Head `ec47cbff`. Then #1272 (S1a implementation; L2 merges main and gets it reviewed), then DEC-903 (exact delegation-window comparison, never understating): a ref PR, a tests-correction row, then a #1272 follow-up fix.
-- **#1271:** L5, CLI judged-types pair PR 1 (tests). Head `770e9f45`. PR 2 (the switch) follows.
+- **#1271:** L5, CLI judged-types pair PR 1 (tests).
+- **#1274:** L5, CLI pair PR 2 (the switch). Head `2375f854`. L5 then starts run-logic T1/I1.
 - **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
 
