@@ -11,5 +11,5 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-  matcher: ["/((?!_next/|art/|video/|favicon|apple-touch-icon\\.png|pwa-|og-image\\.png|site\\.webmanifest|robots\\.txt).*)"],
+  matcher: ["/((?!_next/|art/|landing/|video/|favicon|apple-touch-icon\\.png|pwa-|og-image\\.png|site\\.webmanifest|robots\\.txt).*)"],
 };

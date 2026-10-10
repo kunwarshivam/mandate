@@ -166,7 +166,7 @@ describe("the edge middleware with sign-in on (DEC-823: it replaces the Node pro
     const response = await middleware(request("/positions"));
     expect(response.headers.get("location")).toBe("http://localhost:4317/login?next=/positions");
     for (const path of ["/", "/agents", "/login", "/welcome", "/api/beta", "/auth/callback", "/settings/profile"]) expect(matched(path), path).toBe(true);
-    for (const path of ["/_next/static/chunks/app.js", "/art/desk.png", "/video/tour.mp4", "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/og-image.png", "/site.webmanifest", "/robots.txt"]) {
+    for (const path of ["/_next/static/chunks/app.js", "/art/desk.png", "/landing/agent-light.png", "/video/tour.mp4", "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/og-image.png", "/site.webmanifest", "/robots.txt"]) {
       expect(matched(path), path).toBe(false);
     }
   });
