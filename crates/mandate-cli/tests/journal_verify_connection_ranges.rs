@@ -14,12 +14,13 @@ use clap::Parser;
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_cli::journal::{self, JournalCommand, cold};
 use mandate_cli::{Cli, Command};
-use mandate_journal::{Anchor, AnchorLeaf, ArtifactRef};
+use mandate_journal::{Anchor, AnchorLeaf, ArtifactRef, JUDGED_ON_ACCOUNT, JUDGED_ON_CONTROL};
 use serde_json::{Value as Json, json};
 
 const SECTIONS: [&str; 3] = ["connections", "connection_requests", "connection_ranges"];
 const AGENT: &str = "agent:ws_01J8Z2:agent_a";
 const ACCOUNT: &str = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1";
+const CONTROL: &str = "ctl:ws_01J8Z2";
 const BOTH: [&str; 2] = ["verify", "verify-cold"];
 const CODE: &str = "connection_lifecycle_mismatch";
 const GLASS: &str = "break_glass_cause_mismatch";
@@ -393,4 +394,74 @@ fn a_check_one_to_six_is_reported_before_a_later_connection_check() {
         let what = format!("{name}: {want:?}, an artifact missing at {last}");
         expect(&range, Some((last, "artifact_missing")), false, &what);
     }
+}
+
+/// One record of each connection type the vectors draft: every `connection_ranges` draft and the
+/// `client_actor` owner's `ConnectionRevoked` (the only revocation drafted), as stored bodies.
+fn one_of_each_connection_type() -> Vec<Json> {
+    let vectors = vectors();
+    let drafts = vectors["connection_ranges"]["drafts"]
+        .as_object()
+        .unwrap()
+        .values();
+    let revoked = &vectors["client_actor"]["drafts"]["revoked_compromised"];
+    let mut bodies: Vec<Json> = drafts.chain([revoked]).cloned().collect();
+    bodies
+        .iter_mut()
+        .for_each(|b| b["recorded_at"] = b["event_time"].clone());
+    bodies
+}
+
+/// E12-3, after #1231 (DEC-888): rule 68 refuses an account-stream `ConnectionRevoked`, so an
+/// account export whose only connection record is one fails `connection_lifecycle_mismatch`, and
+/// the record is judged there, so DEC-890 item 4's line is printed just before `result:`.
+#[test]
+#[ignore = "pending E12-3"]
+fn an_account_export_of_a_revocation_alone_reports_the_cause_check_not_run() {
+    let revoked = one_of_each_connection_type().pop().unwrap();
+    assert_eq!(revoked["event_type"], "ConnectionRevoked");
+    let range = Range::from(1, vec![revoked]).on(ACCOUNT);
+    expect(
+        &range,
+        Some((1, CODE)),
+        true,
+        "a revocation alone on an account stream",
+    );
+}
+
+/// E12-3: DEC-890's line is printed on a one-record export from `seq` 1 exactly when the record's
+/// type is in the journal's own judged list for its stream type (`JUDGED_ON_CONTROL`,
+/// `JUDGED_ON_ACCOUNT`), so the CLI's lists cannot drift from the library's. Every type of each
+/// list is drafted, and every run reaches the stream checks.
+#[test]
+#[ignore = "pending E12-3"]
+fn the_cause_check_line_follows_the_journals_judged_lists() {
+    let bodies = one_of_each_connection_type();
+    let drafted = |list: &[&str]| {
+        list.iter()
+            .all(|t| bodies.iter().any(|b| b["event_type"] == *t))
+    };
+    assert!(
+        drafted(JUDGED_ON_CONTROL) && drafted(JUDGED_ON_ACCOUNT),
+        "a judged type undrafted"
+    );
+    let mut printed = Vec::new();
+    for (stream, judged) in [(CONTROL, JUDGED_ON_CONTROL), (ACCOUNT, JUDGED_ON_ACCOUNT)] {
+        for body in &bodies {
+            let kind = body["event_type"].as_str().unwrap();
+            let range = Range::from(1, vec![body.clone()]).on(stream);
+            for command in BOTH {
+                let ran = run(command, &range, &[]);
+                let reached = result(&ran).starts_with("verified") || ran.1 == Some(CODE);
+                assert!(reached, "{command} {kind} on {stream}: {:?}", ran.0);
+                let line = ran.0.len() > 1 && ran.0[ran.0.len() - 2] == NOT_RUN;
+                printed.push((command, stream, kind, line, judged.contains(&kind)));
+            }
+        }
+    }
+    let differ: Vec<_> = printed.into_iter().filter(|p| p.3 != p.4).collect();
+    assert!(
+        differ.is_empty(),
+        "(command, stream, type, printed, judged): {differ:?}"
+    );
 }
