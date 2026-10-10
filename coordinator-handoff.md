@@ -69,87 +69,66 @@ anything here.
 - **Coordinator DEC range 868–879** is used up (879 = C2 filter allowlist). For a new coordinator
   decision, reserve the next free number per `docs/project/decisions/README.md`.
 
-## State right now
+## State right now (updated 2026-10-10 ~02:40 UTC)
 
-**Merged tonight (selection):**
-- C2: #1246, #1251 and #1253 (DEC-875, DEC-879).
-- DEC-876 tests: #1240.
-- E1b part 2 tests: #1245.
-- Dispatcher D2 and D3: #1249, #1255.
-- S1b: #1250, #1252.
-- E7-17 tests correction: #1247.
-- Journal verification: #1248 (DEC-896), #1256, #1259 (v0.39) and #1260.
+**Merged tonight (latest first):** #1273, #1234, #1271, #1268, #1261, #1242, #1267, #1258, #1266, #1265,
+#1254, #1264, plus earlier: #1263, #1262, #1260, #1259, #1257, #1256, #1255, #1253, #1251, #1250,
+#1249, #1248, #1247, #1246, #1245, #1240.
 
 **Approved, waiting on CI or merge:**
-- **#1263:** L3, DEC-706 plus journal spec v0.40 (`NoticeAttempted` gets a `verdict`). Docs only.
-  Head `dce20280`.
-- **#1262:** the DEC-876 implementation (finishes C3). The Sonnet review passed. Head `e1c1cf06`.
-- **#1257:** L4, C-26 web chips; web-e2e green. Head `b76f3965`.
-- **#1264:** C4 tests (DEC-902). Head `367f1cb5`.
-- **#1254:** bracket-leg tests (DEC-878). Head `f4cc05d8`.
-- **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
+- **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
 
-- **#1242:** L2, E7-17 implementation (round-2 delta passed). Head `5f9093e7`.
-- **#1267:** L2, DEC-900 implementation (approved; already merged).
-- **#1268:** L5, PR 4b; completes slice C (merged).
-- **#1273:** L2, S1a tests correction. Head `ec47cbff`. Then #1272 (S1a implementation; L2 merges main and gets it reviewed), then DEC-903 (exact delegation-window comparison, never understating): a ref PR, a tests-correction row, then a #1272 follow-up fix.
-- **#1271:** L5, CLI judged-types pair PR 1 (tests).
-- **#1274:** L5, CLI pair PR 2 (the switch). Head `2375f854`. L5 then starts run-logic T1/I1.
-- **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
-- **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
+**Needs action now:**
+1. **#1169** (E7-28 implementation). #1234 has merged, so:
+   - merge `main` into `claude/live-e7-28-v2`;
+   - re-delete any resurrected `#[ignore = "pending E7-28"]` lines and the `ci_files` behaviour-only row;
+   - check that #1169's tests diff against main is only those deletions, and that the non-test patch-id matches
+     reviewed head `0ec45247`;
+   - approve.
+   Then **close #1219** as superseded by #1234.
+2. **#1269 + #1270** (bracket-leg tests correction and implementation; this unblocks FT-11 for E2). A Sonnet review
+   was running when the old coordinator stopped. If neither body has a verdict, run one on both heads (`5ae5a217`,
+   `9857dfc3`).
+   - Approve #1269 first.
+   - After it merges, merge `main` into `claude/bracket-leg-impl`. Re-delete any resurrected `pending E7-4` ignores
+     and rows. The test diff must be the 3 ignore deletions, plus the deliberate deletion of the
+     `no_leg_id_is_read_from_a_broker_order` stub test (DEC-878 item 7).
+   - Then approve #1270.
+3. **#1272** (L2, S1a implementation). L2 merges main (#1273 landed) and runs its review. Approve on its verdict.
+   Then L2 continues with DEC-903 (exact delegation-window comparison): a ref PR, a tests-correction row, then a #1272
+   follow-up fix.
+4. **#878** stays held for the founder (Cloudflare cutover).
 
-**New lane PRs to check:** Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
+**Next rows to dispatch (no builder is running for them):**
+- **C4 (live path):** first a tests correction for #1264's review minors:
+  - trailing zeros on every money and quantity field;
+  - a sell order;
+  - an empty order id;
+  - the DEC-902 item 6 citation, as a Status-line note.
+  Then the C4 implementation, plus `mandate-rh-sim` serving `get_portfolio`, `get_equity_positions`,
+  `get_equity_tradability` and `get_equity_quotes`, plus the end-to-end preflight test.
+- **E3 (paper path):** after #1270 merges. Then the founder's **E2** run. E2 should record the open-orders read after
+  its fill, because Alpaca's nested-leg shape is unconfirmed.
+- **Follow-ups:**
+  - **Alpaca cancel of a bracket's legs:** `client.rs::cancel` looks up `{entry}-p…`, which 404s. The in-doubt lookup
+    does the same. Both must be fixed before any exit runs against a filled bracket.
+  - **E7-28 minors:** listed in #1234's "Not done".
+  - **E1b part 2 edge case:** a suspend past the session end.
 
-**Open PRs needing a review verdict, then approval:**
-**Being reworked:**
-- **The bracket-leg implementation: #1269 (tests correction, head `5ae5a217`) and #1270
-  (implementation, head `9857dfc3`, stacked).** #1254 has merged. This blocks FT-11 for E2.
-  - Builder results: mutants 25 caught, 0 missed; no regressions across executor, alpaca, shell
-    and paper.
-  - A Sonnet review of both was running. If there's no verdict in the bodies, run one.
-  - Approve #1269 first. After it squash-merges:
-    1. merge `main` into `claude/bracket-leg-impl`;
-    2. re-delete any resurrected `pending E7-4` ignore lines and rows;
-    3. check that the test diff is only those 3 deletions plus the deliberate stub-test deletion
-       (DEC-878 item 7);
-    4. approve #1270.
-
-- **E7-28 round 6: both PRs passed review.** #1234 (tests) is APPROVED at `6e4e47a1`. Once it
-  merges:
-  1. merge `main` into `claude/live-e7-28-v2` (#1169, reviewed at `0ec45247`);
-  2. re-delete any resurrected `pending E7-28` ignore lines and the `ci_files` row;
-  3. check that #1169's test text equals main's minus those lines, and that the non-test patch-id
-     matches `0ec45247`'s;
-  4. approve #1169;
-  5. close #1219 as superseded.
-  The review minors are listed in #1234's "Not done", for a follow-up.
-
-**C4 (live path):** the tests PR **#1264** is approved (head `367f1cb5`, DEC-902). **Next:**
-1. a C4 tests correction for the review minors listed in #1264's "Not done": trailing zeros on
-   every money and quantity field, a sell order, an empty order id, and the DEC-902 item 6
-   citation;
-2. the C4 implementation, plus `mandate-rh-sim` serving `get_portfolio`, `get_equity_positions`,
-   `get_equity_tradability` and `get_equity_quotes`, plus the end-to-end preflight test.
-
-**Lanes' next items:**
-- **L2:** its queue is clear after #1242 and #1267. Options: E7-17 follow-up (c) (delete the deprecated raw `fold`), or the mixed-stream prefix tightening (tests first).
-- **L3:** DEC-706 step 2 (`notices.rs` pending tests), then step 3: register v2, refuse v1, and
-  move `step.rs`'s writer to v2 in one PR. Then D4 (retries), whose writer derives `verdict` from
-  the `Outcome` variant.
-- **L5:** slice C is done once #1268 merges. Next: the CLI judged-types pair after #1231, then run-logic T1/I1. T1/I1 includes
-  DEC-896's start-token cases (re-sequenced; backlog E12-8) and DEC-787 item 8.
+**Lanes (Claude Code sessions; they open PRs and write review verdicts into PR bodies):**
+- **L2** (`session_018LpuiyKntPJenZ4jZnEdTz`): #1272, then DEC-903, then the E7-17 follow-up (c) (delete the raw
+  `fold`), then the mixed-stream prefix tightening.
+- **L3+L4** (`session_01BtCufaGcvxBnm9h6eebWxE`):
+  - L3: DEC-706 step 3 (register `NoticeAttempted` v2, refuse v1, move `step.rs`'s writer to v2), then D4 (retries).
+  - L4: C-2, C-16 and C-17.
+- **L5** (`session_01GiEDxyxqyByvuwCrETeC6G`): run-logic T1/I1, including DEC-896's start-token cases and DEC-787
+  item 8.
+- **DEC numbers in use tonight:** 873–879 (coordinator), 878 (bracket legs), 879 (C2 allowlist), 896 (L5), 900–903
+  (L2), 902 (C4, inside L2's range), 706 (L3). Reserve new numbers per the decisions README.
 
 **Paths:**
-- **Paper:** E1b part 2 (#1258/#1261) and the bracket-leg fix (#1254 tests, then implementation),
-  then E3, then **E2, the founder's run**. E2 should record the open-orders read after its fill:
-  Alpaca's nested-leg shape is unconfirmed.
-- **Live:** C4 (tests, then implementation; rh-sim must serve those reads), then G1a and G1b,
-  then R0 (the founder's rehearsal and live run). C2 and C3 are done; DEC-876 (#1262) finishes C3.
-- **Known follow-ups:**
-  - Cancelling bracket legs 404s at Alpaca (`client.rs::cancel` looks up `{entry}-p…`), and so
-    does the in-doubt lookup. Both must be fixed before any exit runs against a filled bracket;
-    neither blocks E2's one-share run.
-  - DEC-877 item 4 (below).
+- **Paper:** #1269/#1270 → E3 → E2 (the founder's run).
+- **Live:** C4 (tests correction → implementation + rh-sim) → G1a/G1b → R0. C2 and C3 are done.
 
 ## Founder morning list (open items from tonight; earlier items were answered at ~15:40 UTC)
 1. **DECISION: DEC-877 item 4.** The shell refuses every submission after the entry as
