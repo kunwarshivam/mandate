@@ -3107,13 +3107,15 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `Input::Journal` answers a loud `Unimplemented { story: "E7-4" }` naming slice 5, landing first in
   E7-4 slice 1 rather than dropping the fact (the coordinator's ruling on #244, 5861479849).
 - **E7-4, the slice that reconciles protective legs (stream K; blocks FT-11 in E2):** find a filled
-  bracket's placement through its entry at reconciliation, by a live sell leg nested under it, and
-  never by the leg's own id, which Alpaca names itself ([DEC-878](decisions/DEC-878.md)). The tests
+  bracket's placement through its entry at reconciliation, only when the entry is listed `filled`
+  with exactly its stop and take-profit resting under it at the recorded quantity and prices, and
+  never by the leg's own id, which Alpaca names itself ([DEC-878](decisions/DEC-878.md)); what a
+  half-legged or mismatched bracket becomes is DEC-878's "Not settled" item. The tests
   PR changed `BrokerOrder.legs` to whole legs with its tests correction and left three pending
   tests in `mandate-executor/tests/bracket_legs.rs`; the code PR deletes their behaviour-only rows
-  and `protection.rs`'s `no_leg_id_is_read_from_a_broker_order`, whose #174 ruling (b) ends with
-  this slice. Still open after it (DEC-878, "Not decided here"): the Alpaca cancel of a bracket's
-  placement, which looks up `{entry}-p{record}` and gets a 404, must resolve through the entry's
+  and `protection.rs`'s `no_leg_id_is_read_from_a_broker_order` (with its `read_production`
+  helper), deliberately, since #174 ruling (b) ends with this slice. Still open after it (DEC-878,
+  "Not decided here"): the Alpaca cancel of a bracket's placement, which looks up `{entry}-p{record}` and gets a 404, must resolve through the entry's
   legs before any exit runs against a filled bracket; the in-doubt lookup should ask by the entry's
   id; and the hand-built `submit_oco_accepted` scenario's leg ids should be Alpaca's.
 - **E7-4 slices 2 and 3 (stream K):** `properties::protective_sell_quantity_never_exceeds_the_position_in_any_script`

@@ -6,9 +6,12 @@
 //! name: a bracket's parent is the entry itself, and the broker names each leg with its own
 //! `client_order_id` (the recorded `submit_bracket_accepted`). The open-orders read nests the legs
 //! under their parent (`nested=true`), so reconciliation (§11 step 1) finds them there, through
-//! the entry's `client_order_id`, by side and status, and never by the leg's own id (DEC-878
-//! items 2 to 4). A placement whose legs the broker does not list live is still adopted
-//! `Unknown`, with its `CompensatingEvent`, as any missing order is (rule 3, DEC-878 item 5).
+//! the entry's `client_order_id`, and never by the leg's own id (DEC-878 items 2 to 4). The
+//! placement counts as present only when the whole bracket rests as recorded: the entry listed
+//! `filled`, and exactly its stop and its take-profit nested under it, both resting, each for the
+//! placement's quantity at the recorded price. Anything else, a half-legged bracket included, is
+//! still adopted `Unknown` with its `CompensatingEvent`, as any missing order is (rule 3, DEC-878
+//! item 5).
 
 mod common;
 
@@ -27,33 +30,43 @@ const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const EXIT_INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ2";
 
-/// One leg of the bracket as Alpaca nests it under the entry: the broker's own order id, and the
-/// broker's own `client_order_id`, a UUID that is never one of ours.
-fn leg(broker_id: &str, side: Side, status: &str, take_profit: bool) -> BrokerOrder {
+/// The stop leg as Alpaca nests it under the entry: a sell stop at 140 for `quantity`, `status`,
+/// under the broker's own order id and the broker's own `client_order_id`, never one of ours.
+fn stop_leg(status: &str, quantity: &str) -> BrokerOrder {
     BrokerOrder {
-        broker_order_id: broker_id.to_owned(),
-        client_order_id: Some(format!("{broker_id}-0000-4000-8000-000000000000")),
-        side,
-        limit_price: take_profit.then(|| price("170")),
-        stop_price: (!take_profit).then(|| price("140")),
-        status: status.to_owned(),
+        client_order_id: Some("94969c96-b018-47e9-a6fc-c3faa85b65af".to_owned()),
+        limit_price: None,
+        stop_price: Some(price("140")),
         created_on: None,
-        ..broker_order(broker_id, None, AAPL, side, "10", "0", status)
+        ..broker_order("b2222222", None, AAPL, Side::Sell, quantity, "0", status)
     }
 }
 
-/// The two legs of the filled bracket, live as Alpaca reports them once the entry fills: the
-/// take-profit `new`, the stop `held` (§5.7 maps both to `Accepted`).
+/// The take-profit leg: a sell limit at 170 for `quantity`, `status`.
+fn take_profit_leg(status: &str, quantity: &str) -> BrokerOrder {
+    BrokerOrder {
+        client_order_id: Some("86942a5e-a11d-4464-872b-05f671c148ac".to_owned()),
+        limit_price: Some(price("170")),
+        stop_price: None,
+        created_on: None,
+        ..broker_order("a1111111", None, AAPL, Side::Sell, quantity, "0", status)
+    }
+}
+
+/// The two legs of the filled bracket of 10, resting as Alpaca reports them once the entry fills:
+/// the take-profit `new`, the stop `held` (§5.7 maps both to `Accepted`).
 fn live_legs() -> Vec<BrokerOrder> {
-    vec![
-        leg("a1111111", Side::Sell, "new", true),
-        leg("b2222222", Side::Sell, "held", false),
-    ]
+    vec![take_profit_leg("new", "10"), stop_leg("held", "10")]
 }
 
 /// The entry as the open-orders read lists it once filled, `client_order_id` its own, with `legs`
 /// nested under it.
 fn listed_entry(client_order_id: &str, legs: Vec<BrokerOrder>) -> BrokerOrder {
+    listed_entry_as(client_order_id, "filled", legs)
+}
+
+/// [`listed_entry`] with the entry's own status `status`.
+fn listed_entry_as(client_order_id: &str, status: &str, legs: Vec<BrokerOrder>) -> BrokerOrder {
     BrokerOrder {
         legs,
         ..broker_order(
@@ -63,7 +76,7 @@ fn listed_entry(client_order_id: &str, legs: Vec<BrokerOrder>) -> BrokerOrder {
             Side::Buy,
             "10",
             "10",
-            "filled",
+            status,
         )
     }
 }
@@ -127,18 +140,81 @@ fn filled_bracket(ports: &Ports<'_>) -> (Shell, String, String) {
 
 /// The snapshot of the account right after the fill: the 10 held, and `open_orders`.
 fn after_the_fill(shell: &Shell, open_orders: Vec<BrokerOrder>) -> Input {
+    after_a_fill_of(shell, "10", "18500", open_orders)
+}
+
+/// The snapshot after a fill of `held` at 150, with `cash` left of the 20000, and `open_orders`.
+fn after_a_fill_of(shell: &Shell, held: &str, cash: &str, open_orders: Vec<BrokerOrder>) -> Input {
     let mut taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
     taken.open_orders = open_orders;
-    taken.positions = vec![broker_position(AAPL, "10")];
-    taken.account = shell_account();
+    taken.positions = vec![broker_position(AAPL, held)];
+    let mut account = broker_account();
+    account.cash = common::usd(cash);
+    taken.account = account;
     Input::BrokerSnapshot(taken)
 }
 
-/// The broker's account once the 10 at 150 are bought: 1500 out of the 20000 cash.
-fn shell_account() -> mandate_executor::BrokerAccount {
-    let mut account = broker_account();
-    account.cash = common::usd("18500");
-    account
+/// A ready executor whose bracket entry of 10 filled 4 and was then cancelled, so its 4 are
+/// protected by one GTC OCO the executor **sent** (an `OrderSubmitted` of its own), named
+/// `{entry}-p{record}` like a bracket's placement and acknowledged by the broker (§5.4); answers
+/// the entry's id and the OCO's.
+fn partly_filled_bracket(ports: &Ports<'_>) -> (Shell, String, String) {
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("the stream opens");
+    let mut shell = shell.restart_ready(ports);
+    let entry = shell
+        .run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            ports,
+        )
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the entry goes as one bracket (§5.4)");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-1",
+            Some(&entry),
+            "4",
+            "150",
+        ))),
+        ports,
+    );
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "e0000000",
+            Some(&entry),
+            AAPL,
+            Side::Buy,
+            "10",
+            "4",
+            "canceled",
+        ))),
+        ports,
+    );
+    let oco = ended
+        .submissions()
+        .first()
+        .filter(|order| order.oco.is_some())
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("ended partly filled, the entry gets one GTC OCO for its 4 (§5.4)");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "o0000000",
+            Some(&oco),
+            AAPL,
+            Side::Sell,
+            "4",
+            "0",
+            "accepted",
+        ))),
+        ports,
+    );
+    (shell, entry, oco)
 }
 
 /// Whether `ran` adopted a state for `id`: an `OrderStateChanged` naming it, and its
@@ -164,7 +240,8 @@ fn queried(ran: &common::Ran, id: &str) -> bool {
 }
 
 /// DEC-878 items 2 and 3, FT-11: right after a complete fill, a reconciliation that lists the
-/// entry with its two live sell legs nested under it finds the placement present. Nothing is
+/// entry `filled` with its stop and take-profit resting under it, each for the 10 at the recorded
+/// price, finds the placement present. Nothing is
 /// adopted for it, no `CompensatingEvent` names it, it is never asked for by the name Alpaca does
 /// not hold, it stays `Accepted` and still covers the 10, and the run is clean. The legs' own
 /// `client_order_id`s, the broker's, are not external activity (item 4).
@@ -188,8 +265,8 @@ fn a_filled_brackets_legs_listed_under_its_entry_keep_their_placement() {
     assert_eq!(
         adopted(&ran, &protection),
         (false, false),
-        "the legs are listed live under their entry, so their placement is present, not adopted \
-         unknown and compensated (DEC-878 item 2): {:?}",
+        "the whole bracket rests under its filled entry as recorded, so its placement is \
+         present, not adopted unknown and compensated (DEC-878 item 2): {:?}",
         ran.draft_types()
     );
     assert!(
@@ -222,57 +299,186 @@ fn a_filled_brackets_legs_listed_under_its_entry_keep_their_placement() {
     );
 }
 
-/// How many listings [`listing`] answers.
-const LISTINGS: usize = 7;
+/// What a listing is shown to: the filled bracket's placement, or the OCO a partly filled
+/// bracket was sent.
+#[derive(Clone, Copy)]
+enum Placement {
+    Bracket,
+    SentOco,
+}
 
-/// Listing `case` of the open orders right after the fill, its name, and whether it keeps the
-/// placement: only a live sell leg nested under `entry` does.
-fn listing(case: usize, entry: &str) -> (&'static str, bool, Vec<BrokerOrder>) {
-    let done = vec![
-        leg("a1111111", Side::Sell, "canceled", true),
-        leg("b2222222", Side::Sell, "expired", false),
-    ];
-    let buying = vec![
-        leg("a1111111", Side::Buy, "new", true),
-        leg("b2222222", Side::Buy, "held", false),
-    ];
-    let one_live = vec![
-        leg("a1111111", Side::Sell, "canceled", true),
-        leg("b2222222", Side::Sell, "held", false),
-    ];
+/// How many listings [`listing`] answers.
+const LISTINGS: usize = 20;
+
+/// Listing `case` of the open orders right after the fill: its name, the placement it is shown
+/// to, and whether it keeps that placement. Only the whole filled bracket resting as recorded does
+/// (DEC-878 item 2): the entry `filled`, exactly one resting sell stop at 140 and one resting sell
+/// limit at 170 nested under it, each for the placement's 10.
+fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<BrokerOrder>) {
+    let under = |legs: Vec<BrokerOrder>| vec![listed_entry(entry, legs)];
     let another = "md-01JABCDEFGHJKMNPQRSTVWXYZ9";
+    let buying = |mut leg: BrokerOrder| {
+        leg.side = Side::Buy;
+        leg
+    };
+    let priced = |mut leg: BrokerOrder, stop: Option<&str>, limit: Option<&str>| {
+        leg.stop_price = stop.map(price);
+        leg.limit_price = limit.map(price);
+        leg
+    };
+    let bracket = Placement::Bracket;
     match case {
         0 => (
-            "both legs live under the entry",
+            "both legs resting under the entry",
+            bracket,
             true,
-            vec![listed_entry(entry, live_legs())],
+            under(live_legs()),
         ),
         1 => (
-            "one leg live under the entry",
-            true,
-            vec![listed_entry(entry, one_live)],
+            "the take-profit resting, the stop cancelled",
+            bracket,
+            false,
+            under(vec![
+                take_profit_leg("new", "10"),
+                stop_leg("canceled", "10"),
+            ]),
         ),
-        2 => ("both legs done", false, vec![listed_entry(entry, done)]),
-        3 => ("no legs", false, vec![listed_entry(entry, Vec::new())]),
-        4 => ("legs that buy", false, vec![listed_entry(entry, buying)]),
-        5 => (
-            "live legs under another order",
+        2 => (
+            "the stop resting, the take-profit cancelled",
+            bracket,
+            false,
+            under(vec![
+                take_profit_leg("canceled", "10"),
+                stop_leg("held", "10"),
+            ]),
+        ),
+        3 => (
+            "the take-profit alone, no stop nested",
+            bracket,
+            false,
+            under(vec![take_profit_leg("new", "10")]),
+        ),
+        4 => (
+            "both legs done",
+            bracket,
+            false,
+            under(vec![
+                take_profit_leg("canceled", "10"),
+                stop_leg("expired", "10"),
+            ]),
+        ),
+        5 => ("no legs", bracket, false, under(Vec::new())),
+        6 => (
+            "legs that buy",
+            bracket,
+            false,
+            under(vec![
+                buying(take_profit_leg("new", "10")),
+                buying(stop_leg("held", "10")),
+            ]),
+        ),
+        7 => (
+            "resting legs under another order",
+            bracket,
             false,
             vec![listed_entry(another, live_legs())],
         ),
-        _ => ("nothing listed", false, Vec::new()),
+        8 => ("nothing listed", bracket, false, Vec::new()),
+        9 => (
+            "the stop for 9 of the 10",
+            bracket,
+            false,
+            under(vec![take_profit_leg("new", "10"), stop_leg("held", "9")]),
+        ),
+        10 => (
+            "the take-profit for 9 of the 10",
+            bracket,
+            false,
+            under(vec![take_profit_leg("new", "9"), stop_leg("held", "10")]),
+        ),
+        11 => (
+            "the stop at 139, not the recorded 140",
+            bracket,
+            false,
+            under(vec![
+                take_profit_leg("new", "10"),
+                priced(stop_leg("held", "10"), Some("139"), None),
+            ]),
+        ),
+        12 => (
+            "the take-profit at 171, not the recorded 170",
+            bracket,
+            false,
+            under(vec![
+                priced(take_profit_leg("new", "10"), None, Some("171")),
+                stop_leg("held", "10"),
+            ]),
+        ),
+        13 => (
+            "the entry canceled, its legs resting",
+            bracket,
+            false,
+            vec![listed_entry_as(entry, "canceled", live_legs())],
+        ),
+        14 => (
+            "the entry rejected, its legs resting",
+            bracket,
+            false,
+            vec![listed_entry_as(entry, "rejected", live_legs())],
+        ),
+        15 => (
+            "the stop suspended, a restricted status",
+            bracket,
+            false,
+            under(vec![
+                take_profit_leg("new", "10"),
+                stop_leg("suspended", "10"),
+            ]),
+        ),
+        16 => (
+            "the stop in a status outside §5.7's table",
+            bracket,
+            false,
+            under(vec![take_profit_leg("new", "10"), stop_leg("frozen", "10")]),
+        ),
+        17 => (
+            "two stops and no take-profit",
+            bracket,
+            false,
+            under(vec![
+                priced(take_profit_leg("new", "10"), Some("140"), None),
+                stop_leg("held", "10"),
+            ]),
+        ),
+        18 => (
+            "a third leg nested, done, beside the two resting",
+            bracket,
+            false,
+            under(vec![
+                take_profit_leg("new", "10"),
+                stop_leg("held", "10"),
+                stop_leg("canceled", "10"),
+            ]),
+        ),
+        _ => (
+            "a sent OCO absent, the entry listed filled with its legs resting for the OCO's 4",
+            Placement::SentOco,
+            false,
+            under(vec![take_profit_leg("new", "4"), stop_leg("held", "4")]),
+        ),
     }
 }
 
-/// DEC-878 items 2 and 5: only a live sell leg nested under **this** entry keeps the placement.
-/// Listed live under the entry, it is kept; every other listing adopts it `Unknown` with its
-/// `CompensatingEvent` and asks after it, as §11 adopts any order the broker does not list (rule
-/// 3: what cannot be shown live is in doubt, never assumed). The others: the entry listed with
-/// both legs done, with no legs, with legs that buy, the same live legs under another order's id,
-/// and nothing listed at all.
+/// DEC-878 items 2 and 5: only the whole bracket, resting as recorded under its filled entry,
+/// keeps the placement. Every other listing adopts it `Unknown` with its `CompensatingEvent` and
+/// asks after it, as §11 adopts any order the broker does not list (rule 3: what cannot be shown
+/// resting is in doubt, never assumed). A half-legged bracket is one of them: a placement whose
+/// stop is gone must never read as covering (rule 13's protection, DEC-878 item 9). So is a sent
+/// OCO that is itself absent, whatever its entry lists: it has its own `OrderSubmitted` and is
+/// found by its own id or not at all.
 #[test]
 #[ignore = "pending E7-4"]
-fn only_a_live_sell_leg_under_the_entry_keeps_the_placement() {
+fn only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement() {
     let (ids, mandates, instruments, config) = (
         TestIds,
         FixedMandate::covering(&[AAPL]),
@@ -281,35 +487,41 @@ fn only_a_live_sell_leg_under_the_entry_keeps_the_placement() {
     );
     let ports = ports(&ids, &mandates, &instruments, &config);
     for case in 0..LISTINGS {
-        let (mut shell, entry, protection) = filled_bracket(&ports);
-        let (case, kept, open) = listing(case, &entry);
-        let ran = shell.run(after_the_fill(&shell, open), &ports);
+        let (_, shown, _, _) = listing(case, "md-unused");
+        let (mut shell, entry, protection) = match shown {
+            Placement::Bracket => filled_bracket(&ports),
+            Placement::SentOco => partly_filled_bracket(&ports),
+        };
+        let (case, _, kept, open) = listing(case, &entry);
+        let taken = match shown {
+            Placement::Bracket => after_the_fill(&shell, open),
+            Placement::SentOco => after_a_fill_of(&shell, "4", "19400", open),
+        };
+        let ran = shell.run(taken, &ports);
         let state = shell
             .state
             .orders()
             .values()
             .find(|order| order.client_order_id.as_str() == protection)
             .map(|order| order.state);
+        let seen = (
+            adopted(&ran, &protection),
+            queried(&ran, &protection),
+            state,
+        );
         if kept {
             assert_eq!(
-                (
-                    adopted(&ran, &protection),
-                    queried(&ran, &protection),
-                    state
-                ),
+                seen,
                 ((false, false), false, Some(OrderState::Accepted)),
-                "{case}: a live sell leg under the entry keeps the placement (DEC-878 item 2)"
+                "{case}: the whole bracket rests under its filled entry, so the placement is kept \
+                 (DEC-878 item 2)"
             );
         } else {
             assert_eq!(
-                (
-                    adopted(&ran, &protection),
-                    queried(&ran, &protection),
-                    state
-                ),
+                seen,
                 ((true, true), true, Some(OrderState::Unknown)),
-                "{case}: no live sell leg under the entry, so the placement is adopted unknown, \
-                 compensated and asked after (DEC-878 item 5, rule 3)"
+                "{case}: not the whole bracket resting as recorded, so the placement is adopted \
+                 unknown, compensated and asked after (DEC-878 item 5, rule 3)"
             );
         }
     }
