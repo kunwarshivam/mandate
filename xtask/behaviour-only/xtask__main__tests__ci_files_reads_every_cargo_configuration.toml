@@ -1,8 +1,0 @@
-file = "xtask/src/main.rs"
-test = "tests::ci_files_reads_every_cargo_configuration"
-reason = """
-E7-28 round 4 (#1169 round 3 review, bypass 5): `ci_files` is live code, not a stub, so this test
-fails on what it reads (no `.cargo/config` and no `.cargo` below the root) rather than at
-`resolved_live_problems`'s stub report. It still runs and fails; #1169 deletes this file with
-the test's `#[ignore]` line.
-"""
