@@ -91,9 +91,7 @@ anything here.
      and rows. The test diff must be the 3 ignore deletions, plus the deliberate deletion of the
      `no_leg_id_is_read_from_a_broker_order` stub test (DEC-878 item 7).
    - Then approve #1270.
-3. **#1272** (L2, S1a implementation). L2 merges main (#1273 landed) and runs its review. Approve on its verdict.
-   Then L2 continues with DEC-903 (exact delegation-window comparison): a ref PR, a tests-correction row, then a #1272
-   follow-up fix.
+3. **#1272** (L2, S1a implementation): APPROVED at `4df3fac7`. Next from L2 is DEC-903: a ref PR, a tests-correction row, then a #1272 follow-up fix.
 4. **#878** stays held for the founder (Cloudflare cutover).
 
 **Next rows to dispatch (no builder is running for them):**
