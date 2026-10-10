@@ -286,7 +286,11 @@ test("with motion allowed, the water moves and the moon rises out of it as the o
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const sea = page.locator("[data-slot=long-page] [data-slot=pixel-sea]");
+  const looping = () => sea.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.timeline instanceof DocumentTimeline && a.playState === "running").length);
+  await expect(sea, "out of view, the sea holds still").toHaveAttribute("data-ambient", "paused");
+  expect(await looping()).toBe(0);
   await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - window.innerHeight + 20, behavior: "instant" }));
+  await expect(sea).toHaveAttribute("data-ambient", "playing");
   await expect.poll(() => risen(page), "the moon is still under the water as the sea comes in").toBeLessThan(0.3);
   await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 200, behavior: "instant" }));
   await expect.poll(() => risen(page), "and half risen once the opening is in view").toBeCloseTo(0.5, 2);

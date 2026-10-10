@@ -99,7 +99,7 @@ const RECTS = nightRects();
 
 export function PixelNight({ className }: { className?: string }) {
   return (
-    <svg aria-hidden viewBox={`0 0 ${COLS} ${ROWS}`} preserveAspectRatio="xMidYMid slice" shapeRendering="crispEdges" className={className} data-slot="pixel-night">
+    <svg aria-hidden viewBox={`0 0 ${COLS} ${ROWS}`} preserveAspectRatio="xMidYMid slice" shapeRendering="crispEdges" className={className} data-slot="pixel-night" data-ambient="">
       <rect width={COLS} height={HORIZON} fill={NIGHT_COLOURS.sky} />
       <rect y={HORIZON} width={COLS} height={ROWS - HORIZON} fill={NIGHT_COLOURS.tide} />
       {RECTS.map((r) => (

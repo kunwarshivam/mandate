@@ -284,21 +284,23 @@ describe("the design system", () => {
 });
 
 describe("the motion", () => {
+  /** Stands in for every observer the page makes, and tells the one watching an element when it comes into view or leaves. */
   function observe() {
+    type Report = (entries: { target: Element; isIntersecting: boolean }[]) => void;
     const seen: Element[] = [];
-    let report: (entries: { target: Element; isIntersecting: boolean }[]) => void = () => {};
+    const watcher = new Map<Element, Report>();
     class Observer {
-      constructor(cb: typeof report) {
-        report = cb;
-      }
+      constructor(private readonly report: Report) {}
       observe(el: Element) {
         seen.push(el);
+        watcher.set(el, this.report);
       }
       unobserve() {}
       disconnect() {}
     }
     vi.stubGlobal("IntersectionObserver", Observer);
-    return { seen, show: (el: Element) => act(() => report([{ target: el, isIntersecting: true }])) };
+    const tell = (el: Element, isIntersecting: boolean) => act(() => watcher.get(el)?.([{ target: el, isIntersecting }]));
+    return { seen, show: (el: Element) => tell(el, true), hide: (el: Element) => tell(el, false) };
   }
 
   it("with motion reduced, leaves every piece where the server drew it", () => {
@@ -313,11 +315,35 @@ describe("the motion", () => {
     const { seen, show } = observe();
     const { container } = render(<LongPage />);
     expect(container.querySelector("[data-slot=long-page]")).toHaveAttribute("data-motion", "on");
-    expect(seen.length).toBe(container.querySelectorAll("[data-reveal]").length);
+    expect(seen.filter((el) => el.matches("[data-reveal]")).length).toBe(container.querySelectorAll("[data-reveal]").length);
     const notification = container.querySelector("[data-slot=lock-screen] [data-reveal=drop]")!;
     expect(notification).not.toHaveAttribute("data-shown");
     show(notification);
     expect(notification).toHaveAttribute("data-shown");
+  });
+
+  it("with motion allowed, holds the sea's and the night's loops still while each is out of view, and lets them go as it comes back", () => {
+    const { seen, show, hide } = observe();
+    const { container } = render(<LongPage />);
+    const pictures = [...container.querySelectorAll<HTMLElement>("[data-ambient]")];
+    expect(pictures.map((p) => p.dataset.slot).sort()).toEqual(["pixel-night", "pixel-sea"]);
+    expect(seen.filter((el) => el.matches("[data-ambient]"))).toEqual(pictures);
+    for (const picture of pictures) {
+      hide(picture);
+      expect(picture.dataset.ambient, picture.dataset.slot).toBe("paused");
+      show(picture);
+      expect(picture.dataset.ambient, picture.dataset.slot).toBe("playing");
+    }
+  });
+
+  it("pauses only the looping animations of a picture out of view, never the moon's rise, which follows the scroll", () => {
+    const css = readFileSync(join(__dirname, "scroll.module.css"), "utf8");
+    const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
+    const rule = motion.match(/\[data-ambient="paused"\] :is\(([^)]*)\) \{\s*animation-play-state: paused;/);
+    expect(rule, "a paused picture's loops hold still, with motion allowed").not.toBeNull();
+    const held = rule![1]!.split(",").map((s) => s.trim());
+    expect(held).toEqual(expect.arrayContaining([".wave", ".foam", ".glintA", ".glintB", ".wingsUp", ".wingsDown", ".twinkle", '[data-slot="cue-arrow"]']));
+    expect(held).not.toContain(".moon");
   });
 
   it("strikes each thing it won't do in turn, and settles every picture of the app with a tilt", () => {

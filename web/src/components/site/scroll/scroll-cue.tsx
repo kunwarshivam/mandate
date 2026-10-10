@@ -63,7 +63,10 @@ export function ScrollCue() {
       if (!raf) raf = window.requestAnimationFrame(place);
     };
     const onScroll = () => {
-      if (window.scrollY < window.innerHeight) follow();
+      const covered = window.scrollY >= window.innerHeight;
+      const ambient = covered ? "paused" : "playing";
+      if (cue.dataset.ambient !== ambient) cue.dataset.ambient = ambient;
+      if (!covered) follow();
     };
     const outside = (target: Node | EventTarget | null) => !(target instanceof Node && cue.contains(target));
     const onMotion = (e: Event) => {

@@ -123,6 +123,19 @@ describe("the scroll cue", () => {
     document.removeEventListener(CUE_MOVED, moved);
   });
 
+  it("holds its arrow still once the page has covered it, and lets it go when the first screen comes back", () => {
+    layout();
+    stage(true);
+    const cue = screen.getByRole("link", { name: "Scroll" });
+    expect(cue.dataset.ambient).toBe("playing");
+    vi.spyOn(window, "scrollY", "get").mockReturnValue(window.innerHeight);
+    window.dispatchEvent(new Event("scroll"));
+    expect(cue.dataset.ambient).toBe("paused");
+    vi.spyOn(window, "scrollY", "get").mockReturnValue(0);
+    window.dispatchEvent(new Event("scroll"));
+    expect(cue.dataset.ambient).toBe("playing");
+  });
+
   it("brings the long page into view when pressed, without changing the address", () => {
     layout();
     const into = vi.spyOn(Element.prototype, "scrollIntoView");

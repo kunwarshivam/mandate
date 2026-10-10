@@ -255,6 +255,12 @@
     animation: twinkle 3.1s steps(1) infinite;
   }
 
+  /* Out of view, the loops hold still (`ambient.tsx`, and the cue once the page covers it). The
+     moon's rise follows the scroll, so it is never held. */
+  [data-ambient="paused"] :is(.wave, .foam, .glintA, .glintB, .wingsUp, .wingsDown, .twinkle, [data-slot="cue-arrow"]) {
+    animation-play-state: paused;
+  }
+
   .stage > :not(.cue) {
     transform-origin: 50% 35%;
   }
