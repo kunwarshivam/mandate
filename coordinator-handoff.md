@@ -83,9 +83,8 @@ anything here.
 
 **Needs action now:**
 1. **#1169** (E7-28 implementation): main merged in, resurrected rows and ignores re-deleted, and approved at `46f63d0b`. #1219 is closed as superseded. Nothing left except merging on green CI.
-2. **#1269 + #1270** (bracket-leg tests correction and implementation; this unblocks FT-11 for E2). A Sonnet review
-   was running when the old coordinator stopped. If neither body has a verdict, run one on both heads (`5ae5a217`,
-   `9857dfc3`).
+2. **#1269 + #1270** (bracket-leg tests correction and implementation; this unblocks FT-11 for E2). The Sonnet review
+   passed on both heads (#1269 `5ae5a217`, #1270 `9857dfc3`), with mutants 25/25, and #1269 is APPROVED.
    - Approve #1269 first.
    - After it merges, merge `main` into `claude/bracket-leg-impl`. Re-delete any resurrected `pending E7-4` ignores
      and rows. The test diff must be the 3 ignore deletions, plus the deliberate deletion of the
