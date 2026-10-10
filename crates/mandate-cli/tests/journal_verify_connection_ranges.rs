@@ -6,6 +6,7 @@
 //! Oracles: the single-stream `connection*` sequences of `fixtures/refcases/journal.json`: a full
 //! chain answers its `expect`, an anchored range's prefix plus records its `expect` moved past the
 //! prefix (DEC-885 I1), and a tail a scan of §11's "No anchor" list, checked against the vectors.
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,9 +34,11 @@ const NOT_RUN: &str = "not run: connection_cause_mismatch (needs the control str
 const CONTROL_JUDGED: &str = "ConnectionRequested ConnectionEstablished \
     ConnectionCredentialRotated ConnectionRefused";
 /// "Any connection record on an account stream" (same lines), as §9.8's "Who writes what" lists
-/// them (lines 2005-2008): checks, state, refreshes, and the two copies; rule 68 judges each.
+/// them (lines 2005-2008): checks, state, refreshes, and the two copies; rule 68 judges each. Since
+/// journal spec v0.37 (DEC-888) rule 68 also refuses a `ConnectionRevoked` there, so it is judged.
 const ACCOUNT_JUDGED: &str = "ConnectionChecked ConnectionStateChanged \
-    ConnectionCredentialRefreshed ConnectionEstablished ConnectionCredentialRotated";
+    ConnectionCredentialRefreshed ConnectionEstablished ConnectionCredentialRotated \
+    ConnectionRevoked";
 
 fn vectors() -> Json {
     let path =
@@ -410,6 +413,25 @@ fn one_of_each_connection_type() -> Vec<Json> {
         .iter_mut()
         .for_each(|b| b["recorded_at"] = b["event_time"].clone());
     bodies
+}
+
+/// This file's §11 lists, an oracle kept apart from the library's, name the same types as the
+/// journal's exports, each once.
+#[test]
+fn the_judged_lists_here_match_the_journals_exports() {
+    let set = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<BTreeSet<_>>();
+    for (here, export) in [
+        (CONTROL_JUDGED, JUDGED_ON_CONTROL),
+        (ACCOUNT_JUDGED, JUDGED_ON_ACCOUNT),
+    ] {
+        let here: Vec<&str> = here.split(' ').collect();
+        assert_eq!(set(&here), set(export), "{here:?}");
+        assert_eq!(
+            (here.len(), export.len()),
+            (set(&here).len(), set(export).len()),
+            "no type twice"
+        );
+    }
 }
 
 /// E12-3, after #1231 (DEC-888): rule 68 refuses an account-stream `ConnectionRevoked`, so an
