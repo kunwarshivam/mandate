@@ -143,6 +143,13 @@ pub enum ShellError {
     /// The executor asked for a second submission in one run. The tracer places one order.
     #[error("the tracer places one order per run, and the executor asked for another")]
     SecondSubmission,
+    /// E1b's watch reached the end of the regular session without the broker confirming the
+    /// entry's cancel (DEC-858 item 5, DEC-877 item 1). The entry's `pending_cancel` stays
+    /// journaled for the next start's reconciliation; nothing more is placed or cancelled.
+    #[error(
+        "the entry's cancel was unconfirmed at the session's end; the next start reconciles it"
+    )]
+    CancelUnconfirmed,
     /// The builder proposed a quantity of zero, which no order can carry (PB-14).
     #[error("the order builder proposed a quantity of zero")]
     ProposalInvalid,
@@ -175,6 +182,7 @@ impl ShellError {
             Self::ReconciliationMismatch => "reconciliation_mismatch",
             Self::WriteAheadViolated { .. } => "write_ahead_violated",
             Self::SecondSubmission => "one_order_only",
+            Self::CancelUnconfirmed => "cancel_unconfirmed",
             Self::ProposalInvalid => "proposal_invalid",
             Self::Envelope { .. } => "envelope_not_composed",
             Self::Usage(_) => "usage",
@@ -193,6 +201,7 @@ impl ShellError {
             | Self::ReconciliationMismatch
             | Self::WriteAheadViolated { .. }
             | Self::SecondSubmission
+            | Self::CancelUnconfirmed
             | Self::ProposalInvalid
             | Self::Envelope { .. }
             | Self::Usage(_) => None,
