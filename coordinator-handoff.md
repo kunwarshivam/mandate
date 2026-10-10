@@ -89,22 +89,12 @@ anything here.
 - **#1254:** bracket-leg tests (DEC-878). Head `f4cc05d8`.
 - **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
 
-- **#1258:** E1b part 2 tests correction. Head `d48973d5`.
+- **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
 
 **New lane PRs to check:** Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
 
 **Open PRs needing a review verdict, then approval:**
-- **#1261** (E1b part 2 implementation, stacked on #1258). The review passed at `4bd31c44`.
-  Approve it once #1258 has merged:
-  1. merge `main` into `claude/e1b-part2-impl`;
-  2. re-delete any resurrected `#[ignore = "pending E7-19"]` lines and behaviour-only rows;
-  3. check that the test diff is exactly the 5 ignore deletions plus the 5 deleted rows, and that
-     the `src` patch-id matches `4bd31c44`'s;
-  4. approve the new head.
-  The review's minors are recorded in #1258's body: the suspend-past-the-end edge case, and the
-  untested check order.
-
 **Being reworked:**
 - **#1254: bracket-leg tests (DEC-878).** APPROVED at `f4cc05d8` after round 2 passed. **Next:**
   the bracket-leg implementation PR, using the scratch fix in #1254's body. That PR must:
