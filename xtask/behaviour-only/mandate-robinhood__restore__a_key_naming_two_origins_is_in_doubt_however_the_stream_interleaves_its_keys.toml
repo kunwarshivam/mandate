@@ -1,0 +1,9 @@
+file = "crates/mandate-robinhood/tests/restore.rs"
+test = "a_key_naming_two_origins_is_in_doubt_however_the_stream_interleaves_its_keys"
+reason = """
+DEC-876 in the interleaving property: main places a successor whose records name two different
+`replaces` targets, so the oracle, which holds it in doubt, disagrees. `RobinhoodConnector::restore`
+is implemented on main (E7-6, #1200, #1236), so there is no stub to stop at: the test fails on the
+answer the implementation gives. The E7-6 change that adopts DEC-876 deletes the marker and this
+file.
+"""
