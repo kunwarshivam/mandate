@@ -95,7 +95,6 @@ fn refusal(draft: &Value) -> Option<(&'static str, String)> {
 /// §9.13 rule 111, §11: `segment_rows_mismatch` reported for the range with `seq` null parses as
 /// a version 2 `VerificationRun`, whose rule 133 result is `fail`.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_version_2_run_reports_the_rows_mismatch_for_the_range() {
     let (found, draft) = case("valid_drafts", "rows_mismatch_for_the_range");
     assert_eq!(
@@ -116,7 +115,6 @@ fn a_version_2_run_reports_the_rows_mismatch_for_the_range() {
 /// §9.13 rule 111: the same failure naming a `seq` inside its range is refused `schema` at
 /// `failure.seq`, since the check is reported for the range, not at an event.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_version_2_rows_mismatch_naming_a_seq_is_refused_at_its_seq() {
     let (found, draft) = case("invalid_drafts", "rows_mismatch_at_a_seq");
     let expect = found.get("expect").unwrap();
