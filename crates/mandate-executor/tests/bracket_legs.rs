@@ -308,12 +308,13 @@ enum Placement {
 }
 
 /// How many listings [`listing`] answers.
-const LISTINGS: usize = 20;
+const LISTINGS: usize = 22;
 
 /// Listing `case` of the open orders right after the fill: its name, the placement it is shown
 /// to, and whether it keeps that placement. Only the whole filled bracket resting as recorded does
 /// (DEC-878 item 2): the entry `filled`, exactly one resting sell stop at 140 and one resting sell
-/// limit at 170 nested under it, each for the placement's 10.
+/// limit at 170 with no stop price nested under it, each for the placement's 10. A leg rests when
+/// §5.7 maps its status to `Accepted` and none of it has filled.
 fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<BrokerOrder>) {
     let under = |legs: Vec<BrokerOrder>| vec![listed_entry(entry, legs)];
     let another = "md-01JABCDEFGHJKMNPQRSTVWXYZ9";
@@ -458,6 +459,27 @@ fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<Brok
                 take_profit_leg("new", "10"),
                 stop_leg("held", "10"),
                 stop_leg("canceled", "10"),
+            ]),
+        ),
+        19 => (
+            "a stop carrying a limit at the take-profit's 170, the take-profit cancelled",
+            bracket,
+            false,
+            under(vec![
+                priced(stop_leg("held", "10"), Some("140"), Some("170")),
+                take_profit_leg("canceled", "10"),
+            ]),
+        ),
+        20 => (
+            "the take-profit `new` with 3 of its 10 already filled",
+            bracket,
+            false,
+            under(vec![
+                BrokerOrder {
+                    filled_qty: qty("3"),
+                    ..take_profit_leg("new", "10")
+                },
+                stop_leg("held", "10"),
             ]),
         ),
         _ => (
