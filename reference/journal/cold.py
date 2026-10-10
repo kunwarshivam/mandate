@@ -628,6 +628,8 @@ def more_row_specs(rows: list[dict], by_hash: dict, by_anchor: dict, seg: dict) 
          by_anchor, anchor_with(leaf_set(0, hash="g" * 64)), unread, "no_start"),
         ("genesis_after_seq_one", "§11: genesis is seq 1 only", acct, 2, {"kind": "genesis"}, None, unread,
          "no_start"),
+        ("manifest_not_recorded", "§9.14: a manifest hash that no row records", acct, 4,
+         {"kind": "manifest", "manifest_hash": "8" * 64}, None, cold_read(seg), "no_start"),
     ]
 
 
@@ -970,7 +972,7 @@ ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace
                "row.skip_unparsed", "row.anchor_root", "row.anchor_order", "row.unstamped_ok", "row.segment_stream",
                "start.first_seq", "row.anchor_leaf_seq", "row.anchor_seq_floor",
                "row.anchor_leaf_stream", "row.anchor_foreign", "row.anchor_type", "row.bad_stream_id", "row.bad_hex",
-               "start.genesis_seq", "start.anchor_seq", "start.workspace")
+               "start.genesis_seq", "start.anchor_seq", "start.workspace", "start.manifest_hash")
 
 
 def row_mutant_killers(section: dict, mutant: str) -> list[str]:

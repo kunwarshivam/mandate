@@ -34323,6 +34323,20 @@ cold_records:
       expect:
         outcome: refused
         cause: no_start
+    - name: manifest_not_recorded
+      clause: '§9.14: a manifest hash that no row records'
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      from_seq: 4
+      request:
+        kind: manifest
+        manifest_hash: '8888888888888888888888888888888888888888888888888888888888888888'
+      replace: null
+      cold:
+        state: read
+        bytes: '{"file_sha256":"7777777777777777777777777777777777777777777777777777777777777777","first_prev_hash":"5555555555555555555555555555555555555555555555555555555555555555","first_seq":4,"last_hash":"6666666666666666666666666666666666666666666666666666666666666666","last_seq":9,"stream":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+      expect:
+        outcome: refused
+        cause: no_start
 verification_runs:
   spec: docs/specs/journal.md v0.36 §9.13 and §11 (DEC-788, DEC-789)
   drafts:
