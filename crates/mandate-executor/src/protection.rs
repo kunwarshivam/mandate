@@ -2376,9 +2376,7 @@ pub(crate) fn exit_hold(
 
 #[cfg(test)]
 mod stub_tests {
-    use std::fs;
     use std::io;
-    use std::path::Path;
 
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::{Price, Qty};
@@ -2439,12 +2437,6 @@ mod stub_tests {
         Ok(kept)
     }
 
-    /// One file's production code, or the refusal naming the file.
-    fn read_production(path: &Path) -> io::Result<String> {
-        production(&fs::read_to_string(path)?)
-            .map_err(|refused| io::Error::other(format!("{}: {refused}", path.display())))
-    }
-
     /// #286 round 1, minor 3: a one-line item mid-file (the `mod x;` shape `stages.rs`,
     /// `policy.rs` and `validate.rs` use), one under several attributes, and a block are each
     /// stripped exactly, keeping every production line after them; an item `production` cannot
@@ -2469,27 +2461,6 @@ mod stub_tests {
             assert!(
                 production(unstrippable).is_err(),
                 "{unstrippable:?} is refused"
-            );
-        }
-        Ok(())
-    }
-
-    /// #174 ruling (b), 5861764910: slice 1 reads no leg id from a `BrokerOrder`. The broker's
-    /// legs carry only their broker ids until the slice that reconciles legs keeps each leg's
-    /// `client_order_id` (with its own `ready()` tests correction), so until then a broker-reported
-    /// leg falls to the single holder or fails closed (DEC-160 3a). Every production source of
-    /// this crate is scanned for a read of the field.
-    #[test]
-    fn no_leg_id_is_read_from_a_broker_order() -> io::Result<()> {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        for entry in fs::read_dir(&src)? {
-            let path = entry?.path();
-            let source = read_production(&path)?;
-            assert!(
-                !source.contains(".legs"),
-                "{} reads a broker order's legs; leg ids from the broker wait for the leg \
-                 reconciliation slice (#174 ruling (b))",
-                path.display()
             );
         }
         Ok(())

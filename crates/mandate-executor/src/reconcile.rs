@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_num::{Fraction, Qty, SignedQty};
 
@@ -20,8 +20,8 @@ use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
-    Adopted, BrokerAccount, BrokerSnapshot, Difference, EventId, Mode, OrderState, ReconcileReason,
-    Reconciliation, ReconciliationVerdict, StatusMapping, Unexplained,
+    Adopted, BrokerAccount, BrokerOrder, BrokerSnapshot, Difference, EventId, Mode, OrderState,
+    ReconcileReason, Reconciliation, ReconciliationVerdict, StatusMapping, Unexplained,
 };
 
 /// The order of the steps is part of the algorithm: **orders, then fills, then positions, then
@@ -160,6 +160,7 @@ fn orders(
                 Ok(StatusMapping::ReplacedPair) => OrderState::Replaced,
                 Ok(StatusMapping::Unchanged) | Err(_) => ours,
             },
+            None if bracket_rests(&batch.view, &id, snapshot) => ours,
             None => OrderState::Unknown,
         };
         if adopted != ours {
@@ -205,6 +206,67 @@ fn orders(
         )?;
     }
     Ok(())
+}
+
+/// Whether `id`, a live protective order no broker order is named for, is a filled bracket's
+/// placement whose whole bracket rests as recorded under its entry (DEC-878 item 2), so step 1
+/// keeps it rather than adopting it `Unknown`.
+///
+/// The placement is unsent (no `OrderSubmitted` of its own: a sent OCO is found by its own id or
+/// not at all), its id names an entry that was sent as a bracket, and the snapshot lists that
+/// entry, by the entry's own `client_order_id`, in status `filled` with exactly two legs nested
+/// under it: one resting sell stop at the recorded stop and one resting sell limit with no stop
+/// price at the recorded take-profit, each for the placement's quantity. A leg rests when §5.7
+/// maps its status to `Accepted` and none of it has filled. The legs' own `client_order_id`s are
+/// the broker's and are never compared (items 1 and 3); a missing stop never reads as covering
+/// (item 9).
+fn bracket_rests(view: &ExecutorState, id: &ClientOrderId, snapshot: &BrokerSnapshot) -> bool {
+    let unsent = view
+        .details
+        .get(id)
+        .is_none_or(|detail| detail.request.is_none());
+    let (Some(entry), Some(placement)) = (id.protected_entry(), view.orders.get(id)) else {
+        return false;
+    };
+    let Some(recorded) = view
+        .details
+        .get(&entry)
+        .and_then(|detail| detail.request.as_ref())
+        .and_then(|request| request.bracket.clone())
+    else {
+        return false;
+    };
+    let Some(parent) = snapshot
+        .open_orders
+        .iter()
+        .find(|open| open.client_order_id.as_deref() == Some(entry.as_str()))
+    else {
+        return false;
+    };
+    let resting = |leg: &BrokerOrder| {
+        leg.side == Side::Sell
+            && leg.qty == placement.qty
+            && leg.filled_qty == Qty::ZERO
+            && matches!(
+                status_mapping(&leg.status),
+                Ok(StatusMapping::Becomes(OrderState::Accepted))
+            )
+    };
+    let stops = parent
+        .legs
+        .iter()
+        .filter(|leg| resting(leg) && leg.stop_price == Some(recorded.stop))
+        .count();
+    let take_profits = parent
+        .legs
+        .iter()
+        .filter(|leg| {
+            resting(leg)
+                && leg.stop_price.is_none()
+                && leg.limit_price == Some(recorded.take_profit)
+        })
+        .count();
+    unsent && parent.status == "filled" && parent.legs.len() == 2 && stops == 1 && take_profits == 1
 }
 
 /// Journals the `CompensatingEvent` an adoption already on the journal is still owed — the run a
