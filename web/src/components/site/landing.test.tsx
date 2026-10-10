@@ -455,6 +455,7 @@ describe("the desktop", () => {
       "Winamp",
       "Tour.mp4",
       "Recycle Bin",
+      "Mac",
       "Sign in",
       "Shut down…",
     ]);

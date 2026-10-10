@@ -14,12 +14,17 @@ function subscribe(onChange: () => void): () => void {
 
 const current = (): ThemeMode => (document.documentElement.dataset.mode === "dark" ? "dark" : "light");
 
+/** The theme in force, or `null` before the browser has said; the Mac's Special menu checks it too. */
+export function useThemeMode(): ThemeMode | null {
+  return useSyncExternalStore(subscribe, current, () => null);
+}
+
 /**
  * Dark mode, in the taskbar's tray: pressed in while it is on, as a toggle of 1996 was. It saves the
  * same choice as the app's theme menu, so the two always agree.
  */
 export function ThemeSwitch() {
-  const mode = useSyncExternalStore(subscribe, current, () => null);
+  const mode = useThemeMode();
   const dark = mode === "dark";
   return (
     <button

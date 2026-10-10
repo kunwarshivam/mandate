@@ -107,6 +107,50 @@ test("a window zooms out of the icon that opened it and into its taskbar button,
   expect(end.h).toBeLessThanOrEqual(task.h + 1);
 });
 
+test("the Mac on the desktop redraws it as System 7, which the server keeps drawing, and a window collapses into the windows menu", async ({ page }) => {
+  await open(page, 1440);
+  await page.getByRole("list", { name: "Desktop, right" }).getByRole("button", { name: "Mac" }).click();
+  await expect(page.locator("[data-slot=menu-bar]")).toBeVisible();
+  await expect(page.locator("[data-slot=taskbar]")).toHaveCount(0);
+
+  const html = await (await page.request.get(PATH)).text();
+  expect(html, "the server draws the chosen desktop, so nothing swaps after the page paints").toContain('data-os="mac"');
+  await page.reload({ waitUntil: "load" });
+  await expect(page.locator("[data-slot=menu-bar]")).toBeVisible();
+  const look = await page.evaluate(() => ({
+    shadow: getComputedStyle(document.getElementById("win-home")!).boxShadow,
+    radius: getComputedStyle(document.querySelector("[data-slot=hero-actions] button")!).borderRadius,
+    menus: getComputedStyle(document.querySelector("[data-slot=browser-menus]")!).display,
+    pattern: document.querySelector("[data-slot=desktop-pattern]") !== null,
+  }));
+  expect(look.shadow, "a window casts System 7's hard shadow").toMatch(/2px 2px 0px/);
+  expect(look.radius, "its buttons are round").toBe("6px");
+  expect(look.menus, "the browser's menus leave its window for the menu bar").toBe("none");
+  expect(look.pattern, "and the desktop is the grey pattern").toBe(true);
+
+  const frames = await track(page);
+  await page.locator("[data-slot=desktop-icons] li[data-app=guestbook] button").click();
+  await expect(page.locator("#win-guestbook")).toBeVisible();
+  await page.waitForTimeout(500);
+  const menu = await centre(page, "[data-slot=window-menu]");
+  await frames.reset();
+  await page.getByRole("button", { name: "Minimize guestbook.cgi" }).click();
+  await expect(page.locator("#win-guestbook")).toBeHidden();
+  const going = (await frames.frames()).filter((f) => f !== null);
+  const end = going.at(-1)!;
+  expect(going.length, "collapsing moves").toBeGreaterThan(5);
+  expect(Math.abs(end.x - menu.x), "and ends on the windows menu").toBeLessThan(12);
+  expect(Math.abs(end.y - menu.y)).toBeLessThan(12);
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  const { scroll, inner } = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  expect(scroll, "nothing scrolls sideways at 320 px").toBeLessThanOrEqual(inner);
+
+  await page.locator("[data-bar=owl]").click();
+  await page.getByRole("menu", { name: "Owlhead" }).getByRole("menuitem", { name: "PC" }).click();
+  await expect(page.locator("[data-slot=taskbar]")).toBeVisible();
+});
+
 test("with motion reduced, or from the keyboard, a window opens where it stands without moving", async ({ browser }, info) => {
   for (const reduced of [true, false]) {
     const context = await browser.newContext({ reducedMotion: reduced ? "reduce" : "no-preference", colorScheme: info.project.use.colorScheme });
