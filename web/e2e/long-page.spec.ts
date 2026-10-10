@@ -129,6 +129,32 @@ for (const width of [390, 1024, 1280, 1440]) {
   });
 }
 
+test("the Scroll cue follows the browser window's status bar when the window is dragged", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, 1440);
+  const cue = page.locator("[data-slot=scroll-cue]");
+  const status = page.locator("[data-window=home] [data-slot=status-text]");
+  await expect(cue).toHaveAttribute("data-at", "status");
+  const middle = async () => {
+    const box = (await status.boundingBox())!;
+    return Math.round(box.y + box.height / 2);
+  };
+  const cueMiddle = async () => {
+    const box = (await cue.boundingBox())!;
+    return Math.round(box.y + box.height / 2);
+  };
+  const before = await middle();
+  expect(await cueMiddle()).toBe(before);
+  const bar = (await page.locator("[data-window=home] [data-slot=title-bar]").first().boundingBox())!;
+  await page.mouse.move(bar.x + bar.width / 3, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + bar.width / 3, bar.y + bar.height / 2 - 30, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(middle, "the window moved up").toBeLessThan(before - 10);
+  await expect.poll(async () => (await cueMiddle()) - (await middle()), "the cue stays on the status bar's row").toBe(0);
+  await expect(cue).toHaveAttribute("data-at", "status");
+});
+
 test("with motion allowed, the owl peeks over the Scroll cue in the middle of the screen", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
