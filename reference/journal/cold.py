@@ -521,6 +521,10 @@ def leaves_reversed(body: dict) -> None:
     body["payload"]["root"] = merkle_root(body["payload"]["leaves"])
 
 
+def unstamped(body: dict) -> None:
+    body["payload"]["token"] = None
+
+
 def doubled(row: dict, prev: str, member: str) -> dict:
     """The row recorded again at seq 5, chained to `prev`, its body stored with `member` written
     twice at the head of its payload, the first time with another value, and re-hashed."""
@@ -587,6 +591,8 @@ def row_cases(rows: list[dict]) -> list[dict]:
          (ANCHOR, edited(rows[ANCHOR], leaf_edited, True)), COLD["unreadable"], "anchor_root_mismatch"),
         ("anchor_leaves_reordered_and_rehashed", "DEC-895 item 2, §11 anchor_root_mismatch: the leaves out of stream order", acct, 10, by_anchor,
          (ANCHOR, edited(rows[ANCHOR], leaves_reversed, True)), COLD["unreadable"], "anchor_root_mismatch"),
+        ("anchor_unstamped_and_rehashed", "DEC-896, §9.14, DEC-783 item 8: a null token vouches for nothing, the row otherwise sound", acct, 10,
+         by_anchor, (ANCHOR, edited(rows[ANCHOR], unstamped, True)), COLD["unreadable"], "no_start"),
     ]
     out = []
     for name, clause, stream, n, request, replace, cold, intended in specs:
@@ -978,7 +984,7 @@ RANGE_MUTANTS = ("self.missing", "self.seq", "self.hash")
 START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "start.null_token", "start.workspace")
 ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace", "row.rehash_mismatch", "row.rule_117",
                "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest",
-               "row.skip_unparsed", "row.anchor_root", "row.anchor_order")
+               "row.skip_unparsed", "row.anchor_root", "row.anchor_order", "row.unstamped_ok")
 
 
 def row_mutant_killers(section: dict, mutant: str) -> list[str]:
