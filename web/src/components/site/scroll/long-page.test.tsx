@@ -245,7 +245,7 @@ describe("the design system", () => {
       .filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f) && f !== "app/globals.css")
       .filter((f) => /\b(bg|text|ring|border|fill|stroke)-tide\b|var\(--tide|"--tide"/.test(readFileSync(join(src, f), "utf8")))
       .sort();
-    expect(users).toEqual(["components/site/scroll/long-page.tsx", "components/site/scroll/owl-flight.tsx", "components/site/scroll/parts.ts"]);
+    expect(users).toEqual(["components/site/scroll/long-page.tsx", "components/site/scroll/parts.ts", "components/site/scroll/scroll.module.css"]);
   });
 });
 

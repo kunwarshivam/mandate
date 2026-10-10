@@ -99,11 +99,17 @@
   visibility: hidden;
 }
 
-/* The flying owl's canvas, drawn by `owl-flight.tsx`, in the pixel owls' outline and eyes. */
+/* The flying owl's canvas, drawn by `owl-flight.tsx`: the logo's ink with a pale disc, sun eyes, and
+   tide on its wings, the disc's rim and the chest. On tide it goes pale, so it never sinks into it. */
 .owl {
-  --owl-eye: var(--card);
-  --owl-pupil: var(--foreground);
   --owl-line: var(--foreground);
+  --owl-feathers: var(--foreground);
+  --owl-trim: var(--tide);
+  --owl-disc: var(--card);
+  --owl-iris: var(--highlight);
+  --owl-pupil: var(--highlight-foreground);
+  --owl-glint: var(--tide-foreground);
+  --owl-beak: var(--foreground);
   position: fixed;
   top: 0;
   left: 0;
@@ -117,9 +123,14 @@
 }
 
 :global(html:root[data-mode="dark"]) .owl {
-  --owl-eye: var(--foreground);
-  --owl-pupil: var(--card);
   --owl-line: var(--background);
+}
+
+.owl[data-coat="pale"] {
+  --owl-line: var(--highlight-foreground);
+  --owl-feathers: var(--tide-foreground);
+  --owl-disc: var(--highlight-foreground);
+  --owl-beak: var(--tide-foreground);
 }
 
 @media (prefers-reduced-motion: no-preference) {

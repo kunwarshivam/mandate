@@ -1,25 +1,34 @@
-import { EYE_ROW, owlRows } from "@/components/domain/owl-sprite";
-
 /**
- * The brand owl in three dimensions (DEC-907): its 16 by 16 sprite pushed out into cubes, deepest
- * down the middle and shallow at the ears, so it reads as round. Drawn on a canvas with the faces
- * sorted back to front, each face one flat tone of its colour, so no colour on the owl ever blends.
+ * The brand owl in three dimensions (DEC-907), drawn from its own sprite rather than the agents' one:
+ * a tall, round body, a heart-shaped facial disc ringed in tide, two big sun eyes, a hooked beak and
+ * folded tide wings, so it reads as an owl from any side. The sprite is pushed out into cubes,
+ * deepest down the middle; its head turns on its own and its wings lift from the shoulders. Drawn on
+ * a canvas with the faces sorted back to front, each face one flat tone of its colour, so no colour
+ * on the owl ever blends.
  */
 
-export type VoxelInk = "line" | "feathers" | "wing" | "belly" | "eye" | "pupil" | "beak";
+export type VoxelInk = "line" | "feathers" | "trim" | "disc" | "iris" | "pupil" | "glint" | "beak";
+
+/** The parts that move on their own: the head turns, each wing lifts from its shoulder. */
+export type OwlPart = "head" | "body" | "wing-left" | "wing-right";
 
 export interface Voxel {
   x: number;
   y: number;
   z: number;
   ink: VoxelInk;
+  part: OwlPart;
 }
 
-/** Radians: `yaw` turns the head, `pitch` tips it towards you, `roll` leans it. */
+/** Radians: `yaw` turns the owl, `pitch` tips it towards you, `roll` leans it. */
 export interface Pose {
   yaw: number;
   pitch: number;
   roll: number;
+  /** How far the head turns from the body, in radians; an owl's turns a long way. */
+  head: number;
+  /** How far each wing lifts from its folded place, in radians. */
+  flap: number;
   /** Stretch along the vertical, 1 at rest; the width takes the inverse so the owl keeps its volume. */
   stretch: number;
   blink: boolean;
@@ -28,37 +37,82 @@ export interface Pose {
 /** One CSS colour per ink, as the page's tokens resolve. */
 export type OwlInks = Record<VoxelInk, string>;
 
-const SIZE = 16;
-const EYE_COLS = [2, 10] as const;
+/**
+ * The legend: o outline, b feathers, d wing, r the disc's rim, l the disc, c the chest, s the
+ * chest's marks, y an iris, p a pupil, g its glint, k the beak, K its hooked tip, f a talon.
+ */
+export const OWL_ROWS = [
+  "....oooooooo....",
+  "..oobbbbbbbboo..",
+  ".obbbbbbbbbbbbo.",
+  "obrrrrrbbrrrrrbo",
+  "orllllllllllllro",
+  "orllyyllllyyllro",
+  "orlyyyyllyyyylro",
+  "orlygpykkygpylro",
+  "orlyppykkyppylro",
+  "orllyylKKlyyllro",
+  "obrllllllllllrbo",
+  "obbrrllllllrrbbo",
+  "odbbbrrrrrrbbbdo",
+  "oddbbccccccbbddo",
+  "oddbscscscscbddo",
+  "oddbccccccccbddo",
+  "oddbcscscscsbddo",
+  ".oddbccccccbddo.",
+  "..oddbbbbbbddo..",
+  "...oooooooooo...",
+  "....fff..fff....",
+] as const;
 
-function inEye(x: number, y: number): "pupil" | "glint" | null {
-  for (const col of EYE_COLS) {
-    if (y >= EYE_ROW + 1 && y <= EYE_ROW + 2 && x >= col + 1 && x <= col + 2) return x === col + 1 && y === EYE_ROW + 1 ? "glint" : "pupil";
+const WIDTH = 16;
+export const OWL_HEIGHT = OWL_ROWS.length;
+/** The last row of the head; below it the body and the wings. */
+const NECK = 12;
+/** The row the closed eyelids are drawn on. */
+const LID_ROW = 7;
+const MID_X = (WIDTH - 1) / 2;
+const MID_Y = (OWL_HEIGHT - 1) / 2;
+/** Where each wing hinges: the inner edge of its top row, in the owl's own units. */
+const SHOULDER_X = 5;
+const SHOULDER_Y = MID_Y - NECK + 0.5;
+
+/** Which part a sprite pixel moves with: wing feathers and the outline beside them are the wings. */
+export function partOf(x: number, y: number): OwlPart {
+  if (y >= NECK && y < OWL_HEIGHT - 2) {
+    const row = OWL_ROWS[y]!;
+    const first = row.indexOf("d");
+    const last = row.lastIndexOf("d");
+    if (first >= 0 && x <= first + 1 && x < MID_X && (row[x] === "d" || x < first)) return "wing-left";
+    if (last >= 0 && x >= last - 1 && x > MID_X && (row[x] === "d" || x > last)) return "wing-right";
   }
-  return null;
+  return y <= NECK ? "head" : "body";
 }
 
 /** How far the owl reaches front and back at a column: half its depth, in cubes. */
-export function halfDepth(x: number, y: number, ink: string): number {
-  if (ink === "f") return 1;
-  const t = (x - (SIZE - 1) / 2) / (SIZE / 2);
-  const round = Math.max(1, Math.round(1.5 + 3.5 * Math.sqrt(Math.max(0, 1 - t * t))));
-  return y < 3 ? Math.min(round, 2) : round;
+export function halfDepth(x: number, y: number, c: string): number {
+  if (c === "f") return 1;
+  const t = (x - MID_X) / (WIDTH / 2);
+  const round = Math.max(1, Math.round(1 + 2.6 * Math.sqrt(Math.max(0, 1 - t * t))));
+  return y < 2 ? Math.min(round, 3) : round;
 }
 
-function frontInk(c: string, x: number, y: number, blink: boolean): VoxelInk {
-  const eye = inEye(x, y);
-  if (c === "w" || eye) {
-    if (blink) return "feathers";
-    return eye === "pupil" ? "pupil" : "eye";
-  }
+function frontInk(c: string, y: number, blink: boolean): VoxelInk {
   switch (c) {
     case "o":
       return "line";
     case "d":
-      return "wing";
+    case "r":
+    case "s":
+      return "trim";
     case "l":
-      return "belly";
+    case "c":
+      return "disc";
+    case "y":
+    case "p":
+    case "g":
+      if (blink) return y === LID_ROW ? "line" : "disc";
+      return c === "y" ? "iris" : c === "p" ? "pupil" : "glint";
     case "k":
     case "K":
     case "f":
@@ -68,26 +122,32 @@ function frontInk(c: string, x: number, y: number, blink: boolean): VoxelInk {
   }
 }
 
+function backInk(c: string): VoxelInk {
+  if (c === "d") return "trim";
+  if (c === "k" || c === "K" || c === "f") return "beak";
+  return "feathers";
+}
+
+const PROUD = new Set(["y", "p", "g", "k", "K"]);
+
 /**
- * The owl's cubes, centred on the origin with y up. The outline, eyes and belly are drawn on the
- * front face only; behind it the owl is feathers, its wings wrap round the sides, and the eyes and
- * beak stand one cube proud of the face.
+ * The owl's cubes, centred on the origin with y up. The disc, eyes and chest are drawn on the front
+ * face only; behind it the owl is feathers, its wings wrap round the sides, and the eyes and beak
+ * stand one cube proud of the face.
  */
 export function owlVoxels(blink = false): Voxel[] {
   const out: Voxel[] = [];
-  owlRows("tufts").forEach((row, y) => {
+  OWL_ROWS.forEach((row, y) => {
     [...row].forEach((c, x) => {
       if (c === ".") return;
       const h = halfDepth(x, y, c);
-      const cx = x - (SIZE - 1) / 2;
-      const cy = (SIZE - 1) / 2 - y;
+      const part = partOf(x, y);
+      const cx = x - MID_X;
+      const cy = MID_Y - y;
       for (let z = -h; z < h; z++) {
-        const front = z === h - 1;
-        const ink: VoxelInk = front ? frontInk(c, x, y, blink) : c === "d" ? "wing" : c === "f" || c === "k" || c === "K" ? "beak" : "feathers";
-        out.push({ x: cx, y: cy, z: z + 0.5, ink });
+        out.push({ x: cx, y: cy, z: z + 0.5, ink: z === h - 1 ? frontInk(c, y, blink) : backInk(c), part });
       }
-      const proud = c === "w" || c === "k" || c === "K" || inEye(x, y) !== null;
-      if (proud) out.push({ x: cx, y: cy, z: h + 0.5, ink: frontInk(c, x, y, blink) });
+      if (PROUD.has(c)) out.push({ x: cx, y: cy, z: h + 0.5, ink: frontInk(c, y, blink), part });
     });
   });
   return out;
@@ -95,10 +155,11 @@ export function owlVoxels(blink = false): Voxel[] {
 
 type Vec = readonly [number, number, number];
 
-interface Face {
+export interface Face {
   normal: Vec;
   corners: readonly Vec[];
   ink: VoxelInk;
+  part: OwlPart;
 }
 
 const SIDES: { n: Vec; q: readonly Vec[] }[] = [
@@ -110,17 +171,49 @@ const SIDES: { n: Vec; q: readonly Vec[] }[] = [
   { n: [0, -1, 0], q: [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]] },
 ];
 
-/** Only the faces no other cube covers: the owl's skin. */
+/** Only the faces no other cube of the same part covers: a lifted wing or a turned head never shows a hole. */
 export function skin(voxels: Voxel[]): Face[] {
-  const filled = new Set(voxels.map((v) => `${v.x},${v.y},${v.z}`));
+  const filled = new Set(voxels.map((v) => `${v.part}:${v.x},${v.y},${v.z}`));
   const faces: Face[] = [];
   for (const v of voxels) {
     for (const side of SIDES) {
-      if (filled.has(`${v.x + side.n[0]},${v.y + side.n[1]},${v.z + side.n[2]}`)) continue;
-      faces.push({ normal: side.n, corners: side.q.map((q) => [v.x + q[0] / 2, v.y + q[1] / 2, v.z + q[2] / 2] as const), ink: v.ink });
+      if (filled.has(`${v.part}:${v.x + side.n[0]},${v.y + side.n[1]},${v.z + side.n[2]}`)) continue;
+      faces.push({ normal: side.n, corners: side.q.map((q) => [v.x + q[0] / 2, v.y + q[1] / 2, v.z + q[2] / 2] as const), ink: v.ink, part: v.part });
     }
   }
   return faces;
+}
+
+function turnY([x, y, z]: Vec, a: number): Vec {
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return [x * c + z * s, y, -x * s + z * c];
+}
+
+function turnZ([x, y, z]: Vec, a: number, ox = 0, oy = 0): Vec {
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const dx = x - ox;
+  const dy = y - oy;
+  return [ox + dx * c - dy * s, oy + dx * s + dy * c, z];
+}
+
+/** Moves a point, or a normal with `origin` false, with its part: the head turns about the neck, a wing about its shoulder. */
+function withPart(p: Vec, part: OwlPart, pose: Pose, origin: boolean): Vec {
+  switch (part) {
+    case "head":
+      return turnY(p, pose.head);
+    case "wing-left":
+      return origin ? turnZ(p, -pose.flap, -SHOULDER_X, SHOULDER_Y) : turnZ(p, -pose.flap);
+    case "wing-right":
+      return origin ? turnZ(p, pose.flap, SHOULDER_X, SHOULDER_Y) : turnZ(p, pose.flap);
+    case "body":
+      return p;
+    default: {
+      const never: never = part;
+      return never;
+    }
+  }
 }
 
 function rotate([x0, y0, z0]: Vec, { yaw, pitch, roll }: Pose): Vec {
@@ -172,11 +265,11 @@ export function drawOwl(g: CanvasRenderingContext2D, faces: Face[], pose: Pose, 
   const visible: { pts: [number, number][]; depth: number; fill: string }[] = [];
   const tones = new Map<string, string>();
   for (const f of faces) {
-    const n = rotate(f.normal, pose);
+    const n = rotate(withPart(f.normal, f.part, pose, false), pose);
     if (n[2] <= 0) continue;
     let depth = 0;
     const pts = f.corners.map((corner) => {
-      const [x, y, z] = rotate(corner, pose);
+      const [x, y, z] = rotate(withPart(corner, f.part, pose, true), pose);
       depth += z;
       const k = EYE_DISTANCE / (EYE_DISTANCE - z);
       return [cx + x * k * unit * sx, cy - y * k * unit * sy] as [number, number];
@@ -195,8 +288,8 @@ export function drawOwl(g: CanvasRenderingContext2D, faces: Face[], pose: Pose, 
   g.lineWidth = 0.75;
   for (const p of visible) {
     g.beginPath();
-    g.moveTo(p.pts[0][0], p.pts[0][1]);
-    for (let i = 1; i < p.pts.length; i++) g.lineTo(p.pts[i][0], p.pts[i][1]);
+    g.moveTo(p.pts[0]![0], p.pts[0]![1]);
+    for (let i = 1; i < p.pts.length; i++) g.lineTo(p.pts[i]![0], p.pts[i]![1]);
     g.closePath();
     g.fillStyle = p.fill;
     g.strokeStyle = p.fill;

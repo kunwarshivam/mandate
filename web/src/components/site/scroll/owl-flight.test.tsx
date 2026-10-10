@@ -4,9 +4,9 @@ import { LongPage } from "./long-page";
 import { OwlFlight, nearestPerch, owlSize, perchOn } from "./owl-flight";
 
 /**
- * The flying owl (DEC-907): decoration only, it stands on the perches the page marks, wears tide
- * feathers where its sun ones would vanish, and with motion reduced stands still on the first perch
- * without asking for a single animation frame.
+ * The flying owl (DEC-907): decoration only, it stands on the perches the page marks, wears its
+ * pale coat on tide where its ink would sink, and with motion reduced stands still on the first
+ * perch without asking for a single animation frame.
  */
 
 function context() {
@@ -66,8 +66,10 @@ describe("its perches", () => {
     el.dataset.perchAt = "0.25";
     el.dataset.perchYaw = "0.5";
     box(el, { left: 100, top: 400, width: 800, height: 300, bottom: 700 });
-    expect(perchOn(el, 100)).toEqual({ x: 300, y: 400 - 44, yaw: 0.5, coat: "sun" });
-    expect(perchOn(el, 100, { left: 50, top: 100 })).toMatchObject({ x: 250, y: 300 - 44 });
+    expect(perchOn(el, 100)).toEqual({ x: 300, y: 400 - 50, yaw: 0.5, coat: "ink" });
+    expect(perchOn(el, 100, { left: 50, top: 100 })).toMatchObject({ x: 250, y: 300 - 50 });
+    el.dataset.perchCoat = "pale";
+    expect(perchOn(el, 100).coat).toBe("pale");
   });
 
   it("picks the perch nearest two fifths down the window, and holds the current one against a near tie", () => {
@@ -95,11 +97,11 @@ describe("its perches", () => {
     }
   });
 
-  it("wears tide feathers exactly where it stands on sun, so it never vanishes into its own colour", () => {
+  it("wears its pale coat exactly where it stands on tide, so its ink never sinks into the teal", () => {
     const { container } = render(<LongPage />);
     for (const p of container.querySelectorAll<HTMLElement>("[data-perch]")) {
-      const onSun = p.closest(".bg-highlight") !== null;
-      expect(p.dataset.perchCoat, p.outerHTML.slice(0, 80)).toBe(onSun ? "tide" : "sun");
+      const onTide = p.closest(".bg-tide") !== null;
+      expect(p.dataset.perchCoat, p.outerHTML.slice(0, 80)).toBe(onTide ? "pale" : "ink");
     }
   });
 });

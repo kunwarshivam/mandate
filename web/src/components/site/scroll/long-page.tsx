@@ -60,7 +60,7 @@ function Feature({
 }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className={cn("scroll-mt-14", TONES[tone].section)} data-slot="part" data-tone={tone}>
-      <div className={cn(WRAP, "grid items-center gap-12 py-24 sm:py-32 lg:grid-cols-12 lg:gap-16")}>
+      <div className={cn(WRAP, "grid items-center gap-x-12 gap-y-24 py-24 sm:py-32 lg:grid-cols-12 lg:gap-16")}>
         <div className={cn("grid content-start gap-6 lg:col-span-5", flip && "lg:order-2")}>
           <h2 id={`${id}-title`} className={cn(styles.display, DISPLAY_MD)} data-reveal="">
             {title}
@@ -117,7 +117,7 @@ export function LongPage() {
             </Link>
           </p>
         </div>
-        <div className={cn(WRAP, "pt-16 sm:pt-20")} data-reveal="tilt">
+        <div className={cn(WRAP, "pt-24 sm:pt-28")} data-reveal="tilt">
           <Shot
             name="agent"
             alt="Agent 1's page in Owlhead: equity of $10,123.45 on paper, its chart, and its limits in dollars beside it."
@@ -160,7 +160,7 @@ export function LongPage() {
       >
         <div className="flex items-center justify-center gap-4 sm:gap-8">
           <LockScreen className="max-sm:hidden" />
-          <div className={cn(styles.phone, "w-[16.5rem] shrink-0")} {...perchProps({ at: 0.5, yaw: -0.3 })}>
+          <div className={cn(styles.phone, "w-[16.5rem] shrink-0")} {...perchProps({ at: 0.5, yaw: -0.3, coat: "pale" })}>
             <Shot name="request" frame={false} alt="An approval request on a phone: buy 0.015 BTC/USD at a limit of $56,700.00, with Approve and Skip." sizes="17rem" />
           </div>
         </div>

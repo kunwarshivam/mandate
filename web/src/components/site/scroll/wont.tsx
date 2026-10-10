@@ -21,7 +21,7 @@ export function Wont() {
         <h2
           id="wont-title"
           className={cn(styles.display, "text-[clamp(3rem,1.6rem+5.5vw,7rem)] leading-[0.95] font-normal tracking-[-0.025em] lg:sticky lg:top-40 lg:self-start")}
-          {...perchProps({ at: 0.62, yaw: 0.35, coat: "tide" })}
+          {...perchProps({ at: 0.92, yaw: 0.35 })}
         >
           <i>It won&apos;t</i>
         </h2>
