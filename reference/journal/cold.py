@@ -383,8 +383,15 @@ def range_checks() -> list[dict]:
     ]
 
 
-SEGMENT_START = segment(ACCOUNT_STREAM, 4, 9, "5" * 64)
-FOREIGN_SEGMENT = segment(ACCOUNT_STREAM, 20, 30, "9" * 64)
+START_WORKSPACE = "01J863MZRG9CQ9T08000000051"
+"""The trusted-start rows' workspace: a ULID (§2), so a tenant can own its streams and a verification
+run's tests (E12-3) can drive these rows under that tenant's `Permitted<ReadRecords>` witness. It is
+`mandate-audit`'s test workspace `WS_A`, `WorkspaceId(0x0192_0C3A_7F10_4B2E_9D01_0000_0000_00A1)`."""
+START_CONTROL = f"ctl:{START_WORKSPACE}"
+START_ACCOUNT = f"acct:{START_WORKSPACE}:01J8Z2ACCT00000000000000A1"
+START_AGENT = f"agent:{START_WORKSPACE}:agent_a"
+SEGMENT_START = segment(START_ACCOUNT, 4, 9, "5" * 64)
+FOREIGN_SEGMENT = segment(START_ACCOUNT, 20, 30, "9" * 64)
 
 
 def trusted_starts() -> dict:
@@ -415,16 +422,17 @@ def start_rows() -> list[dict]:
     def at(i: int, event_type: str, seq: int, payload: dict) -> dict:
         body = chained(event_type, seq, payload)
         body["event_id"] = ROW_IDS[i]
+        body["stream_id"] = START_CONTROL
         return body
 
     head = [
-        at(OPENED, "StreamOpened", 1, {"stream_type": "control", "workspace_id": WORKSPACE}),
-        at(FROM_GENESIS, "SegmentExported", 2, segment(ACCOUNT_STREAM, 1, 3, GENESIS)),
+        at(OPENED, "StreamOpened", 1, {"stream_type": "control", "workspace_id": START_WORKSPACE}),
+        at(FROM_GENESIS, "SegmentExported", 2, segment(START_ACCOUNT, 1, 3, GENESIS)),
         at(SEGMENT, "SegmentExported", 3, SEGMENT_START),
     ]
     leaves = [
-        {"hash": "1" * 64, "seq": 9, "stream_id": ACCOUNT_STREAM},
-        {"hash": hash_chain(copy.deepcopy(head), GENESIS)[2]["hash"], "seq": 3, "stream_id": STREAM},
+        {"hash": "1" * 64, "seq": 9, "stream_id": START_ACCOUNT},
+        {"hash": hash_chain(copy.deepcopy(head), GENESIS)[2]["hash"], "seq": 3, "stream_id": START_CONTROL},
     ]
     anchor = at(ANCHOR, "AnchorComputed", 4, {"leaves": leaves, "root": merkle_root(leaves), "token": TOKEN})
     foreign = at(FOREIGN, "SegmentExported", 1, FOREIGN_SEGMENT)
@@ -509,7 +517,7 @@ def row_cases(rows: list[dict]) -> list[dict]:
     """Each case's `replace` swaps one row of `rows` before the resolver reads them, and its `cold` is
     what the cold store gives for the start's segment. The reference's answer is recorded, once it
     agrees with the outcome the case was built for."""
-    acct, seg, foreign = ACCOUNT_STREAM, json.loads(rows[SEGMENT]["body"])["payload"], FOREIGN_SEGMENT
+    acct, seg, foreign = START_ACCOUNT, json.loads(rows[SEGMENT]["body"])["payload"], FOREIGN_SEGMENT
     genesis_seg = json.loads(rows[FROM_GENESIS]["body"])["payload"]
     by_hash = {"kind": "manifest", "manifest_hash": seg["manifest_hash"]}
     by_anchor = {"kind": "anchor", "anchor_event_id": ROW_IDS[ANCHOR]}
@@ -539,7 +547,7 @@ def row_cases(rows: list[dict]) -> list[dict]:
          (ANCHOR, retyped(rows[ANCHOR], json.dumps(dict(sorted(loose.items(), reverse=True)), separators=(",", ":")))),
          COLD["unreadable"], "non_canonical"),
         ("workspace_column_claims_this_workspace", "§11 check 2: another workspace's body under this workspace's column", acct, 20,
-         {"kind": "manifest", "manifest_hash": foreign["manifest_hash"]}, (FOREIGN, {**rows[FOREIGN], "stream_id": STREAM}),
+         {"kind": "manifest", "manifest_hash": foreign["manifest_hash"]}, (FOREIGN, {**rows[FOREIGN], "stream_id": START_CONTROL}),
          cold_read(foreign), "column_mismatch"),
         ("workspace_column_names_another", "§11 check 2: this workspace's body under another's column", acct, 4, by_hash,
          (SEGMENT, {**rows[SEGMENT], "stream_id": FOREIGN_CTL}), cold_read(seg), "no_start"),
@@ -584,7 +592,7 @@ def more_row_specs(rows: list[dict], by_hash: dict, by_anchor: dict, seg: dict) 
     """E12-3: the resolver's lookup clauses the old resolver's cases alone pinned, each on the rows
     path, a forged row stored consistently (columns from its body, re-hashed) so only the clause
     named can refuse it."""
-    acct, agent, tip, unread = ACCOUNT_STREAM, AGENT_STREAM, rows[ANCHOR]["hash"], COLD["unreadable"]
+    acct, agent, tip, unread = START_ACCOUNT, START_AGENT, rows[ANCHOR]["hash"], COLD["unreadable"]
     no_ws, no_ws_too = "acct::A1", "acct:"
     stray = segment(no_ws, 1, 3, GENESIS)
     unhex = segment(acct, 4, 9, "5" * 63)
@@ -818,7 +826,7 @@ def check_ranges_and_starts(section: dict) -> list[str]:
             problems.append(found("ranges.walk", f"{case['name']}: expected {case['expect']}"))
     starts = section["trusted_starts"]
     rows = starts["rows"]
-    own = [{"body": json.loads(r["body"]), "hash": r["hash"]} for r in rows if r["stream_id"] == STREAM]
+    own = [{"body": json.loads(r["body"]), "hash": r["hash"]} for r in rows if r["stream_id"] == START_CONTROL]
     if chain_breaks(own) or len(own) != len(rows) - 1:
         problems.append(found("starts.rows_oracle", f"the workspace's rows do not chain: {chain_breaks(own)}"))
     for case in starts["row_cases"]:
