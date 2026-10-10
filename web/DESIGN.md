@@ -73,6 +73,8 @@ azure and sun.
 | Crimson | Kill switch | `--crimson`, `--crimson-edge` | crimson-700 #9B0A28 | crimson-700, edge crimson-400 #FD9696 |
 | Gain / loss | Signed figures and the hero line's direction | `--gain` / `--loss`; `--gain-cvd` / `--loss-cvd` when colour-blind friendly is on | green-600 #0B7133 / red-600 #983D24 | green-400 #78CE8C / red-400 #FD997E |
 | Series | An asset's share of the account, cash, an owl's feathers | `--series-1` to `--series-5` | azure-500, sun-400, teal-500, sky-400, ink-500 | azure-200, sun-300, teal-400, sky-300, paper-500 |
+| Tide | The landing page's third colour: one section of its long page, the flying owl's trim and the lock screen's night, never the product (DEC-907) | `--tide`, `--tide-foreground`, `--tide-muted` | teal-800 #064D4B under paper-50 or teal-200 | the same |
+| Tide line | The long page's pixel thread on the page and on cards (DEC-907) | `--tide-line` | teal-800 #064D4B | teal-400 #43CFCB |
 | Surfaces | The page, wells, hairlines, text | `--card`, `--background`, `--muted`, `--border`, `--foreground`, `--muted-foreground` | paper and ink steps | the same ramps, inverted: the card ink-950 #0F1113, the page ink-975 #07080A |
 
 Rules the tests hold in both themes: every token is a ramp step and every neutral is paper or ink;
@@ -182,7 +184,13 @@ Motion answers an action or shows what changed; it is quick, interruptible, star
 and never animates keyboard-driven or high-frequency actions. Interactions stay under 300ms; the hero
 line's draw-in on first load (700ms) is the one longer moment. Deadlines, the figures in an approval,
 and Stop never move, and nothing in the frame moves on its own (DEC-215). Reduced motion drops every
-movement and keeps the colour and opacity changes that help comprehension. The tokens (`--ease-*`,
+movement and keeps the colour and opacity changes that help comprehension. The long page under the
+landing page's desktop is the one exception to "one longer moment", at the founder's request
+(DEC-907): its pieces settle on damped springs (`spring.ts`, as CSS `linear()` easings), and the brand
+owl, in voxels, flies down it from perch to perch on the same springs, flapping as it goes, while a
+pixel thread in tide is sewn down the page as far as the visitor has read. All of it is decoration,
+hidden from assistive technology, and still under reduced motion: nothing hidden waits for motion to
+show it, and the thread is there whole. The tokens (`--ease-*`,
 `--duration-*`) are in `globals.css` and listed in the reference.
 
 ## Do's and Don'ts

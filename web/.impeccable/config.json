@@ -1,0 +1,35 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "var(--spring-bounce)",
+        "files": [
+          "src/components/site/scroll/scroll.module.css"
+        ],
+        "createdAt": "2026-10-10T10:24:12.987Z",
+        "reason": "Founder: asked for physics on the long page and kept the movements (DEC-907 item 7)"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "var(--spring)",
+        "files": [
+          "src/components/site/scroll/scroll.module.css"
+        ],
+        "createdAt": "2026-10-10T10:24:12.992Z",
+        "reason": "Founder: asked for physics on the long page and kept the movements (DEC-907 item 7)"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "var(--ease-spring)",
+        "files": [
+          "src/components/site/letter.module.css"
+        ],
+        "createdAt": "2026-10-10T10:24:12.998Z",
+        "reason": "Founder: asked to give the desktop motion; the icons settle on a spring as the desktop boots (DEC-905)"
+      }
+    ]
+  }
+}

@@ -37,6 +37,10 @@
   --selection: oklch(0.91 0.042 258);
   --highlight: oklch(0.88 0.149 90);
   --highlight-foreground: oklch(0.175 0.006 255);
+  --tide: oklch(0.38 0.063 192);
+  --tide-foreground: oklch(0.992 0.003 255);
+  --tide-muted: oklch(0.91 0.058 192);
+  --tide-line: oklch(0.38 0.063 192);
   --ink: oklch(0.175 0.006 255);
   --ink-foreground: oklch(0.992 0.003 255);
   --ink-line: oklch(0.44 0.01 255);
@@ -161,6 +165,10 @@ html:root[data-mode="dark"] {
   --selection: oklch(0.38 0.136 258);
   --highlight: oklch(0.88 0.149 90);
   --highlight-foreground: oklch(0.175 0.006 255);
+  --tide: oklch(0.38 0.063 192);
+  --tide-foreground: oklch(0.992 0.003 255);
+  --tide-muted: oklch(0.91 0.058 192);
+  --tide-line: oklch(0.78 0.117 192);
   --ink: oklch(0.975 0.004 255);
   --ink-foreground: oklch(0.175 0.006 255);
   --ink-line: oklch(0.62 0.007 255);
@@ -310,6 +318,10 @@ html:root[data-cvd="on"] {
   --color-mandate-soft: var(--mandate-soft);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
+  --color-tide: var(--tide);
+  --color-tide-foreground: var(--tide-foreground);
+  --color-tide-muted: var(--tide-muted);
+  --color-tide-line: var(--tide-line);
   --color-ink: var(--ink);
   --color-ink-foreground: var(--ink-foreground);
   --color-ink-line: var(--ink-line);

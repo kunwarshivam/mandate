@@ -1,0 +1,301 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BETA_REQUEST_PATH, LOGIN_PATH } from "@/lib/auth-routes";
+import { DISCARDED, QUESTIONS } from "../apps";
+import { artwork } from "../art";
+import { Landing } from "../landing";
+import { BROKERS, GAP_CAVEAT, LongPage } from "./long-page";
+import { PUSH_TEXT } from "./lock-screen";
+import { PAGE_FORM_ID, PARTS, SIGN_UP_ID } from "./parts";
+import { SHOTS } from "./shot";
+import { WONT } from "./wont";
+
+/**
+ * The long page under the desktop (DEC-907): a landing page in its own type that shows the app and
+ * says what the desktop's homepage does not, with Sign in and Sign up always in its bar.
+ */
+
+const WEB = join(__dirname, "..", "..", "..", "..");
+const SCROLL_DIR = __dirname;
+const SOURCES = readdirSync(SCROLL_DIR).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f) && f !== "app/globals.css");
+const BLEND = new RegExp(["grad", "ient|bg-(linear|radial|conic)-"].join(""), "i");
+
+const text = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("the long page's structure", () => {
+  it("gives every part in the bar a section labelled by its h2, and the bar's links land on them", () => {
+    render(<LongPage />);
+    const nav = screen.getByRole("navigation", { name: "On this page" });
+    for (const part of PARTS) {
+      const section = document.getElementById(part.id);
+      expect(section?.tagName, part.id).toBe("SECTION");
+      const heading = within(section!).getAllByRole("heading", { level: 2 })[0]!;
+      expect(section!.getAttribute("aria-labelledby")).toBe(heading.id);
+      expect(within(nav).getByRole("link", { name: part.label }).getAttribute("href")).toBe(`#${part.id}`);
+    }
+  });
+
+  it("links within the page only to ids that exist, and back up to the desktop", () => {
+    const { container } = render(
+      <>
+        <div id="desktop" />
+        <LongPage />
+      </>,
+    );
+    for (const a of container.querySelectorAll<HTMLAnchorElement>("a[href^='#']")) {
+      expect(document.getElementById(a.getAttribute("href")!.slice(1)), a.getAttribute("href")!).not.toBeNull();
+    }
+  });
+
+  it("uses h2 for every heading, under the desktop's one h1", () => {
+    const { container } = render(<LongPage />);
+    expect(container.querySelector("h1, h3, h4")).toBeNull();
+    expect(container.querySelectorAll("h2").length).toBeGreaterThanOrEqual(PARTS.length + 2);
+  });
+
+  it("brings its own footer with the terms the page is offered on", () => {
+    render(<LongPage />);
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent("It is software, not investment advice. Trading involves risk, and you can lose money.");
+    expect(footer).toHaveTextContent("© 2026 Owlhead");
+  });
+});
+
+describe("the bar", () => {
+  it("names Sign in and Sign up in words, and Sign in goes to the sign-in page", () => {
+    render(<LongPage />);
+    const bar = document.querySelector<HTMLElement>("[data-slot=page-bar]")!;
+    expect(within(bar).getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe(LOGIN_PATH);
+    expect(within(bar).getByRole("button", { name: "Sign up" })).toBeTruthy();
+  });
+
+  it("sticks to the top of the sheet, so the two stay in view once the desktop is covered", () => {
+    render(<LongPage />);
+    expect(document.querySelector("[data-slot=page-bar]")!.className).toMatch(/\bsticky\b.*\btop-0\b/);
+  });
+
+  it("brings the request form into view on Sign up and puts the cursor in its email field", () => {
+    const into = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(<LongPage />);
+    fireEvent.click(within(document.querySelector<HTMLElement>("[data-slot=page-bar]")!).getByRole("button", { name: "Sign up" }));
+    expect(into.mock.contexts[0]).toBe(document.getElementById(SIGN_UP_ID));
+    expect(document.activeElement).toBe(document.getElementById(`${PAGE_FORM_ID}-email`));
+  });
+});
+
+describe("what it says", () => {
+  /** Every sentence the page says in its own words: its headings, leads and the won't list. */
+  function said(container: HTMLElement): string[] {
+    const own = [...container.querySelectorAll("h2, [data-slot=part] p, [data-slot=intro] p, [data-slot=wont] li > span:last-child")]
+      .map(text)
+      .filter((t) => t && t !== GAP_CAVEAT);
+    return own.flatMap((t) => t.split(/(?<=[.?])\s+/)).filter((s) => s.split(" ").length > 3);
+  }
+
+  it("repeats nothing the desktop's homepage, its questions or its Recycle Bin already say", () => {
+    const { container } = render(<LongPage />);
+    const sentences = said(container);
+    expect(sentences.length).toBeGreaterThan(10);
+    cleanup();
+    render(<Landing />);
+    fireEvent.click(screen.getByRole("tab", { name: "Owlhead Home Page" }));
+    const desktop = [text(document.querySelector("[data-slot=landing-page]")!), ...QUESTIONS.map((q) => q.a), ...DISCARDED.map((d) => d.why)].join(" ");
+    for (const s of sentences) expect(desktop, s).not.toContain(s);
+  });
+
+  it("says losses can pass a limit, beside the limits", () => {
+    render(<LongPage />);
+    expect(document.getElementById("limits")).toHaveTextContent(GAP_CAVEAT);
+  });
+
+  it("marks the brokers that are not connected yet as coming, and Alpaca as paper", () => {
+    render(<LongPage />);
+    const brokers = document.querySelector<HTMLElement>("[data-slot=brokers]")!;
+    expect(BROKERS.map((b) => `${b.name}: ${b.status}`)).toEqual(["Alpaca: Paper trading", "Robinhood: Coming", "Kraken Derivatives US: Coming"]);
+    for (const b of BROKERS) expect(brokers).toHaveTextContent(`${b.name}${b.status}`);
+  });
+
+  it("puts on the lock screen only the sentence a request's push carries", () => {
+    const worker = readFileSync(join(WEB, "public", "push-sw.js"), "utf8");
+    expect(worker).toContain(`approval_needed: "${PUSH_TEXT}"`);
+    render(<LongPage />);
+    const lock = document.querySelector<HTMLElement>("[data-slot=lock-screen]")!;
+    expect(lock).toHaveTextContent(PUSH_TEXT);
+    expect(text(lock)).not.toMatch(/\$|BTC|XYZ|Buy|Sell/);
+  });
+
+  it("strikes through each thing it won't do, under It won't", () => {
+    render(<LongPage />);
+    const wont = document.getElementById("wont")!;
+    expect(within(wont).getByRole("heading", { level: 2 })).toHaveTextContent("It won't");
+    expect([...wont.querySelectorAll("s")].map(text)).toEqual(WONT.map((w) => w.verb));
+  });
+
+  it("states no performance and makes no promise of money", () => {
+    const { container } = render(<LongPage />);
+    const words = text(container);
+    expect(words).not.toMatch(/\d\s?%/);
+    expect(words).not.toMatch(/[+−-]\s?\$\d/);
+    expect(words).not.toMatch(/\bP&L\b|\breturns?\b|\bgains?\b|\bperformance\b|profit|guarantee|make money|beat the market|risk[- ]free/i);
+    expect(container.querySelector("blockquote, q, cite")).toBeNull();
+  });
+
+  it("uses no em dash, en dash, or exclamation mark, and never names the product Mandate", () => {
+    const { container } = render(<LongPage />);
+    expect(text(container)).not.toMatch(/[—–!]/);
+    expect(text(container)).not.toMatch(/\bMandate\b/);
+  });
+
+  it("names no button exactly Stop (DEC-211)", () => {
+    render(<LongPage />);
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+  });
+});
+
+describe("the pictures", () => {
+  /** A PNG's width and height, from its header. */
+  function pngSize(file: string): [number, number] {
+    const bytes = readFileSync(file);
+    return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+  }
+
+  it("ships each picture of the app in light and dark, at twice the size it is drawn", () => {
+    for (const [name, { width, height }] of Object.entries(SHOTS)) {
+      for (const mode of ["light", "dark"]) {
+        expect(pngSize(join(WEB, "public", "landing", `${name}-${mode}.png`)), `${name}-${mode}`).toEqual([width * 2, height * 2]);
+      }
+    }
+  });
+
+  it("describes every picture of the app, and draws each one", () => {
+    const { container } = render(<LongPage />);
+    const shots = [...container.querySelectorAll<HTMLElement>("[data-slot=shot]")];
+    expect(new Set(shots.map((s) => s.dataset.shot))).toEqual(new Set(Object.keys(SHOTS)));
+    for (const img of container.querySelectorAll("[data-slot=shot] img")) expect(img.getAttribute("alt")?.length ?? 0).toBeGreaterThan(20);
+  });
+
+  it("credits the painting behind the request form to the Met, linked to its page", () => {
+    render(<LongPage />);
+    const art = artwork("kanasawa-full-moon");
+    const plate = document.getElementById(SIGN_UP_ID)!;
+    const credit = within(plate).getByRole("link", { name: `${art.artist}, ${art.title}` });
+    expect(credit.getAttribute("href")).toBe(art.url);
+    expect(credit.parentElement).toHaveTextContent(/, the Met$/);
+  });
+});
+
+describe("the request form", () => {
+  it("asks for an email in the page's own type and posts it to the beta's request", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    render(<LongPage />);
+    const plate = document.getElementById(SIGN_UP_ID)!;
+    fireEvent.change(within(plate).getByLabelText("Email address"), { target: { value: "owner@example.com" } });
+    fireEvent.click(within(plate).getByRole("radio", { name: "Trading my own account" }));
+    await act(async () => {
+      fireEvent.click(within(plate).getByRole("button", { name: "Ask for a place" }));
+    });
+    expect(fetch).toHaveBeenCalledWith(BETA_REQUEST_PATH, expect.objectContaining({ method: "POST" }));
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ email: "owner@example.com", role: "own" });
+    expect(within(plate).getByRole("status")).toHaveTextContent("You're on the list.");
+  });
+});
+
+describe("the design system", () => {
+  it("draws no colour blends and no raw colours, in source or in the rendered classes", () => {
+    for (const file of SOURCES) {
+      const source = readFileSync(join(SCROLL_DIR, file), "utf8");
+      expect(source, file).not.toMatch(BLEND);
+      expect(source, file).not.toMatch(/oklch\(\s*[\d.]|rgba?\(\s*\d|hsla?\(\s*\d|#[0-9a-f]{3,8}\b/i);
+    }
+    const { container } = render(<LongPage />);
+    for (const el of container.querySelectorAll("*")) expect(el.getAttribute("class") ?? "").not.toMatch(BLEND);
+  });
+
+  it("uses no font-sans, never goes above 600, writes no dark: class and keeps crimson for the kill switch", () => {
+    const { container } = render(<LongPage />);
+    expect(container.innerHTML).not.toMatch(/\bfont-sans\b|\bfont-(bold|extrabold|black)\b|\bdark:|crimson/);
+  });
+
+  it("moves only inside a reduced-motion check, ties the parallax to a check for scroll-driven animations, and hides a piece only once the page is moving", () => {
+    const css = readFileSync(join(SCROLL_DIR, "scroll.module.css"), "utf8");
+    const [before, after] = css.split("@media (prefers-reduced-motion: no-preference)");
+    expect(before).not.toMatch(/\b(animation|transition)\s*:/);
+    expect(before).not.toMatch(/data-reveal/);
+    expect(after).toMatch(/@supports \(animation-timeline: scroll\(\)\)/);
+    const hidden = after!.match(/^[^{}\n]*:not\(\[data-shown\]\)[^{}\n]*\{/gm) ?? [];
+    expect(hidden.length).toBeGreaterThanOrEqual(3);
+    for (const rule of hidden) expect(rule.trim(), "a hidden state needs the page marked as moving").toMatch(/^\.page\[data-motion="on"\] /);
+  });
+
+  it("fills one section with tide, the part about asking you, and uses tide nowhere outside the landing page", () => {
+    const { container } = render(<LongPage />);
+    const filled = [...container.querySelectorAll("[class]")].filter((el) => el.classList.contains("bg-tide"));
+    expect(filled.map((el) => el.id)).toEqual(["asking"]);
+    const src = join(WEB, "src");
+    const users = (readdirSync(src, { recursive: true }) as string[])
+      .filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f) && f !== "app/globals.css")
+      .filter((f) => /\b(bg|text|ring|border|fill|stroke)-tide\b|var\(--tide|"--tide"/.test(readFileSync(join(src, f), "utf8")))
+      .sort();
+    expect(users).toEqual([
+      "components/site/scroll/lock-screen.tsx",
+      "components/site/scroll/long-page.tsx",
+      "components/site/scroll/parts.ts",
+      "components/site/scroll/pixel-night.tsx",
+      "components/site/scroll/scroll.module.css",
+    ]);
+  });
+});
+
+describe("the motion", () => {
+  function observe() {
+    const seen: Element[] = [];
+    let report: (entries: { target: Element; isIntersecting: boolean }[]) => void = () => {};
+    class Observer {
+      constructor(cb: typeof report) {
+        report = cb;
+      }
+      observe(el: Element) {
+        seen.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", Observer);
+    return { seen, show: (el: Element) => act(() => report([{ target: el, isIntersecting: true }])) };
+  }
+
+  it("with motion reduced, leaves every piece where the server drew it", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const { seen } = observe();
+    render(<LongPage />);
+    expect(document.querySelector("[data-slot=long-page]")).not.toHaveAttribute("data-motion");
+    expect(seen).toHaveLength(0);
+  });
+
+  it("with motion allowed, watches every piece and lets each settle once it comes into view", () => {
+    const { seen, show } = observe();
+    const { container } = render(<LongPage />);
+    expect(container.querySelector("[data-slot=long-page]")).toHaveAttribute("data-motion", "on");
+    expect(seen.length).toBe(container.querySelectorAll("[data-reveal]").length);
+    const notification = container.querySelector("[data-slot=lock-screen] [data-reveal=drop]")!;
+    expect(notification).not.toHaveAttribute("data-shown");
+    show(notification);
+    expect(notification).toHaveAttribute("data-shown");
+  });
+
+  it("strikes each thing it won't do in turn, and settles every picture of the app with a tilt", () => {
+    const { container } = render(<LongPage />);
+    const lines = [...container.querySelectorAll<HTMLElement>("#wont li")];
+    expect(lines.map((li) => [li.dataset.reveal, li.style.getPropertyValue("--i")])).toEqual(WONT.map((_, i) => ["strike", String(i)]));
+    for (const shot of container.querySelectorAll("[data-slot=shot]")) expect(shot.closest("[data-reveal=tilt]"), shot.getAttribute("data-shot")!).not.toBeNull();
+  });
+});
