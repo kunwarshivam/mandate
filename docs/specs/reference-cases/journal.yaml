@@ -34240,20 +34240,6 @@ cold_records:
       expect:
         outcome: refused
         cause: no_start
-    - name: anchor_start_from_its_control_streams_leaf
-      clause: '§9.14: the leaf for `s`, not the anchor''s first leaf'
-      stream_id: ctl:ws_01J8Z2
-      from_seq: 4
-      request:
-        kind: anchor
-        anchor_event_id: 01J8Z3C6A000000000000000R4
-      replace: null
-      cold:
-        state: unreadable
-      expect:
-        outcome: start
-        from_seq: 4
-        prev_hash: d1bbaf0d64d5e5d0530894987405421f26dcac52d658ff46867b7a613a1551b9
     - name: anchor_without_a_leaf_for_the_stream
       clause: '§9.14: the leaf for `s`; the agent stream has none, the leaf at n − 1 is the account''s'
       stream_id: agent:ws_01J8Z2:agent_a

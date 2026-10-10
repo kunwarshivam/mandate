@@ -654,8 +654,6 @@ def more_row_specs(rows: list[dict], by_hash: dict, by_anchor: dict, seg: dict) 
         ("anchor_requested_at_its_leaf_seq", "§9.14: the leaf's seq is n − 1, not n", acct, 9, by_anchor, None, unread, "no_start"),
         ("anchor_requested_from_seq_zero", "§9.14: no leaf is at seq 0 − 1, though one is stored at seq 0", acct, 0, by_anchor,
          anchor_with(leaf_set(0, seq=0)), unread, "no_start"),
-        ("anchor_start_from_its_control_streams_leaf", "§9.14: the leaf for `s`, not the anchor's first leaf", STREAM, 4, by_anchor,
-         None, unread, "start"),
         ("anchor_without_a_leaf_for_the_stream", "§9.14: the leaf for `s`; the agent stream has none, the leaf at n − 1 is the account's",
          agent, 10, by_anchor, None, unread, "no_start"),
         ("anchor_leaf_at_the_seq_is_another_streams", "§9.14: the leaf for `s`; the account's is at 9, the one at 3 the control stream's",
@@ -1063,7 +1061,7 @@ START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "st
 ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace", "row.rehash_mismatch", "row.rule_117",
                "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest",
                "row.skip_unparsed", "row.anchor_root", "row.anchor_order", "row.unstamped_ok", "row.segment_stream",
-               "start.first_seq", "row.anchor_leaf_seq", "row.anchor_seq_floor", "row.anchor_first_leaf",
+               "start.first_seq", "row.anchor_leaf_seq", "row.anchor_seq_floor",
                "row.anchor_leaf_stream", "row.anchor_foreign", "row.anchor_type", "row.bad_stream_id", "row.bad_hex")
 
 

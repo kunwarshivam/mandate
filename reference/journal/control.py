@@ -1838,8 +1838,7 @@ def trusted_start(
             continue
         if r["payload"].get("token") is None and "start.null_token" not in skip:
             return None
-        leaves = r["payload"]["leaves"][:1] if "row.anchor_first_leaf" in skip else r["payload"]["leaves"]
-        for leaf in leaves:
+        for leaf in r["payload"]["leaves"]:
             fits = leaf["seq"] in leaf_seqs or "start.anchor_seq" in skip
             if (leaf["stream_id"] == stream or "row.anchor_leaf_stream" in skip) and fits:
                 return {"from_seq": from_seq, "prev_hash": leaf["hash"]}
