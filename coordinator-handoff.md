@@ -86,6 +86,9 @@ anything here.
 - **#1262:** the DEC-876 implementation (finishes C3). The Sonnet review passed. Head `e1c1cf06`.
 - **#1257:** L4, C-26 web chips; web-e2e green. Head `b76f3965`.
 - **#1264:** C4 tests (DEC-902). Head `367f1cb5`.
+- **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
+
+**New lane PRs to check:** #1265 (L3, DEC-706 step 2 pending tests). Next from L5: PR 4b, which removes the old vectors and includes the `journal.md:3166` sentence.
 
 **Open PRs needing a review verdict, then approval:**
 - **#1258 + #1261** (E1b part 2 tests-correction plus implementation, stacked; paper path).
