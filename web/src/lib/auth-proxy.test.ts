@@ -1,7 +1,9 @@
 // @vitest-environment node
+import { readdirSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { proxy } from "@/proxy";
+import { config, proxy } from "@/proxy";
 import type * as AuthConfig from "./auth-config";
 import type * as SupabaseProxy from "./supabase/proxy";
 
@@ -25,6 +27,11 @@ vi.mock("@/lib/supabase/proxy", async (original) => {
 
 /** `nextUrl` spells every loopback host `localhost`; Next makes a same-origin location relative after the proxy. */
 const request = (path: string) => new NextRequest(`http://localhost:4317${path}`);
+
+/** Next compiles each matcher source to a whole-path pattern; this one has no named parameters. */
+const matched = (path: string) => config.matcher.some((source) => new RegExp(`^${source}$`).test(path));
+
+const PUBLIC = join(__dirname, "../../public");
 
 beforeEach(() => {
   session.signedIn = false;
@@ -75,6 +82,25 @@ describe("the proxy with sign-in on", () => {
       const response = await proxy(request(path));
       expect(response.headers.get("location"), path).toBeNull();
       expect(response.headers.get("x-middleware-rewrite"), path).toBeNull();
+    }
+  });
+
+  it("serves every file in public/ to a signed-out visitor, so no picture on the welcome page turns into the sign-in page", async () => {
+    const files = (readdirSync(PUBLIC, { recursive: true }) as string[])
+      .filter((f) => statSync(join(PUBLIC, f)).isFile())
+      .map((f) => `/${f.split(sep).join("/")}`);
+    expect(files).toContain("/landing/agent-light.png");
+    for (const path of files) {
+      if (!matched(path)) continue;
+      const response = await proxy(request(path));
+      expect(response.headers.get("location"), `${path} is sent to sign in`).toBeNull();
+      expect(response.headers.get("x-middleware-rewrite"), path).toBeNull();
+    }
+  });
+
+  it("still runs on every screen, the welcome page and the beta address", () => {
+    for (const path of ["/", "/agents", "/positions", "/login", "/welcome", "/demo", "/api/beta", "/auth/callback", "/settings/profile", "/landing", "/artists"]) {
+      expect(matched(path), path).toBe(true);
     }
   });
 });
