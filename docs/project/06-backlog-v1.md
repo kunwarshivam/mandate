@@ -1717,6 +1717,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   generic text, never the record's body, columns, or payload (`AGENTS.md` rule 6, infrastructure
   design OPS-10); it records no `VerificationRun` and raises no §11 SEV-1, since no range was
   walked; an unreadable cold store raises none, being an outage; a payload capture test covers it.
+- **E12-8 (Should, with E12-3's run)** Verify the trusted-start anchor's TSA token
+  ([DEC-896](decisions/DEC-896.md)), so that an anchor row rewritten in the hot store, its root
+  recomputed and re-hashed, never starts a range that passes. *Accepted when:* the null-token row
+  vector `anchor_unstamped_and_rehashed` is refused (DEC-896 item 4); the run checks the start
+  anchor's token at workspace API §4.8.1 step 2.2; a token that does not verify, does not carry the
+  anchor's root, or whose artifact is absent fails `tsa_token_invalid`; an unverifiable one ends
+  the range `incomplete`, cause `token_unverifiable`, never `pass`; token vectors with an oracle and
+  seeded bugs land before the pending tests, and those before the implementation (DEC-896's
+  sequence); the journal spec text is lane L2's.
 
 ### E13 Hybrid deployment
 
