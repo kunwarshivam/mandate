@@ -559,7 +559,11 @@ pub struct BrokerOrder {
     pub status: String,
     pub reject_code: Option<String>,
     pub replaced_by_broker_order_id: Option<String>,
-    pub legs: Vec<String>,
+    /// A bracket's or OCO's legs, each as the broker describes it, nested under their parent as
+    /// the open-orders read asks (`nested=true`). The broker creates them and names each with its
+    /// own `client_order_id`, never one of ours (the recorded `submit_bracket_accepted`), so a
+    /// leg is found through its parent, by side and status, and never by that id (DEC-878).
+    pub legs: Vec<BrokerOrder>,
     pub created_on: Option<Date>,
 }
 

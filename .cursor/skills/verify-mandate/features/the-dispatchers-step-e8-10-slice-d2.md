@@ -5,8 +5,9 @@
   NT-3, NT-8; journal spec §5.1 (fencing) and §9.15; DEC-701 item 3; DEC-704; DEC-705.
 - **Code:** `mandate-dispatcher` (layer 4, pure, safety-critical, now over `mandate-journal`):
   `crates/mandate-dispatcher/src/step.rs` (`NoticeWriter`, which holds only a notice stream;
-  the `Journal` trait, whose only append takes a `NoticeWriter`; `Config`; `step`). Tests PR: the
-  writer's three methods and `step` are stubs.
+  the `Journal` trait, whose only append takes a `NoticeWriter`; `Config`; `step`), implemented
+  per DEC-704 and DEC-705. Every draft is built from `mandate_canon` values and every append goes
+  through `Journal::append_notices`; no non-test code calls `MemoryJournal`.
 - **Tests:** `crates/mandate-dispatcher/src/step/tests.rs`, over `MemoryJournal` and the fixture
   provider: a writer refuses every stream but `ntf:`; only committed alerts are causes, no other
   stream is written, and each send finds its `NoticeIssued` committed and its attempt not yet
@@ -20,4 +21,15 @@
   (`Unavailable` on the issue batch, `Ambiguous` on an attempt) returns `NotCommitted` with no
   send or append after it. Per DEC-705, the kill switch's cause is the control-stream alert
   even when the subject streams are given as `[A1, A2, CTL]`.
-- **Run:** `cargo nextest run -p mandate-dispatcher`; `cargo xtask ci pending`.
+- **DEC-706 (journal spec v0.40 §9.15, rule 134; tests, pending E8-10):**
+  `crates/mandate-dispatcher/src/step/tests/verdict.rs` pins that the step journals every
+  `NoticeAttempted` at version 2, its `verdict` taken from the `Outcome` variant (`provider_error`
+  and `too_large` arriving both ways, a timeout `retryable`) and `null` on a delivered attempt;
+  that an outcome contradicting its reason's fixed verdict is refused and stops the step; and,
+  live, that a stored version-1 `failed` attempt ends its channel. `crates/mandate-journal/tests/notices.rs`
+  pins version 2's closed schema, rule 134 against a table typed from the spec (every outcome and
+  verdict, and a property over the other members), the refusal of version 1 on append as
+  `unknown_schema`, and, live, that a stored version-1 attempt still verifies. Each pending test
+  is a behaviour-only row in `xtask/behaviour-only/` until the implementation lands.
+- **Run:** `cargo nextest run -p mandate-dispatcher -p mandate-journal`; the pending ones with
+  `--run-ignored ignored-only`.

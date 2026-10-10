@@ -222,7 +222,7 @@ fn a_duplicate_key_copy_beside_the_start_segment_refuses_it() {
     );
 }
 
-/// A small deterministic generator (xorshift64), as `trusted_start.rs` uses.
+/// A small deterministic generator (xorshift64), so the random variants need no dependency.
 struct Rng(u64);
 
 impl Rng {

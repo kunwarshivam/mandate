@@ -521,6 +521,31 @@ def leaves_reversed(body: dict) -> None:
     body["payload"]["root"] = merkle_root(body["payload"]["leaves"])
 
 
+def unstamped(body: dict) -> None:
+    body["payload"]["token"] = None
+
+
+def moved_to(stream: str):
+    def edit(body: dict) -> None:
+        body["stream_id"] = stream
+    return edit
+
+
+def leaf_set(i: int, **members):
+    """The anchor's `i`th leaf given `members`, its root recomputed over the leaves in stream order."""
+    def edit(body: dict) -> None:
+        leaves = body["payload"]["leaves"]
+        leaves[i:i + 1] = [{**(leaves[i] if i < len(leaves) else {}), **members}]
+        leaves.sort(key=lambda leaf: leaf["stream_id"].encode())
+        body["payload"]["root"] = merkle_root(leaves)
+    return edit
+
+
+def appended(row: dict, prev: str, event_id: str, **members) -> dict:
+    """The row recorded again at seq 5, chained to `prev`, as `event_id` with `members` changed."""
+    return row_of({**json.loads(row["body"]), "seq": 5, "prev_hash": prev, "event_id": event_id, **members})
+
+
 def doubled(row: dict, prev: str, member: str) -> dict:
     """The row recorded again at seq 5, chained to `prev`, its body stored with `member` written
     twice at the head of its payload, the first time with another value, and re-hashed."""
@@ -587,7 +612,10 @@ def row_cases(rows: list[dict]) -> list[dict]:
          (ANCHOR, edited(rows[ANCHOR], leaf_edited, True)), COLD["unreadable"], "anchor_root_mismatch"),
         ("anchor_leaves_reordered_and_rehashed", "DEC-895 item 2, §11 anchor_root_mismatch: the leaves out of stream order", acct, 10, by_anchor,
          (ANCHOR, edited(rows[ANCHOR], leaves_reversed, True)), COLD["unreadable"], "anchor_root_mismatch"),
+        ("anchor_unstamped_and_rehashed", "DEC-896, §9.14, DEC-783 item 8: a null token vouches for nothing, the row otherwise sound", acct, 10,
+         by_anchor, (ANCHOR, edited(rows[ANCHOR], unstamped, True)), COLD["unreadable"], "no_start"),
     ]
+    specs += more_row_specs(rows, by_hash, by_anchor, seg)
     out = []
     for name, clause, stream, n, request, replace, cold, intended in specs:
         case = copy.deepcopy({"name": name, "clause": clause, "stream_id": stream, "from_seq": n, "request": request,
@@ -598,6 +626,55 @@ def row_cases(rows: list[dict]) -> list[dict]:
             raise AssertionError(f"{name}: built for {intended}, the reference answers {expect}")
         out.append({**case, "expect": expect})
     return out
+
+
+def more_row_specs(rows: list[dict], by_hash: dict, by_anchor: dict, seg: dict) -> list[tuple]:
+    """E12-3: the resolver's lookup clauses the old resolver's cases alone pinned, each on the rows
+    path, a forged row stored consistently (columns from its body, re-hashed) so only the clause
+    named can refuse it."""
+    acct, agent, tip, unread = ACCOUNT_STREAM, AGENT_STREAM, rows[ANCHOR]["hash"], COLD["unreadable"]
+    no_ws, no_ws_too = "acct::A1", "acct:"
+    stray = segment(no_ws, 1, 3, GENESIS)
+    unhex = segment(acct, 4, 9, "5" * 63)
+    leaf_id = {"kind": "anchor", "anchor_event_id": "01J8Z3C6A000000000000000R8"}
+
+    def anchor_with(edit) -> tuple:
+        return ANCHOR, edited(rows[ANCHOR], edit, True)
+
+    def manifest(p: dict) -> dict:
+        return {"kind": "manifest", "manifest_hash": p["manifest_hash"]}
+
+    return [
+        ("segment_of_another_stream_than_requested", "§9.14: a SegmentExported of `s`; this one is the account's, the agent stream asked",
+         agent, 4, by_hash, None, cold_read(seg), "no_start"),
+        ("segment_requested_before_its_first_seq", "§9.14: a segment starts at its first_seq, not the seq before", acct, 3, by_hash,
+         None, cold_read(seg), "no_start"),
+        ("segment_requested_after_its_last_seq", "§9.14: a segment starts at its first_seq, not past its last_seq", acct, 10, by_hash,
+         None, cold_read(seg), "no_start"),
+        ("anchor_requested_at_its_leaf_seq", "§9.14: the leaf's seq is n − 1, not n", acct, 9, by_anchor, None, unread, "no_start"),
+        ("anchor_requested_from_seq_zero", "§9.14: no leaf is at seq 0 − 1, though one is stored at seq 0", acct, 0, by_anchor,
+         anchor_with(leaf_set(0, seq=0)), unread, "no_start"),
+        ("anchor_without_a_leaf_for_the_stream", "§9.14: the leaf for `s`; the agent stream has none, the leaf at n − 1 is the account's",
+         agent, 10, by_anchor, None, unread, "no_start"),
+        ("anchor_leaf_at_the_seq_is_another_streams", "§9.14: the leaf for `s`; the account's is at 9, the one at 3 the control stream's",
+         acct, 4, by_anchor, None, unread, "no_start"),
+        ("anchor_moved_to_another_workspace", "§9.14, DEC-767: an anchor of another workspace's control stream, stored consistently",
+         acct, 10, by_anchor, anchor_with(moved_to(FOREIGN_CTL)), unread, "no_start"),
+        ("anchor_id_names_a_segment", "§9.14: the AnchorComputed with this event_id; it names a SegmentExported", acct, 10,
+         {"kind": "anchor", "anchor_event_id": ROW_IDS[SEGMENT]}, None, unread, "no_start"),
+        ("anchor_id_names_the_stream_opened", "§9.14: the AnchorComputed with this event_id; it names a StreamOpened", acct, 2,
+         {"kind": "anchor", "anchor_event_id": ROW_IDS[OPENED]}, None, unread, "no_start"),
+        ("anchor_payload_under_another_event_type", "§9.14: an AnchorComputed; a VerificationRun holding an anchor's payload, chained",
+         acct, 10, leaf_id, (FOREIGN, appended(rows[ANCHOR], tip, leaf_id["anchor_event_id"], event_type="VerificationRun")), unread, "no_start"),
+        ("segment_for_a_stream_without_a_workspace", "§9.14, DEC-767: `s` has no workspace, so no control stream is its own", no_ws, 1,
+         manifest(stray), (FOREIGN, appended(rows[SEGMENT], tip, "01J8Z3C6A000000000000000R9", payload=stray)), cold_read(stray), "no_start"),
+        ("anchor_for_a_stream_without_a_workspace", "§9.14, DEC-767: `s` has no workspace, so no control stream is its own", no_ws_too, 10,
+         by_anchor, anchor_with(leaf_set(2, stream_id=no_ws_too, seq=9, hash="1" * 64)), unread, "no_start"),
+        ("segment_first_prev_hash_not_a_digest", "§9.14, §2: first_prev_hash is 63 hex digits, rule 117 and the row hash hold", acct, 4,
+         manifest(unhex), (SEGMENT, edited(rows[SEGMENT], lambda b: b.update(payload=unhex), True)), cold_read(unhex), "no_start"),
+        ("anchor_leaf_hash_not_a_digest", "§9.14, §2: the start leaf's hash is not hex, the root and the row hash hold", acct, 10,
+         by_anchor, anchor_with(leaf_set(0, hash="g" * 64)), unread, "no_start"),
+    ]
 
 
 def row_answer(starts: dict, c: dict, skip: frozenset[str] = frozenset()) -> dict:
@@ -749,6 +826,11 @@ def anchor_root_holds(p: dict) -> bool:
     return streams == sorted(set(streams)) and root_by_levels(p["leaves"]) == p["root"]
 
 
+def is_digest(text) -> bool:
+    """A digest as the Rust resolver reads one: a string of exactly 64 lowercase hex digits."""
+    return isinstance(text, str) and len(text) == 64 and set(text) <= set("0123456789abcdef")
+
+
 def row_start_by_oracle(rows: list[dict], case: dict) -> dict:
     """The oracle's own DEC-787 items 3 and 5, written from the decision rather than from the
     reference: find the record as §9.14 does, then judge its row with `json` and `hashlib` directly,
@@ -766,10 +848,10 @@ def row_start_by_oracle(rows: list[dict], case: dict) -> dict:
     for row in mine:
         p = json.loads(row["body"])["payload"]
         fits = (p.get("manifest_hash"), p.get("stream_id"), p.get("first_seq")) == (request.get("manifest_hash"), stream, n)
-        if request["kind"] == "manifest" and row["event_type"] == "SegmentExported" and fits:
+        if request["kind"] == "manifest" and row["event_type"] == "SegmentExported" and fits and is_digest(p["first_prev_hash"]):
             hits.append((row, p["first_prev_hash"]))
         if request["kind"] == "anchor" and row["event_type"] == "AnchorComputed" and row["event_id"] == request["anchor_event_id"]:
-            leaves = [leaf["hash"] for leaf in p["leaves"] if (leaf["stream_id"], leaf["seq"]) == (stream, n - 1)]
+            leaves = [leaf["hash"] for leaf in p["leaves"] if (leaf["stream_id"], leaf["seq"]) == (stream, n - 1) and is_digest(leaf["hash"])]
             hits += [(row, leaves[0])] if p["token"] and leaves else []
     if len(hits) != 1:
         return {"outcome": "refused", "cause": "ambiguous_start" if hits else "no_start"}
@@ -978,7 +1060,9 @@ RANGE_MUTANTS = ("self.missing", "self.seq", "self.hash")
 START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "start.null_token", "start.workspace")
 ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace", "row.rehash_mismatch", "row.rule_117",
                "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest",
-               "row.skip_unparsed", "row.anchor_root", "row.anchor_order")
+               "row.skip_unparsed", "row.anchor_root", "row.anchor_order", "row.unstamped_ok", "row.segment_stream",
+               "start.first_seq", "row.anchor_leaf_seq", "row.anchor_seq_floor",
+               "row.anchor_leaf_stream", "row.anchor_foreign", "row.anchor_type", "row.bad_stream_id", "row.bad_hex")
 
 
 def row_mutant_killers(section: dict, mutant: str) -> list[str]:

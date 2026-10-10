@@ -1667,7 +1667,7 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   clause of rules 109 and 110 is unreachable, since rule 83 refuses a client first.
   *Parked (Could; coordinator, 2026-10-09):* derive `mandate journal verify` and `verify-cold`'s
   trusted start from a control-stream export (`--start-manifest` or `--start-anchor` with
-  `--control`) through `mandate_journal::resolve_trusted_start` ([DEC-784](decisions/DEC-784.md)).
+  `--control`) through `mandate_journal::resolve_start_from_rows` ([DEC-784](decisions/DEC-784.md)).
   Journal spec §11 takes the raw `(from_seq, trusted_prev_hash)` the CLI already accepts
   ([DEC-115](04-decision-log.md#decisions) item 5, [DEC-490](decisions/DEC-490.md)); the
   derivation the spec requires is the workspace API's `POST /verifications` (§4.8.1,
@@ -1717,6 +1717,17 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   generic text, never the record's body, columns, or payload (`AGENTS.md` rule 6, infrastructure
   design OPS-10); it records no `VerificationRun` and raises no §11 SEV-1, since no range was
   walked; an unreadable cold store raises none, being an outage; a payload capture test covers it.
+- **E12-8 (Should, with E12-3's run)** Verify the trusted-start anchor's TSA token
+  ([DEC-896](decisions/DEC-896.md)), so that an anchor row rewritten in the hot store, its root
+  recomputed and re-hashed, never starts a range that passes. *Accepted when:* the null-token row
+  vector `anchor_unstamped_and_rehashed` is refused (DEC-896 item 4); the run checks the start
+  anchor's token at workspace API §4.8.1 step 2.2; a token that does not verify, does not carry the
+  anchor's root, or whose artifact is absent fails `tsa_token_invalid`; an unverifiable one ends
+  the range `incomplete`, cause `token_unverifiable`, never `pass`; token vectors with an oracle and
+  seeded bugs land before the pending tests, and those before the implementation (DEC-896's
+  sequence); the journal spec text is lane L2's. By the coordinator's ruling, the start-anchor
+  token cases are re-sequenced into the run's reference vectors in T1/I1, no longer a standalone
+  step-2 PR.
 
 ### E13 Hybrid deployment
 
@@ -3106,14 +3117,18 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   containing it, shown failing under the do-nothing plant (#244 round 1, finding 3). Until then
   `Input::Journal` answers a loud `Unimplemented { story: "E7-4" }` naming slice 5, landing first in
   E7-4 slice 1 rather than dropping the fact (the coordinator's ruling on #244, 5861479849).
-- **E7-4, the slice that reconciles protective legs (stream K):** make `mandate-alpaca`'s `wire.rs`
-  keep each leg's `client_order_id` instead of reading `legs[].id` only, with its own `ready()` tests
-  correction first, since `BrokerOrder.legs` changes type (#229's pattern). E7-4 slice 1 aligns
-  `ClientOrderId::for_protection` to the §2.3 grammar (`{entry}-p{protection}`, legs `-tp` and `-sl`)
-  and reads no leg id from a `BrokerOrder`, which an in-module test pins. Until the wire change lands,
-  a broker-reported leg is attributed by the single holder or fails closed for openings; exits are
-  untouched ([DEC-160](04-decision-log.md#decisions) 3a, #243 round 1, the coordinator's ruling (b)
-  on #174, 5861764910).
+- **E7-4, the slice that reconciles protective legs (stream K; blocks FT-11 in E2):** find a filled
+  bracket's placement through its entry at reconciliation, only when the entry is listed `filled`
+  with exactly its stop and take-profit resting under it at the recorded quantity and prices, and
+  never by the leg's own id, which Alpaca names itself ([DEC-878](decisions/DEC-878.md)); what a
+  half-legged or mismatched bracket becomes is DEC-878's "Not settled" item. The tests
+  PR changed `BrokerOrder.legs` to whole legs with its tests correction and left three pending
+  tests in `mandate-executor/tests/bracket_legs.rs`; the code PR deletes their behaviour-only rows
+  and `protection.rs`'s `no_leg_id_is_read_from_a_broker_order` (with its `read_production`
+  helper), deliberately, since #174 ruling (b) ends with this slice. Still open after it (DEC-878,
+  "Not decided here"): the Alpaca cancel of a bracket's placement, which looks up `{entry}-p{record}` and gets a 404, must resolve through the entry's
+  legs before any exit runs against a filled bracket; the in-doubt lookup should ask by the entry's
+  id; and the hand-built `submit_oco_accepted` scenario's leg ids should be Alpaca's.
 - **E7-4 slices 2 and 3 (stream K):** `properties::protective_sell_quantity_never_exceeds_the_position_in_any_script`
   wants the `ProtectionChanged placed` at or after the entry's completion with no lag. That is right
   on the normal path (§5.4's legs activate at completion), but a re-placement after a

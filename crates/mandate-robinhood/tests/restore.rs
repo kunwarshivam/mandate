@@ -867,7 +867,6 @@ fn origins_still_cancel(label: &str, records: &[FoldedEvent], all: &[ClientOrder
 /// whether two origins disagree (A and B) or agree (A and C), and with three (A, B and C). Neither
 /// the first link nor the last decides.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_successor_naming_two_different_origins_is_in_doubt_in_either_order() {
     let torn = successor("01JREPLACETORN");
     let mut placeable = Vec::new();
@@ -898,7 +897,6 @@ fn a_successor_naming_two_different_origins_is_in_doubt_in_either_order() {
 /// different `replaces` targets, in either order of the links and with the own submit before or
 /// after them: the key's own records contradict each other about which order it is.
 #[test]
-#[ignore = "pending E7-6"]
 fn its_own_submit_does_not_rescue_a_key_naming_two_different_origins() {
     let torn = successor("01JREPLACEOWNTORN");
     let mut placeable = Vec::new();
@@ -933,7 +931,6 @@ fn its_own_submit_does_not_rescue_a_key_naming_two_different_origins() {
 /// submit does not inherit (DEC-872 item 3, DEC-876 item 3), so it still cancels by its one id
 /// with its own instrument and side (`AGENTS.md` rule 13).
 #[test]
-#[ignore = "pending E7-6"]
 fn a_successor_of_a_key_naming_two_different_origins_inherits_its_doubt() {
     let (torn, heir) = (successor("01JREPLACEMIDDLE"), successor("01JREPLACEHEIR2"));
     let own_heir = successor("01JREPLACEOWNHEIR");
@@ -1055,7 +1052,6 @@ fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() 
 /// from the generated choices: a key naming two different ones is in doubt whatever its own
 /// submits say, and naming one twice is one link.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_key_naming_two_origins_is_in_doubt_however_the_stream_interleaves_its_keys() {
     interleaved(true);
 }

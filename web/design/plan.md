@@ -285,7 +285,7 @@ item above (C-3, C-9) are not repeated.
       (C-4) Done in [#1239](https://github.com/kunwarshivam/mandate/pull/1239).
 - [x] **Alerts says all clear** when every feed answers and no agent is restricted. (C-13) Done in [#1167](https://github.com/kunwarshivam/mandate/pull/1167).
 - [x] **Day headings on the timeline.** (C-19) Done in [#1191](https://github.com/kunwarshivam/mandate/pull/1191).
-- [ ] **The status strip's state chips outlined**, not ink. (C-26)
+- [x] **The status strip's state chips outlined**, not ink. (C-26) Done in [#1257](https://github.com/kunwarshivam/mandate/pull/1257).
 - [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
       subtitle drops "Rules". (C-20)
 - [ ] **One left edge across densities** on the audit screens. (C-17)

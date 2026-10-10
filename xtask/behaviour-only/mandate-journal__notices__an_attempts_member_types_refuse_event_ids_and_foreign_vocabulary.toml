@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/notices.rs"
+test = "an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary"
+reason = """
+E8-10 (journal spec v0.40, DEC-706): `Draft::parse` is already implemented, and refuses
+`NoticeAttempted` at version 2 as `unknown_schema` until it is registered, so this test fails
+on that answer rather than at a stub. The code PR that registers version 2 (and stops admitting
+version 1) deletes this file with the test's `#[ignore]` line.
+"""
