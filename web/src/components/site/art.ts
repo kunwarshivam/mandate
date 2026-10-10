@@ -102,7 +102,7 @@ export const WALLPAPERS: Artwork[] = [
   },
 ];
 
-/** The wallpaper by day, and by night, until someone picks one. Every picture is a night, so the owls are at home. */
+/** The wallpaper by day, and by night, until someone picks one. The pictures are moonlight and snow, so the owls are at home. */
 export const DAY = "ishiyama-autumn-moon";
 export const NIGHT = "copenhagen-moonlight";
 
