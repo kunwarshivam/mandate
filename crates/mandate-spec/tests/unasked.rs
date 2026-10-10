@@ -311,13 +311,18 @@ fn reference_cases() -> Vec<Case> {
         Case { name: "a delegation that expired two days ago gives nothing", model: Model { delegations: vec![del(None, C::Purpose, ("300", 3, "900"), (TWO_DAYS_AGO, PAST))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
         Case { name: "a delegation live for a second after t counts", model: Model { delegations: vec![del(None, C::Purpose, ("300", 3, "900"), (PAST, NOW_1S))], per_day: 10, ..Model::base() }, expect: Some("900"), ..Case::base() },
         Case { name: "a delegation starting at the day's end gives nothing", model: Model { delegations: vec![del(None, C::Purpose, ("300", 3, "900"), (END, END_1H))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "an auto rule bounded below zero gives no slice", model: Model { rules: vec![("auto", cmp("lte", "-5"))], per_day: 2, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "an auto rule bounded at zero gives no slice", model: Model { rules: vec![("auto", cmp("lte", "0"))], per_day: 2, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "an auto slice below zero takes no order from a delegation", model: Model { rules: vec![("auto", cmp("lte", "-5"))], delegations: vec![del(None, C::Purpose, ("300", 3, "700"), (PAST, WEEK))], per_day: 10, ..Model::base() }, expect: Some("700"), ..Case::base() },
+        Case { name: "a delegation bounded below zero beside an auto rule gives nothing more", model: Model { rules: vec![("auto", cmp("lte", "900"))], delegations: vec![del(None, cmp("lte", "-5"), ("300", 2, "600"), (PAST, WEEK))], per_day: 2, ..Model::base() }, expect: Some("1800"), ..Case::base() },
+        Case { name: "a delegation bounded below zero gives nothing", model: Model { delegations: vec![del(None, cmp("lte", "-5"), ("300", 2, "600"), (PAST, WEEK))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "a delegation bounded at zero gives nothing", model: Model { delegations: vec![del(None, cmp("lte", "0"), ("300", 2, "600"), (PAST, WEEK))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
     ]
 }
 
 /// §4.2 items 1 to 6 as the reference model computes them: unknown inputs, the known zeros, each
 /// condition's order bound, delegation slices, the count, and rounding up to the cent.
 #[test]
-#[ignore = "pending E10-7"]
 fn the_figure_matches_the_reference_model() {
     for case in reference_cases() {
         let usage = case.usage.as_ref().map(|rows| {
@@ -592,7 +597,6 @@ fn known(figure: Result<Option<Usd>, SpecError>) -> Result<Usd, TestCaseError> {
 /// DEC-695 items 2 and 4: no risk day runs more unasked than the figure, whatever its orders'
 /// values and times, while marks, cancels, and exits free gross headroom within the day.
 #[test]
-#[ignore = "pending E10-7"]
 fn no_day_runs_more_unasked_than_the_figure() {
     run(512, |rng| {
         let mut m = Model::base();
@@ -631,7 +635,6 @@ fn no_day_runs_more_unasked_than_the_figure() {
 /// DEC-695's rationale: where every condition is a catch-all or an `lte` bound and no `ask` or
 /// `deny` rule comes before an `auto` one, a greedy day reaches the figure, to the cent above.
 #[test]
-#[ignore = "pending E10-7"]
 fn a_greedy_day_reaches_the_figure() {
     run(512, |rng| {
         let lte = |rng: &mut Rng| C::Cmp("lte", rng.pick(&[300_000, 450_505, 500_000, 900_000]));

@@ -682,7 +682,6 @@ fn assert_target_kept(
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn an_unknown_scope_member_malformed_inside_is_dropped_whole_and_the_target_kept()
 -> Result<(), String> {
     for (kind, id) in scopes() {

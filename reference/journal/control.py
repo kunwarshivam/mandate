@@ -657,7 +657,7 @@ EVENT_CHECKS = (
     "connection_cause_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
-# v0.38 (DEC-894, pending): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
+# v0.38 (DEC-894): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
 # closed list is not edited (§8).
 V2_RANGE_CHECKS = (*RANGE_CHECKS, "segment_rows_mismatch")
 CHECKED_RANGE = rec(
@@ -1823,7 +1823,9 @@ def trusted_start(
     if request["kind"] == "manifest":
         for r in own:
             p = r["payload"]
-            if r["event_type"] != "SegmentExported" or p["manifest_hash"] != request["manifest_hash"]:
+            if r["event_type"] != "SegmentExported":
+                continue
+            if p["manifest_hash"] != request["manifest_hash"] and "start.manifest_hash" not in skip:
                 continue
             ours = p["stream_id"] == stream or "row.segment_stream" in skip
             fits = ours and (p["first_seq"] == from_seq or "start.first_seq" in skip)

@@ -579,7 +579,6 @@ fn the_closes_are_the_full_trusted_span_in_order() {
 /// from 15:40:05, the one `DELETE` is at 15:50:00, and the last read, at 15:50:05, reads it
 /// canceled and ends the run.
 #[test]
-#[ignore = "pending E7-19"]
 fn a_placing_run_watches_its_entry_to_the_registered_bound() {
     let mut scene = Scene::new("watch", 231..256);
     scene.at(LATE);

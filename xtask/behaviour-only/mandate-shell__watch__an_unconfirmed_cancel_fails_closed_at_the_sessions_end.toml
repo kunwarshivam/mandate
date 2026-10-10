@@ -1,7 +1,0 @@
-file = "crates/mandate-shell/tests/watch.rs"
-test = "an_unconfirmed_cancel_fails_closed_at_the_sessions_end"
-reason = """
-E1b part 1's watch has no cap (DEC-858 item 5): with the cancel never confirmed it keeps reading past
-16:00 until the test clock's pause budget stops it, so it fails on behaviour, not at a stub. E1b part
-2's implementation PR (E7-19) adds the cap and deletes this row.
-"""

@@ -1,8 +1,0 @@
-file = "crates/mandate-api/tests/lenient.rs"
-test = "an_unknown_scope_member_malformed_inside_is_dropped_whole_and_the_target_kept"
-reason = """
-E10-10 (DEC-900): `decode_lenient` is already implemented (#1204), and reads the kill switch's
-whole `scope` through the strict duplicate scan, so it refuses `duplicate_member` a scope whose
-unknown member holds a duplicate. This test fails on that answer rather than at a stub. The fix
-that drops the unknown member before the scan deletes this file with the test's `#[ignore]` line.
-"""

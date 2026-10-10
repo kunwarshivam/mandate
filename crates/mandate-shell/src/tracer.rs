@@ -30,7 +30,7 @@ use crate::map;
 use crate::stages::{
     Admitted, Classifier, ExitPath, Gate, GovernedRefs, JournalWriter, Sizing, Stage, Stages,
 };
-use crate::watch::Watch;
+use crate::watch::{Watch, session_end};
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -465,11 +465,16 @@ impl<'s> Session<'s> {
         }
     }
 
-    /// E1b's watch over the run's one submission (DEC-858 items 3 and 4). Each wake pauses, moves
+    /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
     /// the event time to the clock, and reads the entry back by its client order id, then ticks the
     /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
     /// of the read. It ends once the broker reports the entry terminal. A run that submitted
     /// nothing watches nothing.
+    ///
+    /// The cap (DEC-877 item 1): the first wake at or past the end of the bound's regular session
+    /// stops the run with [`ShellError::CancelUnconfirmed`] before any read there, so nothing is
+    /// sent at or after the session's end. The entry's last state stays the executor's journaled
+    /// `pending_cancel`, for the next start's reconciliation.
     fn watch<P: Pause>(
         &mut self,
         instrument: &InstrumentId,
@@ -489,10 +494,14 @@ impl<'s> Session<'s> {
                 })
             })?;
         let agent = mandate_executor::AgentId(self.setup.deployment.agent.0.clone());
+        let cap = session_end(watch.bound).map_err(refused(Stage::Executor))?;
         let mut cancel_handed = false;
         loop {
             runtime.block_on(watch.pause.pause(watch.interval));
             let now = watch.pause.now();
+            if now >= cap {
+                return Err(ShellError::CancelUnconfirmed);
+            }
             self.event_time = now;
             if !cancel_handed && now >= watch.bound {
                 cancel_handed = true;
@@ -554,6 +563,11 @@ impl<'s> Session<'s> {
         self.perform_executor(reconciled.effects)
     }
 
+    /// Runs `effects` and everything they lead to, gathering the reconciliation reads they ask
+    /// for rather than sending them one by one: a request the executor asks for is sent and its
+    /// answer stepped, and the effects that answer leads to join the queue, so a reconciliation
+    /// asked for by an answer is gathered too (DEC-877 item 2). Journal drafts are appended in
+    /// order.
     fn prepare_reconciliation(
         &mut self,
         effects: Vec<mandate_executor::Effect>,
@@ -574,7 +588,14 @@ impl<'s> Session<'s> {
                     | BrokerRequest::ListOrders(_)
                     | BrokerRequest::CancelAll(_)
                     | BrokerRequest::ClosePosition(_, _) => {
-                        self.perform_executor(vec![mandate_executor::Effect::Broker(request)])?;
+                        if let Some(answer) = self.broker(&request)? {
+                            let more = self
+                                .stages
+                                .executor
+                                .step(answer)
+                                .map_err(refused(Stage::Executor))?;
+                            effects.extend(more);
+                        }
                     }
                 },
                 mandate_executor::Effect::Journal(draft) => {

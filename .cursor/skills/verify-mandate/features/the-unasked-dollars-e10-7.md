@@ -1,8 +1,7 @@
 # The unasked dollars (E10-7)
 
 Specified by mandate spec §4.2 and DEC-695 (Accepted), the formula for DEC-189's figure. E10-7 slice
-S1a's DEC-77 tests PR stubs `unasked_usd` in `mandate-spec`, so every test below is pending on it
-until the implementation PR replaces the stub.
+S1a implements `unasked_usd` in `mandate-spec`; every test below runs.
 
 - **Spec:** `docs/specs/mandate.md` §4.2 (the unasked dollars), §6.2 steps 4a, 5b, and 5c, §6.5;
   `docs/specs/workspace-api.md` §5.3 (`unasked_usd_after`); DEC-189, DEC-695.
@@ -17,4 +16,4 @@ until the implementation PR replaces the stub.
 - **Reference model:** `reference/mandate/ref.py` (`unasked_usd`, `order_usd_bound`),
   `reference/mandate/fuzz.py` (`fuzz_unasked`), `reference/mandate/mutants.py` (`UNASKED_MUTANTS`).
 - **Reference cases:** none; DEC-695 item 9 adds no reference case or fixture.
-- **Run:** `cargo nextest run -p mandate-spec --run-ignored all -E 'binary(unasked)'`.
+- **Run:** `cargo nextest run -p mandate-spec -E 'binary(unasked)'`.

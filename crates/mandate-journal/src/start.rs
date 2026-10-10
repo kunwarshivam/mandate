@@ -1,12 +1,11 @@
 //! §9.14's "What a verifier reads" (journal spec v0.29, E12-3, DEC-783 item 8, DEC-767): the
-//! trusted start of a range, resolved from the workspace's own control-stream records, never from
-//! the request ([workspace API spec](../../../docs/specs/workspace-api.md) §4.8.1). The reference
-//! is `reference/journal/control.py`'s `trusted_start`; the vectors are `cold_records.trusted_starts`.
-//! It also reads an `AnchorComputed` row as the anchor a verifier checks ([`anchor_record`], §10,
-//! §11). [`resolve_start_from_rows`] is the resolver over stored rows DEC-893 and DEC-894 define:
-//! its start record is checked, and a manifest start is a [`ManifestStart`] the cold store must
-//! confirm; the reference is `control.py`'s `start_from_rows`, the vectors
-//! `cold_records.trusted_starts.row_cases`.
+//! trusted start of a range, resolved from the workspace's own control-stream rows, never from
+//! the request ([workspace API spec](../../../docs/specs/workspace-api.md) §4.8.1).
+//! [`resolve_start_from_rows`] is the resolver over stored rows DEC-893 and DEC-894 define: its
+//! start record is checked, and a manifest start is a [`ManifestStart`] the cold store must
+//! confirm; the reference is `reference/journal/control.py`'s `start_from_rows`, the vectors
+//! `cold_records.trusted_starts.row_cases`. It also reads an `AnchorComputed` row as the anchor a
+//! verifier checks ([`anchor_record`], §10, §11).
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 
@@ -39,59 +38,6 @@ pub enum TrustedStartError {
     /// Never returned now that E12-3 built the resolver; kept, as `ControlVerifyError` keeps its
     /// own, so a caller's match stays the same across the crate's stubs (DEC-77).
     Unimplemented { story: &'static str },
-}
-
-/// The trusted start of a range of `stream_id` entered at `from_seq`, from `request`, among the
-/// `records` on the control stream of `stream_id`'s own workspace only: genesis is seq 1 with 64
-/// zeros; a `SegmentExported` of `stream_id` with `first_seq` = `from_seq` gives its
-/// `first_prev_hash`; an `AnchorComputed` with a `token` gives the `hash` of its leaf for
-/// `stream_id` at `from_seq − 1`.
-pub fn resolve_trusted_start(
-    records: &[StoredEvent],
-    stream_id: &str,
-    from_seq: u64,
-    request: StartRequest<'_>,
-) -> Result<TrustedStart, TrustedStartError> {
-    let refused = TrustedStartError::Refused;
-    let workspace = workspace_of(stream_id).ok_or(refused)?;
-    let own = records.iter().filter(|r| {
-        StreamId::parse(&r.stream_id).is_some_and(|s| s.stream_type() == StreamType::Control)
-            && workspace_of(&r.stream_id) == Some(workspace)
-    });
-    let found = match request {
-        StartRequest::Genesis => (from_seq == 1).then_some(Digest::ZERO),
-        StartRequest::Manifest { manifest_hash } => own
-            .filter(|r| r.event_type == "SegmentExported")
-            .filter_map(|r| parse(&r.body).ok())
-            .filter_map(|b| b.get("payload").cloned())
-            .find(|p| {
-                digest_at(p, "manifest_hash") == Some(manifest_hash)
-                    && p.get("stream_id").and_then(Value::as_str) == Some(stream_id)
-                    && p.get("first_seq").and_then(Value::as_int) == Some(from_seq)
-            })
-            .and_then(|p| digest_at(&p, "first_prev_hash")),
-        StartRequest::Anchor { anchor_event_id } => {
-            let leaf_seq = from_seq.checked_sub(1).ok_or(refused)?;
-            own.filter(|r| r.event_type == "AnchorComputed" && r.event_id == anchor_event_id)
-                .filter_map(|r| parse(&r.body).ok())
-                .filter_map(|b| b.get("payload").cloned())
-                .filter(|p| p.get("token").is_some_and(|t| *t != Value::Null))
-                .find_map(|p| {
-                    let leaves = p.get("leaves").and_then(Value::as_array)?;
-                    let leaf = leaves.iter().find(|l| {
-                        l.get("stream_id").and_then(Value::as_str) == Some(stream_id)
-                            && l.get("seq").and_then(Value::as_int) == Some(leaf_seq)
-                    })?;
-                    digest_at(leaf, "hash")
-                })
-        }
-    };
-    found
-        .map(|prev_hash| TrustedStart {
-            from_seq,
-            prev_hash,
-        })
-        .ok_or(refused)
 }
 
 /// What [`resolve_start_from_rows`] found (DEC-893 item 4): a start ready to walk from, or a
@@ -141,8 +87,9 @@ impl ManifestStart {
 }
 
 /// §9.14's lookup over the stored `rows` of the control stream of `stream_id`'s own workspace
-/// (DEC-893): exactly one row must match `request`, by its columns and its body's `payload`, as
-/// [`resolve_trusted_start`] matches records, and more than one refuses (item 7). That row must
+/// (DEC-893): exactly one row must match `request`, by its columns and its body's `payload`, and
+/// more than one refuses (item 7): a segment of `stream_id` whose `first_seq` is `from_seq`, or a
+/// stamped anchor with a leaf for `stream_id` at `from_seq − 1`. That row must
 /// pass §11 checks 2 and 4, a `SegmentExported` rule 117 too (item 1), and an `AnchorComputed`
 /// §11's root check (DEC-895 item 2); every candidate row, of the record type the request needs,
 /// must pass check 1 first, or the request is refused (DEC-895 item 1). No other check runs
@@ -217,7 +164,7 @@ impl Wanted<'_> {
         }
     }
 
-    /// §9.14's lookup on one candidate row, as [`resolve_trusted_start`] matches a record: a
+    /// §9.14's lookup on one candidate row, by its columns and its body's `payload`: a
     /// segment of `stream_id` from `from_seq` gives its `first_prev_hash`; a stamped anchor with
     /// this `event_id` column gives the `hash` of its leaf for `stream_id` at `from_seq − 1`.
     fn start_in(
