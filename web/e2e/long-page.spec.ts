@@ -211,8 +211,7 @@ for (const width of [390, 1440]) {
     const sea = page.locator("[data-slot=long-page] [data-slot=pixel-sea]");
     await sea.scrollIntoViewIfNeeded();
     await expect(sea).toHaveAttribute("aria-hidden", "true");
-    const shown = sea.locator("[data-slot=sea-crests]:visible");
-    await expect(shown).toHaveCount(1);
+    expect(await sea.locator("[data-slot=sea-wave]:visible").count(), "rows of waves down to the bottom of the sea").toBeGreaterThan(10);
     const water = (await sea.boundingBox())!;
     const shot = (await page.locator("[data-slot=shot][data-shot=agent]").boundingBox())!;
     expect(water.y, "the sea starts above the picture").toBeLessThan(shot.y);
@@ -221,16 +220,27 @@ for (const width of [390, 1440]) {
     expect(words.y + words.height, "the line under the buttons sits above the sea").toBeLessThanOrEqual(water.y);
     const onTop = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-shot=agent]") !== null, [shot.x + shot.width / 2, shot.y + shot.height / 2]);
     expect(onTop, "the picture sits over the sea").toBe(true);
-    expect(await shown.evaluate((el) => el.getAnimations().length), "the crests rest with motion reduced").toBe(0);
+    expect(await sea.evaluate((el) => el.getAnimations({ subtree: true }).length), "the sea rests with motion reduced").toBe(0);
+    expect(await risen(page), "the moon rests half risen").toBeCloseTo(0.5, 2);
   });
 }
 
-test("with motion allowed, the sea's crests drift", async ({ page }) => {
+/** How much of the moon stands above the horizon, 0 to 1. */
+const risen = (page: Page) =>
+  page.locator("[data-slot=long-page] [data-slot=pixel-sea]").evaluate((sea) => {
+    const moon = [...sea.querySelectorAll("[data-slot=sea-moon]")].map((m) => m.getBoundingClientRect()).find((r) => r.width > 0)!;
+    return (sea.getBoundingClientRect().top - moon.top) / moon.height;
+  });
+
+test("with motion allowed, the water moves and the moon rises out of it as the opening comes into view", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
-  const crests = page.locator("[data-slot=pixel-sea] [data-slot=sea-crests]:visible");
-  await crests.scrollIntoViewIfNeeded();
-  expect(await crests.evaluate((el) => el.getAnimations().length)).toBeGreaterThan(0);
+  const sea = page.locator("[data-slot=long-page] [data-slot=pixel-sea]");
+  await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - window.innerHeight + 20, behavior: "instant" }));
+  await expect.poll(() => risen(page), "the moon is still under the water as the sea comes in").toBeLessThan(0.3);
+  await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 200, behavior: "instant" }));
+  await expect.poll(() => risen(page), "and half risen once the opening is in view").toBeCloseTo(0.5, 2);
+  expect(await sea.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === "running").length)).toBeGreaterThan(5);
 });
 
 test("the lock screen behind the notification is a night in pixels, and the notification stays readable over it", async ({ page }) => {
