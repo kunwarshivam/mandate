@@ -33,11 +33,43 @@ function problem(status: Status): string | null {
   }
 }
 
+type Look = "guestbook" | "page";
+
+/**
+ * How the form is drawn: as a dialog of the late 1990s in the guestbook's window, or in the long
+ * page's own type under the desktop (DEC-907). Both send the same request.
+ */
+const LOOKS: Record<Look, { face: string; field: string; roles: string; role: string; button: string; problem: string; submit: string; sending: string }> = {
+  guestbook: {
+    face: PIXEL,
+    field: FIELD,
+    roles: cn(SUNKEN, "grid gap-1.5 px-3 pt-1 pb-3"),
+    role: "flex w-fit cursor-pointer items-center gap-2",
+    button: BUTTON,
+    problem: "border border-foreground bg-warning-soft",
+    submit: "Sign the guestbook",
+    sending: "Signing...",
+  },
+  page: {
+    face: "",
+    field:
+      "h-12 w-full max-w-[26rem] rounded-full bg-card px-5 text-[1.0625rem] text-foreground ring-1 ring-foreground/25 outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring",
+    roles: "flex flex-wrap gap-2",
+    role: "flex cursor-pointer items-center gap-2 rounded-full px-3.5 py-2 text-[0.9375rem] ring-1 ring-foreground/25 has-checked:bg-foreground has-checked:text-background has-checked:ring-foreground has-focus-visible:ring-3 has-focus-visible:ring-ring",
+    button:
+      "inline-flex h-12 items-center rounded-full bg-foreground px-6 text-[1rem] font-semibold text-background outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60",
+    problem: "rounded-xl bg-warning-soft ring-1 ring-foreground/25",
+    submit: "Ask for a place",
+    sending: "Sending...",
+  },
+};
+
 /**
  * The private beta's request form, set as a dialog: an email, an optional answer, and one button. `id`
  * prefixes its element ids, so a second copy (the page's no-script fallback) never repeats them.
  */
-export function BetaForm({ id = "beta", className }: { id?: string; className?: string }) {
+export function BetaForm({ id = "beta", look = "guestbook", className }: { id?: string; look?: Look; className?: string }) {
+  const style = LOOKS[look];
   const [status, setStatus] = useState<Status>("idle");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<BetaRole | null>(null);
@@ -61,7 +93,7 @@ export function BetaForm({ id = "beta", className }: { id?: string; className?: 
 
   if (status === "done") {
     return (
-      <div role="status" className={cn("grid gap-2 text-base", PIXEL, className)} data-slot="beta-done">
+      <div role="status" className={cn("grid gap-2 text-base", style.face, className)} data-slot="beta-done">
         <p className="font-semibold">Thank you. You&apos;re on the list.</p>
         <p>
           We&apos;ll write to <strong className="font-medium">{email.trim()}</strong> when your place opens.
@@ -73,10 +105,16 @@ export function BetaForm({ id = "beta", className }: { id?: string; className?: 
   const message = problem(status);
 
   return (
-    <form onSubmit={submit} className={cn("relative grid gap-5 text-base", PIXEL, className)} data-slot="beta-form">
+    <form onSubmit={submit} className={cn("relative grid gap-5 text-base", style.face, className)} data-slot="beta-form">
       <p className="grid gap-1.5">
         <label htmlFor={`${id}-email`}>
-          <span className="underline">E</span>mail address:
+          {look === "guestbook" ? (
+            <>
+              <span className="underline">E</span>mail address:
+            </>
+          ) : (
+            "Email address"
+          )}
         </label>
         <input
           id={`${id}-email`}
@@ -90,15 +128,15 @@ export function BetaForm({ id = "beta", className }: { id?: string; className?: 
           onChange={(event) => setEmail(event.target.value)}
           aria-invalid={status === "email" || undefined}
           aria-describedby={message ? `${id}-problem` : undefined}
-          className={FIELD}
+          className={style.field}
         />
       </p>
 
-      <fieldset className={cn(SUNKEN, "grid gap-1.5 px-3 pt-1 pb-3")}>
-        <legend className="px-1">What would you use it for? (optional)</legend>
+      <fieldset className={style.roles}>
+        <legend className={look === "guestbook" ? "px-1" : "mb-2.5 text-[0.9375rem] text-muted-foreground"}>What would you use it for? (optional)</legend>
         {BETA_ROLES.map((value) => (
-          <label key={value} className="flex w-fit cursor-pointer items-center gap-2">
-            <input type="radio" name="role" value={value} checked={role === value} onChange={() => setRole(value)} className="size-3.5 accent-foreground" />
+          <label key={value} className={style.role}>
+            <input type="radio" name="role" value={value} checked={role === value} onChange={() => setRole(value)} className={look === "guestbook" ? "size-3.5 accent-foreground" : "sr-only"} />
             {ROLE_LABELS[value]}
           </label>
         ))}
@@ -111,14 +149,14 @@ export function BetaForm({ id = "beta", className }: { id?: string; className?: 
 
       <div className="grid gap-3">
         <p>
-          <button type="submit" disabled={status === "sending"} className={BUTTON}>
-            {status === "sending" ? "Signing..." : "Sign the guestbook"}
+          <button type="submit" disabled={status === "sending"} className={style.button}>
+            {status === "sending" ? style.sending : style.submit}
           </button>
         </p>
         <p
           id={`${id}-problem`}
           role="status"
-          className={message ? "flex max-w-[22rem] items-start gap-2 border border-foreground bg-warning-soft px-3 py-2" : "sr-only"}
+          className={message ? cn("flex max-w-[22rem] items-start gap-2 px-3 py-2", style.problem) : "sr-only"}
           data-slot={message ? "beta-problem" : undefined}
         >
           {message && <WarningDiamond aria-hidden className="size-6 shrink-0" />}
