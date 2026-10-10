@@ -12,7 +12,9 @@
   tests, and the interleaving property; DEC-876's two-`replaces` tests and its interleaving
   property are pending E7-6, each with a `xtask/behaviour-only/` row),
   `crates/mandate-robinhood/tests/scope.rs` (C2, CN-8 and DEC-875: the byte-equal account
-  check, run afresh on every read, the filtered reads, and rule 13's exits beside them), and
+  check, run afresh on every read, the filtered reads, the shorter-prefix and empty near misses,
+  and rule 13's exits beside them; DEC-879's filter-key allowlist test is pending E7-6, with a
+  `xtask/behaviour-only/` row), and
   `crates/mandate-rh-sim/tests/robinhood.rs` (`Submit` against `SimServer` over loopback: review
   then place, a deduplicated re-send, LT-6's lost and garbled answers, LT-5's alerts, `Cancel`
   by `order_id`, what the profile does not offer, and a cancel after a restart by

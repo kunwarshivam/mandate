@@ -3,8 +3,11 @@
 //! when the list shows exactly one agentic account, under the recorded number, listed once; a read
 //! whose arguments name another account is refused with nothing called; records naming another
 //! account are dropped; a record naming none refuses the read; and none of it holds an exit on
-//! the agentic account (`AGENTS.md` rule 13). Oracles: outcomes computed from the generated
-//! account choices, and a recording tool double. The account fingerprint (CN-5) is not C2's.
+//! the agentic account (`AGENTS.md` rule 13). A shorter prefix of the recorded number, and an
+//! empty or blank one, is a near miss like any other (DEC-875 item 3). A filter key the read's
+//! tool does not list is refused with nothing called (DEC-879, pending E7-6). Oracles: outcomes
+//! computed from the generated account choices, the contract's parameters written out here, and a
+//! recording tool double. The account fingerprint (CN-5) is not C2's.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -437,4 +440,156 @@ fn every_read_checks_the_account_list_afresh() {
         tools,
         ["get_accounts", "get_equity_positions", "get_accounts"]
     );
+}
+
+/// Near misses of the recorded number that are strict prefixes of it, before and after trimming
+/// and ASCII lower-casing, and the empty and blank numbers, which are prefixes of every number
+/// (DEC-875 item 3; the #1246 review's minors 1 and 2). None of them names another account.
+const SHORTER: [&str; 6] = ["5QR0000", "5qr0000", " 5QR0000 ", "5", "", "   "];
+
+/// A filter naming a shorter prefix of the recorded number, or an empty or blank one, is
+/// `OtherAccount` with nothing called; a record naming one refuses the read rather than being
+/// dropped as another account's; and in the account list none of them stands for the recorded
+/// account or rescues it (DEC-875 items 1 and 3).
+#[test]
+fn a_shorter_prefix_or_an_empty_number_is_a_near_miss_never_another_account() {
+    for named in SHORTER {
+        for read in READS {
+            let (c, calls) = connector(&[
+                ("get_accounts", accounts(&[(0, true)])),
+                (tool_of(read), read_answer(read, &[0])),
+            ]);
+            let filters = object(json!({ "account_number": named }));
+            let refused = ready(c.read(read, &filters));
+            assert_eq!(refused, Err(OTHER), "{read:?} filter {named:?}");
+            assert!(
+                calls.borrow().is_empty(),
+                "{read:?} {named:?}: nothing called"
+            );
+        }
+        let ours = json!({"account_number": OURS, "tag": 0});
+        let near = json!({"account_number": named, "tag": 1});
+        let answers = [
+            (AccountRead::Portfolio, content(near.clone())),
+            (
+                AccountRead::Positions,
+                content(json!({ "positions": [ours, near] })),
+            ),
+            (
+                AccountRead::Orders,
+                content(json!({ "orders": [near, ours] })),
+            ),
+        ];
+        for (read, answer) in answers {
+            let (c, calls) = connector(&[
+                ("get_accounts", accounts(&[(0, true)])),
+                (tool_of(read), answer),
+            ]);
+            let outcome = ready(c.read(read, &Map::new()));
+            unreadable(&outcome, &format!("{read:?} record {named:?}"));
+            let sent = calls.borrow().last().cloned();
+            let exact = json!({ "account_number": OURS });
+            let expected = (CallClass::Ordinary, tool_of(read), exact);
+            assert_eq!(
+                sent,
+                Some(expected),
+                "{named:?}: called with the exact number"
+            );
+        }
+        let near_list = |ours_allowed: bool| {
+            let records = json!([
+                {"account_number": named, "agentic_allowed": true},
+                {"account_number": OURS, "agentic_allowed": ours_allowed},
+            ]);
+            content(json!({ "accounts": records }))
+        };
+        let lists = [
+            (near_list(false), RobinhoodError::NoAgenticAccount),
+            (near_list(true), RobinhoodError::AmbiguousAgenticAccount),
+        ];
+        for (list, error) in lists {
+            let (c, _) = connector(&[("get_accounts", list)]);
+            assert_eq!(ready(c.agentic_account()), Err(error), "{named:?}");
+        }
+    }
+}
+
+/// The filter keys each read's tool takes besides `account_number` (DEC-879 item 1), written out
+/// here from the contract's parameters rather than read from the connector.
+fn listed_keys(read: AccountRead) -> &'static [&'static str] {
+    match read {
+        AccountRead::Portfolio | AccountRead::Positions => &[],
+        AccountRead::Orders => &[
+            "order_id",
+            "state",
+            "symbol",
+            "created_at_gte",
+            "placed_agent",
+            "cursor",
+        ],
+    }
+}
+
+/// Every key a tool lists reaches it as given, beside the recorded `account_number` (DEC-879
+/// item 1): the allowlist refuses only what the contract does not list.
+#[test]
+fn every_listed_filter_key_reaches_its_tool_as_given() {
+    for read in READS {
+        let (c, calls) = connector(&[
+            ("get_accounts", accounts(&[(0, true)])),
+            (tool_of(read), read_answer(read, &[0])),
+        ]);
+        let mut filters = Map::new();
+        for key in listed_keys(read) {
+            filters.insert((*key).to_owned(), json!(format!("{key}-value")));
+        }
+        let outcome = ready(c.read(read, &filters));
+        let ours = object(json!({"account_number": OURS, "tag": 0}));
+        assert_eq!(outcome, Ok(vec![ours]), "{read:?}");
+        filters.insert("account_number".to_owned(), json!(OURS));
+        let sent = calls.borrow().last().cloned();
+        let expected = (CallClass::Ordinary, tool_of(read), Value::Object(filters));
+        assert_eq!(sent, Some(expected), "{read:?}");
+    }
+}
+
+/// DEC-879 item 1: a filter key the read's tool does not list, a spelling of `account_number`
+/// such as `accountNumber` or `account_id` included, is `UnlistedFilter` with nothing called,
+/// whether or not the recorded `account_number` stands beside it.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_filter_key_its_tool_does_not_list_is_refused_with_nothing_called() {
+    let spellings = [
+        "accountNumber",
+        "account_id",
+        "account_numbers",
+        "ACCOUNT_NUMBER",
+        " account_number",
+        "account",
+        "",
+    ];
+    let foreign = [
+        "ref_id", "tax_lots", "symbols", "limit", "Symbol", " cursor",
+    ];
+    let listed_elsewhere = ["symbol", "order_id", "state", "cursor", "placed_agent"];
+    for read in READS {
+        let (c, calls) = connector(&[
+            ("get_accounts", accounts(&[(0, true)])),
+            (tool_of(read), read_answer(read, &[0])),
+        ]);
+        let mut unlisted: Vec<&str> = spellings.iter().chain(&foreign).copied().collect();
+        if read != AccountRead::Orders {
+            unlisted.extend(listed_elsewhere);
+        }
+        for key in unlisted {
+            let alone = object(json!({ key: "x" }));
+            let beside = object(json!({ key: OURS, "account_number": OURS }));
+            for filters in [alone, beside] {
+                let refused = ready(c.read(read, &filters));
+                let expected = Err(RobinhoodError::UnlistedFilter);
+                assert_eq!(refused, expected, "{read:?} {filters:?}");
+            }
+        }
+        assert!(calls.borrow().is_empty(), "{read:?}: {:?}", calls.borrow());
+    }
 }
