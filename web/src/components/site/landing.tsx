@@ -16,7 +16,6 @@ import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
 export const SUBHEAD = "A trading agent for your own brokerage account. It does the reading and the watching, trades only inside rules you write, and writes down why it placed every order.";
-export const UPDATED = "5 October 2026";
 
 type Section = { id: string; title: string; body: ReactNode };
 
@@ -232,7 +231,6 @@ export function Landing() {
                 Sign in
               </Link>
             </p>
-            <p className="text-[0.9375rem] text-muted-foreground">Last updated {UPDATED}.</p>
           </header>
 
           <hr className={cn(RULE, "mx-4 sm:mx-8")} />
