@@ -5,11 +5,8 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { OwlheadWordmark } from "@/components/brand/Logo";
 import { LOGIN_PATH } from "@/lib/auth-routes";
 import { cn } from "@/lib/utils";
-import { PAGE_FORM_ID, PARTS, SIGN_UP_ID } from "./parts";
+import { PAGE_FORM_ID, SIGN_UP_ID } from "./parts";
 import styles from "./scroll.module.css";
-
-const PART_LINK =
-  "rounded-full px-3 py-1.5 text-[0.9375rem] font-medium whitespace-nowrap text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
 
 const ACCOUNT = "inline-flex h-9 items-center rounded-full px-4 text-[0.9375rem] font-semibold whitespace-nowrap outline-none focus-visible:ring-3 focus-visible:ring-ring";
 
@@ -23,7 +20,8 @@ export function toSignUp() {
 /**
  * The long page's bar, on the top edge of the sheet that rises over the desktop: it rides up with the
  * sheet and then sticks, so Sign in and Sign up stay in view once the desktop's own bar is covered
- * (DEC-906 item 8).
+ * (DEC-906 item 8). It carries the logo and those two alone, and lists none of the page's parts
+ * (DEC-908).
  */
 export function ScrollBar() {
   return (
@@ -34,18 +32,7 @@ export function ScrollBar() {
           <BrandOwl className="size-7" />
           <OwlheadWordmark title="" className="h-5 w-auto max-[380px]:hidden" />
         </a>
-        <nav aria-label="On this page" className="mx-auto max-lg:hidden">
-          <ul className="flex items-center">
-            {PARTS.map((p) => (
-              <li key={p.id}>
-                <a href={`#${p.id}`} className={PART_LINK}>
-                  {p.label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <div className="ms-auto flex items-center gap-1.5 lg:ms-0" data-slot="account-buttons">
+        <div className="ms-auto flex items-center gap-1.5" data-slot="account-buttons">
           <Link href={LOGIN_PATH} className={cn(ACCOUNT, "text-foreground hover:bg-muted")}>
             Sign in
           </Link>

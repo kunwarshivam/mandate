@@ -30,16 +30,22 @@ afterEach(() => {
 });
 
 describe("the long page's structure", () => {
-  it("gives every part in the bar a section labelled by its h2, and the bar's links land on them", () => {
+  it("gives every part a section labelled by its h2", () => {
     render(<LongPage />);
-    const nav = screen.getByRole("navigation", { name: "On this page" });
-    for (const part of PARTS) {
-      const section = document.getElementById(part.id);
-      expect(section?.tagName, part.id).toBe("SECTION");
+    for (const id of PARTS) {
+      const section = document.getElementById(id);
+      expect(section?.tagName, id).toBe("SECTION");
       const heading = within(section!).getAllByRole("heading", { level: 2 })[0]!;
       expect(section!.getAttribute("aria-labelledby")).toBe(heading.id);
-      expect(within(nav).getByRole("link", { name: part.label }).getAttribute("href")).toBe(`#${part.id}`);
     }
+  });
+
+  it("lists none of the parts in the bar: only the logo back to the desktop, Sign in and Sign up (DEC-908)", () => {
+    render(<LongPage />);
+    const bar = document.querySelector<HTMLElement>("[data-slot=page-bar]")!;
+    expect(within(bar).queryByRole("navigation")).toBeNull();
+    expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#desktop", LOGIN_PATH]);
+    expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign up"]);
   });
 
   it("links within the page only to ids that exist, and back up to the desktop", () => {
