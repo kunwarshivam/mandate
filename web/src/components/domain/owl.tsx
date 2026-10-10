@@ -1,10 +1,10 @@
 "use client";
 
-import { type CSSProperties, type RefObject, useEffect, useRef } from "react";
+import { type CSSProperties, type ReactNode, type RefObject, createContext, useContext, useEffect, useId, useRef } from "react";
 import { AnimatePresence, type MotionValue, motion, useReducedMotion, useReducedMotionConfig, useSpring, useTransform } from "motion/react";
 import type { Agent, AgentMode } from "@/fixtures/types";
 import { cn } from "@/lib/utils";
-import { EYE_ROW, type OwlMood, type OwlRect, PX, beakFor, bodyRects, eyeRects, owlShape } from "./owl-sprite";
+import { EYE_ROW, type OwlMood, type OwlRect, PX, beakFor, bodyRects, eyeRects, owlSeed, owlShape } from "./owl-sprite";
 
 export { FEATHERS, beakFor, owlRows, owlSeed, owlShape, type OwlMood, type OwlShape } from "./owl-sprite";
 
@@ -34,6 +34,44 @@ const REACH = PX;
 /** Past this distance from the owl, in CSS pixels, the pupils are at full reach. */
 const FAR = 240;
 const SPRING = { stiffness: 220, damping: 22, mass: 0.6 };
+
+/** How one owl of many carries itself: its blink, how fast its eyes turn, how long it takes to notice the pointer, and how often it looks away. */
+export type OwlMind = {
+  blink: { every: number; offset: number };
+  spring: { stiffness: number; damping: number; mass: number };
+  /** Milliseconds before it turns to where the pointer went. */
+  lag: number;
+  /** Milliseconds, on average, between glances elsewhere. */
+  rest: number;
+};
+
+const tenths = (n: number) => Math.round(n * 10) / 10;
+
+/** The temperament `key` gives an owl, the same for the same key, on the server and in the browser. */
+export function mindOf(key: string): OwlMind {
+  const a = owlSeed(key);
+  const b = owlSeed(`${key}:mind`);
+  const unit = (h: number, shift: number) => ((h >>> shift) & 0xff) / 255;
+  const every = tenths(3.2 + unit(a, 0) * 4.4);
+  return {
+    blink: { every, offset: Math.min(tenths(unit(a, 8) * every), tenths(every - 0.1)) },
+    spring: { stiffness: Math.round(110 + unit(a, 16) * 230), damping: Math.round(14 + unit(a, 24) * 14), mass: 0.6 },
+    lag: Math.round(unit(b, 0) * 420),
+    rest: Math.round(2400 + unit(b, 8) * 6400),
+  };
+}
+
+const OwnMindContext = createContext(false);
+
+/**
+ * Owls with minds of their own (DEC-906). Inside it every owl, even many of one seed, as the logo's
+ * owls all are, blinks on its own rhythm, turns to the pointer at its own pace after its own pause,
+ * and now and then glances elsewhere, so a page of owls never moves as one. The landing page's
+ * desktop wears it; in the app an agent's owl keeps the rhythm its ID gives it.
+ */
+export function OwnMinds({ children }: { children: ReactNode }) {
+  return <OwnMindContext value={true}>{children}</OwnMindContext>;
+}
 
 /** One listener for every owl on the page, fired at most once a frame. */
 const watchers = new Set<(x: number, y: number) => void>();
@@ -65,15 +103,21 @@ function watchPointer(watcher: (x: number, y: number) => void): () => void {
 
 /**
  * Pupils that follow the pointer on a spring, `reach` viewBox units at most, and settle in the
- * middle when the pointer leaves or the eyes are shut. Reduced motion only gates the pointer here;
- * the stylesheet stops the rest, so the server's markup, which cannot know the preference, still
- * matches the client's.
+ * middle when the pointer leaves or the eyes are shut. Given a mind, they turn on its spring after its
+ * pause, and glance in a direction of their own every so often, for a second or so, before finding
+ * the pointer again. Reduced motion only gates the pointer here; the stylesheet stops the rest, so
+ * the server's markup, which cannot know the preference, still matches the client's.
  */
-export function useGaze(ref: RefObject<SVGSVGElement | null>, { reach, looking }: { reach: number; looking: boolean }): [MotionValue<number>, MotionValue<number>] {
+export function useGaze(
+  ref: RefObject<SVGSVGElement | null>,
+  { reach, looking, mind }: { reach: number; looking: boolean; mind?: OwlMind | null },
+): [MotionValue<number>, MotionValue<number>] {
   const reduced = useReducedMotion() ?? false;
   const tracking = looking && !reduced;
-  const gazeX = useSpring(0, SPRING);
-  const gazeY = useSpring(0, SPRING);
+  const gazeX = useSpring(0, mind?.spring ?? SPRING);
+  const gazeY = useSpring(0, mind?.spring ?? SPRING);
+  const lag = mind?.lag ?? 0;
+  const rest = mind?.rest ?? 0;
 
   useEffect(() => {
     if (!tracking) {
@@ -81,7 +125,11 @@ export function useGaze(ref: RefObject<SVGSVGElement | null>, { reach, looking }
       gazeY.jump(0);
       return;
     }
-    const stop = watchPointer((x, y) => {
+    let seen: { x: number; y: number } | null = null;
+    let glancing = false;
+    let noticing = 0;
+    let glance = 0;
+    const look = ({ x, y }: { x: number; y: number }) => {
       const box = ref.current?.getBoundingClientRect();
       if (!box || box.width === 0) return;
       const dx = x - (box.left + box.width / 2);
@@ -91,17 +139,51 @@ export function useGaze(ref: RefObject<SVGSVGElement | null>, { reach, looking }
       const pull = Math.min(distance / FAR, 1) * reach;
       gazeX.set((dx / distance) * pull);
       gazeY.set((dy / distance) * pull);
-    });
+    };
     const settle = () => {
+      seen = null;
       gazeX.set(0);
       gazeY.set(0);
     };
+    const stop = watchPointer((x, y) => {
+      seen = { x, y };
+      if (glancing) return;
+      if (lag === 0) return look(seen);
+      if (noticing) return;
+      noticing = window.setTimeout(() => {
+        noticing = 0;
+        if (seen && !glancing) look(seen);
+      }, lag);
+    });
+    const wander = () => {
+      glance = window.setTimeout(
+        () => {
+          glancing = true;
+          const turn = Math.random() * Math.PI * 2;
+          gazeX.set(Math.cos(turn) * reach);
+          gazeY.set(Math.sin(turn) * reach);
+          glance = window.setTimeout(
+            () => {
+              glancing = false;
+              if (seen) look(seen);
+              else settle();
+              wander();
+            },
+            600 + Math.random() * 900,
+          );
+        },
+        rest * (0.5 + Math.random()),
+      );
+    };
+    if (rest > 0) wander();
     document.documentElement.addEventListener("pointerleave", settle);
     return () => {
       stop();
+      window.clearTimeout(noticing);
+      window.clearTimeout(glance);
       document.documentElement.removeEventListener("pointerleave", settle);
     };
-  }, [tracking, reach, ref, gazeX, gazeY]);
+  }, [tracking, reach, ref, gazeX, gazeY, lag, rest]);
 
   return [gazeX, gazeY];
 }
@@ -175,8 +257,11 @@ export function Owl({
   style?: CSSProperties;
 }) {
   const shape = owlShape(seed);
+  const instance = useId();
+  const mind = useContext(OwnMindContext) ? mindOf(`${seed}${instance}`) : null;
+  const blink = mind?.blink ?? shape.blink;
   const ref = useRef<SVGSVGElement>(null);
-  const [gazeX, gazeY] = useGaze(ref, { reach: REACH, looking: !still && looks(mood) });
+  const [gazeX, gazeY] = useGaze(ref, { reach: REACH, looking: !still && looks(mood), mind });
   const snapX = useTransform(gazeX, (v) => Math.round(v / PX) * PX);
   const snapY = useTransform(gazeY, (v) => Math.round(v / PX) * PX);
   const feathers = featherOverride ?? shape.feathers;
@@ -191,7 +276,7 @@ export function Owl({
       data-mood={mood}
       data-still={still ? "" : undefined}
       className={cn("shrink-0 overflow-visible", className)}
-      style={{ "--owl-blink": `${shape.blink.every}s`, "--owl-blink-offset": `-${shape.blink.offset}s`, ...style } as CSSProperties}
+      style={{ "--owl-blink": `${blink.every}s`, "--owl-blink-offset": `-${blink.offset}s`, ...style } as CSSProperties}
     >
       <g className="owl-body" shapeRendering="crispEdges">
         <Rects rects={bodyRects(shape, feathers, beak)} />

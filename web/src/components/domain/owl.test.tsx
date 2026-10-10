@@ -1,10 +1,11 @@
-import { render } from "@testing-library/react";
-import { MotionConfig } from "motion/react";
+import { useRef } from "react";
+import { act, render } from "@testing-library/react";
+import { MotionConfig, type MotionValue } from "motion/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentMode } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
-import { AgentOwl, FEATHERS, HatchingOwl, Owl, beakFor, moodFor, owlRows, owlShape } from "./owl";
+import { AgentOwl, FEATHERS, HatchingOwl, Owl, type OwlMind, OwnMinds, beakFor, mindOf, moodFor, owlRows, owlShape, useGaze } from "./owl";
 
 const MODES: AgentMode[] = ["normal", "exits_only", "paused", "stopped"];
 
@@ -122,5 +123,94 @@ describe("an agent's owl", () => {
         if (v && v !== "none") expect(v, attr).toMatch(/^var\(--[a-z0-9-]+\)$/);
       }
     }
+  });
+});
+
+describe("owls with minds of their own (DEC-906)", () => {
+  const rhythm = (svg: Element) => `${(svg as SVGElement).style.getPropertyValue("--owl-blink")} ${(svg as SVGElement).style.getPropertyValue("--owl-blink-offset")}`;
+  const flock = (n: number) => Array.from({ length: n }, (_, i) => <Owl key={i} seed="owlhead" mood="awake" />);
+
+  it("gives every owl of one seed its own blink inside, and the seed's one rhythm outside", () => {
+    const own = render(<OwnMinds>{flock(6)}</OwnMinds>).container.querySelectorAll("svg[data-slot=owl]");
+    expect(new Set([...own].map(rhythm)).size, "six logo owls, six rhythms").toBe(6);
+    const { every, offset } = owlShape("owlhead").blink;
+    const plain = render(<>{flock(3)}</>).container.querySelectorAll("svg[data-slot=owl]");
+    for (const svg of plain) expect(rhythm(svg)).toBe(`${every}s -${offset}s`);
+  });
+
+  it("draws the same minds on the server and in the browser, so the page hydrates as it was sent", () => {
+    const sent = renderToStaticMarkup(<OwnMinds>{flock(4)}</OwnMinds>);
+    expect(renderToStaticMarkup(<OwnMinds>{flock(4)}</OwnMinds>)).toBe(sent);
+  });
+
+  it("keeps each temperament in bounds: a blink every few seconds, a spring that settles, a pause under half a second, a glance every few seconds", () => {
+    const minds = Array.from({ length: 300 }, (_, i) => mindOf(`owlhead«r${i}»`));
+    expect(mindOf("owlhead«r1»")).toEqual(mindOf("owlhead«r1»"));
+    for (const m of minds) {
+      expect(m.blink.every).toBeGreaterThanOrEqual(3.2);
+      expect(m.blink.every).toBeLessThanOrEqual(7.6);
+      expect(m.blink.offset).toBeGreaterThanOrEqual(0);
+      expect(m.blink.offset).toBeLessThan(m.blink.every);
+      expect(m.spring.stiffness).toBeGreaterThanOrEqual(110);
+      expect(m.spring.stiffness).toBeLessThanOrEqual(340);
+      expect(m.spring.damping).toBeGreaterThanOrEqual(14);
+      expect(m.lag).toBeGreaterThanOrEqual(0);
+      expect(m.lag).toBeLessThanOrEqual(420);
+      expect(m.rest).toBeGreaterThanOrEqual(2400);
+      expect(m.rest).toBeLessThanOrEqual(8800);
+    }
+    expect(new Set(minds.map((m) => m.blink.every)).size).toBeGreaterThan(20);
+    expect(new Set(minds.map((m) => m.lag)).size).toBeGreaterThan(50);
+  });
+
+  describe("the gaze", () => {
+    afterEach(() => vi.useRealTimers());
+
+    function watch(mind: OwlMind) {
+      const seen: { gaze?: [MotionValue<number>, MotionValue<number>] } = {};
+      function Eyes() {
+        const ref = useRef<SVGSVGElement>(null);
+        seen.gaze = useGaze(ref, { reach: 4, looking: true, mind });
+        return <svg ref={ref} />;
+      }
+      render(<Eyes />);
+      const svg = document.querySelector("svg")!;
+      svg.getBoundingClientRect = () => ({ left: 100, top: 100, width: 40, height: 40, right: 140, bottom: 140, x: 100, y: 100, toJSON: () => ({}) });
+      const [x, y] = seen.gaze!;
+      const setX = vi.spyOn(x, "set");
+      const setY = vi.spyOn(y, "set");
+      return { setX, setY };
+    }
+
+    const MIND: OwlMind = { blink: { every: 4, offset: 1 }, spring: { stiffness: 200, damping: 20, mass: 0.6 }, lag: 300, rest: 2000 };
+
+    it("turns to the pointer only after its own pause", () => {
+      vi.useFakeTimers();
+      const { setX } = watch(MIND);
+      act(() => {
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 900, clientY: 120 }));
+        vi.advanceTimersByTime(20);
+      });
+      expect(setX, "not yet: it has not noticed").not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(MIND.lag));
+      expect(setX).toHaveBeenLastCalledWith(4);
+    });
+
+    it("glances somewhere of its own now and then, and comes back to the pointer", () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      const { setX, setY } = watch({ ...MIND, lag: 0 });
+      act(() => {
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 900, clientY: 120 }));
+        vi.advanceTimersByTime(20);
+      });
+      expect(setX).toHaveBeenLastCalledWith(4);
+      act(() => vi.advanceTimersByTime(MIND.rest));
+      expect(setX, "half a turn: it looks the other way").toHaveBeenLastCalledWith(-4);
+      expect(setY.mock.lastCall?.[0]).toBeCloseTo(0);
+      act(() => vi.advanceTimersByTime(1100));
+      expect(setX, "and back to the pointer").toHaveBeenLastCalledWith(4);
+      vi.mocked(Math.random).mockRestore();
+    });
   });
 });
