@@ -246,7 +246,6 @@ fn queried(ran: &common::Ran, id: &str) -> bool {
 /// not hold, it stays `Accepted` and still covers the 10, and the run is clean. The legs' own
 /// `client_order_id`s, the broker's, are not external activity (item 4).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_filled_brackets_legs_listed_under_its_entry_keep_their_placement() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -499,7 +498,6 @@ fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<Brok
 /// OCO that is itself absent, whatever its entry lists: it has its own `OrderSubmitted` and is
 /// found by its own id or not at all.
 #[test]
-#[ignore = "pending E7-4"]
 fn only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -554,7 +552,6 @@ fn only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement() {
 /// and its sequence's first step cancels the placement (§5.4's marketable exit sequence), rather
 /// than waiting on a placement the run made `Unknown`.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_risk_exit_after_the_reconciliation_is_never_held_by_the_legs() {
     let (ids, mandates, instruments, config) = (
         TestIds,
