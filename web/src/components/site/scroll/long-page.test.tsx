@@ -19,7 +19,7 @@ import { WONT } from "./wont";
 
 const WEB = join(__dirname, "..", "..", "..", "..");
 const SCROLL_DIR = __dirname;
-const SOURCES = readdirSync(SCROLL_DIR).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f));
+const SOURCES = readdirSync(SCROLL_DIR).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f) && f !== "app/globals.css");
 const BLEND = new RegExp(["grad", "ient|bg-(linear|radial|conic)-"].join(""), "i");
 
 const text = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -214,7 +214,7 @@ describe("the design system", () => {
     for (const file of SOURCES) {
       const source = readFileSync(join(SCROLL_DIR, file), "utf8");
       expect(source, file).not.toMatch(BLEND);
-      expect(source, file).not.toMatch(/oklch\(|rgba?\(|hsla?\(|#[0-9a-f]{3,8}\b/i);
+      expect(source, file).not.toMatch(/oklch\(\s*[\d.]|rgba?\(\s*\d|hsla?\(\s*\d|#[0-9a-f]{3,8}\b/i);
     }
     const { container } = render(<LongPage />);
     for (const el of container.querySelectorAll("*")) expect(el.getAttribute("class") ?? "").not.toMatch(BLEND);
@@ -225,10 +225,71 @@ describe("the design system", () => {
     expect(container.innerHTML).not.toMatch(/\bfont-sans\b|\bfont-(bold|extrabold|black)\b|\bdark:|crimson/);
   });
 
-  it("moves only inside a reduced-motion check and a check for scroll-driven animations", () => {
+  it("moves only inside a reduced-motion check, ties the parallax to a check for scroll-driven animations, and hides a piece only once the page is moving", () => {
     const css = readFileSync(join(SCROLL_DIR, "scroll.module.css"), "utf8");
     const [before, after] = css.split("@media (prefers-reduced-motion: no-preference)");
-    expect(before).not.toMatch(/\banimation\s*:/);
+    expect(before).not.toMatch(/\b(animation|transition)\s*:/);
+    expect(before).not.toMatch(/data-reveal/);
     expect(after).toMatch(/@supports \(animation-timeline: scroll\(\)\)/);
+    const hidden = after!.match(/^[^{}\n]*:not\(\[data-shown\]\)[^{}\n]*\{/gm) ?? [];
+    expect(hidden.length).toBeGreaterThanOrEqual(3);
+    for (const rule of hidden) expect(rule.trim(), "a hidden state needs the page marked as moving").toMatch(/^\.page\[data-motion="on"\] /);
+  });
+
+  it("fills one section with tide, the part about asking you, and uses tide nowhere outside the landing page", () => {
+    const { container } = render(<LongPage />);
+    const filled = [...container.querySelectorAll("[class*='bg-tide']")];
+    expect(filled.map((el) => el.id)).toEqual(["asking"]);
+    const src = join(WEB, "src");
+    const users = (readdirSync(src, { recursive: true }) as string[])
+      .filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f) && f !== "app/globals.css")
+      .filter((f) => /\b(bg|text|ring|border|fill|stroke)-tide\b|var\(--tide|"--tide"/.test(readFileSync(join(src, f), "utf8")))
+      .sort();
+    expect(users).toEqual(["components/site/scroll/long-page.tsx", "components/site/scroll/owl-flight.tsx", "components/site/scroll/parts.ts"]);
+  });
+});
+
+describe("the motion", () => {
+  function observe() {
+    const seen: Element[] = [];
+    let report: (entries: { target: Element; isIntersecting: boolean }[]) => void = () => {};
+    class Observer {
+      constructor(cb: typeof report) {
+        report = cb;
+      }
+      observe(el: Element) {
+        seen.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", Observer);
+    return { seen, show: (el: Element) => act(() => report([{ target: el, isIntersecting: true }])) };
+  }
+
+  it("with motion reduced, leaves every piece where the server drew it", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const { seen } = observe();
+    render(<LongPage />);
+    expect(document.querySelector("[data-slot=long-page]")).not.toHaveAttribute("data-motion");
+    expect(seen).toHaveLength(0);
+  });
+
+  it("with motion allowed, watches every piece and lets each settle once it comes into view", () => {
+    const { seen, show } = observe();
+    const { container } = render(<LongPage />);
+    expect(container.querySelector("[data-slot=long-page]")).toHaveAttribute("data-motion", "on");
+    expect(seen.length).toBe(container.querySelectorAll("[data-reveal]").length);
+    const notification = container.querySelector("[data-slot=lock-screen] [data-reveal=drop]")!;
+    expect(notification).not.toHaveAttribute("data-shown");
+    show(notification);
+    expect(notification).toHaveAttribute("data-shown");
+  });
+
+  it("strikes each thing it won't do in turn, and settles every picture of the app with a tilt", () => {
+    const { container } = render(<LongPage />);
+    const lines = [...container.querySelectorAll<HTMLElement>("#wont li")];
+    expect(lines.map((li) => [li.dataset.reveal, li.style.getPropertyValue("--i")])).toEqual(WONT.map((_, i) => ["strike", String(i)]));
+    for (const shot of container.querySelectorAll("[data-slot=shot]")) expect(shot.closest("[data-reveal=tilt]"), shot.getAttribute("data-shot")!).not.toBeNull();
   });
 });

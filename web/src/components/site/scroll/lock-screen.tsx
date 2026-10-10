@@ -13,7 +13,7 @@ export function LockScreen({ className }: { className?: string }) {
         <span aria-hidden className="absolute top-2.5 left-1/2 h-6 w-24 -translate-x-1/2 rounded-full bg-foreground" />
         <p className="text-[0.875rem] font-medium opacity-80">Friday, September 25</p>
         <p className="text-[4.25rem] leading-none font-semibold tracking-[-0.03em] tabular-nums">2:04</p>
-        <div className="mt-8 flex w-full items-start gap-2.5 rounded-2xl bg-card px-3 py-2.5 text-start text-foreground">
+        <div className="mt-8 flex w-full items-start gap-2.5 rounded-2xl bg-card px-3 py-2.5 text-start text-foreground" data-reveal="drop">
           <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background" style={{ color: "var(--logo)" }}>
             <BrandOwl still className="size-6" />
           </span>
