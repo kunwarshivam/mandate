@@ -57,6 +57,86 @@
   background: color-mix(in oklab, var(--background) 30%, transparent);
 }
 
+/*
+ * The Mac desktop (DEC-904): System 7's one-bit chrome over the same markup. Bevels become one-pixel
+ * ink boxes, windows and menus turn white with a hard shadow, and buttons round off, the default one
+ * ringed. These rules sit outside Tailwind's layers, so they win over its utilities.
+ */
+.frame:global([data-os="mac"]) {
+  --muted: var(--card);
+  --color-muted: var(--card);
+}
+
+:global([data-os="mac"]) .raised,
+:global([data-os="mac"]) .sunken {
+  border: 1px solid var(--foreground);
+}
+
+/* A Mac application's menus live in the menu bar, so the browser draws none in its window. */
+.frame:global([data-os="mac"]) :global([data-slot="browser-menus"]) {
+  display: none;
+}
+
+/* System 7's scroll bar: a grey track ruled off in ink, and a white box for a thumb. */
+:global([data-os="mac"]) .osWindow * {
+  scrollbar-color: auto;
+  scrollbar-width: auto;
+}
+
+:global([data-os="mac"]) .osWindow ::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+:global([data-os="mac"]) .osWindow ::-webkit-scrollbar-track {
+  background-color: color-mix(in oklab, var(--foreground) 22%, var(--card));
+  border-left: 1px solid var(--foreground);
+}
+
+:global([data-os="mac"]) .osWindow ::-webkit-scrollbar-thumb {
+  min-height: 24px;
+  background-color: var(--card);
+  border: 1px solid var(--foreground);
+}
+
+:global([data-os="mac"]) .osWindow ::-webkit-scrollbar-corner {
+  background-color: var(--card);
+}
+
+:global([data-os="mac"]) button.raised:active:not(:disabled) {
+  background-color: var(--foreground);
+  color: var(--card);
+}
+
+:global([data-os="mac"]) .osWindow,
+:global([data-os="mac"]) .menu {
+  background-color: var(--card);
+  box-shadow: 2px 2px 0 var(--foreground);
+}
+
+:global([data-os="mac"]) .osWindow {
+  padding: 0;
+}
+
+:global([data-os="mac"]) .button,
+:global([data-os="mac"]) .plainButton {
+  border-radius: 6px;
+  background-color: var(--card);
+  font-weight: 600;
+}
+
+:global([data-os="mac"]) .button {
+  box-shadow:
+    0 0 0 1px var(--card),
+    0 0 0 4px var(--foreground);
+}
+
+:global([data-os="mac"]) .button:active:not(:disabled),
+:global([data-os="mac"]) .plainButton:active:not(:disabled) {
+  background-color: var(--foreground);
+  color: var(--card);
+}
+
 /* The Display Properties monitor keeps a dark case in both themes. */
 .monitor {
   background: var(--foreground);

@@ -11,7 +11,7 @@ import { Printer } from "pixelarticons/react/Printer.js";
 import { Reload } from "pixelarticons/react/Reload.js";
 import { Search } from "pixelarticons/react/Search.js";
 import { cn } from "@/lib/utils";
-import { ETCHED, MENU_ITEM, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
+import { ETCHED, MENU_ITEM, MENU_PANEL, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { OpenAppContext } from "./open-app";
 import { type AppId, TASK } from "./windows";
 
@@ -172,7 +172,7 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
               {mnemonic}
             </button>
             {on && (
-              <div ref={list} role="menu" aria-label={m.label} onKeyDown={keys} className={cn(RAISED, "absolute top-full z-30 grid min-w-48 bg-muted py-1 ring-1 ring-foreground/70")} style={{ left }} data-slot="browser-menu">
+              <div ref={list} role="menu" aria-label={m.label} onKeyDown={keys} className={cn(MENU_PANEL, "absolute top-full z-30 grid min-w-48")} style={{ left }} data-slot="browser-menu">
                 {m.items.map((item, i) =>
                   item === "rule" ? (
                     <div key={`rule-${i}`} role="separator" className="mx-1 my-1 border-t border-b border-t-foreground/40 border-b-card" />

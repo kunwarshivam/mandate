@@ -16,11 +16,17 @@ export const FOCUS = "outline-none focus-visible:bg-highlight focus-visible:text
 
 export const LINK = `text-mandate-strong underline decoration-1 underline-offset-[0.15em] hover:bg-highlight hover:text-highlight-foreground ${FOCUS}`;
 
-/** Light on the top and left, dark on the bottom and right: a surface that stands out. */
-export const RAISED = "border-2 border-t-card border-l-card border-r-foreground/60 border-b-foreground/60";
+/** Light on the top and left, dark on the bottom and right: a surface that stands out. On the Mac desktop, a one-pixel ink box. */
+export const RAISED = `border-2 border-t-card border-l-card border-r-foreground/60 border-b-foreground/60 ${styles.raised}`;
 
 /** The reverse: a well that sinks in. */
-export const SUNKEN = "border-2 border-t-foreground/60 border-l-foreground/60 border-r-card border-b-card";
+export const SUNKEN = `border-2 border-t-foreground/60 border-l-foreground/60 border-r-card border-b-card ${styles.sunken}`;
+
+/** A window's frame: grey and bevelled on Windows, white with a hard ink shadow on the Mac. */
+export const WINDOW_FRAME = `${RAISED} bg-muted p-0.5 ring-1 ring-foreground/70 ${styles.osWindow}`;
+
+/** A dropped-down menu's panel, framed as a window is. */
+export const MENU_PANEL = `${RAISED} bg-muted py-1 ring-1 ring-foreground/70 ${styles.menu}`;
 
 export const RULE = "my-10 border-0 border-t border-b border-t-foreground/45 border-b-card sm:my-12";
 
@@ -32,9 +38,9 @@ export const BOLD = `${styles.pixel} text-[1.1em] leading-none font-semibold`;
 const BEVEL = `press inline-flex cursor-pointer items-center justify-center gap-1.5 ${RAISED} ${styles.pixel} active:border-t-foreground/60 active:border-l-foreground/60 active:border-r-card active:border-b-card disabled:cursor-wait disabled:opacity-70 outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground`;
 
 /** The default button: the same grey as every other, set apart by the extra ink ring a window's default button had. */
-export const BUTTON = `${BEVEL} h-9 min-w-32 bg-muted px-4 text-[0.9375rem] text-foreground ring-1 ring-foreground`;
+export const BUTTON = `${BEVEL} h-9 min-w-32 bg-muted px-4 text-[0.9375rem] text-foreground ring-1 ring-foreground ${styles.button}`;
 
-export const PLAIN_BUTTON = `${BEVEL} h-8 bg-muted px-3 text-[0.9375rem] text-foreground`;
+export const PLAIN_BUTTON = `${BEVEL} h-8 bg-muted px-3 text-[0.9375rem] text-foreground ${styles.plainButton}`;
 
 /** Typed text in the terminal face, as the address is, at 20px so a phone never zooms into the field. */
 export const FIELD = `h-9 w-full max-w-[22rem] ${SUNKEN} bg-card px-2 ${styles.mono} text-[1.25rem] leading-none text-foreground placeholder:text-muted-foreground outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:outline-foreground`;

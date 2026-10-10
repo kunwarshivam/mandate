@@ -1,49 +1,22 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Key } from "pixelarticons/react/Key.js";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { type Guide, LocationField, MenuBar, Toolbar } from "./browser-chrome";
-import { MONO, PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
+import { MONO, PIXEL, PLAIN_BUTTON, RAISED, SUNKEN, WINDOW_FRAME } from "./letter";
 import styles from "./letter.module.css";
 import { OpenApp } from "./open-app";
 import { StatusText } from "./status-text";
+import { TitleBar } from "./title-bar";
 
 export function Blink({ children }: { children: ReactNode }) {
   return <span className={styles.blink}>{children}</span>;
 }
 
-const WINDOW_BUTTONS = ["_", "□", "×"];
-
-export const WINDOW_BUTTON = cn(RAISED, "grid size-5 place-items-center bg-muted text-xs leading-none text-foreground");
-
-/**
- * A title bar from a 1990s desktop: dark while its window is in front, grey behind, with the three
- * buttons at the right. Without `controls`, the buttons are drawn and do nothing.
- */
-export function TitleBar({ title, icon, inactive, controls, className, ...rest }: { title: string; icon?: ReactNode; inactive?: boolean; controls?: ReactNode } & ComponentProps<"div">) {
-  return (
-    <div className={cn("flex h-7 shrink-0 items-center justify-between gap-3 ps-1.5 pe-0.5 text-[0.9375rem] text-card", inactive ? "bg-muted-foreground" : "bg-foreground", PIXEL, className)} {...rest}>
-      <span className="flex min-w-0 items-center gap-1.5">
-        {icon}
-        <span className="truncate">{title}</span>
-      </span>
-      {controls ?? (
-        <span aria-hidden className="flex shrink-0 gap-0.5">
-          {WINDOW_BUTTONS.map((glyph) => (
-            <span key={glyph} className={WINDOW_BUTTON}>
-              {glyph}
-            </span>
-          ))}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** A dialog window: the title bar and a grey body. */
+/** A dialog window: the title bar and its body. */
 export function Window({ title, icon, children, className }: { title: string; icon?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <div className={cn(RAISED, "bg-muted p-0.5 ring-1 ring-foreground/70", className)} data-slot="window">
+    <div className={cn(WINDOW_FRAME, className)} data-slot="window">
       <TitleBar title={title} icon={icon} />
       <div className="p-4 sm:p-5">{children}</div>
     </div>
