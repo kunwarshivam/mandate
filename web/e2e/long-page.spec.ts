@@ -204,6 +204,35 @@ test("with motion allowed, the thread is sewn on as the visitor reads down", asy
   await expect.poll(() => painted(page)).toBeGreaterThan(0);
 });
 
+for (const width of [390, 1440]) {
+  test(`${width} px: the opening's picture floats on a pixel sea that leaves the words on paper`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await open(page, width);
+    const sea = page.locator("[data-slot=long-page] [data-slot=pixel-sea]");
+    await sea.scrollIntoViewIfNeeded();
+    await expect(sea).toHaveAttribute("aria-hidden", "true");
+    const shown = sea.locator("[data-slot=sea-crests]:visible");
+    await expect(shown).toHaveCount(1);
+    const water = (await sea.boundingBox())!;
+    const shot = (await page.locator("[data-slot=shot][data-shot=agent]").boundingBox())!;
+    expect(water.y, "the sea starts above the picture").toBeLessThan(shot.y);
+    expect(water.y + water.height, "and runs below it").toBeGreaterThan(shot.y + shot.height);
+    const words = (await page.locator("[data-slot=reassure]").boundingBox())!;
+    expect(words.y + words.height, "the line under the buttons sits above the sea").toBeLessThanOrEqual(water.y);
+    const onTop = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-shot=agent]") !== null, [shot.x + shot.width / 2, shot.y + shot.height / 2]);
+    expect(onTop, "the picture sits over the sea").toBe(true);
+    expect(await shown.evaluate((el) => el.getAnimations().length), "the crests rest with motion reduced").toBe(0);
+  });
+}
+
+test("with motion allowed, the sea's crests drift", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await open(page, 1440);
+  const crests = page.locator("[data-slot=pixel-sea] [data-slot=sea-crests]:visible");
+  await crests.scrollIntoViewIfNeeded();
+  expect(await crests.evaluate((el) => el.getAnimations().length)).toBeGreaterThan(0);
+});
+
 test("the lock screen behind the notification is a night in pixels, and the notification stays readable over it", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, 1440);

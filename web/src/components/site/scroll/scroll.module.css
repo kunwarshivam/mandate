@@ -113,6 +113,17 @@
   --thread: var(--tide);
 }
 
+/* The opening's pixel sea (`pixel-sea.tsx`): the thread's knot on it is pale, as on tide. Its islands
+   and geese are ink by day and a muted grey by night, so they never vanish into a dark page. */
+.sea {
+  --thread: var(--tide-muted);
+  --sea-land: var(--foreground);
+}
+
+:global(html[data-mode="dark"]) .sea {
+  --sea-land: var(--muted-foreground);
+}
+
 .thread {
   position: fixed;
   top: 0;
@@ -156,6 +167,11 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* The sea's crests drift a cell a second, one tile every 48 seconds. */
+  .crests {
+    animation: drift 48s steps(48) infinite;
+  }
+
   /* A star on the lock screen's night blinks now and then. */
   .twinkle {
     animation: twinkle 3.1s steps(1) infinite;
@@ -301,6 +317,12 @@
   }
   to {
     translate: 0 6%;
+  }
+}
+
+@keyframes drift {
+  to {
+    transform: translateX(calc(-1 * var(--tile)));
   }
 }
 

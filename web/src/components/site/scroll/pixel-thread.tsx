@@ -113,7 +113,10 @@ export function rasterize(path: Point[], cell: number, radius = cell * 2): Point
   return cells;
 }
 
-/** The parts of the page from top to bottom, in page pixels, each with the thread's colour there. */
+/**
+ * The parts of the page, and the bands marked `data-thread-band` inside them, in page pixels, each
+ * with the thread's colour there; a band comes before the part it sits in, so its colour wins.
+ */
 interface Band {
   top: number;
   bottom: number;
@@ -135,7 +138,9 @@ export function PixelThread() {
     let colours = new Map<Element, string>();
 
     const readColours = () => {
-      colours = new Map([...page.querySelectorAll(":scope > section, :scope > footer")].map((el) => [el, getComputedStyle(el).getPropertyValue("--thread").trim()]));
+      const within = [...page.querySelectorAll("[data-thread-band]")];
+      const parts = [...page.querySelectorAll(":scope > section, :scope > footer")];
+      colours = new Map([...within, ...parts].map((el) => [el, getComputedStyle(el).getPropertyValue("--thread").trim()]));
     };
 
     const size = () => {

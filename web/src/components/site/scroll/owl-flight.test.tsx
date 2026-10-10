@@ -97,10 +97,14 @@ describe("its perches", () => {
     }
   });
 
-  it("wears its pale coat exactly where it stands on tide, so its ink never sinks into the teal", () => {
+  it("wears its pale coat exactly where it stands on tide or the opening's pixel sea, so its ink never sinks into the teal", () => {
     const { container } = render(<LongPage />);
+    const overSea = (el: HTMLElement) => {
+      for (let a = el.parentElement; a; a = a.parentElement) if ([...a.children].some((c) => c.matches("[data-slot=pixel-sea]"))) return true;
+      return false;
+    };
     for (const p of container.querySelectorAll<HTMLElement>("[data-perch]")) {
-      const onTide = p.closest(".bg-tide") !== null;
+      const onTide = p.closest(".bg-tide") !== null || overSea(p);
       expect(p.dataset.perchCoat, p.outerHTML.slice(0, 80)).toBe(onTide ? "pale" : "ink");
     }
   });

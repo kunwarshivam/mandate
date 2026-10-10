@@ -9,6 +9,7 @@ import { BetaForm } from "../beta-form";
 import { LockScreen } from "./lock-screen";
 import { OwlFlight } from "./owl-flight";
 import { DISPLAY, DISPLAY_MD, INTRO_ID, LEAD, LEAD_ON_TIDE, PAGE_FORM_ID, PRIMARY, SECONDARY, SIGN_UP_ID, WRAP } from "./parts";
+import { PixelSea } from "./pixel-sea";
 import { PixelThread } from "./pixel-thread";
 import { Plate } from "./plate";
 import { Reveals } from "./reveals";
@@ -120,14 +121,17 @@ export function LongPage() {
             Free during the beta. It starts on paper money.
           </p>
         </div>
-        <div className={cn(WRAP, "pt-24 sm:pt-28")} data-reveal="tilt">
-          <Shot
-            name="agent"
-            alt="Agent 1's page in Owlhead: equity of $10,123.45 on paper, its chart, and its limits in dollars beside it."
-            sizes="(min-width: 80rem) 74rem, 100vw"
-            className="mx-auto max-w-[74rem]"
-            perch={{ at: 0.86, yaw: -0.5 }}
-          />
+        <div className="relative">
+          <PixelSea className="absolute inset-x-0 top-14 bottom-0 sm:top-16" />
+          <div className={cn(WRAP, "pt-24 pb-12 sm:pt-28 sm:pb-20")} data-reveal="tilt">
+            <Shot
+              name="agent"
+              alt="Agent 1's page in Owlhead: equity of $10,123.45 on paper, its chart, and its limits in dollars beside it."
+              sizes="(min-width: 80rem) 74rem, 100vw"
+              className="mx-auto max-w-[74rem]"
+              perch={{ at: 0.86, yaw: -0.5, coat: "pale" }}
+            />
+          </div>
         </div>
         <div className={cn(WRAP, "py-16 sm:py-20")}>
           <dl className="flex flex-wrap items-baseline justify-center gap-x-12 gap-y-6" data-slot="brokers">
