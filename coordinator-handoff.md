@@ -78,6 +78,8 @@ anything here.
 **Approved, waiting on CI or merge:**
 - **#1169** (E7-28 implementation). Head `46f63d0b`.
 - **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
+- **#1275** (L2, links merged DECs in place of the stale "pending" words; docs only). Head `1b86398c`.
+- **#1276** (L5, `segment_rows_mismatch` tests; the implementation follows). Head `0832cfda`.
 
 **Needs action now:**
 1. **#1169** (E7-28 implementation): main merged in, resurrected rows and ignores re-deleted, and approved at `46f63d0b`. #1219 is closed as superseded. Nothing left except merging on green CI.
@@ -123,7 +125,7 @@ anything here.
   4. T2/I2: anchors, segments, incomplete.
   5. T3/I3: prefix bind, hold, connection, control.
   Before I2, a journal T/I pair adds `segment_rows_mismatch` to `CHECKS`/`RANGE_CHECKS` (L5, coordinated with L2).
-  L2 owes the pending spec text for DEC-892, DEC-889 and DEC-894.
+  The pending spec text for DEC-892, DEC-889 and DEC-894 is #1275.
 - **DEC numbers in use tonight:** 873–879 (coordinator), 878 (bracket legs), 879 (C2 allowlist), 896 (L5), 900–903
   (L2), 902 (C4, inside L2's range), 706 (L3). Reserve new numbers per the decisions README.
 
