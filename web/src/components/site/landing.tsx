@@ -2,16 +2,16 @@ import "./faces";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
 import { Contents } from "./contents";
 import { Desktop } from "./desktop";
 import type { AppId } from "./windows";
-import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
+import { BODY, BOLD, BUTTON, H2, LINK, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
 import { Blink, Browser, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
+import { Wordmark } from "./wordmark";
 
 export const HEADLINE = "Owlhead";
 export const SUBHEAD = "A trading agent for your own brokerage account. It does the reading and the watching, trades only inside rules you write, and writes down why it placed every order.";
@@ -207,9 +207,7 @@ export function Landing() {
           <header className="grid justify-items-center gap-4 px-4 pt-8 pb-2 text-center sm:px-8 sm:pt-12">
             <h1>
               <span className="sr-only">{HEADLINE}</span>
-              <span aria-hidden className={cn(MONO, "block text-start text-[clamp(10px,4vw,28px)] leading-[0.95] whitespace-pre text-foreground")}>
-                {OWLHEAD_ASCII}
-              </span>
+              <Wordmark />
             </h1>
             <Perch />
             <p className="max-w-[34rem] pt-2 text-[1.3125rem] leading-snug text-balance">{SUBHEAD}</p>

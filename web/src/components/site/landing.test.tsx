@@ -7,12 +7,12 @@ import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
 import { DISCARDED, QUESTIONS } from "./apps";
-import { OWLHEAD_ASCII } from "./ascii";
 import { GREETING, TIPS } from "./assistant";
 import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
 import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
 import { EDITED, TRACE } from "./record-trace";
+import { COLUMNS, GLYPHS, WORDMARK_TEXT } from "./wordmark";
 
 /**
  * The landing page (DEC-213): one homepage set as the web looked in the late 1990s. Real headings and
@@ -53,19 +53,27 @@ afterEach(() => {
 });
 
 describe("the landing page's structure", () => {
-  it("has one h1 named Owlhead, with the block letters hidden from assistive technology", () => {
+  it("has one h1 named Owlhead, with the bitmap wordmark hidden from assistive technology", () => {
     const { container } = renderLanding();
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s).toHaveLength(1);
     expect(h1s[0]).toHaveAccessibleName(HEADLINE);
-    expect(h1s[0].querySelector("[aria-hidden]")?.textContent).toBe(OWLHEAD_ASCII);
+    const mark = h1s[0].querySelector("[data-slot=wordmark]");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark?.querySelectorAll("path")).toHaveLength(2);
     expect(container).toHaveTextContent(SUBHEAD);
   });
 
-  it("sets the block letters upright, no wider than the slanted ones were, so they fit the hero", () => {
-    expect(OWLHEAD_ASCII).not.toMatch(/\/_\/ \//);
-    expect(OWLHEAD_ASCII).toMatch(/_{4}/);
-    expect(Math.max(...OWLHEAD_ASCII.split("\n").map((l) => l.length))).toBeLessThanOrEqual(49);
+  it("draws the wordmark in sentence case, nine pixels tall, as narrow as the old block letters", () => {
+    expect(WORDMARK_TEXT).toBe(HEADLINE);
+    for (const { char, rows } of GLYPHS) {
+      expect(rows, char).toHaveLength(9);
+      expect(new Set(rows.map((r) => r.length)).size, `${char}: every row the same width`).toBe(1);
+      expect(rows.join(""), char).toMatch(/^[.#]+$/);
+    }
+    const lowerTop = GLYPHS.filter((g) => ["w", "e", "a"].includes(g.char)).map((g) => g.rows.slice(0, 3).join(""));
+    lowerTop.forEach((top) => expect(top, "x-height letters leave the ascender rows empty").toMatch(/^\.+$/));
+    expect(COLUMNS).toBeLessThanOrEqual(56);
   });
 
   it("numbers every section and labels it by its heading", () => {
@@ -767,7 +775,7 @@ const LANDING_PAIRS = [
   { fg: "mandate-strong", bg: "card", use: "Links" },
   { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
   { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
-  { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the sun badge" },
+  { fg: "highlight-foreground", bg: "highlight", use: "The New tag, a hovered link and the sun badge" },
   { fg: "card", bg: "foreground", use: "Title bars, icon labels, the record's column heads and the ink badges" },
   { fg: "card", bg: "muted-foreground", use: "The title bars of windows behind the front one" },
   { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },
