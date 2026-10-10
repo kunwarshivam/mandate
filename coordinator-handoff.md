@@ -76,16 +76,11 @@ anything here.
 #1249, #1248, #1247, #1246, #1245, #1240.
 
 **Approved, waiting on CI or merge:**
+- **#1169** (E7-28 implementation). Head `46f63d0b`.
 - **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
 
 **Needs action now:**
-1. **#1169** (E7-28 implementation). #1234 has merged, so:
-   - merge `main` into `claude/live-e7-28-v2`;
-   - re-delete any resurrected `#[ignore = "pending E7-28"]` lines and the `ci_files` behaviour-only row;
-   - check that #1169's tests diff against main is only those deletions, and that the non-test patch-id matches
-     reviewed head `0ec45247`;
-   - approve.
-   Then **close #1219** as superseded by #1234.
+1. **#1169** (E7-28 implementation): main merged in, resurrected rows and ignores re-deleted, and approved at `46f63d0b`. #1219 is closed as superseded. Nothing left except merging on green CI.
 2. **#1269 + #1270** (bracket-leg tests correction and implementation; this unblocks FT-11 for E2). A Sonnet review
    was running when the old coordinator stopped. If neither body has a verdict, run one on both heads (`5ae5a217`,
    `9857dfc3`).
