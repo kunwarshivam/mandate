@@ -1,0 +1,10 @@
+file = "crates/mandate-cli/tests/journal_verify_connection_ranges.rs"
+test = "an_account_export_of_a_revocation_alone_reports_the_cause_check_not_run"
+reason = """
+E12-3, after #1231 (journal spec v0.37, DEC-888, DEC-890 item 4): `journal verify` and
+`verify-cold` are already implemented and print DEC-890's `not run` line from the CLI's own
+copies of the judged lists, whose account list lacks `ConnectionRevoked`, so this test fails on
+that answer rather than at a stub. The code PR that makes `cause_not_run` read
+`mandate_journal::JUDGED_ON_CONTROL` and `JUDGED_ON_ACCOUNT` deletes this file with the test's
+`#[ignore]` line.
+"""

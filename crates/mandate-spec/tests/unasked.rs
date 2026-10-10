@@ -311,6 +311,12 @@ fn reference_cases() -> Vec<Case> {
         Case { name: "a delegation that expired two days ago gives nothing", model: Model { delegations: vec![del(None, C::Purpose, ("300", 3, "900"), (TWO_DAYS_AGO, PAST))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
         Case { name: "a delegation live for a second after t counts", model: Model { delegations: vec![del(None, C::Purpose, ("300", 3, "900"), (PAST, NOW_1S))], per_day: 10, ..Model::base() }, expect: Some("900"), ..Case::base() },
         Case { name: "a delegation starting at the day's end gives nothing", model: Model { delegations: vec![del(None, C::Purpose, ("300", 3, "900"), (END, END_1H))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "an auto rule bounded below zero gives no slice", model: Model { rules: vec![("auto", cmp("lte", "-5"))], per_day: 2, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "an auto rule bounded at zero gives no slice", model: Model { rules: vec![("auto", cmp("lte", "0"))], per_day: 2, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "an auto slice below zero takes no order from a delegation", model: Model { rules: vec![("auto", cmp("lte", "-5"))], delegations: vec![del(None, C::Purpose, ("300", 3, "700"), (PAST, WEEK))], per_day: 10, ..Model::base() }, expect: Some("700"), ..Case::base() },
+        Case { name: "a delegation bounded below zero beside an auto rule gives nothing more", model: Model { rules: vec![("auto", cmp("lte", "900"))], delegations: vec![del(None, cmp("lte", "-5"), ("300", 2, "600"), (PAST, WEEK))], per_day: 2, ..Model::base() }, expect: Some("1800"), ..Case::base() },
+        Case { name: "a delegation bounded below zero gives nothing", model: Model { delegations: vec![del(None, cmp("lte", "-5"), ("300", 2, "600"), (PAST, WEEK))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
+        Case { name: "a delegation bounded at zero gives nothing", model: Model { delegations: vec![del(None, cmp("lte", "0"), ("300", 2, "600"), (PAST, WEEK))], per_day: 10, ..Model::base() }, expect: Some("0"), ..Case::base() },
     ]
 }
 

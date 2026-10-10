@@ -16,8 +16,10 @@
 //! refusal, the control stream, E19-11's phase 1 and the artifacts (DEC-505), before any
 //! credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
-//! and output handed to [`mandate_shell::ProductionCycle::run_observed`], the one door (FT-1,
-//! FT-6). No product value is a constant here (FT-2).
+//! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
+//! (FT-1, FT-6), which watches the one submission to the registered close window's start at the
+//! registered rule set's interval (E1b, DEC-853 items 5 and 6, DEC-858). No product value is a
+//! constant here (FT-2).
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -47,7 +49,8 @@ use mandate_shell::paper::{
     Artifacts, PaperClock, PaperFacts, daily_closes, liquidity_facts, load_contexts_with_clock,
     preflight,
 };
-use mandate_shell::{Cause, Report, Setup, ShellError, Stage, production_cycle};
+use mandate_shell::{Cause, Report, Setup, ShellError, Stage, Watch, production_cycle};
+use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
@@ -294,9 +297,17 @@ pub fn run<P: Ports>(
     };
     let agent = deployed.deployment().agent.clone();
     let paper = PaperFacts { broker, liquidity };
-    let binding_clock = Rc::new(PortClock(clock));
+    let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
         .map_err(refused(Stage::Validate))?;
+    let registered = artifacts
+        .production_configuration()
+        .map_err(refused(Stage::Validate))?;
+    let watch = Watch {
+        pause: clock,
+        bound: close_window_bound(now, registered.gate).map_err(refused(Stage::Validate))?,
+        interval: poll_interval(&registered.executor).map_err(refused(Stage::Validate))?,
+    };
     let setup = Setup {
         deployment: deployed.deployment().clone(),
         account_ref: deployed.account_ref().to_owned(),
@@ -318,7 +329,7 @@ pub fn run<P: Ports>(
         transport,
     };
     let report = production_cycle(sources, setup)
-        .run_observed(observation, output)
+        .run_observed_watched(observation, output, &watch)
         .map_err(PaperError::Shell)?;
     Ok(Outcome::Cycle(Box::new(report)))
 }
@@ -411,8 +422,9 @@ impl Pause for SystemClock {
 
 /// The binary's whole run over the process's arguments (after the program name) and environment:
 /// [`parse`], [`run`] over [`Production`], and the lines to print: the order a dry run would place,
-/// each submitted order, or the model's `Flat` or `Undecided`. The binary prints an error's message
-/// alone on stderr and exits non-zero; no line or message names a DSN or a key (rule 7).
+/// each submitted order, or the model's `Flat` or `Undecided`. The binary prints an error's
+/// [`stderr_line`] alone on stderr and exits non-zero; no line or message names a DSN or a key
+/// (rule 7).
 ///
 /// The environment is the process's own, as `std::env::vars_os` gives it, so a variable that is
 /// not Unicode never panics the binary: each name and value is read lossily, so one the run does
@@ -464,9 +476,12 @@ pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
 }
 
 /// The one line the binary prints on stderr for `error` before it exits non-zero: the stop's
-/// message. DEC-877 item 1 has the cap's fail-closed stop print its stable code
-/// `cancel_unconfirmed` alone; E1b part 2's implementation PR (E7-19) does that. No line names an
-/// order, a DSN or a key (rules 6 and 7).
+/// message, except the cap's fail-closed stop, which prints its stable code `cancel_unconfirmed`
+/// alone, the key-only alert DEC-858 item 5 asks for (DEC-877 item 1). No line names an order, a
+/// DSN or a key (rules 6 and 7).
 pub fn stderr_line(error: &PaperError) -> String {
-    error.to_string()
+    match error {
+        PaperError::Shell(stop @ ShellError::CancelUnconfirmed) => stop.code().to_owned(),
+        other => other.to_string(),
+    }
 }

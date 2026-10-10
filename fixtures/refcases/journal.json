@@ -57993,208 +57993,6 @@
    }
   ],
   "trusted_starts": {
-   "records": [
-    {
-     "event_id": "01J8Z3C4A000000000000000G1",
-     "event_type": "SegmentExported",
-     "stream_id": "ctl:ws_01J8Z2",
-     "payload": {
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "first_seq": 4,
-      "last_seq": 9,
-      "first_prev_hash": "5555555555555555555555555555555555555555555555555555555555555555",
-      "last_hash": "6666666666666666666666666666666666666666666666666666666666666666",
-      "file_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
-      "manifest_hash": "660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f"
-     }
-    },
-    {
-     "event_id": "01J8Z3C4A000000000000000S1",
-     "event_type": "AnchorComputed",
-     "stream_id": "ctl:ws_01J8Z2",
-     "payload": {
-      "leaves": [
-       {
-        "hash": "1111111111111111111111111111111111111111111111111111111111111111",
-        "seq": 9,
-        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
-       },
-       {
-        "hash": "2222222222222222222222222222222222222222222222222222222222222222",
-        "seq": 3,
-        "stream_id": "ctl:ws_01J8Z2"
-       }
-      ],
-      "root": "bdc1de83e8b91718fc143aae7ce5069976ff385c79d7c0cc58a030a3fabf1435",
-      "token": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-     }
-    },
-    {
-     "event_id": "01J8Z3C4A000000000000000U1",
-     "event_type": "AnchorComputed",
-     "stream_id": "ctl:ws_01J8Z2",
-     "payload": {
-      "leaves": [
-       {
-        "hash": "3333333333333333333333333333333333333333333333333333333333333333",
-        "seq": 12,
-        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"
-       },
-       {
-        "hash": "4444444444444444444444444444444444444444444444444444444444444444",
-        "seq": 5,
-        "stream_id": "ctl:ws_01J8Z2"
-       }
-      ],
-      "root": "43ba4c738cb4ff4ec68eb127b9aca6088c6d28bd945bcec15491542f0fda894f",
-      "token": null
-     }
-    },
-    {
-     "event_id": "01J8Z3C4A000000000000000F1",
-     "event_type": "SegmentExported",
-     "stream_id": "ctl:ws_01J8Z9",
-     "payload": {
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "first_seq": 20,
-      "last_seq": 30,
-      "first_prev_hash": "9999999999999999999999999999999999999999999999999999999999999999",
-      "last_hash": "6666666666666666666666666666666666666666666666666666666666666666",
-      "file_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
-      "manifest_hash": "0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d"
-     }
-    }
-   ],
-   "cases": [
-    {
-     "name": "genesis_at_seq_one",
-     "clause": "§11: the genesis start",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 1,
-     "request": {
-      "kind": "genesis"
-     },
-     "expect": {
-      "from_seq": 1,
-      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
-     }
-    },
-    {
-     "name": "genesis_after_seq_one",
-     "clause": "§11: genesis is seq 1 only",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 2,
-     "request": {
-      "kind": "genesis"
-     },
-     "expect": null
-    },
-    {
-     "name": "segment_at_its_first_seq",
-     "clause": "§9.14: a SegmentExported's start",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 4,
-     "request": {
-      "kind": "manifest",
-      "manifest_hash": "660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f"
-     },
-     "expect": {
-      "from_seq": 4,
-      "prev_hash": "5555555555555555555555555555555555555555555555555555555555555555"
-     }
-    },
-    {
-     "name": "segment_entered_inside",
-     "clause": "§9.14: a segment starts at its first_seq",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 5,
-     "request": {
-      "kind": "manifest",
-      "manifest_hash": "660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f"
-     },
-     "expect": null
-    },
-    {
-     "name": "segment_of_another_stream",
-     "clause": "§9.14: the segment's own stream",
-     "stream_id": "agent:ws_01J8Z2:agent_a",
-     "from_seq": 4,
-     "request": {
-      "kind": "manifest",
-      "manifest_hash": "660e908d4696826a7778a19321a8e08bf6a2968496c5ea030ef5d78bb176156f"
-     },
-     "expect": null
-    },
-    {
-     "name": "manifest_not_recorded",
-     "clause": "§9.14: an absent manifest",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 4,
-     "request": {
-      "kind": "manifest",
-      "manifest_hash": "8888888888888888888888888888888888888888888888888888888888888888"
-     },
-     "expect": null
-    },
-    {
-     "name": "stamped_anchor_after_its_leaf",
-     "clause": "§9.14: a stamped anchor's leaf at n - 1",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 10,
-     "request": {
-      "kind": "anchor",
-      "anchor_event_id": "01J8Z3C4A000000000000000S1"
-     },
-     "expect": {
-      "from_seq": 10,
-      "prev_hash": "1111111111111111111111111111111111111111111111111111111111111111"
-     }
-    },
-    {
-     "name": "stamped_anchor_at_its_leaf",
-     "clause": "§9.14: the leaf is the event before the start",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 9,
-     "request": {
-      "kind": "anchor",
-      "anchor_event_id": "01J8Z3C4A000000000000000S1"
-     },
-     "expect": null
-    },
-    {
-     "name": "unstamped_anchor_is_no_start",
-     "clause": "§9.14, DEC-783 item 8: a null token vouches for nothing",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 13,
-     "request": {
-      "kind": "anchor",
-      "anchor_event_id": "01J8Z3C4A000000000000000U1"
-     },
-     "expect": null
-    },
-    {
-     "name": "anchor_without_the_stream",
-     "clause": "§9.14: the anchor has no leaf for the stream",
-     "stream_id": "agent:ws_01J8Z2:agent_a",
-     "from_seq": 10,
-     "request": {
-      "kind": "anchor",
-      "anchor_event_id": "01J8Z3C4A000000000000000S1"
-     },
-     "expect": null
-    },
-    {
-     "name": "another_workspaces_segment",
-     "clause": "§9.14, DEC-767: only the workspace's own records",
-     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-     "from_seq": 20,
-     "request": {
-      "kind": "manifest",
-      "manifest_hash": "0bd26f5bd5bf6d7e6d1a1a14baa2b1d2e484339c70964a271fe21e0f6e03b80d"
-     },
-     "expect": null
-    }
-   ],
    "rows": [
     {
      "stream_id": "ctl:ws_01J8Z2",
@@ -59328,6 +59126,42 @@
      },
      "cold": {
       "state": "unreadable"
+     },
+     "expect": {
+      "outcome": "refused",
+      "cause": "no_start"
+     }
+    },
+    {
+     "name": "genesis_after_seq_one",
+     "clause": "§11: genesis is seq 1 only",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+     "from_seq": 2,
+     "request": {
+      "kind": "genesis"
+     },
+     "replace": null,
+     "cold": {
+      "state": "unreadable"
+     },
+     "expect": {
+      "outcome": "refused",
+      "cause": "no_start"
+     }
+    },
+    {
+     "name": "manifest_not_recorded",
+     "clause": "§9.14: a manifest hash that no row records",
+     "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+     "from_seq": 4,
+     "request": {
+      "kind": "manifest",
+      "manifest_hash": "8888888888888888888888888888888888888888888888888888888888888888"
+     },
+     "replace": null,
+     "cold": {
+      "state": "read",
+      "bytes": "{\"file_sha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"first_prev_hash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"first_seq\":4,\"last_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"last_seq\":9,\"stream\":\"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1\"}"
      },
      "expect": {
       "outcome": "refused",
