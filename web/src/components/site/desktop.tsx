@@ -1,7 +1,7 @@
 "use client";
 
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
+import { type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal, flushSync } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
@@ -15,6 +15,7 @@ import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MONITOR, NOTE, PIC
 import { TitleBar, WINDOW_BUTTON } from "./retro";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
+import { leave, leaving, moving, openFrom, reframe } from "./window-motion";
 import { type AppId, TASK } from "./windows";
 import type { AmpState } from "./winamp";
 
@@ -188,6 +189,11 @@ const GRIP = 96;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+const windowOf = (id: AppId) => document.getElementById(`win-${id}`);
+
+/** Enter and Space click with no pointer behind them, and a keyboard action never animates (`web/DESIGN.md`). */
+const fromKeyboard = (e?: MouseEvent<Element>) => e?.detail === 0;
+
 const PRESS = "cursor-pointer active:border-t-foreground/60 active:border-l-foreground/60 active:border-r-card active:border-b-card outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground";
 
 /** The title bar's glyphs, as 8 by 8 pixel drawings. */
@@ -232,7 +238,11 @@ function Glyph({ name }: { name: keyof typeof GLYPHS }) {
   );
 }
 
-function Window({ id, win, layer, front, dispatch, children }: { id: AppId; win: Win; layer: number; front: boolean; dispatch: (a: Action) => void; children: ReactNode }) {
+type Click = MouseEvent<Element>;
+
+type Controls = { minimize: (id: AppId, e?: Click) => void; maximize: (id: AppId, e?: Click) => void; close: (id: AppId, e?: Click) => void };
+
+function Window({ id, win, layer, front, dispatch, controls, children }: { id: AppId; win: Win; layer: number; front: boolean; dispatch: (a: Action) => void; controls: Controls; children: ReactNode }) {
   const { title, icon, frame } = APPS[id];
   const ref = useRef<HTMLElement>(null);
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
@@ -281,7 +291,7 @@ function Window({ id, win, layer, front, dispatch, children }: { id: AppId; win:
       data-maximized={win.max || undefined}
       onPointerDownCapture={() => dispatch({ type: "focus", id })}
       onFocusCapture={() => dispatch({ type: "focus", id })}
-      className={cn(RAISED, "absolute inset-0 flex flex-col bg-muted p-0.5 ring-1 ring-foreground/70 outline-none max-sm:translate-none!", !win.max && frame)}
+      className={cn(RAISED, "absolute inset-0 flex origin-top-left flex-col bg-muted p-0.5 ring-1 ring-foreground/70 outline-none max-sm:translate-none!", !win.max && frame)}
       style={{ zIndex: layer, translate: win.max ? undefined : `${win.x}px ${win.y}px` }}
     >
       <TitleBar
@@ -293,20 +303,20 @@ function Window({ id, win, layer, front, dispatch, children }: { id: AppId; win:
         onPointerUp={drop}
         onPointerCancel={drop}
         onDoubleClick={(e) => {
-          if (!(e.target as Element).closest("button")) dispatch({ type: "maximize", id });
+          if (!(e.target as Element).closest("button")) controls.maximize(id, e);
         }}
         className={cn("select-none", !win.max && "sm:cursor-grab sm:touch-none sm:active:cursor-grabbing")}
         controls={
           <span className="flex shrink-0 gap-0.5">
             {/* Pointer affordances like the icons: out of the tab cycle, so the window's content
                 comes first in the keyboard order (`e2e/landing.spec.ts`). */}
-            <button type="button" tabIndex={-1} aria-label={`Minimize ${title}`} onClick={() => dispatch({ type: "minimize", id })} className={cn(WINDOW_BUTTON, PRESS)}>
+            <button type="button" tabIndex={-1} aria-label={`Minimize ${title}`} onClick={(e) => controls.minimize(id, e)} className={cn(WINDOW_BUTTON, PRESS)}>
               <Glyph name="minimize" />
             </button>
-            <button type="button" tabIndex={-1} aria-label={`${win.max ? "Restore" : "Maximize"} ${title}`} onClick={() => dispatch({ type: "maximize", id })} className={cn(WINDOW_BUTTON, PRESS, "max-sm:hidden")}>
+            <button type="button" tabIndex={-1} aria-label={`${win.max ? "Restore" : "Maximize"} ${title}`} onClick={(e) => controls.maximize(id, e)} className={cn(WINDOW_BUTTON, PRESS, "max-sm:hidden")}>
               <Glyph name={win.max ? "restore" : "maximize"} />
             </button>
-            <button type="button" tabIndex={-1} aria-label={`Close ${title}`} onClick={() => dispatch({ type: "close", id })} className={cn(WINDOW_BUTTON, PRESS, "ms-0.5")}>
+            <button type="button" tabIndex={-1} aria-label={`Close ${title}`} onClick={(e) => controls.close(id, e)} className={cn(WINDOW_BUTTON, PRESS, "ms-0.5")}>
               <Glyph name="close" />
             </button>
           </span>
@@ -343,7 +353,7 @@ function arrowKeys(e: KeyboardEvent<HTMLElement>) {
   items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
 }
 
-function ShortcutItem({ s, onOpen, role, className, tabIndex, children }: { s: Shortcut; onOpen: (s: Shortcut) => void; role?: "menuitem"; className?: string; tabIndex?: number; children: ReactNode }) {
+function ShortcutItem({ s, onOpen, role, className, tabIndex, children }: { s: Shortcut; onOpen: (s: Shortcut, e: Click) => void; role?: "menuitem"; className?: string; tabIndex?: number; children: ReactNode }) {
   if ("href" in s)
     return (
       <Link href={s.href} role={role} tabIndex={tabIndex} className={className}>
@@ -351,7 +361,7 @@ function ShortcutItem({ s, onOpen, role, className, tabIndex, children }: { s: S
       </Link>
     );
   return (
-    <button type="button" role={role} tabIndex={tabIndex} onClick={() => onOpen(s)} className={className}>
+    <button type="button" role={role} tabIndex={tabIndex} onClick={(e) => onOpen(s, e)} className={className}>
       {children}
     </button>
   );
@@ -403,17 +413,45 @@ export function Desktop({ home }: { home: ReactNode }) {
     return () => clearTimeout(t);
   }, []);
 
-  const openApp = (id: AppId) => {
-    dispatch({ type: "open", id });
+  /**
+   * Opens a window, zooming it out of the control that was clicked, or out of its desktop icon when
+   * nothing was. A window opened from the keyboard just appears; one caught mid-close turns around.
+   */
+  const openApp = (id: AppId, e?: Click) => {
+    const el = windowOf(id);
+    const w = state.wins[id];
+    const from = (e?.currentTarget ?? document.querySelector(`[data-slot=desktop] li[data-app="${id}"]`))?.getBoundingClientRect() ?? null;
+    const turning = moving(el);
+    flushSync(() => dispatch({ type: "open", id }));
     setStart(false);
     setMenu(null);
-    requestAnimationFrame(() => document.getElementById(`win-${id}`)?.focus({ preventScroll: true }));
+    if (el && (turning || ((!w.open || w.min) && !fromKeyboard(e)))) openFrom(el, from);
+    requestAnimationFrame(() => el?.focus({ preventScroll: true }));
   };
 
-  const launch = (s: Shortcut) => {
+  const controls: Controls = {
+    minimize: (id, e) => {
+      const el = windowOf(id);
+      const to = document.querySelector(`[data-task="${id}"]`)?.getBoundingClientRect() ?? null;
+      if (!el || fromKeyboard(e)) dispatch({ type: "minimize", id });
+      else leave(el, to, () => flushSync(() => dispatch({ type: "minimize", id })));
+    },
+    maximize: (id, e) => {
+      const el = windowOf(id);
+      if (!el || fromKeyboard(e)) dispatch({ type: "maximize", id });
+      else reframe(el, () => flushSync(() => dispatch({ type: "maximize", id })));
+    },
+    close: (id, e) => {
+      const el = windowOf(id);
+      if (!el || fromKeyboard(e)) dispatch({ type: "close", id });
+      else leave(el, null, () => flushSync(() => dispatch({ type: "close", id })));
+    },
+  };
+
+  const launch = (s: Shortcut, e?: Click) => {
     setSelected(s.id);
     setStart(false);
-    if ("app" in s) openApp(s.app);
+    if ("app" in s) openApp(s.app, e);
     if ("amp" in s) {
       setAmpLoaded(true);
       setAmp("open");
@@ -428,7 +466,7 @@ export function Desktop({ home }: { home: ReactNode }) {
     guestbook: <Guestbook />,
     readme: <Notepad />,
     owl: <PictureViewer />,
-    display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
+    display: <DisplayProperties onDone={() => controls.close("display")} />,
     tour: <MediaPlayer />,
     bin: <RecycleBin items={bin} onEmpty={() => setBin([])} />,
   };
@@ -439,7 +477,7 @@ export function Desktop({ home }: { home: ReactNode }) {
     list.map((s) => {
       const on = selected === s.id;
       return (
-        <li key={s.id} className="grid justify-items-center">
+        <li key={s.id} className="grid justify-items-center" data-app={"app" in s ? s.app : undefined}>
           {/* Desktop icons are pointer affordances, out of the tab cycle as on the real desktop: the
               keyboard reaches the apps through the Start menu, and the page's content comes first
               (`e2e/landing.spec.ts`: skip link, then the guide links). */}
@@ -489,7 +527,7 @@ export function Desktop({ home }: { home: ReactNode }) {
 
         <OpenAppContext value={openApp}>
           {(Object.keys(APPS) as AppId[]).map((id) => (
-            <Window key={id} id={id} win={state.wins[id]} layer={layers.indexOf(id) + 1} front={front === id} dispatch={dispatch}>
+            <Window key={id} id={id} win={state.wins[id]} layer={layers.indexOf(id) + 1} front={front === id} dispatch={dispatch} controls={controls}>
               {bodies[id]}
             </Window>
           ))}
@@ -497,10 +535,10 @@ export function Desktop({ home }: { home: ReactNode }) {
 
         {menu && (
           <div role="menu" aria-label="Desktop" data-slot="desktop-menu" onKeyDown={arrowKeys} className={cn(RAISED, "absolute z-[60] w-48 bg-muted py-1 ring-1 ring-foreground/70")} style={{ left: menu.x, top: menu.y }}>
-            <button type="button" role="menuitem" autoFocus onClick={() => openApp("home")} className={MENU_ITEM}>
+            <button type="button" role="menuitem" autoFocus onClick={(e) => openApp("home", e)} className={MENU_ITEM}>
               Open Owlhead
             </button>
-            <button type="button" role="menuitem" onClick={() => openApp("display")} className={MENU_ITEM}>
+            <button type="button" role="menuitem" onClick={(e) => openApp("display", e)} className={MENU_ITEM}>
               Change wallpaper…
             </button>
             <button
@@ -585,7 +623,8 @@ export function Desktop({ home }: { home: ReactNode }) {
               <button
                 type="button"
                 aria-pressed={front === id}
-                onClick={() => (front === id ? dispatch({ type: "minimize", id }) : openApp(id))}
+                data-task={id}
+                onClick={(e) => (front === id && !leaving(windowOf(id)) ? controls.minimize(id, e) : openApp(id, e))}
                 className={cn(front === id ? "bg-card" : "bg-muted", front === id ? SUNKEN : RAISED, "flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 px-1.5 text-[0.875rem] outline-none focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
               >
                 {APPS[id].icon}

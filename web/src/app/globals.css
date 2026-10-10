@@ -124,6 +124,8 @@
   --duration-sheet-exit: 200ms;
   --duration-dialog: 240ms;
   --duration-dialog-exit: 150ms;
+  --duration-window: 280ms;
+  --duration-window-exit: 220ms;
   --duration-draw: 700ms;
 
   color-scheme: light;

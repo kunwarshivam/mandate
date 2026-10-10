@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 /** The sign-in pages' controls, from the landing page's letter (`site/letter.ts`), so signing in looks like the page it came from. */
 export const LOGON_HEADING = `${BOLD} text-[1.625rem]`;
 
-/** The dialog's default button: sun, ringed in ink, full width, and 44px so a thumb finds it. */
+/** The dialog's default button: grey, ringed in ink, full width, and 44px so a thumb finds it. */
 export const LOGON_PRIMARY = cn(BUTTON, "h-11 w-full gap-2.5");
 
 export const LOGON_SECONDARY = cn(PLAIN_BUTTON, "h-11 w-full gap-2.5");

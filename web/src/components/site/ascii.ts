@@ -1,2 +1,0 @@
-/** The name in ASCII letters, as a 1990s homepage would set it (figlet, Standard: upright, so it reads at a glance). */
-export const OWLHEAD_ASCII = "  _____        ___     _   _ _____    _    ____\n / _ \\ \\      / / |   | | | | ____|  / \\  |  _ \\\n| | | \\ \\ /\\ / /| |   | |_| |  _|   / _ \\ | | | |\n| |_| |\\ V  V / | |___|  _  | |___ / ___ \\| |_| |\n \\___/  \\_/\\_/  |_____|_| |_|_____/_/   \\_\\____/";

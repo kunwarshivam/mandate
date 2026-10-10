@@ -1,13 +1,14 @@
 import "./faces";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { BrandOwl } from "@/components/brand/brand-owl";
+import { OwlheadWordmark } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
-import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
 import { Contents } from "./contents";
 import { Desktop } from "./desktop";
 import type { AppId } from "./windows";
-import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
+import { BODY, BOLD, BUTTON, H2, LINK, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
 import { Blink, Browser, UnderConstruction, Window } from "./retro";
@@ -207,8 +208,9 @@ export function Landing() {
           <header className="grid justify-items-center gap-4 px-4 pt-8 pb-2 text-center sm:px-8 sm:pt-12">
             <h1>
               <span className="sr-only">{HEADLINE}</span>
-              <span aria-hidden className={cn(MONO, "block text-start text-[clamp(10px,4vw,28px)] leading-[0.95] whitespace-pre text-foreground")}>
-                {OWLHEAD_ASCII}
+              <span aria-hidden className="flex items-center gap-3 sm:gap-4" style={{ color: "var(--logo)" }} data-slot="wordmark">
+                <BrandOwl still className="size-14 sm:size-16" />
+                <OwlheadWordmark title="" className="h-10 w-auto sm:h-12" />
               </span>
             </h1>
             <Perch />

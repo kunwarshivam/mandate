@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WORDMARK_PATH } from "@/components/brand/Logo";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
 import { DISCARDED, QUESTIONS } from "./apps";
-import { OWLHEAD_ASCII } from "./ascii";
 import { GREETING, TIPS } from "./assistant";
 import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
@@ -53,19 +53,17 @@ afterEach(() => {
 });
 
 describe("the landing page's structure", () => {
-  it("has one h1 named Owlhead, with the block letters hidden from assistive technology", () => {
+  it("has one h1 named Owlhead, with the product's owl and wordmark beside it hidden from assistive technology", () => {
     const { container } = renderLanding();
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s).toHaveLength(1);
     expect(h1s[0]).toHaveAccessibleName(HEADLINE);
-    expect(h1s[0].querySelector("[aria-hidden]")?.textContent).toBe(OWLHEAD_ASCII);
+    const mark = h1s[0].querySelector<HTMLElement>("[data-slot=wordmark]");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark?.querySelector("[data-slot=brand-owl]"), "the brand owl leads").not.toBeNull();
+    expect(mark?.querySelector("[data-slot=owlhead-wordmark] path")).toHaveAttribute("d", WORDMARK_PATH);
+    expect(mark?.style.color, "in the logo's colour, as the app's header has it").toBe("var(--logo)");
     expect(container).toHaveTextContent(SUBHEAD);
-  });
-
-  it("sets the block letters upright, no wider than the slanted ones were, so they fit the hero", () => {
-    expect(OWLHEAD_ASCII).not.toMatch(/\/_\/ \//);
-    expect(OWLHEAD_ASCII).toMatch(/_{4}/);
-    expect(Math.max(...OWLHEAD_ASCII.split("\n").map((l) => l.length))).toBeLessThanOrEqual(49);
   });
 
   it("numbers every section and labels it by its heading", () => {
@@ -767,7 +765,7 @@ const LANDING_PAIRS = [
   { fg: "mandate-strong", bg: "card", use: "Links" },
   { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
   { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
-  { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the sun badge" },
+  { fg: "highlight-foreground", bg: "highlight", use: "The New tag, a hovered link and the sun badge" },
   { fg: "card", bg: "foreground", use: "Title bars, icon labels, the record's column heads and the ink badges" },
   { fg: "card", bg: "muted-foreground", use: "The title bars of windows behind the front one" },
   { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },

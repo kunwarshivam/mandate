@@ -47,6 +47,88 @@ test("no element draws a gradient", async ({ page }) => {
   expect(offenders).toEqual([]);
 });
 
+type Frame = { x: number; y: number; w: number; h: number; opacity: number } | null;
+
+/** Records the guestbook window's box on every frame from now on; `null` while it is hidden. */
+async function track(page: Page) {
+  await page.evaluate(() => {
+    const log: Frame[] = [];
+    Object.assign(window, { __frames: log });
+    const tick = () => {
+      const el = document.getElementById("win-guestbook");
+      if (!el || el.hidden) log.push(null);
+      else {
+        const r = el.getBoundingClientRect();
+        log.push({ x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, opacity: Number(getComputedStyle(el).opacity) });
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  return {
+    reset: () => page.evaluate(() => (window as unknown as { __frames: Frame[] }).__frames.splice(0)),
+    frames: () => page.evaluate(() => [...(window as unknown as { __frames: Frame[] }).__frames]),
+  };
+}
+
+const centre = async (page: Page, selector: string) => {
+  const b = (await page.locator(selector).boundingBox())!;
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height };
+};
+
+test("a window zooms out of the icon that opened it and into its taskbar button, as a Mac's do", async ({ page }) => {
+  await open(page, 1440);
+  const frames = await track(page);
+  const icon = await centre(page, "[data-slot=desktop-icons] li[data-app=guestbook]");
+  await frames.reset();
+  await page.locator("[data-slot=desktop-icons] li[data-app=guestbook] button").click();
+  await expect(page.locator("#win-guestbook")).toBeVisible();
+  await page.waitForTimeout(500);
+  const opening = (await frames.frames()).filter((f) => f !== null);
+  const first = opening[0]!;
+  const last = opening.at(-1)!;
+  expect(Math.abs(first.x - icon.x), "the first frame is centred on the icon").toBeLessThan(4);
+  expect(Math.abs(first.y - icon.y)).toBeLessThan(4);
+  expect(first.w, "and no wider than it").toBeLessThanOrEqual(icon.w + 1);
+  expect(first.opacity).toBeLessThan(0.2);
+  expect(opening.length, "over several frames, not a jump").toBeGreaterThan(5);
+  expect(opening.every((f, i) => i === 0 || f!.w >= opening[i - 1]!.w), "growing all the way").toBe(true);
+  expect(last.opacity).toBe(1);
+
+  const task = await centre(page, "[data-task=guestbook]");
+  await frames.reset();
+  await page.getByRole("button", { name: "Minimize guestbook.cgi" }).click();
+  await expect(page.locator("#win-guestbook")).toBeHidden();
+  const going = (await frames.frames()).filter((f) => f !== null);
+  const end = going.at(-1)!;
+  expect(going.length, "minimizing moves too").toBeGreaterThan(5);
+  expect(Math.abs(end.x - task.x), "and ends on the taskbar button").toBeLessThan(12);
+  expect(Math.abs(end.y - task.y)).toBeLessThan(12);
+  expect(end.h).toBeLessThanOrEqual(task.h + 1);
+});
+
+test("with motion reduced, or from the keyboard, a window opens where it stands without moving", async ({ browser }, info) => {
+  for (const reduced of [true, false]) {
+    const context = await browser.newContext({ reducedMotion: reduced ? "reduce" : "no-preference", colorScheme: info.project.use.colorScheme });
+    const page = await context.newPage();
+    await open(page, 1440);
+    const frames = await track(page);
+    await frames.reset();
+    const button = page.locator("[data-slot=hero-actions]").getByRole("button", { name: "Sign the guestbook" });
+    if (reduced) await button.click();
+    else {
+      await button.focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(page.locator("#win-guestbook")).toBeVisible();
+    await page.waitForTimeout(400);
+    const shown = (await frames.frames()).filter((f) => f !== null);
+    const sizes = new Set(shown.map((f) => `${Math.round(f!.x)},${Math.round(f!.y)},${Math.round(f!.w)}`));
+    expect(sizes.size, reduced ? "reduced motion: one place and size throughout" : "keyboard: one place and size throughout").toBe(1);
+    await context.close();
+  }
+});
+
 test("with motion reduced, the New tag holds still and stays visible", async ({ browser }, info) => {
   const context = await browser.newContext({ reducedMotion: "reduce", colorScheme: info.project.use.colorScheme });
   const page = await context.newPage();
