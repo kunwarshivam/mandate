@@ -318,11 +318,11 @@ impl LocatedConnectionFailure {
 /// [`verify_connection_lifecycle`] takes them. From [`ConnectionStart::Genesis`] it is the full
 /// chain; anchored, it judges the anchor's stream as the full chain would, rule 131's closing
 /// existence included, and fails closed with [`ConnectionCheck::Unanchored`] at the first record
-/// of another stream that the unanchored run would fail at (DEC-889 item 2); unanchored, it fails closed with [`ConnectionCheck::Unanchored`] at the first
-/// `ConnectionRequested`, `ConnectionEstablished`, `ConnectionCredentialRotated`, or
-/// `ConnectionRefused` on a control stream or connection record on an account stream, a
-/// `ConnectionRevoked` there included; a control-stream `ConnectionRevoked` never fails (DEC-885
-/// items 3 and 4, I6; DEC-888).
+/// of another stream that the unanchored run would fail at (DEC-889 item 2); unanchored, it
+/// fails closed with [`ConnectionCheck::Unanchored`] at the first `ConnectionRequested`,
+/// `ConnectionEstablished`, `ConnectionCredentialRotated`, or `ConnectionRefused` on a control
+/// stream or connection record on an account stream, a `ConnectionRevoked` there included; a
+/// control-stream `ConnectionRevoked` never fails (DEC-885 items 3 and 4, I6; DEC-888).
 pub fn verify_connection_lifecycle_from(
     start: ConnectionStart,
     rows: &[StoredEvent],

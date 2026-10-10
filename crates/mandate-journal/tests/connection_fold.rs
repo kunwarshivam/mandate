@@ -1314,7 +1314,6 @@ fn an_anchored_run_fails_closed_at_another_streams_record() {
 /// anchored control run fails closed at it, an account-stream `ConnectionRevoked` included, from
 /// an empty anchor, a part of the prefix, or the whole of it.
 #[test]
-#[ignore = "pending E7-17"]
 fn an_anchored_run_fails_closed_at_an_account_streams_record() {
     let own = control(&["request X A1", "establish X A1"]);
     let revoked_on_account = ("checked_start", set("event_type", r#""ConnectionRevoked""#));
