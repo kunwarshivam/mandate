@@ -111,24 +111,13 @@ anything here.
     first, as a tests correction or inside its own tests PR;
   - pass mutants on the `reconcile.rs` and `wire.rs` diff with 0 missed.
   This blocks FT-11 for E2.
-- **E7-28 round 6** (CI live-feature reader; #1234 tests, #1169 implementation; close #1219 as
-  superseded when #1234 lands).
-  - **Scope ruling:** DEC-851's threat model covers accidents and careless changes, not
-    deliberate obfuscation.
-  - **Round 6 closes:**
-    - B1: leading redirects;
-    - B2: heredoc command substitution;
-    - B3: an env-key allowlist;
-    - B4: plain `shell:` only;
-    - B5: no writes to build inputs;
-    - B6: non-local `uses:` only from a list;
-    - B7: normalized `web/` paths, with `npx` and `npm exec` refused;
-    - B8: scripts called by allowlisted scripts are read transitively;
-    - the round-5 surviving mutants M03, M04, M05, M07, M10, M11, M13, M18, M19 and M20.
-  - DEC-873 must drop its "fails closed on every spelling" overclaim and add an Out-of-scope
-    paragraph.
-  - Builder branches: `claude/live-e7-28-tests-7` and `claude/live-e7-28-v2`. Review against
-    that scope; don't reopen the obfuscation chase.
+- **E7-28 round 6 is pushed:** #1234 at `6e4e47a1`, #1169 at `0ec45247`.
+  - Closed: B1 to B8 and the round-5 mutants. All 45 planted bugs are caught, and the real
+    repository passes.
+  - A Sonnet review against the accident-only scope was running. If there is no verdict in the
+    bodies, run one, then approve both and close #1219 as superseded once #1234 lands.
+  - Open point for the reviewer: a job under `crates/` can still write a plain file such as
+    `lib.rs`; only build-input names are refused.
 
 **C4 (live path):** the tests PR **#1264** is approved (head `367f1cb5`, DEC-902). **Next:**
 1. a C4 tests correction for the review minors listed in #1264's "Not done": trailing zeros on
