@@ -79,18 +79,14 @@ anything here.
 - **#1169** (E7-28 implementation). Head `46f63d0b`.
 - **#1274** (L5, CLI judged-lists switch). Head `2375f854`.
 - **#1275** (L2, links merged DECs in place of the stale "pending" words; docs only). Head `1b86398c`.
+- **#1278** (L5, `segment_rows_mismatch` implementation). Head `60997566`.
+- **#1270** (bracket-leg implementation). Head `020b6904`.
 - **#1277** (L5, DEC-897: verification-run tightenings; docs only). Head `38a9d6b4`.
 - **#1276** (L5, `segment_rows_mismatch` tests; the implementation follows). Head `0832cfda`.
 
 **Needs action now:**
 1. **#1169** (E7-28 implementation): main merged in, resurrected rows and ignores re-deleted, and approved at `46f63d0b`. #1219 is closed as superseded. Nothing left except merging on green CI.
-2. **#1269 + #1270** (bracket-leg tests correction and implementation; this unblocks FT-11 for E2). The Sonnet review
-   passed on both heads (#1269 `5ae5a217`, #1270 `9857dfc3`), with mutants 25/25, and #1269 is APPROVED.
-   - Approve #1269 first.
-   - After it merges, merge `main` into `claude/bracket-leg-impl`. Re-delete any resurrected `pending E7-4` ignores
-     and rows. The test diff must be the 3 ignore deletions, plus the deliberate deletion of the
-     `no_leg_id_is_read_from_a_broker_order` stub test (DEC-878 item 7).
-   - Then approve #1270.
+2. **#1270** (bracket-leg implementation): main merged in (clean, same patch-id as reviewed), and APPROVED at `020b6904`. #1269 has merged. After #1270 merges, dispatch **E3** (paper path).
 3. **#1272** (L2, S1a implementation): APPROVED at `4df3fac7`. Next from L2 is DEC-903: a ref PR, a tests-correction row, then a #1272 follow-up fix.
 4. **#878** stays held for the founder (Cloudflare cutover).
 
