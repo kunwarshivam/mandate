@@ -70,7 +70,9 @@ impl<T: Tools> RobinhoodConnector<T> {
 
     /// One read of the agentic account, on the `Ordinary` budget (DEC-875 items 2 and 3).
     /// `filters` are the tool's other arguments; an `account_number` among them that is not the
-    /// recorded number as text is [`RobinhoodError::OtherAccount`], with nothing called. Then
+    /// recorded number as text is [`RobinhoodError::OtherAccount`], with nothing called. Any other
+    /// key the tool does not list is [`RobinhoodError::UnlistedFilter`], with nothing called
+    /// (DEC-879); a listed key's value is forwarded as given. Then
     /// [`Self::agentic_account`] runs, and its refusal is the read's, so a non-agentic account's
     /// data is never read. The tool is called with the recorded `account_number`, and only the
     /// answer's records naming it byte for byte are returned. A record naming another account is
@@ -88,6 +90,13 @@ impl<T: Tools> RobinhoodConnector<T> {
             None => {}
             Some(Value::String(named)) if named == recorded => {}
             Some(_) => return Err(RobinhoodError::OtherAccount),
+        }
+        let listed = read.listed_filters();
+        let unlisted = filters
+            .keys()
+            .any(|key| key != NUMBER && !listed.contains(&key.as_str()));
+        if unlisted {
+            return Err(RobinhoodError::UnlistedFilter);
         }
         self.agentic_account().await?;
         let (tool, member, code) = read.wire();
@@ -125,6 +134,23 @@ impl<T: Tools> RobinhoodConnector<T> {
 }
 
 impl AccountRead {
+    /// The filter keys the read's tool lists besides `account_number` (DEC-879 item 1): the
+    /// contract's `get_equity_orders` parameters, and none for the two tools whose parameters the
+    /// contract does not name, the narrowest set.
+    fn listed_filters(self) -> &'static [&'static str] {
+        match self {
+            Self::Portfolio | Self::Positions => &[],
+            Self::Orders => &[
+                "order_id",
+                "state",
+                "symbol",
+                "created_at_gte",
+                "placed_agent",
+                "cursor",
+            ],
+        }
+    }
+
     /// The tool, the member of its `structuredContent` that holds the records (`None` when the
     /// content is the one record), and the code a refusal of it carries.
     fn wire(self) -> (&'static str, Option<&'static str>, &'static str) {
