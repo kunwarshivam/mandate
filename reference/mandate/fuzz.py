@@ -2304,7 +2304,34 @@ def fuzz_unasked(n):
     """§4.2's unasked dollars (DEC-189, DEC-695). Sound: no day of opening orders runs more unasked than the
     figure, whatever their values, times, and conditions, while marks, cancels, and exits free headroom. Unknown is
     never 0. Reached: where every condition is a catch-all or an `lte` bound, no `ask` or `deny` rule comes before an
-    `auto` one, and headroom is ample, a greedy day reaches the figure, and an `any` of two bounds gives the larger."""
+    `auto` one, and headroom is ample, a greedy day reaches the figure, and an `any` of two bounds gives the larger.
+    Whatever the seed, a delegation window is compared at full precision (DEC-903): one whose `expires_at` falls inside
+    the risk clock's second, or whose `starts_at` is a nanosecond before the end of the risk day, still gives its
+    slices, and one that ends at the risk clock, or starts at the end of the risk day, gives none."""
+    now = fmt(DELEG_NOW)
+    day_end = risk_day(now)["ends_at"]
+    within = lambda instant, nanos: instant[:20] + f"{nanos:09d}Z"
+    def one_delegation(starts_at, expires_at):
+        m = copy.deepcopy(base.btc)
+        m["autonomy"].update({"default": "ask", "rules": [], "delegations": [
+            {"id": "d0", "lifts": "default", "when": {"field": "purpose", "op": "in", "value": ["increase", "open"]},
+             "max_order_usd": "400", "max_orders": 2, "max_total_usd": "1000", "starts_at": starts_at,
+             "expires_at": expires_at, "source_approval_id": None}]})
+        V.validate(m)
+        check(not semantic(m, base.CTX)[0], "unasked: the full-precision window fixture passes every rule, V-041 included",
+              (starts_at, expires_at, semantic(m, base.CTX)[0]))
+        return unasked_usd(m, {"now": now, "orders_today": 0, "usage": {}})
+    one_hour_back = fmt(DELEG_NOW - timedelta(hours=1))
+    last_second = fmt(T(day_end) - timedelta(seconds=1))
+    for starts_at, expires_at, want in [
+            (one_hour_back, within(now, 500000000), "800"), (one_hour_back, within(now, 999999999), "800"),
+            (one_hour_back, within(now, 1), "800"), (one_hour_back, now, "0"),
+            (within(last_second, 999999999), fmt(T(day_end) + timedelta(hours=1)), "800"),
+            (day_end, fmt(T(day_end) + timedelta(hours=1)), "0")]:
+        fig = one_delegation(starts_at, expires_at)
+        check(fig is not None and D(fig) == D(want),
+              "unasked: a delegation window is compared at full precision, never truncated to the second (DEC-903)",
+              (now, starts_at, expires_at, fig, want))
     for _ in range(n):
         m = rand_unasked_mandate()
         if m is None:

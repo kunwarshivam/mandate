@@ -395,7 +395,13 @@ UNASKED_MUTANTS = {
     "unasked: a delegation's last partial order is dropped": (
         '        if full < k and rest - full * c > 0:', '        if False:'),
     "unasked: an expired delegation still counts": (
-        '        if not (T(d["starts_at"]) < day_end and T(st["now"]) < T(d["expires_at"])):', '        if False:'),
+        '        if not (d["starts_at"] < day_end and st["now"] < d["expires_at"]):', '        if False:'),
+    "unasked: a delegation's expiry is truncated to the second (DEC-903)": (
+        '        if not (d["starts_at"] < day_end and st["now"] < d["expires_at"]):',
+        '        if not (d["starts_at"] < day_end and T(st["now"]) < T(d["expires_at"])):'),
+    "unasked: a delegation starting at the end of the risk day counts (DEC-903)": (
+        '        if not (d["starts_at"] < day_end and st["now"] < d["expires_at"]):',
+        '        if not (d["starts_at"] <= day_end and st["now"] < d["expires_at"]):'),
     "unasked: a delegation's condition bound is ignored": (
         '        c = capped(per_order, D(d["max_order_usd"]), order_usd_bound(d["when"]),',
         '        c = capped(per_order, D(d["max_order_usd"]), None,'),

@@ -1118,6 +1118,12 @@ after U-A1 to U-A5 are recorded.
   bounds each delegation on its own, so twenty delegations can each carry `max_total_usd` equal to the allocation. That is
   the spec's reading, and the gate enforces every limit regardless (§6.5). The approval card and the MC-U family should
   consider the aggregate, which is the V-045 the criteria above name and the mandate spec does not yet define.
+  Also for E8-8 ([DEC-903](decisions/DEC-903.md), found in E10-7 S1a): `reference/mandate/ref.py`'s §6.2
+  delegation-live check in `delegation_lift` (`T(d["starts_at"]) <= now and now < T(d["expires_at"])`) truncates
+  `starts_at` and `expires_at` to whole seconds, so it can lift an ask up to 1 s before a sub-second `starts_at`, a
+  loosening against §6.2 "Live" item 2 (the risk clock in [`starts_at`, `expires_at`)). E8-8's Rust decision path must
+  compare delegation windows exactly, nanosecond instants against the risk clock and never truncated, and ref.py's line
+  must be aligned in the same change with a pending test (DEC-903). On the founder's FYI list.
 - **E8-9 (Must, M7; SC)** As an owner, I want every notice, alerts included, built from one closed
   payload type so that nothing about my trading can reach a provider
   ([notifications spec §3, §4.2, §5.5](../specs/notifications.md), DEC-438 items 1, 2, 5, 17).

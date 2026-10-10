@@ -1195,7 +1195,10 @@ def unasked_usd(m, st, policy=None):
     """§4.2's unasked dollars (DEC-189, DEC-695): an upper bound, rounded up to the cent, on the order value the
     agent could have decided `auto` from the risk clock `st["now"]` to the end of its risk day, before a new risk day,
     version, or policy raises it. No gross-exposure cap: marks, cancels, and exits free headroom within the day
-    (DEC-695 item 4). None when a journal input is missing: unknown is never shown as 0."""
+    (DEC-695 item 4). None when a journal input is missing: unknown is never shown as 0. A delegation's window is
+    compared with the risk clock and the end of its risk day at full precision, never truncated to the second, so one
+    whose `starts_at` or `expires_at` falls inside a second still counts (DEC-903): every instant here is the same
+    30-character UTC form, so string order is time order."""
     if st is None or any(k not in st for k in UNASKED_STATE):
         return None
     policy = policy or {}
@@ -1210,9 +1213,9 @@ def unasked_usd(m, st, policy=None):
     if auto_caps and max(auto_caps) > 0:
         slices.append((max(auto_caps), None))
     rules = {f"rule:{x['id']}": x["when"] for x in au["rules"]}
-    day_end = T(risk_day(st["now"])["ends_at"])
+    day_end = risk_day(st["now"])["ends_at"]
     for d in au.get("delegations", []):
-        if not (T(d["starts_at"]) < day_end and T(st["now"]) < T(d["expires_at"])):
+        if not (d["starts_at"] < day_end and st["now"] < d["expires_at"]):
             continue
         used = st["usage"].get(d["id"], {"orders": 0, "total_usd": "0"})
         c = capped(per_order, D(d["max_order_usd"]), order_usd_bound(d["when"]),
