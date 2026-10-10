@@ -189,7 +189,8 @@ landing page's desktop is the one exception to "one longer moment", at the found
 (DEC-907): its pieces settle on damped springs (`spring.ts`, as CSS `linear()` easings), and the brand
 owl, in voxels, flies down it from perch to perch on the same springs, flapping as it goes, while a
 pixel thread in tide is sewn down the page as far as the visitor has read; the opening's picture
-floats on a pixel sea whose crests drift a cell at a time (DEC-908). All of it is decoration,
+floats on a pixel sea whose rows of waves glide and heave a pixel at a time, under a moon that
+rises as it comes into view (DEC-908). All of it is decoration,
 hidden from assistive technology, and still under reduced motion: nothing hidden waits for motion to
 show it, and the thread is there whole. The tokens (`--ease-*`,
 `--duration-*`) are in `globals.css` and listed in the reference.
