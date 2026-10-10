@@ -89,6 +89,8 @@ anything here.
 - **#1254:** bracket-leg tests (DEC-878). Head `f4cc05d8`.
 - **#1266:** L5, PR 4a, retires `resolve_trusted_start`. Head `2586e144`.
 
+- **#1242:** L2, E7-17 implementation (round-2 delta passed). Head `5f9093e7`.
+- **#1267:** L2, DEC-900 implementation (approved; already merged).
 - **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
 
@@ -119,7 +121,7 @@ anything here.
    `get_equity_tradability` and `get_equity_quotes`, plus the end-to-end preflight test.
 
 **Lanes' next items:**
-- **L2:** #1242 delta, then the DEC-900 fix.
+- **L2:** its queue is clear after #1242 and #1267. Options: E7-17 follow-up (c) (delete the deprecated raw `fold`), or the mixed-stream prefix tightening (tests first).
 - **L3:** DEC-706 step 2 (`notices.rs` pending tests), then step 3: register v2, refuse v1, and
   move `step.rs`'s writer to v2 in one PR. Then D4 (retries), whose writer derives `verdict` from
   the `Outcome` variant.
