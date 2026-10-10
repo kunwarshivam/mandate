@@ -9,6 +9,7 @@ import { BetaForm } from "../beta-form";
 import { LockScreen } from "./lock-screen";
 import { OwlFlight } from "./owl-flight";
 import { DISPLAY, DISPLAY_MD, INTRO_ID, LEAD, LEAD_ON_TIDE, PAGE_FORM_ID, PRIMARY, SECONDARY, SIGN_UP_ID, WRAP } from "./parts";
+import { PixelThread } from "./pixel-thread";
 import { Plate } from "./plate";
 import { Reveals } from "./reveals";
 import { ScrollBar } from "./scroll-bar";
@@ -87,8 +88,9 @@ function Feature({
  * the visitor scrolls. It shows the app itself, in pictures of the example workspace, and says what
  * the desktop's homepage does not: the checks, the request on a phone, the threads, the limits in
  * dollars, what no agent does, and the request for a place. The brand owl flies down it in three
- * dimensions, and each piece settles on a spring as it comes into view; tide, the page's third
- * colour beside ink and sun, fills only the part about asking you.
+ * dimensions, a pixel thread in tide sews the parts together behind it, and each piece settles on
+ * a spring as it comes into view; tide, the page's third colour beside ink and sun, fills only the
+ * part about asking you.
  */
 export function LongPage() {
   return (
@@ -219,6 +221,7 @@ export function LongPage() {
         </div>
       </footer>
 
+      <PixelThread />
       <OwlFlight />
       <Reveals />
     </div>

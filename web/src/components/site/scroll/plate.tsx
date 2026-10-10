@@ -10,7 +10,7 @@ import styles from "./scroll.module.css";
  */
 export function Plate({ id, art, children, className }: { id: string; art: Artwork; children: ReactNode; className?: string }) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} className="relative isolate scroll-mt-14 overflow-hidden bg-muted" data-slot="plate" data-art={art.id}>
+    <section id={id} aria-labelledby={`${id}-title`} className="relative isolate z-[2] scroll-mt-14 overflow-hidden bg-muted" data-slot="plate" data-art={art.id}>
       <div aria-hidden className="absolute inset-0 -z-10">
         <div className={cn(styles.plate, "absolute inset-x-0 -inset-y-[7%]")}>
           <Image src={art.src} alt="" fill sizes="100vw" className="object-cover" style={{ objectPosition: art.focus }} />

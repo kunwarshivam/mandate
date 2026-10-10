@@ -99,6 +99,28 @@
   visibility: hidden;
 }
 
+/* The pixel thread (`pixel-thread.tsx`): over each part's colour, under its column. Deep tide on a
+   light page, bright teal on a dark one, pale on tide and deep again on sun. */
+.page {
+  --thread: var(--tide-line);
+}
+
+.page [data-tone="tide"] {
+  --thread: var(--tide-muted);
+}
+
+.page [data-slot="wont"] {
+  --thread: var(--tide);
+}
+
+.thread {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
 /* The flying owl's canvas, drawn by `owl-flight.tsx`: the logo's ink with a pale disc, sun eyes, and
    tide on its wings, the disc's rim and the chest. On tide it goes pale, so it never sinks into it. */
 .owl {

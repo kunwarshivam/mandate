@@ -13,7 +13,8 @@ export const INTRO_ID = "intro";
 export const SIGN_UP_ID = "sign-up";
 export const PAGE_FORM_ID = "beta-page";
 
-export const WRAP = "mx-auto w-full max-w-[80rem] px-5 sm:px-8 lg:px-12";
+/** A part's column; it sits over the thread, so the thread passes behind the words and under the pictures. */
+export const WRAP = "relative z-[2] mx-auto w-full max-w-[80rem] px-5 sm:px-8 lg:px-12";
 
 const HEADING = "font-normal text-balance tracking-[-0.022em]";
 export const DISPLAY = `${HEADING} text-[clamp(2.75rem,1.4rem+5vw,6.5rem)] leading-[0.98]`;
