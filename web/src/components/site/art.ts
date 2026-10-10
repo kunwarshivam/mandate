@@ -21,16 +21,27 @@ const MET = "https://www.metmuseum.org/art/collection/search/";
 
 export const WALLPAPERS: Artwork[] = [
   {
-    id: "great-wave",
-    title: "The Great Wave",
-    artist: "Katsushika Hokusai",
-    date: "ca. 1830 to 1832",
+    id: "ishiyama-autumn-moon",
+    title: "The Autumn Moon at Ishiyama on Lake Biwa",
+    artist: "Utagawa Hiroshige",
+    date: "ca. 1835",
     medium: "Woodblock print; ink and color on paper",
-    url: `${MET}45434`,
-    src: "/art/great-wave.jpg",
+    url: `${MET}36527`,
+    src: "/art/ishiyama-autumn-moon.jpg",
+    width: 1942,
+    height: 1320,
+  },
+  {
+    id: "two-men-moon",
+    title: "Two Men Contemplating the Moon",
+    artist: "Caspar David Friedrich",
+    date: "ca. 1825 to 1830",
+    medium: "Oil on canvas",
+    url: `${MET}438417`,
+    src: "/art/two-men-moon.jpg",
     width: 2400,
-    height: 1613,
-    focus: "40% 50%",
+    height: 1924,
+    focus: "35% 50%",
   },
   {
     id: "copenhagen-moonlight",
@@ -45,15 +56,16 @@ export const WALLPAPERS: Artwork[] = [
     focus: "55% 50%",
   },
   {
-    id: "wheat-field-cypresses",
-    title: "Wheat Field with Cypresses",
-    artist: "Vincent van Gogh",
-    date: "1889",
+    id: "wood-island-moonlight",
+    title: "Moonlight, Wood Island Light",
+    artist: "Winslow Homer",
+    date: "1894",
     medium: "Oil on canvas",
-    url: `${MET}436535`,
-    src: "/art/wheat-field-cypresses.jpg",
+    url: `${MET}11127`,
+    src: "/art/wood-island-moonlight.jpg",
     width: 2400,
-    height: 1910,
+    height: 1814,
+    focus: "40% 50%",
   },
   {
     id: "kanasawa-full-moon",
@@ -90,8 +102,8 @@ export const WALLPAPERS: Artwork[] = [
   },
 ];
 
-/** The wallpaper by day, and by night, until someone picks one. */
-export const DAY = "great-wave";
+/** The wallpaper by day, and by night, until someone picks one. Every picture is a night, so the owls are at home. */
+export const DAY = "ishiyama-autumn-moon";
 export const NIGHT = "copenhagen-moonlight";
 
 export const OWL_SCROLL: Artwork = {

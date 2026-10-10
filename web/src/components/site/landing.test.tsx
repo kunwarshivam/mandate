@@ -572,10 +572,10 @@ describe("the desktop", () => {
     expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
     await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
     const display = win("Display Properties");
-    await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Wheat Field with Cypresses" })));
-    expect(wallpaper).toHaveAttribute("data-wallpaper", "wheat-field-cypresses");
+    await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Two Men Contemplating the Moon" })));
+    expect(wallpaper).toHaveAttribute("data-wallpaper", "two-men-moon");
     expect(localStorage.length).toBe(0);
-    expect(display).toHaveTextContent("Vincent van Gogh, Wheat Field with Cypresses, 1889.");
+    expect(display).toHaveTextContent("Caspar David Friedrich, Two Men Contemplating the Moon, ca. 1825 to 1830.");
     await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Day and night" })));
     expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
     await press(within(display).getByRole("button", { name: "OK" }));

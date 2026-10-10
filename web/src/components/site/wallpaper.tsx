@@ -145,7 +145,7 @@ export function DisplayProperties({ onDone }: { onDone: () => void }) {
 
       {choice === AUTO ? (
         <p className="text-[0.9375rem] leading-snug">
-          Hokusai&apos;s <i>Great Wave</i> by day and Dahl&apos;s <i>Copenhagen Harbor by Moonlight</i> at night, from The Metropolitan Museum of Art, public domain.
+          Hiroshige&apos;s <i>Autumn Moon at Ishiyama</i> by day and Dahl&apos;s <i>Copenhagen Harbor by Moonlight</i> at night, from The Metropolitan Museum of Art, public domain.
         </p>
       ) : (
         <Credit art={shown} />
