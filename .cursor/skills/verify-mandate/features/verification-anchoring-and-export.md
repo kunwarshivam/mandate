@@ -37,6 +37,7 @@
 - **Reference cases:** `journal::tamper::*`, `journal::merkle`, `journal::export_line_seq_1`, and
   the `cold_records.range_checks`, `cold_records.trusted_starts.rows` and `row_cases`, and
   `records_access.range_checks`, `verification_runs`, `connections`, `connection_requests`,
-  `connection_ranges`, `connection_revocations` (DEC-888), and `segment_rows` (journal spec v0.38's `segment_rows_mismatch`, DEC-894; no Rust test
-  reads it until E12-3's tests PR) vectors of `fixtures/refcases/journal.json`.
+  `connection_ranges`, `connection_revocations` (DEC-888), and `segment_rows` (journal spec v0.38's `segment_rows_mismatch`, DEC-894; its
+  `VerificationRun` drafts are read by `crates/mandate-journal/tests/segment_rows_check.rs`,
+  version 2 pending E12-3 and version 1's refusal live) vectors of `fixtures/refcases/journal.json`.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-refcases`.
