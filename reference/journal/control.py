@@ -1809,7 +1809,7 @@ def trusted_start(
     `from_seq`, resolved from `request` among the control-stream `records` of `stream`'s own
     workspace, or `None` when the request names no usable start."""
     workspace = stream.split(":")[1]
-    lax = "start.workspace" in skip or (not workspace and "row.bad_stream_id" in skip)
+    lax = not workspace and "row.bad_stream_id" in skip
     own = [
         r
         for r in records
@@ -1817,7 +1817,7 @@ def trusted_start(
         or r["event_type"] == "AnchorComputed" and "row.anchor_foreign" in skip
     ]
     if request["kind"] == "genesis":
-        if from_seq == 1 or "start.genesis_seq" in skip:
+        if from_seq == 1:
             return {"from_seq": from_seq, "prev_hash": GENESIS}
         return None
     if request["kind"] == "manifest":
@@ -1839,8 +1839,7 @@ def trusted_start(
         if r["payload"].get("token") is None and "start.null_token" not in skip:
             return None
         for leaf in r["payload"]["leaves"]:
-            fits = leaf["seq"] in leaf_seqs or "start.anchor_seq" in skip
-            if (leaf["stream_id"] == stream or "row.anchor_leaf_stream" in skip) and fits:
+            if (leaf["stream_id"] == stream or "row.anchor_leaf_stream" in skip) and leaf["seq"] in leaf_seqs:
                 return {"from_seq": from_seq, "prev_hash": leaf["hash"]}
     return None
 

@@ -3192,7 +3192,8 @@ and file from the cold store (§6.2) and checks them; a start that only the hot 
 `SegmentExported` vouches for, because the cold store cannot be read, is not a trusted start, as an
 anchor without a `token` is not ([DEC-787](../project/decisions/DEC-787.md) item 5). Every start is looked up among the workspace's own control-stream records only,
 so a record that is absent and one of another workspace give the same refusal (workspace API
-§4.8.1, DEC-767). The test vectors' `cold_records.trusted_starts` hold these cases.
+§4.8.1, DEC-767). The test vectors' `cold_records.trusted_starts.rows` and `row_cases` hold these cases
+over stored rows ([DEC-893](../project/decisions/DEC-893.md), [DEC-895](../project/decisions/DEC-895.md)).
 
 **Consistency rules** (reason `schema`; the path is the member named):
 

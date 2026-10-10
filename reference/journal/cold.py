@@ -34,7 +34,6 @@ from control import (
     merkle_root,
     reported,
     start_from_rows,
-    trusted_start,
     violations,
 )
 from control import (
@@ -386,58 +385,11 @@ def range_checks() -> list[dict]:
 
 SEGMENT_START = segment(ACCOUNT_STREAM, 4, 9, "5" * 64)
 FOREIGN_SEGMENT = segment(ACCOUNT_STREAM, 20, 30, "9" * 64)
-ANCHOR_IDS = {"stamped": "01J8Z3C4A000000000000000S1", "unstamped": "01J8Z3C4A000000000000000U1"}
-
-
-def start_records() -> list[dict]:
-    """The records a resolver reads: one workspace's control stream, and a record of another
-    workspace's that names this workspace's account stream."""
-
-    def anchor(leaves: list[dict], token) -> dict:
-        return {"leaves": leaves, "root": merkle_root(leaves), "token": token}
-
-    stamped = [
-        {"hash": "1" * 64, "seq": 9, "stream_id": ACCOUNT_STREAM},
-        {"hash": "2" * 64, "seq": 3, "stream_id": STREAM},
-    ]
-    unstamped = [
-        {"hash": "3" * 64, "seq": 12, "stream_id": ACCOUNT_STREAM},
-        {"hash": "4" * 64, "seq": 5, "stream_id": STREAM},
-    ]
-    return [
-        {"event_id": "01J8Z3C4A000000000000000G1", "event_type": "SegmentExported", "stream_id": STREAM, "payload": SEGMENT_START},
-        {"event_id": ANCHOR_IDS["stamped"], "event_type": "AnchorComputed", "stream_id": STREAM, "payload": anchor(stamped, TOKEN)},
-        {"event_id": ANCHOR_IDS["unstamped"], "event_type": "AnchorComputed", "stream_id": STREAM, "payload": anchor(unstamped, None)},
-        {"event_id": "01J8Z3C4A000000000000000F1", "event_type": "SegmentExported", "stream_id": "ctl:ws_01J8Z9", "payload": FOREIGN_SEGMENT},
-    ]
-
-
-def start_case(name, clause, stream, from_seq, request, expect):
-    return {"name": name, "clause": clause, "stream_id": stream, "from_seq": from_seq, "request": request, "expect": expect}
 
 
 def trusted_starts() -> dict:
-    manifest = {"kind": "manifest", "manifest_hash": SEGMENT_START["manifest_hash"]}
-    stamped = {"kind": "anchor", "anchor_event_id": ANCHOR_IDS["stamped"]}
-    unstamped = {"kind": "anchor", "anchor_event_id": ANCHOR_IDS["unstamped"]}
-    genesis = {"kind": "genesis"}
-    acct = ACCOUNT_STREAM
     rows = start_rows()
     return {
-        "records": start_records(),
-        "cases": [
-            start_case("genesis_at_seq_one", "§11: the genesis start", acct, 1, genesis, {"from_seq": 1, "prev_hash": GENESIS}),
-            start_case("genesis_after_seq_one", "§11: genesis is seq 1 only", acct, 2, genesis, None),
-            start_case("segment_at_its_first_seq", "§9.14: a SegmentExported's start", acct, 4, manifest, {"from_seq": 4, "prev_hash": "5" * 64}),
-            start_case("segment_entered_inside", "§9.14: a segment starts at its first_seq", acct, 5, manifest, None),
-            start_case("segment_of_another_stream", "§9.14: the segment's own stream", AGENT_STREAM, 4, manifest, None),
-            start_case("manifest_not_recorded", "§9.14: an absent manifest", acct, 4, {"kind": "manifest", "manifest_hash": "8" * 64}, None),
-            start_case("stamped_anchor_after_its_leaf", "§9.14: a stamped anchor's leaf at n - 1", acct, 10, stamped, {"from_seq": 10, "prev_hash": "1" * 64}),
-            start_case("stamped_anchor_at_its_leaf", "§9.14: the leaf is the event before the start", acct, 9, stamped, None),
-            start_case("unstamped_anchor_is_no_start", "§9.14, DEC-783 item 8: a null token vouches for nothing", acct, 13, unstamped, None),
-            start_case("anchor_without_the_stream", "§9.14: the anchor has no leaf for the stream", AGENT_STREAM, 10, stamped, None),
-            start_case("another_workspaces_segment", "§9.14, DEC-767: only the workspace's own records", acct, 20, {"kind": "manifest", "manifest_hash": FOREIGN_SEGMENT["manifest_hash"]}, None),
-        ],
         "rows": rows,
         "row_cases": row_cases(rows),
     }
@@ -701,8 +653,6 @@ ORACLE_CHECKS = (
     "ranges.chain",
     "ranges.reference",
     "ranges.walk",
-    "starts.reference",
-    "starts.resolve",
     "starts.rows_reference",
     "starts.rows_oracle",
 )
@@ -775,32 +725,6 @@ def chain_breaks(chain: list[dict]) -> list[int]:
             bad.append(body["seq"])
         prev = entry["hash"]
     return bad
-
-
-def resolve_start(records: list[dict], case: dict) -> dict | None:
-    """The oracle's own resolver, written from §9.14's paragraph: filter by workspace first, then by
-    the kind of start, and only then by the fit."""
-    stream, n, request = case["stream_id"], case["from_seq"], case["request"]
-    mine = [r for r in records if workspace_of(r["stream_id"]) == workspace_of(stream)]
-    if request["kind"] == "genesis":
-        return {"from_seq": 1, "prev_hash": GENESIS} if n == 1 else None
-    if request["kind"] == "manifest":
-        hits = [
-            r["payload"]
-            for r in mine
-            if r["event_type"] == "SegmentExported"
-            and r["payload"]["manifest_hash"] == request["manifest_hash"]
-            and r["payload"]["stream_id"] == stream
-            and r["payload"]["first_seq"] == n
-        ]
-        return {"from_seq": n, "prev_hash": hits[0]["first_prev_hash"]} if hits else None
-    anchors = [
-        r["payload"]
-        for r in mine
-        if r["event_type"] == "AnchorComputed" and r["event_id"] == request["anchor_event_id"] and r["payload"]["token"]
-    ]
-    leaves = [leaf for a in anchors for leaf in a["leaves"] if (leaf["stream_id"], leaf["seq"]) == (stream, n - 1)]
-    return {"from_seq": n, "prev_hash": leaves[0]["hash"]} if leaves else None
 
 
 def parses_once_canonical(text: str) -> bool:
@@ -889,12 +813,6 @@ def check_ranges_and_starts(section: dict) -> list[str]:
         if walk_own_leaf(chain) != case["expect"]:
             problems.append(found("ranges.walk", f"{case['name']}: expected {case['expect']}"))
     starts = section["trusted_starts"]
-    for case in starts["cases"]:
-        got = trusted_start(starts["records"], case["stream_id"], case["from_seq"], case["request"])
-        if got != case["expect"]:
-            problems.append(found("starts.reference", f"{case['name']}: expected {case['expect']}, got {got}"))
-        if resolve_start(starts["records"], case) != case["expect"]:
-            problems.append(found("starts.resolve", f"{case['name']}: expected {case['expect']}"))
     rows = starts["rows"]
     own = [{"body": json.loads(r["body"]), "hash": r["hash"]} for r in rows if r["stream_id"] == STREAM]
     if chain_breaks(own) or len(own) != len(rows) - 1:
@@ -1026,18 +944,6 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "ranges.walk",
             mutated(lambda s: s["range_checks"][2].update(expect=None)),
         ),
-        (
-            "an unstamped anchor is expected to be a start",
-            "starts.resolve",
-            mutated(lambda s: case(s["trusted_starts"], "cases", "unstamped_anchor_is_no_start").update(
-                expect={"from_seq": 13, "prev_hash": "3" * 64})),
-        ),
-        (
-            "a segment's start is expected at another hash",
-            "starts.reference",
-            mutated(lambda s: case(s["trusted_starts"], "cases", "segment_at_its_first_seq").update(
-                expect={"from_seq": 4, "prev_hash": "6" * 64})),
-        ),
         ("a leaf forged under its row's old hash is expected to start", "starts.rows_reference", mutated(
             lambda s: case(s["trusted_starts"], "row_cases", "anchor_leaf_forged_under_its_old_hash").update(
                 expect={"outcome": "start", "from_seq": 10, "prev_hash": FORGED_PREV}))),
@@ -1057,7 +963,6 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
 
 RANGE_MUTANTS = ("self.missing", "self.seq", "self.hash")
-START_MUTANTS = ("start.genesis_seq", "start.first_seq", "start.anchor_seq", "start.null_token", "start.workspace")
 ROW_MUTANTS = ("row.non_canonical", "row.column_mismatch", "row.column_workspace", "row.rehash_mismatch", "row.rule_117",
                "row.anchor_unchecked", "row.first_match", "row.non_ctl_stream", "cold.confirm", "cold.absent_ok", "cold.digest",
                "row.skip_unparsed", "row.anchor_root", "row.anchor_order", "row.unstamped_ok", "row.segment_stream",
@@ -1089,14 +994,6 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
         skip = frozenset([mutant])
         if all(anchor_self_failure(entries_of(c["chain"]), skip) == c["expect"] for c in section["range_checks"]):
             escaped.append(f"cold-records range mutant {mutant}")
-    starts = section["trusted_starts"]
-    for mutant in START_MUTANTS:
-        skip = frozenset([mutant])
-        if all(
-            trusted_start(starts["records"], c["stream_id"], c["from_seq"], c["request"], skip) == c["expect"]
-            for c in starts["cases"]
-        ):
-            escaped.append(f"cold-records start mutant {mutant}")
     for mutant in ROW_MUTANTS:
         if not row_mutant_killers(section, mutant):
             escaped.append(f"cold-records row-start mutant {mutant}")
