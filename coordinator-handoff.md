@@ -84,6 +84,7 @@ anything here.
 - **#1263:** L3, DEC-706 plus journal spec v0.40 (`NoticeAttempted` gets a `verdict`). Docs only.
   Head `dce20280`.
 - **#1262:** the DEC-876 implementation (finishes C3). The Sonnet review passed. Head `e1c1cf06`.
+- **#1257:** L4, C-26 web chips; web-e2e green. Head `b76f3965`.
 
 **Open PRs needing a review verdict, then approval:**
 - **#1258 + #1261** (E1b part 2 tests-correction plus implementation, stacked; paper path).
@@ -92,7 +93,6 @@ anything here.
     the 5 ignore deletions plus the 5 deleted rows.
   - Judge the edge case in #1261's body: a wake past both the bound and the session end stops
     without cancelling. It needs a clock jump to happen at a 5 s interval.
-- **#1257** (L4, C-26 web chips): waiting on web-e2e run 38010338767.
 - **#1242** (L2, E7-17 implementation): needs main merged in (now that #1247 has landed), one
   more ignore line deleted, a doc rewrap and a delta verdict from L2.
 
@@ -115,8 +115,9 @@ anything here.
     entry.
   - **DEC-878** gets a "Not settled" item: what a half-legged bracket becomes. If the answer
     loosens anything, it goes to the founder.
-  - The builder was pushing round 2 to `claude/bracket-leg-reconcile-tests`. Review it again
-    when it lands.
+  - **Round 2** is pushed at `f4cc05d8`: the rule above, plus 20 listing cases and the round-1
+    survivors now caught. A Sonnet delta review was running; if there's no verdict in the body,
+    run one, then approve.
 - **E7-28 round 6** (CI live-feature reader; #1234 tests, #1169 implementation; close #1219 as
   superseded when #1234 lands).
   - **Scope ruling:** DEC-851's threat model covers accidents and careless changes, not
@@ -136,10 +137,14 @@ anything here.
   - Builder branches: `claude/live-e7-28-tests-7` and `claude/live-e7-28-v2`. Review against
     that scope; don't reopen the obfuscation chase.
 
-**Dispatched, not yet reported:**
-- **C4 tests** (live path, E7-6), branch `claude/live-c4-tests`: preflight facts and the account
-  snapshot from `get_accounts`, `get_portfolio`, `get_equity_positions` and `get_equity_orders`,
-  mapped to DEC-470 item 1. Any unknown or missing field refuses.
+**C4 tests: #1264** (live path, E7-6, head `367f1cb5`, adds DEC-902). A Sonnet review was
+running; if no verdict appears in the body, run one.
+- **Content:** 8 pending tests; preflight facts and the account snapshot mapped to DEC-470 item 1.
+  Any unknown field, non-canonical number or next-page cursor refuses.
+- **Builder's scratch implementation** (~190 lines) was at `scratchpad/c4-scratch.diff`. That is
+  not reachable from Cursor; the PR body describes it.
+- **Founder FYI:** strict key and decimal readings will likely refuse real Robinhood answers
+  (e.g. `"100.00"`) until R0 records the real shapes. This fails closed.
 
 **Lanes' next items:**
 - **L2:** #1242 delta, then the DEC-900 fix.
