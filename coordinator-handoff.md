@@ -92,6 +92,7 @@ anything here.
 - **#1242:** L2, E7-17 implementation (round-2 delta passed). Head `5f9093e7`.
 - **#1267:** L2, DEC-900 implementation (approved; already merged).
 - **#1268:** L5, PR 4b; completes slice C (merged).
+- **#1273:** L2, S1a tests correction. Head `ec47cbff`. Then #1272 (S1a implementation; L2 merges main and gets it reviewed), then DEC-903 (exact delegation-window comparison, never understating): a ref PR, a tests-correction row, then a #1272 follow-up fix.
 - **#1271:** L5, CLI judged-types pair PR 1 (tests). Head `770e9f45`. PR 2 (the switch) follows.
 - **#1261:** E1b part 2 implementation, with main merged in and resurrected rows re-deleted. Head `14e1e950`. Once it merges, the paper path needs the bracket-leg implementation, then E3, then E2.
 - **#1265:** L3, DEC-706 step 2 pending tests. Head `1ba9fa16`. L3's step 3 (the implementation) comes next.
@@ -166,6 +167,9 @@ anything here.
 7. **FYI: #1212** moved a `layers.toml` entry (a founder-owned file).
 8. **FYI:** `merge.yml`'s cron sweep isn't firing; direct merges were used.
 9. **Still held for the founder:** #878 (Cloudflare cutover).
+10. **FYI: a truncation bug in ref.py's §6.2 decision.** Whole-second truncation can lift an ask up to 1 s before a
+    delegation's sub-second `starts_at`, which §6.2 forbids. It is recorded in DEC-903 for E8-8's owner, and E8-8's
+    Rust must compare instants exactly. It exists only in the reference model; no Rust order path uses it yet.
 
 ## Session end (when the night is over)
 - Update `docs/project/08-work-tracker.md` and `docs/project/11-work-log.md`.
