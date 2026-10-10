@@ -215,11 +215,18 @@ test("with motion allowed, the owl lands, then draws nothing but a blink until t
   const owl = page.locator("[data-slot=flying-owl]");
   const paints = () => page.evaluate(() => (window as unknown as { owlPaints: number }).owlPaints);
   await page.locator("#threads").scrollIntoViewIfNeeded();
-  await expect(owl).toHaveAttribute("data-owl", "perched", { timeout: 10_000 });
+  await expect
+    .poll(() => page.evaluate(() => document.getAnimations().filter((a) => a instanceof CSSTransition && a.playState === "running").length), { message: "the pieces have settled", timeout: 10_000 })
+    .toBe(0);
+  const phase = await page.evaluate(() => performance.now() % 6800);
+  if (phase < 2700 || phase > 4000) await page.waitForTimeout((2700 - phase + 6800) % 6800);
+  await expect(owl, "a glance starts every 6.8 s and ends 1.5 s in; these two seconds are clear of both").toHaveAttribute("data-owl", "perched");
   const landed = await paints();
   await page.waitForTimeout(2000);
   expect((await paints()) - landed, "in two seconds, at most a blink's two paints").toBeLessThanOrEqual(2);
-  expect(await owl.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName)), "it bobs in CSS").toEqual(["owl-bob"]);
+  const bobs = await owl.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName));
+  expect(bobs, "it bobs in CSS").toHaveLength(1);
+  expect(bobs[0]).toMatch(/owl-bob$/);
   await page.mouse.wheel(0, 400);
   await expect(owl).not.toHaveAttribute("data-owl", "perched");
   await expect(owl).toHaveAttribute("data-owl", "perched", { timeout: 10_000 });
