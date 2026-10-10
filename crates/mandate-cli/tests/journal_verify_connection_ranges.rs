@@ -30,7 +30,7 @@ const NO_TOKEN: &[u8] = b"no imprint";
 const OPERATOR_READ: &str = "operator_read_fails_until_dec_261_item_9";
 const NOT_RUN: &str = "not run: connection_cause_mismatch (needs the control stream and its account streams together)";
 /// §11's "No anchor" list (journal spec lines 3382-3384): what rules 66, 67 and 131 judge on a
-/// control stream. A `ConnectionRevoked` is never judged (I6).
+/// control stream. A `ConnectionRevoked` on a control stream is never judged (I6).
 const CONTROL_JUDGED: &str = "ConnectionRequested ConnectionEstablished \
     ConnectionCredentialRotated ConnectionRefused";
 /// "Any connection record on an account stream" (same lines), as §9.8's "Who writes what" lists
@@ -199,11 +199,21 @@ fn result(ran: &Ran) -> &str {
 /// just before `result:` exactly when `line`.
 #[track_caller]
 fn assert_form(command: &str, ran: &Ran, line: bool, what: &str) {
+    assert_eq!(
+        form(command, ran, line),
+        (true, true),
+        "{command} {what}: {:?}",
+        ran.0
+    );
+}
+
+/// [`assert_form`]'s two answers: whether the report has its line count, and whether the line
+/// before `result:` is the last input's or DEC-890's, as `line` says.
+fn form(command: &str, ran: &Ran, line: bool) -> (bool, bool) {
     let (inputs, last) = [(6, "anchor: "), (7, "token: ")][usize::from(command != "verify")];
     let before = &ran.0[ran.0.len() - 2];
     let fits = [before.starts_with(last), before == NOT_RUN][usize::from(line)];
-    let (form, want) = ((ran.0.len(), fits), (inputs + usize::from(line), true));
-    assert_eq!(form, want, "{command} {what}: {:?}", ran.0);
+    (ran.0.len() == inputs + usize::from(line), fits)
 }
 
 fn put(dir: &Path, name: &str, bytes: &[u8]) -> String {
@@ -451,10 +461,10 @@ fn an_account_export_of_a_revocation_alone_reports_the_cause_check_not_run() {
     );
 }
 
-/// E12-3: DEC-890's line is printed on a one-record export from `seq` 1 exactly when the record's
-/// type is in the journal's own judged list for its stream type (`JUDGED_ON_CONTROL`,
-/// `JUDGED_ON_ACCOUNT`), so the CLI's lists cannot drift from the library's. Every type of each
-/// list is drafted, and every run reaches the stream checks.
+/// E12-3: DEC-890's line is printed, once and in [`assert_form`]'s form, on a one-record export
+/// from `seq` 1 exactly when the record's type is in the journal's own judged list for its stream
+/// type (`JUDGED_ON_CONTROL`, `JUDGED_ON_ACCOUNT`), so the CLI's lists cannot drift from the
+/// library's. Every type of each list is drafted, and every run reaches the stream checks.
 #[test]
 #[ignore = "pending E12-3"]
 fn the_cause_check_line_follows_the_journals_judged_lists() {
@@ -476,14 +486,17 @@ fn the_cause_check_line_follows_the_journals_judged_lists() {
                 let ran = run(command, &range, &[]);
                 let reached = result(&ran).starts_with("verified") || ran.1 == Some(CODE);
                 assert!(reached, "{command} {kind} on {stream}: {:?}", ran.0);
-                let line = ran.0.len() > 1 && ran.0[ran.0.len() - 2] == NOT_RUN;
-                printed.push((command, stream, kind, line, judged.contains(&kind)));
+                let judged = judged.contains(&kind);
+                let times = ran.0.iter().filter(|l| *l == NOT_RUN).count();
+                let fits =
+                    form(command, &ran, judged) == (true, true) && times == usize::from(judged);
+                printed.push((command, stream, kind, times, judged, fits));
             }
         }
     }
-    let differ: Vec<_> = printed.into_iter().filter(|p| p.3 != p.4).collect();
+    let differ: Vec<_> = printed.into_iter().filter(|p| !p.5).collect();
     assert!(
         differ.is_empty(),
-        "(command, stream, type, printed, judged): {differ:?}"
+        "(command, stream, type, lines printed, judged, in form): {differ:?}"
     );
 }
