@@ -12559,7 +12559,8 @@ jq -r "$filter" "$src"
             "on: push\npermissions: {}\njobs:\n  setup:\n    runs-on: ubuntu-24.04\n    steps:\n      \
              - run: echo ready\n  lib-tests:\n    runs-on: ubuntu-24.04\n    permissions: {}\n    \
              needs: [setup]\n    strategy:\n      matrix:\n        shard: [\"0/2\", \"1/2\"]\n    \
-             steps:\n      - uses: actions/checkout@v4 # a comment naming cargo\n      - name: Test \
+             steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # a \
+             comment naming cargo\n      - name: Test \
              the library\n        run: cargo test -p a-lib\n      - run: |\n          # cargo test \
              in a comment\n          cargo test -p a-lib\n          cargo clippy -p a-lib\n",
         )];
@@ -13004,7 +13005,7 @@ jq -r "$filter" "$src"
     /// that make it possible: `eval`, a pipe into a shell or an interpreter, `sh -c`,
     /// `python -c`, `perl -e`, `node -e`, a glob in a command word, a double-quoted `run:` with a
     /// `\` (a line continuation, or an escape such as `\x67`), and a step `shell:` that is not
-    /// bash or sh (#1169 round 3 review, bypass 6; DEC-176
+    /// exactly bash (#1169 round 3 review, bypass 6, and round 5 review, B4; DEC-176
     /// tightening). The control holds only programs DEC-873's closed world reads.
     #[test]
     fn cargo_without_a_cargo_word_cannot_be_read() -> Result<()> {
@@ -13222,7 +13223,8 @@ jq -r "$filter" "$src"
     /// The closed world's control: a workflow shaped like the repository's own (downloads checked
     /// and installed, `rustup`, cargo with `-p`, `test`, `if`/`case`/`for` blocks, `gh` and `jq`,
     /// a here-string into `jq`, writes to `$GITHUB_OUTPUT`, the four repository scripts, the five
-    /// allowed `CARGO_*` names, and `npm`/`npx` in a `web` job) is not flagged (DEC-873).
+    /// allowed `CARGO_*` names, and `npm`/`npx` in a `web` job beside its `package.json`) is not
+    /// flagged (DEC-873).
     #[test]
     fn a_repository_shaped_workflow_passes_the_closed_world() -> Result<()> {
         let mut flows = clean_scripts();
@@ -13279,6 +13281,10 @@ jq -r "$filter" "$src"
             "      - run: npx --yes impeccable@4.1.0 detect src/",
             "      - run: npm run build",
         ]));
+        flows.push(ci_file(
+            "web/package.json",
+            "{\"scripts\": {\"build\": \"next build\"}}\n",
+        ));
         assert_eq!(host_problems(&flows)?, Vec::<String>::new());
         Ok(())
     }
@@ -13572,8 +13578,8 @@ jq -r "$filter" "$src"
     }
 
     /// `npm` and `npx` are read only in a job whose `defaults.run.working-directory` is `web` or
-    /// below it and that holds no cargo word; in any other job they cannot be read (DEC-873
-    /// item 3).
+    /// below it, that holds no cargo word, and beside the `package.json` of that directory; in
+    /// any other job they cannot be read (DEC-873 item 3).
     #[test]
     fn npm_runs_only_in_a_web_job_without_cargo() -> Result<()> {
         let flows = [yaml_lines(&[
@@ -13585,7 +13591,7 @@ jq -r "$filter" "$src"
             "        working-directory: web",
             "    steps:",
             "      - run: npm ci",
-            "      - run: npx playwright install chromium",
+            "      - run: npx playwright install-deps chromium",
             "  web-app:",
             "    defaults:",
             "      run:",
@@ -13613,6 +13619,13 @@ jq -r "$filter" "$src"
             "    steps:",
             "      - run: npm ci",
         ])];
+        let package = "{\"scripts\": {\"build\": \"next build\", \"test\": \"vitest run\"}}\n";
+        let [workflow_file] = flows;
+        let flows = [
+            workflow_file,
+            ci_file("web/package.json", package),
+            ci_file("web/app/package.json", package),
+        ];
         let problems = host_problems(&flows)?;
         unreadable(
             &problems,
@@ -13650,7 +13663,7 @@ jq -r "$filter" "$src"
     }
 
     /// A local action or reusable workflow, `uses: ./…` on a step or a job, quoted or not, cannot
-    /// be read; a remote action can (DEC-873 item 6).
+    /// be read; a listed remote action, pinned as the repository pins it, can (DEC-873 item 6).
     #[test]
     fn a_local_action_or_workflow_cannot_be_read() -> Result<()> {
         let flows = [yaml_lines(&[
@@ -13666,7 +13679,7 @@ jq -r "$filter" "$src"
             "      - uses: \"./.github/actions/setup\"",
             "  remote:",
             "    steps:",
-            "      - uses: actions/checkout@v4",
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "      - run: cargo test -p a-lib",
         ])];
         let problems = host_problems(&flows)?;
@@ -13835,6 +13848,849 @@ jq -r "$filter" "$src"
             assert!(named, "names `{script}`: {problems:?}");
         }
         names(&problems, &["word"], &["clean"]);
+        Ok(())
+    }
+
+    /// A redirection before the command word, glued or spaced, to a file or appended, and a
+    /// descriptor number before it, is skipped as the shell skips it, so the cargo word after it
+    /// is judged; a `run:` value that starts with `>` is no block scalar header and cannot be read
+    /// (#1169 round 5 review, B1; DEC-851 item 6's structural skip).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_redirection_before_the_command_word_is_skipped() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  glued:",
+            "    steps:",
+            "      - run: |",
+            "          >/dev/null cargo build --workspace",
+            "  spaced:",
+            "    steps:",
+            "      - run: |",
+            "          > /dev/null cargo build --workspace",
+            "  to-a-file:",
+            "    steps:",
+            "      - run: |",
+            "          >out cargo build --workspace",
+            "  appended:",
+            "    steps:",
+            "      - run: |",
+            "          >>out cargo build --workspace",
+            "  descriptor:",
+            "    steps:",
+            "      - run: |",
+            "          2>/dev/null cargo build --workspace",
+            "  after-a-command:",
+            "    steps:",
+            "      - run: echo start; >/dev/null cargo build --workspace",
+            "  inline:",
+            "    steps:",
+            "      - run: >/dev/null cargo build --workspace",
+            "  lib-tests:",
+            "    steps:",
+            "      - run: |",
+            "          >/dev/null cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        judged_with_host(
+            &problems,
+            &[
+                "glued",
+                "spaced",
+                "to-a-file",
+                "appended",
+                "descriptor",
+                "after-a-command",
+            ],
+        );
+        unreadable(&problems, &["inline"]);
+        names(&problems, &["glued"], &["lib-tests"]);
+        Ok(())
+    }
+
+    /// An unquoted heredoc's body expands, so a command substitution in it, `$(` or a backtick,
+    /// cannot be read, whatever it runs; a quoted delimiter, a parameter expansion and an escaped
+    /// `\$(` can (#1169 round 5 review, B2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_substitution_in_an_unquoted_heredoc_cannot_be_read() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  substituted:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<EOF",
+            "          $(cargo build --workspace)",
+            "          EOF",
+            "  backtick:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<EOF",
+            "          `cargo build --workspace`",
+            "          EOF",
+            "  any-substitution:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<EOF",
+            "          built on $(date)",
+            "          EOF",
+            "  dashed:",
+            "    steps:",
+            "      - run: |",
+            "          cat > notes.txt <<-EOF",
+            "          built on $(date)",
+            "          EOF",
+            "  read-heredocs:",
+            "    steps:",
+            "      - run: |",
+            "          cat > a.txt <<'EOF'",
+            "          $(date) and `date`",
+            "          EOF",
+            "          cat > b.txt <<\"EOF\"",
+            "          $(date)",
+            "          EOF",
+            "          cat > c.txt <<EOF",
+            "          ${HOME} and \\$(date)",
+            "          EOF",
+            "          cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &["substituted", "backtick", "any-substitution", "dashed"],
+        );
+        names(&problems, &["substituted"], &["read-heredocs"]);
+        Ok(())
+    }
+
+    /// An `env:` key, at workflow, job, step or service level, and a command-prefix assignment
+    /// are read only when the name is one the repository's workflows set or one of the five
+    /// `CARGO_*` names: `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and
+    /// `NODE_OPTIONS`, in any case, cannot be read, nor can a listed name in another case, an
+    /// inline `env:` mapping, an
+    /// uppercase name assigned by a command of its own or a `for` loop, or `printf -v`; a
+    /// lowercase local can (#1169 round 5 review, B3).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn an_environment_name_off_the_list_cannot_be_read() -> Result<()> {
+        let job_env = |job: &str, name: &str| {
+            format!(
+                "  {job}:\n    env:\n      {name}: x\n    steps:\n      - run: cargo test -p a-lib\n"
+            )
+        };
+        let step_env = |job: &str, name: &str| {
+            format!(
+                "  {job}:\n    steps:\n      - env:\n          {name}: x\n        run: cargo test -p \
+                 a-lib\n"
+            )
+        };
+        let mut text = String::from("on: push\njobs:\n");
+        for (job, name) in [
+            ("job-bash-env", "BASH_ENV"),
+            ("job-env", "ENV"),
+            ("job-toolchain", "RUSTUP_TOOLCHAIN"),
+            ("job-lowercase", "bash_env"),
+            ("job-listed-lowercase", "gh_token"),
+        ] {
+            text.push_str(&job_env(job, name));
+        }
+        for (job, name) in [
+            ("step-path", "PATH"),
+            ("step-preload", "LD_PRELOAD"),
+            ("step-node", "NODE_OPTIONS"),
+            ("step-mixed-case", "Path"),
+        ] {
+            text.push_str(&step_env(job, name));
+        }
+        for (job, run) in [
+            ("prefix-path", "PATH=/tmp/bin cargo test -p a-lib"),
+            ("prefix-lowercase", "path=/tmp/bin cargo test -p a-lib"),
+            (
+                "prefix-toolchain",
+                "RUSTUP_TOOLCHAIN=nightly cargo test -p a-lib",
+            ),
+            ("prefix-bash-env", "BASH_ENV=x.txt cargo test -p a-lib"),
+            (
+                "prefix-listed-lowercase",
+                "cargo_term_color=never cargo test -p a-lib",
+            ),
+            ("standalone", "PATH=/tmp/bin; cargo test -p a-lib"),
+            (
+                "loop-variable",
+                "for PATH in /tmp/bin; do cargo test -p a-lib; done",
+            ),
+            ("printf-variable", "printf -v PATH '%s' /tmp/bin"),
+        ] {
+            text.push_str(&format!("  {job}:\n    steps:\n      - run: {run}\n"));
+        }
+        text.push_str(
+            "  service-env:\n    services:\n      db:\n        image: \
+             postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f\n        \
+             env:\n          LD_PRELOAD: x\n    steps:\n      - run: cargo test -p a-lib\n",
+        );
+        text.push_str(
+            "  allowed:\n    env:\n      MANDATE_PG_URL: postgres://localhost/x\n      \
+             CARGO_TERM_COLOR: always\n    services:\n      db:\n        image: \
+             postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f\n        \
+             env:\n          POSTGRES_PASSWORD: postgres\n    steps:\n      - env:\n          \
+             GH_TOKEN: x\n        run: MANDATE_TEST_PARTITION=1/2 cargo test -p a-lib\n      - run: \
+             |\n          failed=0\n          for pr in 1 2; do echo \"$pr\"; done\n",
+        );
+        let flows = [
+            ci_file(".github/workflows/ci.yml", &text),
+            ci_file(
+                ".github/workflows/top.yml",
+                "on: push\nenv:\n  BASH_ENV: x.txt\njobs:\n  a:\n    steps:\n      - run: echo ok\n",
+            ),
+            ci_file(
+                ".github/workflows/inline.yml",
+                "on: push\nenv: { NODE_OPTIONS: x }\njobs:\n  b:\n    steps:\n      - run: echo ok\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "job-bash-env",
+                "job-env",
+                "job-toolchain",
+                "job-lowercase",
+                "job-listed-lowercase",
+                "step-path",
+                "step-preload",
+                "step-node",
+                "step-mixed-case",
+                "prefix-path",
+                "prefix-lowercase",
+                "prefix-toolchain",
+                "prefix-bash-env",
+                "prefix-listed-lowercase",
+                "standalone",
+                "loop-variable",
+                "printf-variable",
+                "service-env",
+            ],
+        );
+        unreadable_file(&problems, ".github/workflows/top.yml");
+        unreadable_file(&problems, ".github/workflows/inline.yml");
+        names(&problems, &["job-env"], &["allowed"]);
+        Ok(())
+    }
+
+    /// Every `CARGO_*` name but the five the workflows need cannot be read, as an `env:` key or
+    /// as a prefix assignment, so adding any one of these to the list is caught (#1169 round 5
+    /// review, mutant M04; DEC-873 item 5).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn every_cargo_name_but_the_five_cannot_be_read() -> Result<()> {
+        let names_refused = [
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+            "CARGO_BUILD_TARGET",
+            "CARGO_BUILD_TARGET_DIR",
+            "CARGO_BUILD_RUSTC",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_BUILD_RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_JOBS",
+            "CARGO_INCREMENTAL",
+            "CARGO_NET_OFFLINE",
+            "CARGO_HTTP_PROXY",
+            "CARGO_REGISTRIES_CRATES_IO_PROTOCOL",
+            "CARGO_UNSTABLE_BUILD_STD",
+            "CARGO_PROFILE_RELEASE_DEBUG",
+            "CARGO_PROFILE_DEV_OPT_LEVEL",
+            "CARGO_PROFILE_TEST_OPT_LEVEL",
+            "CARGO_PROFILE_DEV_DEBUG_ASSERTIONS",
+            "CARGO_TERM_VERBOSE",
+            "CARGO_TERM_QUIET",
+            "CARGO_FEATURE_LIVE",
+            "CARGO_CFG_FEATURE",
+            "CARGO_MAKEFLAGS",
+            "CARGO_LOG",
+            "CARGO_CACHE_RUSTC_INFO",
+            "CARGO_ALIAS_B",
+            "CARGO_INSTALL_ROOT",
+            "CARGO_MUTANTS_JOBS",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
+        ];
+        let mut text = String::from("on: push\njobs:\n");
+        let mut jobs = Vec::new();
+        for name in names_refused {
+            let job = name.to_ascii_lowercase().replace('_', "-");
+            text.push_str(&format!(
+                "  env-{job}:\n    env:\n      {name}: x\n    steps:\n      - run: echo ok\n"
+            ));
+            text.push_str(&format!(
+                "  prefix-{job}:\n    steps:\n      - run: {name}=x cargo test -p a-lib\n"
+            ));
+            jobs.push(format!("env-{job}"));
+            jobs.push(format!("prefix-{job}"));
+        }
+        text.push_str(
+            "  allowed:\n    env:\n      CARGO_TERM_COLOR: always\n      CARGO_MUTANTS_VERSION: \
+             1\n      CARGO_MUTANTS_SHA256: x\n      CARGO_PROFILE_DEV_DEBUG: 0\n      \
+             CARGO_PROFILE_TEST_DEBUG: 0\n    steps:\n      - run: CARGO_TERM_COLOR=never cargo \
+             test -p a-lib\n",
+        );
+        let problems = host_problems(&[ci_file(".github/workflows/ci.yml", &text)])?;
+        let jobs: Vec<&str> = jobs.iter().map(String::as_str).collect();
+        unreadable(&problems, &jobs);
+        names(&problems, &["env-cargo-home"], &["allowed"]);
+        Ok(())
+    }
+
+    /// A step's or a default `shell:` is read only as exactly `bash`, the form the repository
+    /// uses: one with any argument (`bash -c …`, `bash --rcfile x {0}`, `bash -e {0}`, `sh -c
+    /// …`), a bare `sh` and a quoted `"bash"` cannot be read (#1169 round 5 review, B4).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_shell_with_arguments_cannot_be_read() -> Result<()> {
+        let mut text = String::from("on: push\njobs:\n");
+        for (job, shell) in [
+            ("bash-c", "bash -c x {0}"),
+            ("rcfile", "bash --rcfile x.txt {0}"),
+            ("bash-e", "bash -e {0}"),
+            ("sh-c", "sh -c x"),
+            ("plain-sh", "sh"),
+            ("quoted", "\"bash\""),
+        ] {
+            text.push_str(&format!(
+                "  {job}:\n    steps:\n      - shell: {shell}\n        run: echo ok\n"
+            ));
+        }
+        text.push_str(
+            "  job-defaults:\n    defaults:\n      run:\n        shell: bash --noprofile {0}\n    \
+             steps:\n      - run: echo ok\n",
+        );
+        text.push_str(
+            "  plain-bash:\n    defaults:\n      run:\n        shell: bash\n    steps:\n      - \
+             shell: bash\n        run: cargo test -p a-lib\n",
+        );
+        let flows = [
+            ci_file(".github/workflows/ci.yml", &text),
+            ci_file(
+                ".github/workflows/defaults.yml",
+                "on: push\ndefaults:\n  run:\n    shell: bash -c x\njobs:\n  a:\n    steps:\n      \
+                 - run: echo ok\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "bash-c",
+                "rcfile",
+                "bash-e",
+                "sh-c",
+                "plain-sh",
+                "quoted",
+                "job-defaults",
+            ],
+        );
+        unreadable_file(&problems, ".github/workflows/defaults.yml");
+        names(&problems, &["bash-c"], &["plain-bash"]);
+        Ok(())
+    }
+
+    /// A write to a build input cannot be read, by any writer the closed world reads: a
+    /// redirection, `tee`, `curl -o`, a `tar` member, `cp`, `mv`, `install` and a heredoc `cat`
+    /// writes, to `Cargo.toml`, `Cargo.lock`, `rust-toolchain*`, `config.toml`, `build.rs` or a
+    /// path under `crates/` or `xtask/`; nor can `curl -O`, `--remote-name`, `--output-dir` or
+    /// `-K`, whose targets are not named, `tar` with no member or a flag, or a write to a hidden
+    /// file (#1169 round 5 review, B5 and mutants M05, M10 and M11).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_write_to_a_build_input_cannot_be_read() -> Result<()> {
+        let jobs = [
+            ("redirect-manifest", "echo x > Cargo.toml"),
+            ("append-lock", "echo x >> Cargo.lock"),
+            ("toolchain-file", "echo x > rust-toolchain"),
+            ("toolchain-toml", "echo x > rust-toolchain.toml"),
+            ("config-toml", "echo x > config.toml"),
+            ("build-script", "echo x > build.rs"),
+            ("under-crates", "echo x > crates/a-lib/src/lib.rs"),
+            ("under-xtask", "echo x >> xtask/src/main.rs"),
+            ("tee-manifest", "echo x | tee Cargo.toml"),
+            ("tee-append", "echo x | tee -a build.rs"),
+            (
+                "curl-output",
+                "curl -sSfL -o Cargo.toml https://example.com/x",
+            ),
+            (
+                "curl-long-output",
+                "curl -sSfL --output build.rs https://example.com/x",
+            ),
+            ("curl-glued", "curl -sSfLobuild.rs https://example.com/x"),
+            (
+                "curl-remote-cluster",
+                "curl -sSfLO https://example.com/Cargo.toml",
+            ),
+            ("curl-remote", "curl -O https://example.com/x"),
+            (
+                "curl-remote-long",
+                "curl --remote-name https://example.com/x",
+            ),
+            (
+                "curl-output-dir",
+                "curl --output-dir crates -o x https://example.com/x",
+            ),
+            ("curl-config", "curl -K curl.txt https://example.com/x"),
+            (
+                "curl-config-long",
+                "curl --config curl.txt https://example.com/x",
+            ),
+            ("tar-manifest", "tar xzf t.tgz Cargo.toml"),
+            ("tar-build-script", "tar xzf t.tgz build.rs"),
+            ("tar-path", "tar xzf t.tgz src/lib.rs"),
+            ("tar-directory", "tar xzf t.tgz crates"),
+            ("tar-no-members", "tar xzf t.tgz"),
+            ("tar-flags", "tar xzf t.tgz -C crates tool"),
+            ("hidden-redirect", "echo x > .npmrc"),
+            ("hidden-tee", "echo x | tee .profile"),
+            ("hidden-curl", "curl -sSfL -o .bashrc https://example.com/x"),
+            ("hidden-tar", "tar xzf t.tgz .profile"),
+            ("copy", "cp x.txt Cargo.toml"),
+            ("move", "mv x.txt build.rs"),
+            ("install", "install x.txt crates/a-lib/build.rs"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push((
+            "writes",
+            "echo x > notes.txt && curl -sSfL -o tool.tgz https://example.com/x && tar xzf \
+             tool.tgz tool && echo x | tee -a \"$GITHUB_OUTPUT\" && cargo test -p a-lib",
+        ));
+        let flows = [
+            workflow(&all),
+            ci_file(
+                ".github/workflows/heredoc.yml",
+                "on: push\njobs:\n  heredoc-build-script:\n    steps:\n      - run: |\n          \
+                 cat > build.rs <<'EOF'\n          fn main() {}\n          EOF\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        let mut refused: Vec<&str> = jobs.iter().map(|(job, _)| *job).collect();
+        refused.push("heredoc-build-script");
+        unreadable(&problems, &refused);
+        names(&problems, &["redirect-manifest"], &["writes"]);
+        Ok(())
+    }
+
+    /// A non-local `uses:` is read only when it names an action the repository's workflows use,
+    /// pinned as they pin it, and the tag-pinned CodeQL actions only in `codeql.yml`: another
+    /// action, another pin, a quoted pin, a `docker://` image and a remote reusable workflow cannot
+    /// be read, nor can a job `container:` or a `services:` image off the list (#1169 round 5
+    /// review, B6; DEC-873 item 6).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_remote_action_or_image_off_the_list_cannot_be_read() -> Result<()> {
+        let postgres = "postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f";
+        let service = format!("        image: {postgres}");
+        let flows = [
+            yaml_lines(&[
+                "on: push",
+                "jobs:",
+                "  unpinned:",
+                "    steps:",
+                "      - uses: actions/checkout@v4",
+                "  other-action:",
+                "    steps:",
+                "      - uses: someone/action@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                "  other-pin:",
+                "    steps:",
+                "      - uses: actions/checkout@0000000000000000000000000000000000000000",
+                "  docker:",
+                "    steps:",
+                "      - uses: docker://alpine:3.20",
+                "  quoted-pin:",
+                "    steps:",
+                "      - uses: \"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\"",
+                "  codeql-tag:",
+                "    steps:",
+                "      - uses: actions/checkout@v7",
+                "  remote-workflow:",
+                "    uses: someone/repo/.github/workflows/build.yml@main",
+                "  container-inline:",
+                "    container: node:22",
+                "    steps:",
+                "      - run: echo ok",
+                "  container-image:",
+                "    container:",
+                "      image: node:22",
+                "    steps:",
+                "      - run: echo ok",
+                "  service-image:",
+                "    services:",
+                "      db:",
+                "        image: postgres:16",
+                "    steps:",
+                "      - run: echo ok",
+                "  listed:",
+                "    services:",
+                "      db:",
+                &service,
+                "    steps:",
+                "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+                "      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2",
+                "      - run: cargo test -p a-lib",
+            ]),
+            ci_file(
+                ".github/workflows/codeql.yml",
+                "on: push\njobs:\n  analyze:\n    steps:\n      - uses: actions/checkout@v7\n      \
+                 - uses: github/codeql-action/init@v4\n      - uses: \
+                 github/codeql-action/analyze@v4\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        unreadable(
+            &problems,
+            &[
+                "unpinned",
+                "other-action",
+                "other-pin",
+                "docker",
+                "quoted-pin",
+                "codeql-tag",
+                "remote-workflow",
+                "container-inline",
+                "container-image",
+                "service-image",
+            ],
+        );
+        names(&problems, &["unpinned"], &["listed", "analyze"]);
+        Ok(())
+    }
+
+    /// In a `web` job, `npm` runs only as `npm ci`, `npm run <script>` of a script its
+    /// `package.json` holds, and `npm test`, and `npx` only in the forms the repository uses:
+    /// `npx`, `npm exec`, `npm pkg set`, `npm config set`, `npm install`, a missing script, a
+    /// script given arguments and a `package.json` naming cargo cannot be read. Working
+    /// directories are resolved first, so `web/..`, `web/../`, `../crates` and `web/../crates`
+    /// are not under `web`, and neither is a step's own `working-directory: .`, while
+    /// `./web/app/..` is `web` (#1169 round 5 review, B7; DEC-873 item 3).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn npm_and_npx_run_only_in_the_repository_forms() -> Result<()> {
+        let job = |name: &str, dir: &str, run: &str| {
+            format!(
+                "  {name}:\n    defaults:\n      run:\n        working-directory: {dir}\n    \
+                 steps:\n      - run: {run}\n"
+            )
+        };
+        let refused = [
+            ("npx-other", "web", "npx cowsay hi"),
+            (
+                "npx-other-version",
+                "web",
+                "npx --yes impeccable@4.2.0 detect src/",
+            ),
+            ("npx-playwright-test", "web", "npx playwright test"),
+            ("npm-exec", "web", "npm exec cowsay"),
+            ("npm-pkg-set", "web", "npm pkg set scripts.build=x"),
+            (
+                "npm-config-set",
+                "web",
+                "npm config set registry https://example.com",
+            ),
+            ("npm-install", "web", "npm install left-pad"),
+            ("npm-run-missing", "web", "npm run nope"),
+            ("npm-run-arguments", "web", "npm run build -- --debug"),
+            ("package-naming-it", "web/app", "npm run build"),
+            ("dir-up", "web/..", "npm ci"),
+            ("dir-up-slash", "web/../", "npm ci"),
+            ("dir-crates", "../crates", "npm ci"),
+            ("dir-through", "web/../crates", "npm ci"),
+        ];
+        let mut text = String::from("on: push\njobs:\n");
+        for (name, dir, run) in refused {
+            text.push_str(&job(name, dir, run));
+        }
+        text.push_str(
+            "  step-root:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
+             - working-directory: .\n        run: npm ci\n",
+        );
+        text.push_str(
+            "  web-ok:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
+             - run: npm ci\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
+             test --if-present\n      - run: npx playwright install --with-deps --only-shell \
+             chromium\n      - run: npx playwright install-deps chromium\n      - run: npx --yes \
+             impeccable@4.1.0 detect src/\n      - working-directory: web\n        run: npm ci\n",
+        );
+        text.push_str(&job("dir-resolved", "./web/app/..", "npm ci"));
+        let flows = [
+            ci_file(".github/workflows/ci.yml", &text),
+            ci_file(
+                "web/package.json",
+                "{\"scripts\": {\"build\": \"next build\", \"lint\": \"eslint\", \"test\": \"vitest \
+                 run\"}}\n",
+            ),
+            ci_file(
+                "web/app/package.json",
+                "{\"scripts\": {\"build\": \"cargo build --workspace\"}}\n",
+            ),
+        ];
+        let problems = host_problems(&flows)?;
+        let mut jobs: Vec<&str> = refused.iter().map(|(name, ..)| *name).collect();
+        jobs.push("step-root");
+        unreadable(&problems, &jobs);
+        names(&problems, &["npx-other"], &["web-ok", "dir-resolved"]);
+        Ok(())
+    }
+
+    /// A listed repository script is read with every repository script it runs, by
+    /// `"$(dirname "$0")/<name>"`, transitively and under the same rules: a callee that names
+    /// cargo, is missing, writes a build input or runs an interpreter makes the caller unreadable,
+    /// and so does a call the check cannot resolve to a file (`../`, `./`, an expansion) and an
+    /// `eval`, `bash -c` or `awk` in the script itself; a clean chain, and a cycle, can be read
+    /// (#1169 round 5 review, B8; DEC-873 item 2).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_repository_script_is_read_with_the_scripts_it_runs() -> Result<()> {
+        let run = |docs_only: &str, base_ref: Option<&str>| {
+            let mut flows: Vec<CiFile> = clean_scripts()
+                .into_iter()
+                .map(|file| {
+                    if file.path == ".github/scripts/docs-only.sh" {
+                        ci_file(&file.path, docs_only)
+                    } else {
+                        file
+                    }
+                })
+                .collect();
+            if let Some(text) = base_ref {
+                flows.push(ci_file(".github/scripts/base-ref.sh", text));
+            }
+            flows.push(workflow(&[("docs", ".github/scripts/docs-only.sh")]));
+            host_problems(&flows)
+        };
+        let calls = "#!/usr/bin/env bash\nset -euo pipefail\nbase=$(\"$(dirname \"$0\")/base-ref.sh\")\necho \"$base\"\n";
+        let clean = "#!/usr/bin/env bash\necho main\n";
+        assert_eq!(run(calls, Some(clean))?, Vec::<String>::new());
+        let cycle = "#!/usr/bin/env bash\n\"$(dirname \"$0\")/docs-only.sh\"\n";
+        assert_eq!(run(calls, Some(cycle))?, Vec::<String>::new());
+        for (case, base_ref) in [
+            (
+                "callee-cargo",
+                Some("#!/usr/bin/env bash\ncargo build --workspace\n"),
+            ),
+            ("callee-missing", None),
+            (
+                "callee-interpreter",
+                Some("#!/usr/bin/env bash\npython3 x.py\n"),
+            ),
+            (
+                "callee-write",
+                Some("#!/usr/bin/env bash\necho x > Cargo.toml\n"),
+            ),
+            (
+                "callee-environment",
+                Some("#!/usr/bin/env bash\necho \"RUSTFLAGS=x\" >> \"$GITHUB_ENV\"\n"),
+            ),
+        ] {
+            let problems = run(calls, base_ref)?;
+            unreadable(&problems, &["docs"]);
+            let named = problems
+                .iter()
+                .any(|p| p.contains("`.github/scripts/base-ref.sh"));
+            assert!(named, "{case} names base-ref.sh: {problems:?}");
+        }
+        for (case, docs_only) in [
+            (
+                "climbing",
+                "#!/usr/bin/env bash\n\"$(dirname \"$0\")/../base-ref.sh\"\n",
+            ),
+            ("dot-slash", "#!/usr/bin/env bash\n./helper.sh\n"),
+            ("expansion", "#!/usr/bin/env bash\n\"$TOOL\" run\n"),
+            ("eval", "#!/usr/bin/env bash\neval \"$X\"\n"),
+            ("bash-c", "#!/usr/bin/env bash\nbash -c 'echo x'\n"),
+            ("awk", "#!/usr/bin/env bash\nawk '{ print }' x.txt\n"),
+        ] {
+            let problems = run(docs_only, Some(clean))?;
+            unreadable(&problems, &["docs"]);
+            let named = problems
+                .iter()
+                .any(|p| p.contains("`.github/scripts/docs-only.sh"));
+            assert!(named, "{case} names docs-only.sh: {problems:?}");
+        }
+        Ok(())
+    }
+
+    /// The two `awk` programs of `merge-approved.sh` a person has read are read only byte for
+    /// byte and only in that script: the same text in another script, or one changed by a
+    /// word, cannot be read (#1169 round 5 review, B8).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn the_read_script_lines_are_read_only_exactly() -> Result<()> {
+        let approvals = r##"approvals=$(awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced' <<<"$body" |
+  sed -nE 's/^[[:space:]]*([-*][[:space:]]+)?Coordinator-approved-head:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*$/\2/p' |
+  tr 'A-F' 'a-f')"##;
+        let kept = r##"kept=$(awk '
+  /^<!-- CURSOR_AGENT_PR_BODY_BEGIN -->$/ { inside = 1; marked = 1; next }
+  /^<!-- CURSOR_AGENT_PR_BODY_END -->$/ { inside = 0; next }
+  { line[++n] = $0; kept[n] = inside }
+  END { for (i = 1; i <= n; i++) if (!marked || kept[i]) print line[i] }
+' <<<"$body")"##;
+        let run = |script: &str, text: &str| {
+            let mut flows: Vec<CiFile> = clean_scripts()
+                .into_iter()
+                .map(|file| {
+                    if file.path == script {
+                        ci_file(&file.path, text)
+                    } else {
+                        file
+                    }
+                })
+                .collect();
+            flows.push(workflow(&[
+                ("merge", ".github/scripts/merge-approved.sh \"$PR\""),
+                ("checks", ".github/scripts/docs-checks.sh"),
+            ]));
+            host_problems(&flows)
+        };
+        let both = format!("#!/usr/bin/env bash\nbody=x\n{approvals}\n{kept}\necho ok\n");
+        assert_eq!(
+            run(".github/scripts/merge-approved.sh", &both)?,
+            Vec::<String>::new()
+        );
+        let elsewhere = run(".github/scripts/docs-checks.sh", &both)?;
+        unreadable(&elsewhere, &["checks"]);
+        names(&elsewhere, &["checks"], &["merge"]);
+        let changed = both.replace("print line[i]", "system(line[i])");
+        let changed = run(".github/scripts/merge-approved.sh", &changed)?;
+        unreadable(&changed, &["merge"]);
+        Ok(())
+    }
+
+    /// A here-string feeds only `jq` and a heredoc only `cat`: a here-string into `cat` and a
+    /// heredoc into `echo` cannot be read (#1169 round 5 review, mutants M03 and M20).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_heredoc_or_here_string_feeds_only_its_one_program() -> Result<()> {
+        let flows = [yaml_lines(&[
+            "on: push",
+            "jobs:",
+            "  here-string-cat:",
+            "    steps:",
+            "      - run: cat <<< \"$X\"",
+            "  heredoc-echo:",
+            "    steps:",
+            "      - run: |",
+            "          echo <<EOF",
+            "          text",
+            "          EOF",
+            "  fed:",
+            "    steps:",
+            "      - run: |",
+            "          more=$(jq -r '.[]' <<< \"$X\")",
+            "          cat > notes.txt <<'EOF'",
+            "          text",
+            "          EOF",
+            "          cargo test -p a-lib",
+        ])];
+        let problems = host_problems(&flows)?;
+        unreadable(&problems, &["here-string-cat", "heredoc-echo"]);
+        names(&problems, &["here-string-cat"], &["fed"]);
+        Ok(())
+    }
+
+    /// `rustup` is read only as the repository runs it, `rustup show active-toolchain` and a bare
+    /// `rustup toolchain install`: `rustup run`, `default`, `override`, `toolchain link`, a named
+    /// install and any other form cannot be read (#1169 round 5 review, mutant M07).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn rustup_runs_only_in_the_repository_forms() -> Result<()> {
+        let jobs = [
+            ("run", "rustup run stable echo x"),
+            ("default", "rustup default nightly"),
+            ("override", "rustup override set nightly"),
+            ("link", "rustup toolchain link dev /tmp/dev"),
+            ("named-install", "rustup toolchain install nightly"),
+            ("show-home", "rustup show home"),
+            ("bare", "rustup"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push((
+            "repository",
+            "rustup show active-toolchain || rustup toolchain install",
+        ));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["run"], &["repository"]);
+        Ok(())
+    }
+
+    /// `--all-features` beside the compile-only form makes it no compile-only job: it resolves
+    /// `live` in the runner, which is named, and the one plain compile-only job after it is still
+    /// the first and passes (#1169 round 5 review, mutant M13).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn all_features_never_counts_as_the_compile_only_form() -> Result<()> {
+        let flows = [workflow(&[
+            (
+                "check-all-features",
+                "cargo check -p the-runner --features live --all-features",
+            ),
+            ("check-live", COMPILE_ONLY),
+        ])];
+        let problems = check(&live_policy(), with_runner(vec![]), &flows, by_flags)?;
+        let resolves = problems
+            .iter()
+            .any(|p| p.contains("`check-all-features`") && p.contains("resolves `live`"));
+        assert!(resolves, "the all-features job resolves live: {problems:?}");
+        names(&problems, &["check-all-features"], &["check-live"]);
+        Ok(())
+    }
+
+    /// `sudo install` is read only into exactly `/usr/local/bin/`: a sibling such as
+    /// `/usr/local/bin2/`, a directory below it, a path that climbs out of it and a name sharing
+    /// its prefix cannot be read (#1169 round 5 review, mutant M18).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn sudo_install_writes_only_into_usr_local_bin() -> Result<()> {
+        let jobs = [
+            ("sibling", "sudo install tool /usr/local/bin2/"),
+            ("below", "sudo install tool /usr/local/bin/sub/"),
+            ("climbing", "sudo install tool /usr/local/bin/../lib/"),
+            ("prefix", "sudo install tool /usr/local/binx"),
+        ];
+        let mut all = jobs.to_vec();
+        all.push(("listed", "sudo install tool /usr/local/bin/"));
+        let problems = host_problems(&[workflow(&all)])?;
+        unreadable(&problems, &jobs.map(|(job, _)| job));
+        names(&problems, &["sibling"], &["listed"]);
+        Ok(())
+    }
+
+    /// `--manifest-path`, in either spelling and on either side of `-p`, makes the build select
+    /// every member even beside a `-p` naming another crate, so it holds the live-only member
+    /// (#1169 round 5 review, mutant M19).
+    #[test]
+    #[ignore = "pending E7-28"]
+    fn a_manifest_path_beside_a_package_selects_every_member() -> Result<()> {
+        let flows = [workflow(&[
+            (
+                "after-package",
+                "cargo test -p a-lib --manifest-path crates/rh-host/Cargo.toml",
+            ),
+            (
+                "glued-after-package",
+                "cargo test -p a-lib --manifest-path=crates/rh-host/Cargo.toml",
+            ),
+            (
+                "before-package",
+                "cargo test --manifest-path crates/rh-host/Cargo.toml -p a-lib",
+            ),
+            ("lib-tests", "cargo test -p a-lib"),
+        ])];
+        let problems = host_problems(&flows)?;
+        judged_with_host(
+            &problems,
+            &["after-package", "glued-after-package", "before-package"],
+        );
+        names(&problems, &["after-package"], &["lib-tests"]);
         Ok(())
     }
 
