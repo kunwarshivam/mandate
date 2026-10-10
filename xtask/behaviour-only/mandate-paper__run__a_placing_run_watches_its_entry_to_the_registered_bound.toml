@@ -1,7 +1,0 @@
-file = "crates/mandate-paper/tests/run.rs"
-test = "a_placing_run_watches_its_entry_to_the_registered_bound"
-reason = """
-The paper adapter still hands the cycle to run_observed, which does not watch, so nothing is read
-back or cancelled after the submission: a behaviour failure, not a stub. E1b part 2's implementation
-PR (E7-19) wires run_observed_watched with the registered bound and interval and deletes this row.
-"""

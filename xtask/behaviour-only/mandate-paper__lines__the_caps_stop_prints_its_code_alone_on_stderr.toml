@@ -1,7 +1,0 @@
-file = "crates/mandate-paper/tests/lines.rs"
-test = "the_caps_stop_prints_its_code_alone_on_stderr"
-reason = """
-stderr_line prints every stop's message, as the binary always has, so the cap's stop prints its
-message rather than its code: a behaviour failure, not a stub. E1b part 2's implementation PR
-(E7-19) prints the code alone for CancelUnconfirmed (DEC-877 item 1) and deletes this row.
-"""

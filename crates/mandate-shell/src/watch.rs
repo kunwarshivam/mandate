@@ -28,24 +28,34 @@ pub struct Watch<P> {
 /// # Errors
 /// [`Cause::Absent`] when `now` is not inside a regular session before its close window (FT-8).
 pub fn close_window_bound(now: UtcNanos, gate: &GateConfig) -> Result<UtcNanos, Cause> {
-    let calendar = ExchangeCalendar::us_equities().map_err(|_| outside())?;
-    let (today, _) = new_york_date_and_hour(now).map_err(|_| outside())?;
-    let session = calendar
-        .sessions(today)
-        .map_err(|_| outside())?
-        .into_iter()
-        .find(|span| span.session() == Session::Regular && span.contains(now))
-        .ok_or_else(outside)?;
+    let end = session_end(now)?;
     let window_s = i64::from(gate.close_window_minutes)
         .checked_mul(MINUTE_S)
         .ok_or_else(outside)?;
-    let end = session.end();
     let bound_s = end.secs().checked_sub(window_s).ok_or_else(outside)?;
     let bound = UtcNanos::from_parts(bound_s, end.nanos()).map_err(|_| outside())?;
     if now >= bound {
         return Err(outside());
     }
     Ok(bound)
+}
+
+/// The end of the regular session `at` is in, on `mandate_time::ExchangeCalendar`: 16:00 New
+/// York on a full day, the early close on a short one. It is both the close window's end (DEC-853
+/// item 5) and the watch's cap past the bound (DEC-858 item 5, DEC-877 item 1).
+///
+/// # Errors
+/// [`Cause::Absent`] when `at` is not inside a regular session.
+pub(crate) fn session_end(at: UtcNanos) -> Result<UtcNanos, Cause> {
+    let calendar = ExchangeCalendar::us_equities().map_err(|_| outside())?;
+    let (today, _) = new_york_date_and_hour(at).map_err(|_| outside())?;
+    calendar
+        .sessions(today)
+        .map_err(|_| outside())?
+        .into_iter()
+        .find(|span| span.session() == Session::Regular && span.contains(at))
+        .map(|span| span.end())
+        .ok_or_else(outside)
 }
 
 const MINUTE_S: i64 = 60;
