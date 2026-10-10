@@ -17,27 +17,66 @@ const AGENT = "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC";
 const SWING = "agt_01JB3K9P2H6SD4F8G1E3W7XYZB";
 const APPROVAL = "apr_01JB3E28JT97KB6CQ643DZVMXX";
 
+/** The box around every element the locators find, grown by `x` at the sides and `y` above and below, in whole CSS pixels. */
+async function around(locators, { x = 0, y = 0 } = {}) {
+  const boxes = [];
+  for (const locator of locators) {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error(`nothing to crop to: ${locator}`);
+    boxes.push(box);
+  }
+  const left = Math.floor(Math.min(...boxes.map((b) => b.x)) - x);
+  const top = Math.floor(Math.min(...boxes.map((b) => b.y)) - y);
+  const right = Math.ceil(Math.max(...boxes.map((b) => b.x + b.width)) + x);
+  const bottom = Math.ceil(Math.max(...boxes.map((b) => b.y + b.height)) + y);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** `box` cut to the left and right edges of `edges`. */
+const between = (box, edges) => ({ ...box, x: edges.x, width: edges.width });
+
+/** A gate check by its name. */
+const check = (page, name) => page.locator("[data-slot=gate-checks] > li").filter({ hasText: name });
+
 /**
- * Each picture: the links followed from Home inside the example app, the window it is taken at,
- * and the part of it kept. These sizes are the CSS pixels `Shot` declares; the files are twice that.
+ * Each picture: the links followed from Home inside the example app, the window it is taken at, and
+ * the part of it kept, either the whole window or the few elements that make the part's point, so
+ * each one reads at the size the page draws it. `width` and `height` are the CSS pixels `Shot`
+ * declares; the files are twice that.
  */
 export const LANDING_SHOTS = [
-  { name: "agent", hops: [`/agents/${AGENT}`], width: 1280, height: 800 },
-  { name: "thread", hops: ["/messages", `/messages/${SWING}`], width: 1280, height: 800 },
+  { name: "agent", hops: [`/agents/${AGENT}`], viewport: { width: 1280, height: 800 } },
   {
-    name: "gate",
+    name: "verdict",
     hops: [`/agents/${AGENT}/decisions/01JBWPQ5E6EYCNDY0YP57RCYBV`],
-    width: 1024,
-    height: 900,
-    clip: { x: 0, y: 64, width: 1024, height: 720 },
+    viewport: { width: 1024, height: 1400 },
+    crop: async (page) => {
+      const verdict = page.locator("section").filter({ has: page.locator("[data-slot=verdict]") });
+      return between(await around([verdict], { y: 20 }), await around([page.locator("[data-slot=gate-checks]")], { x: 20 }));
+    },
   },
-  { name: "request", hops: [`/approvals/${APPROVAL}`], width: 390, height: 844 },
   {
-    name: "mandate",
+    name: "check",
+    hops: [`/agents/${AGENT}/decisions/01JBWPQ5E6EYCNDY0YP57RCYBV`],
+    viewport: { width: 1024, height: 1400 },
+    crop: (page) => around([check(page, "Re-entry cooldown"), check(page, "Order size")], { x: 20 }),
+  },
+  {
+    name: "ask",
+    hops: ["/messages", `/messages/${SWING}`],
+    viewport: { width: 1280, height: 800 },
+    crop: (page) => around([page.locator("[data-slot=request-card]").last(), page.locator("[data-slot=composer]")], { x: 16, y: 8 }),
+  },
+  { name: "request", hops: [`/approvals/${APPROVAL}`], viewport: { width: 390, height: 844 } },
+  {
+    name: "ladder",
     hops: [`/agents/${AGENT}`, `/agents/${AGENT}/mandate`],
-    width: 1280,
-    height: 1000,
-    clip: { x: 0, y: 260, width: 1280, height: 600 },
+    viewport: { width: 1280, height: 1000 },
+    crop: async (page) => {
+      const envelope = page.locator("[data-slot=envelope]");
+      const ladder = envelope.locator("ol").first();
+      return between(await around([envelope.locator("h2"), ladder], { y: 16 }), await around([ladder], { x: 20 }));
+    },
   },
 ];
 
@@ -45,7 +84,7 @@ const browser = await chromium.launch();
 await mkdir(OUT, { recursive: true });
 for (const mode of ["light", "dark"]) {
   for (const shot of LANDING_SHOTS) {
-    const context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, deviceScaleFactor: 2 });
+    const context = await browser.newContext({ viewport: shot.viewport, deviceScaleFactor: 2 });
     await context.addCookies([{ name: "owlhead-theme", value: mode, url: BASE }]);
     const page = await context.newPage();
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -56,8 +95,10 @@ for (const mode of ["light", "dark"]) {
     }
     await page.waitForTimeout(600);
     const file = path.join(OUT, `${shot.name}-${mode}.png`);
-    await page.screenshot({ path: file, ...(shot.clip ? { clip: shot.clip } : {}) });
-    console.log(path.relative(process.cwd(), file));
+    const clip = shot.crop ? await shot.crop(page) : undefined;
+    await page.screenshot({ path: file, ...(clip ? { clip } : {}) });
+    const { width, height } = clip ?? shot.viewport;
+    console.log(`${path.relative(process.cwd(), file)} ${width}x${height}`);
     await context.close();
   }
 }

@@ -4,13 +4,12 @@ import { WRAP } from "./parts";
 import { perchProps } from "./shot";
 import styles from "./scroll.module.css";
 
-/** What no agent does in v1, whatever its rules say (PRD §3, FR-5.12), each with the line that holds it. */
+/** What no agent does in v1, whatever its rules say (PRD §3, FR-5.12), each as a promise to the owner. */
 export const WONT: { verb: string; why: string }[] = [
-  { verb: "borrow", why: "It trades at one times buying power. No margin loans." },
-  { verb: "sell short", why: "It only sells what it holds." },
-  { verb: "trade options", why: "US stocks, ETFs and crypto, nothing with an expiry." },
-  { verb: "trade overnight", why: "Stock orders go in during the regular session." },
-  { verb: "chase a price", why: "It opens every position with a limit order." },
+  { verb: "borrow", why: "Only money already in your account. Never a loan." },
+  { verb: "sell short", why: "It only sells what you own." },
+  { verb: "trade options", why: "Stocks, ETFs and crypto. Nothing exotic." },
+  { verb: "chase a price", why: "It names its price, or it doesn't trade." },
 ];
 
 /** The won't list, on a field of sun under ink type, each verb struck through as its line comes into view. */

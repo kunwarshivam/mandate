@@ -50,22 +50,29 @@ test("the bar's Sign up brings the request form into view with the cursor in its
   await page.evaluate(() => window.scrollTo({ top: window.innerHeight * 1.5, behavior: "instant" }));
   await page.locator("[data-slot=page-bar]").getByRole("button", { name: "Sign up" }).click();
   await expect(page.getByLabel("Email address", { exact: true })).toBeFocused();
-  await expect(page.getByRole("heading", { level: 2, name: "Ask for a place in the beta." })).toBeInViewport();
+  await expect(page.getByRole("heading", { level: 2, name: "Put an agent to work." })).toBeInViewport();
 });
 
-test("each picture of the app has loaded, and it is the one for the page's theme", async ({ page }) => {
+/** The pictures cut to one piece of a screen, which a wide window draws at the size they were taken. */
+const PIECES = ["verdict", "check", "ask", "ladder"];
+
+test("each picture of the app has loaded, it is the one for the page's theme, and none is drawn larger than it was taken", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, 1440);
   const mode = await page.evaluate(() => document.documentElement.dataset.mode);
   expect(mode === "light" || mode === "dark").toBe(true);
   const shots = page.locator("[data-slot=long-page] [data-slot=shot]");
-  expect(await shots.count()).toBe(5);
+  expect(await shots.count()).toBe(6);
   for (const shot of await shots.all()) {
     await shot.scrollIntoViewIfNeeded();
     const shown = shot.locator("img:visible");
     await expect(shown).toHaveCount(1);
     await expect.poll(() => shown.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     expect(decodeURIComponent((await shown.getAttribute("src")) ?? "")).toContain(`-${mode}.png`);
+    const name = (await shot.getAttribute("data-shot"))!;
+    const [drawn, taken] = await shown.evaluate((img: HTMLImageElement) => [img.getBoundingClientRect().width, Number(img.getAttribute("width"))]);
+    expect(drawn, `${name} is drawn no wider than it was taken`).toBeLessThanOrEqual(taken + 0.5);
+    if (PIECES.includes(name)) expect(drawn, `${name} is drawn at the size it was taken`).toBeGreaterThanOrEqual(taken - 0.5);
   }
 });
 
@@ -109,6 +116,28 @@ test("the Scroll cue shows on the first screen, takes the visitor to the opening
   const box = (await cue.boundingBox())!;
   const top = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-slot=scroll-cue]") !== null, [box.x + box.width / 2, box.y + box.height / 2]);
   expect(top, "the risen page covers the cue").toBe(false);
+});
+
+for (const width of [390, 1024, 1280, 1440]) {
+  test(`${width} px: the Scroll cue sits in the middle of the screen`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await open(page, width);
+    const cue = page.locator("[data-slot=scroll-cue]");
+    await expect(cue).toHaveAttribute("data-at", /status|edge/);
+    const box = (await cue.boundingBox())!;
+    expect(Math.abs(box.x + box.width / 2 - width / 2), "the cue's middle from the screen's").toBeLessThanOrEqual(1);
+  });
+}
+
+test("with motion allowed, the owl peeks over the Scroll cue in the middle of the screen", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await open(page, 1440);
+  const owl = page.locator("[data-slot=flying-owl]");
+  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect.poll(async () => {
+    const box = (await owl.boundingBox())!;
+    return Math.round(box.x + box.width / 2);
+  }).toBe(720);
 });
 
 test("with motion allowed, the owl flies down the page and the pieces settle as they come into view", async ({ page }) => {

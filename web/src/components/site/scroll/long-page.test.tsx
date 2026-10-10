@@ -30,16 +30,22 @@ afterEach(() => {
 });
 
 describe("the long page's structure", () => {
-  it("gives every part in the bar a section labelled by its h2, and the bar's links land on them", () => {
+  it("gives every part a section labelled by its h2", () => {
     render(<LongPage />);
-    const nav = screen.getByRole("navigation", { name: "On this page" });
-    for (const part of PARTS) {
-      const section = document.getElementById(part.id);
-      expect(section?.tagName, part.id).toBe("SECTION");
+    for (const id of PARTS) {
+      const section = document.getElementById(id);
+      expect(section?.tagName, id).toBe("SECTION");
       const heading = within(section!).getAllByRole("heading", { level: 2 })[0]!;
       expect(section!.getAttribute("aria-labelledby")).toBe(heading.id);
-      expect(within(nav).getByRole("link", { name: part.label }).getAttribute("href")).toBe(`#${part.id}`);
     }
+  });
+
+  it("lists none of the parts in the bar: only the logo back to the desktop, Sign in and Sign up (DEC-908)", () => {
+    render(<LongPage />);
+    const bar = document.querySelector<HTMLElement>("[data-slot=page-bar]")!;
+    expect(within(bar).queryByRole("navigation")).toBeNull();
+    expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#desktop", LOGIN_PATH]);
+    expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign up"]);
   });
 
   it("links within the page only to ids that exist, and back up to the desktop", () => {
@@ -110,9 +116,23 @@ describe("what it says", () => {
     for (const s of sentences) expect(desktop, s).not.toContain(s);
   });
 
+  it("sells what the visitor gets and leaves the machinery to the app and the desktop (DEC-908)", () => {
+    const { container } = render(<LongPage />);
+    const pitch = said(container).join(" ");
+    for (const term of ["limit order", "safe point", "headroom", "passkey", "regular session", "buying power", "margin", "checks", "thread", "mode", "Nothing more"]) {
+      expect(pitch, term).not.toMatch(new RegExp(`\\b${term}\\b`, "i"));
+    }
+  });
+
   it("says losses can pass a limit, beside the limits", () => {
     render(<LongPage />);
     expect(document.getElementById("limits")).toHaveTextContent(GAP_CAVEAT);
+  });
+
+  it("says under the first buttons that it is free in the beta and starts on paper money", () => {
+    render(<LongPage />);
+    const intro = document.querySelector<HTMLElement>("[data-slot=intro]")!;
+    expect(within(intro).getByText("Free during the beta. It starts on paper money.")).toHaveAttribute("data-slot", "reassure");
   });
 
   it("marks the brokers that are not connected yet as coming, and Alpaca as paper", () => {
@@ -171,6 +191,13 @@ describe("the pictures", () => {
       for (const mode of ["light", "dark"]) {
         expect(pngSize(join(WEB, "public", "landing", `${name}-${mode}.png`)), `${name}-${mode}`).toEqual([width * 2, height * 2]);
       }
+    }
+  });
+
+  it("draws no picture wider than it was taken, so the app's words read at their own size", () => {
+    const { container } = render(<LongPage />);
+    for (const shot of container.querySelectorAll<HTMLElement>("[data-slot=shot]")) {
+      expect(shot.style.maxWidth, shot.dataset.shot).toBe(`${SHOTS[shot.dataset.shot as keyof typeof SHOTS].width}px`);
     }
   });
 

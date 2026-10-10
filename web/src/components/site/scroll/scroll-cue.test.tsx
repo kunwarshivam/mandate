@@ -5,20 +5,21 @@ import { ScrollCue } from "./scroll-cue";
 
 /**
  * The cue on the desktop's first screen that there is more below (DEC-907): a link to the long page,
- * on the middle of the browser window's status bar, or above the bottom edge when no window shows.
+ * in the middle of the screen, on the row of the browser window's status bar when that bar runs under
+ * the middle, or above the bottom edge when it does not.
  */
 
 const rect = (r: Partial<DOMRect>) => ({ left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}), ...r }) as DOMRect;
 
-/** A 1440 by 900 desktop whose window's status bar runs from 200 to 800 across, at 840 down. */
-function layout() {
+/** A 1440 by 900 desktop whose window's status bar runs from `from` to `to` across, at 840 down. */
+function layout(from = 200, to = 1240) {
   vi.spyOn(window, "requestAnimationFrame").mockReturnValue(0);
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
     switch (this.getAttribute("data-slot")) {
       case "desktop-stage":
-        return rect({ width: 1440, height: 900 });
+        return rect({ width: 1440, height: 900, right: 1440, bottom: 900 });
       case "status-text":
-        return rect({ left: 200, top: 840, width: 600, height: 24 });
+        return rect({ left: from, right: to, top: 840, width: to - from, height: 24 });
       default:
         return rect({});
     }
@@ -46,12 +47,20 @@ describe("the scroll cue", () => {
     expect(screen.getByRole("link", { name: "Scroll" })).toHaveAttribute("href", `#${INTRO_ID}`);
   });
 
-  it("sits on the middle of the window's status bar", () => {
-    layout();
+  it("sits in the middle of the screen, on the row of a status bar that runs under the middle", () => {
+    layout(200, 1240);
     stage(true);
     const cue = screen.getByRole("link", { name: "Scroll" });
     expect(cue.dataset.at).toBe("status");
-    expect([cue.style.left, cue.style.top]).toEqual(["500px", "852px"]);
+    expect([cue.style.left, cue.style.top]).toEqual(["720px", "852px"]);
+  });
+
+  it("stays in the middle of the screen when the window sits off to one side, above the bottom edge", () => {
+    layout(200, 600);
+    stage(true);
+    const cue = screen.getByRole("link", { name: "Scroll" });
+    expect(cue.dataset.at).toBe("edge");
+    expect([cue.style.left, cue.style.top]).toEqual(["720px", "836px"]);
   });
 
   it("sits above the bottom edge, in the middle, when no window's status bar shows", () => {

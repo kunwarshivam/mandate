@@ -1,13 +1,7 @@
 import styles from "./scroll.module.css";
 
-/** The long page's parts, in order, as its bar links to them. */
-export const PARTS = [
-  { id: "checks", label: "Checks" },
-  { id: "asking", label: "Asking you" },
-  { id: "threads", label: "Threads" },
-  { id: "limits", label: "Limits" },
-  { id: "wont", label: "Won't do" },
-] as const;
+/** The long page's parts, in order; the bar lists none of them (DEC-908). */
+export const PARTS = ["checks", "asking", "threads", "limits", "wont"] as const;
 
 export const INTRO_ID = "intro";
 export const SIGN_UP_ID = "sign-up";

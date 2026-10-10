@@ -28,8 +28,6 @@ export const BROKERS: { name: string; status: string }[] = [
   { name: "Kraken Derivatives US", status: "Coming" },
 ];
 
-const HALF = "(min-width: 64rem) 46rem, 100vw";
-
 /** The order a piece settles in among its neighbours, as `scroll.module.css` staggers it. */
 const nth = (i: number) => ({ "--i": i }) as CSSProperties;
 
@@ -85,9 +83,9 @@ function Feature({
 
 /**
  * The page under the desktop (DEC-907): the desktop fills the first screen, and this rises over it as
- * the visitor scrolls. It shows the app itself, in pictures of the example workspace, and says what
- * the desktop's homepage does not: the checks, the request on a phone, the threads, the limits in
- * dollars, what no agent does, and the request for a place. The brand owl flies down it in three
+ * the visitor scrolls. It shows the app itself, in pictures of the example workspace, and sells what
+ * the desktop's homepage explains (DEC-908): your rules hold, the big calls come to you, every move
+ * has its reason, the stakes are in dollars, what no agent does, and the request for a place. The brand owl flies down it in three
  * dimensions, a pixel thread in tide sews the parts together behind it, and each piece settles on
  * a spring as it comes into view; tide, the page's third colour beside ink and sun, fills only the
  * part about asking you.
@@ -108,7 +106,7 @@ export function LongPage() {
             </i>
           </h2>
           <p className={cn(LEAD, "mx-auto")} style={nth(2)} data-reveal="">
-            It trades in your own brokerage account, with permission to trade and nothing that can move money out of it.
+            It works the market while you get on with your day. Your money never leaves your account.
           </p>
           <p className="flex flex-wrap justify-center gap-3" style={nth(3)} data-reveal="">
             <a href={`#${SIGN_UP_ID}`} className={PRIMARY}>
@@ -117,6 +115,9 @@ export function LongPage() {
             <Link href={LOGIN_PATH} className={SECONDARY}>
               Sign in
             </Link>
+          </p>
+          <p className="-mt-2 text-[0.9375rem] text-muted-foreground" style={nth(4)} data-reveal="" data-slot="reassure">
+            Free during the beta. It starts on paper money.
           </p>
         </div>
         <div className={cn(WRAP, "pt-24 sm:pt-28")} data-reveal="tilt">
@@ -143,10 +144,17 @@ export function LongPage() {
       <Feature
         id="checks"
         tone="background"
-        title="Every order clears the same checks, in the same order."
-        lead="Can the account trade? Is the market open? Does the order fit your limits? Each answer is written down, the yeses too, and an order that fails one is never sent."
+        title={
+          <>
+            Your rules. <i>No exceptions.</i>
+          </>
+        }
+        lead="Every order is held up against what you wrote before it goes anywhere. If it doesn't fit, it doesn't go, however good the idea looked."
       >
-        <Shot name="gate" alt="A gate decision: buying 0.02 BTC/USD was not allowed, with each check listed in the order it ran." sizes={HALF} perch={{ at: 0.12, yaw: 0.6 }} />
+        <div className="mx-auto grid w-full max-w-[38rem] gap-4">
+          <Shot name="verdict" alt="An order to buy 0.02 BTC/USD at $56,650.00, marked Not allowed." perch={{ at: 0.12, yaw: 0.6 }} />
+          <Shot name="check" alt="The checks it met: re-entry cooldown passed, and order size, at most $1,000.00, not allowed." className="justify-self-end lg:me-[-2rem]" />
+        </div>
       </Feature>
 
       <Feature
@@ -155,10 +163,10 @@ export function LongPage() {
         tone="tide"
         title={
           <>
-            Your phone says an agent needs you. <i>Nothing more.</i>
+            You make the big calls. <i>From anywhere.</i>
           </>
         }
-        lead="The order, the rule that asked and the deadline open in the app. Your approval holds the size and the price, and the checks run again before it goes out."
+        lead="Past an amount you set, your agent waits for your yes. Approve it in a tap, or let it pass, and nothing happens without you."
       >
         <div className="flex items-center justify-center gap-4 sm:gap-8">
           <LockScreen className="max-sm:hidden" />
@@ -171,20 +179,33 @@ export function LongPage() {
       <Feature
         id="threads"
         tone="background"
-        title="Every agent keeps a thread."
-        lead="Its orders, its requests and every change to its mode, in the order they happened. Ask it about any of them, or ask Owlhead about all your agents at once."
+        title={
+          <>
+            Ask it why. <i>It wrote it down.</i>
+          </>
+        }
+        lead="Every move comes with its reason, kept from the moment it was made. Ask your agent about any of them in plain words, whenever you like."
       >
-        <Shot name="thread" alt="Agent 2's thread: a request waiting, a new version of its rules applied, and an approved order the gate then held back." sizes={HALF} perch={{ at: 0.88, yaw: -0.6 }} />
+        <Shot
+          name="ask"
+          alt="Agent 2 asks to buy 2 XYZ at a limit of $141.30, with why it asked, and questions to ask it next, such as Why did it ask?"
+          className="mx-auto"
+          perch={{ at: 0.88, yaw: -0.6 }}
+        />
       </Feature>
 
       <Feature
         id="limits"
         flip
-        title="Limits in dollars, with the headroom beside each one."
-        lead="Raising a limit asks for your passkey. Lowering one takes effect at the agent's next safe point."
+        title={
+          <>
+            Set the stakes. <i>In dollars.</i>
+          </>
+        }
+        lead="Decide what it can spend and where it steps back, in amounts you can picture. You can tighten them any time, and only you can loosen them."
         after={<p className="max-w-[36rem] text-[0.9375rem] leading-[1.55] text-pretty text-muted-foreground">{GAP_CAVEAT}</p>}
       >
-        <Shot name="mandate" alt="Agent 1's limits: each level in dollars, what the agent does there, and the headroom left on each limit." sizes={HALF} perch={{ at: 0.1, yaw: 0.6 }} />
+        <Shot name="ladder" alt="Agent 1's limits as a ladder in dollars, from $10,150.00 down to a floor of $9,000.00, with what the agent does at each." className="mx-auto" perch={{ at: 0.1, yaw: 0.6 }} />
       </Feature>
 
       <Wont />
@@ -192,9 +213,9 @@ export function LongPage() {
       <Plate id={SIGN_UP_ID} art={artwork("kanasawa-full-moon")} className={cn(WRAP, "grid justify-items-center py-28 sm:py-40")}>
         <div className="grid w-full max-w-[38rem] gap-6 rounded-3xl bg-card p-7 sm:p-10" data-reveal="" {...perchProps({ at: 0.86, yaw: -0.4 })}>
           <h2 id={`${SIGN_UP_ID}-title`} className={cn(styles.display, DISPLAY_MD)}>
-            Ask for a place in the beta.
+            Put an agent to work.
           </h2>
-          <p className={LEAD}>We let people in a few at a time. It&apos;s free while the beta runs.</p>
+          <p className={LEAD}>We&apos;re letting people in a few at a time, and it&apos;s free while the beta runs.</p>
           <BetaForm id={PAGE_FORM_ID} look="page" />
         </div>
       </Plate>
