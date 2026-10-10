@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft } from "pixelarticons/react/ArrowLeft.js";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { Folder } from "pixelarticons/react/Folder.js";
@@ -134,9 +134,9 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
     run();
   };
 
-  const choose = (item: Exclude<Item, "rule">) => {
+  const choose = (item: Exclude<Item, "rule">, e: MouseEvent<HTMLButtonElement>) => {
     setOpen(null);
-    if ("app" in item) openApp(item.app);
+    if ("app" in item) openApp(item.app, e);
     if ("act" in item) act(item.act);
   };
 
@@ -185,7 +185,7 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
                       {item.label}
                     </a>
                   ) : (
-                    <button key={item.label} type="button" role="menuitem" tabIndex={-1} onClick={() => choose(item)} className={MENU_ITEM}>
+                    <button key={item.label} type="button" role="menuitem" tabIndex={-1} onClick={(e) => choose(item, e)} className={MENU_ITEM}>
                       {item.label}
                     </button>
                   ),
