@@ -153,7 +153,6 @@ fn object(value: Value) -> Map<String, Value> {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn only_the_agentic_accounts_records_reach_the_caller() {
     let mut runner = TestRunner::new(Config::with_cases(512));
     let lists = vec((0usize..4, any::<bool>()), 0..4);
@@ -193,7 +192,6 @@ fn only_the_agentic_accounts_records_reach_the_caller() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn zero_or_several_agentic_accounts_fail_closed_with_no_guess() {
     let none = RobinhoodError::NoAgenticAccount;
     let two = RobinhoodError::AmbiguousAgenticAccount;
@@ -245,7 +243,6 @@ fn zero_or_several_agentic_accounts_fail_closed_with_no_guess() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_read_naming_another_account_is_refused_with_nothing_called() {
     let list = [(0, true), (1, false)];
     let orders = read_answer(AccountRead::Orders, &[0]);
@@ -279,7 +276,6 @@ fn a_read_naming_another_account_is_refused_with_nothing_called() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn an_answer_that_cannot_be_attributed_refuses_the_whole_read() {
     let ours = json!({"account_number": OURS, "tag": 0});
     let list = |records: Value| content(json!({ "positions": records }));
@@ -323,7 +319,6 @@ fn an_answer_that_cannot_be_attributed_refuses_the_whole_read() {
 /// `AGENTS.md` rule 13: a failed account check and a refused read hold no exit, protective order
 /// or cancel on the agentic account, each sent on the reserved budget and naming that account.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_failed_account_check_holds_no_exit_on_the_agentic_account() {
     let order = json!({"id": "rh-1", "state": "confirmed", "quantity": "2",
         "filled_quantity": "0", "limit_price": "475", "stop_price": null});
@@ -423,7 +418,6 @@ impl Tools for Changing {
 
 /// DEC-875 item 2: each read checks the account list afresh, so a pass is never remembered.
 #[test]
-#[ignore = "pending E7-6"]
 fn every_read_checks_the_account_list_afresh() {
     let lists = vec![accounts(&[(0, true)]), accounts(&[(0, true), (1, true)])];
     let calls = Calls::default();
