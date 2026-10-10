@@ -55,6 +55,26 @@ fn stored(row: &Value) -> StoredEvent {
     }
 }
 
+/// The vectors' own workspace's control and account streams, read from their rows rather than named
+/// here, so the test follows whichever workspace the vectors are keyed to: the control stream the
+/// `StreamOpened` row opens, and the account stream that control stream's first `SegmentExported`
+/// exports.
+fn own_streams(rows: &[StoredEvent]) -> (String, String) {
+    let opened = rows.iter().find(|r| r.event_type == "StreamOpened");
+    let control = opened.unwrap().stream_id.clone();
+    let exported = rows
+        .iter()
+        .find(|r| r.stream_id == control && r.event_type == "SegmentExported");
+    let body = parse(&exported.unwrap().body).unwrap();
+    let account = text(body.get("payload").unwrap(), "stream_id").to_owned();
+    let workspace = control.strip_prefix("ctl:").unwrap_or_default();
+    assert!(
+        !workspace.is_empty() && account.starts_with(&format!("acct:{workspace}:")),
+        "the vectors' own control stream {control} exports its own account stream, not {account}"
+    );
+    (control, account)
+}
+
 fn request(req: &Value) -> StartRequest<'_> {
     match text(req, "kind") {
         "genesis" => StartRequest::Genesis,
@@ -268,6 +288,7 @@ fn digits(body: &[u8], key: &str, rng: &mut Rng) -> usize {
 fn random_row_variants_resolve_as_built() {
     let section = section();
     let base: Vec<StoredEvent> = list(&section, "rows").iter().map(stored).collect();
+    let (own_control, own_account) = own_streams(&base);
     let starts: Vec<&Value> = list(&section, "row_cases")
         .iter()
         .filter(|c| text(c.get("expect").unwrap(), "outcome") == "start")
@@ -278,7 +299,7 @@ fn random_row_variants_resolve_as_built() {
         starts.iter().position(|c| {
             let req = c.get("request").unwrap();
             let named = text(req, "manifest_hash");
-            let ctl = row.stream_id == "ctl:ws_01J8Z2";
+            let ctl = row.stream_id == own_control;
             ctl && match text(req, "kind") {
                 "anchor" => row.event_id == text(req, "anchor_event_id"),
                 _ => String::from_utf8_lossy(&row.body).contains(named),
@@ -290,7 +311,7 @@ fn random_row_variants_resolve_as_built() {
         .map(|r| Known {
             serves: serving(r),
             on_ctl: r.stream_id.starts_with("ctl:"),
-            own_ctl: r.stream_id == "ctl:ws_01J8Z2",
+            own_ctl: r.stream_id == own_control,
             event_type: r.event_type.clone(),
             broken: false,
             unreadable: false,
@@ -327,7 +348,7 @@ fn random_row_variants_resolve_as_built() {
                     known.push(known[i].clone());
                 }
                 4 => {
-                    rows[i].stream_id = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1".to_owned();
+                    rows[i].stream_id.clone_from(&own_account);
                     known[i].on_ctl = false;
                     known[i].own_ctl = false;
                 }
