@@ -5,9 +5,11 @@ import { createPortal, flushSync } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
+import { LOGIN_PATH } from "@/lib/auth-routes";
 import type { DesktopStyle } from "@/lib/desktop-style";
 import { writeThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { AccountButtons } from "./account-buttons";
 import { DISCARDED, Guestbook, Help, Notepad, PictureViewer, RecordViewer, RecycleBin } from "./apps";
 import { Assistant } from "./assistant";
 import { useDesktopStyle, useSetDesktopStyle } from "./desktop-style";
@@ -192,8 +194,10 @@ const SHORTCUTS: Shortcut[] = [
   { id: "tour", label: "Tour.mp4", icon: sprite(FILM), app: "tour", right: true },
   { id: "bin", label: "Recycle Bin", icon: sprite(BIN), app: "bin", right: true },
   { id: "os", label: "Mac", icon: sprite(MAC), os: true, right: true },
-  { id: "signin", label: "Sign in", icon: sprite(KEY), href: "/login" },
 ];
+
+/** Sign in has no icon on the desktop, since the bar names it in words; the menus keep it last. */
+const SIGN_IN: Shortcut = { id: "signin", label: "Sign in", icon: sprite(KEY), href: LOGIN_PATH };
 
 /** The owl assistant says hello this long after the desktop opens, once a visit. */
 const HELLO = 9_000;
@@ -346,7 +350,7 @@ const now = () => new Date().toLocaleTimeString("en-US", { hour: "numeric", minu
 function Clock() {
   const time = useSyncExternalStore(subscribeClock, now, () => "");
   return (
-    <span aria-hidden className="w-[4.25rem] text-center text-[0.875rem] sm:w-[4.75rem] sm:text-[0.9375rem]" data-slot="clock">
+    <span aria-hidden className="w-[4.75rem] text-center text-[0.9375rem]" data-slot="clock">
       {time}
     </span>
   );
@@ -368,10 +372,13 @@ type BarMenu = "owl" | "file" | "edit" | "special" | "windows";
 
 const BAR_MENUS: BarMenu[] = ["owl", "file", "edit", "special", "windows"];
 
+/** On a phone the menu bar leaves out Edit, all greyed out, so Sign in and Sign up fit beside the rest. */
+const ON_PHONE: BarMenu[] = BAR_MENUS.filter((m) => m !== "edit");
+
 /** The Edit menu every Mac application carried. Nothing on the desktop can be edited, so it is all greyed out. */
 const EDITS = ["Undo", "Cut", "Copy", "Paste", "Clear"];
 
-const BAR_TITLE = "flex h-full cursor-pointer items-center gap-1.5 px-2.5 outline-none aria-expanded:bg-foreground aria-expanded:text-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground";
+const BAR_TITLE = "flex h-full cursor-pointer items-center gap-1.5 px-2 outline-none sm:px-2.5 aria-expanded:bg-foreground aria-expanded:text-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground";
 
 const BAR_RULE = <div role="separator" className="my-1 border-t border-dotted border-foreground" />;
 
@@ -401,7 +408,11 @@ function Check({ on }: { on: boolean }) {
  * The other desktop's computer is left out, since a menu would have to write its name; the keyboard
  * reaches it in Display, where it is a picture too.
  */
-const LAUNCHER: Shortcut[] = [{ id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" }, ...SHORTCUTS.slice(1).filter((s) => !("os" in s))];
+const LAUNCHER: Shortcut[] = [
+  { id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" },
+  ...SHORTCUTS.slice(1).filter((s) => !("os" in s)),
+  SIGN_IN,
+];
 
 /** What the other desktop's icon does, for assistive technology only; on screen it is just a computer. */
 const SWAP_NOTE = "desktop-swap";
@@ -585,14 +596,15 @@ export function Desktop({ home }: { home: ReactNode }) {
   const barKeys = (e: KeyboardEvent<HTMLElement>) => {
     if (bar && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
       e.preventDefault();
-      setBar(BAR_MENUS[(BAR_MENUS.indexOf(bar) + (e.key === "ArrowRight" ? 1 : -1) + BAR_MENUS.length) % BAR_MENUS.length]);
+      const menus = window.matchMedia(WIDE).matches ? BAR_MENUS : ON_PHONE;
+      setBar(menus[(menus.indexOf(bar) + (e.key === "ArrowRight" ? 1 : -1) + menus.length) % menus.length]);
       return;
     }
     arrowKeys(e);
   };
 
   const barMenu = (name: BarMenu, label: string, title: ReactNode, items: ReactNode, { named, end }: { named?: boolean; end?: boolean } = {}) => (
-    <div className="relative flex" onPointerEnter={() => bar && bar !== name && setBar(name)}>
+    <div className={cn("relative flex", !ON_PHONE.includes(name) && "max-sm:hidden")} onPointerEnter={() => bar && bar !== name && setBar(name)}>
       <button
         type="button"
         aria-haspopup="menu"
@@ -675,7 +687,7 @@ export function Desktop({ home }: { home: ReactNode }) {
           )}
           {item("Print…", null)}
           {BAR_RULE}
-          <Link href="/login" role="menuitem" className={MENU_ITEM}>
+          <Link href={LOGIN_PATH} role="menuitem" className={MENU_ITEM}>
             Sign in…
           </Link>
         </>,
@@ -700,7 +712,8 @@ export function Desktop({ home }: { home: ReactNode }) {
         </>,
       )}
       <div className="ms-auto flex items-stretch">
-        <span className="grid place-items-center px-1">
+        <AccountButtons compact onSignUp={(e) => openApp("guestbook", e)} />
+        <span className="grid place-items-center px-1 max-sm:hidden">
           <Clock />
         </span>
         {barMenu(
@@ -905,9 +918,13 @@ export function Desktop({ home }: { home: ReactNode }) {
             )}
           </ul>
 
+          <AccountButtons onSignUp={(e) => openApp("guestbook", e)} />
+
           <div className={cn(SUNKEN, "flex h-8 shrink-0 items-center gap-1 px-0.5")} data-slot="tray">
             <ThemeSwitch />
-            <Clock />
+            <span className="max-sm:hidden">
+              <Clock />
+            </span>
           </div>
         </div>
       )}

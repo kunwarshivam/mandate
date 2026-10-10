@@ -257,6 +257,19 @@ describe("links", () => {
     for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
   });
 
+  it("names Sign in and Sign up in words on the taskbar, where no window covers them, and Sign up opens the guestbook", async () => {
+    const { container } = renderLanding();
+    const bar = container.querySelector<HTMLElement>("[data-slot=taskbar] [data-slot=account-buttons]")!;
+    expect(within(bar).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect([...bar.children].map((c) => c.textContent), "Sign up last, by the tray").toEqual(["Sign in", "Sign up"]);
+    expect(within(bar).getByRole("button", { name: "Sign up" }).className).toContain("bg-highlight");
+    expect(within(screen.getByRole("list", { name: "Desktop" })).queryByRole("link", { name: "Sign in" }), "the bar replaces the desktop's key icon").toBeNull();
+    expect(screen.queryByRole("region", { name: GUESTBOOK })).toBeNull();
+    await press(within(bar).getByRole("button", { name: "Sign up" }));
+    expect(win(GUESTBOOK)).toHaveAttribute("data-front", "true");
+    expect(within(win(GUESTBOOK)).getByLabelText("Email address:")).toBeInTheDocument();
+  });
+
   it("offers the guestbook as a button in the hero and again after who it's for, each opening its window", async () => {
     renderLanding();
     const buttons = screen.getAllByRole("button", { name: "Sign the guestbook" });

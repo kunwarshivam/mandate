@@ -137,6 +137,14 @@ describe("the Mac desktop", () => {
     expect(screen.queryByRole("region", { name: "Owlhead Home Page" })).toBeNull();
   });
 
+  it("names Sign in and Sign up in words in the menu bar, and Sign up opens the guestbook", async () => {
+    const { container } = renderOn("mac");
+    const bar = container.querySelector<HTMLElement>("[data-slot=menu-bar] [data-slot=account-buttons]")!;
+    expect(within(bar).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    await press(within(bar).getByRole("button", { name: "Sign up" }));
+    expect(screen.getByRole("region", { name: "guestbook.cgi" })).toHaveAttribute("data-front", "true");
+  });
+
   it("opens the apps from the owl menu, and walks the menu bar with the arrow keys", async () => {
     renderOn("mac");
     await press(barTitle("Owlhead"));

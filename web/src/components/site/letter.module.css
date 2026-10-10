@@ -253,6 +253,17 @@
   color: var(--card);
 }
 
+/* Sign up stays the one filled button on the Mac too: ink, and paper while pressed. */
+:global([data-os="mac"]) .plainButton.signUp {
+  background-color: var(--foreground);
+  color: var(--card);
+}
+
+:global([data-os="mac"]) .plainButton.signUp:active {
+  background-color: var(--card);
+  color: var(--foreground);
+}
+
 /* The Display Properties monitor keeps a dark case in both themes. */
 .monitor {
   background: var(--foreground);

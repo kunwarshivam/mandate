@@ -40,7 +40,7 @@ export function ThemeSwitch() {
       )}
     >
       <Moon aria-hidden className="size-6" />
-      Dark
+      <span className="max-sm:sr-only">Dark</span>
     </button>
   );
 }

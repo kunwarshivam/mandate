@@ -154,6 +154,29 @@ test("a window zooms out of the icon that opened it and into its taskbar button,
   expect(end.h).toBeLessThanOrEqual(task.h + 1);
 });
 
+for (const os of ["windows", "mac"] as const) {
+  for (const width of [320, 390, 1440]) {
+    test(`${os}, ${width} px: Sign in and Sign up are named in the desktop's bar, uncovered, and Sign up opens the guestbook`, async ({ page }) => {
+      await page.context().addCookies([{ name: "owlhead-desktop", value: os, url: test.info().project.use.baseURL! }]);
+      await open(page, width, 800, { app: true });
+      const bar = page.locator(`[data-slot=${os === "mac" ? "menu-bar" : "taskbar"}] [data-slot=account-buttons]`);
+      const signIn = bar.getByRole("link", { name: "Sign in" });
+      const signUp = bar.getByRole("button", { name: "Sign up" });
+      for (const control of [signIn, signUp]) {
+        await expect(control).toBeInViewport({ ratio: 1 });
+        const box = (await control.boundingBox())!;
+        const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("a, button")?.textContent, [box.x + box.width / 2, box.y + box.height / 2]);
+        expect(hit, "nothing covers it").toBe(await control.textContent());
+      }
+      await expect(signIn).toHaveAttribute("href", "/login");
+      const spill = await page.locator(`[data-slot=${os === "mac" ? "menu-bar" : "taskbar"}]`).evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(spill, "and the bar still fits").toBe(0);
+      await signUp.click();
+      await expect(page.getByRole("region", { name: "guestbook.cgi" })).toBeVisible();
+    });
+  }
+}
+
 test("the Mac on the desktop redraws it as System 7, which the server keeps drawing, and a window collapses into the windows menu", async ({ page }) => {
   await open(page, 1440);
   await page.getByRole("list", { name: "Desktop, right" }).getByRole("button", { name: "Mac" }).click();
