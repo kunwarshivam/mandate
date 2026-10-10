@@ -43,8 +43,8 @@ pub trait Tools {
 /// The connector for one agentic account, whose number the founder typed (CN-8). It has no
 /// `Debug`: the account number is personal data (journal spec §6.4).
 pub struct RobinhoodConnector<T> {
-    tools: T,
-    account_number: String,
+    pub(crate) tools: T,
+    pub(crate) account_number: String,
     /// The order each place answered, by our key: its broker `order_id` is what a `Cancel` goes
     /// by, and its instrument and side are what a cancel's answer is read against. After a restart
     /// it is rebuilt from the journal by [`Self::restore`] (DEC-860 item 7).
@@ -368,12 +368,12 @@ fn wire_names(order: &SubmitOrder) -> (&'static str, &'static str) {
 
 /// A tool result: its `structuredContent` when it carries no `isError` or `isError: false`, or
 /// a refusal when `isError` is `true`. `None` for anything else.
-enum ToolResult {
+pub(crate) enum ToolResult {
     Content(Map<String, Value>),
     Refused,
 }
 
-fn tool_result(text: &str) -> Option<ToolResult> {
+pub(crate) fn tool_result(text: &str) -> Option<ToolResult> {
     let Value::Object(mut result) = serde_json::from_str(text).ok()? else {
         return None;
     };
