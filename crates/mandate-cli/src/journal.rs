@@ -19,9 +19,10 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{
     Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, ConnectionCheckError,
-    ConnectionStart, ControlVerifyError, EventCheck, EventFailure, HeldAnchor, RangeCheck,
-    StoredEvent, StreamId, StreamType, TrustedStart, verify_agent_stream_anchored, verify_anchor,
-    verify_anchor_self, verify_break_glass_causes, verify_connection_lifecycle_from, verify_events,
+    ConnectionStart, ControlVerifyError, EventCheck, EventFailure, HeldAnchor, JUDGED_ON_ACCOUNT,
+    JUDGED_ON_CONTROL, RangeCheck, StoredEvent, StreamId, StreamType, TrustedStart,
+    verify_agent_stream_anchored, verify_anchor, verify_anchor_self, verify_break_glass_causes,
+    verify_connection_lifecycle_from, verify_events,
 };
 
 pub mod cold;
@@ -128,32 +129,14 @@ pub(crate) const CAUSE_NOT_RUN: &str = concat!(
     "(needs the control stream and its account streams together)"
 );
 
-/// The records journal spec §11's `connection_lifecycle_mismatch` judges on a control stream (its
-/// "No anchor" list); a `ConnectionRevoked` is never judged.
-const CONTROL_JUDGED: [&str; 4] = [
-    "ConnectionRequested",
-    "ConnectionEstablished",
-    "ConnectionCredentialRotated",
-    "ConnectionRefused",
-];
-
-/// The connection records on an account stream (§9.8, "Who writes what"), each judged by rule 68.
-const ACCOUNT_JUDGED: [&str; 5] = [
-    "ConnectionChecked",
-    "ConnectionStateChanged",
-    "ConnectionCredentialRefreshed",
-    "ConnectionEstablished",
-    "ConnectionCredentialRotated",
-];
-
 /// Whether a run that reached the stream checks prints [`CAUSE_NOT_RUN`]: the export is a control
 /// or account stream holding a record its stream type's lifecycle rules judge (DEC-890 item 4),
 /// whatever the result from there. A control export of requests and refusals only prints it too:
 /// the cause check would judge nothing there, and it still did not run.
 pub(crate) fn cause_not_run(stream: &StreamId, rows: &[StoredEvent]) -> bool {
     let judged: &[&str] = match stream.stream_type() {
-        StreamType::Control => &CONTROL_JUDGED,
-        StreamType::Account => &ACCOUNT_JUDGED,
+        StreamType::Control => JUDGED_ON_CONTROL,
+        StreamType::Account => JUDGED_ON_ACCOUNT,
         _ => &[],
     };
     rows.iter()

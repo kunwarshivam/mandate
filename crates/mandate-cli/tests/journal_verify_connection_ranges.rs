@@ -448,7 +448,6 @@ fn the_judged_lists_here_match_the_journals_exports() {
 /// account export whose only connection record is one fails `connection_lifecycle_mismatch`, and
 /// the record is judged there, so DEC-890 item 4's line is printed just before `result:`.
 #[test]
-#[ignore = "pending E12-3"]
 fn an_account_export_of_a_revocation_alone_reports_the_cause_check_not_run() {
     let revoked = one_of_each_connection_type().pop().unwrap();
     assert_eq!(revoked["event_type"], "ConnectionRevoked");
@@ -466,7 +465,6 @@ fn an_account_export_of_a_revocation_alone_reports_the_cause_check_not_run() {
 /// type (`JUDGED_ON_CONTROL`, `JUDGED_ON_ACCOUNT`), so the CLI's lists cannot drift from the
 /// library's. Every type of each list is drafted, and every run reaches the stream checks.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_cause_check_line_follows_the_journals_judged_lists() {
     let bodies = one_of_each_connection_type();
     let drafted = |list: &[&str]| {
