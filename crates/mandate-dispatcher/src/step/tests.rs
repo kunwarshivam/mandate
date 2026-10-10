@@ -294,7 +294,6 @@ fn run_over(
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_writer_holds_only_a_notice_stream() -> Checked {
     let ntf = StreamId::parse(NTF).ok_or("ntf")?;
     let writer = NoticeWriter::new(ntf.clone(), 7)?;
@@ -307,7 +306,6 @@ fn a_writer_holds_only_a_notice_stream() -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn only_committed_alerts_are_causes_and_each_send_follows_its_notice() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit"), (2, "agent_held")])?;
@@ -341,7 +339,6 @@ fn only_committed_alerts_are_causes_and_each_send_follows_its_notice() -> Checke
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn one_user_kill_switch_is_one_notice_and_a_cause_is_issued_once() -> Checked {
     let journal = world()?;
     kill_switch(&journal)?;
@@ -381,7 +378,6 @@ fn the_cause_is_the_apis_alert(journal: &Shared) -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_fenced_dispatcher_sends_nothing_and_the_live_one_sends() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
@@ -397,7 +393,6 @@ fn a_fenced_dispatcher_sends_nothing_and_the_live_one_sends() -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_steps_notices_are_one_batch_that_opens_a_fresh_stream() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit"), (2, "agent_held")])?;
@@ -427,7 +422,6 @@ fn a_steps_notices_are_one_batch_that_opens_a_fresh_stream() -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn recipients_are_sorted_and_unique_and_each_gets_its_own_channels() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
@@ -464,7 +458,6 @@ fn recipients_are_sorted_and_unique_and_each_gets_its_own_channels() -> Checked 
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_send_that_does_not_go_through_is_journaled_failed_with_its_reason() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
@@ -514,7 +507,6 @@ fn a_send_that_does_not_go_through_is_journaled_failed_with_its_reason() -> Chec
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn an_append_that_does_not_commit_stops_the_step_before_its_next_send() -> Checked {
     let cases = [
         (0, AppendOutcome::Unavailable, "Unavailable"),
@@ -544,7 +536,6 @@ fn an_append_that_does_not_commit_stops_the_step_before_its_next_send() -> Check
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn the_control_streams_alert_is_the_kill_switch_cause_whatever_the_subject_order() -> Checked {
     let journal = world()?;
     kill_switch(&journal)?;
