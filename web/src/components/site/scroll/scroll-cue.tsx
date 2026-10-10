@@ -5,13 +5,14 @@ import { cn } from "@/lib/utils";
 import { INTRO_ID } from "./parts";
 import styles from "./scroll.module.css";
 
-/** Above the Windows taskbar, or the bottom edge on the Mac, when no window's status bar is showing. */
+/** Above the Windows taskbar, or the bottom edge on the Mac, when no window's status bar is under the middle. */
 const FALLBACK_BOTTOM = 64;
 
 /**
- * The cue that there is more below the desktop (DEC-907): a pill on the empty middle of the browser
- * window's status bar, the one place no layout puts anything, followed as the window boots, moves or
- * closes. The page rising over the desktop covers it, and with motion allowed it fades as it goes.
+ * The cue that there is more below the desktop (DEC-907): a pill in the middle of the screen, on the
+ * row of the browser window's status bar when that bar runs under the middle with room for it, the
+ * one place no layout puts anything, followed as the window boots, moves or closes. The page rising
+ * over the desktop covers it, and with motion allowed it fades as it goes.
  */
 export function ScrollCue() {
   const ref = useRef<HTMLAnchorElement>(null);
@@ -24,10 +25,13 @@ export function ScrollCue() {
     const place = () => {
       if (window.scrollY < window.innerHeight) {
         const frame = stage.getBoundingClientRect();
-        const status = [...stage.querySelectorAll<HTMLElement>("[data-slot=status-text]")].map((s) => s.getBoundingClientRect()).find((r) => r.width > 0 && r.height > 0);
-        const at = status ? { x: status.left + status.width / 2, y: status.top + status.height / 2 } : { x: frame.width / 2, y: frame.height - FALLBACK_BOTTOM };
-        cue.style.left = `${at.x - frame.left}px`;
-        cue.style.top = `${at.y - frame.top}px`;
+        const middle = frame.left + frame.width / 2;
+        const half = cue.offsetWidth / 2;
+        const status = [...stage.querySelectorAll<HTMLElement>("[data-slot=status-text]")]
+          .map((s) => s.getBoundingClientRect())
+          .find((r) => r.width > 0 && r.height > 0 && r.left + half <= middle && middle <= r.right - half);
+        cue.style.left = `${frame.width / 2}px`;
+        cue.style.top = `${status ? status.top + status.height / 2 - frame.top : frame.height - FALLBACK_BOTTOM}px`;
         cue.dataset.at = status ? "status" : "edge";
       }
       raf = window.requestAnimationFrame(place);

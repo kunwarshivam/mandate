@@ -111,6 +111,28 @@ test("the Scroll cue shows on the first screen, takes the visitor to the opening
   expect(top, "the risen page covers the cue").toBe(false);
 });
 
+for (const width of [390, 1024, 1280, 1440]) {
+  test(`${width} px: the Scroll cue sits in the middle of the screen`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await open(page, width);
+    const cue = page.locator("[data-slot=scroll-cue]");
+    await expect(cue).toHaveAttribute("data-at", /status|edge/);
+    const box = (await cue.boundingBox())!;
+    expect(Math.abs(box.x + box.width / 2 - width / 2), "the cue's middle from the screen's").toBeLessThanOrEqual(1);
+  });
+}
+
+test("with motion allowed, the owl peeks over the Scroll cue in the middle of the screen", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await open(page, 1440);
+  const owl = page.locator("[data-slot=flying-owl]");
+  await expect(owl).toHaveAttribute("data-owl", "flying");
+  await expect.poll(async () => {
+    const box = (await owl.boundingBox())!;
+    return Math.round(box.x + box.width / 2);
+  }).toBe(720);
+});
+
 test("with motion allowed, the owl flies down the page and the pieces settle as they come into view", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
