@@ -5,8 +5,10 @@
 //! and a recording tool double. A key the stream names anywhere is never placed again
 //! (DEC-872). Part 3 adds the distinct-id property here, whose oracle counts ids from the
 //! generated choices, and the restart against `mandate-rh-sim` in that crate's
-//! `tests/robinhood.rs`. Part 4 (DEC-874, pending E7-6) pins that an odd `broker_order_id` and
-//! the order in which the stream interleaves its keys' records never make a key placeable.
+//! `tests/robinhood.rs`. Part 4 (DEC-874) pins that an odd `broker_order_id` and the order in
+//! which the stream interleaves its keys' records never decide whether a key is placed. Part 5
+//! (DEC-876, pending E7-6) pins that a key naming two different `replaces` targets is in doubt,
+//! whatever its own submit says, and so is every successor that inherits through it.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -783,6 +785,233 @@ fn rebuilt_within_seconds(records: &[FoldedEvent]) {
     );
 }
 
+/// Three origins, each submitted with its own id: `01JORIGINA` SPY/buy by `rh-a`, `01JORIGINB`
+/// QQQ/sell by `rh-b`, and `01JORIGINC` SPY/buy by `rh-c`, which agrees with `01JORIGINA`; and a
+/// known order beside them.
+fn origins() -> (Stream, [ClientOrderId; 3]) {
+    let all = [key("01JORIGINA"), key("01JORIGINB"), key("01JORIGINC")];
+    let mut s = Stream::default();
+    beside_a_known_order(&mut s);
+    for (k, symbol, side, id) in [
+        (&all[0], "SPY", "buy", "rh-a"),
+        (&all[1], "QQQ", "sell", "rh-b"),
+        (&all[2], "SPY", "buy", "rh-c"),
+    ] {
+        s.submitted(k, symbol, side);
+        s.changed(k, "accepted", Some(Some(id)), NONE);
+    }
+    (s, all)
+}
+
+/// `successor`'s version-2 `OrderStateChanged` naming `origin` in `replaces`, with its own id.
+fn replacing(s: &mut Stream, successor: &ClientOrderId, origin: &ClientOrderId, id: &str) {
+    let link = json!({"replaces": origin.as_str()});
+    s.changed(successor, "accepted", Some(Some(id)), link);
+}
+
+/// The check of [`never_placed_again_nor_guessed`] reported rather than asserted, so each stream
+/// of a test is restored and checked on its own and every one that leaves a key placeable is named
+/// before the test fails.
+fn placeable_where_in_doubt(
+    label: &str,
+    records: &[FoldedEvent],
+    keys: &[&ClientOrderId],
+) -> Vec<String> {
+    let (mut c, calls) = restored(records, "confirmed");
+    let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
+    let mut placeable = Vec::new();
+    for key in keys {
+        let submit = call(&mut c, &protective_stop(key));
+        let cancelled = cancel(&mut c, key);
+        if submit != Err(in_doubt) || cancelled != Err(NO_ORDER_ID) {
+            placeable.push(format!(
+                "{label}: {}: submit {submit:?}, cancel {cancelled:?}",
+                key.as_str()
+            ));
+        }
+    }
+    if !calls.borrow().is_empty() {
+        placeable.push(format!("{label}: CN-7: called {:?}", calls.borrow()));
+    }
+    placeable
+}
+
+/// `AGENTS.md` rule 13 beside every DEC-876 stream: each origin, and the known order, has one
+/// unshared id and its own readable instrument and side, so each still cancels by it, whatever
+/// the key that names them says.
+fn origins_still_cancel(label: &str, records: &[FoldedEvent], all: &[ClientOrderId; 3]) {
+    let (mut c, calls) = restored(records, "confirmed");
+    let known = key("01JKNOWN");
+    let controls = [
+        (&known, "rh-known", "SPY", Side::Buy),
+        (&all[0], "rh-a", "SPY", Side::Buy),
+        (&all[1], "rh-b", "QQQ", Side::Sell),
+        (&all[2], "rh-c", "SPY", Side::Buy),
+    ];
+    let mut expected = Vec::new();
+    for (k, id, symbol, side) in controls {
+        let placed = order(k, id, symbol, side);
+        let outcome = cancel(&mut c, k);
+        assert_eq!(
+            outcome,
+            Ok(BrokerOutcome::Order(placed)),
+            "{label}: rule 13"
+        );
+        expected.push(cancelled_by(id));
+    }
+    assert_eq!(*calls.borrow(), expected, "{label}: rule 13");
+}
+
+/// DEC-876: a successor without its own `OrderSubmitted` whose records name two or more different
+/// `replaces` targets has no one origin to inherit from, so it is in doubt in any record order,
+/// whether two origins disagree (A and B) or agree (A and C), and with three (A, B and C). Neither
+/// the first link nor the last decides.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_successor_naming_two_different_origins_is_in_doubt_in_either_order() {
+    let torn = successor("01JREPLACETORN");
+    let mut placeable = Vec::new();
+    let variants: [(&[usize], &str); 7] = [
+        (&[0, 1], "A then B"),
+        (&[1, 0], "B then A"),
+        (&[0, 2], "A then C"),
+        (&[2, 0], "C then A"),
+        (&[0, 1, 2], "A then B then C"),
+        (&[2, 0, 1], "C then A then B"),
+        (&[1, 2, 0], "B then C then A"),
+    ];
+    for (targets, label) in variants {
+        let (mut s, all) = origins();
+        for &target in targets {
+            replacing(&mut s, &torn, &all[target], "rh-torn");
+        }
+        placeable.extend(placeable_where_in_doubt(label, &s.0, &[&torn]));
+        origins_still_cancel(label, &s.0, &all);
+    }
+    assert!(
+        placeable.is_empty(),
+        "DEC-876: a key naming two different replaces targets must be in doubt: {placeable:#?}"
+    );
+}
+
+/// DEC-876: a key's own readable `OrderSubmitted` does not rescue a key whose records name two
+/// different `replaces` targets, in either order of the links and with the own submit before or
+/// after them: the key's own records contradict each other about which order it is.
+#[test]
+#[ignore = "pending E7-6"]
+fn its_own_submit_does_not_rescue_a_key_naming_two_different_origins() {
+    let torn = successor("01JREPLACEOWNTORN");
+    let mut placeable = Vec::new();
+    for (first, second, own_first, label) in [
+        (0, 1, true, "own submit, then A, then B"),
+        (1, 0, true, "own submit, then B, then A"),
+        (0, 1, false, "A, then B, then own submit"),
+        (1, 0, false, "B, then A, then own submit"),
+    ] {
+        let (mut s, all) = origins();
+        if own_first {
+            s.submitted(&torn, "QQQ", "buy");
+        }
+        replacing(&mut s, &torn, &all[first], "rh-own-torn");
+        replacing(&mut s, &torn, &all[second], "rh-own-torn");
+        if !own_first {
+            s.submitted(&torn, "QQQ", "buy");
+        }
+        placeable.extend(placeable_where_in_doubt(label, &s.0, &[&torn]));
+        origins_still_cancel(label, &s.0, &all);
+    }
+    assert!(
+        placeable.is_empty(),
+        "DEC-876: its own submit must not rescue a key naming two different replaces targets: \
+         {placeable:#?}"
+    );
+}
+
+/// DEC-876 and DEC-874 item 2: a successor without its own `OrderSubmitted` that `replaces` a key
+/// naming two different targets inherits that key's doubt, whether or not the key has its own
+/// readable submit and in either order of its links. A successor of it with its own readable
+/// submit does not inherit (DEC-872 item 3, DEC-876 item 3), so it still cancels by its one id
+/// with its own instrument and side (`AGENTS.md` rule 13).
+#[test]
+#[ignore = "pending E7-6"]
+fn a_successor_of_a_key_naming_two_different_origins_inherits_its_doubt() {
+    let (torn, heir) = (successor("01JREPLACEMIDDLE"), successor("01JREPLACEHEIR2"));
+    let own_heir = successor("01JREPLACEOWNHEIR");
+    let mut placeable = Vec::new();
+    for (first, second, own, label) in [
+        (0, 1, false, "A then B"),
+        (1, 0, false, "B then A"),
+        (0, 1, true, "A then B, own submit"),
+        (1, 0, true, "B then A, own submit"),
+    ] {
+        let (mut s, all) = origins();
+        if own {
+            s.submitted(&torn, "QQQ", "buy");
+        }
+        replacing(&mut s, &torn, &all[first], "rh-middle");
+        replacing(&mut s, &torn, &all[second], "rh-middle");
+        replacing(&mut s, &heir, &torn, "rh-heir2");
+        replacing(&mut s, &own_heir, &torn, "rh-own-heir");
+        s.submitted(&own_heir, "SPY", "sell");
+        placeable.extend(placeable_where_in_doubt(label, &s.0, &[&torn, &heir]));
+        origins_still_cancel(label, &s.0, &all);
+        let (mut c, calls) = restored(&s.0, "confirmed");
+        let expected = order(&own_heir, "rh-own-heir", "SPY", Side::Sell);
+        let outcome = cancel(&mut c, &own_heir);
+        assert_eq!(
+            outcome,
+            Ok(BrokerOutcome::Order(expected)),
+            "{label}: rule 13"
+        );
+        assert_eq!(*calls.borrow(), [cancelled_by("rh-own-heir")], "{label}");
+    }
+    assert!(
+        placeable.is_empty(),
+        "DEC-876: a successor inheriting through a key that names two different replaces targets \
+         must be in doubt: {placeable:#?}"
+    );
+}
+
+/// DEC-876: a key whose records name the same `replaces` target twice names one origin, so it is
+/// one link. Without its own submit it inherits that origin's instrument and side; with its own,
+/// it keeps its own (DEC-872 item 3); a successor of it inherits. Each cancels by its one id.
+#[test]
+fn a_key_naming_one_origin_twice_still_cancels_by_its_one_id() {
+    let (twice, own, heir) = (
+        successor("01JREPLACETWICE"),
+        successor("01JREPLACEOWNTWICE"),
+        successor("01JREPLACEHEIRTWICE"),
+    );
+    let (mut s, all) = origins();
+    replacing(&mut s, &twice, &all[0], "rh-twice");
+    s.changed(&twice, "partially_filled", Some(None), NONE);
+    replacing(&mut s, &twice, &all[0], "rh-twice");
+    replacing(&mut s, &heir, &twice, "rh-heir-twice");
+    replacing(&mut s, &own, &all[1], "rh-own-twice");
+    s.submitted(&own, "QQQ", "buy");
+    replacing(&mut s, &own, &all[1], "rh-own-twice");
+    origins_still_cancel("one origin twice", &s.0, &all);
+    let (mut c, calls) = restored(&s.0, "confirmed");
+    let cases = [
+        (&twice, "rh-twice", "SPY", Side::Buy),
+        (&heir, "rh-heir-twice", "SPY", Side::Buy),
+        (&own, "rh-own-twice", "QQQ", Side::Buy),
+    ];
+    let mut expected = Vec::new();
+    for (k, id, symbol, side) in cases {
+        let placed = order(k, id, symbol, side);
+        assert_eq!(cancel(&mut c, k), Ok(BrokerOutcome::Order(placed)), "{id}");
+        expected.push(cancelled_by(id));
+    }
+    assert_eq!(*calls.borrow(), expected);
+    let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
+    for (k, ..) in cases {
+        let outcome = call(&mut c, &protective_stop(k));
+        assert_eq!(outcome, Err(in_doubt), "placed again: {}", k.as_str());
+    }
+    assert_eq!(*calls.borrow(), expected, "DEC-860 item 4");
+}
+
 /// What one generated record of a key in the shuffle property is, from its choice: an
 /// `OrderSubmitted` with one of four readable instrument-and-side pairs or an unreadable `side`,
 /// or an `OrderStateChanged` with one of the `broker_order_id` forms.
@@ -818,6 +1047,23 @@ fn generated_id(n: usize, choice: usize) -> Option<Value> {
 /// text id and no odd one.
 #[test]
 fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() {
+    interleaved(false);
+}
+
+/// DEC-876 in the interleaving property: the second successor's records may alternate between
+/// two `replaces` targets, the same one twice or two different ones. The oracle reads the targets
+/// from the generated choices: a key naming two different ones is in doubt whatever its own
+/// submits say, and naming one twice is one link.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_key_naming_two_origins_is_in_doubt_however_the_stream_interleaves_its_keys() {
+    interleaved(true);
+}
+
+/// The interleaving property over five keys. With `alternates`, successor 4's odd-numbered
+/// `OrderStateChanged` records name `q4` in `replaces` rather than `p4`; without, `q4` is always
+/// the fifth choice, which names no second target.
+fn interleaved(alternates: bool) {
     let keys = [
         key("01JMIX0"),
         key("01JMIX1"),
@@ -826,21 +1072,25 @@ fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() 
         successor("01JREPLACEMIX4"),
     ];
     let own = proptest::collection::vec(0..15_usize, 0..5);
+    let no_second_target = 4_usize;
+    let second = if alternates { 0 } else { no_second_target }..no_second_target + 1;
     let strategy = (
         proptest::collection::vec(own, keys.len()),
-        (0..3_usize, 0..4_usize),
+        (0..3_usize, 0..4_usize, second),
         proptest::collection::vec(0..keys.len(), 0..30),
     );
     let mut runner = TestRunner::new(Config::with_cases(256));
-    let verdict = runner.run(&strategy, |(records, (p3, p4), picks)| {
+    let verdict = runner.run(&strategy, |(records, (p3, p4, q4), picks)| {
         let parent = |n: usize| match n {
             3 => Some(p3),
             4 => Some(p4),
             _ => None,
         };
+        let alternate = |n: usize| Some(q4).filter(|&q| n == 4 && q != no_second_target);
         let mut queues: Vec<Vec<FoldedEvent>> = Vec::new();
         for (n, choices) in records.iter().enumerate() {
             let mut own = Stream::default();
+            let mut links_written = 0_usize;
             for &choice in choices {
                 if let Some(pair) = SUBMITS.get(choice) {
                     let (symbol, side) = pair.unwrap_or(("SPY", "short"));
@@ -848,9 +1098,14 @@ fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() 
                     continue;
                 }
                 let mut links = json!({});
-                if let Some(p) = parent(n) {
+                let target = match alternate(n) {
+                    Some(q) if links_written % 2 == 1 => Some(q),
+                    _ => parent(n),
+                };
+                if let Some(p) = target {
                     links["replaces"] = json!(keys[p].as_str());
                 }
+                links_written += 1;
                 if let Some(id) = generated_id(n, choice - SUBMITS.len()) {
                     links["broker_order_id"] = id;
                 }
@@ -877,6 +1132,12 @@ fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() 
                 .filter(|&&c| c >= SUBMITS.len())
                 .map(move |&c| c - SUBMITS.len())
         };
+        let targets = |n: usize| -> BTreeSet<usize> {
+            let count = changes(n).count();
+            let first = parent(n).filter(|_| count >= 1);
+            let second = alternate(n).filter(|_| count >= 2);
+            first.into_iter().chain(second).collect()
+        };
         let own_pair = |n: usize| -> Option<Option<(&str, &str)>> {
             let mut all = submits(n);
             let first = all.next()?;
@@ -884,11 +1145,13 @@ fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() 
         };
         let mut pair: Vec<Option<(&str, &str)>> = Vec::new();
         for n in 0..keys.len() {
-            let inherited = match parent(n) {
-                Some(p) if changes(n).next().is_some() => pair[p],
-                _ => None,
+            let mine = targets(n);
+            let resolved = match mine.first() {
+                Some(_) if mine.len() > 1 => None,
+                Some(&p) => own_pair(n).unwrap_or(pair[p]),
+                None => own_pair(n).flatten(),
             };
-            pair.push(own_pair(n).unwrap_or(inherited));
+            pair.push(resolved);
         }
         let ids = |n: usize| -> BTreeSet<String> {
             changes(n)
@@ -924,8 +1187,7 @@ fn which_keys_are_placed_never_depends_on_how_the_stream_interleaves_its_keys() 
         proptest::prop_assert_eq!(&*calls.borrow(), &expected);
         let in_doubt = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
         for (n, key) in keys.iter().enumerate() {
-            let named = !records[n].is_empty()
-                || (3..keys.len()).any(|m| parent(m) == Some(n) && changes(m).next().is_some());
+            let named = !records[n].is_empty() || (3..keys.len()).any(|m| targets(m).contains(&n));
             if named {
                 let outcome = call(&mut c, &protective_stop(key));
                 proptest::prop_assert_eq!(outcome, Err(in_doubt), "{}", key.as_str());

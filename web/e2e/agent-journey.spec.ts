@@ -13,7 +13,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 
 const log = (page: Page) => page.getByRole("log", { name: "Conversation" });
-const composer = (page: Page) => page.getByRole("textbox", { name: "Your message" });
+const composer = (page: Page) => page.getByRole("textbox", { name: "Your answer" });
 const lastReply = (page: Page) => log(page).locator("[data-slot=said]").last();
 
 /** Sends one message and waits until the model has read it. */

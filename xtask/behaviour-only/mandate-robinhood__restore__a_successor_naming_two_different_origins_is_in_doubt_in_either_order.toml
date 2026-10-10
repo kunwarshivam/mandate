@@ -1,0 +1,9 @@
+file = "crates/mandate-robinhood/tests/restore.rs"
+test = "a_successor_naming_two_different_origins_is_in_doubt_in_either_order"
+reason = """
+DEC-876: main keeps the first `replaces` target a key names, so a successor naming two different
+origins inherits the first one's instrument and side and cancels by its id, with the result
+depending on record order, where it must be in doubt. `RobinhoodConnector::restore` is implemented
+on main (E7-6, #1200, #1236), so there is no stub to stop at: the test fails on the answer the
+implementation gives. The E7-6 change that adopts DEC-876 deletes the marker and this file.
+"""
