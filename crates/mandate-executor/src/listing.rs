@@ -33,23 +33,47 @@ fn dedicated(view: &ExecutorState, agent: &AgentId) -> bool {
         && view.intents.values().all(|intent| &intent.agent == agent)
 }
 
-/// The id a lookup of `id` asks the broker for (DEC-878 item 1, §2.3): a bracket placement's
-/// own id is the platform's handle `{entry}-p{record}`, which no broker order carries and whose
-/// every answer is the broker's 404, so a doubt about it — in doubt, or awaiting the
-/// confirmation of its cancel — is asked after by the **entry's** own id, whose nested legs
-/// decide the placement. Every other order asks by its own: a sent OCO or a re-placed
-/// stop-limit carries its own `OrderSubmitted` of the very id and is found by it or not at all
-/// (DEC-878 item 5); and a protective id that is genuinely ours but names no entry keeps its
-/// own lookup.
-pub(crate) fn lookup_target(view: &ExecutorState, id: &ClientOrderId) -> ClientOrderId {
+/// The id a lookup of `id` asks the broker for, when it asks at all (DEC-878 item 1, §2.3): a
+/// bracket placement's own id is the platform's handle `{entry}-p{record}`, which no broker order
+/// carries and whose every answer is the broker's 404, so a doubt about it — in doubt, or
+/// awaiting the confirmation of its cancel — is asked after by the **entry's** own id, whose
+/// nested legs decide the placement. Every other order asks by its own id: a sent OCO or a
+/// re-placed stop-limit carries its own `OrderSubmitted` of the very id and is found by it or
+/// not at all (DEC-878 item 5); and a protective id that is genuinely ours but names no entry
+/// keeps its own lookup.
+///
+/// The entry is asked only while its own record is current in the ledger
+/// ([`ledger_current`]): an answer read back for an entry the broker has already reported more
+/// filled of than the journal has applied would itself ask for a reconciliation — §11 step 2's
+/// ingest of the missing fill is what resolves it — so while the entry is ahead of its journal
+/// the doubt is asked after by no raw query at all; the next reconciliation's gathered snapshot
+/// ingests the fill and then the doubt asks, still never by the handle (#1292's contract item 3,
+/// bounded to the reads that are folded; the shell drives a reconciliation's own queries
+/// outside the gather that answers everything else, so a query whose answer is known to need a
+/// gather waits for one rather than reaching it).
+pub(crate) fn lookup_target(view: &ExecutorState, id: &ClientOrderId) -> Option<ClientOrderId> {
     let unsent = view
         .details
         .get(id)
         .is_none_or(|detail| detail.request.is_none());
     match (unsent, id.protected_entry()) {
-        (true, Some(entry)) => entry,
-        _ => id.clone(),
+        (true, Some(entry)) if ledger_current(view, &entry) => Some(entry),
+        (true, Some(_)) => None,
+        _ => Some(id.clone()),
     }
+}
+
+/// Whether `entry`'s record is current in the ledger: no broker-reported fill of it that the
+/// journal has not applied remains, so the fold of an answer read back for it asks for no
+/// reconciliation (§11's missing-fill rule: the ingest is the reconciliation's own).
+fn ledger_current(view: &ExecutorState, entry: &ClientOrderId) -> bool {
+    view.details.get(entry).is_none_or(|detail| {
+        detail.reported_filled.is_none_or(|reported| {
+            view.orders
+                .get(entry)
+                .is_none_or(|known| reported <= known.filled_qty)
+        })
+    })
 }
 
 /// Asks what became of an order in doubt, by the id [`lookup_target`] names for it. Where the
@@ -65,10 +89,9 @@ pub(crate) fn query_unknown(
         return Ok(());
     };
     if queryable(&batch.view) || order.state != OrderState::Unknown {
-        batch.broker(BrokerRequest::GetOrderByClientId(lookup_target(
-            &batch.view,
-            &id,
-        )));
+        if let Some(target) = lookup_target(&batch.view, &id) {
+            batch.broker(BrokerRequest::GetOrderByClientId(target));
+        }
         return Ok(());
     }
     let listable = order

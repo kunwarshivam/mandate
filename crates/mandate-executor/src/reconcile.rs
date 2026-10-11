@@ -3217,4 +3217,138 @@ pub(crate) mod tests {
         }
         Ok(())
     }
+
+    /// #1292's contract item 3, bounded to the reads that are folded: the doubt of a placement
+    /// whose entry carries a fill the broker has reported but the journal has not applied asks
+    /// for nothing — not by the entry, whose read-back would fold into §11's missing-fill ingest
+    /// and ask for another gathered reconciliation, and never by the handle, which no broker
+    /// order carries (DEC-878 item 1). The next reconciliation's gathered snapshot is what
+    /// ingests the fill and ends the wait, so the doubt is bounded by a gather rather than by a
+    /// 404-producing name, and it still neither confirms the placement absent nor resubmits it.
+    #[test]
+    fn a_doubt_behind_an_unapplied_fill_waits_for_the_gather() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("20000")?)),
+            &ports,
+        )?;
+        executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("20000")?,
+                ..executor.snapshot(ReconcileReason::Startup)?
+            }),
+            &ports,
+        )?;
+        let submitted = executor.run(
+            Input::Intent(IntentHandoff {
+                intent_id: IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned())),
+                agent: AgentId("agent-a".to_owned()),
+                tif: Some(TimeInForce::Day),
+                body: IntentBody::Order {
+                    instrument: aapl()?,
+                    side: Side::Buy,
+                    qty: Qty::parse("10")?,
+                    limit: Price::parse("150")?,
+                    purpose: Purpose::Open,
+                    protection: Some(ProtectionPrices {
+                        stop: Price::parse("140")?,
+                        take_profit: Some(Price::parse("170")?),
+                    }),
+                },
+            }),
+            &ports,
+        )?;
+        let entry = submitted
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Broker(BrokerRequest::Submit(order)) if order.bracket.is_some() => {
+                    Some(order.client_order_id.as_str().to_owned())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| missing("the entry goes as one bracket (§5.4)"))?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+                broker_order_id: "e0000000".to_owned(),
+                client_order_id: Some(entry.clone()),
+                instrument: aapl()?,
+                side: Side::Buy,
+                qty: Qty::parse("10")?,
+                filled_qty: Qty::parse("10")?,
+                limit_price: Some(Price::parse("150")?),
+                stop_price: None,
+                status: "filled".to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: Some(Date::parse("2026-09-22")?),
+            })),
+            &ports,
+        )?;
+        let placement = executor
+            .journal
+            .iter()
+            .filter(|event| event.event_type == "ProtectionChanged")
+            .filter(|event| {
+                matches!(
+                    event.payload.get("action"),
+                    Some(Value::Str(action)) if action == "placed"
+                )
+            })
+            .flat_map(|event| {
+                event
+                    .payload
+                    .get("orders")
+                    .and_then(Value::as_array)
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .next()
+            .ok_or_else(|| missing("the reported complete fill records the legs placed"))?;
+
+        let adopted = executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                open_orders: Vec::new(),
+                positions: vec![BrokerPosition {
+                    instrument: aapl()?,
+                    qty: SignedQty::parse("10")?,
+                    avg_entry_price: Price::parse("150")?,
+                }],
+                account: account("20000")?,
+                ..executor.snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        assert!(
+            adopted
+                .iter()
+                .all(|effect| !matches!(effect, Effect::Broker(_))),
+            "a doubt whose entry's fill the journal has not applied asks the broker for no name \
+             at all: the next gathered reconciliation ingests the fill and ends the wait \
+             (DEC-878 item 1, §11): {adopted:?}"
+        );
+        assert_eq!(
+            executor
+                .state
+                .orders()
+                .get(&ClientOrderId::parse(&placement)?)
+                .map(|order| order.state),
+            Some(OrderState::Unknown),
+            "the placement is still adopted in doubt (DEC-878 item 5), waiting for the gather"
+        );
+        Ok(())
+    }
 }
