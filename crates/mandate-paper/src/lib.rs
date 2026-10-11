@@ -22,6 +22,10 @@
 //! constant here (FT-2).
 
 mod connection;
+mod evidence;
+mod grant;
+mod lt10;
+mod quote;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -59,6 +63,10 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
+pub use evidence::{Evidence, EvidenceRefusal, evidence};
+pub use grant::{Asked, GrantRefusal, grant};
+pub use lt10::{Lt10Refusal, Watched, lt10};
+pub use quote::{QuoteRefusal, cross_check};
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
 /// host (FT-3, FT-4).
@@ -127,6 +135,18 @@ pub enum PaperError {
     /// connection record.
     #[error(transparent)]
     Lapse(#[from] LapseRefusal),
+    /// The grant an `ask` opening waits for fails closed (G1b, LT-4).
+    #[error(transparent)]
+    Grant(#[from] GrantRefusal),
+    /// The opening's quote cross-check fails closed (G1b, DEC-529 item 12).
+    #[error(transparent)]
+    CrossCheck(#[from] QuoteRefusal),
+    /// The live watch's LT-10 end fails closed (G1b, LT-10).
+    #[error(transparent)]
+    Lt10(#[from] Lt10Refusal),
+    /// The run's exportable evidence fails closed (G1b, the founder's run's step 6).
+    #[error(transparent)]
+    Evidence(#[from] EvidenceRefusal),
     #[error(transparent)]
     Shell(ShellError),
 }
