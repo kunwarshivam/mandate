@@ -11,7 +11,10 @@
   `crates/mandate-paper/src/lib.rs` as `PaperError`'s `Connection` and `Lapse` variants. The
   runner's `live` cargo feature (`crates/mandate-paper/Cargo.toml`, the crate
   `xtask/layers.toml` marks `live_feature`) is the only door to the Robinhood connector:
-  the default build's connection seam refuses `connector_not_built` (DEC-910 item 1).
+  the default build's connection seam refuses `connector_not_built` (DEC-910 item 1). CI's
+  only build of this suite is the default one; a locally built `--features live` leaves the
+  ungated `a_live_record_refuses_the_connector_this_build_does_not_hold` failing by design
+  (the settled #1297 reading).
 - **Tests:** `crates/mandate-paper/tests/connection.rs`: the connection refusals (no record, a
   revoked record — a revoked paper record included, a lone revocation with no prior
   establishment, a revocation of another connection refused never, and a re-establishment after
@@ -22,8 +25,11 @@
   record, a corrupt payload — another environment, another broker, another account stream, and
   the connector the default build does not hold, which is LT-1's runtime build test) and the
   lapse pins (a spent record deploys nothing, a fill on a stream the record does not bind
-  spending nothing, a non-flat account refusing ahead of the spend, the unspent-and-flat pair
-  proceeding to the builder and the gate, and a paper run making no check at all), pinning the
-  implemented seam beside a live test that pins every refusal's message and reason code, and an
-  agreeing paper record keeping the whole paper connection, the account stream included.
+  spending nothing, a fill on an agent stream sharing the bound account segment spending
+  nothing too, a non-flat account refusing ahead of the spend, the unspent-and-flat pair
+  proceeding to the builder and the gate, and a paper run making no check at all), pinning
+  the implemented seam beside a live test that pins every refusal's message and reason code,
+  and an agreeing paper record keeping the whole paper connection, the account stream included,
+  with a same-`seq` revocation outranking its establishment in whichever order the records
+  are read.
 - **Run:** `cargo nextest run -p mandate-paper`.
