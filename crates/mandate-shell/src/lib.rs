@@ -9,8 +9,9 @@
     clippy::as_conversions
 )]
 //! The process shell that binds the runtime, the executor, and the Alpaca paper connector
-//! ([task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7, DEC-138), and the
-//! `mandate-tracer` binary that places **one** order on the owner's Alpaca **paper** account.
+//! ([task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7, DEC-138, DEC-475
+//! item 6). E7-7's one-shot `mandate-tracer` binary is deleted; `mandate-paper` is the one binary
+//! that places an order on the owner's Alpaca **paper** account.
 //!
 //! # What lives here, and what never does
 //!
@@ -33,13 +34,13 @@
 //! The adapters in [`adapters`] become real one slice at a time. The flatten and protection probes,
 //! stored bars, signal, mandate validation, sizing, classification, advisory gate, journal, sink,
 //! executor, connector, and reconciliation are live when their trusted inputs are injected. An
-//! absent run or executor context refuses before deciding or reading the broker. The binary supplies
-//! both from [`paper`]'s one snapshot of broker GETs and stored data, and refuses before the run when
-//! any fact in it is missing, stale, or ambiguous (DEC-466, DEC-470). The effect runner, mappings, envelope, and host
-//! controls are the harness the fail-closed suite tests (DEC-157 item 1).
+//! absent run or executor context refuses before deciding or reading the broker. The paper adapter
+//! supplies both from [`paper`]'s one snapshot of broker GETs and stored data, and refuses before
+//! the run when any fact in it is missing, stale, or ambiguous (DEC-466, DEC-470). The effect
+//! runner, mappings, envelope, and host controls are the harness the fail-closed suite tests
+//! (DEC-157 item 1).
 
 pub mod adapters;
-pub mod cli;
 pub mod control;
 pub mod envelope;
 mod error;

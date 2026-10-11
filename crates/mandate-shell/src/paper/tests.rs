@@ -24,7 +24,7 @@ use super::artifacts::reference;
 use super::context::{PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template};
 use super::{Artifacts, BrokerFacts, INSTRUMENT_ID, LiquidityFacts, PaperFacts, load_contexts};
-use crate::{Cause, Setup};
+use crate::Cause;
 
 const NOW: &str = "2026-09-28T17:00:00Z";
 const AGENT: &str = "tracer-aapl";
@@ -600,111 +600,6 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
             "{name} must not be empty"
         );
     }
-    scratch.remove()
-}
-
-#[test]
-fn shipping_paper_adapter_uses_only_the_validated_deployment_input() -> Result<(), String> {
-    let (scratch, loaded) = production_deployment_artifacts("shipping-deployment")?;
-    let input = loaded
-        .deployment(
-            "workspace-owner-42".to_owned(),
-            "agent-deployment-9".to_owned(),
-            "account-ref-7".to_owned(),
-        )
-        .map_err(text)?;
-    let setup = Setup {
-        deployment: input.deployment().clone(),
-        account_ref: input.account_ref().to_owned(),
-        now: at(NOW)?,
-        place_one_order: false,
-        new_cycle: false,
-    };
-    let source_agent = input.deployment().agent.clone();
-    let source_workspace = input.deployment().workspace.0.clone();
-    let source_account_ref = input.account_ref().to_owned();
-    assert_eq!(setup.deployment.agent, source_agent);
-    assert_eq!(setup.deployment.workspace.0, source_workspace);
-    assert_eq!(
-        setup.deployment.connection.0,
-        loaded.mandate.connection_id.as_str()
-    );
-    assert_eq!(setup.account_ref, source_account_ref);
-    let source = include_str!("../bin/mandate-tracer.rs");
-    let after_signature = source
-        .split_once("fn tracer()")
-        .map(|(_, after)| after)
-        .ok_or_else(|| "the shipping tracer function is missing".to_owned())?;
-    let body = after_signature
-        .split_once("\n}\n\nstruct SystemClock")
-        .map(|(body, _)| body)
-        .ok_or_else(|| "the shipping tracer function boundary is missing".to_owned())?;
-    assert!(!body.contains("//") && !body.contains("/*"));
-    let cli_source = include_str!("../cli.rs");
-    for forbidden in [
-        "WORKSPACE",
-        "AGENT",
-        "CONNECTION",
-        "ACCOUNT_REF",
-        "conn_alpaca_paper_01",
-        "tracer-aapl",
-        "tracer-paper",
-        "\"tracer\"",
-    ] {
-        assert!(
-            !body.contains(forbidden) && !cli_source.contains(forbidden),
-            "the shipping adapter still selects {forbidden}"
-        );
-    }
-    for required in [
-        "cli::parse_production(",
-        "Artifacts::load_production(",
-        "artifacts.deployment(",
-    ] {
-        assert!(
-            body.contains(required),
-            "the shipping adapter must use {required}"
-        );
-    }
-    assert!(!body.contains("Artifacts::load("));
-    let deployment_block = body
-        .split_once("let deployment_input = artifacts.deployment(")
-        .and_then(|(_, after)| after.split_once(".map_err"))
-        .map(|(block, _)| block)
-        .ok_or_else(|| "the deployment-input call is missing".to_owned())?;
-    assert!(!deployment_block.contains('"'));
-    assert!(deployment_block.contains("args.workspace.clone()"));
-    assert!(deployment_block.contains("args.agent.clone()"));
-    assert!(deployment_block.contains("args.account_ref.clone()"));
-    assert!(body.contains("let deployment_input = artifacts"));
-    assert_eq!(
-        body.matches("let agent = deployment_input.deployment().agent.clone();")
-            .count(),
-        1
-    );
-    let context_block = body
-        .split_once("load_contexts_with_clock(")
-        .and_then(|(_, after)| after.split_once(")"))
-        .map(|(block, _)| block)
-        .ok_or_else(|| "the trusted-context call is missing".to_owned())?;
-    assert!(context_block.contains("&agent,"));
-    let setup_block = body
-        .split_once("let setup = Setup {")
-        .and_then(|(_, after)| after.split_once("\n    };"))
-        .map(|(block, _)| block)
-        .ok_or_else(|| "the production setup block is missing".to_owned())?;
-    assert!(setup_block.contains("deployment: deployment_input.deployment().clone(),"));
-    assert!(setup_block.contains("account_ref: deployment_input.account_ref().to_owned(),"));
-    let sources_block = body
-        .split_once("production(Sources {")
-        .and_then(|(_, after)| after.split_once("\n    });"))
-        .map(|(block, _)| block)
-        .ok_or_else(|| "the production sources block is missing".to_owned())?;
-    assert!(sources_block.contains("agent,"));
-    assert!(
-        sources_block.contains("workspace: deployment_input.deployment().workspace.0.clone(),")
-    );
-    assert!(sources_block.contains("account_ref: deployment_input.account_ref().to_owned(),"));
     scratch.remove()
 }
 

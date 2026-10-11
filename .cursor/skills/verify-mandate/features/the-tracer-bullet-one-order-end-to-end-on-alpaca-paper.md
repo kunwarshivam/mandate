@@ -15,12 +15,12 @@ crates.
   idempotency, fencing), 5.2 (write before acting), 8 (replay), 11 (verification); ADR-0001 ES-02,
   ES-06, ES-09, ES-19, ES-20, ES-21, ES-23; backlog E7-7.
 - **Code:** `crates/mandate-shell/` (layer 8, safety-critical, impure). `src/stages.rs` holds the
-  `Stage` enum (the suite's contract) and one trait per stage; `src/tracer.rs` the one pass and the
-  effect runner, which appends every draft before it hands an intent and lets a submission out only
-  after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
-  permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
-  deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
-  `src/bin/mandate-tracer.rs` the binary; `src/control.rs` the deployment input from the control
+  `Stage` enum (the suite's contract) and one trait per stage; `src/tracer.rs` the effect runner,
+  which appends every draft before it hands an intent and lets a submission out only after its
+  `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no permitting
+  arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
+  deterministic ids; `src/host.rs` the refusal of a configured host;
+  `src/control.rs` the deployment input from the control
   stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`) and the effective
   registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
@@ -31,10 +31,14 @@ crates.
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
-  `StoredBars`, `MovingAverage`, `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
+  `StoredBars`, `MovingAverage`,
+  `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
   reconciler. The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
   it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating, pricing, state
-  machine, or arithmetic on money or quantity—and binds the owning crates directly.
+  machine, or arithmetic on money or quantity—and binds the owning crates directly. E7-7's
+  `mandate-tracer` binary, its command line, and its recorded tests are deleted (DEC-475 item 6):
+  `mandate-paper` is the one binary that places an order, and the paper-adapter feature file covers
+  its door.
 - **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
   case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
   zero hands up to `Sink`; zero `IntentProposed` up to `Journal`; zero `OrderSubmitted` up to
@@ -48,14 +52,14 @@ crates.
   verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11);
   `src/adapters.rs`'s cases for the stored-data trust rule, the crossover's envelope windows, and the
   purpose-flag and ownerless-exit mappings of the flatten adapter; `tests/flatten_probe.rs` the
-  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451).
-  `tests/tracer.rs` runs the production path over recorded Alpaca paper responses and a bar dataset
-  written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`, `autonomy_ask`,
-  `signal_flat`, `signal_undecided`, `stale_stored_bars_are_refused`, `oversized_proposal`,
-  `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`,
-  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing). `outlier_close`
-  remains pending and failing on E2-14 until its founder-gated price-trust rule lands; the shell
-  cannot invent price arithmetic (DEC-138 item 3). The mandate
+  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451). E7-7's recorded
+  end-to-end suites are deleted with the binary (DEC-475 item 6): `tests/tracer.rs`'s production
+  path over recorded Alpaca paper responses (whose `outlier_close` pending case went with the file
+  and its `xtask/behaviour-only` row), `tests/paper.rs`'s shipping assembly, and
+  `tests/binary.rs`'s binary order — the cycle, its journal order, its restart, and the observation
+  and output door are pinned by `crates/mandate-shell/tests/observed.rs` and `tests/watch.rs`, and
+  the shipping assembly end to end — the preflight's refusal order, the credential boundary, the
+  one submission and its watch — by the paper adapter's feature file. The mandate
   fixtures are generated and checked against `reference/mandate/ref.py` by
   `tests/fixtures/tracer/generate.py`. The paper assembly is split by step under `src/paper/`
   (`artifacts`, `facts`, `judge`, `gate`, `context`) and computes no money or quantity: the
@@ -64,19 +68,12 @@ crates.
   `mandate-accounting`'s (DEC-471 item 3). `src/paper/tests.rs` covers the artifact members and
   values, each single-fact refusal and its boundary, the session and close window, the mapping of
   the protection prices and the builder's action, and the per-request fee reservation;
-  `src/paper/facts/tests.rs` the liquidity mapping and each refusal it names. `tests/paper.rs`
-  drives the shipping assembly (`Artifacts::load`, `preflight`, `liquidity_facts`, `load_contexts`,
-  `production`) over one scripted transport that also answers the minute-bars read: GETs only
-  before the run, exactly one `POST` after the intent and submission commit, none on a restart, and
-  none when the bars read is empty. `tests/binary.rs` holds the binary's order and its pre-credential
-  refusals. The real HTTP runtime's I/O driver is tested with a local socket and no test holds paper
-  credentials or can reach Alpaca (ES-19).
+  `src/paper/facts/tests.rs` the liquidity mapping and each refusal it names. The real HTTP
+  runtime's I/O driver is tested with a local socket and no test holds paper credentials or can
+  reach Alpaca (ES-19).
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
   `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
-- **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases; the
-  manual paper run is `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset
-  <dir> --config-dir <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both
-  flags, accepts only the reviewed E7-7 paper artifacts, constructs the fixed Alpaca paper
-  transport, refuses any attempt to configure a host, and reads today's minute bars from the data
-  host (DEC-471, Proposed; see the task brief).
+- **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases.
+  The manual paper run is `mandate-paper`'s, not the shell's own command (DEC-475 items 1 and 6);
+  see the paper adapter's feature file and the first paper trade brief's E2.
