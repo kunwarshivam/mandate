@@ -9,6 +9,9 @@ description = "The paper adapter: the confirmed deployment, the GET-only preflig
 [lints]
 workspace = true
 
+[features]
+live = []
+
 [dependencies]
 mandate-accounting.workspace = true
 mandate-alpaca.workspace = true

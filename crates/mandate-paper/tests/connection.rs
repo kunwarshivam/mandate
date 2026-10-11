@@ -192,7 +192,6 @@ fn every_refusal_names_itself_and_its_code() {
 /// establishes refuses before anything runs — no record, so no environment a run could trade
 /// live under, and no connector chosen.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_live_mandate_with_no_record_refuses_before_anything_runs() {
     let refused = connection(&[], &live_mandate(), ACCOUNT);
     assert_eq!(refused, Err(ConnectionRefusal::Unrecorded));
@@ -202,7 +201,6 @@ fn a_live_mandate_with_no_record_refuses_before_anything_runs() {
 /// names keeps today's run — the paper adapter's own connector and environment, over the
 /// account it was given — so the default build's paper path changes nothing.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_paper_mandate_without_a_record_keeps_todays_path() {
     let agreed = connection(&[], &paper_mandate(), ACCOUNT);
     let expected = Connection {
@@ -219,7 +217,6 @@ fn a_paper_mandate_without_a_record_keeps_todays_path() {
 /// default one; E7-26's implementation, which declares the feature, gates this test where it
 /// adds the `live` arm.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_live_record_refuses_the_connector_this_build_does_not_hold() {
     let mandate = live_mandate();
     let id = mandate.connection_id.as_str();
@@ -232,7 +229,6 @@ fn a_live_record_refuses_the_connector_this_build_does_not_hold() {
 /// another one cannot move the run to it — a paper mandate named by a live record refuses
 /// rather than trading live under a deployment confirmed for paper.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_record_of_another_environment_refuses() {
     let mandate = paper_mandate();
     let id = mandate.connection_id.as_str();
@@ -253,7 +249,6 @@ fn a_record_of_another_environment_refuses() {
 /// so a record naming Alpaca refuses, and so does one naming a broker no connector serves at
 /// all.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_record_naming_another_broker_refuses() {
     let mandate = live_mandate();
     let id = mandate.connection_id.as_str();
@@ -273,7 +268,6 @@ fn a_record_naming_another_broker_refuses() {
 /// DEC-910 item 2: the account stream the record binds must be the run's own, so a record
 /// binding another account refuses before anything runs, wherever else it agrees.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_record_of_another_account_refuses() {
     let mandate = live_mandate();
     let id = mandate.connection_id.as_str();
@@ -289,7 +283,6 @@ fn a_record_of_another_account_refuses() {
 /// mandate's environment does not serve and binds another account stream refuses
 /// `connection_broker` before the account is judged.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_environment_broker_and_account_refusals_keep_the_recorded_order() {
     let paper = paper_mandate();
     let id = paper.connection_id.as_str();
@@ -317,7 +310,6 @@ fn the_environment_broker_and_account_refusals_keep_the_recorded_order() {
 /// no run, however its establishment read — the later revocation is decided before any member
 /// of the establishment is parsed, and only a re-establishment after it counts.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_revoked_connection_refuses() {
     let mandate = live_mandate();
     let id = mandate.connection_id.as_str();
@@ -333,7 +325,6 @@ fn a_revoked_connection_refuses() {
 /// connection was recorded and then revoked is not covered by V-001's no-record default, and
 /// the shell's own fold (V-001) and this seam agree on the refusal.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_revoked_paper_record_refuses_the_paper_run_too() {
     let mandate = paper_mandate();
     let id = mandate.connection_id.as_str();
@@ -351,7 +342,6 @@ fn a_revoked_paper_record_refuses_the_paper_run_too() {
 /// establishment: the paper run keeps its recorded path and the live record keeps refusing only
 /// on the build, never on a revocation that is not its own.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_revocation_of_another_connection_does_not_refuse_this_one() {
     let paper = paper_mandate();
     let id = paper.connection_id.as_str();
@@ -391,7 +381,6 @@ fn a_revocation_of_another_connection_does_not_refuse_this_one() {
 /// establishment — so the connection is served again: the paper run proceeds on it, and the
 /// live record refuses only on the build, never as revoked.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_re_establishment_after_a_revocation_restores_the_connection() {
     let paper = paper_mandate();
     let id = paper.connection_id.as_str();
@@ -426,7 +415,6 @@ fn a_re_establishment_after_a_revocation_restores_the_connection() {
 /// refuses", the paper default included, so the run fails closed before anything runs, reading
 /// the revocation as `connection_revoked`, never as no record.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_lone_revocation_without_any_establishment_refuses() {
     let live = live_mandate();
     let id = live.connection_id.as_str();
@@ -440,13 +428,45 @@ fn a_lone_revocation_without_any_establishment_refuses() {
     assert_eq!(refused, Err(ConnectionRefusal::Revoked));
 }
 
+/// DEC-910 item 2 and `AGENTS.md` rule 3: a stream holds one record at one `seq` (journal
+/// spec §5.1), but a slice the run reads could disagree; an equal-`seq` establishment and
+/// revocation of the connection resolve to the revocation — the safe default that refuses,
+/// never a tie that imports an establishment's data over a revocation — and the outcome does
+/// not depend on the order the records are read in: this order and the one after it hold the
+/// same pair read both ways, and the revocation outranks the establishment in each.
+#[test]
+fn a_same_seq_revocation_outranks_the_establishment_read_before_it() {
+    let mandate = live_mandate();
+    let id = mandate.connection_id.as_str();
+    let records = vec![
+        established(7, id, "robinhood", "live", ACCOUNT),
+        revoked(7, id),
+    ];
+    let refused = connection(&records, &mandate, ACCOUNT);
+    assert_eq!(refused, Err(ConnectionRefusal::Revoked));
+}
+
+/// DEC-910 item 2 and `AGENTS.md` rule 3, the other half of the tie: the same equal-`seq`
+/// pair read the other way round refuses exactly the same — the revocation outranks the
+/// establishment wherever the slice holds it, so no input order un-refuses the connection.
+#[test]
+fn a_same_seq_revocation_outranks_the_establishment_read_after_it() {
+    let mandate = live_mandate();
+    let id = mandate.connection_id.as_str();
+    let records = vec![
+        revoked(7, id),
+        established(7, id, "robinhood", "live", ACCOUNT),
+    ];
+    let refused = connection(&records, &mandate, ACCOUNT);
+    assert_eq!(refused, Err(ConnectionRefusal::Revoked));
+}
+
 /// `AGENTS.md` rule 3 and DEC-910 item 2: a record a member the run reads is missing from, or
 /// that holds it in another shape, refuses as unreadable, never a guess at what it meant: a
 /// record with a member missing, a version 1 record — journal spec §9.8's version-1 member set
 /// holds no `account_ref`, so it is never re-established either (rule 66) — and a corrupt
 /// payload whose member the run reads holds not text.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_record_that_cannot_be_read_refuses() {
     let mandate = live_mandate();
     let id = mandate.connection_id.as_str();
@@ -474,7 +494,6 @@ fn a_record_that_cannot_be_read_refuses() {
 /// whatever environment it also states, never a disagreement the run cannot trust itself to
 /// have read.
 #[test]
-#[ignore = "pending E7-26"]
 fn unreadable_sits_between_the_revocation_and_the_environment() {
     let live = live_mandate();
     let id = live.connection_id.as_str();
@@ -497,7 +516,6 @@ fn unreadable_sits_between_the_revocation_and_the_environment() {
 /// account stream — keeps the paper adapter's path and connector, the account stream the run was
 /// given included, so a recorded paper connection changes nothing the run does.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_agreeing_paper_record_proceeds_unchanged() {
     let mandate = paper_mandate();
     let id = mandate.connection_id.as_str();
@@ -518,7 +536,6 @@ fn an_agreeing_paper_record_proceeds_unchanged() {
 /// reconciliation's late fill alike, so the same build cannot start another live run on it
 /// however the account reads now.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_spent_record_deploys_nothing() {
     let rows = [row(1, "TradingDayStarted"), row(3, "FeesCharged")];
     let flat = Held {
@@ -538,7 +555,6 @@ fn a_spent_record_deploys_nothing() {
 /// other stream of the same journal, another account's stream or an agent stream, spends
 /// nothing and the connection proceeds to the builder and the gate.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_fill_on_a_stream_the_record_does_not_bind_does_not_spend_it() {
     let flat = Held {
         positions: 0,
@@ -553,11 +569,27 @@ fn a_fill_on_a_stream_the_record_does_not_bind_does_not_spend_it() {
     }
 }
 
+/// DEC-910 item 3 (journal spec §2): only an account stream — `acct:{workspace_id}:{account_ref}`
+/// — can spend the record, so an agent stream whose own id segment *is* the bound `account_ref`
+/// spends nothing either: the stream type and the account segment name the record's stream
+/// together, and a fill that matches only one of them never spends.
+#[test]
+fn a_fill_on_an_agent_stream_sharing_the_bound_segment_does_not_spend_it() {
+    let flat = Held {
+        positions: 0,
+        open_orders: 0,
+    };
+    for filled in ["FillApplied", "LateFillApplied"] {
+        let rows = vec![row_on("agent:ws_live:acct_live", 1, filled)];
+        let clean = lapse(&live_connection(), &rows, &flat);
+        assert_eq!(clean, Ok(()), "{filled}");
+    }
+}
+
 /// DEC-470 item 1 (DEC-910 item 3): a live run refuses an account that already holds a
 /// position or a working order, on the spot and ahead of the spend: the flat half of the lapse
 /// refuses first, whatever the record's stream holds.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_non_flat_account_refuses_to_start() {
     for held in [
         Held {
@@ -585,7 +617,6 @@ fn a_non_flat_account_refuses_to_start() {
 /// one-order door (FT-1) still sends at most one order; nothing the account stream holds short
 /// of a fill holds it back, a working order's submission and its cancellation included.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_unspent_record_on_a_flat_account_proceeds_to_the_builder_and_gate() {
     let rows = [
         row(1, "StreamOpened"),
@@ -610,7 +641,6 @@ fn an_unspent_record_on_a_flat_account_proceeds_to_the_builder_and_gate() {
 /// holds, so moving onto the record-reading runner changes no Alpaca paper outcome: today's
 /// paper path starts exactly as it did.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_paper_run_makes_no_lapse_check() {
     let paper = Connection {
         broker: Broker::Alpaca,

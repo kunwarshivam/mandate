@@ -8,8 +8,9 @@
 //! refuses here and only the runner's `live` feature can serve it (LT-1, V-001,
 //! [DEC-910](../../../docs/project/decisions/DEC-910.md)).
 
+use mandate_canon::Value;
 use mandate_domain::Environment;
-use mandate_journal::StoredEvent;
+use mandate_journal::{StoredEvent, StreamId, StreamType};
 use mandate_shell::control::ControlRecord;
 use mandate_spec::Mandate;
 
@@ -139,8 +140,11 @@ impl LapseRefusal {
 /// the mandate itself states, and the account stream `account_ref` the record must bind. A
 /// paper mandate whose connection no record names keeps today's run (V-001's paper default,
 /// LT-14); a live mandate requires an established record the build can serve, and a revoked
-/// one refuses wherever the stream holds it. Each disagreement fails closed before anything
-/// runs, in this order: no record ([`ConnectionRefusal::Unrecorded`]), revoked
+/// one refuses wherever the stream holds it. The record that decides is the latest by `seq`,
+/// and a same-`seq` tie between the connection's establishment and its revocation resolves to
+/// the revocation — the safe default that refuses, order-independent, and latent (journal
+/// spec §5.1 gives one `seq` to one record on a stream). Each disagreement fails closed before
+/// anything runs, in this order: no record ([`ConnectionRefusal::Unrecorded`]), revoked
 /// ([`ConnectionRefusal::Revoked`]), a member the run cannot read
 /// ([`ConnectionRefusal::Unreadable`]), another environment
 /// ([`ConnectionRefusal::Environment`]), another broker ([`ConnectionRefusal::Broker`]), another
@@ -154,9 +158,137 @@ pub fn connection(
     mandate: &Mandate,
     account_ref: &str,
 ) -> Result<Connection, ConnectionRefusal> {
-    let _ = (records, mandate, account_ref);
-    Err(ConnectionRefusal::Unimplemented { story: "E7-26" })
+    let named = mandate.connection_id.as_str();
+    let ours = |record: &ControlRecord| {
+        matches!(
+            record.event_type.as_str(),
+            "ConnectionEstablished" | "ConnectionRevoked"
+        ) && member(record, "connection_id") == Some(named)
+    };
+    let latest = records
+        .iter()
+        .filter(|record| ours(record))
+        .max_by_key(|record| (record.seq, revocation_rank(record)));
+    let Some(record) = latest else {
+        return paper_default(mandate, account_ref);
+    };
+    if record.event_type == "ConnectionRevoked" {
+        return Err(ConnectionRefusal::Revoked);
+    }
+    let broker = member(record, "broker").ok_or(ConnectionRefusal::Unreadable)?;
+    let environment = member(record, "environment").ok_or(ConnectionRefusal::Unreadable)?;
+    let bound = member(record, "account_ref").ok_or(ConnectionRefusal::Unreadable)?;
+    if environment != environment_text(mandate) {
+        return Err(ConnectionRefusal::Environment {
+            named: environment.to_owned(),
+        });
+    }
+    let broker = broker_serving(broker, mandate.environment)
+        .map_err(|named| ConnectionRefusal::Broker { named })?;
+    if bound != account_ref {
+        return Err(ConnectionRefusal::Account);
+    }
+    match broker {
+        Broker::Alpaca => Ok(Connection {
+            broker,
+            environment: mandate.environment,
+            account_ref: account_ref.to_owned(),
+        }),
+        Broker::Robinhood => robinhood(mandate.environment, account_ref),
+    }
 }
+
+/// One text member of `record`'s payload, or [`None`] when it is missing or holds not text: a
+/// member the run reads off the record, and [`ConnectionRefusal::Unreadable`] is the only
+/// reading of one ([DEC-910](../../../docs/project/decisions/DEC-910.md) item 2).
+fn member<'a>(record: &'a ControlRecord, name: &str) -> Option<&'a str> {
+    record.payload.get(name).and_then(Value::as_str)
+}
+
+/// The rank the connection's records are collated by after `seq`: [`true`] for the
+/// connection's `ConnectionRevoked` (journal spec §9.2), so a revocation at the same `seq` as
+/// an establishment outranks it — the safe default that refuses, never a tie that imports an
+/// establishment's data over a revocation, and one that does not depend on the order the
+/// records are read in (`AGENTS.md` rule 3, DEC-910 item 2). Journal spec §5.1 gives one
+/// `seq` to one record on a stream, so the tie is latent; the pins hold it anyway.
+fn revocation_rank(record: &ControlRecord) -> bool {
+    record.event_type == "ConnectionRevoked"
+}
+
+/// V-001's paper default (DEC-910 item 2): a paper mandate whose connection no record names
+/// keeps today's run — the Alpaca connector the default build compiles, the mandate's own
+/// environment, the account stream the run was given — and a live mandate with no record has
+/// neither an environment a run could trade live under nor a connector, so it refuses.
+fn paper_default(mandate: &Mandate, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
+    match mandate.environment {
+        Environment::Paper => Ok(Connection {
+            broker: Broker::Alpaca,
+            environment: Environment::Paper,
+            account_ref: account_ref.to_owned(),
+        }),
+        Environment::Live => Err(ConnectionRefusal::Unrecorded),
+    }
+}
+
+/// The mandate's environment as the record states it (mandate spec §3: `paper` or `live`), so
+/// the record's member and the mandate's own field say the same text or the record refuses.
+fn environment_text(mandate: &Mandate) -> &'static str {
+    match mandate.environment {
+        Environment::Paper => "paper",
+        Environment::Live => "live",
+    }
+}
+
+/// The broker `text` names, when it serves `environment` (DEC-910 item 2): a live mandate is
+/// served by the Robinhood connector alone (DEC-529 item 3) and a paper run by the Alpaca
+/// connector the default build compiles (V-001, LT-14), so a paper run has exactly one broker
+/// its build can serve. Any other text names a broker that does not serve the mandate's
+/// environment or one the runner knows no connector for, and it is refused as it is read.
+fn broker_serving(text: &str, environment: Environment) -> Result<Broker, String> {
+    match (text, environment) {
+        ("alpaca", Environment::Paper) => Ok(Broker::Alpaca),
+        ("robinhood", Environment::Live) => Ok(Broker::Robinhood),
+        (named, _) => Err(named.to_owned()),
+    }
+}
+
+/// The Robinhood a record chooses (DEC-910 item 1's runtime seam): one code path, compiled in
+/// every build, chooses — and only the `live` feature lets a build serve the choice, so the
+/// default build's seam refuses [`ConnectionRefusal::NotBuilt`] and no run of it can reach a
+/// Robinhood host at all (LT-1). No CI or release build enables the feature, so the suite
+/// runs in the default build the ungated pins below name, and [`ROBINHOOD_LINKED`] is the only
+/// part the feature gates. **Caveat for the next contributor:** under a locally built
+/// `--features live` the tests that pin `connector_not_built` fail by design — that is the
+/// settled #1297 reading ("CI's only build of this suite is the default one"): this PR's
+/// `a_live_record_refuses_the_connector_this_build_does_not_hold`, and, per #1297's own
+/// fixtures, `a_re_establishment_after_a_revocation_restores_the_connection` and
+/// `a_revocation_of_another_connection_does_not_refuse_this_one`, whose live halves assert
+/// `Err(ConnectionRefusal::NotBuilt)`; no CI job runs any of them.
+fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
+    if !ROBINHOOD_LINKED {
+        return Err(ConnectionRefusal::NotBuilt);
+    }
+    Ok(Connection {
+        broker: Broker::Robinhood,
+        environment,
+        account_ref: account_ref.to_owned(),
+    })
+}
+
+/// Whether this build serves the Robinhood a record chooses (DEC-910 item 1): only the
+/// runner's `live` feature (DEC-529 item 3) may hold a connector for it, and no CI or release
+/// build enables the feature, so this is [`false`] exactly in the default build. A constant,
+/// not a function: the mutants gate generates no mutant for it, so the door stays numerically
+/// verifiable — the refusal behind it and the construction past it are the mutable surface.
+#[cfg(not(feature = "live"))]
+const ROBINHOOD_LINKED: bool = false;
+
+/// Whether this build serves the Robinhood a record chooses (DEC-910 item 1): the `live`
+/// feature's door, opened only by a `--features live` build the founder builds locally from a
+/// commit on `main` (DEC-529 item 3). What serves the choice behind the door — the pinned host,
+/// the connector, the preflight — is the live build's own surface, not this constant's.
+#[cfg(feature = "live")]
+const ROBINHOOD_LINKED: bool = true;
 
 /// DEC-529 item 3's lapse check (G1a): a live run refuses to start unless the account the
 /// connection binds is flat — `held` counts the positions and working orders the connector's
@@ -172,6 +304,32 @@ pub fn lapse(
     rows: &[StoredEvent],
     held: &Held,
 ) -> Result<(), LapseRefusal> {
-    let _ = (connection, rows, held);
-    Err(LapseRefusal::Unimplemented { story: "E7-26" })
+    if connection.environment != Environment::Live {
+        return Ok(());
+    }
+    if held.positions > 0 || held.open_orders > 0 {
+        return Err(LapseRefusal::NotFlat {
+            positions: held.positions,
+            open_orders: held.open_orders,
+        });
+    }
+    if rows.iter().any(|row| spends(row, &connection.account_ref)) {
+        return Err(LapseRefusal::Spent);
+    }
+    Ok(())
+}
+
+/// Whether `row` is the fill evidence that spends the record (DEC-910 item 3): an executor's
+/// `FillApplied` or a reconciliation's `LateFillApplied` alone, on the account stream
+/// `account_ref` names — `acct:{workspace_id}:{account_ref}` (journal spec §2), whose account
+/// segment the ref is, since the CLI binds one account stream to one connection id. Every
+/// other event, and every event of another stream, leaves the record unspent.
+fn spends(row: &StoredEvent, account_ref: &str) -> bool {
+    if !matches!(row.event_type.as_str(), "FillApplied" | "LateFillApplied") {
+        return false;
+    }
+    StreamId::parse(&row.stream_id).is_some_and(|stream| {
+        stream.stream_type() == StreamType::Account
+            && stream.as_str().split(':').nth(2) == Some(account_ref)
+    })
 }
