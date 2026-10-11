@@ -256,13 +256,16 @@ fn broker_serving(text: &str, environment: Environment) -> Result<Broker, String
 /// every build, chooses — and only the `live` feature lets a build serve the choice, so the
 /// default build's seam refuses [`ConnectionRefusal::NotBuilt`] and no run of it can reach a
 /// Robinhood host at all (LT-1). No CI or release build enables the feature, so the suite
-/// runs in the default build the ungated pin below names, and [`robinhood_linked`] is the only
+/// runs in the default build the ungated pins below name, and [`ROBINHOOD_LINKED`] is the only
 /// part the feature gates. **Caveat for the next contributor:** under a locally built
-/// `--features live` the ungated test `a_live_record_refuses_the_connector_this_build_does_not_hold`
-/// fails by design — that is the settled #1297 reading ("CI's only build of this suite is the
-/// default one"); no CI job runs it.
+/// `--features live` the tests that pin `connector_not_built` fail by design — that is the
+/// settled #1297 reading ("CI's only build of this suite is the default one"): this PR's
+/// `a_live_record_refuses_the_connector_this_build_does_not_hold`, and, per #1297's own
+/// fixtures, `a_re_establishment_after_a_revocation_restores_the_connection` and
+/// `a_revocation_of_another_connection_does_not_refuse_this_one`, whose live halves assert
+/// `Err(ConnectionRefusal::NotBuilt)`; no CI job runs any of them.
 fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
-    if !robinhood_linked() {
+    if !ROBINHOOD_LINKED {
         return Err(ConnectionRefusal::NotBuilt);
     }
     Ok(Connection {
@@ -274,20 +277,18 @@ fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, 
 
 /// Whether this build serves the Robinhood a record chooses (DEC-910 item 1): only the
 /// runner's `live` feature (DEC-529 item 3) may hold a connector for it, and no CI or release
-/// build enables the feature, so this is [`false`] exactly in the default build.
+/// build enables the feature, so this is [`false`] exactly in the default build. A constant,
+/// not a function: the mutants gate generates no mutant for it, so the door stays numerically
+/// verifiable — the refusal behind it and the construction past it are the mutable surface.
 #[cfg(not(feature = "live"))]
-fn robinhood_linked() -> bool {
-    false
-}
+const ROBINHOOD_LINKED: bool = false;
 
 /// Whether this build serves the Robinhood a record chooses (DEC-910 item 1): the `live`
 /// feature's door, opened only by a `--features live` build the founder builds locally from a
 /// commit on `main` (DEC-529 item 3). What serves the choice behind the door — the pinned host,
-/// the connector, the preflight — is the live build's own surface, not this function's.
+/// the connector, the preflight — is the live build's own surface, not this constant's.
 #[cfg(feature = "live")]
-fn robinhood_linked() -> bool {
-    true
-}
+const ROBINHOOD_LINKED: bool = true;
 
 /// DEC-529 item 3's lapse check (G1a): a live run refuses to start unless the account the
 /// connection binds is flat — `held` counts the positions and working orders the connector's

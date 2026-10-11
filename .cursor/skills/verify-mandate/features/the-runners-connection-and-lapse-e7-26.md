@@ -13,8 +13,10 @@
   `xtask/layers.toml` marks `live_feature`) is the only door to the Robinhood connector:
   the default build's connection seam refuses `connector_not_built` (DEC-910 item 1). CI's
   only build of this suite is the default one; a locally built `--features live` leaves the
-  ungated `a_live_record_refuses_the_connector_this_build_does_not_hold` failing by design
-  (the settled #1297 reading).
+  `connector_not_built` pins failing by design (the settled #1297 reading):
+  `a_live_record_refuses_the_connector_this_build_does_not_hold`,
+  `a_re_establishment_after_a_revocation_restores_the_connection` and
+  `a_revocation_of_another_connection_does_not_refuse_this_one`.
 - **Tests:** `crates/mandate-paper/tests/connection.rs`: the connection refusals (no record, a
   revoked record — a revoked paper record included, a lone revocation with no prior
   establishment, a revocation of another connection refused never, and a re-establishment after
