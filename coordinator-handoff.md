@@ -232,3 +232,24 @@ Practical brief-writing notes that matter: force worktree-first with a `git rev-
 1. **FOUNDER: E2 ready** (above). Also #878 (Cloudflare cutover), DEC-877 item 4 (protective submissions vs rule 13), the E7-28 build-guard offer, usage credits / Oct 14 for the Claude lanes, dispatch-server restart.
 2. **Backlog minors recorded tonight** (non-blocking, tracked by the reviews): three stale doc references from #1295's Ling review (tests/observed.rs:68 "as tests/tracer.rs's scripted broker does"; docs/specs/agent-harness.md:747 lists the deleted binary as current; mandate-paper/tests/lines.rs:4 "in the words mandate-tracer prints"); the pre-existing flaky pending test protective_sell_quantity_never_exceeds_the_position_in_any_script (E7-2 properties, passed 1/8-2/8 ignored-only runs — can flake CI's fast-pending); #1297's M-A (no dedicated scope-level Tradability drive); the stale work-tracker M6 row (says M2/O1a/S2 are next, but all are merged - true it up at session end).
 3. Session-end duties: update 08-work-tracker.md + 11-work-log.md (AGENTS.md now names the work log explicitly), post the summary on issue #165, keep the morning list current (items 12-16 above stand; add E2-ready).
+
+## Coordinator incident note (2026-10-11 ~06:15 UTC) — #1296 merged ahead of its substantive review verdict
+- What happened: the #1296 delta review (Step-5 session) was still RUNNING when I performed the main-merge;
+  I mistakenly sent the verdict re-anchor request to a DIFFERENT Step-5 session (the #1294 reviewer), whose PASS
+  verified only the merge-identity mechanics (patch-ids, tree equality, suite counts) — not the delta's substance.
+  On that PASS I merged #1296 (347f658f). The substantive review then completed with VERDICT: FAIL 4f731caf and
+  one MAJOR: the rewrite of paper/tests.rs dropped part of the deleted 23-case mutation suite
+  (each_artifact_member_is_read_and_each_unreviewed_value_refused); mutant evidence: paper/artifacts.rs's
+  require_empty_array and the bats exchanges check are no longer caught (caught->missed). The CODE on main is
+  correct and CI-green; the test guard is weakened. DECISION THE FOUNDER MAY WANT: revert #1296, or accept the
+  remediation. My recommendation: accept the remediation (tests-only, restores every dropped guard, mutant-verified);
+  the founder reviews after the fact and can revert (AGENTS.md/DEC-79).
+- Remediation: a tests-only PR (claude/e3-coverage-restoration) was dispatched minutes after the verdict, restoring
+  every dropped case per the reviewer's spec, with hand-applied mutant-kill verification required before push.
+- Process fix adopted: a verdict re-anchor may only be requested from the session that produced the substantive
+  verdict, or the substantive verdict must complete first. Merge-driven-by-identity-verification is not sufficient
+  when the substantive review has not returned.
+- Step-5's minors also recorded: .cursor/...the-tracer-bullet....md is CODEOWNERS founder-owned and was not named in
+  #1296's Decisions-needed (it is named in #1295's; the founder should be told); docs/specs/agent-harness.md:747
+  still names the deleted binary as current (backlog row); ragged doc reflows in three places; the now-unused
+  tests/fixtures/tracer/mandate-{ask,deny,small-orders}.json referenced only by generate.py.
