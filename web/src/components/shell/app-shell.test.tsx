@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentsNew from "@/app/(app)/agents/new/page";
@@ -13,7 +15,8 @@ import { RECORD_AFTER_MS, dockStop, isDisabled, renderWithRuntime, tabStop } fro
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
 import { asPhone, shownOnDesktop, shownOnPhone } from "@/test/viewport";
-import { AppShell } from "./app-shell";
+import { AppShell, densityFor } from "./app-shell";
+import { denseEdgeClass } from "./dense-edge-class";
 import { fullBleed } from "./frame";
 import { hiddenToTheRight } from "./status-strip";
 
@@ -292,6 +295,102 @@ describe("the desktop frame (DEC-215)", () => {
     const strip = screen.getByRole("region", { name: "System status" });
     expect(strip.parentElement?.parentElement).not.toHaveClass("max-lg:hidden");
     expect(within(document.querySelector<HTMLElement>("[data-slot=page-footer]")!).queryByText("Fixture data")).toBeNull();
+  });
+});
+
+/** The stylesheet with its comments gone, so the frame's own blocks are read, not the notes above them. */
+const CSS = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+/** The custom properties a selector's blocks declare, later blocks winning. */
+function declaredIn(selector: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const block of CSS.matchAll(/([^{};]+)\{([^{}]*)\}/g)) {
+    if (block[1].trim() !== selector) continue;
+    for (const d of block[2].matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) out[d[1]] = d[2].trim();
+  }
+  return out;
+}
+
+describe("one left edge across densities on the audit screens (critique C-17)", () => {
+  it.skip("pending E11-9: the dense column keeps the calm page's left edge and only widens to the right (C-17)", () => {
+    const classes = denseEdgeClass().split(" ").filter(Boolean);
+    expect(classes.length, "one helper's classes, not a spread of utilities").toBeGreaterThan(0);
+    expect(classes, "the left edge stays the calm page's own; everything right of it widens").toEqual([
+      "w-auto",
+      expect.stringMatching(/^ml-\[max\(0px,calc\(\(100%-80rem\)\/2\)\)\]$/),
+      "mr-0",
+    ]);
+    setPathname("/audit");
+    const auditVisit = renderWithRuntime(
+      <AppShell>
+        <audit.default />
+      </AppShell>,
+    );
+    const main = screen.getByRole("main");
+    expect(main).toHaveAttribute("data-density", "dense");
+    for (const cls of classes) expect(main.classList, cls).toContain(cls);
+    expect(main.classList, "the column is no longer auto-centred, the drawing that put it at 40px").not.toContain("mx-auto");
+    expect(main).toHaveClass("px-(--page-x)", "max-w-(--content-max)");
+    auditVisit.unmount();
+
+    setPathname("/settings");
+    renderWithRuntime(
+      <AppShell>
+        <settings.default />
+      </AppShell>,
+    );
+    const settingsMain = screen.getByRole("main");
+    expect(settingsMain).toHaveAttribute("data-density", "dense");
+    for (const cls of classes) expect(settingsMain.classList, "the whole density shares the column, not Audit alone").toContain(cls);
+  });
+
+  it.skip("pending E11-9: the tag stays on the page's foot, the calm column keeps its frame, and the widening bounds stay (C-17)", () => {
+    const classes = denseEdgeClass().split(" ").filter(Boolean);
+    setPathname("/audit");
+    const auditVisit = renderWithRuntime(
+      <AppShell>
+        <audit.default />
+      </AppShell>,
+    );
+    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
+    expect(within(foot).getByText("Fixture data"), "the tag still labels the screen, at the page's own foot").toBeInTheDocument();
+    expect(foot, "the tag's row keeps the frame every calm screen starts from").toHaveClass(
+      "mx-auto",
+      "w-full",
+      "max-w-(--content-max)",
+      "px-(--page-x)",
+    );
+    for (const cls of classes) expect(foot.classList, "the tag does not follow the dense column").not.toContain(cls);
+    auditVisit.unmount();
+
+    setPathname("/");
+    renderWithRuntime(
+      <AppShell>
+        <dashboard.default />
+      </AppShell>,
+    );
+    const calm = screen.getByRole("main");
+    expect(calm).toHaveAttribute("data-density", "calm");
+    expect(calm, "the calm column keeps today's centred frame").toHaveClass(
+      "mx-auto",
+      "w-full",
+      "max-w-(--content-max)",
+      "px-(--page-x)",
+      "pt-(--page-top)",
+      "pb-10",
+    );
+    for (const cls of classes) expect(calm.classList, "the fix cannot pass by moving the calm column").not.toContain(cls);
+
+    const rootVars = declaredIn(":root");
+    const denseVars = declaredIn('[data-density="dense"]');
+    expect(rootVars["content-max"], "the calm page's bound, the left edge's source, stays").toBe("80rem");
+    expect(denseVars["content-max"], "the dense column still widens, never past its own bound").toBe("90rem");
+    expect(denseVars["page-x"], "the gutters stay shared: both densities read --page-x the same").toBeUndefined();
+    expect(densityFor("/audit")).toBe("dense");
+    expect(densityFor("/settings")).toBe("dense");
+    expect(densityFor("/connections")).toBe("dense");
+    expect(densityFor("/")).toBe("calm");
+    expect(densityFor("/messages")).toBe("calm");
   });
 });
 
