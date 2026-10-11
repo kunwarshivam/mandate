@@ -827,6 +827,47 @@ fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
     Ok(())
 }
 
+/// The same refusal for the reads that serve C4's preflight: `get_portfolio` and
+/// `get_equity_positions` take `account_number` alone, and `get_equity_tradability` adds
+/// `symbol` (DEC-879's allowlists, DEC-902 items 6 and 8). A key beside those — `cursor` here,
+/// which no tool models until C3 pages — refuses the request with nothing served, rather than
+/// being silently ignored or forwarded to the core.
+#[test]
+fn the_account_reads_refuse_an_argument_key_their_tool_does_not_name() -> Outcome {
+    let (_server, mut wire) = served(Variant::Honest)?;
+    let cases = [
+        (
+            "get_portfolio",
+            json!({"account_number": AGENTIC}),
+            json!({"account_number": AGENTIC, "cursor": "next"}),
+        ),
+        (
+            "get_equity_positions",
+            json!({"account_number": AGENTIC}),
+            json!({"account_number": AGENTIC, "cursor": "next"}),
+        ),
+        (
+            "get_equity_tradability",
+            json!({"account_number": AGENTIC, "symbol": "SPY"}),
+            json!({"account_number": AGENTIC, "symbol": "SPY", "cursor": "next"}),
+        ),
+    ];
+    for (tool, listed, with_a_cursor) in cases {
+        let before = wire.call(tool, listed);
+        assert!(
+            !refused(&before),
+            "{tool} on its listed arguments: {before}"
+        );
+        let answer = wire.call(tool, with_a_cursor);
+        assert!(
+            refused(&answer),
+            "{tool} is never handed a cursor: {answer}"
+        );
+        assert_eq!(answer.get("structuredContent"), None, "{tool}: {answer}");
+    }
+    Ok(())
+}
+
 #[test]
 fn anything_but_post_to_mcp_is_404_never_400() -> Outcome {
     let server = SimServer::start(sim().unwrap(), Variant::Honest)?;

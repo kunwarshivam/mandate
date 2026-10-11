@@ -21,6 +21,9 @@ pub enum AccountRead {
     Positions,
     /// `get_equity_orders`: the records of `structuredContent.orders`.
     Orders,
+    /// `get_equity_tradability`: its `structuredContent` is the one record. Its tool lists the
+    /// `symbol` filter (DEC-902 item 6, DEC-879 item 5).
+    Tradability,
 }
 
 impl<T: Tools> RobinhoodConnector<T> {
@@ -85,6 +88,31 @@ impl<T: Tools> RobinhoodConnector<T> {
         read: AccountRead,
         filters: &Map<String, Value>,
     ) -> Result<Vec<Map<String, Value>>, RobinhoodError> {
+        self.scoped_read(read, filters, false).await
+    }
+
+    /// One read of the agentic account whose answer holds its records' member and nothing else
+    /// (DEC-902 item 5): beside [`Self::read`], a next-page cursor, or any other member of the
+    /// `structuredContent`, is [`RobinhoodError::Unreadable`] with the read's code, because
+    /// reading only the first page could hide an open order of the agentic account. The
+    /// preflight reads this way; following pages is C3's list request, so the check lives here
+    /// with the preflight callers and not inside [`Self::read`] (#1264's minor 5). A one-record
+    /// answer has no member to check, so its closed shape is the caller's.
+    pub async fn read_sole_member(
+        &self,
+        read: AccountRead,
+        filters: &Map<String, Value>,
+    ) -> Result<Vec<Map<String, Value>>, RobinhoodError> {
+        self.scoped_read(read, filters, true).await
+    }
+
+    /// [`Self::read`] and [`Self::read_sole_member`] differ only in `sole_member`.
+    async fn scoped_read(
+        &self,
+        read: AccountRead,
+        filters: &Map<String, Value>,
+        sole_member: bool,
+    ) -> Result<Vec<Map<String, Value>>, RobinhoodError> {
         let recorded = self.account_number.as_str();
         match filters.get(NUMBER) {
             None => {}
@@ -108,6 +136,9 @@ impl<T: Tools> RobinhoodConnector<T> {
             .call_tool(CallClass::Ordinary, tool, &Value::Object(arguments))
             .await;
         let mut content = structured(answer).ok_or(unreadable.clone())?;
+        if sole_member && member.is_some() && content.len() != 1 {
+            return Err(unreadable);
+        }
         let records = match member {
             None => vec![Value::Object(content)],
             Some(member) => match content.remove(member) {
@@ -148,6 +179,7 @@ impl AccountRead {
                 "placed_agent",
                 "cursor",
             ],
+            Self::Tradability => &["symbol"],
         }
     }
 
@@ -158,12 +190,13 @@ impl AccountRead {
             Self::Portfolio => ("get_portfolio", None, "portfolio"),
             Self::Positions => ("get_equity_positions", Some("positions"), "positions"),
             Self::Orders => ("get_equity_orders", Some("orders"), "orders"),
+            Self::Tradability => ("get_equity_tradability", None, "tradability"),
         }
     }
 }
 
 /// The `structuredContent` of an answer that arrived and is not `isError`; `None` otherwise.
-fn structured<E>(answer: Result<String, E>) -> Option<Map<String, Value>> {
+pub(crate) fn structured<E>(answer: Result<String, E>) -> Option<Map<String, Value>> {
     match tool_result(&answer.ok()?)? {
         ToolResult::Content(content) => Some(content),
         ToolResult::Refused => None,

@@ -214,7 +214,6 @@ fn unreadable<T: std::fmt::Debug>(outcome: &Result<T, RobinhoodError>, code: &st
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn the_snapshot_maps_cash_buying_power_positions_and_working_orders() {
     let mut answers = Answers::flat();
     answers.positions = json!({"positions": [position(OURS, SYMBOL, "3", "85.12"),
@@ -238,7 +237,6 @@ fn the_snapshot_maps_cash_buying_power_positions_and_working_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn only_the_working_states_are_open_orders_and_a_flat_account_maps_to_none() {
     for state in STATES {
         let mut answers = Answers::flat();
@@ -262,7 +260,6 @@ fn only_the_working_states_are_open_orders_and_a_flat_account_maps_to_none() {
 /// `sell`) to the executor's own two sides, as `mandate-alpaca`'s wire mapping does: `"sell"` to
 /// `Side::Sell` and `"buy"` to `Side::Buy`.
 #[test]
-#[ignore = "pending E7-6"]
 fn sell_orders_map_to_sell_and_buy_orders_to_buy() {
     let mut answers = Answers::flat();
     answers.orders = json!({"orders": [order(OURS, "sell", "o1", "new", (Some("84.5"), None)),
@@ -324,7 +321,6 @@ fn with_record(code: &str, record: Value) -> Answers {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn any_unknown_or_missing_field_or_unexpected_type_refuses() {
     for (code, member, record) in targets() {
         let fields = record.as_object().unwrap().clone();
@@ -401,7 +397,6 @@ fn any_unknown_or_missing_field_or_unexpected_type_refuses() {
 /// with no id cannot be named, re-read or cancelled, so the whole orders read refuses rather
 /// than carry an order the executor could never refer to again.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_order_record_with_an_empty_id_refuses() {
     let record = order(OURS, "buy", "", "new", (Some("84.5"), None));
     let outcome = with_record("orders", record).snapshot();
@@ -409,7 +404,6 @@ fn an_order_record_with_an_empty_id_refuses() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn the_quote_and_the_tradability_are_the_one_symbols() {
     let quote =
         |bid: &str, ask: &str| json!({"symbol": SYMBOL, "bid_price": bid, "ask_price": ask});
@@ -458,7 +452,6 @@ fn the_quote_and_the_tradability_are_the_one_symbols() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn every_account_read_goes_through_the_scoped_read() {
     let (connector, calls) = Answers::flat().connector();
     ready(connector.preflight_facts(&id(SYMBOL))).unwrap();
@@ -514,7 +507,6 @@ fn every_account_read_goes_through_the_scoped_read() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn no_number_is_invented() {
     let mut answers = Answers::flat();
     answers.orders = json!({"orders": [order(OURS, "buy", "o1", "new", (None, None))]});
@@ -547,7 +539,6 @@ fn no_number_is_invented() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn money_is_exact_decimal_text_and_a_json_number_refuses() {
     let mut answers = Answers::flat();
     answers.portfolio["cash"] = json!("1234567890123.123456789");
@@ -687,7 +678,6 @@ fn owned(mut record: Drawn) -> (Value, bool) {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn the_snapshot_matches_an_independent_oracle_over_random_records() {
     let mut runner = TestRunner::new(Config::with_cases(256));
     let records = (

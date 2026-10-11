@@ -26,7 +26,10 @@
 //!   says, unless [`Event::RefuseChangedResend`] makes a changed re-send an error;
 //! - an order record does not echo its `ref_id` unless [`Event::EchoRefId`] turns that on, so a
 //!   recovery that matches on it cannot pass here and fail against the real broker;
-//! - buying power is a scripted figure that orders and fills do not move;
+//! - buying power and cash are scripted figures that orders and fills do not move;
+//! - a position carries the average price its buys were filled at, rounded to a price's 9
+//!   places, and a sell does not move it; `get_equity_positions` serves every row, a zero
+//!   quantity included;
 //! - a sell is refused when it is larger than the position less every working sell, because the
 //!   agentic account cannot sell short and two working sells must not oversell it;
 //! - `place` refuses on any alert `review` would raise;
@@ -49,7 +52,7 @@ mod server;
 
 pub use server::{CONTRACT, Garble, INJECTION, ServerError, SimServer, Variant};
 
-use mandate_num::{Price, Qty, ShareIncrement, Usd};
+use mandate_num::{Price, Qty, Rounding, ShareIncrement, Usd};
 
 /// The ten values of `get_equity_orders`'s `state`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -143,6 +146,9 @@ pub enum Event {
 pub struct Account {
     pub number: String,
     pub agentic_allowed: bool,
+    /// The account's settled cash, which `get_portfolio` serves (DEC-902 item 2). A scripted
+    /// figure like `buying_power`: orders and fills do not move it.
+    pub cash: Usd,
     pub buying_power: Usd,
     pub pattern_day_trader: bool,
 }
@@ -198,6 +204,18 @@ pub struct Review {
     pub alerts: Vec<Alert>,
 }
 
+/// One position row `get_equity_positions` serves (DEC-902 item 3): the account, the symbol,
+/// the quantity held (signed decimal text on the wire), and the average price it was bought
+/// at, which a sell does not move and zero quantity keeps. The connector's preflight reads
+/// every row, a zero quantity included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Position {
+    pub account_number: String,
+    pub symbol: String,
+    pub quantity: Qty,
+    pub average_buy_price: Price,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SimError {
     #[error("two accounts share a number")]
@@ -238,6 +256,15 @@ pub enum SimError {
     ChangedResend,
 }
 
+/// One account's holding of a symbol: its quantity, and the average price it was bought at,
+/// which a sell does not move and zero quantity keeps, so `get_equity_positions` can serve
+/// every row the broker holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held {
+    quantity: Qty,
+    average: Price,
+}
+
 /// The simulated broker: its accounts, orders, positions, and the scripted market.
 #[derive(Debug, Clone)]
 pub struct Sim {
@@ -247,7 +274,7 @@ pub struct Sim {
     quotes: BTreeMap<String, Price>,
     halted: BTreeSet<String>,
     faults: VecDeque<Fault>,
-    positions: BTreeMap<(String, String), Qty>,
+    positions: BTreeMap<(String, String), Held>,
     traded_today: BTreeSet<(String, String, Side)>,
     requests: Vec<OrderRequest>,
     server_keys: u64,
@@ -414,14 +441,28 @@ impl Sim {
             return Err(SimError::ThroughLimit);
         }
         let key = (order.account_number.clone(), order.symbol.clone());
-        let held = self.positions.get(&key).copied().unwrap_or(Qty::ZERO);
+        let held = self.positions.get(&key).copied();
+        let held_quantity = held.map_or(Qty::ZERO, |position| position.quantity);
         let position = match order.side {
-            Side::Buy => held.checked_add(quantity).map_err(|_| SimError::Overfill)?,
-            Side::Sell => held
+            Side::Buy => held_quantity
+                .checked_add(quantity)
+                .map_err(|_| SimError::Overfill)?,
+            Side::Sell => held_quantity
                 .checked_sub(quantity)
                 .map_err(|_| SimError::InsufficientShares)?,
         };
-        self.positions.insert(key.clone(), position);
+        let average = match held {
+            None => price,
+            Some(previous) if order.side == Side::Buy => reaverage(previous, quantity, price)?,
+            Some(previous) => previous.average,
+        };
+        self.positions.insert(
+            key.clone(),
+            Held {
+                quantity: position,
+                average,
+            },
+        );
         self.traded_today.insert((key.0, key.1, order.side));
         order.filled_quantity = filled;
         order.executions.push(Execution { quantity, price });
@@ -459,10 +500,63 @@ impl Sim {
             .collect())
     }
 
+    /// `get_accounts`'s records: every account of the customer as it was configured, agentic
+    /// flags included (the connector checks them before it reads anything else).
+    pub fn accounts(&self) -> &[Account] {
+        &self.accounts
+    }
+
+    /// `get_portfolio` (DEC-902 item 2): the account's cash and its buying power, both scripted
+    /// figures that orders and fills do not move.
+    pub fn portfolio(&self, account_number: &str) -> Result<(Usd, Usd), SimError> {
+        let account = self.account(account_number)?;
+        Ok((account.cash, account.buying_power))
+    }
+
+    /// `get_equity_positions` (DEC-902 item 3): every row the account holds, a zero quantity
+    /// included, in symbol order. None is merged or dropped.
+    pub fn equity_positions(&self, account_number: &str) -> Result<Vec<Position>, SimError> {
+        self.account(account_number)?;
+        Ok(self
+            .positions
+            .iter()
+            .filter(|((account, _), _)| account == account_number)
+            .map(|((account, symbol), held)| Position {
+                account_number: account.clone(),
+                symbol: symbol.clone(),
+                quantity: held.quantity,
+                average_buy_price: held.average,
+            })
+            .collect())
+    }
+
+    /// `get_equity_tradability` (DEC-902 item 6): the account may trade the symbol unless the
+    /// market holds it halted.
+    pub fn tradability(&self, account_number: &str, symbol: &str) -> Result<bool, SimError> {
+        self.account(account_number)?;
+        Ok(!self.halted.contains(symbol))
+    }
+
+    /// `get_equity_quotes`: each asked symbol's quote, locked at the price the market scripted
+    /// (DEC-902 item 7 reads a locked quote as uncrossed), in the order asked. A symbol with
+    /// no scripted quote refuses, rather than answering a guess.
+    pub fn equity_quotes(&self, symbols: &[String]) -> Result<Vec<(String, Price)>, SimError> {
+        symbols
+            .iter()
+            .map(|symbol| {
+                let price = self.quotes.get(symbol).copied().ok_or(SimError::NoQuote)?;
+                Ok((symbol.clone(), price))
+            })
+            .collect()
+    }
+
     pub fn position(&self, account_number: &str, symbol: &str) -> Result<Qty, SimError> {
         self.account(account_number)?;
         let key = (account_number.to_owned(), symbol.to_owned());
-        Ok(self.positions.get(&key).copied().unwrap_or(Qty::ZERO))
+        Ok(self
+            .positions
+            .get(&key)
+            .map_or(Qty::ZERO, |held| held.quantity))
     }
 
     fn account(&self, number: &str) -> Result<&Account, SimError> {
@@ -550,7 +644,10 @@ impl Sim {
             }
         };
         let key = (account.number.clone(), r.symbol.clone());
-        let held = self.positions.get(&key).copied().unwrap_or(Qty::ZERO);
+        let held = self
+            .positions
+            .get(&key)
+            .map_or(Qty::ZERO, |position| position.quantity);
         let working_sells = self
             .orders
             .iter()
@@ -616,6 +713,33 @@ fn price_field(
         (None, false) => Ok(None),
         _ => Err(SimError::Unreadable(field)),
     }
+}
+
+/// The volume-weighted average of a holding bought again (DEC-902 item 3): the exact quotient
+/// `(held × old + added × at) ÷ (held + added)`, rounded to a price's 9 places, half to even,
+/// because the decimal types offer no other exact division that reaches a [`Price`]. The
+/// number passes through the report quotient with each term's numeric value: `Qty::notional`
+/// at one, the price's own scale.
+fn reaverage(held: Held, added: Qty, at: Price) -> Result<Price, SimError> {
+    let unrecordable = |_| SimError::Unreadable("average_buy_price");
+    let one = Price::parse("1").map_err(unrecordable)?;
+    let cost = held
+        .quantity
+        .notional(held.average)
+        .map_err(unrecordable)?
+        .checked_add(added.notional(at).map_err(unrecordable)?)
+        .map_err(unrecordable)?;
+    let number = held
+        .quantity
+        .checked_add(added)
+        .map_err(unrecordable)?
+        .notional(one)
+        .map_err(unrecordable)?;
+    let average = cost
+        .ratio_to(number, 9, Rounding::HalfEven)
+        .map_err(unrecordable)?
+        .to_string();
+    Price::parse(&average).map_err(unrecordable)
 }
 
 /// Whether a session lets an order with these market hours trade.
