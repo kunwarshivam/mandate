@@ -121,12 +121,12 @@ fn assert_absent(refused: Result<Artifacts, Cause>) {
 
 /// The registered fee schedule, calendar and rule set are each judged as its E7-7 file was: every
 /// member is one the run reads, the rule set's `gate`, `ruleset_version` and `story` strings are
-/// its reviewed ones, a quote-age bound in text or at zero is refused, so are calendars with
-/// entries in either array or a date that is no date, a fee for another environment, and an
-/// object with an extra member — never a reviewed default in its place, and the quote-age
-/// bound's own edge, sixty seconds, still loads. These pin the readers #1296 kept and its
-/// rewrite of the tracer's file tests left unguarded (its post-merge review Major 1),
-/// restoring the deleted
+/// its reviewed ones, a quote-age bound in text, at zero, one second past its bound or missing is
+/// refused, so are calendars with entries in either array or a date that is no date, a fee for
+/// another environment, and an object with an extra member — never a reviewed default in its
+/// place, and the quote-age bound's own edge, sixty seconds, still loads. These pin the readers
+/// #1296 kept and its rewrite of the tracer's file tests left unguarded (its post-merge review
+/// Major 1), restoring the deleted
 /// `each_artifact_member_is_read_and_each_unreviewed_value_refused`.
 #[test]
 fn each_config_object_member_is_read_and_each_unreviewed_value_refused() {
@@ -147,6 +147,14 @@ fn each_config_object_member_is_read_and_each_unreviewed_value_refused() {
         (
             "zero-quote-age",
             RULES.replace(r#""iex_quote_max_age_s":10"#, r#""iex_quote_max_age_s":0"#),
+        ),
+        (
+            "long-quote-age",
+            RULES.replace(r#""iex_quote_max_age_s":10"#, r#""iex_quote_max_age_s":61"#),
+        ),
+        (
+            "missing-quote-age",
+            RULES.replace(r#""iex_quote_max_age_s":10,"#, r#""#),
         ),
         (
             "extra-member",
