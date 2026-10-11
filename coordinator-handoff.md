@@ -162,3 +162,42 @@ anything here.
 - Post a summary on issue #165.
 - Delete the hourly trigger `trig_01VyZUXMo91A8HPRYZjMBMBN` in claude.ai Routines; it fires into
   the old Claude session.
+
+---
+
+# Coordinator handoff: state at 2026-10-11 ~02:50 UTC (GLM-5.3 coordinator session)
+
+Read everything above for process; this section supersedes "State right now" above.
+
+## Merged since the last handoff (by me, DEC-175, through the founder account)
+- **#1280** (L2, E7-17 delete the raw `ConnectionAnchor::fold`) — merged main in first (`671a85ba`), GLM-5.3 reviewed (author Claude, DEC-79 ok), squash-merged as `4190a8d1`.
+- **#1292** (E7-4 bracket-leg cancel tests: 3 behaviour-only rows + 3 pending tests, DEC-878) — builder GLM-5.3 (local), reviewer Longcat-2.5-preview, merged as `e569c5a1`.
+- **#1291** (E7-6 C4 tests correction: trailing zeros on 8 more fields, sell side, empty id, DEC-902 item 6 Status-line note) — builder GLM-5.3 (local), reviewer Step-5-preview, merged as `022a9b64`.
+
+## Open right now
+- **#1293** (E7-4 bracket-leg cancel FIX — gates E3 and FT-11). Builder GLM-5.3 (local). Head `0f8a56d1` after one CI-fix round (first head `db29cdbd` broke two mandate-shell watch tests by reaching the `Unimplemented { story: "E7-3" }` stub through the new doubt-settling wiring; the fix gates the entry-id lookup behind `ledger_current` so an unapplied fill waits for the gathered reconcile instead of refusing — shell protective path restored, 243 shell tests green locally). Longcat review of the OLD head is in flight and will be stale; **the new head needs a re-review before approving** (DEC-175 re-approval on moved heads). One flagged deviation for the reviewer to rule on: the builder changed ONE expectation in #1270's live test `only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement` (it expected lookups by the handle; #1292's merged pin forbids that) citing an amendment it called "DEC-77's #174" — verify that citation exists.
+- **C4 implementation** (E7-6: `account_snapshot` + `preflight_facts`, `mandate-rh-sim` serving the four reads, e2e preflight test, DEC-902 items 1–8, DEC-875 item 6): builder running in my session (GLM-5.3, local), branch `claude/c4-preflight-impl`. Reviewer must be non-GLM (Step-5 or Longcat routes).
+- **#878** stays held for the founder (Cloudflare cutover).
+
+## Infrastructure state (important)
+- **The opencode cloud dispatch server is down** (`opencode.tail93399.ts.net` unreachable / half-broken API). It needs a VM/process restart by the founder. I ran everything locally instead.
+- **The founder's claude.ai plan hit its weekly limit** — that is why the original lane sessions went silent overnight. I created four REPLACEMENT cloud sessions with full briefs (they are NOT the old sessions; those are unrecoverable — "Session not found"): L5 `session_01LzYjz5upn54KqbG8H7UDJF`, L2 `session_01AHuCQq2p2oe6QHQ1FRUFQS`, L3+L4 `session_013FZoRAb4AekasBL385ZeVy`, live-path `session_01EFpKMrXAEZ51e5Wa476meA`. All four are **parked on auto-continue: they resume Oct 14 at 1pm** (or immediately if the founder adds usage credits — a founder spending decision). One inert probe session also exists: `session_012G6QTgKS6hX6fEZ95B16r1` (safe to delete in the web UI).
+- **Local model routes:** kimi-k3 and glm-5.3-flash were both connection-erroring tonight; the GLM-5.3 GB300 route (builders) and the free opencode provider routes (Longcat, Step-5 — good reviewers) work. DEC-79 held throughout: Claude-authored #1280 reviewed by GLM-5.3; GLM-authored 1291/1292 reviewed by Step-5/Longcat.
+- Local machine is fine for this pipeline: M4 Pro, 48 GB RAM, 219 GB free; every agent uses a private worktree + private CARGO_TARGET_DIR and removed it afterward.
+
+## DEC numbering warnings
+- Main reached **DEC-909** — the landing wave (#1283–#1290) took DEC-903 through DEC-909, which collides with L2's plan and its in-flight branch `claude/l2-e10-7-dec-903-exact-window` (its DEC-903.md will conflict loudly; renumber per the README's next-free rule when it opens).
+- DEC-910 was left free by #1292. Check `origin/main` before reserving anything.
+- The AGENTS.md `cargo xtask check` list changed on main: cite nothing stale; the work log `docs/project/11-work-log.md` is now an explicit expectation ("how the work ran, with every PR").
+
+## Queue after the current builders
+1. #1293 re-review at `0f8a56d1` → approve → merge. That + the cancel fix unblocks **E3** (paper path). E2 (the founder's run) should record the open-orders read after its fill (Alpaca's nested-leg shape unconfirmed).
+2. C4 implementation PR → review (non-GLM) → approve → merge. Live path then continues **G1a/G1b**, then R0 (founder's step 4 records the real Robinhood shapes).
+3. When the Claude lanes wake (Oct 14 or credits): L5 continues its verification-run queue (T1b/I1b, V2, T2/I2, T3/I3) after opening the vectors re-key PR on `claude/l5-e12-3-start-vectors-workspace` (tip `577b9685`, reviewed PASS at `486dcd45` pre-#1282 — merge main in, re-run review at the new head); L2 continues the mixed-stream prefix tightening (founder-approved; scope: `ConnectionAnchor::from_verified` returns `Err(Broken)` on multi-stream prefixes; `VerifiedPrefix::bind` stays L5's).
+
+## Founder morning list — additions to the ten items above
+12. **DECISION: usage limits.** Your claude.ai weekly limit stopped all cloud lanes; four replacement sessions are parked to resume Oct 14 1pm, or earlier if you add credits. The local GLM pipeline kept everything moving without them.
+13. **FYI: dispatch server down** (`opencode.tail93399.ts.net`); restart when convenient — until then reviews/builds run locally.
+14. **FYI: the DEC-903–909 landing-wave collision** with L2's reserved-range plan (above); L2's delegation-window PR must renumber to the next free.
+15. **FYI: #1293's CI-fix story** — the shell previously refused a protective action through an E7-3 stub door opened by the doubt-settling wiring; fixed by waiting for the gathered reconcile. Worth a glance at the ruling: a doubt behind an unapplied fill asks nothing and waits (never the handle, never Absent).
+16. **FYI: AGENTS.md updated on main** (work-log expectation, live feature gate DEC-529, schema-mutants, ten-minute check budget DEC-464).
