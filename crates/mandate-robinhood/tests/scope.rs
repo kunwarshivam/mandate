@@ -128,6 +128,7 @@ fn tool_of(read: AccountRead) -> &'static str {
         AccountRead::Portfolio => "get_portfolio",
         AccountRead::Positions => "get_equity_positions",
         AccountRead::Orders => "get_equity_orders",
+        AccountRead::Tradability => "get_equity_tradability",
     }
 }
 
@@ -140,7 +141,9 @@ fn read_answer(read: AccountRead, owners: &[usize]) -> Value {
         .map(|(at, a)| record(at, *a))
         .collect();
     match read {
-        AccountRead::Portfolio => content(record(0, owners.first().copied().unwrap_or(0))),
+        AccountRead::Portfolio | AccountRead::Tradability => {
+            content(record(0, owners.first().copied().unwrap_or(0)))
+        }
         AccountRead::Positions => content(json!({ "positions": records })),
         AccountRead::Orders => content(json!({ "orders": records })),
     }
@@ -176,7 +179,7 @@ fn only_the_agentic_accounts_records_reach_the_caller() {
                 json!({"account_number": OURS}),
             ));
             let owners = match read {
-                AccountRead::Portfolio => &owners[..1],
+                AccountRead::Portfolio | AccountRead::Tradability => &owners[..1],
                 AccountRead::Positions | AccountRead::Orders => &owners[..],
             };
             let ours = (0..owners.len()).filter(|at| owners[*at] == 0);
@@ -527,6 +530,7 @@ fn listed_keys(read: AccountRead) -> &'static [&'static str] {
             "placed_agent",
             "cursor",
         ],
+        AccountRead::Tradability => &["symbol"],
     }
 }
 
@@ -591,4 +595,33 @@ fn a_filter_key_its_tool_does_not_list_is_refused_with_nothing_called() {
         }
         assert!(calls.borrow().is_empty(), "{read:?}: {:?}", calls.borrow());
     }
+}
+
+/// #1264's minor 5: the one-member envelope check is the preflight callers', not the read's, so
+/// `read` itself still tolerates an answer whose envelope carries more than its records member —
+/// C3's list request pages, until it lands — while `read_sole_member` refuses the same answer,
+/// because reading only the first page could hide an open order (DEC-902 item 5).
+#[test]
+fn the_one_member_envelope_check_is_the_preflights_not_the_reads() {
+    let ours = json!({"account_number": OURS, "tag": 0});
+    let paged = content(json!({"positions": [ours], "cursor": "c2"}));
+    let (c, _) = connector(&[
+        ("get_accounts", accounts(&[(0, true)])),
+        ("get_equity_positions", paged.clone()),
+    ]);
+    let expected = vec![object(json!({"account_number": OURS, "tag": 0}))];
+    assert_eq!(
+        ready(c.read(AccountRead::Positions, &Map::new())),
+        Ok(expected),
+        "the read itself pages nowhere yet and judges nothing about it"
+    );
+    let (c, _) = connector(&[
+        ("get_accounts", accounts(&[(0, true)])),
+        ("get_equity_positions", paged),
+    ]);
+    let sole = ready(c.read_sole_member(AccountRead::Positions, &Map::new()));
+    unreadable(
+        &sole,
+        "a preflight read refuses an envelope holding more than its records member",
+    );
 }

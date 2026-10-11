@@ -22,7 +22,8 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Alert, MarketHours, Order, OrderRequest, OrderType, Side, Sim, SimError, State, TimeInForce,
+    Alert, MarketHours, Order, OrderRequest, OrderType, Position, Side, Sim, SimError, State,
+    TimeInForce,
 };
 
 /// The pinned contract: the allowlisted tools' names, descriptions and input schemas. Where the
@@ -363,8 +364,11 @@ impl Shared {
         Some(reply(200, None, &rpc_result(id, result)))
     }
 
-    /// The four order tools drive the core; `get_equity_orders` takes no filter yet, and the
-    /// five reads the core does not model are refused, never answered with a guess.
+    /// The four order tools drive the core, and the five account reads serve what the core holds
+    /// (DEC-875 item 4): the accounts, the portfolio's two scripted figures, the positions with
+    /// their fills' average, the one symbol's tradability, and the locked quotes at the prices
+    /// the market scripted. `get_equity_orders` takes no filter yet. Anything a tool's assumed
+    /// input does not name is refused, never answered with a guess.
     fn run(&mut self, name: &str, args: &Map<String, Value>) -> Result<Value, Refusal> {
         let account = text(args, "account_number")?.unwrap_or_default();
         match name {
@@ -387,9 +391,53 @@ impl Shared {
                 let order_id = text(args, "order_id")?.unwrap_or_default();
                 Ok(order_json(&self.sim.cancel(&account, &order_id)?))
             }
+            "get_accounts" => {
+                let records = self
+                    .sim
+                    .accounts()
+                    .iter()
+                    .map(|account| {
+                        json!({"account_number": account.number,
+                            "agentic_allowed": account.agentic_allowed})
+                    })
+                    .collect::<Vec<_>>();
+                Ok(json!({"accounts": records}))
+            }
+            "get_portfolio" if args.keys().all(|key| key == "account_number") => {
+                let (cash, buying_power) = self.sim.portfolio(&account)?;
+                Ok(json!({"account_number": account, "cash": cash.to_string(),
+                    "buying_power": buying_power.to_string()}))
+            }
+            "get_equity_positions" if args.keys().all(|key| key == "account_number") => {
+                let positions = self.sim.equity_positions(&account)?;
+                Ok(json!({"positions": positions.iter().map(position_json)
+                        .collect::<Vec<_>>()}))
+            }
             "get_equity_orders" if args.keys().all(|key| key == "account_number") => {
                 let orders = self.sim.orders(&account)?;
                 Ok(json!({"orders": orders.iter().map(order_json).collect::<Vec<_>>()}))
+            }
+            "get_equity_tradability"
+                if args
+                    .keys()
+                    .all(|key| key == "account_number" || key == "symbol") =>
+            {
+                let symbol = text(args, "symbol")?.unwrap_or_default();
+                let tradable = self.sim.tradability(&account, &symbol)?;
+                Ok(json!({"account_number": account, "symbol": symbol,
+                    "tradable": tradable}))
+            }
+            "get_equity_quotes" => {
+                let symbols = symbols(args)?;
+                let quoted = self.sim.equity_quotes(&symbols)?;
+                let quotes = quoted
+                    .iter()
+                    .map(|(symbol, price)| {
+                        json!({"symbol": symbol, "bid_price": price.to_string(),
+                            "ask_price": price.to_string()})
+                    })
+                    .collect::<Vec<_>>();
+                Ok(json!({"quotes": quotes}))
             }
             _ => Err(Refusal::Unserved),
         }
@@ -403,6 +451,22 @@ fn text(args: &Map<String, Value>, key: &'static str) -> Result<Option<String>, 
         Some(Value::String(value)) => Ok(Some(value.clone())),
         Some(_) => Err(SimError::Unreadable(key)),
     }
+}
+
+/// `get_equity_quotes`'s `symbols`: every entry as the text it must be, in the order asked.
+/// Anything else, including the parameter missing, is unreadable.
+fn symbols(args: &Map<String, Value>) -> Result<Vec<String>, SimError> {
+    let listed = args.get("symbols").and_then(Value::as_array);
+    let listed = listed.ok_or(SimError::Unreadable("symbols"))?;
+    listed
+        .iter()
+        .map(|symbol| {
+            symbol
+                .as_str()
+                .map(str::to_owned)
+                .ok_or(SimError::Unreadable("symbols"))
+        })
+        .collect()
 }
 
 fn request(args: &Map<String, Value>) -> Result<OrderRequest, SimError> {
@@ -419,6 +483,13 @@ fn request(args: &Map<String, Value>) -> Result<OrderRequest, SimError> {
         market_hours: text(args, "market_hours")?,
         ref_id: text(args, "ref_id")?,
     })
+}
+
+/// A position row under DEC-902 item 3's keys, every number as decimal text.
+fn position_json(position: &Position) -> Value {
+    json!({"account_number": position.account_number, "symbol": position.symbol,
+        "quantity": position.quantity.to_string(),
+        "average_buy_price": position.average_buy_price.to_string()})
 }
 
 /// An order record under the contract's names, every number as decimal text, and `ref_id` only

@@ -23,10 +23,11 @@ pub fn qty(text: &str) -> Qty {
 }
 
 pub fn account(number: &str, agentic_allowed: bool, pattern_day_trader: bool) -> Account {
-    let buying_power = Usd::parse("10000").unwrap();
+    let (buying_power, cash) = (Usd::parse("10000").unwrap(), Usd::parse("750.25").unwrap());
     Account {
         number: number.to_owned(),
         agentic_allowed,
+        cash,
         buying_power,
         pattern_day_trader,
     }
