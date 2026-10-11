@@ -24,7 +24,7 @@ use super::artifacts::reference;
 use super::context::{PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template};
 use super::{Artifacts, BrokerFacts, INSTRUMENT_ID, LiquidityFacts, PaperFacts, load_contexts};
-use crate::{Cause, Setup};
+use crate::Cause;
 
 const NOW: &str = "2026-09-28T17:00:00Z";
 const AGENT: &str = "tracer-aapl";
