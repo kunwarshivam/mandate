@@ -4,11 +4,13 @@
 
 mod common;
 
+use std::collections::BTreeSet;
+
 use common::{FakeClock, FakeTransport};
 use mandate_alpaca::{RetryPolicy, TradingClient, alpaca_profile};
 use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_domain::{
-    AssetClass, MarketSession, OrderType, ProtectionForm, QuantityForm, TimeInForce,
+    AssetClass, MarketSession, OrderType, ProfileError, ProtectionForm, QuantityForm, TimeInForce,
 };
 use mandate_executor::{
     BrokerConnector, OcoLegs, OrderType as ExecutorOrderType, ProtectionPrices,
@@ -262,6 +264,142 @@ fn alpacas_profile_protects_an_equity_by_oco_and_crypto_by_one_stop_limit() {
             (crypto.stop_price, crypto.limit_price),
             (Some(price("140")), Some(price("138.6"))),
             "{quantity}"
+        );
+    }
+}
+
+/// DEC-854's precondition, read as DEC-911 items 1 and 3 state it (E7-26, first-live-trade row
+/// G1a): §5.2's crypto row meets the opening policy in a whole-share `limit` cell that lists
+/// exactly the times in force the row names, `gtc` and `ioc`, and no protection form, since the
+/// row takes simple orders only and crypto's only rested protection is the one stop-limit the
+/// row above pins. Today the cell is absent and `CapabilityProfile::cell` answers `NotOffered`
+/// (reason code `profile_not_offered`), which B3's `opening_form` reads as `no_opening_form`
+/// (DEC-854 items 2 and 6): the empty intersection that refuses an Alpaca crypto mandate, whose
+/// one cause — DEC-854's consequence says — is this missing cell (LT-14).
+#[test]
+#[ignore = "pending E7-26"]
+fn cryptos_whole_limit_cell_lists_exactly_5_2s_gtc_and_ioc_and_no_protection_form() {
+    let profile = alpaca_profile().unwrap();
+    let no_protection_forms: BTreeSet<ProtectionForm> = [].into();
+    let cell = profile
+        .cell(
+            AssetClass::Crypto,
+            MarketSession::Crypto,
+            OrderType::Limit,
+            QuantityForm::Whole,
+        )
+        .map(|cell| (cell.times_in_force.clone(), cell.protection_forms.clone()));
+    assert_eq!(
+        cell,
+        Ok((
+            [TimeInForce::Gtc, TimeInForce::Ioc].into(),
+            no_protection_forms
+        )),
+        "DEC-911 items 1 and 3: the missing cell is the whole cause of the empty intersection"
+    );
+}
+
+/// DEC-911 items 1 and 2, the fractional half of the same row: the `limit` cell a crypto
+/// opening sizes in wherever the market's own grid and the mandate allow fractions (DEC-854
+/// item 3, fractional first) lists exactly `gtc` and `ioc` in both forms — unlike Alpaca's
+/// equities, where a `gtc` limit is whole shares, so fractional sizing survives every one of
+/// §5.2's crypto times in force — and `ioc` sits beside `gtc` because §5.4's crypto adds are
+/// limit IOC orders on the same row.
+#[test]
+#[ignore = "pending E7-26"]
+fn cryptos_fractional_limit_cell_lists_exactly_5_2s_gtc_and_ioc_for_fractional_sizing() {
+    let profile = alpaca_profile().unwrap();
+    let no_protection_forms: BTreeSet<ProtectionForm> = [].into();
+    let cell = profile
+        .cell(
+            AssetClass::Crypto,
+            MarketSession::Crypto,
+            OrderType::Limit,
+            QuantityForm::Fractional,
+        )
+        .map(|cell| (cell.times_in_force.clone(), cell.protection_forms.clone()));
+    assert_eq!(
+        cell,
+        Ok((
+            [TimeInForce::Gtc, TimeInForce::Ioc].into(),
+            no_protection_forms
+        )),
+        "DEC-911 items 1 and 2: whole and fractional, `gtc` and `ioc`, neither more nor fewer"
+    );
+}
+
+/// DEC-911 items 2 to 4: the crypto row offers neither more nor fewer cells than this slice and
+/// §5.2 name — no notional `limit` (the equities rows name notional and crypto's row does not,
+/// so the tighter set is taken), no `market` or `stop` cell (DEC-531 item 6: a row is added when
+/// a story reads it, and G1a's precondition reads the `limit` cells alone), and B2a's two
+/// `stop_limit` cells unchanged (DEC-838 item 3, so nothing here loosens their pins). The
+/// anchor asserts the `limit` cell first, so today the test refuses on the row's missing cell
+/// and nothing else: the `NotOffered` answer is the empty intersection itself.
+#[test]
+#[ignore = "pending E7-26"]
+fn the_crypto_row_offers_only_the_two_limit_cells_and_b2as_stop_limit_cells() {
+    let profile = alpaca_profile().unwrap();
+    assert_eq!(
+        profile
+            .cell(
+                AssetClass::Crypto,
+                MarketSession::Crypto,
+                OrderType::Limit,
+                QuantityForm::Whole
+            )
+            .map(|_| ()),
+        Ok(()),
+        "the anchor: today the row answers `NotOffered` for the `limit` cell, the empty \
+         intersection DEC-854's consequence names"
+    );
+    assert_eq!(
+        profile
+            .cell(
+                AssetClass::Crypto,
+                MarketSession::Crypto,
+                OrderType::Limit,
+                QuantityForm::Notional
+            )
+            .map(|_| ()),
+        Err(ProfileError::NotOffered),
+        "DEC-911 item 2: whole and fractional, no notional cell"
+    );
+    for order_type in [OrderType::Market, OrderType::Stop] {
+        for quantity_form in [
+            QuantityForm::Whole,
+            QuantityForm::Fractional,
+            QuantityForm::Notional,
+        ] {
+            assert_eq!(
+                profile
+                    .cell(
+                        AssetClass::Crypto,
+                        MarketSession::Crypto,
+                        order_type,
+                        quantity_form
+                    )
+                    .map(|_| ()),
+                Err(ProfileError::NotOffered),
+                "DEC-531 item 6, DEC-911 item 3: no story reads a crypto {order_type:?} cell"
+            );
+        }
+    }
+    for quantity_form in [QuantityForm::Whole, QuantityForm::Fractional] {
+        let stop_limit = profile
+            .cell(
+                AssetClass::Crypto,
+                MarketSession::Crypto,
+                OrderType::StopLimit,
+                quantity_form,
+            )
+            .map(|cell| (cell.times_in_force.clone(), cell.protection_forms.clone()));
+        assert_eq!(
+            stop_limit,
+            Ok((
+                [TimeInForce::Gtc].into(),
+                [ProtectionForm::StopLimit].into()
+            )),
+            "DEC-838 item 3: B2a's cells are unchanged"
         );
     }
 }
