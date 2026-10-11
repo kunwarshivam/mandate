@@ -524,24 +524,53 @@ fn only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement() {
             .values()
             .find(|order| order.client_order_id.as_str() == protection)
             .map(|order| order.state);
-        let seen = (
-            adopted(&ran, &protection),
-            queried(&ran, &protection),
-            state,
-        );
+        let asked_by_entry = queried(&ran, &entry);
+        let asked_by_handle = queried(&ran, &protection);
         if kept {
             assert_eq!(
-                seen,
-                ((false, false), false, Some(OrderState::Accepted)),
+                adopted(&ran, &protection),
+                (false, false),
                 "{case}: the whole bracket rests under its filled entry, so the placement is kept \
                  (DEC-878 item 2)"
             );
+            assert!(
+                !asked_by_entry && !asked_by_handle,
+                "{case}: a placement the snapshot vouches for is asked after by no name at all \
+                 (DEC-878 item 2): {:?}",
+                ran.requests
+            );
+            assert_eq!(
+                state,
+                Some(OrderState::Accepted),
+                "{case}: the kept placement stays live, covering (§5.4, rule 13)"
+            );
         } else {
             assert_eq!(
-                seen,
-                ((true, true), true, Some(OrderState::Unknown)),
+                adopted(&ran, &protection),
+                (true, true),
                 "{case}: not the whole bracket resting as recorded, so the placement is adopted \
-                 unknown, compensated and asked after (DEC-878 item 5, rule 3)"
+                 unknown and compensated (DEC-878 item 5, rule 3): {:?}",
+                ran.draft_types()
+            );
+            match shown {
+                Placement::Bracket => assert!(
+                    !asked_by_handle && asked_by_entry,
+                    "{case}: an unsent placement's doubt is asked after by the entry's own id, \
+                     never the handle no broker order carries (DEC-878 item 1, #1292's Not \
+                     done): {:?}",
+                    ran.requests
+                ),
+                Placement::SentOco => assert!(
+                    asked_by_handle,
+                    "{case}: a sent OCO has an `OrderSubmitted` of its own, so its doubt is asked \
+                     by its own id or not at all (DEC-878 item 5): {:?}",
+                    ran.requests
+                ),
+            }
+            assert_eq!(
+                state,
+                Some(OrderState::Unknown),
+                "{case}: the placement stays in doubt (DEC-878 item 5, rule 3)"
             );
         }
     }
@@ -598,7 +627,6 @@ fn a_risk_exit_after_the_reconciliation_is_never_held_by_the_legs() {
 /// placement is asked after by the entry's own id, and until that settles it the placement
 /// stays `Unknown`: in doubt, holding exits, never confirmed absent by a name the broker does
 /// not hold.
-#[ignore = "pending E7-4"]
 #[test]
 fn the_doubted_bracket_placement_is_asked_after_by_its_entry_never_by_its_handle() {
     let (ids, mandates, instruments, config) = (

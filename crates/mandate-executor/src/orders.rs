@@ -13,7 +13,7 @@ use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
-use crate::listing::{query_unknown, queryable};
+use crate::listing::{lookup_target, query_unknown, queryable};
 use crate::payload::{int, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
@@ -262,7 +262,7 @@ pub(crate) fn described(
     if order.filled_qty > applied {
         batch.request_reconciliation();
     }
-    Ok(())
+    crate::reconcile::settle_doubted_placements(batch, &id, order)
 }
 
 /// §5.7's last row: a status outside the table pauses the agent and alerts the owner. The order
@@ -377,7 +377,8 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded
 /// up) have passed since it went `Unknown` or since its last absence, so N lookups span the whole
-/// window and no faster.
+/// window and no faster. A bracket placement's doubt is asked after by the entry its id names,
+/// never by the handle no broker order carries ([`lookup_target`], DEC-878 item 1).
 pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
     if !queryable(&batch.view) {
         return;
@@ -406,7 +407,10 @@ pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
         .map(|order| order.client_order_id.clone())
         .collect();
     for id in due {
-        batch.broker(BrokerRequest::GetOrderByClientId(id));
+        batch.broker(BrokerRequest::GetOrderByClientId(lookup_target(
+            &batch.view,
+            &id,
+        )));
     }
 }
 

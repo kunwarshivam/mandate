@@ -14,7 +14,7 @@ use crate::ids::ClientOrderId;
 use crate::listing::query_unknown;
 use crate::orders::{
     EXTERNAL, StateEvidence, account_fields, account_restriction, every_agent_alerted, fill,
-    record_state_change, status_mapping,
+    record_state_change, status_mapping, transition,
 };
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -221,6 +221,26 @@ fn orders(
 /// the broker's and are never compared (items 1 and 3); a missing stop never reads as covering
 /// (item 9).
 fn bracket_rests(view: &ExecutorState, id: &ClientOrderId, snapshot: &BrokerSnapshot) -> bool {
+    id.protected_entry().is_some_and(|entry| {
+        snapshot
+            .open_orders
+            .iter()
+            .find(|open| open.client_order_id.as_deref() == Some(entry.as_str()))
+            .is_some_and(|parent| bracket_rests_under(view, id, parent))
+    })
+}
+
+/// [`bracket_rests`]'s rule over one broker's listing of the entry itself, the shape both the
+/// open-orders snapshot and the read-back of the entry's own id answer with (`nested=true`): the
+/// whole bracket rests as recorded — the entry `filled`, exactly two resting sell legs under it,
+/// one stop at the recorded stop and one sell limit with no stop price at the recorded
+/// take-profit, each for the placement's quantity — or it does not, and nothing is kept, settled
+/// or confirmed on a bracket this answer cannot vouch for.
+pub(crate) fn bracket_rests_under(
+    view: &ExecutorState,
+    id: &ClientOrderId,
+    parent: &BrokerOrder,
+) -> bool {
     let unsent = view
         .details
         .get(id)
@@ -233,13 +253,6 @@ fn bracket_rests(view: &ExecutorState, id: &ClientOrderId, snapshot: &BrokerSnap
         .get(&entry)
         .and_then(|detail| detail.request.as_ref())
         .and_then(|request| request.bracket.clone())
-    else {
-        return false;
-    };
-    let Some(parent) = snapshot
-        .open_orders
-        .iter()
-        .find(|open| open.client_order_id.as_deref() == Some(entry.as_str()))
     else {
         return false;
     };
@@ -267,6 +280,51 @@ fn bracket_rests(view: &ExecutorState, id: &ClientOrderId, snapshot: &BrokerSnap
         })
         .count();
     unsent && parent.status == "filled" && parent.legs.len() == 2 && stops == 1 && take_profits == 1
+}
+
+/// The answer to the in-doubt lookup of a filled bracket's placement (DEC-878 item 1, the
+/// "Not decided here" this slice took; #1292's contract item 3): the broker's description of an
+/// order settles the doubt of every unsent placement naming it as its entry — and present only
+/// when the whole bracket rests as recorded under it ([`bracket_rests_under`]), the same rule
+/// step 1 keeps the placement by. Settling journals the placement's own `Unknown → Accepted:
+/// found` (trading-domain spec §5.7, whose every transition is journaled before it takes
+/// effect); anything else the answer shows leaves the placement in doubt: `Unknown`, never
+/// confirmed absent, never resubmitted, and always free to hold exits as rule 13 allows on a
+/// real doubt. The described entry is folded by [`super::orders::described`] before this runs,
+/// so the entry's own state is already what the broker says.
+pub(crate) fn settle_doubted_placements(
+    batch: &mut Batch<'_, '_>,
+    described: &ClientOrderId,
+    parent: &BrokerOrder,
+) -> Result<(), ExecutorError> {
+    let doubted: Vec<ClientOrderId> = batch
+        .view
+        .orders
+        .keys()
+        .filter(|id| {
+            batch
+                .view
+                .orders
+                .get(id)
+                .is_some_and(|order| order.state == OrderState::Unknown)
+                && id.protected_entry().as_ref() == Some(described)
+        })
+        .cloned()
+        .collect();
+    for id in doubted {
+        if bracket_rests_under(&batch.view, &id, parent) {
+            transition(
+                batch,
+                &id,
+                OrderState::Accepted,
+                StateEvidence {
+                    broker_status: Some(parent.status.clone()),
+                    ..StateEvidence::default()
+                },
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Journals the `CompensatingEvent` an adoption already on the journal is still owed — the run a
@@ -624,11 +682,11 @@ pub(crate) mod tests {
     use crate::state::{ExecutorState, ObservedAccount, fold};
     use crate::step::handle;
     use crate::types::{
-        AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
+        AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount, BrokerFill,
         BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate,
-        DifferenceKind, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input,
-        IntentBody, IntentHandoff, MandateVersion, Mode, Order, OrderState, Purpose,
-        ReconcileReason, Seq, TimeInForce, WorkspaceId, WriterEpoch,
+        DifferenceKind, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId, FoldedEvent,
+        Input, IntentBody, IntentHandoff, MandateVersion, Mode, Order, OrderState,
+        ProtectionPrices, Purpose, ReconcileReason, Seq, TimeInForce, WorkspaceId, WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does,
@@ -2864,6 +2922,299 @@ pub(crate) mod tests {
             vec![true, false],
             "the fee step's own snapshot writes `model_cash` as null; a cash comparison's compares"
         );
+        Ok(())
+    }
+
+    /// One sell leg as Alpaca nests it under a filled entry: `qty` of it, `status`, and the
+    /// prices a stop or a take-profit carries.
+    fn leg(
+        broker_id: &str,
+        qty: &str,
+        status: &str,
+        stop: Option<&str>,
+        limit: Option<&str>,
+    ) -> Result<BrokerOrder, ExecutorError> {
+        Ok(BrokerOrder {
+            broker_order_id: broker_id.to_owned(),
+            client_order_id: Some(format!("{broker_id}-client")),
+            instrument: aapl()?,
+            side: Side::Sell,
+            qty: Qty::parse(qty)?,
+            filled_qty: Qty::ZERO,
+            limit_price: limit.map(Price::parse).transpose()?,
+            stop_price: stop.map(Price::parse).transpose()?,
+            status: status.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: Some(Date::parse("2026-09-22")?),
+        })
+    }
+
+    /// The entry as the in-doubt lookup's answer describes it: `filled`, by its own
+    /// `client_order_id`, with `legs` nested under it.
+    fn listed_entry(entry: &str, legs: Vec<BrokerOrder>) -> Result<BrokerOrder, ExecutorError> {
+        Ok(BrokerOrder {
+            legs,
+            broker_order_id: "e0000000".to_owned(),
+            client_order_id: Some(entry.to_owned()),
+            instrument: aapl()?,
+            side: Side::Buy,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::parse("10")?,
+            limit_price: Some(Price::parse("150")?),
+            stop_price: None,
+            status: "filled".to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            created_on: Some(Date::parse("2026-09-22")?),
+        })
+    }
+
+    /// DEC-878 item 2(c), #1292's contract items 2 and 3: the in-doubt lookup of a filled
+    /// bracket's placement settles its doubt only when the answer — the entry read back by its
+    /// own id, with its nested legs — shows the whole bracket resting **as recorded**: exactly
+    /// the placement's quantity and the entry's recorded stop and take-profit prices, the check
+    /// that is beyond any connector's reach from the handle alone and that runs where the record
+    /// lives. A mismatched price or quantity refuses, and the placement stays `Unknown`: in
+    /// doubt, never settled present, never confirmed absent, never resubmitted. The recorded
+    /// answer settles it by §5.7's own `Unknown --> Accepted: found`, journaled before it takes
+    /// effect.
+    #[test]
+    fn a_doubted_placement_settles_only_on_legs_matching_the_recorded_quantity_and_prices()
+    -> Result<(), ExecutorError> {
+        let stop_at = |stop: &str| leg("b2222222", "10", "held", Some(stop), None);
+        let take_profit_at = |limit: &str| leg("a1111111", "10", "new", None, Some(limit));
+        let cases = [
+            (
+                "the recorded stop at 140 and take-profit at 170, resting",
+                (take_profit_at("170")?, stop_at("140")?),
+                true,
+            ),
+            (
+                "the stop at 141, not the recorded 140",
+                (take_profit_at("170")?, stop_at("141")?),
+                false,
+            ),
+            (
+                "the take-profit at 169, not the recorded 170",
+                (take_profit_at("169")?, stop_at("140")?),
+                false,
+            ),
+            (
+                "the stop for 9 of the 10",
+                (
+                    take_profit_at("170")?,
+                    leg("b2222222", "9", "held", Some("140"), None)?,
+                ),
+                false,
+            ),
+            (
+                "the take-profit for 9 of the 10",
+                (
+                    leg("a1111111", "9", "new", None, Some("170"))?,
+                    stop_at("140")?,
+                ),
+                false,
+            ),
+            (
+                "the stop canceled, resting no longer",
+                (
+                    take_profit_at("170")?,
+                    leg("b2222222", "10", "canceled", Some("140"), None)?,
+                ),
+                false,
+            ),
+        ];
+        for (case, (take_profit, stop), settles) in cases {
+            let (config, fees) = (executor_config(), fees()?);
+            let ports = Ports {
+                ids: &Ids,
+                mandates: &Everything,
+                instruments: &Everything,
+                config: &config,
+                fees: &fees,
+            };
+            let mut executor = Executor::opened(&ports)?;
+            executor.run(
+                Input::BrokerUpdate(BrokerUpdate::Account(account("20000")?)),
+                &ports,
+            )?;
+            executor.run(
+                Input::BrokerSnapshot(BrokerSnapshot {
+                    account: account("20000")?,
+                    ..executor.snapshot(ReconcileReason::Startup)?
+                }),
+                &ports,
+            )?;
+            let submitted = executor.run(
+                Input::Intent(IntentHandoff {
+                    intent_id: IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned())),
+                    agent: AgentId("agent-a".to_owned()),
+                    tif: Some(TimeInForce::Day),
+                    body: IntentBody::Order {
+                        instrument: aapl()?,
+                        side: Side::Buy,
+                        qty: Qty::parse("10")?,
+                        limit: Price::parse("150")?,
+                        purpose: Purpose::Open,
+                        protection: Some(ProtectionPrices {
+                            stop: Price::parse("140")?,
+                            take_profit: Some(Price::parse("170")?),
+                        }),
+                    },
+                }),
+                &ports,
+            )?;
+            let entry = submitted
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Broker(BrokerRequest::Submit(order)) if order.bracket.is_some() => {
+                        Some(order.client_order_id.as_str().to_owned())
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| missing("the entry goes as one bracket (§5.4)"))?;
+            executor.run(
+                Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+                    fill_id: FillId("f-1".to_owned()),
+                    client_order_id: Some(entry.clone()),
+                    instrument: aapl()?,
+                    side: Side::Buy,
+                    qty: Qty::parse("10")?,
+                    price: Price::parse("150")?,
+                    fees: Usd::ZERO,
+                    trade_date: Date::parse("2026-09-22")?,
+                })),
+                &ports,
+            )?;
+            executor.run(
+                Input::BrokerUpdate(BrokerUpdate::Order(BrokerOrder {
+                    broker_order_id: "e0000000".to_owned(),
+                    client_order_id: Some(entry.clone()),
+                    instrument: aapl()?,
+                    side: Side::Buy,
+                    qty: Qty::parse("10")?,
+                    filled_qty: Qty::parse("10")?,
+                    limit_price: Some(Price::parse("150")?),
+                    stop_price: None,
+                    status: "filled".to_owned(),
+                    reject_code: None,
+                    replaced_by_broker_order_id: None,
+                    legs: Vec::new(),
+                    created_on: Some(Date::parse("2026-09-22")?),
+                })),
+                &ports,
+            )?;
+            let placement = executor
+                .journal
+                .iter()
+                .filter(|event| event.event_type == "ProtectionChanged")
+                .filter(|event| {
+                    matches!(
+                        event.payload.get("action"),
+                        Some(Value::Str(action)) if action == "placed"
+                    )
+                })
+                .flat_map(|event| {
+                    event
+                        .payload
+                        .get("orders")
+                        .and_then(Value::as_array)
+                        .map(|ids| {
+                            ids.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                })
+                .next()
+                .ok_or_else(|| missing("the complete fill records the legs placed"))?;
+
+            let adopted = executor.run(
+                Input::BrokerSnapshot(BrokerSnapshot {
+                    open_orders: Vec::new(),
+                    positions: vec![BrokerPosition {
+                        instrument: aapl()?,
+                        qty: SignedQty::parse("10")?,
+                        avg_entry_price: Price::parse("150")?,
+                    }],
+                    account: account("18500")?,
+                    ..executor.snapshot(ReconcileReason::Scheduled)?
+                }),
+                &ports,
+            )?;
+            let asked_by_entry = adopted.iter().any(|effect| {
+                matches!(
+                    effect,
+                    Effect::Broker(BrokerRequest::GetOrderByClientId(asked))
+                        if asked.as_str() == entry
+                )
+            });
+            let asked_by_handle = adopted.iter().any(|effect| {
+                matches!(
+                    effect,
+                    Effect::Broker(BrokerRequest::GetOrderByClientId(asked))
+                        if asked.as_str() == placement
+                )
+            });
+            assert!(
+                asked_by_entry && !asked_by_handle,
+                "{case}: the adopted placement is asked after by the entry's own id, never the \
+                 handle (DEC-878 item 1): {adopted:?}"
+            );
+            assert_eq!(
+                executor
+                    .state
+                    .orders()
+                    .get(&ClientOrderId::parse(&placement)?)
+                    .map(|order| order.state),
+                Some(OrderState::Unknown),
+                "{case}: the broker listing nothing adopts the placement in doubt (DEC-878 item 5)"
+            );
+
+            executor.run(
+                Input::Broker(Ok(BrokerOutcome::Order(listed_entry(
+                    &entry,
+                    vec![take_profit, stop],
+                )?))),
+                &ports,
+            )?;
+
+            let state = executor
+                .state
+                .orders()
+                .get(&ClientOrderId::parse(&placement)?)
+                .map(|order| order.state);
+            if settles {
+                assert_eq!(
+                    state,
+                    Some(OrderState::Accepted),
+                    "{case}: the whole bracket resting under the filled entry as recorded settles \
+                     the doubt, §5.7's `Unknown --> Accepted: found`"
+                );
+            } else {
+                assert_eq!(
+                    state,
+                    Some(OrderState::Unknown),
+                    "{case}: legs that do not match the recorded quantity or price settle \
+                     nothing: the placement stays in doubt (DEC-878 item 2(c), rule 3)"
+                );
+            }
+            let resubmitted = executor
+                .journal
+                .iter()
+                .any(|event| {
+                    event.event_type == "OrderSubmitted"
+                        && matches!(event.payload.get("client_order_id"), Some(Value::Str(id)) if id == &placement)
+                });
+            assert!(
+                !resubmitted,
+                "{case}: a doubted placement is never resubmitted, whatever the legs it rests on \
+                 (DEC-878 item 1, §5.7)"
+            );
+        }
         Ok(())
     }
 }

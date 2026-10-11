@@ -33,10 +33,30 @@ fn dedicated(view: &ExecutorState, agent: &AgentId) -> bool {
         && view.intents.values().all(|intent| &intent.agent == agent)
 }
 
-/// Asks what became of an order in doubt. Where the profile can query by client order id, by
-/// that id. Otherwise an `Unknown` order on an account dedicated to its agent is listed once
-/// (DEC-862 items 1 to 3); on a shared account nothing is asked and the order stays `Unknown`.
-/// An order in any other state keeps the lookup by id, which such a connector refuses unsent.
+/// The id a lookup of `id` asks the broker for (DEC-878 item 1, §2.3): a bracket placement's
+/// own id is the platform's handle `{entry}-p{record}`, which no broker order carries and whose
+/// every answer is the broker's 404, so a doubt about it — in doubt, or awaiting the
+/// confirmation of its cancel — is asked after by the **entry's** own id, whose nested legs
+/// decide the placement. Every other order asks by its own: a sent OCO or a re-placed
+/// stop-limit carries its own `OrderSubmitted` of the very id and is found by it or not at all
+/// (DEC-878 item 5); and a protective id that is genuinely ours but names no entry keeps its
+/// own lookup.
+pub(crate) fn lookup_target(view: &ExecutorState, id: &ClientOrderId) -> ClientOrderId {
+    let unsent = view
+        .details
+        .get(id)
+        .is_none_or(|detail| detail.request.is_none());
+    match (unsent, id.protected_entry()) {
+        (true, Some(entry)) => entry,
+        _ => id.clone(),
+    }
+}
+
+/// Asks what became of an order in doubt, by the id [`lookup_target`] names for it. Where the
+/// profile can query by client order id, by that id. Otherwise an `Unknown` order on an account
+/// dedicated to its agent is listed once (DEC-862 items 1 to 3); on a shared account nothing is
+/// asked and the order stays `Unknown`. An order in any other state keeps the lookup, which such
+/// a connector refuses unsent.
 pub(crate) fn query_unknown(
     batch: &mut Batch<'_, '_>,
     id: ClientOrderId,
@@ -45,7 +65,10 @@ pub(crate) fn query_unknown(
         return Ok(());
     };
     if queryable(&batch.view) || order.state != OrderState::Unknown {
-        batch.broker(BrokerRequest::GetOrderByClientId(id));
+        batch.broker(BrokerRequest::GetOrderByClientId(lookup_target(
+            &batch.view,
+            &id,
+        )));
         return Ok(());
     }
     let listable = order
