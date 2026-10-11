@@ -14,6 +14,7 @@ import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
 import { AppHeader } from "./app-header";
 import { Dock } from "./dock";
+import { denseEdgeClass } from "./dense-edge-class";
 import { PAGE_FRAME, fullBleed } from "./frame";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
@@ -23,6 +24,17 @@ import { StopSheetHost } from "./stop-control";
 export function densityFor(pathname: string): "calm" | "dense" {
   return /^\/(audit|settings|connections)(\/|$)/.test(pathname) ? "dense" : "calm";
 }
+
+/**
+ * The dense screens' column: the frame's own pieces with the centring gone, so the column keeps
+ * the calm page's left edge (`denseEdgeClass()`, critique C-17) and widens only to the right,
+ * never past the density's own 90rem bound. Built by hand, not by appending to `PAGE_FRAME`: the
+ * merge helper keeps `mx-auto` beside a later `ml-`, so the centring must be replaced, not joined.
+ */
+const DENSE_FRAME = cn(
+  denseEdgeClass(),
+  "max-w-(--content-max) px-(--page-x) pt-(--page-top) pb-10",
+);
 
 /**
  * The frame: the header, then nothing while every feed answers (DEC-215). From `lg` up, the status
@@ -57,6 +69,7 @@ function Frame({ children }: { children: ReactNode }) {
   const banner = !record && !fresh && ws.status !== "loading";
   const sheetLayer = useRef<HTMLDivElement>(null);
   const bleed = fullBleed(pathname);
+  const density = densityFor(pathname);
 
   return (
     <div className="group/frame relative isolate flex min-h-svh w-full" style={{ "--copilot-w": copilot.open ? COPILOT_WIDTH : "0px" } as CSSProperties}>
@@ -79,10 +92,10 @@ function Frame({ children }: { children: ReactNode }) {
         <main
           id="main"
           tabIndex={-1}
-          data-density={densityFor(pathname)}
+          data-density={density}
           className={cn(
             "flex-1 outline-none",
-            bleed ? "flex min-h-0 w-full flex-col" : PAGE_FRAME,
+            bleed ? "flex min-h-0 w-full flex-col" : density === "dense" ? DENSE_FRAME : PAGE_FRAME,
             strip && !bleed && "lg:pb-[calc(var(--dock-clearance)+2rem)]",
           )}
         >

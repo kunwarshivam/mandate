@@ -14,7 +14,7 @@
  * while the first moves the dense column alone and brings the tag back over the column it
  * labels without moving the tag.
  *
- * The final shape: `w-auto ml-[max(0px,calc((100%-80rem)/2))] mr-0`, carried by the shell's
+ * The shape it returns: `w-auto ml-[max(0px,calc((100%-80rem)/2))] mr-0`, carried by the shell's
  * main column wherever `densityFor` reads dense (`app-shell.tsx`), beside the frame every
  * calm screen draws. The left inset is the calm page's own: `max(0px, calc((100%-80rem)/2))`
  * is the inset the calm column's centred 80rem bound (`--content-max` at `:root`, the width
@@ -29,10 +29,8 @@
  * the centring gone, not `PAGE_FRAME` with the class appended. The phone is laid out by CSS
  * with no script media query (DEC-207): one class needs no media boundary. The page's foot —
  * the row's "Fixture data" tag — keeps its today's frame; still on the page's own edge, it
- * sits back over the column it labels. The implementation PR gives the stub its value, carries
- * the class on the main column, and deletes the two `.skip`s; per DEC-750 it edits no test
- * but by un-skipping.
+ * sits back over the column it labels.
  */
 export function denseEdgeClass(): string {
-  throw new Error("Unimplemented: E11-9");
+  return "w-auto ml-[max(0px,calc((100%-80rem)/2))] mr-0";
 }
