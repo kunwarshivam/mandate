@@ -19,8 +19,9 @@
   `crates/mandate-paper/src/evidence.rs` (`Evidence`, `EvidenceRefusal`, `evidence` — the
   founder's run's step 6: the agent, account and control streams the run's `journal export`
   reads, named as journal spec §2 names them, refused when the run kept no journal), re-exported
-  as the `Evidence` variant. The stubs are DEC-77 stubs; the seams are pure and hold no host,
-  credential or order.
+  as the `Evidence` variant. The seams are implemented
+  ([DEC-912](../../../../docs/project/decisions/DEC-912.md)): pure functions over their inputs,
+  they hold no host, credential or order, and no pin of the crate is pending anymore.
 - **Tests:** `crates/mandate-paper/tests/live_run.rs`: the grant pins (an unanswered ask holding
   the submit before its deadline; a grant repeating the request's hash releasing it; an answer
   repeating another hash refusing with nothing sent, whatever its verdict; the first answer of
@@ -41,7 +42,5 @@
   three streams its export reads, each a journal-spec §2 stream id of its type; the stream names
   deriving from the run's own workspace, agent and account ref; a run keeping no journal
   exporting nothing), and a live test that pins every refusal's message and reason code, the
-  stub's own report with them (DEC-137).
-- **Run:** `cargo nextest run -p mandate-paper` (the live suite) and `cargo nextest run -p
-  mandate-paper --run-ignored ignored-only --no-fail-fast` (the pending pins, each failing at its
-  stub until E7-26's implementation lands).
+  `Unimplemented` variants' own report with them (DEC-137).
+- **Run:** `cargo nextest run -p mandate-paper` (the live suite; no test of the crate is pending).

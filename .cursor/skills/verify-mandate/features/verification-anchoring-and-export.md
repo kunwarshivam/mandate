@@ -14,7 +14,8 @@
   `crates/mandate-journal/src/connection_fold.rs` (§11's connection checks; a range's lifecycle
   run from its connection anchor or failing closed without one, DEC-885; an account-stream
   `ConnectionRevoked` refused under rule 68, DEC-888; and one stream's anchor folded by
-  `ConnectionAnchor::from_verified` from a `VerifiedPrefix` only, DEC-889, DEC-892; E7-17).
+  `ConnectionAnchor::from_verified` from a `VerifiedPrefix` only, DEC-889, DEC-892, which
+  refuses a prefix whose rows span more than one stream `Broken`, DEC-913; E7-17).
 - **Tests:** `crates/mandate-journal/tests/verify.rs`, `crates/mandate-journal/tests/properties.rs`
   (any tampering detected; rewrites caught only by the anchor; independent Merkle construction),
   `crates/mandate-journal/tests/control_verify.rs` (the two control-stream range checks against
@@ -31,7 +32,9 @@
   every range vector and every split of every stream run from an anchor whose prefix is bound
   through `VerifiedPrefix::bind` first, the raw unverified fold deleted, DEC-889 item 3; a forged,
   short, or unbound prefix fails closed, and an anchored run fails closed at another stream's
-  judged record; E7-17),
+  judged record; a prefix of more than one stream, two or three, anchors nothing, so its range
+  fails closed unanchored at its first judged record, and a uniform prefix of one stream the fold
+  never reads still anchors (DEC-913; E7-17),
   `crates/mandate-journal/tests/records_access.rs` (`VerificationRun` version 2 against its
   vectors, rules 132 and 133 swept by their own oracle, and version 1 kept with rule 112; E12-3),
   `crates/mandate-journal/tests/range_walk.rs` (seeded faults against an independent comparison)

@@ -59,8 +59,11 @@ impl Lt10Refusal {
 /// item 3): may the run end at `now`? It may when [`Watched`] shows the entry terminal and any
 /// filled quantity covered — nothing filled, or the profile's strongest protection resting over
 /// the whole of it — and also when a filled quantity is uncovered but the run's report already
-/// holds the unprotected interval's alert key (LT-10's halves). It may not while the entry is
-/// still working or the filled quantity is uncovered and unalerted, and past `cap` — the
+/// holds the unprotected interval's alert key (LT-10's halves; the key is
+/// `unprotected_interval_limit` alone, notifications spec §4.2's `protection` row — the row's
+/// other key, `stop_watchdog`, is another alarm's and still shows nothing for this interval,
+/// so it holds the run open). It may not while the entry is still working or the filled
+/// quantity is uncovered and unalerted, and past `cap` — the
 /// session's end, the bound the paper watch already fails at — an unsettled watch fails closed
 /// ([`Lt10Refusal::Capped`]) and never reads again, so no implementation of this seam can loop
 /// unboundedly. A settled watch ends clean at or past the cap, needing no further read.
@@ -69,6 +72,13 @@ impl Lt10Refusal {
 /// [`Lt10Refusal::Unsettled`] while the run keeps reading inside its bounds, or
 /// [`Lt10Refusal::Capped`] past them.
 pub fn lt10(watched: &Watched, now: UtcNanos, cap: UtcNanos) -> Result<(), Lt10Refusal> {
-    let _ = (watched, now, cap);
-    Err(Lt10Refusal::Unimplemented { story: "E7-26" })
+    let interval_reported = matches!(watched.alerted, Some("unprotected_interval_limit"));
+    let settled = watched.entry_terminal && (!watched.uncovered || interval_reported);
+    if settled {
+        return Ok(());
+    }
+    if now >= cap {
+        return Err(Lt10Refusal::Capped);
+    }
+    Err(Lt10Refusal::Unsettled)
 }

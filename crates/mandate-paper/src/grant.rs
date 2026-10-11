@@ -9,6 +9,7 @@
 //! runner's own door, the second check on the one order a live run holds. No host, no credential
 //! and no order is reached from here (ES-19, `AGENTS.md` rule 8, LT-1).
 
+use mandate_canon::Value;
 use mandate_shell::control::ControlRecord;
 use mandate_time::UtcNanos;
 
@@ -75,14 +76,50 @@ impl GrantRefusal {
 /// the ask's deadline (the same answer at or after the deadline denies, mandate spec §6.4 check 2
 /// and rule 3), one whose verdict is `skipped` denies whenever it is read, and one repeating any
 /// other content hash — or holding a member the run cannot read — refuses as a difference, with
-/// nothing sent. With no answer of this ask, the submit stays blocked before the deadline and
-/// the timeout denies at it. While the release holds the cycle's own one-order door (FT-1)
-/// still decides what is submitted, and the runtime's admission still stands in front of both:
-/// this seam releases, it never submits.
+/// nothing sent; a verdict that is neither `approved` nor `skipped` is no verdict a
+/// control-stream answer holds (journal spec §9.7, DEC-533), so it refuses as a difference
+/// rather than a guess at what it meant (rule 3). With no answer of this ask, the submit stays
+/// blocked before the deadline and the timeout denies at it. While the release holds, the
+/// cycle's own one-order door (FT-1) still decides what is submitted, and the runtime's
+/// admission still stands in front of both: this seam releases, it never submits.
+///
+/// `records` arrive read once, in journal order (`ORDER BY seq`, the journal's own read), so
+/// the first answer of the approval in the fold is the first on the stream.
 ///
 /// # Errors
 /// Any [`GrantRefusal`] that applies; every one of them is a stop with nothing sent.
 pub fn grant(records: &[ControlRecord], ask: &Asked, now: UtcNanos) -> Result<(), GrantRefusal> {
-    let _ = (records, ask, now);
-    Err(GrantRefusal::Unimplemented { story: "E7-26" })
+    let answering = |record: &ControlRecord| {
+        record.event_type == "ApprovalResponseSubmitted"
+            && member(record, "approval") == Some(ask.approval.as_str())
+    };
+    let Some(answer) = records.iter().find(|record| answering(record)) else {
+        return Err(if now >= ask.deadline {
+            GrantRefusal::TimedOut
+        } else {
+            GrantRefusal::Unanswered
+        });
+    };
+    let (verdict, content_hash) = match (member(answer, "verdict"), member(answer, "content_hash"))
+    {
+        (Some(verdict), Some(content_hash)) => (verdict, content_hash),
+        _ => return Err(GrantRefusal::Mismatched),
+    };
+    if content_hash != ask.content_hash {
+        return Err(GrantRefusal::Mismatched);
+    }
+    match verdict {
+        "approved" if now < ask.deadline => Ok(()),
+        "approved" => Err(GrantRefusal::TimedOut),
+        "skipped" => Err(GrantRefusal::Denied),
+        _ => Err(GrantRefusal::Mismatched),
+    }
+}
+
+/// One text member of `record`'s payload, or [`None`] when it is missing or holds not text: a
+/// member the run cannot read is never a guess at what the answer meant (`AGENTS.md` rule 3,
+/// [DEC-912](../../../docs/project/decisions/DEC-912.md) item 1), and the answer that holds it
+/// refuses as a difference.
+fn member<'a>(record: &'a ControlRecord, name: &str) -> Option<&'a str> {
+    record.payload.get(name).and_then(Value::as_str)
 }
