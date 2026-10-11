@@ -11,6 +11,7 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
   expect(response?.status()).toBe(200);
   expect(response?.request().redirectedFrom()).toBeNull();
   await expect(page).toHaveURL(`${baseURL}/`);
+  await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
   await expect(page.locator("[data-slot=landing]")).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in" }).first()).toHaveAttribute("href", "/login");
   await expect(page.locator("[data-slot=stop-control]")).toHaveCount(0);
@@ -19,6 +20,7 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
 test("a signed-out visitor can ask for a place in the private beta", async ({ page }) => {
   await page.route("**/api/beta", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
   await page.goto("/");
+  await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
   await page.locator("[data-slot=hero-actions]").getByRole("button", { name: "Sign the guestbook" }).click();
   const guestbook = page.getByRole("region", { name: "guestbook.cgi" });
   await guestbook.getByLabel("Email address:").fill("someone@example.com");
@@ -52,6 +54,19 @@ test("icons, the manifest and the share image stay public", async ({ request }) 
   for (const path of ["/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/pwa-192.png", "/site.webmanifest", "/og-image.png"]) {
     const response = await request.get(path, { maxRedirects: 0 });
     expect(response.status(), path).toBe(200);
+  }
+});
+
+/** A hosted image optimizer fetches the picture's own file through the proxy, where `next start` reads it from disk, so both are asked for. */
+test("every picture on the welcome page loads for a signed-out visitor, none of them the sign-in page", async ({ page }) => {
+  await page.goto("/welcome");
+  const sources = await page.locator("[data-slot=long-page] img").evaluateAll((imgs) => imgs.map((img) => (img as HTMLImageElement).src));
+  expect(sources.filter((src) => src.includes("landing")).length).toBeGreaterThanOrEqual(10);
+  const files = sources.map((src) => new URL(src).searchParams.get("url") ?? new URL(src).pathname);
+  for (const path of [...sources, ...files]) {
+    const response = await page.request.get(path, { maxRedirects: 0 });
+    expect(response.status(), decodeURIComponent(path)).toBe(200);
+    expect(response.headers()["content-type"], decodeURIComponent(path)).toMatch(/^image\//);
   }
 });
 

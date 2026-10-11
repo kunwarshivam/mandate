@@ -4,7 +4,9 @@ import { expect, test } from "@playwright/test";
  * The public pages carry none of the app's controls (DEC-211). The landing page draws its own window
  * on a desktop (DEC-213), and the sign-in pages are a logon window on the same wallpaper, in the same
  * faces, whose close box goes home (DEC-469). Sign-in is off in the e2e build, so the pages render
- * without Supabase and the sign-in page says it is off.
+ * without Supabase and the sign-in page says it is off. The landing page's browser shows the app on the
+ * example workspace in a frame (DEC-906), a document of its own at `/demo`, so none of its controls
+ * are the page's.
  */
 
 const APP_CONTROLS = ["[data-slot=stop-control]", "[data-slot=dock]"];
@@ -15,6 +17,7 @@ for (const width of [390, 1440]) {
 
     test("/welcome has none of the app's controls and no site header", async ({ page }) => {
       await page.goto("/welcome");
+      await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
       await expect(page.getByRole("heading", { level: 1, name: "Owlhead" })).toBeVisible();
       await expect(page.locator("header.glass")).toHaveCount(0);
       for (const selector of APP_CONTROLS) await expect(page.locator(selector), selector).toHaveCount(0);
@@ -42,11 +45,12 @@ for (const width of [390, 1440]) {
 
     test("the welcome page leads to sign in, from its header and its footer", async ({ page }) => {
       await page.goto("/welcome");
+      await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
       // The retro desktop's Start menu carries a third Sign in among its scenery, and the page's
       // own header and footer sit inside the desktop window's region landmark, so they are scoped
-      // structurally: the hero's action row and the footer element.
+      // structurally: the hero's action row and the homepage's footer element.
       const header = page.locator("[data-slot=hero-actions]").getByRole("link", { name: "Sign in" });
-      const footer = page.locator("footer").getByRole("link", { name: "Sign in" });
+      const footer = page.locator("[data-slot=landing-page] footer").getByRole("link", { name: "Sign in" });
       await expect(header).toHaveAttribute("href", "/login");
       await expect(footer).toHaveAttribute("href", "/login");
     });

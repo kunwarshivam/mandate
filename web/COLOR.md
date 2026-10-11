@@ -207,6 +207,8 @@ Every token names a ramp step in each theme.
 | `--hatch-ink` | ink-950 at 0.3 | paper-500 at 0.4 |
 | `--ring` | `--mandate-strong` | the same |
 | `--logo` | the foreground: ink | the foreground: off-white |
+| `--tide` / `--tide-foreground` / `--tide-muted` (the landing page's third colour: one section, the opening's pixel sea, the flying owl's trim and the lock screen's night, never in the product) | teal-800 #064d4b / paper-50 #fbfdfe / teal-200 #b5eeeb | the same |
+| `--tide-line` (the long page's pixel thread on the page and on cards) | teal-800 #064d4b | teal-400 #43cfcb |
 
 ## Azure and sun usage rules
 
@@ -230,6 +232,12 @@ Azure and sun are allowed only through their tokens, and the tests hold each rul
   - Sun-300 (`highlight`) is the same in both themes and always carries ink type (`highlight-foreground`, 13.18:1).
   - It is used for the current range on a chart's range control and for a call to action on the landing page, never as a surface a screen sits on.
   - Sun is too light for a line or a label on paper, so it is never text.
+- **Tide is the landing page's third colour, and it is spent sparingly** ([DEC-907](../docs/project/decisions/DEC-907.md)).
+  - Ink and sun leave a third leg of the triad to choose. Sun's complement, violet, is banned (hue 280 to 330), and of the two remaining legs teal (192, the existing teal ramp) was chosen over rose (345), which sits too near crimson and the colour-blind loss.
+  - Teal-800 is deep enough to carry paper type (9.49:1) and pale teal type (7.59:1), and it is the same in both themes, as the highlight is.
+  - It fills exactly one section, the long page's part about asking you, and the pixel sea the opening's picture floats on ([DEC-908](../docs/project/decisions/DEC-908.md) item 6), whose crests and foam are `tide-muted` (7.59:1, as a mark). Beyond them, tide is the flying owl's trim (its facial rim, wing edges and chest marks), the dithered sea of the lock screen's pixel night, and the long page's pixel thread. `long-page.test.tsx` fails on a second tide section or on tide in any file outside the long page.
+  - The thread is the one line in tide: `tide-line` on the page and on cards (9.03:1 or more in light, 9.94:1 or more in dark), `tide-muted` across the tide section, and `tide` across the sun part (6.74:1). It is decoration, so it is measured as a mark.
+  - It is never in the product and never text on paper.
 - **Azure means an action, the mandate, or the account's line.** The account's azure is a line, a bar, or the current tab's rule. On a chart, a mandate level is never azure: it is a dashed grey line whose axis label is a pale azure tag in deep azure type.
 
 ## Kumo
@@ -314,9 +322,9 @@ The paper badge, the command bar (the muted fill) and Stop keep their own solid 
 ## Contrast results
 
 The checks, measured in each theme:
-- 72 semantic pairs: 54 text pairs (body and figure targets) and 18 non-text marks;
+- 80 semantic pairs: 57 text pairs (body and figure targets) and 23 non-text marks;
 - 42 Kumo role pairs across the four scopes;
-- 228 checks in all, measured with WCAG 2.2 and APCA (APCA in the tests).
+- 244 checks in all, measured with WCAG 2.2 and APCA (APCA in the tests).
 
 `palette.test.ts` requires every one to pass WCAG 2.2 AA and APCA Bronze. In the pair names, "the page" is `background` and "a card" is `card`; the frame's glass is measured separately, above. Every reading colour is measured on both.
 
@@ -346,6 +354,9 @@ Lowest margins:
 | Mandate label on its field | 7.82:1 / 75.6 | 9.84:1 / −78.3 |
 | Mandate label (and focus ring) on a card | 9.97:1 / 91.6 | 13.23:1 / −82.0 |
 | Ink type on the highlight | 13.18:1 / 82.1 | 13.18:1 / 82.1 |
+| Paper type / pale teal type on tide | 9.49:1 / −94.7, 7.59:1 / −78.3 | the same |
+| The thread on the page / on a card | 9.03:1 / 87.1, 9.49:1 / 90.6 | 10.49:1 / −66.5, 9.94:1 / −66.1 |
+| Tide on the highlight (the thread and the owl's trim on sun) | 6.74:1 / 68.7 | the same |
 | Stop control label on ink (loud) | 18.54:1 / −105.8 | 17.65:1 / 100.4 |
 | Stop control label and outline on the header (quiet) | 18.54:1 / 104.0 | 17.65:1 / −101.9 |
 | Kill switch label on crimson | 8.32:1 / −90.3 | 8.32:1 / −90.3 |
@@ -408,4 +419,4 @@ Every required check passes in both themes.
   - **Colour vision.** The teal gain against the azure marks is required under red-green deficiency only, since tritanopia merges teal and blue at any depth.
   - **The figure kind.** A gain or loss figure became its own pair kind, held to APCA Lc 60.
   - **#364's corrections.** In light, `primary` moved from azure-600 to azure-800, so no primary text sits in the mark colour. In dark, `series-1` moved from azure-400 to azure-200, so a holdings bar never paints the mandate's azure.
-
+- **2026-10-10, tide ([DEC-907](../docs/project/decisions/DEC-907.md)).** The founder asked for a third colour beside ink and sun, chosen by colour theory, and to use it sparingly. Tide is teal-800 with paper and teal-200 type, the same in both themes, and only the long page under the landing page's desktop uses it: one section and the flying owl. Later that day the founder asked for something pixelated or threaded in contrasting teal: `tide-line` (teal-800 in light, teal-400 in dark) became the long page's pixel thread, and tide became the owl's trim and the sea of the lock screen's pixel night.

@@ -2,7 +2,7 @@
 //! `resolve_start_from_rows` that neither `cold_records.trusted_starts.row_cases` nor
 //! `trusted_start_row_pins.rs` hold, pinned on rows built from that section's `rows` and re-hashed
 //! so §11 checks 1, 2 and 4 hold. A second workspace's streams start from that workspace's own
-//! control rows, not only `ws_01J8Z2`'s; and a manifest start is read only from a
+//! control rows, not only the vectors' own workspace's; and a manifest start is read only from a
 //! `SegmentExported`, so a segment's payload stored under another `event_type` is no start.
 
 use std::path::Path;
@@ -14,8 +14,6 @@ use mandate_journal::{
 };
 
 const REFUSED: Result<ResolvedStart, TrustedStartError> = Err(TrustedStartError::Refused);
-const OWN_CONTROL: &str = "ctl:ws_01J8Z2";
-const ACCOUNT: &str = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1";
 const FOREIGN_CONTROL: &str = "ctl:ws_01J8Z9";
 const FOREIGN_ACCOUNT: &str = "acct:ws_01J8Z9:01J8Z9ACCT00000000000000B1";
 const TOKEN: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -55,6 +53,35 @@ fn vector_rows() -> Vec<StoredEvent> {
     let section = fixture.get("cold_records").unwrap().get("trusted_starts");
     let rows = section.unwrap().get("rows").and_then(Value::as_array);
     rows.unwrap().iter().map(stored).collect()
+}
+
+/// The vectors' own workspace's streams, read from their rows rather than named here, so the tests
+/// follow whichever workspace the vectors are keyed to: its control stream is the one the
+/// `StreamOpened` row opens, and its account stream the one that control stream's first
+/// `SegmentExported` exports. Neither is [`FOREIGN_CONTROL`]'s workspace's.
+struct OwnStreams {
+    control: String,
+    account: String,
+}
+
+fn own_streams(rows: &[StoredEvent]) -> OwnStreams {
+    let opened = rows.iter().find(|r| r.event_type == "StreamOpened");
+    let control = opened.unwrap().stream_id.clone();
+    let exported = rows
+        .iter()
+        .find(|r| r.stream_id == control && r.event_type == "SegmentExported");
+    let body = parse(&exported.unwrap().body).unwrap();
+    let account = text(body.get("payload").unwrap(), "stream_id").to_owned();
+    let workspace = control.strip_prefix("ctl:").unwrap_or_default();
+    assert!(
+        !workspace.is_empty() && account.starts_with(&format!("acct:{workspace}:")),
+        "the vectors' own control stream {control} exports its own account stream, not {account}"
+    );
+    assert!(
+        control != FOREIGN_CONTROL && !FOREIGN_ACCOUNT.starts_with(&format!("acct:{workspace}:")),
+        "the vectors' own workspace is not the foreign one"
+    );
+    OwnStreams { control, account }
 }
 
 /// The vector row of `event_type` on `stream`.
@@ -176,15 +203,16 @@ fn start(from_seq: u64, prev_hash: Digest) -> TrustedStart {
 /// §9.14, DEC-767: the lookup is scoped to the requested stream's own workspace, whichever it is.
 /// `ws_01J8Z9`'s control stream, after the vector's foreign segment, records a segment of its own
 /// account stream over seqs 4 to 6 and then a stamped anchor whose leaf for that stream is the
-/// segment's last seq and hash, and which also holds a leaf for `ws_01J8Z2`'s account stream. The
+/// segment's last seq and hash, and which also holds a leaf for the vectors' own account stream. The
 /// foreign account stream starts at 4 from the segment, once the cold bytes confirm it, and at 7
-/// from the anchor; the same rows start nothing of `ws_01J8Z2`'s, by either record, while its own
+/// from the anchor; the same rows start nothing of the own workspace's, by either record, while its own
 /// anchor still starts its account stream.
 #[test]
 fn another_workspaces_streams_start_from_its_own_control_rows() {
     let mut rows = vector_rows();
+    let OwnStreams { control, account } = own_streams(&rows);
     let foreign_head = vector_row(&rows, FOREIGN_CONTROL, "SegmentExported").clone();
-    let own_anchor = vector_row(&rows, OWN_CONTROL, "AnchorComputed").clone();
+    let own_anchor = vector_row(&rows, &control, "AnchorComputed").clone();
     let (prev, last) = (Digest::of(b"foreign head 3"), Digest::of(b"foreign head 6"));
     let (payload, manifest_hash, cold) = segment(FOREIGN_ACCOUNT, 4, 6, prev, last);
     let segment_row = rebuilt(
@@ -199,7 +227,7 @@ fn another_workspaces_streams_start_from_its_own_control_rows() {
         &payload,
     );
     let leaves = [
-        (ACCOUNT, 9, Digest::of(b"own account head 9")),
+        (account.as_str(), 9, Digest::of(b"own account head 9")),
         (FOREIGN_ACCOUNT, 6, last),
         (FOREIGN_CONTROL, 2, segment_row.hash),
     ];
@@ -233,38 +261,39 @@ fn another_workspaces_streams_start_from_its_own_control_rows() {
         ("the foreign segment", 4, by),
         ("the foreign anchor's leaf", 10, at),
     ] {
-        assert_eq!(resolve(ACCOUNT, n, request), REFUSED, "{name}");
+        assert_eq!(resolve(&account, n, request), REFUSED, "{name}");
     }
     let own = StartRequest::Anchor {
         anchor_event_id: &own_anchor.event_id,
     };
     assert!(
-        matches!(resolve(ACCOUNT, 10, own), Ok(ResolvedStart::Ready(_))),
+        matches!(resolve(&account, 10, own), Ok(ResolvedStart::Ready(_))),
         "the own anchor still starts"
     );
     assert_eq!(resolve(FOREIGN_ACCOUNT, 10, own), REFUSED, "the own anchor");
 }
 
 /// §9.14: a manifest start is read from a `SegmentExported` only. A rule-117-valid segment of the
-/// account stream from seq 30, appended to `ws_01J8Z2`'s control stream, starts it as a
+/// account stream from seq 30, appended to the vectors' own control stream, starts it as a
 /// `SegmentExported`; the same payload recorded as an `AnchorComputed` is no start, the mirror of
 /// `row_cases`' `anchor_payload_under_another_event_type`.
 #[test]
 fn a_segment_payload_under_another_event_type_is_no_manifest_start() {
     let base = vector_rows();
-    let own_anchor = vector_row(&base, OWN_CONTROL, "AnchorComputed").clone();
-    let template = vector_row(&base, OWN_CONTROL, "SegmentExported").clone();
+    let OwnStreams { control, account } = own_streams(&base);
+    let own_anchor = vector_row(&base, &control, "AnchorComputed").clone();
+    let template = vector_row(&base, &control, "SegmentExported").clone();
     let (prev, last) = (
         Digest::of(b"account head 29"),
         Digest::of(b"account head 31"),
     );
-    let (payload, manifest_hash, cold) = segment(ACCOUNT, 30, 31, prev, last);
+    let (payload, manifest_hash, cold) = segment(&account, 30, 31, prev, last);
     let by = StartRequest::Manifest { manifest_hash };
     for (event_type, starts) in [("SegmentExported", true), ("AnchorComputed", false)] {
         let row = rebuilt(
             &template,
             &Columns {
-                stream: OWN_CONTROL,
+                stream: &control,
                 seq: own_anchor.seq + 1,
                 event_id: "01J8Z3C6A000000000000000S5",
                 event_type,
@@ -273,7 +302,7 @@ fn a_segment_payload_under_another_event_type_is_no_manifest_start() {
             &payload,
         );
         let rows = [base.clone(), vec![row]].concat();
-        let got = resolve_start_from_rows(&rows, ACCOUNT, 30, by);
+        let got = resolve_start_from_rows(&rows, &account, 30, by);
         match (got, starts) {
             (Ok(ResolvedStart::Manifest(m)), true) => {
                 let confirmed = m.confirm(ColdRead::Read(cold.clone()));

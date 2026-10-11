@@ -5,7 +5,7 @@
  * the frame rate (tour-cues.ts), the owls' pixels (owl-sprite.ts) and the wallpapers.
  */
 (() => {
-  const { TOUR, CUES: C, RULES_TEXT, WIPE, FPS, CAST, WAVE, NIGHT } = window.TOUR_DATA;
+  const { TOUR, CUES: C, RULES_TEXT, WIPE, FPS, CAST, DAY, NIGHT } = window.TOUR_DATA;
 
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const span = (t, a, d) => clamp((t - a) / d, 0, 1);
@@ -128,7 +128,7 @@
           ) + cursor(cx, cy, down);
       }
       const view = camera(t, [[0, 1.17, 385, 205], [c.dialog, 1.17, 385, 205], [c.dialog + 0.6, 1, 640, 360], [c.press - 0.15, 1, 640, 360], [c.press + 0.15, 1.15, 1000, 440], [c.press + 1.1, 1.15, 1000, 440], [10, 1.04, 820, 330]]);
-      return cam(desk(WAVE, note + dialog + flash(t, c.press, 0.25, "var(--highlight)", 0.22), "9:29 AM"), view, shake(t, c.press, 0.18, 4, 2));
+      return cam(desk(DAY, note + dialog + flash(t, c.press, 0.25, "var(--highlight)", 0.22), "9:29 AM"), view, shake(t, c.press, 0.18, 4, 2));
     },
 
     ideas(t) {
@@ -155,7 +155,7 @@
       const reading = `<div class="mono" style="font-size:26px;color:var(--muted-foreground);padding-bottom:8px">Reading filings, news and prices${dots(t)}</div>`;
       const body = `<div style="display:flex;gap:28px"><div style="padding-top:10px">${owl(CAST.perch[0], 150, { t, gaze, style: `transform:translateY(${-hop}px)` })}</div><div style="flex:1">${reading}${rows}</div></div>`;
       const shown = t >= c.win ? win(160, 64, 960, 320, "ideas.txt - Owlhead", body, pop(t, c.win).style) : "";
-      return cam(desk(WAVE, shown, "9:31 AM"), camera(t, [[0, 1, 640, 300], [c.row0, 1, 640, 300], [c.row0 + 0.5, 1.07, 700, 240], [8, 1.07, 700, 240]]));
+      return cam(desk(DAY, shown, "9:31 AM"), camera(t, [[0, 1, 640, 300], [c.row0, 1, 640, 300], [c.row0 + 0.5, 1.07, 700, 240], [8, 1.07, 700, 240]]));
     },
 
     orders(t) {
@@ -191,7 +191,7 @@
       const down = t >= c.press && t < c.press + 0.16;
       const tap = t >= c.cursor[0] ? cursor(...glide(t, c.cursor, [1150, 650], [896, 330]), down) : "";
       const view = camera(t, [[0, 1, 640, 360], [c.phone + 0.2, 1, 640, 360], [c.phone + 0.75, 1.22, 925, 330], [c.approved + 0.9, 1.22, 925, 330], [c.approved + 1.5, 1, 640, 360]]);
-      return cam(desk(WAVE, flow + watcher + phone + tap + flash(t, c.approved, 0.3, "var(--highlight)", 0.25), "9:32 AM"), view);
+      return cam(desk(DAY, flow + watcher + phone + tap + flash(t, c.approved, 0.3, "var(--highlight)", 0.25), "9:32 AM"), view);
     },
 
     record(t) {
@@ -232,7 +232,7 @@
       const down = t >= c.click && t < c.click + 0.15;
       const edit = t >= c.cursor[0] && t < c.tamper + 1.2 ? cursor(...glide(t, c.cursor, [760, 620], [402, 214]), down) : "";
       const view = camera(t, [[0, 1, 640, 235], [c.cursor[1], 1, 640, 235], [c.tamper + 0.15, 1.18, 520, 250], [c.tamper + 2.4, 1.18, 520, 250], [c.tamper + 2.9, 1.04, 640, 250]]);
-      return cam(desk(WAVE, shown + edit + flash(t, c.tamper, 0.22, "var(--crimson)", 0.2), "9:33 AM"), view, shake(t, c.tamper, 0.5, 12, 3));
+      return cam(desk(DAY, shown + edit + flash(t, c.tamper, 0.22, "var(--crimson)", 0.2), "9:33 AM"), view, shake(t, c.tamper, 0.5, 12, 3));
     },
 
     check(t) {
@@ -267,7 +267,7 @@
       const shown = t >= c.win ? win(150, 66, 980, 340, "How it stays in check", `<div style="position:relative">${owls}${list}${stop}</div>`, pop(t, c.win).style) : "";
       const pointer = t >= c.cursor[0] && t < c.press + 2 ? cursor(cx, cy, down) : "";
       const view = camera(t, [[0, 1, 640, 300], [c.press - 0.1, 1, 640, 300], [c.press + 0.12, 1.16, 330, 330], [c.press + 2.2, 1.16, 330, 330], [c.press + 2.9, 1.02, 640, 300]]);
-      return cam(desk(WAVE, shown + pointer + flash(t, c.press, 0.18, "var(--card)", 0.5), "9:34 AM"), view, shake(t, c.press, 0.55, 16, 4));
+      return cam(desk(DAY, shown + pointer + flash(t, c.press, 0.18, "var(--card)", 0.5), "9:34 AM"), view, shake(t, c.press, 0.55, 16, 4));
     },
 
     end(t) {

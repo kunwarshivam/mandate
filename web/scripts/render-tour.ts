@@ -69,7 +69,7 @@ const CAST = {
   perch: PERCH.map((p) => castOwl(p.seed, p.mood)),
 };
 
-const DATA = { TOUR, CUES, RULES_TEXT, WIPE, FPS, CAST, WAVE: file("public/art/great-wave.jpg"), NIGHT: file("public/art/copenhagen-moonlight.jpg") };
+const DATA = { TOUR, CUES, RULES_TEXT, WIPE, FPS, CAST, DAY: file("public/art/ishiyama-autumn-moon.jpg"), NIGHT: file("public/art/copenhagen-moonlight.jpg") };
 
 const page = `<!doctype html>
 <html><head><meta charset="utf-8"><style>

@@ -42,7 +42,7 @@ const VIEW_FORMS: [&str; 2] = ["json", "csv"];
 
 /// §11's codes a `checked_range`'s failure names: the checks reported at an event (checks 1 to
 /// 6, the anchored head, the anchor's own, the agent stream's two, the hold's, the connection's
-/// two, and the operator read's break-glass cause), then [`RANGE_CHECKS`].
+/// two, and the operator read's break-glass cause), then version 1's four of [`RANGE_CHECKS`].
 const CHECKS: [&str; 19] = [
     "non_canonical",
     "column_mismatch",
@@ -65,12 +65,39 @@ const CHECKS: [&str; 19] = [
     "segment_gap",
 ];
 
-/// §11's checks reported for a range as a whole, whose failure names no `seq` (rule 111).
-const RANGE_CHECKS: [&str; 4] = [
+/// §11's checks reported for a range as a whole, whose failure names no `seq` (rule 111):
+/// version 1's four, then `segment_rows_mismatch`, which only version 2's list names (DEC-894).
+const RANGE_CHECKS: [&str; 5] = [
     "anchor_root_mismatch",
     "tsa_token_invalid",
     "segment_manifest_mismatch",
     "segment_gap",
+    "segment_rows_mismatch",
+];
+
+/// Version 2's codes: [`CHECKS`], then `segment_rows_mismatch` (DEC-894). Version 1's closed list
+/// is not edited (§8).
+const CHECKS_V2: [&str; 20] = [
+    "non_canonical",
+    "column_mismatch",
+    "seq_gap",
+    "rehash_mismatch",
+    "prev_hash_mismatch",
+    "artifact_missing",
+    "artifact_mismatch",
+    "anchor_head_mismatch",
+    "anchor_self_mismatch",
+    "intent_action_mismatch",
+    "mode_event_mismatch",
+    "held_mismatch",
+    "connection_lifecycle_mismatch",
+    "connection_cause_mismatch",
+    "break_glass_cause_mismatch",
+    "anchor_root_mismatch",
+    "tsa_token_invalid",
+    "segment_manifest_mismatch",
+    "segment_gap",
+    "segment_rows_mismatch",
 ];
 
 /// The §9.13 schema of `event_type` at `schema_version` on `stream`, or `None` when this module
@@ -403,7 +430,7 @@ static CHECKED_RANGE_V2: Ty = Ty::Record(&[
     (
         "failure",
         Ty::Nullable(&Ty::Record(&[
-            ("check", Ty::OneOf(&CHECKS)),
+            ("check", Ty::OneOf(&CHECKS_V2)),
             ("seq", Ty::Nullable(&Ty::Int)),
         ])),
     ),

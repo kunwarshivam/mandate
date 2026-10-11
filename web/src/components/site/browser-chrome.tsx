@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject, createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft } from "pixelarticons/react/ArrowLeft.js";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { Folder } from "pixelarticons/react/Folder.js";
@@ -11,12 +11,20 @@ import { Printer } from "pixelarticons/react/Printer.js";
 import { Reload } from "pixelarticons/react/Reload.js";
 import { Search } from "pixelarticons/react/Search.js";
 import { cn } from "@/lib/utils";
-import { ETCHED, MENU_ITEM, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
+import { ETCHED, MENU_ITEM, MENU_PANEL, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { OpenAppContext } from "./open-app";
 import { type AppId, TASK } from "./windows";
 
-/** What the browser's own controls can do to the page: scroll it back to its top, or load it again. */
-type Act = "home" | "reload";
+/** What the browser's own controls can do to the page in front: go back or forward, go home, or load it again. */
+type Act = "back" | "forward" | "home" | "reload";
+
+/**
+ * The browser's controls for the tab in front, when it brings its own (DEC-906): the app's tab goes
+ * back and forward through its own screens. `null` greys a control out.
+ */
+export type Nav = { back: (() => void) | null; forward: (() => void) | null; home: () => void; reload: () => void };
+
+export const BrowserNav = createContext<Nav | null>(null);
 
 /**
  * One line of a menu: a part of the page, a window on the desktop, one of the browser's own acts, or
@@ -37,7 +45,7 @@ function menus(bookmarks: { id: string; title: string }[], directory: Guide[]): 
     { label: "File", items: [] },
     { label: "Edit", items: [] },
     { label: "View", items: [{ label: "Reload", act: "reload" }, { label: "Change wallpaper…", app: "display" }] },
-    { label: "Go", items: [{ label: "Back", off: true }, { label: "Forward", off: true }, { label: "Home", act: "home" }] },
+    { label: "Go", items: [{ label: "Back", act: "back" }, { label: "Forward", act: "forward" }, { label: "Home", act: "home" }] },
     { label: "Bookmarks", items: bookmarks.map((b) => ({ label: b.title, href: `#${b.id}` })) },
     { label: "Options", items: [] },
     { label: "Directory", items: directory },
@@ -46,17 +54,31 @@ function menus(bookmarks: { id: string; title: string }[], directory: Guide[]): 
   ];
 }
 
-/** The browser's own acts, on the page in the same window. */
-function useActs(from: RefObject<HTMLElement | null>): (act: Act) => void {
-  return (act) => {
+/**
+ * The browser's own acts on the tab in front, and whether each can act now. With no tab of its own
+ * in front, Home takes the page in the same window to its top and Reload loads it again, and there
+ * is nowhere to go back or forward to.
+ */
+function useActs(from: RefObject<HTMLElement | null>): { run: (act: Act) => void; can: (act: Act) => boolean } {
+  const nav = useContext(BrowserNav);
+  const can = (act: Act) => (act === "back" ? !!nav?.back : act === "forward" ? !!nav?.forward : true);
+  const run = (act: Act) => {
     switch (act) {
+      case "back":
+        nav?.back?.();
+        return;
+      case "forward":
+        nav?.forward?.();
+        return;
       case "home": {
+        if (nav) return nav.home();
         const root = from.current?.closest("[data-slot=browser]")?.querySelector<HTMLElement>("[data-scroll-root]");
         const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         root?.scrollTo({ top: 0, behavior: still ? "auto" : "smooth" });
         return;
       }
       case "reload":
+        if (nav) return nav.reload();
         window.location.reload();
         return;
       default: {
@@ -65,6 +87,7 @@ function useActs(from: RefObject<HTMLElement | null>): (act: Act) => void {
       }
     }
   };
+  return { run, can };
 }
 
 /** Up and Down move through a menu's lines, skipping the greyed ones. */
@@ -87,7 +110,7 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
   const bar = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const openApp = useContext(OpenAppContext);
-  const act = useActs(bar);
+  const { run: act, can } = useActs(bar);
   const live = all.filter((m) => m.items.length > 0).map((m) => m.label);
 
   useEffect(() => {
@@ -134,9 +157,9 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
     run();
   };
 
-  const choose = (item: Exclude<Item, "rule">) => {
+  const choose = (item: Exclude<Item, "rule">, e: MouseEvent<HTMLButtonElement>) => {
     setOpen(null);
-    if ("app" in item) openApp(item.app);
+    if ("app" in item) openApp(item.app, e);
     if ("act" in item) act(item.act);
   };
 
@@ -172,11 +195,11 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
               {mnemonic}
             </button>
             {on && (
-              <div ref={list} role="menu" aria-label={m.label} onKeyDown={keys} className={cn(RAISED, "absolute top-full z-30 grid min-w-48 bg-muted py-1 ring-1 ring-foreground/70")} style={{ left }} data-slot="browser-menu">
+              <div ref={list} role="menu" aria-label={m.label} onKeyDown={keys} className={cn(MENU_PANEL, "absolute top-full z-30 grid min-w-48")} style={{ left }} data-slot="browser-menu">
                 {m.items.map((item, i) =>
                   item === "rule" ? (
                     <div key={`rule-${i}`} role="separator" className="mx-1 my-1 border-t border-b border-t-foreground/40 border-b-card" />
-                  ) : "off" in item ? (
+                  ) : "off" in item || ("act" in item && !can(item.act)) ? (
                     <span key={item.label} role="menuitem" aria-disabled="true" tabIndex={-1} className={cn(MENU_ITEM, ETCHED, "hover:bg-transparent hover:text-foreground/40")}>
                       {item.label}
                     </span>
@@ -185,7 +208,7 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
                       {item.label}
                     </a>
                   ) : (
-                    <button key={item.label} type="button" role="menuitem" tabIndex={-1} onClick={() => choose(item)} className={MENU_ITEM}>
+                    <button key={item.label} type="button" role="menuitem" tabIndex={-1} onClick={(e) => choose(item, e)} className={MENU_ITEM}>
                       {item.label}
                     </button>
                   ),
@@ -208,8 +231,8 @@ const ICON = "size-6";
  * it stopped, loading, so it is never read as the product's Stop.
  */
 const TOOLS: { label: string; name?: string; icon: ReactNode; act?: Act; wide?: boolean }[] = [
-  { label: "Back", icon: <ArrowLeft className={ICON} /> },
-  { label: "Forward", icon: <ArrowRight className={ICON} /> },
+  { label: "Back", icon: <ArrowLeft className={ICON} />, act: "back" },
+  { label: "Forward", icon: <ArrowRight className={ICON} />, act: "forward" },
   { label: "Home", icon: <Home className={ICON} />, act: "home" },
   { label: "Reload", icon: <Reload className={ICON} />, act: "reload" },
   { label: "Images", icon: <ImageIcon className={ICON} />, wide: true },
@@ -224,10 +247,12 @@ const TOOL = "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 t
 /** Its buttons are pointer affordances out of the tab cycle, as the title bar's are. */
 export function Toolbar() {
   const ref = useRef<HTMLDivElement>(null);
-  const act = useActs(ref);
+  const { run: act, can } = useActs(ref);
   return (
     <div ref={ref} role="toolbar" aria-label="Browser" className={cn("flex flex-wrap gap-1", PIXEL)} data-slot="browser-tools">
-      {TOOLS.map(({ label, name, icon, act: does, wide }) => (
+      {TOOLS.map(({ label, name, icon, act: may, wide }) => {
+        const does = may && can(may) ? may : undefined;
+        return (
         <button
           key={label}
           type="button"
@@ -241,22 +266,43 @@ export function Toolbar() {
           {icon}
           {label}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-/** The address, in a field that selects all of it when pressed, so it is one copy away. */
-export function LocationField({ address }: { address: string }) {
+const LOCATION = cn(SUNKEN, "h-8 min-w-0 flex-1 bg-card px-2 text-lg leading-tight text-foreground outline-none selection:bg-foreground selection:text-card", MONO);
+
+/**
+ * The address, in a field that selects all of it when pressed, so it is one copy away. Given `onGo`,
+ * it takes an address too, typed and sent with Enter, as the app's tab does (DEC-906).
+ */
+export function LocationField({ address, onGo }: { address: string; onGo?: (typed: string) => void }) {
+  const [typed, setTyped] = useState<string | null>(null);
+  if (!onGo)
+    return <input readOnly tabIndex={-1} aria-label="Address" value={address} onFocus={(e) => e.currentTarget.select()} data-slot="location" className={LOCATION} />;
+  const go = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (typed !== null) onGo(typed);
+    setTyped(null);
+  };
   return (
-    <input
-      readOnly
-      tabIndex={-1}
-      aria-label="Address"
-      value={address}
-      onFocus={(e) => e.currentTarget.select()}
-      data-slot="location"
-      className={cn(SUNKEN, "h-8 min-w-0 flex-1 bg-card px-2 text-lg leading-tight text-foreground outline-none selection:bg-foreground selection:text-card", MONO)}
-    />
+    <form onSubmit={go} className="flex min-w-0 flex-1" data-slot="location-form">
+      <input
+        aria-label="Address"
+        value={typed ?? address}
+        onChange={(e) => setTyped(e.currentTarget.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={() => setTyped(null)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setTyped(null);
+        }}
+        spellCheck={false}
+        autoComplete="off"
+        data-slot="location"
+        className={cn(LOCATION, "focus-visible:outline-1 focus-visible:outline-dotted focus-visible:-outline-offset-4 focus-visible:outline-foreground")}
+      />
+    </form>
   );
 }

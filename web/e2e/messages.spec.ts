@@ -71,6 +71,18 @@ for (const [width, height, withRail] of [
   });
 }
 
+for (const width of [1024, 1280, 1440]) {
+  test(`${width} px with no thread open: "Pick a thread" sits beside the threads, to the window's right edge and foot`, async ({ page }) => {
+    await open(page, "/messages?scenario=normal", width, 768);
+    const threads = (await page.locator("[data-slot=threads-pane]").boundingBox())!;
+    const empty = (await page.locator("[data-slot=no-thread]").boundingBox())!;
+    expect(empty.x, "it meets the threads").toBeCloseTo(threads.x + threads.width, 0);
+    expect(empty.x + empty.width, "and ends at the window's right edge").toBeCloseTo(width, 0);
+    expect(empty.y, "on the threads' row").toBeCloseTo(threads.y, 0);
+    expect(threads.y + threads.height, "the threads run to the foot of the window").toBeCloseTo(768, 0);
+  });
+}
+
 test("on a phone the thread fills the width between the header and the tab bar", async ({ page }) => {
   await open(page, THREAD, 390, 844);
   const pane = (await page.locator("[data-slot=thread-pane]").boundingBox())!;

@@ -246,7 +246,6 @@ fn queried(ran: &common::Ran, id: &str) -> bool {
 /// not hold, it stays `Accepted` and still covers the 10, and the run is clean. The legs' own
 /// `client_order_id`s, the broker's, are not external activity (item 4).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_filled_brackets_legs_listed_under_its_entry_keep_their_placement() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -308,12 +307,13 @@ enum Placement {
 }
 
 /// How many listings [`listing`] answers.
-const LISTINGS: usize = 20;
+const LISTINGS: usize = 22;
 
 /// Listing `case` of the open orders right after the fill: its name, the placement it is shown
 /// to, and whether it keeps that placement. Only the whole filled bracket resting as recorded does
 /// (DEC-878 item 2): the entry `filled`, exactly one resting sell stop at 140 and one resting sell
-/// limit at 170 nested under it, each for the placement's 10.
+/// limit at 170 with no stop price nested under it, each for the placement's 10. A leg rests when
+/// §5.7 maps its status to `Accepted` and none of it has filled.
 fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<BrokerOrder>) {
     let under = |legs: Vec<BrokerOrder>| vec![listed_entry(entry, legs)];
     let another = "md-01JABCDEFGHJKMNPQRSTVWXYZ9";
@@ -460,6 +460,27 @@ fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<Brok
                 stop_leg("canceled", "10"),
             ]),
         ),
+        19 => (
+            "a stop carrying a limit at the take-profit's 170, the take-profit cancelled",
+            bracket,
+            false,
+            under(vec![
+                priced(stop_leg("held", "10"), Some("140"), Some("170")),
+                take_profit_leg("canceled", "10"),
+            ]),
+        ),
+        20 => (
+            "the take-profit `new` with 3 of its 10 already filled",
+            bracket,
+            false,
+            under(vec![
+                BrokerOrder {
+                    filled_qty: qty("3"),
+                    ..take_profit_leg("new", "10")
+                },
+                stop_leg("held", "10"),
+            ]),
+        ),
         _ => (
             "a sent OCO absent, the entry listed filled with its legs resting for the OCO's 4",
             Placement::SentOco,
@@ -477,7 +498,6 @@ fn listing(case: usize, entry: &str) -> (&'static str, Placement, bool, Vec<Brok
 /// OCO that is itself absent, whatever its entry lists: it has its own `OrderSubmitted` and is
 /// found by its own id or not at all.
 #[test]
-#[ignore = "pending E7-4"]
 fn only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -532,7 +552,6 @@ fn only_the_whole_bracket_resting_under_its_filled_entry_keeps_the_placement() {
 /// and its sequence's first step cancels the placement (§5.4's marketable exit sequence), rather
 /// than waiting on a placement the run made `Unknown`.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_risk_exit_after_the_reconciliation_is_never_held_by_the_legs() {
     let (ids, mandates, instruments, config) = (
         TestIds,

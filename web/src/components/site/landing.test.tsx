@@ -3,15 +3,19 @@ import { join } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WORDMARK_PATH } from "@/components/brand/Logo";
+import { DEMO_PATH, DEMO_SOURCE } from "@/components/demo/demo-messages";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
 import { HEADLINE, Landing, SECTIONS, SUBHEAD, WINDOWS } from "./landing";
 import { DISCARDED, QUESTIONS } from "./apps";
-import { OWLHEAD_ASCII } from "./ascii";
+import { WALLPAPERS, randomWallpaper } from "./art";
+import { APP_ORIGIN } from "./app-tab";
 import { GREETING, TIPS } from "./assistant";
 import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
 import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
+import { WallpaperProvider } from "./wallpaper";
 import { EDITED, TRACE } from "./record-trace";
 
 /**
@@ -20,8 +24,11 @@ import { EDITED, TRACE } from "./record-trace";
  * copy that makes no claim of performance and no promise.
  */
 
+/** The landing page with its home page in front; the app's tab opens first, and has tests of its own. */
 function renderLanding() {
-  return render(<Landing />);
+  const result = render(<Landing />);
+  fireEvent.click(screen.getByRole("tab", { name: "Owlhead Home Page" }));
+  return result;
 }
 
 function readable(container: HTMLElement): string {
@@ -53,19 +60,17 @@ afterEach(() => {
 });
 
 describe("the landing page's structure", () => {
-  it("has one h1 named Owlhead, with the block letters hidden from assistive technology", () => {
+  it("has one h1 named Owlhead, with the product's owl and wordmark beside it hidden from assistive technology", () => {
     const { container } = renderLanding();
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s).toHaveLength(1);
     expect(h1s[0]).toHaveAccessibleName(HEADLINE);
-    expect(h1s[0].querySelector("[aria-hidden]")?.textContent).toBe(OWLHEAD_ASCII);
+    const mark = h1s[0].querySelector<HTMLElement>("[data-slot=wordmark]");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark?.querySelector("[data-slot=brand-owl]"), "the brand owl leads").not.toBeNull();
+    expect(mark?.querySelector("[data-slot=owlhead-wordmark] path")).toHaveAttribute("d", WORDMARK_PATH);
+    expect(mark?.style.color, "in the logo's colour, as the app's header has it").toBe("var(--logo)");
     expect(container).toHaveTextContent(SUBHEAD);
-  });
-
-  it("sets the block letters upright, no wider than the slanted ones were, so they fit the hero", () => {
-    expect(OWLHEAD_ASCII).not.toMatch(/\/_\/ \//);
-    expect(OWLHEAD_ASCII).toMatch(/_{4}/);
-    expect(Math.max(...OWLHEAD_ASCII.split("\n").map((l) => l.length))).toBeLessThanOrEqual(49);
   });
 
   it("numbers every section and labels it by its heading", () => {
@@ -252,6 +257,19 @@ describe("links", () => {
     for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
   });
 
+  it("names Sign in and Sign up in words on the taskbar, where no window covers them, and Sign up opens the guestbook", async () => {
+    const { container } = renderLanding();
+    const bar = container.querySelector<HTMLElement>("[data-slot=taskbar] [data-slot=account-buttons]")!;
+    expect(within(bar).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect([...bar.children].map((c) => c.textContent), "Sign up last, by the tray").toEqual(["Sign in", "Sign up"]);
+    expect(within(bar).getByRole("button", { name: "Sign up" }).className).toContain("bg-highlight");
+    expect(within(screen.getByRole("list", { name: "Desktop" })).queryByRole("link", { name: "Sign in" }), "the bar replaces the desktop's key icon").toBeNull();
+    expect(screen.queryByRole("region", { name: GUESTBOOK })).toBeNull();
+    await press(within(bar).getByRole("button", { name: "Sign up" }));
+    expect(win(GUESTBOOK)).toHaveAttribute("data-front", "true");
+    expect(within(win(GUESTBOOK)).getByLabelText("Email address:")).toBeInTheDocument();
+  });
+
   it("offers the guestbook as a button in the hero and again after who it's for, each opening its window", async () => {
     renderLanding();
     const buttons = screen.getAllByRole("button", { name: "Sign the guestbook" });
@@ -270,7 +288,7 @@ describe("links", () => {
   it("puts See why it traded beside Sign the guestbook in the hero, and it opens the record's window", async () => {
     renderLanding();
     const hero = document.querySelector<HTMLElement>("[data-slot=hero-actions]")!;
-    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See why it traded"]);
+    expect(within(hero).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sign the guestbook", "See why it traded", "Look inside the app"]);
     const see = within(hero).getByRole("button", { name: "See why it traded" });
     expect(see.className).toBe(within(hero).getByRole("button", { name: "Sign the guestbook" }).className);
     expect(screen.queryByRole("region", { name: RECORD })).toBeNull();
@@ -300,6 +318,126 @@ describe("links", () => {
     const away = hrefs.filter((h) => !h.startsWith("#") && h !== "/login");
     expect(away.length).toBeGreaterThan(0);
     for (const h of away) expect(h).toMatch(/^https:\/\/www\.metmuseum\.org\/art\/collection\/search\/\d+$/);
+  });
+});
+
+describe("the browser's tabs", () => {
+  const tabs = () => screen.getByRole("tablist", { name: "Pages" });
+  const address = () => screen.getByRole("textbox", { name: "Address" });
+  const appFrame = () => screen.getByTitle("Owlhead app, example workspace") as HTMLIFrameElement;
+  const tool = (name: string) => within(screen.getByRole("toolbar", { name: "Browser" })).getByRole("button", { name });
+  const status = () => document.querySelector("[data-slot=status-text]")!;
+
+  async function report(path: string, back: boolean, forward: boolean, from: MessageEventSource | null = appFrame().contentWindow, origin = window.location.origin) {
+    await act(async () => window.dispatchEvent(new MessageEvent("message", { data: { source: DEMO_SOURCE, type: "at", path, back, forward }, origin, source: from })));
+  }
+
+  it("opens on the app itself, live in a frame on the example workspace, with the home page in the second tab", () => {
+    render(<Landing />);
+    const [app, site] = within(tabs()).getAllByRole("tab");
+    expect(app).toHaveAccessibleName("Inside the app");
+    expect(app).toHaveAttribute("aria-selected", "true");
+    expect(site).toHaveAccessibleName("Owlhead Home Page");
+    const appPanel = document.getElementById(app.getAttribute("aria-controls")!)!;
+    expect(appPanel).toBeVisible();
+    expect(appPanel).toHaveAccessibleName("Inside the app");
+    expect(within(appPanel).getByTitle("Owlhead app, example workspace")).toHaveAttribute("src", DEMO_PATH);
+    expect(document.getElementById(site.getAttribute("aria-controls")!)).not.toBeVisible();
+    expect(home(), "the home page stays in the document while hidden").toBeInTheDocument();
+    expect(address()).toHaveValue(`${APP_ORIGIN}/`);
+    expect(address(), "the app's address takes a typed one").not.toHaveAttribute("readonly");
+    expect(status()).toHaveTextContent("Contacting host: app.owlhead.ai…");
+    expect(appFrame()).toHaveAttribute("data-ready", "false");
+  });
+
+  it("follows where the app goes, and hears only its own frame on this origin", async () => {
+    render(<Landing />);
+    await report("/agents", true, false);
+    expect(address()).toHaveValue(`${APP_ORIGIN}/agents`);
+    expect(appFrame()).toHaveAttribute("data-ready", "true");
+    expect(status()).toHaveTextContent("Document: Done");
+    expect(tool("Back")).toBeEnabled();
+    expect(tool("Forward")).toBeDisabled();
+    await report("/positions", false, true, window);
+    await report("/positions", false, true, appFrame().contentWindow, "https://elsewhere.example");
+    expect(address()).toHaveValue(`${APP_ORIGIN}/agents`);
+  });
+
+  it("sends the app back, forward, home, to a typed address, or to start over, and nowhere it has no path for", async () => {
+    render(<Landing />);
+    const sent = vi.fn();
+    appFrame().contentWindow!.postMessage = sent;
+    await report("/agents", true, true);
+    const asked = () => sent.mock.calls.map(([data, origin]) => (expect(origin).toBe(window.location.origin), data));
+    sent.mockClear();
+    await press(tool("Back"));
+    await press(tool("Forward"));
+    await press(tool("Home"));
+    await press(tool("Reload"));
+    for (const typed of ["app.owlhead.ai/approvals", "https://app.owlhead.ai/alerts", "/positions", "https://elsewhere.example/x", "//elsewhere.example", "app.owlhead.ai.elsewhere.example/x"]) {
+      fireEvent.change(address(), { target: { value: typed } });
+      fireEvent.submit(address().closest("form")!);
+    }
+    expect(asked()).toEqual([
+      { source: DEMO_SOURCE, type: "go", to: "back" },
+      { source: DEMO_SOURCE, type: "go", to: "forward" },
+      { source: DEMO_SOURCE, type: "open", path: "/" },
+      { source: DEMO_SOURCE, type: "go", to: "restart" },
+      { source: DEMO_SOURCE, type: "open", path: "/approvals" },
+      { source: DEMO_SOURCE, type: "open", path: "/alerts" },
+      { source: DEMO_SOURCE, type: "open", path: "/positions" },
+    ]);
+    fireEvent.change(address(), { target: { value: "half typed" } });
+    fireEvent.keyDown(address(), { key: "Escape" });
+    expect(address()).toHaveValue(`${APP_ORIGIN}/agents`);
+  });
+
+  it("dresses the app in the page's theme, and keeps it in step", async () => {
+    render(<Landing />);
+    const root = document.documentElement;
+    root.dataset.mode = "light";
+    const doc = appFrame().contentDocument!;
+    const inside = doc.documentElement ?? doc.appendChild(doc.createElement("html"));
+    await report("/", false, false);
+    expect(inside.dataset.mode).toBe("light");
+    await act(async () => {
+      root.dataset.mode = "dark";
+      root.classList.add("dark");
+      await frame();
+    });
+    expect(inside.dataset.mode).toBe("dark");
+    expect(inside).toHaveClass("dark");
+    root.classList.remove("dark");
+    root.dataset.mode = "light";
+  });
+
+  it("moves between the tabs with the arrow keys, and comes back to the home page from the hero, a guide, or the skip link", async () => {
+    render(
+      <>
+        <a href="#main">Skip to content</a>
+        <Landing />
+      </>,
+    );
+    const site = within(tabs()).getByRole("tab", { name: "Owlhead Home Page" });
+    const app = within(tabs()).getByRole("tab", { name: "Inside the app" });
+    await press(screen.getByRole("link", { name: "Skip to content" }));
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(home()).toBeVisible();
+    expect(address()).toHaveValue("http://www.owlhead.ai/");
+    expect(address(), "the home page's address is read-only").toHaveAttribute("readonly");
+    await press(within(document.querySelector<HTMLElement>("[data-slot=hero-actions]")!).getByRole("button", { name: "Look inside the app" }));
+    expect(app).toHaveAttribute("aria-selected", "true");
+    expect(app, "the keyboard follows the tab").toHaveFocus();
+    expect(app).toHaveAttribute("tabindex", "0");
+    expect(site).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(app, { key: "ArrowRight" });
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(site).toHaveFocus();
+    fireEvent.keyDown(site, { key: "ArrowLeft" });
+    expect(app).toHaveAttribute("aria-selected", "true");
+    await press(within(screen.getByRole("navigation", { name: "Guides" })).getByRole("link", { name: "Handbook" }));
+    expect(site).toHaveAttribute("aria-selected", "true");
+    expect(home()).toBeVisible();
   });
 });
 
@@ -424,16 +562,33 @@ describe("the desktop", () => {
     expect(screen.queryByRole("region", { name: "Owlhead Home Page" })).toBeNull();
   });
 
+  it("opens on the painting the server picked for the visit, offers no grey pattern, and picks among every painting", async () => {
+    const { container } = render(
+      <WallpaperProvider initial="kiso-snow">
+        <Landing />
+      </WallpaperProvider>,
+    );
+    expect(container.querySelector("[data-slot=wallpaper]")).toHaveAttribute("data-wallpaper", "kiso-snow");
+    expect(container.querySelector("[data-slot=desktop-pattern]")).toBeNull();
+    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
+    const display = win("Display Properties");
+    expect(within(display).getByRole("radio", { name: "The Kiso Mountains in Snow" })).toBeChecked();
+    expect(within(display).queryAllByRole("radio", { name: /pattern/i })).toHaveLength(0);
+    const rolls = Array.from({ length: 600 }, (_, i) => randomWallpaper(i / 600));
+    expect(new Set(rolls), "every painting can open a visit, and nothing else").toEqual(new Set(WALLPAPERS.map((w) => w.id)));
+    expect(randomWallpaper(0.999999)).toBe(WALLPAPERS.at(-1)?.id);
+  });
+
   it("changes the wallpaper in Display, credits the painting, and keeps the choice out of browser storage", async () => {
     const { container } = renderLanding();
     const wallpaper = container.querySelector("[data-slot=wallpaper]")!;
     expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
     await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
     const display = win("Display Properties");
-    await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Wheat Field with Cypresses" })));
-    expect(wallpaper).toHaveAttribute("data-wallpaper", "wheat-field-cypresses");
+    await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Two Men Contemplating the Moon" })));
+    expect(wallpaper).toHaveAttribute("data-wallpaper", "two-men-moon");
     expect(localStorage.length).toBe(0);
-    expect(display).toHaveTextContent("Vincent van Gogh, Wheat Field with Cypresses, 1889.");
+    expect(display).toHaveTextContent("Caspar David Friedrich, Two Men Contemplating the Moon, ca. 1825 to 1830.");
     await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Day and night" })));
     expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
     await press(within(display).getByRole("button", { name: "OK" }));
@@ -767,7 +922,7 @@ const LANDING_PAIRS = [
   { fg: "mandate-strong", bg: "card", use: "Links" },
   { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
   { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
-  { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the sun badge" },
+  { fg: "highlight-foreground", bg: "highlight", use: "The New tag, a hovered link and the sun badge" },
   { fg: "card", bg: "foreground", use: "Title bars, icon labels, the record's column heads and the ink badges" },
   { fg: "card", bg: "muted-foreground", use: "The title bars of windows behind the front one" },
   { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },

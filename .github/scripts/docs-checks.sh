@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The short path's checks for a documentation-only change (DEC-112), mirroring xtask's
 # `spec-guard` and `commit-trailers` parts so a docs PR needs no Rust toolchain:
-#   1. `typos` over the repository (the same binary and config `cargo xtask ci lint` uses);
+#   1. `typos` over the repository (the same binary and config `xtask ci lint` uses);
 #   2. protected paths (ES-22) changed only with a DEC-<n> cited in the PR description or a commit;
 #   3. no `Co-authored-by` trailer on any commit.
 # Usage: MANDATE_PR_BODY=<body> docs-checks.sh   (the base is `base-ref.sh`'s, as xtask chooses it)

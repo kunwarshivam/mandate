@@ -36287,7 +36287,7 @@ verification_runs:
     expect:
       outcome: Valid
 segment_rows:
-  spec: docs/specs/journal.md v0.38 §11 and workspace API §4.8.1 step 2.3a (DEC-894, pending)
+  spec: docs/specs/journal.md v0.38 §11 and workspace API §4.8.1 step 2.3a (DEC-894)
   ranges:
   - name: rows_match_their_files
     clause: '§11 segment_rows_mismatch: passes'

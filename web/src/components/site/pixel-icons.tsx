@@ -208,6 +208,66 @@ export const FILM: Sprite = [
   "................",
 ];
 
+/** A compact Mac, smiling on its screen as one did at start-up. */
+export const MAC: Sprite = [
+  "................",
+  "..kkkkkkkkkkkk..",
+  "..kwwwwwwwwwwk..",
+  "..kwkkkkkkkkwk..",
+  "..kwkwwwwwwkwk..",
+  "..kwkwkwwkwkwk..",
+  "..kwkwwwwwwkwk..",
+  "..kwkwkkkkwkwk..",
+  "..kwkwwwwwwkwk..",
+  "..kwkkkkkkkkwk..",
+  "..kwwwwwwwwwwk..",
+  "..kwwwwwggggwk..",
+  "..kwwwwwwwwwwk..",
+  "..kkkkkkkkkkkk..",
+  "..kggggggggggk..",
+  "..kkkkkkkkkkkk..",
+];
+
+/** A PC of the time: a monitor on a desktop case, its screen the colour of a fresh Windows install. */
+export const PC: Sprite = [
+  "................",
+  "..kkkkkkkkkkkk..",
+  "..kwwwwwwwwwwk..",
+  "..kwkkkkkkkkwk..",
+  "..kwkttttttkwk..",
+  "..kwkttttttkwk..",
+  "..kwkttttttkwk..",
+  "..kwkkkkkkkkwk..",
+  "..kwwwwwwwwwwk..",
+  "..kkkkkkkkkkkk..",
+  ".....kkkkkk.....",
+  ".kkkkkkkkkkkkkk.",
+  ".kwwwwwwwwwwwwk.",
+  ".kwgggwwwwwwtwk.",
+  ".kkkkkkkkkkkkkk.",
+  "................",
+];
+
+/** The Mac's hard disk, which sat at the top right of every desktop. */
+export const DISK: Sprite = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  ".kkkkkkkkkkkkkk.",
+  ".kwwwwwwwwwwwwk.",
+  ".kwwwwwwwwwwwwk.",
+  ".kwwwwwwwwwwwwk.",
+  ".kwkkkkwwwwwtwk.",
+  ".kwwwwwwwwwwwwk.",
+  ".kkkkkkkkkkkkkk.",
+  ".kggggggggggggk.",
+  ".kkkkkkkkkkkkkk.",
+  "................",
+  "................",
+];
+
 /** One run of same-coloured pixels per rect, so a sprite is a few dozen rects. */
 function runs(sprite: Sprite) {
   const out: { x: number; y: number; w: number; fill: string }[] = [];

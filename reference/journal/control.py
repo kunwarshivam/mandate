@@ -657,7 +657,7 @@ EVENT_CHECKS = (
     "connection_cause_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
-# v0.38 (DEC-894, pending): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
+# v0.38 (DEC-894): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
 # closed list is not edited (§8).
 V2_RANGE_CHECKS = (*RANGE_CHECKS, "segment_rows_mismatch")
 CHECKED_RANGE = rec(

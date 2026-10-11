@@ -11,9 +11,28 @@ import { type Page, expect, test } from "@playwright/test";
 const PATH = "/welcome";
 const WIDTHS = [320, 390, 1024, 1440];
 
-async function open(page: Page, width: number, height = 900) {
+/**
+ * Waits out the desktop's power-on (DEC-905), so what a test measures is where things rest; the endless
+ * drift and blink go on, and so do the long page's scroll-driven pieces (DEC-907), which finish only
+ * when the visitor scrolls.
+ */
+const settled = (page: Page) =>
+  page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.timeline instanceof DocumentTimeline && a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
+
+/** Opens the landing page with its home page in front; `app` leaves the app's tab in front, as a visit opens (DEC-906). */
+async function open(page: Page, width: number, height = 900, { app = false } = {}) {
   await page.setViewportSize({ width, height });
   await page.goto(PATH, { waitUntil: "load" });
+  await settled(page);
+  if (app) return;
+  await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
   await page.locator("[data-slot=landing]").waitFor();
 }
 
@@ -26,13 +45,52 @@ async function openWindow(page: Page, button: "See why it traded" | "Sign the gu
 }
 
 for (const width of WIDTHS) {
-  test(`${width} px: nothing scrolls sideways`, async ({ page }) => {
-    await open(page, width);
+  test(`${width} px: nothing scrolls sideways, on either tab`, async ({ page }) => {
+    await open(page, width, 900, { app: true });
     await page.evaluate(() => document.fonts.ready);
-    const { scroll, inner } = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
-    expect(scroll).toBeLessThanOrEqual(inner);
+    const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(await sideways()).toBeLessThanOrEqual(0);
+    await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
+    expect(await sideways()).toBeLessThanOrEqual(0);
   });
 }
+
+test("opens on the app itself, live: a press inside moves the address, the browser's Back and a typed address drive it, and it wears the page's theme", async ({ page }) => {
+  await open(page, 1440, 900, { app: true });
+  await expect(page.getByRole("tab", { name: "Inside the app" })).toHaveAttribute("aria-selected", "true");
+  const address = page.getByRole("textbox", { name: "Address", exact: true });
+  const frame = page.locator("iframe[title='Owlhead app, example workspace']");
+  await expect(frame).toHaveAttribute("data-ready", "true");
+  await expect(address).toHaveValue("https://app.owlhead.ai/");
+  const app = page.frameLocator("iframe[title='Owlhead app, example workspace']");
+  await expect(app.getByText("Account equity").first()).toBeVisible();
+  await app.getByRole("link", { name: "Agents" }).first().click();
+  await expect(address).toHaveValue("https://app.owlhead.ai/agents");
+  await expect(app.getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
+  const tools = page.getByRole("toolbar", { name: "Browser" });
+  await tools.getByRole("button", { name: "Back" }).click();
+  await expect(address).toHaveValue("https://app.owlhead.ai/");
+  await expect(tools.getByRole("button", { name: "Forward" })).toBeEnabled();
+  await address.fill("app.owlhead.ai/approvals");
+  await address.press("Enter");
+  await expect(address).toHaveValue("https://app.owlhead.ai/approvals");
+  await expect(app.getByRole("heading", { level: 1, name: "Approvals" })).toBeVisible();
+  expect(page.url(), "the page's own address stays where it was").toMatch(/\/welcome$/);
+  const modes = () => Promise.all([page.evaluate(() => document.documentElement.dataset.mode), frame.evaluate((f: HTMLIFrameElement) => f.contentDocument!.documentElement.dataset.mode)]);
+  const [pageMode, appMode] = await modes();
+  expect(appMode).toBe(pageMode);
+  await page.getByRole("button", { name: "Dark" }).click();
+  await expect.poll(async () => new Set(await modes()).size, "the app follows the page's theme").toBe(1);
+  expect((await modes())[0]).not.toBe(pageMode);
+});
+
+test("the skip link brings the home page to the front and lands on it", async ({ page }) => {
+  await open(page, 1440, 900, { app: true });
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tab", { name: "Owlhead Home Page" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#main")).toBeFocused();
+});
 
 test("no element draws a gradient", async ({ page }) => {
   await open(page, 1440);
@@ -45,6 +103,161 @@ test("no element draws a gradient", async ({ page }) => {
       .map((el) => el.outerHTML.slice(0, 120)),
   );
   expect(offenders).toEqual([]);
+});
+
+type Frame = { x: number; y: number; w: number; h: number; opacity: number } | null;
+
+/** Records the guestbook window's box on every frame from now on; `null` while it is hidden. */
+async function track(page: Page) {
+  await page.evaluate(() => {
+    const log: Frame[] = [];
+    Object.assign(window, { __frames: log });
+    const tick = () => {
+      const el = document.getElementById("win-guestbook");
+      if (!el || el.hidden) log.push(null);
+      else {
+        const r = el.getBoundingClientRect();
+        log.push({ x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, opacity: Number(getComputedStyle(el).opacity) });
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  return {
+    reset: () => page.evaluate(() => (window as unknown as { __frames: Frame[] }).__frames.splice(0)),
+    frames: () => page.evaluate(() => [...(window as unknown as { __frames: Frame[] }).__frames]),
+  };
+}
+
+const centre = async (page: Page, selector: string) => {
+  const b = (await page.locator(selector).boundingBox())!;
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height };
+};
+
+test("a window zooms out of the icon that opened it and into its taskbar button, as a Mac's do", async ({ page }) => {
+  await open(page, 1440);
+  const frames = await track(page);
+  const icon = await centre(page, "[data-slot=desktop-icons] li[data-app=guestbook]");
+  await frames.reset();
+  await page.locator("[data-slot=desktop-icons] li[data-app=guestbook] button").click();
+  await expect(page.locator("#win-guestbook")).toBeVisible();
+  await page.waitForTimeout(500);
+  const opening = (await frames.frames()).filter((f) => f !== null);
+  const first = opening[0]!;
+  const last = opening.at(-1)!;
+  expect(Math.abs(first.x - icon.x), "the first frame is centred on the icon").toBeLessThan(4);
+  expect(Math.abs(first.y - icon.y)).toBeLessThan(4);
+  expect(first.w, "and no wider than it").toBeLessThanOrEqual(icon.w + 1);
+  expect(first.opacity).toBeLessThan(0.2);
+  expect(opening.length, "over several frames, not a jump").toBeGreaterThan(5);
+  expect(opening.every((f, i) => i === 0 || f!.w >= opening[i - 1]!.w), "growing all the way").toBe(true);
+  expect(last.opacity).toBe(1);
+
+  const task = await centre(page, "[data-task=guestbook]");
+  await frames.reset();
+  await page.getByRole("button", { name: "Minimize guestbook.cgi" }).click();
+  await expect(page.locator("#win-guestbook")).toBeHidden();
+  const going = (await frames.frames()).filter((f) => f !== null);
+  const end = going.at(-1)!;
+  expect(going.length, "minimizing moves too").toBeGreaterThan(5);
+  expect(Math.abs(end.x - task.x), "and ends on the taskbar button").toBeLessThan(12);
+  expect(Math.abs(end.y - task.y)).toBeLessThan(12);
+  expect(end.h).toBeLessThanOrEqual(task.h + 1);
+});
+
+for (const os of ["windows", "mac"] as const) {
+  for (const width of [320, 390, 1440]) {
+    test(`${os}, ${width} px: Sign in and Sign up are named in the desktop's bar, uncovered, and Sign up opens the guestbook`, async ({ page }) => {
+      await page.context().addCookies([{ name: "owlhead-desktop", value: os, url: test.info().project.use.baseURL! }]);
+      await open(page, width, 800, { app: true });
+      const bar = page.locator(`[data-slot=${os === "mac" ? "menu-bar" : "taskbar"}] [data-slot=account-buttons]`);
+      const signIn = bar.getByRole("link", { name: "Sign in" });
+      const signUp = bar.getByRole("button", { name: "Sign up" });
+      for (const control of [signIn, signUp]) {
+        await expect(control).toBeInViewport({ ratio: 1 });
+        const box = (await control.boundingBox())!;
+        const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("a, button")?.textContent, [box.x + box.width / 2, box.y + box.height / 2]);
+        expect(hit, "nothing covers it").toBe(await control.textContent());
+      }
+      await expect(signIn).toHaveAttribute("href", "/login");
+      const spill = await page.locator(`[data-slot=${os === "mac" ? "menu-bar" : "taskbar"}]`).evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(spill, "and the bar still fits").toBe(0);
+      await signUp.click();
+      await expect(page.getByRole("region", { name: "guestbook.cgi" })).toBeVisible();
+    });
+  }
+}
+
+test("the Mac on the desktop redraws it as System 7, which the server keeps drawing, and a window collapses into the windows menu", async ({ page }) => {
+  await open(page, 1440);
+  await page.getByRole("list", { name: "Desktop, right" }).getByRole("button", { name: "Mac" }).click();
+  await expect(page.locator("[data-slot=menu-bar]")).toBeVisible();
+  await expect(page.locator("[data-slot=taskbar]")).toHaveCount(0);
+
+  const html = await (await page.request.get(PATH)).text();
+  expect(html, "the server draws the chosen desktop, so nothing swaps after the page paints").toContain('data-os="mac"');
+  await page.reload({ waitUntil: "load" });
+  await expect(page.locator("[data-slot=menu-bar]")).toBeVisible();
+  await settled(page);
+  const look = await page.evaluate(() => ({
+    shadow: getComputedStyle(document.getElementById("win-home")!).boxShadow,
+    radius: getComputedStyle(document.querySelector("[data-slot=hero-actions] button")!).borderRadius,
+    menus: getComputedStyle(document.querySelector("[data-slot=browser-menus]")!).display,
+    pattern: document.querySelector("[data-slot=desktop-pattern]") !== null,
+    painting: document.querySelector("[data-slot=wallpaper] img") !== null,
+    named: document.querySelector("[data-slot=desktop-icons-right] li:has([aria-describedby]) button")?.textContent,
+  }));
+  expect(look.shadow, "a window casts System 7's hard shadow").toMatch(/2px 2px 0px/);
+  expect(look.radius, "its buttons are round").toBe("6px");
+  expect(look.menus, "the browser's menus leave its window for the menu bar").toBe("none");
+  expect(look.pattern, "the desktop is a painting, never the grey pattern").toBe(false);
+  expect(look.painting).toBe(true);
+  expect(look.named, "the other computer's icon writes no name").toBe("");
+
+  const frames = await track(page);
+  await page.locator("[data-slot=desktop-icons] li[data-app=guestbook] button").click();
+  await expect(page.locator("#win-guestbook")).toBeVisible();
+  await page.waitForTimeout(500);
+  const menu = await centre(page, "[data-slot=window-menu]");
+  await frames.reset();
+  await page.getByRole("button", { name: "Minimize guestbook.cgi" }).click();
+  await expect(page.locator("#win-guestbook")).toBeHidden();
+  const going = (await frames.frames()).filter((f) => f !== null);
+  const end = going.at(-1)!;
+  expect(going.length, "collapsing moves").toBeGreaterThan(5);
+  expect(Math.abs(end.x - menu.x), "and ends on the windows menu").toBeLessThan(12);
+  expect(Math.abs(end.y - menu.y)).toBeLessThan(12);
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  const { scroll, inner } = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  expect(scroll, "nothing scrolls sideways at 320 px").toBeLessThanOrEqual(inner);
+
+  await page.locator("[data-bar=special]").click();
+  await page.getByRole("menu", { name: "Special" }).getByRole("menuitem", { name: "Change wallpaper…" }).click();
+  await page.getByRole("radio", { name: "Windows 98" }).dispatchEvent("click");
+  await expect(page.locator("[data-slot=taskbar]")).toBeVisible();
+});
+
+test("with motion reduced, or from the keyboard, a window opens where it stands without moving", async ({ browser }, info) => {
+  for (const reduced of [true, false]) {
+    const context = await browser.newContext({ reducedMotion: reduced ? "reduce" : "no-preference", colorScheme: info.project.use.colorScheme });
+    const page = await context.newPage();
+    await open(page, 1440);
+    const frames = await track(page);
+    await frames.reset();
+    const button = page.locator("[data-slot=hero-actions]").getByRole("button", { name: "Sign the guestbook" });
+    if (reduced) await button.click();
+    else {
+      await button.focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(page.locator("#win-guestbook")).toBeVisible();
+    await page.waitForTimeout(400);
+    const shown = (await frames.frames()).filter((f) => f !== null);
+    const sizes = new Set(shown.map((f) => `${Math.round(f!.x)},${Math.round(f!.y)},${Math.round(f!.w)}`));
+    expect(sizes.size, reduced ? "reduced motion: one place and size throughout" : "keyboard: one place and size throughout").toBe(1);
+    await context.close();
+  }
 });
 
 test("with motion reduced, the New tag holds still and stays visible", async ({ browser }, info) => {
@@ -73,10 +286,12 @@ test("the page barely shifts while it and its fonts load", async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { __cls: number }).__cls)).toBeLessThan(0.1);
 });
 
-test("the keyboard goes skip link, then the guide links, with a visible outline", async ({ page }) => {
-  await open(page, 1440);
+test("the keyboard goes skip link, the app's address, then the guide links, with a visible outline", async ({ page }) => {
+  await open(page, 1440, 900, { app: true });
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => (document.activeElement as HTMLElement).innerText.trim())).toBe("Skip to content");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("textbox", { name: "Address", exact: true }), "the app's address takes a typed one").toBeFocused();
   await page.keyboard.press("Tab");
   const first = await page.evaluate(() => {
     const el = document.activeElement as HTMLElement;

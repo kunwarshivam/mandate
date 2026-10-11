@@ -1,21 +1,22 @@
 import "./faces";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { BrandOwl } from "@/components/brand/brand-owl";
+import { OwlheadWordmark } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
-import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
+import { Browser, TabLink } from "./browser";
 import { Contents } from "./contents";
 import { Desktop } from "./desktop";
 import type { AppId } from "./windows";
-import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
+import { BODY, BOLD, BUTTON, H2, LINK, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
-import { Blink, Browser, UnderConstruction, Window } from "./retro";
+import { Blink, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
 export const SUBHEAD = "A trading agent for your own brokerage account. It does the reading and the watching, trades only inside rules you write, and writes down why it placed every order.";
-export const UPDATED = "5 October 2026";
 
 type Section = { id: string; title: string; body: ReactNode };
 
@@ -207,8 +208,9 @@ export function Landing() {
           <header className="grid justify-items-center gap-4 px-4 pt-8 pb-2 text-center sm:px-8 sm:pt-12">
             <h1>
               <span className="sr-only">{HEADLINE}</span>
-              <span aria-hidden className={cn(MONO, "block text-start text-[clamp(10px,4vw,28px)] leading-[0.95] whitespace-pre text-foreground")}>
-                {OWLHEAD_ASCII}
+              <span aria-hidden className="flex items-center gap-3 sm:gap-4" style={{ color: "var(--logo)" }} data-slot="wordmark">
+                <BrandOwl still className="size-14 sm:size-16" />
+                <OwlheadWordmark title="" className="h-10 w-auto sm:h-12" />
               </span>
             </h1>
             <Perch />
@@ -226,11 +228,13 @@ export function Landing() {
               <OpenApp app="record" className={BUTTON}>
                 See why it traded
               </OpenApp>
+              <TabLink tab="app" className={cn(PLAIN_BUTTON, "h-9")}>
+                Look inside the app
+              </TabLink>
               <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in
               </Link>
             </p>
-            <p className="text-[0.9375rem] text-muted-foreground">Last updated {UPDATED}.</p>
           </header>
 
           <hr className={cn(RULE, "mx-4 sm:mx-8")} />
