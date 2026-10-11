@@ -14,6 +14,7 @@ mandate-accounting.workspace = true
 mandate-alpaca.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
+mandate-domain.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
 mandate-modelhost.workspace = true

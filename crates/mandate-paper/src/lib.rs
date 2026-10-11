@@ -21,6 +21,8 @@
 //! registered rule set's interval (E1b, DEC-853 items 5 and 6, DEC-858). No product value is a
 //! constant here (FT-2).
 
+mod connection;
+
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -53,6 +55,10 @@ use mandate_shell::{Cause, Report, Setup, ShellError, Stage, Watch, production_c
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+
+pub use connection::{
+    Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
+};
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
 /// host (FT-3, FT-4).
@@ -114,6 +120,13 @@ pub enum PaperError {
     Configuration(ConfigRefusal),
     #[error("the model host refused: {0}")]
     Model(Refusal),
+    /// The connector choice from the connection record fails closed (G1a, DEC-529 item 3).
+    #[error(transparent)]
+    Connection(#[from] ConnectionRefusal),
+    /// DEC-529 item 3's lapse: a live run refuses an account that is not flat or a spent
+    /// connection record.
+    #[error(transparent)]
+    Lapse(#[from] LapseRefusal),
     #[error(transparent)]
     Shell(ShellError),
 }
