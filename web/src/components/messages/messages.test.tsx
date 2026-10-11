@@ -103,7 +103,7 @@ describe("the thread header's slug (critique C-16)", () => {
   const header = () => main().querySelector<HTMLElement>("[data-slot=thread-bar]")!;
   const slug = () => within(header()).getByText(twoStockSwing.name).closest("span")!;
 
-  it.skip("pending E11-9: on a phone, the thread header drops the slug while the owl and the name still say which agent it is (C-16)", () => {
+  it("pending E11-9: on a phone, the thread header drops the slug while the owl and the name still say which agent it is (C-16)", () => {
     renderThread(AGENT_IDS.swing);
     expect(slug()).toHaveClass(threadSlugClass());
     expect(shownOnPhone(slug()), "the slug is gone from the phone thread header").toBe(false);
@@ -111,7 +111,7 @@ describe("the thread header's slug (critique C-16)", () => {
     expect(shownOnPhone(within(header()).getByRole("link", { name: "Agent 2" })), "the name stays").toBe(true);
   });
 
-  it.skip("pending E11-9: from lg the header keeps the slug, and only the slug leaves the phone's row (C-16)", () => {
+  it("pending E11-9: from lg the header keeps the slug, and only the slug leaves the phone's row (C-16)", () => {
     renderThread(AGENT_IDS.swing);
     expect(threadSlugClass(), "the drop holds only below the bar's own lg boundary").toMatch(/^max-lg:hidden$/);
     expect(shownOnDesktop(slug()), "the desktop header keeps the slug").toBe(true);

@@ -14,5 +14,5 @@
  * (plan D's "Three nouns" item holds the naming).
  */
 export function threadSlugClass(): string {
-  throw new Error("Unimplemented: E11-9");
+  return "max-lg:hidden";
 }

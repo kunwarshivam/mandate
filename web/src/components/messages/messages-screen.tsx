@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { ThreadDesk } from "./desk";
 import { ThreadList } from "./inbox";
 import { ThreadRail } from "./rail";
+import { threadSlugClass } from "./thread-slug-class";
 import { ThreadChat } from "./thread";
 
 export type ThreadView = "chat" | "desk";
@@ -73,7 +74,7 @@ function ThreadBar({ agent, view }: { agent: Agent; view: ThreadView }) {
           </h2>
           <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground max-lg:text-caption">
             <ModeBadge mode={agent.mode} className="h-5 lg:hidden [&>svg]:size-5" />
-            <span className="truncate" translate="no">
+            <span className={cn("truncate", threadSlugClass())} translate="no">
               {agent.mandate.name}
             </span>
           </p>
