@@ -56,7 +56,6 @@ fn stop(reason: Reason) -> Outcome {
 /// arrive both ways (DEC-728 item 1, DEC-729 items 4, 5, 7 and 8) and each record follows the
 /// variant; the delivered attempt beside it carries `null`. Every record is version 2.
 #[test]
-#[ignore = "pending E8-10"]
 fn every_attempt_is_journaled_at_version_2_with_the_verdict_of_its_outcome_variant() -> Checked {
     let cases = [
         (retry(Reason::Timeout), "timeout", "retryable"),
@@ -100,7 +99,6 @@ fn every_attempt_is_journaled_at_version_2_with_the_verdict_of_its_outcome_varia
 /// refused by the journal, and the refused append stops the step before its next send (DEC-704
 /// item 3, DEC-706's rationale), with nothing recorded for it.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_outcome_whose_variant_contradicts_its_reasons_fixed_verdict_stops_the_step() -> Checked {
     let contradicting = [
         retry(Reason::AddressRejected),

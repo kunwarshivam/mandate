@@ -21,7 +21,7 @@
   (`Unavailable` on the issue batch, `Ambiguous` on an attempt) returns `NotCommitted` with no
   send or append after it. Per DEC-705, the kill switch's cause is the control-stream alert
   even when the subject streams are given as `[A1, A2, CTL]`.
-- **DEC-706 (journal spec v0.40 §9.15, rule 134; tests, pending E8-10):**
+- **DEC-706 (journal spec v0.40 §9.15, rule 134; implemented):**
   `crates/mandate-dispatcher/src/step/tests/verdict.rs` pins that the step journals every
   `NoticeAttempted` at version 2, its `verdict` taken from the `Outcome` variant (`provider_error`
   and `too_large` arriving both ways, a timeout `retryable`) and `null` on a delivered attempt;
@@ -29,7 +29,9 @@
   live, that a stored version-1 `failed` attempt ends its channel. `crates/mandate-journal/tests/notices.rs`
   pins version 2's closed schema, rule 134 against a table typed from the spec (every outcome and
   verdict, and a property over the other members), the refusal of version 1 on append as
-  `unknown_schema`, and, live, that a stored version-1 attempt still verifies. Each pending test
-  is a behaviour-only row in `xtask/behaviour-only/` until the implementation lands.
+  `unknown_schema`, and, live, that a stored version-1 attempt still verifies.
+  `crates/mandate-journal/src/notices.rs` registers version 2 and rule 134 and refuses version 1
+  at `append`, and the step's `attempt` writer (in `crates/mandate-dispatcher/src/step.rs`)
+  derives the `verdict` from the `Outcome` variant, never from the reason.
 - **Run:** `cargo nextest run -p mandate-dispatcher -p mandate-journal`; the pending ones with
   `--run-ignored ignored-only`.

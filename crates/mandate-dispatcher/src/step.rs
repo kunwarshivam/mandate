@@ -4,7 +4,8 @@
 //! once to each recipient's push channel, and journals each outcome as `NoticeAttempted`. Every
 //! append goes through a [`NoticeWriter`], which holds only an `ntf:` stream id, so the
 //! dispatcher cannot name an agent, account, or control stream. An append that does not commit
-//! stops the step before its next send.
+//! stops the step before its next send. Every `NoticeAttempted` is journaled at schema version 2,
+//! its `verdict` the outcome's own variant and never a reading of its reason (DEC-706).
 
 use std::collections::BTreeSet;
 
@@ -17,6 +18,10 @@ use mandate_notify::{
 use mandate_time::UtcNanos;
 
 use crate::DispatchError;
+
+/// The `NoticeAttempted` schema version `append` admits (journal spec v0.40 §9.15, DEC-706): every
+/// attempt is journaled at version 2, its `verdict` last, so no writer leaves the verdict out.
+const ATTEMPTED_VERSION: u64 = 2;
 
 /// The one handle the dispatcher appends through: a notice stream `ntf:{workspace_id}` and the
 /// writer epoch the dispatcher took for it (journal spec §5.1).
@@ -152,7 +157,7 @@ pub fn step(
                 ("stream_type", text("notice")),
                 ("workspace_id", text(workspace)),
             ])?;
-            drafts.push(draft(config, random, now, "StreamOpened", None, opened)?);
+            drafts.push(draft(config, random, now, "StreamOpened", None, 1, opened)?);
         }
         for cause in fresh {
             let kind = kind(&cause.kind).ok_or(NotifyError::Unrepresentable { what: "kind" })?;
@@ -165,7 +170,15 @@ pub fn step(
                 ("recipients", Value::Array(listed.clone())),
             ])?;
             let caused = Some(cause.event.as_str());
-            drafts.push(draft(config, random, now, "NoticeIssued", caused, payload)?);
+            drafts.push(draft(
+                config,
+                random,
+                now,
+                "NoticeIssued",
+                caused,
+                1,
+                payload,
+            )?);
         }
         append(journal, config.writer, before.head, now, &drafts)?;
     }
@@ -200,7 +213,15 @@ pub fn step(
                 let key = IdempotencyKey::of(&notice, &address)?;
                 let outcome = provider.send(config.origin, &notification, &address, &key)?;
                 let payload = attempt(&send, &outcome)?;
-                let attempted = draft(config, random, now, "NoticeAttempted", None, payload)?;
+                let attempted = draft(
+                    config,
+                    random,
+                    now,
+                    "NoticeAttempted",
+                    None,
+                    ATTEMPTED_VERSION,
+                    payload,
+                )?;
                 head = append(journal, config.writer, head, now, &[attempted])?;
             }
         }
@@ -208,17 +229,17 @@ pub fn step(
     Ok(())
 }
 
-/// The `NoticeAttempted` payload of a first attempt's `outcome` (spec §5.5, DEC-704 item 2):
-/// `accepted` is `delivered` with the provider's message id, and `retryable` and `permanent` are
-/// `failed` with the reason.
+/// The `NoticeAttempted` payload of a first attempt's `outcome` (spec §5.5, DEC-704 item 2,
+/// DEC-706): `accepted` is `delivered` with the provider's message id and no verdict, and
+/// `retryable` and `permanent` are `failed` with the reason and the verdict of their own variant,
+/// never a reading of the reason, which rule 134 holds to §5.2 to §5.4.
 fn attempt(send: &Send, outcome: &Outcome) -> Result<Value, DispatchError> {
-    let (status, reason, message) = match outcome {
+    let (status, reason, message, verdict) = match outcome {
         Outcome::Accepted {
             provider_message_id,
-        } => ("delivered", None, Some(provider_message_id.as_str())),
-        Outcome::Retryable { reason } | Outcome::Permanent { reason } => {
-            ("failed", Some(reason.key()?), None)
-        }
+        } => ("delivered", None, Some(provider_message_id.as_str()), None),
+        Outcome::Retryable { reason } => ("failed", Some(reason.key()?), None, Some("retryable")),
+        Outcome::Permanent { reason } => ("failed", Some(reason.key()?), None, Some("permanent")),
     };
     let (notice, recipient, channel) = send;
     let first = Int::new(1).ok_or(NotifyError::Unrepresentable { what: "attempt" })?;
@@ -231,6 +252,7 @@ fn attempt(send: &Send, outcome: &Outcome) -> Result<Value, DispatchError> {
         ("reason", reason.map_or(Value::Null, text)),
         ("provider_message_id", message.map_or(Value::Null, text)),
         ("coalesced_into", Value::Null),
+        ("verdict", verdict.map_or(Value::Null, text)),
     ])
 }
 
@@ -337,14 +359,15 @@ fn append(
     }
 }
 
-/// One notice-stream draft, its event id the ULID text of its own draw from `random` and its
-/// actor the dispatcher (DEC-704 items 5 and 6).
+/// One notice-stream draft at `schema_version`, its event id the ULID text of its own draw from
+/// `random` and its actor the dispatcher (DEC-704 items 5 and 6).
 fn draft(
     config: &Config<'_>,
     random: &mut dyn SecureRandom,
     now: UtcNanos,
     event_type: &str,
     causation: Option<&str>,
+    schema_version: u64,
     payload: Value,
 ) -> Result<Vec<u8>, DispatchError> {
     let mut bits = [0u8; 16];
@@ -356,13 +379,16 @@ fn draft(
         ("build", text(config.build)),
     ])?;
     let one = Int::new(1).ok_or(NotifyError::Unrepresentable { what: "draft" })?;
+    let version = Int::new(schema_version).ok_or(NotifyError::Unrepresentable {
+        what: "schema_version",
+    })?;
     let envelope = object([
         ("envelope_version", Value::Int(one)),
         ("environment", text(config.environment.as_str())),
         ("event_id", text(&encode_ulid(u128::from_be_bytes(bits)))),
         ("stream_id", text(config.writer.stream()?.as_str())),
         ("event_type", text(event_type)),
-        ("schema_version", Value::Int(one)),
+        ("schema_version", Value::Int(version)),
         ("event_time", text(&now.to_string())),
         ("clock_source", text("local")),
         ("causation_id", causation.map_or(Value::Null, text)),

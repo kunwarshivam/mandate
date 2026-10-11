@@ -1,9 +1,12 @@
-//! The alert and notice records journal spec v0.28 §9.15 closes at schema version 1 (DEC-720,
-//! DEC-795): the subject stream owner's `OwnerAlertSent` on the agent, account, and control streams,
-//! and the dispatcher's `StreamOpened`, `NoticeIssued`, and `NoticeAttempted` on the notice stream
-//! `ntf:{workspace_id}`, with the `notice_id`, `opaque`, and `kind` types, consistency rules 119
-//! to 129, and the batch rule 130. None of the four holds free text (`AGENTS.md` rule 6). Every rule
-//! only refuses a draft.
+//! The alert and notice records journal spec v0.40 §9.15 closes (DEC-720, DEC-795, and, for
+//! `NoticeAttempted`'s version 2 and rule 134, DEC-706): the subject stream owner's
+//! `OwnerAlertSent` on the agent, account, and control streams, and the dispatcher's
+//! `StreamOpened`, `NoticeIssued`, and `NoticeAttempted` on the notice stream `ntf:{workspace_id}`,
+//! with the `notice_id`, `opaque`, and `kind` types, consistency rules 119 to 129, the batch rule
+//! 130, and rule 134 at version 2. `append` admits `NoticeAttempted` only at version 2 (a stored
+//! version-1 record still verifies and still replays, §8), so no writer leaves the verdict out by
+//! writing the older shape. None of the four holds free text (`AGENTS.md` rule 6). Every rule only
+//! refuses a draft.
 
 use mandate_canon::Value;
 
@@ -74,6 +77,21 @@ const RECEIPTS: [&str; 3] = ["bounced", "complained", "unsubscribed"];
 /// The statuses of an attempt that sent nothing (rule 129).
 const QUIET: [&str; 2] = ["suppressed_quiet_hours", "deferred_quiet_hours"];
 
+/// Rule 134's fixed verdicts: each `failed` reason notifications spec §5.2 to §5.4 give one
+/// verdict (DEC-706 item 4). `provider_error` and `too_large` take either, as accepted decisions
+/// split them, and an `abandoned` attempt's two stops carry none.
+const FIXED: [(&str, &str); 9] = [
+    ("timeout", "retryable"),
+    ("rate_limited", "retryable"),
+    ("address_rejected", "permanent"),
+    ("auth_failed", "permanent"),
+    ("recipient_not_permitted", "permanent"),
+    ("address_missing", "permanent"),
+    ("bounced", "permanent"),
+    ("complained", "permanent"),
+    ("unsubscribed", "permanent"),
+];
+
 /// Whether §9.15 governs `event_type` on `stream`: every record of the notice stream, and the alert
 /// on the three streams the catalogue admits it on.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
@@ -91,13 +109,13 @@ pub(crate) fn schema(
         (ALERT, 1, _) => Some(&OWNER_ALERT_SENT),
         (OPENED, 1, StreamType::Notice) => Some(&NOTICE_STREAM_OPENED),
         (ISSUED, 1, _) => Some(&NOTICE_ISSUED),
-        (ATTEMPTED, 1, _) => Some(&NOTICE_ATTEMPTED),
+        (ATTEMPTED, 2, _) => Some(&NOTICE_ATTEMPTED),
         _ => None,
     }
 }
 
-/// Rules 119, 120, 122 to 124, and 126 to 129 on a payload its schema has normalized, in rule
-/// order: the first that fails is reported. `causation_id` is the envelope's.
+/// Rules 119, 120, 122 to 124, 126 to 129, and, at version 2, 134 on a payload its schema has
+/// normalized, in rule order: the first that fails is reported. `causation_id` is the envelope's.
 pub(crate) fn rules(
     event_type: &str,
     payload: &Value,
@@ -148,6 +166,16 @@ pub(crate) fn rules(
             ensure(
                 text("coalesced_into").is_none() || !QUIET.contains(&status),
                 "payload.coalesced_into",
+            )?;
+            let verdict = text("verdict");
+            ensure(verdict.is_some() == (status == "failed"), "payload.verdict")?;
+            let fixed = FIXED
+                .iter()
+                .find(|(fixed_reason, _)| Some(*fixed_reason) == reason)
+                .map(|(_, fixed_verdict)| *fixed_verdict);
+            ensure(
+                verdict.is_none_or(|v| fixed.is_none_or(|f| f == v)),
+                "payload.verdict",
             )
         }
         _ => Ok(()),
@@ -316,4 +344,8 @@ static NOTICE_ATTEMPTED: Ty = Ty::Record(&[
     ),
     ("provider_message_id", Ty::Nullable(&Ty::Text(is_opaque))),
     ("coalesced_into", Ty::Nullable(&Ty::Text(is_opaque))),
+    (
+        "verdict",
+        Ty::Nullable(&Ty::OneOf(&["retryable", "permanent"])),
+    ),
 ]);
