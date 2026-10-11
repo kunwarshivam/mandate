@@ -4,9 +4,10 @@
 //! seams — the `ask` the run waits on, read verbatim off the journal it appended to; the
 //! answers' fold handed to `grant` unchanged, in the journal's own order; the collar's own `x`
 //! the cross-check reads; the `Watched` the watch's LT-10 question observes; the cap its reads
-//! fail at; and the evidence named at the run's report. Every pending test fails at its stub
-//! until E7-26's wiring implementation lands (DEC-77); every fixture is a recorded row or a
-//! parsed decimal, holds no credential and reaches no host (ES-19, LT-1, `AGENTS.md` rule 8).
+//! fail at; and the evidence named at the run's report. These are the wiring's own pins, live
+//! since #1313 closed them; the seams' pins (#1308, DEC-912) live beside them in
+//! `live_run.rs`. Every fixture is a recorded row or a parsed decimal, holds no credential
+//! and reaches no host (ES-19, LT-1, `AGENTS.md` rule 8).
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
