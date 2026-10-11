@@ -527,7 +527,7 @@ fn missing_reordered_duplicated_and_truncated_ranges_fail_seq_gap() {
     swapped.swap(5, 6);
     let cases = [
         ("a deleted row", deleted, failed("seq_gap", 5, 4)),
-        ("a duplicated row", duplicated, failed("seq_gap", 4, 3)),
+        ("a duplicated row", duplicated, failed("seq_gap", 3, 2)),
         ("two swapped rows", swapped, failed("seq_gap", 6, 5)),
         (
             "a truncated read",
@@ -850,12 +850,24 @@ fn the_record_drafts_the_run_and_claims_no_cause() {
             Some(result),
             "{name}"
         );
+        let found_failure = range_at(&record, "failure").cloned();
         assert_eq!(
-            range_at(&record, "failure").map(|found| (
-                found.get("check").and_then(Value::as_str),
-                found.get("seq").and_then(Value::as_int),
-            )),
-            failed_check.map(|check| (Some(check), failed_seq)),
+            range_at(&record, "failure") == Some(&Value::Null),
+            failed_check.is_none(),
+            "{name}: `failure` is null exactly when the walk found none"
+        );
+        assert_eq!(
+            found_failure
+                .as_ref()
+                .and_then(|found| found.get("check").and_then(Value::as_str)),
+            failed_check,
+            "{name}"
+        );
+        assert_eq!(
+            found_failure
+                .as_ref()
+                .and_then(|found| found.get("seq").and_then(Value::as_int)),
+            failed_seq,
             "{name}"
         );
         assert_eq!(
@@ -1006,24 +1018,42 @@ fn the_result_rebuilds_from_the_record_alone() {
             ),
             "{name}: the served members rebuild from the record"
         );
+        let found_failure = range_at(&record, "failure").cloned();
         assert_eq!(
-            range_at(&record, "failure").map(|found| (
-                found.get("check").and_then(Value::as_str),
-                found.get("seq").and_then(Value::as_int),
-            )),
-            run.first_failure()
-                .map(|failure| (Some(failure.check), failure.seq)),
+            range_at(&record, "failure") == Some(&Value::Null),
+            run.first_failure().is_none(),
+            "{name}: the record's failure is null exactly when the run serves none (rule 111)"
+        );
+        assert_eq!(
+            found_failure
+                .as_ref()
+                .and_then(|found| found.get("check").and_then(Value::as_str)),
+            run.first_failure().map(|failure| failure.check),
             "{name}: the record's failure is the served first_failure (rule 111)"
         );
         assert_eq!(
-            range_at(&record, "incomplete").map(|incomplete| (
-                incomplete.get("check").and_then(Value::as_str),
-                incomplete.get("cause").and_then(Value::as_str),
-            )),
-            run.incomplete()
-                .map(|incomplete| (Some(incomplete.check()), Some(incomplete.cause.code()),)),
-            "{name}: the record's incomplete is the served one, and it is null on a range that \
-             is not incomplete (rule 132)"
+            found_failure
+                .as_ref()
+                .and_then(|found| found.get("seq").and_then(Value::as_int)),
+            run.first_failure().and_then(|failure| failure.seq),
+            "{name}: the first failure's position serves from the record (rule 111)"
+        );
+        assert_eq!(
+            range_at(&record, "incomplete") == Some(&Value::Null),
+            run.incomplete().is_none(),
+            "{name}: the record's incomplete is null on a range that is not incomplete (rule 132)"
+        );
+        assert_eq!(
+            range_at(&record, "incomplete")
+                .and_then(|incomplete| incomplete.get("check").and_then(Value::as_str)),
+            run.incomplete().map(|incomplete| incomplete.check()),
+            "{name}: only the token check can be incomplete (§11)"
+        );
+        assert_eq!(
+            range_at(&record, "incomplete")
+                .and_then(|incomplete| incomplete.get("cause").and_then(Value::as_str)),
+            run.incomplete().map(|incomplete| incomplete.cause.code()),
+            "{name}: the record's incomplete is the served one (DEC-789 item 7)"
         );
         let start = range_at(&record, "start").cloned().unwrap_or(Value::Null);
         let start_hash = start
