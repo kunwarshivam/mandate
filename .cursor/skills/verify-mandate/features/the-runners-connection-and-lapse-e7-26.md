@@ -10,11 +10,18 @@
   each refusal with its own reason code), re-exported by
   `crates/mandate-paper/src/lib.rs` as `PaperError`'s `Connection` and `Lapse` variants.
 - **Tests:** `crates/mandate-paper/tests/connection.rs`: the connection refusals (no record, a
-  revoked record — a revoked paper record included, an unreadable record, another environment,
-  another broker, another account stream, and the connector the default build does not hold,
-  which is LT-1's runtime build test) and the lapse pins (a spent record deploys nothing, a
-  non-flat account refuses ahead of the spend, and the unspent-and-flat pair is the one that
-  proceeds to the builder and the gate), each a pending test on its stub until E7-26's
-  implementation lands (DEC-77), beside a live test pinning every refusal's message and
-  reason code.
+  revoked record — a revoked paper record included, a lone revocation with no prior
+  establishment, a revocation of another connection refused never, and a re-establishment after
+  a revocation restoring the connection; the refusal order DEC-910 item 2 states, the
+  revocation before the unreadable record and the unreadable record before the environment
+  disagreement, the environment before the broker and the account stream, the broker before the
+  account stream; an unreadable record in each shape it refuses — a member missing, a version 1
+  record, a corrupt payload — another environment, another broker, another account stream, and
+  the connector the default build does not hold, which is LT-1's runtime build test) and the
+  lapse pins (a spent record deploys nothing, a fill on a stream the record does not bind
+  spending nothing, a non-flat account refusing ahead of the spend, the unspent-and-flat pair
+  proceeding to the builder and the gate, and a paper run making no check at all), each a
+  pending test on its stub until E7-26's implementation lands (DEC-77), beside a live test
+  pinning every refusal's message and reason code, and an agreeing paper record keeping the
+  whole paper connection, the account stream included.
 - **Run:** `cargo nextest run -p mandate-paper`.
