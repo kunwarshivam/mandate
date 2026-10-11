@@ -249,28 +249,57 @@ fn the_collars_own_aggressiveness_decides_the_agreement() {
 }
 
 /// DEC-529 item 12 (DEC-912 item 2, [DEC-163](../../../docs/project/04-decision-log.md#decisions)
-/// item 2): the collar's band ends round inward, exactly as `Price::collar_bound` rounds them —
-/// the buy's ceiling truncates down at the 9 places a price holds — so a price sitting exactly
-/// on the inward-rounded end stays inside and one grid step past it refuses: an IEX ask of
-/// 10.123456789 at a 1% collar prices an exact ceiling of 10.22469335689, which no price
-/// holds, and the band's end it keeps is 10.224693356.
+/// item 2): the collar's ceiling rounds inward, exactly as `Price::collar_bound` rounds it —
+/// the buy's ceiling truncates toward zero at the 9 places a price holds — so a price sitting
+/// exactly on the inward-rounded ceiling stays inside and one grid step past it refuses: an
+/// IEX ask of 10.123456789 at a 1% collar prices an exact ceiling of **10.22469135689**
+/// (10.123456789 × 101 ÷ 100, eleven places, which no price holds), and the end the band keeps
+/// is **10.224691356** — truncated toward zero, verified against `Price::collar_bound` itself.
 #[test]
 #[ignore = "pending E7-26"]
-fn the_collars_ends_round_inward_at_nine_places() {
+fn the_collars_ceiling_rounds_inward_at_nine_places() {
     let collar = Fraction::parse("0.01").expect("the collar fixture parses");
     let iex = Price::parse("10.123456789").expect("the iex ask parses");
-    let on_the_rounded_end = cross_check(
-        Some(Price::parse("10.224693356").expect("the broker ask parses")),
+    let on_the_rounded_ceiling = cross_check(
+        Some(Price::parse("10.224691356").expect("the broker ask parses")),
         Some(iex),
         collar,
     );
     let one_grid_step_past = cross_check(
-        Some(Price::parse("10.224693357").expect("the broker ask parses")),
+        Some(Price::parse("10.224691357").expect("the broker ask parses")),
         Some(iex),
         collar,
     );
     assert_eq!(
-        (on_the_rounded_end, one_grid_step_past),
+        (on_the_rounded_ceiling, one_grid_step_past),
+        (Ok(()), Err(QuoteRefusal::Disagreement))
+    );
+}
+
+/// DEC-529 item 12 (DEC-912 item 2, [DEC-163](../../../docs/project/04-decision-log.md#decisions)
+/// item 2): the collar's floor rounds inward too — a sell's floor rounds up, `Rounding::Ceiling`
+/// at the 9 places a price holds, as `Price::collar_bound(Adverse::Down)` rounds it — so the
+/// same IEX ask of 10.123456789 at a 1% collar prices an exact floor of **10.02222222111**
+/// (10.123456789 × 99 ÷ 100, eleven places, which no price holds), and the end the band keeps
+/// is **10.022222222**: a price sitting exactly on the inward-rounded floor stays inside and
+/// one grid step below it refuses, pinning the lower end as tightly as the ceiling test above.
+#[test]
+#[ignore = "pending E7-26"]
+fn the_collars_floor_rounds_inward_at_nine_places() {
+    let collar = Fraction::parse("0.01").expect("the collar fixture parses");
+    let iex = Price::parse("10.123456789").expect("the iex ask parses");
+    let on_the_rounded_floor = cross_check(
+        Some(Price::parse("10.022222222").expect("the broker ask parses")),
+        Some(iex),
+        collar,
+    );
+    let one_grid_step_below = cross_check(
+        Some(Price::parse("10.022222221").expect("the broker ask parses")),
+        Some(iex),
+        collar,
+    );
+    assert_eq!(
+        (on_the_rounded_floor, one_grid_step_below),
         (Ok(()), Err(QuoteRefusal::Disagreement))
     );
 }

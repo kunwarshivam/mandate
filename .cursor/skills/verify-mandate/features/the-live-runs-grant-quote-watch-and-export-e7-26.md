@@ -30,8 +30,9 @@
   as a difference), the cross-check pins (a broker quote within the collar proceeding; one
   beyond it in either direction refusing before any submission; a missing quote of either side
   refusing; the collar's own aggressiveness deciding the agreement — the same reads agreeing at
-  2% and refusing at 1%; the band's ends rounding inward at nine places as `Price::collar_bound`
-  rounds them, a price on the rounded end proceeding and one grid step past it refusing), the
+  2% and refusing at 1%; the band's ceiling and floor each rounding inward at the nine places a
+  price holds, as `Price::collar_bound` rounds them — a price on the inward-rounded ceiling or
+  floor proceeding and one grid step past either refusing), the
   watch pins (a terminal covered or flat entry ending the run; an uncovered quantity keeping it
   reading; an uncovered quantity ending only with its alert key reported; another interval's
   alert key — `stop_watchdog`, the other key of the notifications spec §4.2 `protection` row —
