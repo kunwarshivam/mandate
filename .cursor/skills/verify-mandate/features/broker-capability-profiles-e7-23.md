@@ -10,7 +10,10 @@
 - **Tests:** `crates/mandate-domain/tests/profile.rs` (each refusal, the canonical object and its
   SHA-256 written by hand, every member moving the hash, declaration order never moving it),
   `crates/mandate-alpaca/tests/profile.rs` (Alpaca's object by hand, §5.2's fractional rule, the
-  connector declaring without a broker call), and `crates/mandate-builder/tests/opening.rs`
+  connector declaring without a broker call, and — pending E7-26, DEC-854's precondition read as
+  DEC-911 — the crypto `limit` cells §5.2's row requires: exactly `gtc` and `ioc`, whole and
+  fractional, no protection form, and nothing else beside B2a's `stop_limit` cells), and
+  `crates/mandate-builder/tests/opening.rs`
   (B3: whole shares or nothing under the cap, the time in force and session in the
   intersection, an empty intersection refusing a buy and never an exit, deployment, and a property
   over generated profiles).
