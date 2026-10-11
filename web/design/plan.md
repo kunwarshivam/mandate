@@ -290,7 +290,7 @@ item above (C-3, C-9) are not repeated.
       subtitle drops "Rules". (C-20)
 - [ ] **One left edge across densities** on the audit screens. (C-17)
 - [x] **One paragraph per set of shared rules** on the Approvals rail. (C-12) Done in [#1189](https://github.com/kunwarshivam/mandate/pull/1189).
-- [ ] **The phone thread header without the slug.** (C-16)
+- [x] **The phone thread header without the slug.** (C-16) Done in [#1314](https://github.com/kunwarshivam/mandate/pull/1314).
 - [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
 - [x] **The brand owl never wears an agent's colour.** The founder decided it on 2026-10-09
       (DEC-739 item 2, amending DEC-452's "choose the color at random"): the brand owl wears
