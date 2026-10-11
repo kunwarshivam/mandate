@@ -1,9 +1,0 @@
-file = "crates/mandate-alpaca/tests/profile.rs"
-test = "cryptos_whole_limit_cell_lists_exactly_5_2s_gtc_and_ioc_and_no_protection_form"
-reason = """
-E7-26, DEC-854's precondition (DEC-911 items 1 and 3): `alpaca_profile` is implemented data
-and its crypto row declares no `limit` cell, so `CapabilityProfile::cell` answers `NotOffered`
-— the empty intersection B3's `opening_form` reads as `no_opening_form` — and the test fails
-on that answer rather than at any `Unimplemented` stub. The implementation PR that adds §5.2's
-crypto `limit` cells deletes this file with the test's `#[ignore]` line.
-"""

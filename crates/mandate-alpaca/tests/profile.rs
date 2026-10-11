@@ -1,6 +1,7 @@
-//! Alpaca's capability profile (E7-23 B1, B2a): trading spec §5.2's US equities rows and crypto's
-//! one resting stop-limit as data (DEC-531 items 5 and 6, DEC-630, DEC-838), handed to the executor
-//! through `BrokerConnector::profile` without a request to the broker.
+//! Alpaca's capability profile (E7-23 B1, B2a; E7-26 G1a's precondition): trading spec §5.2's US
+//! equities rows and crypto's one resting stop-limit and `limit` cells as data (DEC-531 items 5
+//! and 6, DEC-630, DEC-838, DEC-911), handed to the executor through `BrokerConnector::profile`
+//! without a request to the broker.
 
 mod common;
 
@@ -49,10 +50,16 @@ const ALPACA: &str = concat!(
     r#"],"session":"regular"}]}"#,
 );
 
-/// Crypto's row (E7-23 B2a): simple orders only, and its one resting stop-limit goes as `gtc`
-/// (§5.2), in whole and fractional quantities alike (DEC-838 item 3).
+/// Crypto's row (E7-23 B2a; E7-26 G1a's precondition): simple orders only, its one resting
+/// stop-limit goes as `gtc` (§5.2), in whole and fractional quantities alike (DEC-838 item 3),
+/// and its `limit` cells take `gtc` and `ioc` (§5.2, DEC-911 items 1 and 2), whole and
+/// fractional, with no protection form (DEC-911 item 3).
 const CRYPTO_ROW: &str = concat!(
     r#"{"asset_class":"crypto","cells":["#,
+    r#"{"order_type":"limit","protection_forms":[],"quantity_form":"fractional","#,
+    r#""times_in_force":["gtc","ioc"]},"#,
+    r#"{"order_type":"limit","protection_forms":[],"quantity_form":"whole","#,
+    r#""times_in_force":["gtc","ioc"]},"#,
     r#"{"order_type":"stop_limit","protection_forms":["stop_limit"],"quantity_form":"fractional","#,
     r#""times_in_force":["gtc"]},"#,
     r#"{"order_type":"stop_limit","protection_forms":["stop_limit"],"quantity_form":"whole","#,
@@ -272,12 +279,10 @@ fn alpacas_profile_protects_an_equity_by_oco_and_crypto_by_one_stop_limit() {
 /// G1a): §5.2's crypto row meets the opening policy in a whole-share `limit` cell that lists
 /// exactly the times in force the row names, `gtc` and `ioc`, and no protection form, since the
 /// row takes simple orders only and crypto's only rested protection is the one stop-limit the
-/// row above pins. Today the cell is absent and `CapabilityProfile::cell` answers `NotOffered`
-/// (reason code `profile_not_offered`), which B3's `opening_form` reads as `no_opening_form`
-/// (DEC-854 items 2 and 6): the empty intersection that refuses an Alpaca crypto mandate, whose
-/// one cause — DEC-854's consequence says — is this missing cell (LT-14).
+/// row's B2a cells pin. The cell is what B3's `opening_form` intersects with the opening policy
+/// (DEC-854 items 2 and 6), so its presence ends the empty intersection that used to refuse an
+/// Alpaca crypto mandate (LT-14).
 #[test]
-#[ignore = "pending E7-26"]
 fn cryptos_whole_limit_cell_lists_exactly_5_2s_gtc_and_ioc_and_no_protection_form() {
     let profile = alpaca_profile().unwrap();
     let no_protection_forms: BTreeSet<ProtectionForm> = [].into();
@@ -295,7 +300,8 @@ fn cryptos_whole_limit_cell_lists_exactly_5_2s_gtc_and_ioc_and_no_protection_for
             [TimeInForce::Gtc, TimeInForce::Ioc].into(),
             no_protection_forms
         )),
-        "DEC-911 items 1 and 3: the missing cell is the whole cause of the empty intersection"
+        "DEC-911 items 1 and 3: the whole-share `limit` cell offers exactly `gtc` and `ioc`, \
+         never a protection form"
     );
 }
 
@@ -306,7 +312,6 @@ fn cryptos_whole_limit_cell_lists_exactly_5_2s_gtc_and_ioc_and_no_protection_for
 /// §5.2's crypto times in force — and `ioc` sits beside `gtc` because §5.4's crypto adds are
 /// limit IOC orders on the same row.
 #[test]
-#[ignore = "pending E7-26"]
 fn cryptos_fractional_limit_cell_lists_exactly_5_2s_gtc_and_ioc_for_fractional_sizing() {
     let profile = alpaca_profile().unwrap();
     let no_protection_forms: BTreeSet<ProtectionForm> = [].into();
@@ -333,10 +338,9 @@ fn cryptos_fractional_limit_cell_lists_exactly_5_2s_gtc_and_ioc_for_fractional_s
 /// so the tighter set is taken), no `market` or `stop` cell (DEC-531 item 6: a row is added when
 /// a story reads it, and G1a's precondition reads the `limit` cells alone), and B2a's two
 /// `stop_limit` cells unchanged (DEC-838 item 3, so nothing here loosens their pins). The
-/// anchor asserts the `limit` cell first, so today the test refuses on the row's missing cell
-/// and nothing else: the `NotOffered` answer is the empty intersection itself.
+/// anchor asserts the `limit` cell first, so the row's limits are held to the cells the
+/// precondition names and nothing else.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_crypto_row_offers_only_the_two_limit_cells_and_b2as_stop_limit_cells() {
     let profile = alpaca_profile().unwrap();
     assert_eq!(
@@ -349,8 +353,8 @@ fn the_crypto_row_offers_only_the_two_limit_cells_and_b2as_stop_limit_cells() {
             )
             .map(|_| ()),
         Ok(()),
-        "the anchor: today the row answers `NotOffered` for the `limit` cell, the empty \
-         intersection DEC-854's consequence names"
+        "the anchor: the `limit` cell DEC-854's consequence requires, which ends the empty \
+         intersection that used to refuse an Alpaca crypto mandate"
     );
     assert_eq!(
         profile

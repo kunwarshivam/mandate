@@ -1,7 +1,8 @@
 //! Alpaca's capability profile: trading spec §5.2 as data (DEC-531 item 5, DEC-630).
 //!
 //! Only the rows the first live order and its protection read are declared (DEC-531 item 6): US
-//! equities in the regular session, and crypto's one resting stop-limit (E7-23 B2a, DEC-838).
+//! equities in the regular session, and crypto's one resting stop-limit (E7-23 B2a, DEC-838)
+//! with the `limit` cells its openings need (E7-26 G1a's precondition, DEC-854, DEC-911).
 
 use mandate_domain::{
     AssetClass, CapabilityProfile, Cell, Idempotency, MarketSession, OrderType, ProfileError,
@@ -21,6 +22,10 @@ use mandate_domain::{
 /// - Fractional and notional orders are `day` only and never in an OCO or bracket.
 /// - Crypto takes simple orders only, and Mandate sends its stop-limit as `gtc` only (§5.2): the
 ///   one resting stop-limit, in whole and fractional quantities alike (DEC-838 item 3).
+/// - Crypto's `limit` cells (E7-26 G1a's precondition, DEC-854, DEC-911) take `gtc` and `ioc`
+///   (§5.2's row), in whole and fractional quantities, with no protection form: the row is
+///   simple orders only, so a crypto limit is never a bracket's entry or an OCO's parent
+///   (DEC-911 item 3).
 ///
 /// Our `client_order_id` goes on the wire, a second order with one Alpaca holds is refused
 /// (`client::DUPLICATE_CLIENT_ORDER_ID`), and an order is read back by it
@@ -50,13 +55,24 @@ pub fn alpaca() -> Result<CapabilityProfile, ProfileError> {
     })
     .collect();
     let crypto = [QuantityForm::Whole, QuantityForm::Fractional]
-        .map(|quantity_form| Cell {
-            order_type: OrderType::StopLimit,
-            quantity_form,
-            times_in_force: [TimeInForce::Gtc].into(),
-            protection_forms: [ProtectionForm::StopLimit].into(),
+        .into_iter()
+        .flat_map(|quantity_form| {
+            [
+                Cell {
+                    order_type: OrderType::Limit,
+                    quantity_form,
+                    times_in_force: [TimeInForce::Gtc, TimeInForce::Ioc].into(),
+                    protection_forms: [].into(),
+                },
+                Cell {
+                    order_type: OrderType::StopLimit,
+                    quantity_form,
+                    times_in_force: [TimeInForce::Gtc].into(),
+                    protection_forms: [ProtectionForm::StopLimit].into(),
+                },
+            ]
         })
-        .into();
+        .collect();
     let rows = vec![
         Row {
             asset_class: AssetClass::UsEquity,
