@@ -1,9 +1,0 @@
-file = "crates/mandate-alpaca/tests/profile.rs"
-test = "the_crypto_row_offers_only_the_two_limit_cells_and_b2as_stop_limit_cells"
-reason = """
-E7-26, DEC-854's precondition (DEC-911 items 2 to 4): the row's only refusal today is the
-missing `limit` cell, which the test's anchor asserts first, so it fails on `NotOffered` —
-the empty intersection B3's `opening_form` reads as `no_opening_form` — rather than at any
-`Unimplemented` stub. The implementation PR that adds §5.2's crypto `limit` cells deletes
-this file with the test's `#[ignore]` line.
-"""

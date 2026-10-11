@@ -1,8 +1,0 @@
-file = "crates/mandate-alpaca/tests/profile.rs"
-test = "cryptos_fractional_limit_cell_lists_exactly_5_2s_gtc_and_ioc_for_fractional_sizing"
-reason = """
-E7-26, DEC-854's precondition (DEC-911 items 1 and 2): the fractional `limit` cell is missing
-from the implemented crypto row, so `CapabilityProfile::cell` answers `NotOffered` and the
-test fails on that answer rather than at any `Unimplemented` stub. The implementation PR that
-adds §5.2's crypto `limit` cells deletes this file with the test's `#[ignore]` line.
-"""
