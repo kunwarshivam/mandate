@@ -13,31 +13,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use mandate_backtest::Signal;
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError, FoldedEvent};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_risk::{Check, CheckOutcome, Verdict};
 use mandate_runtime::{
     AgentId, Autonomy, Command, Effect, EventId, Initiator, Input, IntentBody, IntentHandoff,
-    KillScope, Purpose,
+    KillScope, Observation, Purpose, RiskClock,
 };
 
 use super::doubles::{
-    FixedClassifier, FixedGate, FixedReconciler, FixedSignal, FixtureMandate, LedgerJournal,
-    OneShare, PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World,
-    account_stream, agent_stream, equities_only, passed_checks, setup, stub,
+    FixedClassifier, FixedGate, FixedReconciler, FixtureMandate, LedgerJournal, OneShare,
+    PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, account_stream,
+    agent_stream, equities_only, instrument, output, passed_checks, setup, stub,
 };
 use super::{Connector, Executor, ExitPath, JournalWriter, MandateSource, Protection, Stage};
 use crate::adapters::{Disconnected, Sources, over};
 use crate::error::{Cause, ShellError};
-use crate::tracer::{Report, Session, run};
+use crate::tracer::{ProductionCycle, Report, Session, run_observed};
 
-/// Runs the tracer over `world`'s ledger with `stages`, and returns the outcome.
-fn run_with(stages: &mut super::Stages) -> Result<Result<Report, ShellError>, String> {
+/// Runs one production cycle over `world`'s ledger with `stages`, handing the cycle the host's
+/// model output, which is the only strategy input the shell accepts (DEC-475 item 1).
+fn run_with(stages: super::Stages) -> Result<Result<Report, ShellError>, String> {
     let setup = setup()?;
-    Ok(run(stages, &setup))
+    let output = output().map_err(|cause| format!("the fixture output: {cause}"))?;
+    Ok(ProductionCycle::new(stages, setup).run(output))
+}
+
+/// [`run_with`] over a caller's `setup`, for the cases that change its flags.
+fn run_with_setup(
+    stages: super::Stages,
+    setup: &crate::tracer::Setup,
+) -> Result<Result<Report, ShellError>, String> {
+    let output = output().map_err(|cause| format!("the fixture output: {cause}"))?;
+    Ok(ProductionCycle::new(stages, setup.clone()).run(output))
 }
 
 fn refusal(outcome: Result<Report, ShellError>) -> Result<ShellError, String> {
@@ -50,11 +60,17 @@ fn refusal(outcome: Result<Report, ShellError>) -> Result<ShellError, String> {
 /// The per-stage assertions, made at the furthest boundary the stubbed stage could have reached
 /// (TI-2): the sink for stages up to it, the journal's `IntentProposed` for stages up to the
 /// journal, the `OrderSubmitted` for stages up to the executor, and the broker for all of them.
+/// `Stage::MarketData` has no stage double to stub: its refusal is the observation store's own
+/// check, so its case hands the cycle an observation whose data is not in the run's store and
+/// holds the same boundary over the agent stream's cycle records.
 fn assert_fails_closed(stage: Stage) -> Result<(), String> {
+    if stage == Stage::MarketData {
+        return assert_market_data_refuses();
+    }
     let world = World::default();
     let mut stages = world.stages();
     stub(&mut stages, stage, &world);
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     let tally = world.tally.borrow();
     let ledger = world.ledger.borrow();
     assert_eq!(error.stage(), Some(stage), "{stage}: {error}");
@@ -76,7 +92,7 @@ fn assert_fails_closed(stage: Stage) -> Result<(), String> {
     if stage.position() <= Stage::Executor.position() {
         assert_eq!(ledger.count("OrderSubmitted"), 0, "{stage}");
     }
-    if stage.position() <= Stage::Signal.position() {
+    if stage.position() < Stage::MarketData.position() {
         assert!(
             !tally.calls.contains(&Stage::Journal),
             "{stage} refuses before any stream exists"
@@ -97,7 +113,6 @@ fn assert_fails_closed(stage: Stage) -> Result<(), String> {
                 | Stage::ProtectionProbe
                 | Stage::Validate
                 | Stage::MarketData
-                | Stage::Signal
                 | Stage::Reconcile
                 | Stage::Size
                 | Stage::Classify
@@ -106,6 +121,46 @@ fn assert_fails_closed(stage: Stage) -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+/// The market-data boundary over the production door: an observation whose data is not in the
+/// run's store is refused as `market_data_untrusted`, with nothing about the cycle journaled —
+/// no observation, no model output, no decision, no intent — while the startup's own account
+/// records still committed (`AGENTS.md` rule 13, E15-13's slice H3).
+fn assert_market_data_refuses() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    let setup = setup()?;
+    let observation = Observation {
+        source: "alpaca_iex_daily_bars".to_owned(),
+        instrument_id: Some(instrument().map_err(|cause| format!("{cause}"))?),
+        as_of: RiskClock::from_secs(setup.now.secs()),
+        data_ref: Digest::of(b"closes the run never stored"),
+    };
+    let output = output().map_err(|cause| format!("{cause}"))?;
+    let error = refusal(run_observed(&mut stages, &setup, observation, output))?;
+    assert_eq!(error.code(), "market_data_untrusted", "{error}");
+    assert_eq!(error.stage(), Some(Stage::MarketData), "{error}");
+    let tally = world.tally.borrow();
+    let ledger = world.ledger.borrow();
+    assert_eq!(tally.submissions, 0);
+    assert_eq!(tally.hands, 0);
+    assert_eq!(tally.unrecorded_hands, 0);
+    assert_eq!(tally.unrecorded_submissions, 0);
+    for event in [
+        "ObservationRecorded",
+        "ModelOutputRecorded",
+        "DecisionMade",
+        "IntentProposed",
+        "OrderSubmitted",
+    ] {
+        assert_eq!(ledger.count(event), 0, "{event}");
+    }
+    assert!(
+        ledger.count("AccountStateObserved") > 0,
+        "the startup's own account report committed before the refusal"
+    );
     Ok(())
 }
 
@@ -128,7 +183,6 @@ fail_closed_cases! {
     stage_protection_probe => Stage::ProtectionProbe,
     stage_validate => Stage::Validate,
     stage_market_data => Stage::MarketData,
-    stage_signal => Stage::Signal,
     stage_reconcile => Stage::Reconcile,
     stage_size => Stage::Size,
     stage_classify => Stage::Classify,
@@ -165,7 +219,7 @@ fn only_the_two_probes_reduce_risk() {
 #[test]
 fn all_doubles_place_exactly_one_order() -> Result<(), String> {
     let world = World::default();
-    let report = run_with(&mut world.stages())?.map_err(|e| e.to_string())?;
+    let report = run_with(world.stages())?.map_err(|e| e.to_string())?;
     let tally = world.tally.borrow();
     let ledger = world.ledger.borrow();
     assert_eq!(tally.hands, 1);
@@ -271,9 +325,11 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
     let world = World::default();
     let mut stages = world.stages();
     for stage in Stage::ALL {
-        stub(&mut stages, stage, &world);
+        if stage != Stage::MarketData {
+            stub(&mut stages, stage, &world);
+        }
     }
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "exit_path_unavailable");
     let tally = world.tally.borrow();
     assert_eq!(tally.calls, [Stage::FlattenProbe]);
@@ -283,14 +339,14 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
     Ok(())
 }
 
-/// The production stages with no mandate file and no dataset refuse before anything could be sent:
+/// The production stages with no mandate file and no injected contexts refuse before anything
+/// could be sent:
 /// today at the first probe, and once the adapters are real at the protection probe or validation.
 #[test]
 fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
     let recorded_at = setup()?.now;
-    let mut stages = over(Sources {
+    let stages = over(Sources {
         mandate: PathBuf::from("no-such-mandate.json"),
-        dataset: PathBuf::from("no-such-dataset"),
         journal: None,
         recorded_at,
         agent: AgentId("tracer-aapl".to_owned()),
@@ -301,7 +357,7 @@ fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
         artifacts: None,
         transport: Box::new(Disconnected),
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     let stage = error.stage().ok_or(format!("{error}"))?;
     assert!(stage.position() <= Stage::Validate.position(), "{error}");
     assert_eq!(error.code(), stage.code());
@@ -315,7 +371,7 @@ fn refuses_to_start_while_protection_is_unimplemented() -> Result<(), String> {
     let world = World::default();
     let mut stages = world.stages();
     stub(&mut stages, Stage::ProtectionProbe, &world);
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "protection_unavailable");
     assert!(
         matches!(
@@ -440,7 +496,7 @@ fn a_submission_before_its_draft_never_reaches_the_broker() -> Result<(), String
         inverted: true,
         last_client_order_id: None,
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert!(
         matches!(
             error,
@@ -466,7 +522,7 @@ fn an_ambiguous_append_is_never_read_as_committed() -> Result<(), String> {
         inner: LedgerJournal(world.clone()),
         event_type: "OrderSubmitted",
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert!(
         matches!(
             &error,
@@ -508,7 +564,7 @@ fn an_ambiguous_account_report_never_runs_reconciliation_or_opens() -> Result<()
         inner: LedgerJournal(world.clone()),
         event_type: "AccountStateObserved",
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert!(matches!(
         &error,
         ShellError::Refused {
@@ -535,7 +591,7 @@ fn an_ambiguous_reconciliation_keeps_the_committed_account_and_never_opens() -> 
         inner: LedgerJournal(world.clone()),
         event_type: "ReconciliationRun",
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert!(matches!(
         &error,
         ShellError::Refused {
@@ -611,7 +667,7 @@ fn broker_unknown_then_absent_queries_and_never_resubmits() -> Result<(), String
         world: world.clone(),
         script: Script::UnknownThenAbsent,
     });
-    let report = run_with(&mut stages)?.map_err(|e| e.to_string())?;
+    let report = run_with(stages)?.map_err(|e| e.to_string())?;
     let tally = world.tally.borrow();
     assert_eq!(tally.submissions, 1);
     assert_eq!(tally.queries, 1);
@@ -629,7 +685,7 @@ fn an_uninterpretable_broker_answer_stops_and_is_not_handed_on() -> Result<(), S
         world: world.clone(),
         script: Script::Unreadable,
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "broker_answer_uninterpretable");
     assert!(error.to_string().contains("(wire)"), "{error}");
     let tally = world.tally.borrow();
@@ -648,7 +704,7 @@ fn a_request_that_was_not_sent_stops_the_run_and_is_never_asked_again() -> Resul
         world: world.clone(),
         script: Script::NotSent,
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(
         error.code(),
         "broker_request_not_sent",
@@ -671,7 +727,7 @@ fn reconcile_mismatch_pauses() -> Result<(), String> {
         world: world.clone(),
         clean: false,
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "reconciliation_mismatch");
     let ledger = world.ledger.borrow();
     assert_eq!(
@@ -698,8 +754,8 @@ fn reconcile_mismatch_pauses() -> Result<(), String> {
 #[test]
 fn a_restart_sends_nothing_and_a_repeat_run_is_refused() -> Result<(), String> {
     let world = World::default();
-    run_with(&mut world.stages())?.map_err(|e| e.to_string())?;
-    let error = refusal(run_with(&mut world.stages())?)?;
+    run_with(world.stages())?.map_err(|e| e.to_string())?;
+    let error = refusal(run_with(world.stages())?)?;
     assert_eq!(error.code(), "cycle_already_open");
     let tally = world.tally.borrow();
     let ledger = world.ledger.borrow();
@@ -741,10 +797,10 @@ fn a_denied_run_leaves_no_cycle_open() -> Result<(), String> {
         verdict: Verdict::Deny,
         checks: passed_checks(),
     });
-    let error = refusal(run_with(&mut denying)?)?;
+    let error = refusal(run_with(denying)?)?;
     assert_eq!(error.code(), "gate_refused");
     assert!(!world.ledger.borrow().bodies().is_empty());
-    let report = run_with(&mut world.stages())?.map_err(|e| e.to_string())?;
+    let report = run_with(world.stages())?.map_err(|e| e.to_string())?;
     assert_eq!(report.submitted.len(), 1);
     Ok(())
 }
@@ -754,10 +810,12 @@ fn a_denied_run_leaves_no_cycle_open() -> Result<(), String> {
 #[test]
 fn a_new_cycle_is_a_new_intent_with_a_new_id() -> Result<(), String> {
     let world = World::default();
-    run_with(&mut world.stages())?.map_err(|e| e.to_string())?;
+    run_with(world.stages())?.map_err(|e| e.to_string())?;
     let mut setup = setup()?;
     setup.new_cycle = true;
-    run(&mut world.stages(), &setup).map_err(|e| e.to_string())?;
+    run_with_setup(world.stages(), &setup)
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     let tally = world.tally.borrow();
     assert_eq!(tally.submissions, 2);
     let ids: Vec<&str> = tally
@@ -780,7 +838,7 @@ fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
         world: world.clone(),
         autonomy: Autonomy::Ask,
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "autonomy_not_auto");
     assert!(error.to_string().contains("classified ask"), "{error}");
     let ledger = world.ledger.borrow();
@@ -801,7 +859,7 @@ fn a_gate_denial_is_journaled_and_sends_nothing() -> Result<(), String> {
         verdict: Verdict::Deny,
         checks: passed_checks(),
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "gate_refused");
     assert!(error.to_string().contains("max_order_size"), "{error}");
     let ledger = world.ledger.borrow();
@@ -828,33 +886,21 @@ fn gate_allow_with_not_reached_refused() -> Result<(), String> {
         verdict: Verdict::Allow,
         checks,
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "gate_refused");
     assert!(error.to_string().contains("check_not_reached"), "{error}");
     assert_eq!(world.tally.borrow().hands, 0);
     Ok(())
 }
 
-/// PB-7: `Flat` while flat and `Undecided` produce no model output, so nothing is proposed and no
-/// stream is even opened.
-#[test]
-fn a_flat_or_undecided_signal_opens_nothing() -> Result<(), String> {
-    for signal in [Signal::Flat, Signal::Undecided] {
-        let world = World::default();
-        let mut stages = world.stages();
-        stages.signal = Box::new(FixedSignal {
-            world: world.clone(),
-            signal,
-        });
-        let error = refusal(run_with(&mut stages)?)?;
-        assert_eq!(error.code(), "no_long_signal", "{signal:?}");
-        assert!(world.ledger.borrow().bodies().is_empty(), "{signal:?}");
-    }
-    Ok(())
-}
-
 /// PB-14: a proposal of quantity zero is refused by the shell; a cap is the gate's, not the
 /// shell's, so nothing else about the proposal is judged here.
+///
+/// Where PB-7 went: a model that answers `Flat` or `Undecided` never reaches the shell, which
+/// decides only on the model host's `Long`, and no cycle can be opened on a not-`Long` answer
+/// because no such answer exists below the host (DEC-503 item 1, DEC-475 item 1); the shell's
+/// half of the rule is that nothing here could compute one. `mandate-modelhost` pins the host's
+/// refusals and `mandate-paper`'s `a_flat_model_stores_and_sends_nothing` ends its run there.
 #[test]
 fn proposal_sanity() -> Result<(), String> {
     let world = World::default();
@@ -863,7 +909,7 @@ fn proposal_sanity() -> Result<(), String> {
         world: world.clone(),
         qty: "0",
     });
-    let error = refusal(run_with(&mut stages)?)?;
+    let error = refusal(run_with(stages)?)?;
     assert_eq!(error.code(), "proposal_invalid");
     assert_eq!(world.ledger.borrow().count("DecisionMade"), 0);
     assert_eq!(world.tally.borrow().hands, 0);
@@ -880,7 +926,7 @@ fn a_non_paper_mandate_is_refused() -> Result<(), String> {
             world: world.clone(),
             environment,
         });
-        let error = refusal(run_with(&mut stages)?)?;
+        let error = refusal(run_with(stages)?)?;
         assert_eq!(error.code(), "non_paper_environment");
         assert!(world.ledger.borrow().bodies().is_empty());
     }
@@ -894,7 +940,9 @@ fn a_planning_run_stops_before_the_submission() -> Result<(), String> {
     let world = World::default();
     let mut setup = setup()?;
     setup.place_one_order = false;
-    let report = run(&mut world.stages(), &setup).map_err(|e| e.to_string())?;
+    let report = run_with_setup(world.stages(), &setup)
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     assert!(report.submitted.is_empty());
     let order = report.would_place.ok_or("no order reported")?;
     assert_eq!(order.qty.to_string(), "1");
@@ -908,8 +956,8 @@ fn a_planning_run_stops_before_the_submission() -> Result<(), String> {
 fn the_same_inputs_journal_byte_identical_drafts() -> Result<(), String> {
     let first = World::default();
     let second = World::default();
-    run_with(&mut first.stages())?.map_err(|e| e.to_string())?;
-    run_with(&mut second.stages())?.map_err(|e| e.to_string())?;
+    run_with(first.stages())?.map_err(|e| e.to_string())?;
+    run_with(second.stages())?.map_err(|e| e.to_string())?;
     let first = first.ledger.borrow().bodies();
     assert!(!first.is_empty());
     assert_eq!(first, second.ledger.borrow().bodies());
@@ -1172,7 +1220,7 @@ fn every_start_hands_the_executor_the_connectors_profile_after_the_fold() -> Res
             },
             log: Rc::clone(&log),
         });
-        let _ = run_with(&mut stages)?;
+        let _ = run_with(stages)?;
     }
     let log = log.borrow();
     let handed = format!("profile {}", profile.content_hash().to_hex());

@@ -15,7 +15,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_backtest::Signal;
 use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_domain::{
     CapabilityProfile, Cell, Idempotency, MarketSession, OrderType as ProfileOrderType,
@@ -37,8 +36,8 @@ use mandate_runtime::{
 use mandate_time::UtcNanos;
 
 use super::{
-    Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
-    ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stage, Stages,
+    Admitted, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
+    Protection, Reconciler, Sink, Sizing, Stage, Stages,
 };
 use crate::envelope::{IdSpace, Ids};
 use crate::error::Cause;
@@ -183,11 +182,6 @@ impl World {
                 world: self.clone(),
                 environment: Environment::Paper,
             }),
-            bars: Box::new(FixtureBars(self.clone())),
-            signal: Box::new(FixedSignal {
-                world: self.clone(),
-                signal: Signal::Long,
-            }),
             reconciler: Box::new(FixedReconciler {
                 world: self.clone(),
                 clean: true,
@@ -242,6 +236,44 @@ pub fn agent_stream() -> String {
 
 pub fn account_stream() -> String {
     crate::envelope::account_stream("tracer", "tracer-paper")
+}
+
+/// The pinned model the fixture mandate's envelope names. The fail-closed suite hands the cycle a
+/// `Long` of this identity, exactly as the model host hands the paper adapter its output
+/// (DEC-475 item 1); the shell computes no model answer and never sees a signal.
+pub const MODEL_ID: &str = "quant.ma_crossover";
+pub const MODEL_VERSION: &str = "1.0.0";
+
+/// The suite's model output: a `Long` on the fixture's pinned instrument at the run clock, fresh
+/// for a day (DEC-157 item 4).
+///
+/// # Errors
+/// [`Cause::Absent`] when the fixture's conviction or clock will not parse, which they always do.
+pub fn output() -> Result<mandate_runtime::ModelOutput, Cause> {
+    let parse = |what: &'static str| Cause::Absent { what };
+    let now = setup().map_err(|_| parse("the fixture clock"))?.now.secs();
+    let expires = now
+        .checked_add(86_400)
+        .ok_or(parse("the fixture clock's range"))?;
+    let as_of = mandate_runtime::RiskClock::from_secs(now);
+    Ok(mandate_runtime::ModelOutput {
+        model_id: MODEL_ID.to_owned(),
+        model_version: MODEL_VERSION.to_owned(),
+        content_hash: Digest::of(b"quant.ma_crossover:1.0.0"),
+        instrument_id: instrument()?,
+        as_of,
+        expires_at: mandate_runtime::RiskClock::from_secs(expires),
+        direction: mandate_runtime::ModelDirection::Long,
+        conviction: mandate_num::Conviction::parse("1").map_err(|_| parse("conviction 1"))?,
+        confidence: mandate_num::Unit::ONE,
+        horizon_s: 86_400,
+        thesis_ref: None,
+        evidence: Vec::new(),
+        invalidation: None,
+        thesis_id: None,
+        lineage_id: None,
+        ignored: None,
+    })
 }
 
 /// A profile unlike Alpaca's: one row, equities' whole-share limit order with its OCO, and no
@@ -416,43 +448,8 @@ impl MandateSource for FixtureMandate {
                 },
             },
             environment: self.environment,
-            model: ModelRef {
-                id: "quant.ma_crossover".to_owned(),
-                version: "1.0.0".to_owned(),
-                content_hash: Digest::of(b"quant.ma_crossover:1.0.0"),
-                max_output_age_s: 86_400,
-                params: BTreeMap::from([
-                    ("fast_periods".to_owned(), "5".to_owned()),
-                    ("slow_periods".to_owned(), "20".to_owned()),
-                ]),
-            },
-            symbol: "AAPL".to_owned(),
             governed: None,
         })
-    }
-}
-
-pub struct FixtureBars(pub World);
-
-impl Bars for FixtureBars {
-    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
-        let _ = (symbol, now);
-        self.0.called(Stage::MarketData);
-        let close = Price::parse("255.2").map_err(|_| Cause::Absent { what: "a close" })?;
-        Ok(vec![close; 25])
-    }
-}
-
-pub struct FixedSignal {
-    pub world: World,
-    pub signal: Signal,
-}
-
-impl SignalModel for FixedSignal {
-    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause> {
-        let _ = (model, closes);
-        self.world.called(Stage::Signal);
-        Ok(self.signal)
     }
 }
 
@@ -1035,13 +1032,15 @@ fn accepted(order: &SubmitOrder) -> Result<BrokerOrder, ConnectorError> {
 }
 
 /// Each stage's own crate's refusal, the stub the fail-closed suite puts in that stage's place.
+/// `Stage::MarketData` has no row: its refusal is not a stage double's but the observation store's
+/// own check, which [`Stubbed`] cannot stand in for; the suite's market-data case refuses by
+/// handing the cycle an observation whose data is not in the run's store.
 pub fn stub(stages: &mut Stages, stage: Stage, world: &World) {
     match stage {
         Stage::FlattenProbe => stages.exit = Box::new(Stubbed(world.clone(), stage)),
         Stage::ProtectionProbe => stages.protection = Box::new(Stubbed(world.clone(), stage)),
         Stage::Validate => stages.mandate = Box::new(Stubbed(world.clone(), stage)),
-        Stage::MarketData => stages.bars = Box::new(Stubbed(world.clone(), stage)),
-        Stage::Signal => stages.signal = Box::new(Stubbed(world.clone(), stage)),
+        Stage::MarketData => unreachable!("market data is refused by the store, not by a double"),
         Stage::Reconcile => stages.reconciler = Box::new(Stubbed(world.clone(), stage)),
         Stage::Size => stages.sizing = Box::new(Stubbed(world.clone(), stage)),
         Stage::Classify => stages.classifier = Box::new(Stubbed(world.clone(), stage)),
@@ -1054,7 +1053,7 @@ pub fn stub(stages: &mut Stages, stage: Stage, world: &World) {
 }
 
 /// The refusal each stage's own crate gives while it cannot answer. Where the crate is already
-/// implemented (market data, the signal) it is the error that crate gives for missing input.
+/// implemented it is the error that crate gives for missing input.
 pub fn crate_refusal(stage: Stage) -> Cause {
     match stage {
         Stage::FlattenProbe => Cause::Gate(mandate_risk::GateError::Unimplemented(
@@ -1066,9 +1065,8 @@ pub fn crate_refusal(stage: Stage) -> Cause {
         }
         Stage::Validate => Cause::Spec(mandate_spec::SpecError::Unimplemented),
         Stage::MarketData => Cause::Absent {
-            what: "the dataset has no partition for the instrument",
+            what: "the observation's stored data",
         },
-        Stage::Signal => Cause::Backtest(mandate_backtest::BacktestError::NoBars),
         Stage::Reconcile => {
             Cause::Executor(mandate_executor::ExecutorError::Unimplemented { story: "E7-3" })
         }
@@ -1126,20 +1124,6 @@ impl Protection for Stubbed {
 
 impl MandateSource for Stubbed {
     fn admitted(&self) -> Result<Admitted, Cause> {
-        self.refuse()
-    }
-}
-
-impl Bars for Stubbed {
-    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
-        let _ = (symbol, now);
-        self.refuse()
-    }
-}
-
-impl SignalModel for Stubbed {
-    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause> {
-        let _ = (model, closes);
         self.refuse()
     }
 }

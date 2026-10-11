@@ -4,7 +4,6 @@
 //! (`AGENTS.md` rules 6 and 7, TI-8): the upstream errors carried here name paths, codes, and story
 //! ids only.
 
-use mandate_backtest::{BacktestError, Signal};
 use mandate_builder::BuilderError;
 use mandate_executor::{ConnectorError, ExecutorError};
 use mandate_marketdata::dataset::DatasetError;
@@ -26,8 +25,6 @@ pub enum Cause {
     Unimplemented { story: &'static str },
     #[error(transparent)]
     Spec(#[from] SpecError),
-    #[error(transparent)]
-    Backtest(#[from] BacktestError),
     #[error(transparent)]
     Builder(#[from] BuilderError),
     #[error(transparent)]
@@ -55,9 +52,6 @@ pub enum Cause {
     /// An append answered neither `Committed` nor `AlreadyCommitted` (journal spec §5.1).
     #[error("the journal answered {outcome}")]
     Append { outcome: &'static str },
-    /// The signal answered, and its answer opens nothing.
-    #[error("the signal is {0:?}, which opens nothing")]
-    NotLong(Signal),
     /// The mandate admits no proposal of this autonomy without a person, and the tracer has no
     /// escalation (TI-9).
     #[error("the proposal classified {autonomy}, and the tracer acts only on auto")]
@@ -77,7 +71,6 @@ impl Cause {
         match self {
             Self::Unimplemented { .. } => "unimplemented",
             Self::Spec(e) => e.code(),
-            Self::Backtest(e) => e.code(),
             Self::Builder(e) => e.code(),
             Self::Gate(e) => e.code(),
             Self::GateAnswered { .. } => "gate_answered",
@@ -90,7 +83,6 @@ impl Cause {
             Self::Num(e) => e.code(),
             Self::Untrusted { .. } => "untrusted",
             Self::Append { .. } => "append_refused",
-            Self::NotLong(_) => "not_long",
             Self::NotAuto { .. } => "not_auto",
             Self::Absent { .. } => "absent",
             Self::Poisoned(_) => "poisoned",

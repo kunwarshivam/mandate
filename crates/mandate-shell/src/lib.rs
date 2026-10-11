@@ -32,13 +32,12 @@
 //! # State of this crate (DEC-77 stage 3, sliced by DEC-166)
 //!
 //! The adapters in [`adapters`] become real one slice at a time. The flatten and protection probes,
-//! stored bars, signal, mandate validation, sizing, classification, advisory gate, journal, sink,
-//! executor, connector, and reconciliation are live when their trusted inputs are injected. An
-//! absent run or executor context refuses before deciding or reading the broker. The paper adapter
-//! supplies both from [`paper`]'s one snapshot of broker GETs and stored data, and refuses before
-//! the run when any fact in it is missing, stale, or ambiguous (DEC-466, DEC-470). The effect
-//! runner, mappings, envelope, and host controls are the harness the fail-closed suite tests
-//! (DEC-157 item 1).
+//! mandate validation, sizing, classification, advisory gate, journal, sink, executor, connector,
+//! and reconciliation are live when their trusted inputs are injected. An absent run or executor
+//! context refuses before deciding or reading the broker. The paper adapter supplies both from
+//! [`paper`]'s one snapshot of broker GETs and stored data, and refuses before the run when any
+//! fact in it is missing, stale, or ambiguous (DEC-466, DEC-470). The effect runner, mappings,
+//! envelope, and host controls are the harness the fail-closed suite tests (DEC-157 item 1).
 
 pub mod adapters;
 pub mod control;
@@ -53,7 +52,7 @@ pub mod watch;
 
 pub use error::{Cause, ShellError};
 pub use stages::Stage;
-pub use tracer::{ProductionCycle, Report, Setup, run, run_observed, run_observed_watched};
+pub use tracer::{ProductionCycle, Report, Setup, run_observed, run_observed_watched};
 pub use watch::{Watch, close_window_bound, poll_interval};
 
 /// Assembles one production paper cycle. Callers provide deployment inputs and the paper transport;

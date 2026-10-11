@@ -3,17 +3,12 @@
 //! a verdict that permits an order (TI-3). There is no wildcard arm in this module, so a new
 //! variant in any upstream type fails to compile until it is mapped here.
 
-use mandate_accounting::InstrumentId;
-use mandate_backtest::Signal;
 use mandate_executor::{BrokerOutcome, ConnectorError};
-use mandate_num::{Conviction, Unit};
 use mandate_risk::{CheckOutcome, Decision, Verdict};
-use mandate_runtime::{
-    Autonomy, DryRunVerdict, ModelDirection, ModelOutput, Proposal, Purpose, RiskClock,
-};
+use mandate_runtime::{Autonomy, DryRunVerdict, Proposal, Purpose};
 
 use crate::error::{Cause, ShellError};
-use crate::stages::{ModelRef, Stage};
+use crate::stages::Stage;
 
 /// The reason code of an opening `Allow` that carries a check the gate never reached (TI-11).
 pub const CHECK_NOT_REACHED: &str = "check_not_reached";
@@ -133,48 +128,6 @@ pub fn broker_input(
     }
 }
 
-/// The model output a signal becomes (task brief step 4). Only `Long` opens: `Flat` while flat and
-/// `Undecided` produce no output at all (PB-7). A `Long` is conviction 1 at confidence 1, the whole
-/// of a single binary model's say (DEC-157 item 4); the builder does the sizing.
-pub fn model_output(
-    signal: Signal,
-    model: &ModelRef,
-    instrument: &InstrumentId,
-    now: RiskClock,
-) -> Result<ModelOutput, Cause> {
-    match signal {
-        Signal::Long => {
-            let expires = now
-                .secs()
-                .checked_add(model.max_output_age_s)
-                .ok_or(Cause::Absent {
-                    what: "the output's expiry is past the risk clock's range",
-                })?;
-            Ok(ModelOutput {
-                model_id: model.id.clone(),
-                model_version: model.version.clone(),
-                content_hash: model.content_hash,
-                instrument_id: instrument.clone(),
-                as_of: now,
-                expires_at: RiskClock::from_secs(expires),
-                direction: ModelDirection::Long,
-                conviction: Conviction::parse("1")?,
-                confidence: Unit::ONE,
-                horizon_s: u64::try_from(model.max_output_age_s).map_err(|_| Cause::Absent {
-                    what: "the output's horizon is negative",
-                })?,
-                thesis_ref: None,
-                evidence: Vec::new(),
-                invalidation: None,
-                thesis_id: None,
-                lineage_id: None,
-                ignored: None,
-            })
-        }
-        Signal::Flat | Signal::Undecided => Err(Cause::NotLong(signal)),
-    }
-}
-
 /// The name an autonomy is journaled and reported under.
 pub fn autonomy_name(autonomy: Autonomy) -> &'static str {
     match autonomy {
@@ -186,29 +139,19 @@ pub fn autonomy_name(autonomy: Autonomy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use mandate_backtest::{BacktestError, Signal};
     use mandate_builder::BuilderError;
-    use mandate_canon::Digest;
     use mandate_executor::{BrokerOutcome, BrokerUnknown, ConnectorError, ExecutorError};
     use mandate_num::{Price, Qty};
     use mandate_risk::{
         Check, CheckOutcome, Computed, Decision, GateError, Purpose as GatePurpose, ReasonCode,
         Verdict,
     };
-    use mandate_runtime::{
-        Autonomy, DryRunVerdict, ModelDirection, Proposal, Purpose, RiskClock, SinkError,
-    };
+    use mandate_runtime::{Autonomy, DryRunVerdict, Proposal, Purpose, SinkError};
     use mandate_spec::SpecError;
     use proptest::prelude::*;
 
-    use super::{
-        CHECK_NOT_REACHED, autonomy_of, broker_input, decided, model_output, proposal_of,
-        verdict_of,
-    };
+    use super::{CHECK_NOT_REACHED, autonomy_of, broker_input, decided, proposal_of, verdict_of};
     use crate::error::{Cause, ShellError};
-    use crate::stages::ModelRef;
 
     const CHECKS: [Check; 8] = [
         Check::AccountAndMode,
@@ -238,8 +181,6 @@ mod tests {
             Cause::Unimplemented { story: "E7-7" },
             Cause::Spec(SpecError::Unimplemented),
             Cause::Spec(SpecError::ClockWentBackwards),
-            Cause::Backtest(BacktestError::NoBars),
-            Cause::Backtest(BacktestError::StrategyWindowsCrossed),
             Cause::Builder(BuilderError::Unimplemented),
             Cause::Builder(BuilderError::CrossedQuote),
             Cause::Gate(GateError::Unimplemented("evaluate", "E6-6")),
@@ -261,8 +202,6 @@ mod tests {
                 reason: "closed".to_owned(),
             }),
             Cause::Append { outcome: "Fenced" },
-            Cause::NotLong(Signal::Flat),
-            Cause::NotLong(Signal::Undecided),
             Cause::NotAuto { autonomy: "ask" },
             Cause::Absent { what: "gap" },
             Cause::Poisoned("unimplemented".to_owned()),
@@ -430,56 +369,6 @@ mod tests {
             matches!(input, Ok(mandate_executor::Input::Broker(Ok(ref o))) if *o == absent),
             "{input:?}"
         );
-    }
-
-    fn model() -> ModelRef {
-        ModelRef {
-            id: "quant.ma_crossover".to_owned(),
-            version: "1.0.0".to_owned(),
-            content_hash: Digest::of(b"quant.ma_crossover:1.0.0"),
-            max_output_age_s: 86_400,
-            params: BTreeMap::new(),
-        }
-    }
-
-    #[test]
-    fn only_a_long_signal_becomes_a_model_output() -> Result<(), String> {
-        let instrument =
-            mandate_accounting::InstrumentId::new("AAPL").map_err(|e| e.to_string())?;
-        let now = RiskClock::from_secs(1_790_000_000);
-        for signal in [Signal::Flat, Signal::Undecided] {
-            let output = model_output(signal, &model(), &instrument, now);
-            assert!(
-                matches!(output, Err(Cause::NotLong(s)) if s == signal),
-                "{output:?}"
-            );
-        }
-        let output =
-            model_output(Signal::Long, &model(), &instrument, now).map_err(|e| e.to_string())?;
-        assert_eq!(output.model_id, "quant.ma_crossover");
-        assert_eq!(output.model_version, "1.0.0");
-        assert_eq!(output.content_hash, model().content_hash);
-        assert_eq!(output.as_of, now);
-        assert_eq!(output.expires_at, RiskClock::from_secs(1_790_086_400));
-        assert_eq!(output.direction, ModelDirection::Long);
-        assert_eq!(output.conviction.to_string(), "1");
-        assert_eq!(output.confidence.to_string(), "1");
-        assert_eq!(output.horizon_s, 86_400);
-        assert!(output.thesis_ref.is_none());
-        assert!(output.evidence.is_empty());
-        assert!(output.invalidation.is_none());
-        assert!(output.ignored.is_none());
-        let overflow = model_output(
-            Signal::Long,
-            &model(),
-            &instrument,
-            RiskClock::from_secs(i64::MAX),
-        );
-        assert!(
-            matches!(overflow, Err(Cause::Absent { .. })),
-            "{overflow:?}"
-        );
-        Ok(())
     }
 
     #[test]

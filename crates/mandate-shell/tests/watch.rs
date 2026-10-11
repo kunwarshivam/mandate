@@ -322,7 +322,6 @@ fn watched_to(now: &str, bound: &str, place: bool, door: Door, fill: Fill) -> Wa
     let (observation, output, store) = observed(now);
     let sources = Sources {
         mandate: file.clone(),
-        dataset: PathBuf::from("the-watched-cycle-reads-no-dataset"),
         journal: None,
         recorded_at: at(now),
         agent,

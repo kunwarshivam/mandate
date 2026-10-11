@@ -5,22 +5,18 @@
 //! `mandate_executor::Effect`, an `AppendOutcome` — so the shell's mappings in [`crate::map`] are
 //! tested over the values the real crates return, not over values the shell invented.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use mandate_backtest::Signal;
 use mandate_canon::Digest;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
 use mandate_journal::{AppendOutcome, ArtifactSource, Environment, StoredEvent};
-use mandate_num::Price;
 use mandate_risk::Decision;
 use mandate_runtime::{
     Classified, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal, RiskClock,
     SignalInputs,
 };
-use mandate_time::UtcNanos;
 
 use crate::error::Cause;
 
@@ -38,10 +34,12 @@ pub enum Stage {
     ProtectionProbe,
     /// Step 1: the mandate validates with no violation.
     Validate,
-    /// Step 2: the stored daily bars cover what the signal reads.
+    /// The market data a run decides on: an observation whose stored bytes are the run's, read
+    /// back and re-hashed from the run's own store before the runtime is handed anything (E15-13,
+    /// the brief's slice H3), and the trusted daily closes and liquidity facts the paper adapter
+    /// reads. Unlike the rest, a refusal here can arrive after the startup's own records, because
+    /// the streams are opened first; nothing about the cycle is ever decided.
     MarketData,
-    /// Step 3: E4-2's moving-average baseline.
-    Signal,
     /// Step 16, run at every start: the broker's truth is reconciled before anything opens.
     Reconcile,
     /// Step 5: the order builder's sizing.
@@ -64,12 +62,11 @@ impl Stage {
     /// Every stage, in path order. [`Stage::position`] is an exhaustive match, so a new variant does
     /// not compile until it has a position, and `every_stage_is_listed_once_in_path_order` fails
     /// until it is listed here.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 12] = [
         Self::FlattenProbe,
         Self::ProtectionProbe,
         Self::Validate,
         Self::MarketData,
-        Self::Signal,
         Self::Reconcile,
         Self::Size,
         Self::Classify,
@@ -87,15 +84,14 @@ impl Stage {
             Self::ProtectionProbe => 1,
             Self::Validate => 2,
             Self::MarketData => 3,
-            Self::Signal => 4,
-            Self::Reconcile => 5,
-            Self::Size => 6,
-            Self::Classify => 7,
-            Self::GateDryRun => 8,
-            Self::Journal => 9,
-            Self::Sink => 10,
-            Self::Executor => 11,
-            Self::Connector => 12,
+            Self::Reconcile => 4,
+            Self::Size => 5,
+            Self::Classify => 6,
+            Self::GateDryRun => 7,
+            Self::Journal => 8,
+            Self::Sink => 9,
+            Self::Executor => 10,
+            Self::Connector => 11,
         }
     }
 
@@ -111,7 +107,6 @@ impl Stage {
             Self::ProtectionProbe => "protection_unavailable",
             Self::Validate => "mandate_not_validated",
             Self::MarketData => "market_data_untrusted",
-            Self::Signal => "no_long_signal",
             Self::Reconcile => "reconciliation_unavailable",
             Self::Size => "no_proposal",
             Self::Classify => "autonomy_not_auto",
@@ -130,7 +125,6 @@ impl Stage {
             Self::FlattenProbe | Self::ProtectionProbe => true,
             Self::Validate
             | Self::MarketData
-            | Self::Signal
             | Self::Reconcile
             | Self::Size
             | Self::Classify
@@ -150,15 +144,12 @@ impl fmt::Display for Stage {
 }
 
 /// What the mandate stage admits: the runtime's view of a mandate that validated with no
-/// violation, its environment, and the signal model the envelope names.
+/// violation, its environment, and the registered policy set and model registry that govern the
+/// run, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Admitted {
     pub view: MandateView,
     pub environment: Environment,
-    pub model: ModelRef,
-    /// The pinned instrument's ticker, which stored bars are keyed by. The same pinned entry gives
-    /// the view's one instrument id.
-    pub symbol: String,
     /// The registered policy set and model registry that govern the run, or `None` when nothing
     /// does yet (DEC-484).
     pub governed: Option<GovernedRefs>,
@@ -171,19 +162,6 @@ pub struct Admitted {
 pub struct GovernedRefs {
     pub policy_set: Digest,
     pub model_registry: Digest,
-}
-
-/// A signal model as the mandate's envelope names it (mandate spec §8.1). The tracer feeds no model
-/// the mandate does not name (`AGENTS.md` rule 11).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelRef {
-    pub id: String,
-    pub version: String,
-    pub content_hash: Digest,
-    /// How long an output stays fresh, in whole seconds (`max_output_age_s`).
-    pub max_output_age_s: i64,
-    /// The model's `params`, key to value, exactly as the envelope states them.
-    pub params: BTreeMap<String, String>,
 }
 
 /// Step 17's flatten half, and the planner behind the runtime's infallible `FlattenPlanner`.
@@ -214,17 +192,6 @@ pub trait Protection {
 /// Step 1: the mandate, validated with no violation.
 pub trait MandateSource {
     fn admitted(&self) -> Result<Admitted, Cause>;
-}
-
-/// Step 2: the closing prices of every stored daily bar of the pinned instrument, by its ticker,
-/// oldest first, trusted through the last equity session completed by `now`.
-pub trait Bars {
-    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause>;
-}
-
-/// Step 3: the signal of the envelope's `model` at the close of the last period in `closes`.
-pub trait SignalModel {
-    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause>;
 }
 
 /// Step 5's sizing. `Ok(None)` is the builder's own "hold", which is an answer, not a failure.
@@ -314,8 +281,6 @@ pub struct Stages {
     pub exit: Box<dyn ExitPath>,
     pub protection: Box<dyn Protection>,
     pub mandate: Box<dyn MandateSource>,
-    pub bars: Box<dyn Bars>,
-    pub signal: Box<dyn SignalModel>,
     pub reconciler: Box<dyn Reconciler>,
     pub sizing: Box<dyn Sizing>,
     pub classifier: Box<dyn Classifier>,

@@ -156,10 +156,6 @@ def main():
     entry = Decimal(ASK)
     assert entry * (Decimal("1") - Decimal("0.05")) == Decimal("242.4400")
     assert entry * (Decimal("1") + Decimal("0.1")) == Decimal("280.720")
-    (HERE / "model-artifact.json").write_bytes(MODEL_ARTIFACT)
-    assert hashlib.sha256((HERE / "model-artifact.json").read_bytes()).hexdigest() == H_MA.removeprefix(
-        "sha256:"
-    )
     registry = dict(REGISTRY)
     registry["quant.ma_crossover"] = {
         "version": "1.0.0",

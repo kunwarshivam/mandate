@@ -1,5 +1,5 @@
-//! The tracer's one pass (task brief, "The path, step by step") and the effect runner that performs
-//! what the two cores describe.
+//! The effect runner that performs what the two cores describe, over one production cycle
+//! (`mandate_runtime::Input::ModelOutput` is the strategy boundary, DEC-475 item 1).
 //!
 //! The runner is where `AGENTS.md` rule 5 becomes mechanical: it appends each `Effect::Journal`
 //! and stops at the first append that is neither `Committed` nor `AlreadyCommitted`, it hands an
@@ -56,28 +56,6 @@ pub struct Report {
     pub would_place: Option<mandate_executor::SubmitOrder>,
     /// The message key of every alert the cores raised, in order. Keys only (`AGENTS.md` rule 6).
     pub alerts: Vec<&'static str>,
-}
-
-/// One pass of the tracer. Step 17 runs first: the exit path is probed before anything is armed,
-/// so the tracer never opens a position whose exit it could not have planned (TI-4).
-///
-/// # Errors
-/// Every [`ShellError`] is a stop after which nothing further is sent.
-pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
-    let admitted = admit(stages)?;
-    let instrument = pinned(&admitted.view)?;
-    let closes = stages
-        .bars
-        .closes(&admitted.symbol, setup.now)
-        .map_err(refused(Stage::MarketData))?;
-    let signal = stages
-        .signal
-        .signal(&admitted.model, &closes)
-        .map_err(refused(Stage::Signal))?;
-    let clock = RiskClock::from_secs(setup.now.secs());
-    let output = map::model_output(signal, &admitted.model, &instrument, clock)
-        .map_err(refused(Stage::Signal))?;
-    execute_cycle(stages, setup, &admitted, None, output)
 }
 
 /// One pass over the model host's observation and its output (E15-13, the brief's slice H3,

@@ -26,7 +26,10 @@ pub const MANDATE: &str = include_str!("../fixtures/tracer/mandate.json");
 pub const FEE: &str = include_str!("../fixtures/tracer/config/fee-config.json");
 pub const CALENDAR: &str = include_str!("../fixtures/tracer/config/trading-calendar.json");
 pub const RULES: &str = include_str!("../fixtures/tracer/config/rule-set.json");
-pub const E7_7_MODEL: &[u8] = include_bytes!("../fixtures/tracer/config/model-artifact.json");
+/// The E7-7 model artifact's bytes, inlined from the deleted fixture: their digest is the hash the
+/// E7-7 mandate pins and `spy_mandate` replaces, and their `{"id","version"}` shape is what a
+/// DEC-504 content object is not (DEC-475 item 6, X-4).
+pub const E7_7_MODEL: &[u8] = b"{\"id\":\"quant.ma_crossover\",\"version\":\"1.0.0\"}\n";
 pub const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 pub const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 pub const SNAPSHOT: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-09-21T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;

@@ -2,10 +2,13 @@
 
 Planned by [the E7-7 task brief](../../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
 tests PR (DEC-157) landed the fail-closed crate, and the consolidated implementation in
-[PR #598](https://github.com/kunwarshivam/mandate/pull/598) wires the validated mandate,
-freshness-bounded stored bars, signal, builder, advisory and binding gates, runtime, memory/Postgres
-journal, executor, Alpaca paper connector, and startup/restart reconciliation through the real
-crates.
+[PR #598](https://github.com/kunwarshivam/mandate/pull/598) wired the validated mandate, the
+builder, the advisory and binding gates, the runtime, the memory/Postgres journal, the executor,
+the Alpaca paper connector, and the startup/restart reconciliation through the real crates. The
+E7-7 one-shot assembly — the `mandate-tracer` binary, its command line, its recorded suites,
+its file artifacts, its tracer signal path and its `mandate-backtest` dependency — is deleted
+under DEC-475 item 6; the shell's core below is what remains, and it now serves the paper
+adapter's production door.
 
 - **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
   intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
@@ -31,9 +34,9 @@ crates.
   IEX minute bars, DEC-471) and the liquidity facts into one `PaperFacts` snapshot, refuses any
   missing, stale, or ambiguous fact or a non-clean account, and assembles the trusted run and
   executor contexts from that snapshot alone (DEC-470); `src/adapters.rs` the production adapters:
-  `StoredBars`, `MovingAverage`,
   `AlpacaConnector`, `RiskExitPath`, the validated mandate, builder, gate, journal, executor, and
-  reconciler. The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
+  reconciler, and the trusted daily bars and typed closes the paper assembly reads
+  (`trusted_daily_bars`, `trusted_daily_closes`). The risk exit plans over the journal, stream, clock, and agent the run's bridge hands
   it (DEC-449, amended by DEC-451). It holds no trading logic—no sizing, gating, pricing, state
   machine, or arithmetic on money or quantity—and binds the owning crates directly. E7-7's
   `mandate-tracer` binary, its command line, and its recorded tests are deleted (DEC-475 item 6):
@@ -50,8 +53,9 @@ crates.
   shadow order book over the committed bytes, and the host, transport, and defaulting-combinator
   source scans; `src/map.rs`'s properties that no source error or gate answer maps to a permitting
   verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11);
-  `src/adapters.rs`'s cases for the stored-data trust rule, the crossover's envelope windows, and the
-  purpose-flag and ownerless-exit mappings of the flatten adapter; `tests/flatten_probe.rs` the
+  `src/adapters.rs`'s cases for the stored-data trust rule (read oldest first, the session bound,
+  the manifest-first read, and each untrusted dataset) and the purpose-flag and ownerless-exit
+  mappings of the flatten adapter; `tests/flatten_probe.rs` the
   flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451). E7-7's recorded
   end-to-end suites are deleted with the binary (DEC-475 item 6): `tests/tracer.rs`'s production
   path over recorded Alpaca paper responses (whose `outlier_close` pending case went with the file

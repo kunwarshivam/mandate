@@ -198,7 +198,6 @@ fn sources(now: &str, store: Option<Store>) -> (Sources<Broker>, Setup, Rc<Cell<
     let posts = Rc::clone(&broker.posts);
     let sources = Sources {
         mandate: file.clone(),
-        dataset: PathBuf::from("the-observed-cycle-reads-no-dataset"),
         journal: None,
         recorded_at: at(now),
         agent,
