@@ -26,6 +26,7 @@ mod evidence;
 mod grant;
 mod lt10;
 mod quote;
+mod wiring;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -67,6 +68,7 @@ pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, grant};
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
+pub use wiring::{answers, asked, collar_x, reported, session_cap, watched};
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
 /// host (FT-3, FT-4).
