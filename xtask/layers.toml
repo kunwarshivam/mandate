@@ -58,9 +58,10 @@
 #   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
-#   8  mandate-shell, the process shell and the `mandate-tracer` binary (E7-7, DEC-138): the lowest
-#      layer that sees both `mandate-backtest` (7, the tracer's signal) and the order path
-#      (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`); and mandate-modelhost, the
+#   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
+#      deleted with the tracer's signal path, DEC-475 item 6): the lowest layer that sees the
+#      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
+#      mandate-modelhost, the
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector

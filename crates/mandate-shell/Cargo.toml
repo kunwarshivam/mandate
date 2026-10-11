@@ -12,7 +12,6 @@ workspace = true
 [dependencies]
 mandate-accounting.workspace = true
 mandate-alpaca.workspace = true
-mandate-backtest.workspace = true
 mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true

@@ -1,8 +1,7 @@
-//! The reviewed E7-7 artifacts, each read once and judged on the bytes hashed into the executor's
-//! config references (DEC-470 item 2).
+//! The reviewed production inputs, each read once from the confirmed version and the effective
+//! registrations and judged on the bytes hashed into the executor's config references
+//! (DEC-470 item 2; E19-11, DEC-505).
 
-use std::fs;
-use std::path::Path;
 use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
@@ -15,7 +14,7 @@ use mandate_risk::{EtpClass, Exchange as GateExchange, GateConfig};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
-use super::{INSTRUMENT_ID, MODEL_ID, MODEL_VERSION, SYMBOL, absent, usd};
+use super::{absent, usd};
 use crate::control::{Configuration, ConfirmedVersion, SnapshotExchange};
 use crate::error::Cause;
 
@@ -98,20 +97,12 @@ struct Artifact {
 }
 
 impl Artifacts {
-    /// Loads production artifacts without selecting an instrument or model in the shell.
-    ///
-    /// # Errors
-    /// [`Cause::Absent`] for an incomplete, mismatched, or unsupported reviewed input.
-    pub fn load_production(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
-        Self::load_inputs(mandate_path, config_dir)
-    }
-
     /// The run's artifacts from the confirmed version and the effective registrations on the
     /// control stream (E19-11, DEC-505), never from a file: the mandate and its one pinned model,
     /// whose registered content is a DEC-504 content object (`kind` `quant_model_content`) naming
-    /// the pin's own `model_id` and `model_version` under the pinned hash, with no fallback to the
-    /// E7-7 file's shape; the registered fee schedule, calendar and rule set, each judged as
-    /// `load_production` judges its file; and the instrument from the DEC-523 snapshot, which must
+    /// the pin's own `model_id` and `model_version` under the pinned hash; the registered fee
+    /// schedule, calendar and rule set, each judged as its file
+    /// was; and the instrument from the DEC-523 snapshot, which must
     /// be the mandate's pinned asset and symbol. The config references hash the registered bytes,
     /// so the executor journals the objects the stream names (E7-19 slice 2 remainder, the brief's
     /// Q1, X-8). It needs no credential, so it runs before the preflight.
@@ -189,114 +180,6 @@ impl Artifacts {
             model_version: model.version.clone(),
             model_hash: model.content_hash,
             mandate,
-            fees,
-            instrument,
-            quote_max_age,
-            config_refs,
-            gate_config,
-            executor_config,
-        })
-    }
-
-    /// Loads the temporary E7-7 AAPL adapter's reviewed artifacts.
-    ///
-    /// # Errors
-    /// [`Cause::Absent`] unless the production inputs also match the legacy E7-7 deployment.
-    pub fn load(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
-        let loaded = Self::load_inputs(mandate_path, config_dir)?;
-        let identity = loaded.production_identity();
-        if !legacy_identity(&identity) {
-            return Err(absent("the reviewed E7-7 production inputs"));
-        }
-        Ok(loaded)
-    }
-
-    fn load_inputs(mandate_path: &Path, config_dir: &Path) -> Result<Self, Cause> {
-        let mandate_bytes = fs::read(mandate_path).map_err(|_| absent("the mandate artifact"))?;
-        let mandate_value = mandate_canon::parse(&mandate_bytes)
-            .map_err(|_| absent("a canonical mandate artifact"))?;
-        let mandate = mandate_spec::Mandate::parse(&mandate_value)
-            .map_err(|_| absent("a parsed mandate artifact"))?;
-        if mandate.environment != mandate_domain::Environment::Paper {
-            return Err(absent("a paper mandate artifact"));
-        }
-        let [pinned] = mandate.universe.pinned_instruments.as_slice() else {
-            return Err(absent("one pinned production instrument"));
-        };
-        if pinned.asset_class != DomainAssetClass::UsEquity {
-            return Err(absent("a supported production instrument"));
-        }
-        let [model] = mandate.behavior.signal_models.as_slice() else {
-            return Err(absent("the one reviewed signal model"));
-        };
-        let model_artifact = artifact(config_dir, "model-artifact.json", &["id", "version"])?;
-        require_text(&model_artifact.value, "id", model.id.as_str())?;
-        require_text(&model_artifact.value, "version", &model.version)?;
-        if model.content_hash != Digest::of(&model_artifact.bytes) {
-            return Err(absent("the reviewed model artifact"));
-        }
-        let model_id = model.id.as_str().to_owned();
-        let model_version = model.version.clone();
-        let model_hash = model.content_hash;
-
-        let fee = artifact(config_dir, "fee-config.json", FEE_MEMBERS)?;
-        let calendar_artifact = artifact(config_dir, "trading-calendar.json", CALENDAR_MEMBERS)?;
-        let fees = fees(&fee, &calendar_artifact)?;
-
-        let instrument_artifact = artifact(
-            config_dir,
-            "instrument-snapshot.json",
-            &[
-                "asset_class",
-                "etp",
-                "etp_classified_at",
-                "exchange",
-                "increment",
-                "instrument_id",
-                "symbol",
-            ],
-        )?;
-        let reviewed = &instrument_artifact.value;
-        require_text(reviewed, "instrument_id", pinned.asset_id.as_str())?;
-        require_text(reviewed, "symbol", &pinned.symbol)?;
-        require_text(reviewed, "asset_class", "us_equity")?;
-        require_text(reviewed, "increment", "whole")?;
-        require_text(reviewed, "etp", "plain")?;
-        let (broker_exchange, gate_exchange) = exchanges(required_text(reviewed, "exchange")?)?;
-        let etp_classified_at =
-            UtcNanos::parse_rfc3339(required_text(reviewed, "etp_classified_at")?)
-                .map_err(|_| absent("the instrument's ETP classification date"))?;
-        let instrument = ReviewedInstrument {
-            asset_id: pinned.asset_id.clone(),
-            symbol: InstrumentId::new(&pinned.symbol)
-                .map_err(|_| absent("the reviewed instrument symbol"))?,
-            asset_class: DomainAssetClass::UsEquity,
-            broker_exchange,
-            gate_exchange,
-            increment: ShareIncrement::Whole,
-            increment_qty: Qty::parse(WHOLE_SHARE)?,
-            etp: EtpClass::Plain,
-            etp_classified_at,
-        };
-
-        let rules = artifact(config_dir, "rule-set.json", RULE_MEMBERS)?;
-        let (quote_max_age, gate_config, executor_config) = rule_set(&rules)?;
-
-        let canonical_mandate = mandate
-            .canonical_bytes()
-            .map_err(|_| absent("the mandate's canonical artifact"))?;
-        let config_refs = BindingGateConfigRefs::complete(
-            reference(&fee.bytes),
-            reference(&calendar_artifact.bytes),
-            reference(&instrument_artifact.bytes),
-            reference(&rules.bytes),
-            reference(&canonical_mandate),
-        );
-        Ok(Self {
-            mandate,
-            model_id,
-            model_version,
-            model_hash,
             fees,
             instrument,
             quote_max_age,
@@ -533,13 +416,6 @@ fn rule_set(rules: &Artifact) -> Result<(Duration, GateConfig, ExecutorConfig), 
     ))
 }
 
-/// Reads `name` once. Its members must be exactly `members`, which are listed in canonical order.
-fn artifact(config_dir: &Path, name: &str, members: &[&str]) -> Result<Artifact, Cause> {
-    let bytes =
-        fs::read(config_dir.join(name)).map_err(|_| absent("a required config artifact"))?;
-    artifact_from(bytes, members)
-}
-
 fn artifact_from(bytes: Vec<u8>, members: &[&str]) -> Result<Artifact, Cause> {
     let value = mandate_canon::parse(&bytes).map_err(|_| absent("a canonical config artifact"))?;
     let exact = value
@@ -572,14 +448,6 @@ fn require_text(value: &Value, name: &'static str, expected: &str) -> Result<(),
     }
 }
 
-fn legacy_identity(identity: &ProductionIdentity<'_>) -> bool {
-    identity.asset_id.as_str() == INSTRUMENT_ID
-        && identity.symbol.as_str() == SYMBOL
-        && identity.broker_exchange == BrokerExchange::Nasdaq
-        && identity.model_id == MODEL_ID
-        && identity.model_version == MODEL_VERSION
-}
-
 fn exchanges(text: &str) -> Result<(BrokerExchange, GateExchange), Cause> {
     if text == "nasdaq" {
         Ok((BrokerExchange::Nasdaq, GateExchange::Nasdaq))
@@ -605,83 +473,14 @@ fn require_empty_array(value: &Value, name: &'static str) -> Result<(), Cause> {
 
 #[cfg(test)]
 mod tests {
-    use mandate_accounting::InstrumentId;
     use mandate_alpaca::Exchange as BrokerExchange;
-    use mandate_canon::Digest;
-    use mandate_domain::{AssetClass, AssetId};
     use mandate_risk::Exchange as GateExchange;
     use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 
-    use super::{
-        DeploymentInput, ProductionIdentity, exchanges, legacy_identity, require_opaque_id,
-        required_positive_u64,
-    };
+    use super::{DeploymentInput, exchanges, require_opaque_id, required_positive_u64};
 
     fn text<E: std::fmt::Display>(error: E) -> String {
         error.to_string()
-    }
-
-    #[test]
-    fn every_legacy_identity_field_is_required_independently() -> Result<(), String> {
-        let aapl = AssetId::parse("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415").map_err(text)?;
-        let other = AssetId::parse("b0b6dd9d-8b9b-48a9-ba46-b9d54906e416").map_err(text)?;
-        let aapl_symbol = InstrumentId::new("AAPL").map_err(text)?;
-        let other_symbol = InstrumentId::new("MSFT").map_err(text)?;
-        let matches = |asset_id, symbol, exchange, model_id, model_version| {
-            legacy_identity(&ProductionIdentity {
-                asset_id,
-                symbol,
-                asset_class: AssetClass::UsEquity,
-                broker_exchange: exchange,
-                gate_exchange: GateExchange::Nasdaq,
-                model_id,
-                model_version,
-                model_hash: Digest::of(b"model"),
-            })
-        };
-        assert!(matches(
-            &aapl,
-            &aapl_symbol,
-            BrokerExchange::Nasdaq,
-            "quant.ma_crossover",
-            "1.0.0"
-        ));
-        assert!(!matches(
-            &other,
-            &aapl_symbol,
-            BrokerExchange::Nasdaq,
-            "quant.ma_crossover",
-            "1.0.0"
-        ));
-        assert!(!matches(
-            &aapl,
-            &other_symbol,
-            BrokerExchange::Nasdaq,
-            "quant.ma_crossover",
-            "1.0.0"
-        ));
-        assert!(!matches(
-            &aapl,
-            &aapl_symbol,
-            BrokerExchange::Nyse,
-            "quant.ma_crossover",
-            "1.0.0"
-        ));
-        assert!(!matches(
-            &aapl,
-            &aapl_symbol,
-            BrokerExchange::Nasdaq,
-            "quant.other_model",
-            "1.0.0"
-        ));
-        assert!(!matches(
-            &aapl,
-            &aapl_symbol,
-            BrokerExchange::Nasdaq,
-            "quant.ma_crossover",
-            "2.0.0"
-        ));
-        Ok(())
     }
 
     #[test]

@@ -1,25 +1,23 @@
 //! The production adapters: one per [`Stage`](crate::Stage), each binding one crate's public API.
 //!
 //! The implementation lands one slice at a time (DEC-77 stage 3, DEC-166). **Live** in slice 1:
-//! [`StoredBars`], [`MovingAverage`] and [`AlpacaConnector`], whose upstreams are fully implemented
-//! and whose every input the shell holds; since DEC-449's flip also [`RiskExitPath`], which probes
+//! [`AlpacaConnector`], whose upstream is fully implemented and whose every input the shell
+//! holds; since DEC-449's flip also [`RiskExitPath`], which probes
 //! and plans over the journal, stream, clock, and agent the run's bridge hands it; and
 //! [`ExecutorProtection`], through the executor's public protection probe. The journal, sink,
 //! executor, reconciliation, mandate validation, sizing, classification, and advisory-gate
-//! boundaries are also live when their trusted inputs are injected. The E7-7 shipping binary
+//! boundaries are also live when their trusted inputs are injected. The paper adapter
 //! injects the one-run paper contexts [`crate::paper`] assembles from its GET-only broker preflight
 //! and the stored datasets (DEC-466, DEC-470); callers that omit either context fail closed rather
 //! than inventing effective-dated inputs.
 //!
-//! What each will bind, per the task brief's step table:
+//! What each binds, per the task brief's step table:
 //!
 //! | Adapter | Binds |
 //! |---|---|
 //! | [`RiskExitPath`] | `mandate_risk::agent_flatten` (E6-3) |
 //! | [`ExecutorProtection`] | `mandate_executor::is_protected` (E7-4) |
 //! | [`SpecMandate`] | `mandate_spec::validate`, then `ValidatedMandate::new` (stream F) |
-//! | [`StoredBars`] | `mandate_marketdata::dataset::read_manifest` and `dataset::read` (E2-1, E2-2) |
-//! | [`MovingAverage`] | `mandate_backtest::Strategy::MovingAverageCrossover` (E4-2) |
 //! | [`BuilderPlan`] | `mandate-builder`'s sizing and classification (stream H) |
 //! | [`RiskGate`] | `mandate_risk::evaluate` as a dry run (E6-3, E6-6 to E6-8) |
 //! | [`StoreJournal`] | `mandate_journal::MemoryJournal` in CI, `mandate-journal-pg` for the manual run |
@@ -27,6 +25,11 @@
 //! | [`CoreExecutor`] | `mandate_executor::handle` and `fold` (stream K) |
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
+//!
+//! The stored daily bars and typed closes the run trusts are read by [`crate::paper`] through
+//! `trusted_daily_bars` and `trusted_daily_closes` (`mandate_marketdata::dataset::read_manifest`
+//! and `dataset::read`, E2-1, E2-2), not by a stage: the model host owns every signal, and the
+//! shell computes none (DEC-475 items 1 and 6, DEC-503).
 
 use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -37,7 +40,6 @@ use std::sync::Arc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
-use mandate_backtest::{Signal, Strategy, StrategyConfig};
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
     BuilderMandate, Clip as BuilderClip, Direction, Market as BuilderMarket,
@@ -59,7 +61,7 @@ use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Bar, Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Bps, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
+use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
 use mandate_risk::{
     AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
     Decision, FlattenInitiator, FlattenInput, GateConfig, GateInput, GatePass,
@@ -72,7 +74,6 @@ use mandate_runtime::{
     FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, MandateView, ModelDirection,
     OrderExecution, Proposal, Purpose, RiskClock, SignalInputs, TimeInForce,
 };
-use mandate_spec::document::ParamValue;
 use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
@@ -81,8 +82,8 @@ use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
 use crate::stages::{
-    Admitted, Bars, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
-    MandateSource, ModelRef, Protection, Reconciler, SignalModel, Sink, Sizing, Stages,
+    Admitted, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
+    MandateSource, Protection, Reconciler, Sink, Sizing, Stages,
 };
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
@@ -948,47 +949,18 @@ impl MandateSource for SpecMandate {
         let validated = validated_mandate(&self.path, context)?;
         let document = validated.mandate();
         let mut instruments = document.universe.pinned_instruments.iter();
-        let instrument = match (instruments.next(), instruments.next()) {
-            (Some(instrument), None) => instrument,
+        match (instruments.next(), instruments.next()) {
+            (Some(_), None) => {}
             (None, _) | (Some(_), Some(_)) => {
                 return Err(Cause::Absent {
                     what: "the tracer's one pinned instrument",
                 });
             }
-        };
-        let mut models = document.behavior.signal_models.iter();
-        let model = match (models.next(), models.next()) {
-            (Some(model), None) => model,
-            (None, _) | (Some(_), Some(_)) => {
-                return Err(Cause::Absent {
-                    what: "the tracer's one signal model",
-                });
-            }
-        };
-        let params = model
-            .params
-            .iter()
-            .map(|param| {
-                let value = match &param.value {
-                    ParamValue::Decimal(value) => value.as_str().to_owned(),
-                    ParamValue::Bool(value) => value.to_string(),
-                    ParamValue::Text(value) => value.clone(),
-                };
-                (param.key.clone(), value)
-            })
-            .collect();
+        }
         let view = runtime_view(&validated, context)?;
         Ok(Admitted {
             environment: view.approval.environment,
             view,
-            model: ModelRef {
-                id: model.id.as_str().to_owned(),
-                version: model.version.clone(),
-                content_hash: model.content_hash,
-                max_output_age_s: i64::from(model.max_output_age_s),
-                params,
-            },
-            symbol: instrument.symbol.clone(),
             governed: context.governance.as_ref().map(|governance| GovernedRefs {
                 policy_set: governance.policy_set.content_hash,
                 model_registry: governance.model_registry.content_hash,
@@ -997,38 +969,8 @@ impl MandateSource for SpecMandate {
     }
 }
 
-/// The stored daily bars in the dataset directory `dir`, read through `mandate-marketdata`'s own
-/// `inspect` and `dataset::read`, one close per listed day in the manifest's date order. A day
-/// holding anything but exactly one bar is refused, so the windows always span the days the
-/// envelope names. The closes are returned exactly as stored: the shell adjusts, filters and
-/// repairs nothing, so coverage it cannot trust is a refusal, never a guess (PB-15).
-pub struct StoredBars {
-    pub dir: PathBuf,
-}
-
-impl Bars for StoredBars {
-    fn closes(&self, symbol: &str, now: UtcNanos) -> Result<Vec<Price>, Cause> {
-        let inspection = inspect::inspect(&self.dir)?;
-        trusted(&inspection, symbol, now)?;
-        self.listed_closes(inspection.dataset.kind())
-    }
-}
-
-impl StoredBars {
-    /// One close per day the manifest lists with a file, in the manifest's date order, each read
-    /// from that day's own partition. The loop walks the manifest, never the directory, so a
-    /// partition the manifest does not list is not opened even if `trusted` were to let it pass
-    /// (#248 review, minor 1).
-    fn listed_closes(&self, kind: Kind) -> Result<Vec<Price>, Cause> {
-        listed_bars(&self.dir, kind)?
-            .iter()
-            .map(|bar| Ok(Price::parse(bar.close.as_str())?))
-            .collect()
-    }
-}
-
-/// The daily bars [`StoredBars`] decides on, exactly as stored and only once `trusted` admits the
-/// dataset at `now`, so the paper assembly's liquidity facts read the same span as the signal.
+/// The daily bars the run trusts, exactly as stored and only once `trusted` admits the dataset at
+/// `now`, so the paper assembly's liquidity facts read the same span as the model host's closes.
 pub(crate) fn trusted_daily_bars(
     dir: &Path,
     symbol: &str,
@@ -1150,43 +1092,6 @@ fn split_inside(inspection: &Inspection) -> bool {
 
 pub(crate) fn untrusted(what: &'static str) -> Cause {
     Cause::Untrusted { what }
-}
-
-/// E4-2's moving-average baseline, the one model this adapter implements, with the windows the
-/// mandate's envelope gives it (`AGENTS.md` rule 11): a model the envelope names differently, or
-/// a window it does not state, is a refusal rather than a default.
-pub struct MovingAverage;
-
-/// The id the envelope gives E4-2's baseline (DEC-157 item 4).
-pub const MOVING_AVERAGE: &str = "quant.ma_crossover";
-
-impl SignalModel for MovingAverage {
-    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause> {
-        if model.id != MOVING_AVERAGE {
-            return Err(Cause::Absent {
-                what: "the adapter implements only quant.ma_crossover",
-            });
-        }
-        let strategy = Strategy::MovingAverageCrossover(StrategyConfig {
-            fast_periods: window(model, "fast_periods")?,
-            slow_periods: window(model, "slow_periods")?,
-            collar: Bps::ZERO,
-            target_notional: Usd::ZERO,
-        });
-        Ok(strategy.signal(closes)?)
-    }
-}
-
-/// One window, as the envelope states it. `Strategy::signal` reads only the two windows; the
-/// collar and the target notional above price and size a backtest's orders, which the tracer
-/// takes from the order builder instead.
-fn window(model: &ModelRef, key: &'static str) -> Result<u32, Cause> {
-    match model.params.get(key).map(|value| value.parse::<u32>()) {
-        Some(Ok(periods)) => Ok(periods),
-        Some(Err(_)) | None => Err(Cause::Absent {
-            what: "the model's params do not state its windows",
-        }),
-    }
 }
 
 /// `mandate-builder`'s `conviction_linear` sizing and §6 classification.
@@ -2116,7 +2021,6 @@ impl Reconciler for ExecutorReconciler {
 /// Where the production stages read from.
 pub struct Sources<T> {
     pub mandate: PathBuf,
-    pub dataset: PathBuf,
     /// `None` is a scratch in-memory journal: a run that places nothing keeps nothing, so a later
     /// start cannot re-hand an intent a planning run proposed (DEC-157 item 6).
     pub journal: Option<String>,
@@ -2142,7 +2046,6 @@ pub struct Sources<T> {
 pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) -> Stages {
     let Sources {
         mandate,
-        dataset,
         journal,
         recorded_at,
         agent,
@@ -2155,7 +2058,6 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
     } = sources;
     over(Sources {
         mandate,
-        dataset,
         journal,
         recorded_at,
         agent,
@@ -2195,10 +2097,6 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             path: sources.mandate.clone(),
             context: run.clone(),
         }),
-        bars: Box::new(StoredBars {
-            dir: sources.dataset,
-        }),
-        signal: Box::new(MovingAverage),
         reconciler: Box::new(reconciler),
         sizing: Box::new(BuilderPlan {
             mandate: sources.mandate.clone(),
@@ -2233,10 +2131,9 @@ mod tests {
         AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
         ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
         ProtectionProbePorts, RiskGate, RunContext, StoreJournal, action_order_matches,
-        is_unattributed_exit, proposed_order, working_order_of,
+        is_unattributed_exit, listed_days, proposed_order, working_order_of,
     };
-    use mandate_backtest::{BacktestError, Signal};
-    use mandate_canon::{DecStr, Digest, Value};
+    use mandate_canon::{DecStr, Value};
     use mandate_journal::AppendOutcome;
     use mandate_marketdata::actions::{RecordedActions, write_actions};
     use mandate_marketdata::dataset::{Store, partition_name};
@@ -2880,9 +2777,8 @@ mod tests {
         SubmitOrder, TimeInForce,
     };
 
-    use super::{Disconnected, MovingAverage, StoredBars, split_inside, trusted};
+    use super::{Disconnected, split_inside, trusted, trusted_daily_closes};
     use crate::error::Cause;
-    use crate::stages::{Bars, ModelRef, SignalModel};
 
     /// A scratch directory, removed when dropped.
     struct Scratch(PathBuf);
@@ -2979,7 +2875,7 @@ mod tests {
         write(root, &dataset("AAPL", "1Day")?, &closes, skip, empty)
     }
 
-    fn untrusted(answer: Result<Vec<Price>, Cause>) -> Result<&'static str, String> {
+    fn untrusted(answer: Result<Vec<(Date, Price)>, Cause>) -> Result<&'static str, String> {
         match answer {
             Err(Cause::Untrusted { what }) => Ok(what),
             other => Err(format!("expected an untrusted refusal, got {other:?}")),
@@ -3010,13 +2906,10 @@ mod tests {
         store
             .put_day(&id, day("2026-08-29")?, &Records::Bars(Vec::new()))
             .map_err(|e| e.to_string())?;
-        let read = StoredBars {
-            dir: store.dataset_dir(&id),
-        }
-        .closes("AAPL", as_of()?)
-        .map_err(|e| e.to_string())?;
+        let read = trusted_daily_closes(&store.dataset_dir(&id), "AAPL", as_of()?)
+            .map_err(|e| e.to_string())?;
         let expected: Vec<String> = closes.iter().map(|c| canonical(c)).collect();
-        let read: Vec<String> = read.iter().map(ToString::to_string).collect();
+        let read: Vec<String> = read.iter().map(|(_, close)| close.to_string()).collect();
         assert_eq!(read, expected);
         Ok(())
     }
@@ -3027,9 +2920,8 @@ mod tests {
         let dir = aapl(&scratch.0, &[], &[])?;
         let before_monday_close =
             UtcNanos::parse("2026-09-28T19:59:59.000000000Z").map_err(|e| e.to_string())?;
-        let fresh = StoredBars { dir: dir.clone() }
-            .closes("AAPL", before_monday_close)
-            .map_err(|e| e.to_string())?;
+        let fresh =
+            trusted_daily_closes(&dir, "AAPL", before_monday_close).map_err(|e| e.to_string())?;
         assert_eq!(
             fresh.len(),
             25,
@@ -3037,7 +2929,7 @@ mod tests {
         );
         let after_monday_close =
             UtcNanos::parse("2026-09-28T20:00:00.000000000Z").map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", after_monday_close))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", after_monday_close))?;
         assert_eq!(
             what,
             "the dataset does not end on the last completed equity session"
@@ -3068,7 +2960,7 @@ mod tests {
             .map_err(|e| e.to_string())?;
         let after_last_listed =
             UtcNanos::parse("2026-09-28T20:00:00.000000000Z").map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", after_last_listed))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", after_last_listed))?;
         assert_eq!(what, "a listed day does not hold exactly one bar");
         Ok(())
     }
@@ -3114,7 +3006,7 @@ mod tests {
     fn another_instruments_bars_are_refused() -> Result<(), String> {
         let scratch = Scratch::new("symbol")?;
         let dir = aapl(&scratch.0, &[], &[])?;
-        let what = untrusted(StoredBars { dir }.closes("MSFT", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "MSFT", as_of()?))?;
         assert_eq!(what, "the dataset is another instrument's");
         Ok(())
     }
@@ -3129,7 +3021,7 @@ mod tests {
             &[],
             &[],
         )?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
         assert_eq!(what, "the dataset is not daily bars");
         Ok(())
     }
@@ -3142,7 +3034,7 @@ mod tests {
         let mut bytes = fs::read(&path).map_err(|e| e.to_string())?;
         bytes.push(0);
         fs::write(&path, bytes).map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
         assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }
@@ -3159,7 +3051,7 @@ mod tests {
                 &Records::Bars(vec![bar(on, "233.20")?, bar(on, "233.30")?]),
             )
             .map_err(|e| e.to_string())?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
         assert_eq!(what, "two bars share a start");
         Ok(())
     }
@@ -3168,7 +3060,7 @@ mod tests {
     fn a_trading_day_listed_without_a_bar_is_refused() -> Result<(), String> {
         let scratch = Scratch::new("empty")?;
         let dir = aapl(&scratch.0, &[], &["2026-08-26"])?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
         assert_eq!(what, "a trading day has no bar");
         Ok(())
     }
@@ -3177,7 +3069,7 @@ mod tests {
     fn a_trading_day_never_fetched_is_refused() -> Result<(), String> {
         let scratch = Scratch::new("gap")?;
         let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
         assert_eq!(what, "a trading day was never fetched");
         Ok(())
     }
@@ -3254,24 +3146,9 @@ mod tests {
             },
         )
         .map_err(|e| e.to_string())?;
-        let closes = StoredBars { dir }
-            .closes("AAPL", as_of()?)
-            .map_err(|e| e.to_string())?;
+        let closes = trusted_daily_closes(&dir, "AAPL", as_of()?).map_err(|e| e.to_string())?;
         assert_eq!(closes.len(), 25);
         Ok(())
-    }
-
-    fn model(id: &str, params: &[(&str, &str)]) -> ModelRef {
-        ModelRef {
-            id: id.to_owned(),
-            version: "1.0.0".to_owned(),
-            content_hash: Digest::of(format!("{id}:1.0.0").as_bytes()),
-            max_output_age_s: 86_400,
-            params: params
-                .iter()
-                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-                .collect::<BTreeMap<_, _>>(),
-        }
     }
 
     /// `mandate-num`'s canonical text of a decimal: trailing fractional zeros and a bare point
@@ -3304,56 +3181,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn the_crossover_reads_the_windows_the_envelope_states() -> Result<(), String> {
-        let windows = [("fast_periods", "5"), ("slow_periods", "20")];
-        let crossover = model("quant.ma_crossover", &windows);
-        let up = prices(&rising())?;
-        let mut down = up.clone();
-        down.reverse();
-        let answer = |closes: &[Price]| MovingAverage.signal(&crossover, closes);
-        assert!(matches!(answer(&up), Ok(Signal::Long)), "{:?}", answer(&up));
-        assert!(matches!(answer(&down), Ok(Signal::Flat)));
-        let short = up.get(..19).ok_or("closes")?;
-        assert!(matches!(answer(short), Ok(Signal::Undecided)));
-        let exactly = up.get(..20).ok_or("closes")?;
-        assert!(matches!(answer(exactly), Ok(Signal::Long)));
-        let crossed = model(
-            "quant.ma_crossover",
-            &[("fast_periods", "20"), ("slow_periods", "5")],
-        );
-        assert!(matches!(
-            MovingAverage.signal(&crossed, &up),
-            Err(Cause::Backtest(BacktestError::StrategyWindowsCrossed))
-        ));
-        Ok(())
-    }
-
-    /// #241 review round 2, minor 1: the fast window is the one the envelope states. Over these 20
-    /// closes (14 at 101, one at 0.01, five at 100.5) the slow average is 95.8255: the last 5
-    /// average 100.5, above it, but the last 6 average 83.7517 and the last 15 average 94.1007,
-    /// both below it. So a fast window of 5 says `Long` and one of 6 or 15 says `Flat`.
-    #[test]
-    fn the_fast_window_is_the_one_the_envelope_states() -> Result<(), String> {
-        let mut closes = vec!["101".to_owned(); 14];
-        closes.push("0.01".to_owned());
-        closes.extend(vec!["100.5".to_owned(); 5]);
-        let closes = prices(&closes)?;
-        let with = |fast: &str| {
-            MovingAverage.signal(
-                &model(
-                    "quant.ma_crossover",
-                    &[("fast_periods", fast), ("slow_periods", "20")],
-                ),
-                &closes,
-            )
-        };
-        assert!(matches!(with("5"), Ok(Signal::Long)), "{:?}", with("5"));
-        assert!(matches!(with("6"), Ok(Signal::Flat)), "{:?}", with("6"));
-        assert!(matches!(with("15"), Ok(Signal::Flat)), "{:?}", with("15"));
-        Ok(())
-    }
-
     /// #241 review round 2, minor 3: a partition on disk that the manifest does not list is never
     /// read. `inspect` reports it as unlisted, so the whole dataset is refused before any partition
     /// is read, and the stray close cannot reach the windows.
@@ -3372,7 +3199,7 @@ mod tests {
             }],
             "the one problem `inspect` finds is the unlisted partition (#248 review, minor 1)"
         );
-        let what = untrusted(StoredBars { dir }.closes("AAPL", as_of()?))?;
+        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
         assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }
@@ -3392,37 +3219,13 @@ mod tests {
         )
         .map_err(|e| e.to_string())?;
         let daily = Kind::Bars(Timeframe::new(1, TimeUnit::Day).map_err(|e| e.to_string())?);
-        let read: Vec<String> = StoredBars { dir }
-            .listed_closes(daily)
+        let read: Vec<String> = listed_days(&dir, daily)
             .map_err(|e| e.to_string())?
             .iter()
-            .map(ToString::to_string)
+            .map(|(_, bar)| bar.close.as_str().to_owned())
             .collect();
         let expected: Vec<String> = rising().iter().map(|c| canonical(c)).collect();
         assert_eq!(read, expected, "the stray 1.23 is never read");
-        Ok(())
-    }
-
-    #[test]
-    fn another_model_or_an_unstated_window_is_refused() -> Result<(), String> {
-        let up = prices(&rising())?;
-        let refused = |model: ModelRef| {
-            matches!(MovingAverage.signal(&model, &up), Err(Cause::Absent { .. }))
-        };
-        let windows = [("fast_periods", "5"), ("slow_periods", "20")];
-        assert!(refused(model("quant.other", &windows)));
-        assert!(refused(model(
-            "quant.ma_crossover",
-            &[("slow_periods", "20")]
-        )));
-        assert!(refused(model(
-            "quant.ma_crossover",
-            &[("fast_periods", "5")]
-        )));
-        assert!(refused(model(
-            "quant.ma_crossover",
-            &[("fast_periods", "five"), ("slow_periods", "20")]
-        )));
         Ok(())
     }
 

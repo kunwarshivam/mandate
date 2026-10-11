@@ -611,3 +611,47 @@ fn a_placing_run_watches_its_entry_to_the_registered_bound() {
         "reads at every five-second wake, and none after the cancel's"
     );
 }
+
+/// DEC-475 item 3 for the shipping adapter (FT-2): `run` selects no product value. No instrument,
+/// model, deployment id, gate value or executor value is a constant in the adapter's assembly, and
+/// the deployment input comes from the control stream and the artifact store. This is the
+/// successor of the shell-side scan that read the deleted `mandate-tracer` binary's function.
+#[test]
+fn the_shipping_adapter_selects_no_product_value() {
+    let source = include_str!("../src/lib.rs");
+    let body = source
+        .split_once("pub fn run<P: Ports>(")
+        .and_then(|(_, after)| after.split_once("\n}\n\n/// The closes the host read"))
+        .map(|(body, _)| body)
+        .expect("the run function's body is bounded by its doc successor");
+    for forbidden in [
+        "\"AAPL\"",
+        "\"SPY\"",
+        "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+        "b28f4066-5c6d-479b-a2af-85dc1a8f16fb",
+        "quant.ma",
+        "conn_alpaca_paper_01",
+        "tracer-aapl",
+        "tracer-paper",
+        "\"ws_",
+        "\"agent_spy",
+        "GateConfig",
+        "ExecutorConfig",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "the shipping adapter still selects {forbidden}"
+        );
+    }
+    for required in [
+        "let records = ports.control_stream(&args.workspace)?;",
+        "confirmed_version(&records, &store, &facts)",
+        "configuration(&records, &store, &pinned, day)",
+        "Artifacts::from_registered(&confirmed, &config)",
+    ] {
+        assert!(
+            body.contains(required),
+            "the shipping adapter must take its inputs from the stream: {required}"
+        );
+    }
+}

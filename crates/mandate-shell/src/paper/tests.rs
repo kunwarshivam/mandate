@@ -1,6 +1,4 @@
 use std::cell::Cell;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -20,22 +18,38 @@ use mandate_risk::{Exchange as GateExchange, GateConfig, SaneQuote};
 use mandate_runtime::{AgentId, ProtectionPrices};
 use mandate_time::{Date, UtcNanos};
 
+use crate::Cause;
+use crate::control::{
+    Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
+    confirmed_version,
+};
+use mandate_canon::to_canonical;
+use mandate_spec::context::Membership;
+use std::collections::BTreeMap;
+
 use super::artifacts::reference;
 use super::context::{PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template};
-use super::{Artifacts, BrokerFacts, INSTRUMENT_ID, LiquidityFacts, PaperFacts, load_contexts};
-use crate::Cause;
+use super::{Artifacts, BrokerFacts, LiquidityFacts, PaperFacts, load_contexts};
 
 const NOW: &str = "2026-09-28T17:00:00Z";
-const AGENT: &str = "tracer-aapl";
+const AGENT: &str = "agent_spy";
+const INSTRUMENT_ID: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 const OTHER_ASSET: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e416";
+/// The E7-7 paper mandate fixture, whose pinned model hash `aapl_mandate` re-pins.
+const MANDATE: &str = include_str!("../../tests/fixtures/tracer/mandate.json");
+/// The registered objects beside a E7-7-shaped deployment: the reviewed fee schedule, the
+/// calendar, and the rule set, whose bytes are shared with `tests/common/mod.rs`'s streams.
+const FEE: &str = include_str!("../../tests/fixtures/tracer/config/fee-config.json");
+const CALENDAR: &str = include_str!("../../tests/fixtures/tracer/config/trading-calendar.json");
+const RULES: &str = include_str!("../../tests/fixtures/tracer/config/rule-set.json");
+const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
+/// The E7-7 model artifact's bytes, whose digest is the hash the mandate fixture pins and
+/// `aapl_mandate` replaces with the host's (DEC-475 item 6).
+const E7_7_MODEL: &[u8] = b"{\"id\":\"quant.ma_crossover\",\"version\":\"1.0.0\"}\n";
 
 fn text<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
-}
-
-fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tracer")
 }
 
 fn at(rfc3339: &str) -> Result<UtcNanos, String> {
@@ -58,8 +72,207 @@ fn symbol(value: &str) -> Result<InstrumentId, String> {
     InstrumentId::new(value).map_err(text)
 }
 
+/// The content object `mandate model register` stores for the pinned model (DEC-504 item 1), the
+/// host's own canonical bytes for `quant.ma_crossover` 1.0.0.
+fn host_content() -> Result<String, String> {
+    let content = mandate_modelhost::content("quant.ma_crossover", "1.0.0").map_err(text)?;
+    String::from_utf8(content.canonical).map_err(|_| "the content object is not UTF-8".to_owned())
+}
+
+/// The registered model of one deployment: its triple, and the content bytes whose hash the
+/// mandate pins.
+struct RegisteredModel<'a> {
+    id: &'a str,
+    version: &'a str,
+    content: &'a str,
+}
+
+/// The host's own pinned model.
+fn host_model<'a>(content: &'a str) -> RegisteredModel<'a> {
+    RegisteredModel {
+        id: "quant.ma_crossover",
+        version: "1.0.0",
+        content,
+    }
+}
+
+/// The control stream of one deployment and the store of every object it names, each stored as
+/// written so its reference is the hash of those bytes, as `tests/common/mod.rs`'s `Stream` holds
+/// SPY's (DEC-505).
+#[derive(Default)]
+struct Deployed {
+    records: Vec<ControlRecord>,
+    store: BTreeMap<Digest, Vec<u8>>,
+}
+
+impl Deployed {
+    /// Stores `object`'s bytes as written and returns their reference.
+    fn put(&mut self, object: &str) -> String {
+        self.store
+            .insert(Digest::of(object.as_bytes()), object.as_bytes().to_vec());
+        reference(object.as_bytes())
+    }
+
+    /// Appends one fixture record at the next `seq`. The payload is one this file built, so a
+    /// refusal names the fixture, never a product object.
+    fn record(&mut self, event_type: &str, payload: &str) -> Result<(), Cause> {
+        let parsed = mandate_canon::parse(payload.as_bytes()).map_err(|_| Cause::Absent {
+            what: "a fixture record's payload",
+        })?;
+        let seq = u64::try_from(self.records.len()).map_err(|_| Cause::Absent {
+            what: "a fixture record's seq",
+        })?;
+        self.records.push(ControlRecord {
+            seq: seq.saturating_add(1),
+            event_type: event_type.to_owned(),
+            payload: parsed,
+        });
+        Ok(())
+    }
+}
+
+/// One fixture object parsed, to be canonicalized or judged.
+fn parsed(text: &str) -> Result<mandate_canon::Value, Cause> {
+    mandate_canon::parse(text.as_bytes()).map_err(|_| Cause::Absent {
+        what: "a fixture object",
+    })
+}
+
+/// The E7-7 paper mandate as a registered deployment pins it: AAPL on nasdaq with the model
+/// host's own content pinned under its hash, re-pinnable by each case below (DEC-504, DEC-505).
+fn aapl_mandate() -> Result<String, String> {
+    Ok(MANDATE.replace(
+        &Digest::of(E7_7_MODEL).to_hex(),
+        &Digest::of(host_content()?.as_bytes()).to_hex(),
+    ))
+}
+
+/// SPY's registered snapshot (DEC-523's own shape), the base [`aapl_snapshot`] mutates.
+const SPY_SNAPSHOT: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-09-21T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
+
+/// The registered AAPL snapshot, in DEC-523's own shape, dated as the E7-7 file was.
+fn aapl_snapshot() -> String {
+    SPY_SNAPSHOT
+        .replace("b28f4066-5c6d-479b-a2af-85dc1a8f16fb", INSTRUMENT_ID)
+        .replace("\"SPY\"", "\"AAPL\"")
+        .replace("\"arca\"", "\"nasdaq\"")
+        .replace("2026-09-21", "2026-09-25")
+}
+
+/// One deployment's control stream and object store, as `tests/common/mod.rs`'s `Stream::of`
+/// writes SPY's, generalized to the mandate, the agent, the snapshot and the model registration
+/// the case deploys (DEC-505).
+fn deployed_stream(
+    mandate: &str,
+    snapshot: &str,
+    rules: &str,
+    model: &RegisteredModel<'_>,
+) -> Result<Deployed, Cause> {
+    let mut stream = Deployed::default();
+    let document = to_canonical(&parsed(mandate)?);
+    let version = reference(&document);
+    let paths: Vec<String> = ENVELOPE.split(' ').map(|path| format!("/{path}")).collect();
+    let provenance: Vec<String> = paths
+        .iter()
+        .map(|path| format!(r#"{{"path":"{path}","source":"user_entered"}}"#))
+        .collect();
+    let confirmed: Vec<String> = paths.iter().map(|path| format!(r#""{path}""#)).collect();
+    let content_hash = stream.put(model.content);
+    stream.record(
+        "ConfigSnapshotRegistered",
+        &format!(
+            r#"{{"admits_instruments":false,"content_hash":"{content_hash}","kind":"model_version","model_id":"{}","model_version":"{}","params":["fast_periods","slow_periods"]}}"#,
+            model.id,
+            model.version
+        ),
+    )?;
+    for (kind, object) in [
+        ("fee_config", FEE),
+        ("trading_calendar", CALENDAR),
+        ("rule_set", rules),
+        ("instrument_snapshot", snapshot),
+    ] {
+        let hash = stream.put(object);
+        stream.record(
+            "ConfigSnapshotRegistered",
+            &format!(
+                r#"{{"admits_instruments":null,"content_hash":"{hash}","kind":"{kind}","model_id":null,"model_version":null,"params":[]}}"#
+            ),
+        )?;
+    }
+    stream.record(
+        "MandateVersionCreated",
+        &format!(
+            r#"{{"mandate_version":"{version}","provenance":[{}],"record_ref":"sha256:{}"}}"#,
+            provenance.join(","),
+            "7".repeat(64)
+        ),
+    )?;
+    stream.record(
+        "MandateConfirmed",
+        &format!(
+            r#"{{"confirmed_paths":[{}],"mandate_version":"{version}"}}"#,
+            confirmed.join(",")
+        ),
+    )?;
+    stream.record(
+        "AgentDeployed",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","mandate_version":"{version}","record_ref":"sha256:{}"}}"#,
+            "6".repeat(64)
+        ),
+    )?;
+    stream.store.insert(Digest::of(&document), document);
+    Ok(stream)
+}
+
+/// The confirmed version and the effective configuration the stream deploys, pinned as its own
+/// mandate's instrument and model are, for a run on [`NOW`]'s day.
+fn deployed_inputs(stream: &Deployed) -> Result<(ConfirmedVersion, Configuration), String> {
+    let day = at(NOW)?.date();
+    let facts = RunFacts {
+        agent: mandate_spec::context::AgentId::new(AGENT),
+        validation_date: day,
+        membership: Membership {
+            workspace_users: 1,
+            approver_users: 1,
+        },
+    };
+    let confirmed = confirmed_version(&stream.records, &stream.store, &facts).map_err(text)?;
+    let mandate = confirmed.mandate();
+    let ([instrument], [model]) = (
+        mandate.universe.pinned_instruments.as_slice(),
+        mandate.behavior.signal_models.as_slice(),
+    ) else {
+        return Err("the deployment does not pin one instrument and one model".to_owned());
+    };
+    let pinned = Pinned {
+        asset_id: instrument.asset_id.as_str().to_owned(),
+        symbol: instrument.symbol.clone(),
+        model_id: model.id.as_str().to_owned(),
+        model_version: model.version.clone(),
+        content_hash: model.content_hash,
+    };
+    let config = configuration(&stream.records, &stream.store, &pinned, day).map_err(text)?;
+    Ok((confirmed, config))
+}
+
+/// The run's artifacts for the deployment `stream` writes.
+fn artifacts_from(stream: &Deployed) -> Result<Artifacts, String> {
+    let (confirmed, config) = deployed_inputs(stream)?;
+    Artifacts::from_registered(&confirmed, &config).map_err(text)
+}
+
 fn artifacts() -> Result<Artifacts, String> {
-    Artifacts::load(&fixtures().join("mandate.json"), &fixtures().join("config")).map_err(text)
+    let content = host_content()?;
+    let stream = deployed_stream(
+        &aapl_mandate()?,
+        &aapl_snapshot(),
+        RULES,
+        &host_model(&content),
+    )
+    .map_err(text)?;
+    artifacts_from(&stream)
 }
 
 fn reviewed_gate_config() -> Result<GateConfig, String> {
@@ -67,142 +280,6 @@ fn reviewed_gate_config() -> Result<GateConfig, String> {
         .production_configuration()
         .map(|configuration| configuration.gate.clone())
         .map_err(text)
-}
-
-fn production_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
-    let scratch = Scratch::new(name)?;
-    scratch.replace("mandate.json", INSTRUMENT_ID, OTHER_ASSET)?;
-    scratch.replace("mandate.json", "AAPL", "MSFT")?;
-    scratch.replace("mandate.json", "quant.ma_crossover", "quant.other_model")?;
-    scratch.replace(
-        "mandate.json",
-        "\"version\": \"1.0.0\"",
-        "\"version\": \"2.0.0\"",
-    )?;
-    scratch.replace(
-        "config/instrument-snapshot.json",
-        INSTRUMENT_ID,
-        OTHER_ASSET,
-    )?;
-    scratch.replace("config/instrument-snapshot.json", "AAPL", "MSFT")?;
-    scratch.replace("config/instrument-snapshot.json", "\"nasdaq\"", "\"nyse\"")?;
-    let model = br#"{"id":"quant.other_model","version":"2.0.0"}"#;
-    fs::write(scratch.0.join("config/model-artifact.json"), model).map_err(text)?;
-    scratch.replace(
-        "mandate.json",
-        "sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc",
-        &format!("sha256:{}", Digest::of(model).to_hex()),
-    )?;
-    let artifacts =
-        Artifacts::load_production(&scratch.0.join("mandate.json"), &scratch.0.join("config"))
-            .map_err(text)?;
-    Ok((scratch, artifacts))
-}
-
-fn production_deployment_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
-    let scratch = Scratch::new(name)?;
-    scratch.replace(
-        "mandate.json",
-        "conn_alpaca_paper_01",
-        "conn_owner_paper_42",
-    )?;
-    let artifacts =
-        Artifacts::load_production(&scratch.0.join("mandate.json"), &scratch.0.join("config"))
-            .map_err(text)?;
-    Ok((scratch, artifacts))
-}
-
-fn production_configuration_artifacts(name: &str) -> Result<(Scratch, Artifacts), String> {
-    let scratch = Scratch::new(name)?;
-    for (old, new) in [
-        (
-            "\"bracket_partial_fill_timeout_s\":60",
-            "\"bracket_partial_fill_timeout_s\":62",
-        ),
-        ("\"exit_step_s\":5", "\"exit_step_s\":7"),
-        ("\"gtc_expiry_days\":90", "\"gtc_expiry_days\":91"),
-        ("\"max_intent_age_s\":120", "\"max_intent_age_s\":121"),
-        ("\"max_unprotected_s\":60", "\"max_unprotected_s\":63"),
-        (
-            "\"protective_replace_buffer_trading_days\":5",
-            "\"protective_replace_buffer_trading_days\":6",
-        ),
-        (
-            "\"restriction_403_threshold\":3",
-            "\"restriction_403_threshold\":7",
-        ),
-        ("\"stop_watchdog_s\":60", "\"stop_watchdog_s\":64"),
-        (
-            "\"unknown_absent_lookups\":3",
-            "\"unknown_absent_lookups\":4",
-        ),
-        (
-            "\"unknown_absent_window_s\":15",
-            "\"unknown_absent_window_s\":16",
-        ),
-        ("\"close_window_minutes\":10", "\"close_window_minutes\":11"),
-        (
-            "\"collar_crypto_x\":\"0.02\"",
-            "\"collar_crypto_x\":\"0.033\"",
-        ),
-        (
-            "\"collar_liquid_threshold_usd\":\"50000000\"",
-            "\"collar_liquid_threshold_usd\":\"51000000\"",
-        ),
-        (
-            "\"collar_liquid_x\":\"0.01\"",
-            "\"collar_liquid_x\":\"0.011\"",
-        ),
-        (
-            "\"collar_other_x\":\"0.02\"",
-            "\"collar_other_x\":\"0.022\"",
-        ),
-        (
-            "\"collar_passive_band\":\"0.2\"",
-            "\"collar_passive_band\":\"0.24\"",
-        ),
-        (
-            "\"crypto_liquidity_floor_usd\":\"1000000\"",
-            "\"crypto_liquidity_floor_usd\":\"1100000\"",
-        ),
-        (
-            "\"daily_participation\":\"0.05\"",
-            "\"daily_participation\":\"0.066\"",
-        ),
-        (
-            "\"etp_classification_max_age_s\":604800",
-            "\"etp_classification_max_age_s\":604801",
-        ),
-        (
-            "\"legacy_pdt_equity_threshold\":\"25000\"",
-            "\"legacy_pdt_equity_threshold\":\"25001\"",
-        ),
-        (
-            "\"liquidity_floor_usd\":\"1000000\"",
-            "\"liquidity_floor_usd\":\"1000001\"",
-        ),
-        ("\"min_resting_time_s\":2", "\"min_resting_time_s\":3"),
-        (
-            "\"opposite_fill_interval_s\":60",
-            "\"opposite_fill_interval_s\":61",
-        ),
-        (
-            "\"order_size_participation\":\"0.05\"",
-            "\"order_size_participation\":\"0.055\"",
-        ),
-        ("\"order_to_fill_max\":10", "\"order_to_fill_max\":12"),
-        (
-            "\"order_to_fill_min_orders\":20",
-            "\"order_to_fill_min_orders\":21",
-        ),
-        ("\"price_floor\":\"5\"", "\"price_floor\":\"6\""),
-    ] {
-        scratch.replace("config/rule-set.json", old, new)?;
-    }
-    let artifacts =
-        Artifacts::load_production(&scratch.0.join("mandate.json"), &scratch.0.join("config"))
-            .map_err(text)?;
-    Ok((scratch, artifacts))
 }
 
 fn agent() -> AgentId {
@@ -215,52 +292,6 @@ struct TestClock(Rc<Cell<UtcNanos>>);
 impl PaperClock for TestClock {
     fn now(&self) -> Option<UtcNanos> {
         Some(self.0.get())
-    }
-}
-
-/// A scratch copy of the reviewed artifacts, under a name no other test uses.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Result<Self, String> {
-        let path = std::env::temp_dir().join(format!("mandate-e77-{name}-{}", std::process::id()));
-        if path.exists() {
-            fs::remove_dir_all(&path).map_err(text)?;
-        }
-        fs::create_dir_all(path.join("config")).map_err(text)?;
-        fs::copy(fixtures().join("mandate.json"), path.join("mandate.json")).map_err(text)?;
-        for name in [
-            "fee-config.json",
-            "instrument-snapshot.json",
-            "model-artifact.json",
-            "rule-set.json",
-            "trading-calendar.json",
-        ] {
-            fs::copy(
-                fixtures().join("config").join(name),
-                path.join("config").join(name),
-            )
-            .map_err(text)?;
-        }
-        Ok(Self(path))
-    }
-
-    fn load(&self) -> Result<Artifacts, Cause> {
-        Artifacts::load(&self.0.join("mandate.json"), &self.0.join("config"))
-    }
-
-    fn replace(&self, file: &str, from: &str, to: &str) -> Result<(), String> {
-        let path = self.0.join(file);
-        let original = fs::read_to_string(&path).map_err(text)?;
-        let changed = original.replace(from, to);
-        if changed == original {
-            return Err(format!("fixture text not found in {file}: {from}"));
-        }
-        fs::write(path, changed).map_err(text)
-    }
-
-    fn remove(self) -> Result<(), String> {
-        fs::remove_dir_all(&self.0).map_err(text)
     }
 }
 
@@ -347,27 +378,24 @@ fn refusal(result: Result<super::Contexts, Cause>) -> Result<&'static str, Strin
 }
 
 #[test]
-fn the_reviewed_artifacts_load_and_bind_the_bytes_they_checked() -> Result<(), String> {
+fn the_registered_artifacts_bind_the_bytes_they_checked() -> Result<(), String> {
     let loaded = artifacts()?;
-    let config = fixtures().join("config");
-    let file = |name: &str| fs::read(config.join(name)).map_err(text);
     let refs = loaded.config_refs();
-    assert_eq!(refs.fee_config, Some(reference(&file("fee-config.json")?)));
-    assert_eq!(
-        refs.trading_calendar,
-        Some(reference(&file("trading-calendar.json")?))
-    );
+    assert_eq!(refs.fee_config, Some(reference(FEE.as_bytes())));
+    assert_eq!(refs.trading_calendar, Some(reference(CALENDAR.as_bytes())));
     assert_eq!(
         refs.instrument_snapshot,
-        Some(reference(&file("instrument-snapshot.json")?))
+        Some(reference(aapl_snapshot().as_bytes()))
     );
-    assert_eq!(refs.rule_set, Some(reference(&file("rule-set.json")?)));
+    assert_eq!(refs.rule_set, Some(reference(RULES.as_bytes())));
     let canonical = loaded.mandate.canonical_bytes().map_err(text)?;
+    let document = to_canonical(&parsed(&aapl_mandate()?).map_err(text)?);
+    assert_eq!(canonical, document);
     assert_eq!(refs.mandate_version, Some(reference(&canonical)));
     assert_eq!(
         loaded.quote_max_age,
         std::time::Duration::from_secs(10),
-        "the reviewed rule set's quote bound"
+        "the registered rule set's quote bound"
     );
     assert_eq!(
         loaded.instrument.etp_classified_at,
@@ -376,30 +404,61 @@ fn the_reviewed_artifacts_load_and_bind_the_bytes_they_checked() -> Result<(), S
     Ok(())
 }
 
+/// The registered deployment of another instrument, model and connection than any shell
+/// literal: MSFT on arca, a model registered under `quant.other_model` 2.0.0 whose content is
+/// neither the host's nor the E7-7 file's, and the founder's own connection id (DEC-475 item 3;
+/// DEC-523's exchange value set is `arca` and `nasdaq`, D3c).
+fn msft_deployment() -> Result<Artifacts, String> {
+    let content =
+        br#"{"content_hash":"set by the registration","kind":"quant_model_content","model_id":"quant.other_model","model_version":"2.0.0"}"#;
+    let model = RegisteredModel {
+        id: "quant.other_model",
+        version: "2.0.0",
+        content: std::str::from_utf8(content).map_err(|error| error.to_string())?,
+    };
+    let mandate = aapl_mandate()?
+        .replace(INSTRUMENT_ID, OTHER_ASSET)
+        .replace("\"AAPL\"", "\"MSFT\"")
+        .replace("quant.ma_crossover", "quant.other_model")
+        .replace("\"version\": \"1.0.0\"", "\"version\": \"2.0.0\"")
+        .replace("conn_alpaca_paper_01", "conn_owner_paper_42")
+        .replace(
+            &Digest::of(host_content()?.as_bytes()).to_hex(),
+            &Digest::of(content).to_hex(),
+        );
+    let snapshot = aapl_snapshot()
+        .replace(INSTRUMENT_ID, OTHER_ASSET)
+        .replace("\"AAPL\"", "\"MSFT\"")
+        .replace("\"nasdaq\"", "\"arca\"");
+    let stream = deployed_stream(&mandate, &snapshot, RULES, &model).map_err(text)?;
+    artifacts_from(&stream)
+}
+
 #[test]
 fn production_artifacts_derive_the_instrument_and_model_without_shell_literals()
 -> Result<(), String> {
-    let (scratch, loaded) = production_artifacts("production-inputs")?;
+    let loaded = msft_deployment()?;
     let identity = loaded.production_identity();
     assert_eq!(identity.asset_id.as_str(), OTHER_ASSET);
     assert_eq!(identity.symbol.as_str(), "MSFT");
     assert_eq!(identity.asset_class, mandate_domain::AssetClass::UsEquity);
-    assert_eq!(identity.broker_exchange, BrokerExchange::Nyse);
-    assert_eq!(identity.gate_exchange, GateExchange::Nyse);
+    assert_eq!(identity.broker_exchange, BrokerExchange::Arca);
+    assert_eq!(identity.gate_exchange, GateExchange::Arca);
     assert_eq!(identity.model_id, "quant.other_model");
     assert_eq!(identity.model_version, "2.0.0");
-    let model = fs::read(scratch.0.join("config/model-artifact.json")).map_err(text)?;
-    assert_eq!(identity.model_hash, Digest::of(&model));
-    scratch.remove()
+    let content =
+        br#"{"content_hash":"set by the registration","kind":"quant_model_content","model_id":"quant.other_model","model_version":"2.0.0"}"#;
+    assert_eq!(identity.model_hash, Digest::of(content));
+    Ok(())
 }
 
 #[test]
 fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Result<(), String> {
-    let (scratch, loaded) = production_artifacts("production-contexts")?;
+    let loaded = msft_deployment()?;
     let mut snapshot = facts()?;
     snapshot.broker.asset.asset.asset_id = OTHER_ASSET.to_owned();
     snapshot.broker.asset.asset.instrument = symbol("MSFT")?;
-    snapshot.broker.asset.asset.exchange = BrokerExchange::Nyse;
+    snapshot.broker.asset.asset.exchange = BrokerExchange::Arca;
     snapshot.broker.quote.instrument = symbol("MSFT")?;
     snapshot.broker.minute_bars.instrument = symbol("MSFT")?;
 
@@ -421,10 +480,19 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
     );
     let gate = decision.gate.ok_or("a production gate context")?;
     assert_eq!(gate.instrument.instrument.as_str(), OTHER_ASSET);
-    assert_eq!(gate.instrument.exchange, Some(GateExchange::Nyse));
+    assert_eq!(gate.instrument.exchange, Some(GateExchange::Arca));
 
-    let template =
-        gate_template(&loaded, &snapshot, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
+    let template = gate_template(
+        &loaded,
+        &snapshot,
+        at(NOW)?,
+        loaded
+            .production_configuration()
+            .map_err(text)?
+            .gate
+            .clone(),
+    )
+    .map_err(text)?;
     let trusted = TrustedPaperContext {
         template,
         agent: AGENT.to_owned(),
@@ -453,12 +521,116 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         protection: None,
     };
     assert!(trusted.input(&request).is_some());
-    scratch.remove()
+    Ok(())
+}
+
+/// The registered rule set with every member changed, as the E7-7 file's was: each edit must
+/// reach the gate and executor configurations the run assembles, and the reference the executor
+/// journals must be the mutated bytes' own hash.
+fn mutated_rules() -> String {
+    let mut rules = RULES.to_owned();
+    for (old, new) in [
+        (
+            "\"bracket_partial_fill_timeout_s\":60",
+            "\"bracket_partial_fill_timeout_s\":62",
+        ),
+        ("\"exit_step_s\":5", "\"exit_step_s\":7"),
+        ("\"gtc_expiry_days\":90", "\"gtc_expiry_days\":91"),
+        ("\"max_intent_age_s\":120", "\"max_intent_age_s\":121"),
+        ("\"max_unprotected_s\":60", "\"max_unprotected_s\":63"),
+        (
+            "\"protective_replace_buffer_trading_days\":5",
+            "\"protective_replace_buffer_trading_days\":6",
+        ),
+        (
+            "\"restriction_403_threshold\":3",
+            "\"restriction_403_threshold\":7",
+        ),
+        ("\"stop_watchdog_s\":60", "\"stop_watchdog_s\":64"),
+        (
+            "\"unknown_absent_lookups\":3",
+            "\"unknown_absent_lookups\":4",
+        ),
+        (
+            "\"unknown_absent_window_s\":15",
+            "\"unknown_absent_window_s\":16",
+        ),
+        ("\"close_window_minutes\":10", "\"close_window_minutes\":11"),
+        (
+            "\"collar_crypto_x\":\"0.02\"",
+            "\"collar_crypto_x\":\"0.033\"",
+        ),
+        (
+            "\"collar_liquid_threshold_usd\":\"50000000\"",
+            "\"collar_liquid_threshold_usd\":\"51000000\"",
+        ),
+        (
+            "\"collar_liquid_x\":\"0.01\"",
+            "\"collar_liquid_x\":\"0.011\"",
+        ),
+        (
+            "\"collar_other_x\":\"0.02\"",
+            "\"collar_other_x\":\"0.022\"",
+        ),
+        (
+            "\"collar_passive_band\":\"0.2\"",
+            "\"collar_passive_band\":\"0.24\"",
+        ),
+        (
+            "\"crypto_liquidity_floor_usd\":\"1000000\"",
+            "\"crypto_liquidity_floor_usd\":\"1100000\"",
+        ),
+        (
+            "\"daily_participation\":\"0.05\"",
+            "\"daily_participation\":\"0.066\"",
+        ),
+        (
+            "\"etp_classification_max_age_s\":604800",
+            "\"etp_classification_max_age_s\":604801",
+        ),
+        (
+            "\"legacy_pdt_equity_threshold\":\"25000\"",
+            "\"legacy_pdt_equity_threshold\":\"25001\"",
+        ),
+        (
+            "\"liquidity_floor_usd\":\"1000000\"",
+            "\"liquidity_floor_usd\":\"1000001\"",
+        ),
+        ("\"min_resting_time_s\":2", "\"min_resting_time_s\":3"),
+        (
+            "\"opposite_fill_interval_s\":60",
+            "\"opposite_fill_interval_s\":61",
+        ),
+        (
+            "\"order_size_participation\":\"0.05\"",
+            "\"order_size_participation\":\"0.055\"",
+        ),
+        ("\"order_to_fill_max\":10", "\"order_to_fill_max\":12"),
+        (
+            "\"order_to_fill_min_orders\":20",
+            "\"order_to_fill_min_orders\":21",
+        ),
+        ("\"price_floor\":\"5\"", "\"price_floor\":\"6\""),
+    ] {
+        let changed = rules.replace(old, new);
+        assert_ne!(changed, rules, "the rule-set edit did not apply: {old}");
+        rules = changed;
+    }
+    rules
 }
 
 #[test]
 fn production_configuration_comes_from_the_content_addressed_rule_set() -> Result<(), String> {
-    let (scratch, loaded) = production_configuration_artifacts("production-configuration")?;
+    let rules = mutated_rules();
+    let content = host_content()?;
+    let stream = deployed_stream(
+        &aapl_mandate()?,
+        &aapl_snapshot(),
+        &rules,
+        &host_model(&content),
+    )
+    .map_err(text)?;
+    let loaded = artifacts_from(&stream)?;
     let configuration = loaded.production_configuration().map_err(text)?;
     let gate = configuration.gate;
     assert_eq!(
@@ -527,20 +699,17 @@ fn production_configuration_comes_from_the_content_addressed_rule_set() -> Resul
         ),
         (62, 63, 64, 7, 91)
     );
-    let bytes = fs::read(scratch.0.join("config/rule-set.json")).map_err(text)?;
-    let expected_ref = reference(&bytes);
     assert_eq!(
         loaded.config_refs.rule_set.as_deref(),
-        Some(expected_ref.as_str())
+        Some(reference(rules.as_bytes()).as_str()),
+        "the journaled reference is the mutated bytes' own hash"
     );
-    scratch.remove()
+    Ok(())
 }
 
 #[test]
 fn production_contexts_use_only_the_reviewed_gate_and_executor_configuration() -> Result<(), String>
 {
-    let (scratch, loaded) = production_configuration_artifacts("production-context-configuration")?;
-    let _configuration = loaded.production_configuration().map_err(text)?;
     let source = include_str!("context.rs");
     let body = source
         .split_once("pub fn load_contexts_with_clock(")
@@ -559,13 +728,21 @@ fn production_contexts_use_only_the_reviewed_gate_and_executor_configuration() -
             "production context assembly must use `{required}`"
         );
     }
-    scratch.remove()
+    Ok(())
 }
 
 #[test]
 fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -> Result<(), String>
 {
-    let (scratch, loaded) = production_deployment_artifacts("production-deployment")?;
+    let content = host_content()?;
+    let stream = deployed_stream(
+        &aapl_mandate()?.replace("conn_alpaca_paper_01", "conn_owner_paper_42"),
+        &aapl_snapshot(),
+        RULES,
+        &host_model(&content),
+    )
+    .map_err(text)?;
+    let loaded = artifacts_from(&stream)?;
     let input = loaded
         .deployment(
             "workspace-owner-42".to_owned(),
@@ -600,202 +777,7 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
             "{name} must not be empty"
         );
     }
-    scratch.remove()
-}
-
-#[test]
-fn a_missing_effective_dated_artifact_refuses_the_load() {
-    let loaded = Artifacts::load(
-        &fixtures().join("mandate.json"),
-        &fixtures().join("no-config"),
-    );
-    assert!(
-        matches!(loaded, Err(Cause::Absent { .. })),
-        "a missing artifact must refuse"
-    );
-}
-
-#[test]
-fn every_reviewed_mandate_identity_field_is_required_independently() -> Result<(), String> {
-    let cases = [
-        ("asset-id", INSTRUMENT_ID, OTHER_ASSET),
-        ("symbol", "\"symbol\": \"AAPL\"", "\"symbol\": \"MSFT\""),
-        (
-            "asset-class",
-            "\"asset_class\": \"us_equity\",\n        \"asset_id\"",
-            "\"asset_class\": \"crypto_spot\",\n        \"asset_id\"",
-        ),
-        ("model-id", "quant.ma_crossover", "quant.other_model"),
-        (
-            "model-version",
-            "\"version\": \"1.0.0\"",
-            "\"version\": \"2.0.0\"",
-        ),
-        (
-            "environment",
-            "\"environment\": \"paper\"",
-            "\"environment\": \"live\"",
-        ),
-    ];
-    for (name, from, to) in cases {
-        let scratch = Scratch::new(name)?;
-        scratch.replace("mandate.json", from, to)?;
-        assert!(
-            scratch.load().is_err(),
-            "{name} must be checked independently"
-        );
-        scratch.remove()?;
-    }
-    let scratch = Scratch::new("model-hash")?;
-    fs::write(
-        scratch.0.join("config/model-artifact.json"),
-        b"{\"id\":\"quant.ma_crossover\",\"version\":\"1.0.0\"} ",
-    )
-    .map_err(text)?;
-    assert!(
-        scratch.load().is_err(),
-        "the model content hash must be checked"
-    );
-    scratch.remove()
-}
-
-/// Every member an artifact carries is one the run reads, and every value but the reviewed one is
-/// refused: an unknown member, a missing one, and each reviewed value changed.
-#[test]
-fn each_artifact_member_is_read_and_each_unreviewed_value_refused() -> Result<(), String> {
-    let cases = [
-        (
-            "extra-member",
-            "config/instrument-snapshot.json",
-            "{\"asset_class\"",
-            "{\"aa_note\":\"x\",\"asset_class\"",
-        ),
-        (
-            "missing-quote-age",
-            "config/rule-set.json",
-            "\"iex_quote_max_age_s\":10,",
-            "",
-        ),
-        (
-            "zero-quote-age",
-            "config/rule-set.json",
-            "\"iex_quote_max_age_s\":10",
-            "\"iex_quote_max_age_s\":0",
-        ),
-        (
-            "long-quote-age",
-            "config/rule-set.json",
-            "\"iex_quote_max_age_s\":10",
-            "\"iex_quote_max_age_s\":61",
-        ),
-        (
-            "text-quote-age",
-            "config/rule-set.json",
-            "\"iex_quote_max_age_s\":10",
-            "\"iex_quote_max_age_s\":\"10\"",
-        ),
-        (
-            "gate",
-            "config/rule-set.json",
-            "trading-domain-9.1",
-            "trading-domain-9.2",
-        ),
-        ("ruleset", "config/rule-set.json", "\"v1\"", "\"v2\""),
-        ("story", "config/rule-set.json", "E7-7", "E7-8"),
-        (
-            "etp",
-            "config/instrument-snapshot.json",
-            "\"plain\"",
-            "\"complex\"",
-        ),
-        (
-            "etp-date",
-            "config/instrument-snapshot.json",
-            "2026-09-25T00:00:00Z",
-            "2026-09-25",
-        ),
-        (
-            "exchange",
-            "config/instrument-snapshot.json",
-            "\"nasdaq\"",
-            "\"nyse\"",
-        ),
-        (
-            "increment",
-            "config/instrument-snapshot.json",
-            "\"whole\"",
-            "\"fractional\"",
-        ),
-        (
-            "instrument-class",
-            "config/instrument-snapshot.json",
-            "\"us_equity\"",
-            "\"crypto\"",
-        ),
-        (
-            "instrument-id",
-            "config/instrument-snapshot.json",
-            INSTRUMENT_ID,
-            OTHER_ASSET,
-        ),
-        (
-            "instrument-symbol",
-            "config/instrument-snapshot.json",
-            "\"AAPL\"",
-            "\"MSFT\"",
-        ),
-        (
-            "fee-environment",
-            "config/fee-config.json",
-            "\"paper\"",
-            "\"live\"",
-        ),
-        (
-            "fee-schedule",
-            "config/fee-config.json",
-            "conservative_v1",
-            "conservative_v2",
-        ),
-        (
-            "fee-date",
-            "config/fee-config.json",
-            "2026-01-01",
-            "2026-01-xx",
-        ),
-        (
-            "holidays",
-            "config/trading-calendar.json",
-            "\"holidays\":[]",
-            "\"holidays\":[\"2026-11-26\"]",
-        ),
-        (
-            "special-sessions",
-            "config/trading-calendar.json",
-            "\"special_sessions\":[]",
-            "\"special_sessions\":[\"2026-11-27\"]",
-        ),
-        (
-            "calendar-first",
-            "config/trading-calendar.json",
-            "2026-01-01",
-            "2026-13-01",
-        ),
-    ];
-    for (name, file, from, to) in cases {
-        let scratch = Scratch::new(name)?;
-        scratch.replace(file, from, to)?;
-        assert!(scratch.load().is_err(), "{name} must be refused");
-        scratch.remove()?;
-    }
-    let scratch = Scratch::new("max-quote-age")?;
-    scratch.replace(
-        "config/rule-set.json",
-        "\"iex_quote_max_age_s\":10",
-        "\"iex_quote_max_age_s\":60",
-    )?;
-    let loaded = scratch.load().map_err(text)?;
-    assert_eq!(loaded.quote_max_age, std::time::Duration::from_secs(60));
-    scratch.remove()
+    Ok(())
 }
 
 #[test]

@@ -141,7 +141,7 @@ where
 
 /// The liquidity figures at `now`, from two inputs `mandate-shell` parses and maps:
 ///
-/// - `daily` must pass the same trust check the signal's bars do, ending on the last completed
+/// - `daily` must pass the same trust check the model host's closes do, ending on the last completed
 ///   session; its stored close and volume fields are parsed into [`DailyBar`] values, and
 ///   [`daily_liquidity`] reads the last 20.
 /// - `minute_bars` must be `symbol`'s, as the preflight read them; [`trailing_volume`] sums those

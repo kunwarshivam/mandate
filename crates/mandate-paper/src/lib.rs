@@ -317,7 +317,6 @@ pub fn run<P: Ports>(
     };
     let sources = Sources {
         mandate: store.object_path(&ArtifactRef::from_digest(input.version())),
-        dataset: args.bars.clone(),
         journal: args.journal.clone().filter(|_| args.place_one_order),
         recorded_at: now,
         agent,
