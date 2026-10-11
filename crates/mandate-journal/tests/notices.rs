@@ -444,7 +444,6 @@ fn the_batch_rule_binds_an_alert_to_an_earlier_subject_in_its_batch() {
 /// stream and `wrong_stream` elsewhere, while version 1, in its own shape or with a `verdict`, and
 /// any later version are `unknown_schema` at `payload`, through `Draft::parse` and `append` alike.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempt_is_appended_at_version_2_and_refused_at_version_1() {
     closed_on(&[("NoticeAttempted", &[NTF])]);
     run(&[
@@ -485,7 +484,6 @@ fn version_1(draft: &[u8]) -> Vec<u8> {
 /// Version 2 is closed (DEC-720's form): without `verdict`, or with an unlisted member beside it,
 /// an attempt is `schema` at that member.
 #[test]
-#[ignore = "pending E8-10"]
 fn every_member_of_an_attempt_is_required_and_no_unlisted_member_is_admitted() {
     closed(&base("attempted"));
     let failed = set(
@@ -498,7 +496,6 @@ fn every_member_of_an_attempt_is_required_and_no_unlisted_member_is_admitted() {
 /// Non-negotiable 6 and NT-1, NT-2 on version 2: an attempt holds no trading content, address, or
 /// sentence, its `verdict` included.
 #[test]
-#[ignore = "pending E8-10"]
 fn no_attempt_can_carry_trading_content() {
     no_unlisted_content("attempted");
     for member in [
@@ -516,7 +513,6 @@ fn no_attempt_can_carry_trading_content() {
 /// `schema`, a string outside `retryable` and `permanent` is `non_canonical`, and an unlisted
 /// member or an earlier ill-typed member is reported before it.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary() {
     let ulid = event_id(5);
     let over = "x".repeat(257);
@@ -560,7 +556,6 @@ fn an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary() {
 /// Every channel, and every outcome rules 127 and 134 admit, at version 2: a `failed` attempt
 /// with each verdict its reason takes, every other status with none.
 #[test]
-#[ignore = "pending E8-10"]
 fn every_channel_and_outcome_is_admitted_at_version_2() {
     let mut cases = Vec::new();
     for channel in ["email", "phone", "slack", "sms", "telegram", "web_push"] {
@@ -596,7 +591,6 @@ fn every_channel_and_outcome_is_admitted_at_version_2() {
 /// Rules 126 to 129 at version 2, and rule 134 after them: `verdict` is refused only on a payload
 /// those rules pass, so a wrong verdict never hides an earlier rule's path.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempts_consistency_rules_refuse_at_their_paths() {
     let failed = "status=failed provider_message_id=null verdict=permanent";
     let abandoned = "status=abandoned provider_message_id=null";
@@ -707,7 +701,6 @@ fn attempt_with((status, reason, message): Attempt, verdict: Option<&str>) -> Ve
 /// The oracle is [`rule_134`], written from the spec's text; the counts are DEC-706 item 4's own:
 /// five outcomes with no verdict, nine fixed reasons with one, and two reasons with either.
 #[test]
-#[ignore = "pending E8-10"]
 fn the_verdict_is_set_exactly_on_a_failed_attempt_and_fixed_where_the_reason_fixes_it() {
     let mut admitted = 0;
     let mut differ = Vec::new();
@@ -733,7 +726,6 @@ fn the_verdict_is_set_exactly_on_a_failed_attempt_and_fixed_where_the_reason_fix
 /// Rule 134 holds whatever the attempt's other members are: its channel, attempt number,
 /// recipient, and, where rule 129 allows one, the combined message.
 #[test]
-#[ignore = "pending E8-10"]
 fn rule_134_does_not_depend_on_the_other_members() {
     let channel = prop_oneof![
         Just("email"),
