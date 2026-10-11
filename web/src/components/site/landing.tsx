@@ -8,6 +8,7 @@ import { BetaForm } from "./beta-form";
 import { Browser, TabLink } from "./browser";
 import { Contents } from "./contents";
 import { Desktop } from "./desktop";
+import { heroPhoneOrderClass } from "./hero-order";
 import type { AppId } from "./windows";
 import { BODY, BOLD, BUTTON, H2, LINK, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { OpenApp } from "./open-app";
@@ -214,14 +215,14 @@ export function Landing() {
               </span>
             </h1>
             <Perch />
-            <p className="max-w-[34rem] pt-2 text-[1.3125rem] leading-snug text-balance">{SUBHEAD}</p>
-            <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <p className={cn("max-w-[34rem] pt-2 text-[1.3125rem] leading-snug text-balance", heroPhoneOrderClass("subhead"))}>{SUBHEAD}</p>
+            <p className={cn("flex flex-wrap items-center justify-center gap-x-2 gap-y-1", heroPhoneOrderClass("beta-line"))}>
               <span className={cn(RAISED, "bg-highlight px-1.5 text-sm tracking-wide text-highlight-foreground uppercase", PIXEL)}>
                 <Blink>New</Blink>
               </span>
               <span>Private beta, opening a few people at a time. Sign the guestbook to ask for a place.</span>
             </p>
-            <p className="flex flex-wrap items-center justify-center gap-2" data-slot="hero-actions">
+            <p className={cn("flex flex-wrap items-center justify-center gap-2", heroPhoneOrderClass("actions"))} data-slot="hero-actions">
               <OpenApp app="guestbook" className={BUTTON}>
                 Sign the guestbook
               </OpenApp>
