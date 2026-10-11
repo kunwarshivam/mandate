@@ -8,8 +8,9 @@
 //! refuses here and only the runner's `live` feature can serve it (LT-1, V-001,
 //! [DEC-910](../../../docs/project/decisions/DEC-910.md)).
 
+use mandate_canon::Value;
 use mandate_domain::Environment;
-use mandate_journal::StoredEvent;
+use mandate_journal::{StoredEvent, StreamId, StreamType};
 use mandate_shell::control::ControlRecord;
 use mandate_spec::Mandate;
 
@@ -154,8 +155,113 @@ pub fn connection(
     mandate: &Mandate,
     account_ref: &str,
 ) -> Result<Connection, ConnectionRefusal> {
-    let _ = (records, mandate, account_ref);
-    Err(ConnectionRefusal::Unimplemented { story: "E7-26" })
+    let named = mandate.connection_id.as_str();
+    let mut latest = None;
+    for record in records {
+        let ours = matches!(
+            record.event_type.as_str(),
+            "ConnectionEstablished" | "ConnectionRevoked"
+        ) && member(record, "connection_id") == Some(named);
+        let is_later =
+            ours && latest.is_none_or(|earlier: &ControlRecord| earlier.seq < record.seq);
+        if is_later {
+            latest = Some(record);
+        }
+    }
+    let Some(record) = latest else {
+        return paper_default(mandate, account_ref);
+    };
+    if record.event_type == "ConnectionRevoked" {
+        return Err(ConnectionRefusal::Revoked);
+    }
+    let broker = member(record, "broker").ok_or(ConnectionRefusal::Unreadable)?;
+    let environment = member(record, "environment").ok_or(ConnectionRefusal::Unreadable)?;
+    let bound = member(record, "account_ref").ok_or(ConnectionRefusal::Unreadable)?;
+    if environment != environment_text(mandate) {
+        return Err(ConnectionRefusal::Environment {
+            named: environment.to_owned(),
+        });
+    }
+    let broker = broker_serving(broker, mandate.environment)
+        .map_err(|named| ConnectionRefusal::Broker { named })?;
+    if bound != account_ref {
+        return Err(ConnectionRefusal::Account);
+    }
+    match broker {
+        Broker::Alpaca => Ok(Connection {
+            broker,
+            environment: mandate.environment,
+            account_ref: account_ref.to_owned(),
+        }),
+        Broker::Robinhood => robinhood(mandate.environment, account_ref),
+    }
+}
+
+/// One text member of `record`'s payload, or [`None`] when it is missing or holds not text: a
+/// member the run reads off the record, and [`ConnectionRefusal::Unreadable`] is the only
+/// reading of one ([DEC-910](../../../docs/project/decisions/DEC-910.md) item 2).
+fn member<'a>(record: &'a ControlRecord, name: &str) -> Option<&'a str> {
+    record.payload.get(name).and_then(Value::as_str)
+}
+
+/// V-001's paper default (DEC-910 item 2): a paper mandate whose connection no record names
+/// keeps today's run — the Alpaca connector the default build compiles, the mandate's own
+/// environment, the account stream the run was given — and a live mandate with no record has
+/// neither an environment a run could trade live under nor a connector, so it refuses.
+fn paper_default(mandate: &Mandate, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
+    match mandate.environment {
+        Environment::Paper => Ok(Connection {
+            broker: Broker::Alpaca,
+            environment: Environment::Paper,
+            account_ref: account_ref.to_owned(),
+        }),
+        Environment::Live => Err(ConnectionRefusal::Unrecorded),
+    }
+}
+
+/// The mandate's environment as the record states it (mandate spec §3: `paper` or `live`), so
+/// the record's member and the mandate's own field say the same text or the record refuses.
+fn environment_text(mandate: &Mandate) -> &'static str {
+    match mandate.environment {
+        Environment::Paper => "paper",
+        Environment::Live => "live",
+    }
+}
+
+/// The broker `text` names, when it serves `environment` (DEC-910 item 2): a live mandate is
+/// served by the Robinhood connector alone (DEC-529 item 3) and a paper run by the Alpaca
+/// connector the default build compiles (V-001, LT-14), so a paper run has exactly one broker
+/// its build can serve. Any other text names a broker that does not serve the mandate's
+/// environment or one the runner knows no connector for, and it is refused as it is read.
+fn broker_serving(text: &str, environment: Environment) -> Result<Broker, String> {
+    match (text, environment) {
+        ("alpaca", Environment::Paper) => Ok(Broker::Alpaca),
+        ("robinhood", Environment::Live) => Ok(Broker::Robinhood),
+        (named, _) => Err(named.to_owned()),
+    }
+}
+
+/// The Robinhood a record chooses in this build (DEC-910 item 1's runtime seam): the default
+/// build holds no Robinhood host or connector, so its choice refuses here and no run of this
+/// build can reach a Robinhood host at all (LT-1). The runner's `live` feature is the only door,
+/// and no CI or release build enables it.
+#[cfg(not(feature = "live"))]
+fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
+    let _ = (environment, account_ref);
+    Err(ConnectionRefusal::NotBuilt)
+}
+
+/// The Robinhood a record chooses in a `live` build (DEC-910 item 1): the feature is the only
+/// door, no CI or release build enables it, and the founder builds it locally from a commit on
+/// `main` (DEC-529 item 3). The hosts and the connector the cycle serves it with are the live
+/// arm's, which the cycle's own wiring calls after this seam.
+#[cfg(feature = "live")]
+fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
+    Ok(Connection {
+        broker: Broker::Robinhood,
+        environment,
+        account_ref: account_ref.to_owned(),
+    })
 }
 
 /// DEC-529 item 3's lapse check (G1a): a live run refuses to start unless the account the
@@ -172,6 +278,32 @@ pub fn lapse(
     rows: &[StoredEvent],
     held: &Held,
 ) -> Result<(), LapseRefusal> {
-    let _ = (connection, rows, held);
-    Err(LapseRefusal::Unimplemented { story: "E7-26" })
+    if connection.environment != Environment::Live {
+        return Ok(());
+    }
+    if held.positions > 0 || held.open_orders > 0 {
+        return Err(LapseRefusal::NotFlat {
+            positions: held.positions,
+            open_orders: held.open_orders,
+        });
+    }
+    if rows.iter().any(|row| spends(row, &connection.account_ref)) {
+        return Err(LapseRefusal::Spent);
+    }
+    Ok(())
+}
+
+/// Whether `row` is the fill evidence that spends the record (DEC-910 item 3): an executor's
+/// `FillApplied` or a reconciliation's `LateFillApplied` alone, on the account stream
+/// `account_ref` names — `acct:{workspace_id}:{account_ref}` (journal spec §2), whose account
+/// segment the ref is, since the CLI binds one account stream to one connection id. Every
+/// other event, and every event of another stream, leaves the record unspent.
+fn spends(row: &StoredEvent, account_ref: &str) -> bool {
+    if !matches!(row.event_type.as_str(), "FillApplied" | "LateFillApplied") {
+        return false;
+    }
+    StreamId::parse(&row.stream_id).is_some_and(|stream| {
+        stream.stream_type() == StreamType::Account
+            && stream.as_str().split(':').nth(2) == Some(account_ref)
+    })
 }
