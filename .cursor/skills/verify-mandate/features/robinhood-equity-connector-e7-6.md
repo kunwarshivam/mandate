@@ -18,10 +18,13 @@
   check, run afresh on every read, the filtered reads, the shorter-prefix and empty near misses,
   DEC-879's filter-key allowlist, and rule 13's exits beside them),
   `crates/mandate-robinhood/tests/preflight.rs` (C4, DEC-470 item 1 and DEC-902, all pending
-  E7-6: cash, buying power, every position and the working orders mapped; any unknown or missing
-  field, other type, JSON number or next page refusing; the one symbol's quote and tradability;
-  every account read through the scoped `read`; no number invented; and the snapshot property
-  against an independent oracle), and
+  E7-6: cash, buying power, every position and the working orders mapped, each working order with
+  the side its record names, sell as `Sell` and buy as `Buy`; any unknown or missing field, other
+  type, JSON number, non-canonical trailing-zero decimal on every money and quantity field, or
+  next page refusing, and an order record with an empty id refusing; the one symbol's quote and
+  tradability; every account read through the scoped `read`; no number invented, with every
+  money and quantity field's exact decimal text kept; and the snapshot property against an
+  independent oracle, its generated orders of both sides), and
   `crates/mandate-rh-sim/tests/robinhood.rs` (`Submit` against `SimServer` over loopback: review
   then place, a deduplicated re-send, LT-6's lost and garbled answers, LT-5's alerts, `Cancel`
   by `order_id`, what the profile does not offer, and a cancel after a restart by

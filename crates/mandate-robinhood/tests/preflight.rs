@@ -1,11 +1,13 @@
 //! C4 tests (E7-6; DEC-470 item 1, DEC-875 item 6, DEC-902): the preflight facts and the account
 //! snapshot from contract-shaped records. Cash, buying power, every position record and every
-//! working order are mapped as the broker wrote them; a field missing, a field the assumed shape
-//! does not list, a value of another type, or a number that is not canonical decimal text refuses
-//! the whole read (`AGENTS.md` rule 3); the quote and the tradability are the one symbol's; and
-//! every account read goes through the scoped `read`. Oracles: the expected values written out
-//! from the fixtures' literals, the assumed shapes' keys and the working states listed here, and a
-//! recording tool double.
+//! working order are mapped as the broker wrote them, each money and quantity figure as the exact
+//! decimal text it is, and each working order with the side and the id its record names; a field
+//! missing, a field the assumed shape does not list, a value of another type, a number that is
+//! not canonical decimal text (trailing zeroes included), or an order record with an empty id
+//! refuses the whole read (`AGENTS.md` rule 3); the quote and the tradability are the one
+//! symbol's; and every account read goes through the scoped `read`. Oracles: the expected values
+//! written out from the fixtures' literals, the assumed shapes' keys and the working states
+//! listed here, and a recording tool double.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -145,15 +147,21 @@ fn position(account: &str, symbol: &str, quantity: &str, average: &str) -> Value
         "average_buy_price": average})
 }
 
-/// An order record; its `type` follows the prices it carries.
-fn order(account: &str, at: &str, state: &str, prices: (Option<&str>, Option<&str>)) -> Value {
+/// An order record, of the side its text names; its `type` follows the prices it carries.
+fn order(
+    account: &str,
+    side: &str,
+    at: &str,
+    state: &str,
+    prices: (Option<&str>, Option<&str>),
+) -> Value {
     let kind = match prices {
         (None, None) => "market",
         (Some(_), None) => "limit",
         (None, Some(_)) => "stop_market",
         (Some(_), Some(_)) => "stop_limit",
     };
-    json!({"id": at, "account_number": account, "symbol": SYMBOL, "side": "buy", "type": kind,
+    json!({"id": at, "account_number": account, "symbol": SYMBOL, "side": side, "type": kind,
         "quantity": "2", "limit_price": prices.0, "stop_price": prices.1, "time_in_force": "gtc",
         "market_hours": "regular_hours", "state": state, "filled_quantity": "0.5"})
 }
@@ -170,12 +178,17 @@ fn held(symbol: &str, quantity: &str, average: &str) -> BrokerPosition {
     }
 }
 
-fn working(at: &str, status: &str, prices: (Option<&str>, Option<&str>)) -> BrokerOrder {
+fn working(
+    at: &str,
+    side: Side,
+    status: &str,
+    prices: (Option<&str>, Option<&str>),
+) -> BrokerOrder {
     BrokerOrder {
         broker_order_id: at.to_owned(),
         client_order_id: None,
         instrument: id(SYMBOL),
-        side: Side::Buy,
+        side,
         qty: Qty::parse("2").unwrap(),
         filled_qty: Qty::parse("0.5").unwrap(),
         limit_price: prices.0.map(|p| Price::parse(p).unwrap()),
@@ -208,17 +221,17 @@ fn the_snapshot_maps_cash_buying_power_positions_and_working_orders() {
         position(THEIRS, SYMBOL, "9", "1"), position(OURS, "QQQ", "0", "400.5")]});
     let limit = (Some("84.5"), None);
     let stop = (Some("80"), Some("81"));
-    answers.orders = json!({"orders": [order(OURS, "o1", "new", limit),
-        order(OURS, "o2", "partially_filled", stop), order(OURS, "o3", "filled", limit),
-        order(THEIRS, "o4", "new", limit), order(OURS, "o5", "unconfirmed", (None, None))]});
+    answers.orders = json!({"orders": [order(OURS, "buy", "o1", "new", limit),
+        order(OURS, "buy", "o2", "partially_filled", stop), order(OURS, "buy", "o3", "filled", limit),
+        order(THEIRS, "buy", "o4", "new", limit), order(OURS, "buy", "o5", "unconfirmed", (None, None))]});
     let expected = AccountSnapshot {
         cash: usd("250.75"),
         buying_power: usd("1000"),
         positions: vec![held(SYMBOL, "3", "85.12"), held("QQQ", "0", "400.5")],
         open_orders: vec![
-            working("o1", "accepted", limit),
-            working("o2", "partially_filled", stop),
-            working("o5", "accepted", (None, None)),
+            working("o1", Side::Buy, "accepted", limit),
+            working("o2", Side::Buy, "partially_filled", stop),
+            working("o5", Side::Buy, "accepted", (None, None)),
         ],
     };
     assert_eq!(answers.snapshot().unwrap(), expected);
@@ -229,11 +242,11 @@ fn the_snapshot_maps_cash_buying_power_positions_and_working_orders() {
 fn only_the_working_states_are_open_orders_and_a_flat_account_maps_to_none() {
     for state in STATES {
         let mut answers = Answers::flat();
-        answers.orders = json!({"orders": [order(OURS, "o1", state, (Some("84.5"), None))]});
+        answers.orders = json!({"orders": [order(OURS, "buy", "o1", state, (Some("84.5"), None))]});
         let open = answers.snapshot().unwrap().open_orders;
         let status = WORKING.iter().find(|(s, _)| *s == state).map(|(_, m)| *m);
         let expected: Vec<BrokerOrder> = status
-            .map(|m| working("o1", m, (Some("84.5"), None)))
+            .map(|m| working("o1", Side::Buy, m, (Some("84.5"), None)))
             .into_iter()
             .collect();
         assert_eq!(open, expected, "state {state}");
@@ -242,6 +255,26 @@ fn only_the_working_states_are_open_orders_and_a_flat_account_maps_to_none() {
     assert!(
         flat.positions.is_empty() && flat.open_orders.is_empty(),
         "{flat:?}"
+    );
+}
+
+/// DEC-902 item 4 / `BrokerOrder`'s side: the connector maps the record's `side` text (`buy`,
+/// `sell`) to the executor's own two sides, as `mandate-alpaca`'s wire mapping does: `"sell"` to
+/// `Side::Sell` and `"buy"` to `Side::Buy`.
+#[test]
+#[ignore = "pending E7-6"]
+fn sell_orders_map_to_sell_and_buy_orders_to_buy() {
+    let mut answers = Answers::flat();
+    answers.orders = json!({"orders": [order(OURS, "sell", "o1", "new", (Some("84.5"), None)),
+        order(OURS, "buy", "o2", "partially_filled", (None, None))]});
+    let open = answers.snapshot().unwrap().open_orders;
+    assert_eq!(
+        open,
+        vec![
+            working("o1", Side::Sell, "accepted", (Some("84.5"), None)),
+            working("o2", Side::Buy, "partially_filled", (None, None)),
+        ],
+        "the record's side text is the order's side, sell and buy both"
     );
 }
 
@@ -258,7 +291,7 @@ fn targets() -> [(&'static str, Option<&'static str>, Value); 5] {
         (
             "orders",
             Some("orders"),
-            order(OURS, "o1", "new", (Some("84.5"), None)),
+            order(OURS, "buy", "o1", "new", (Some("84.5"), None)),
         ),
         ("tradability", None, Answers::flat().tradability),
         (
@@ -337,16 +370,24 @@ fn any_unknown_or_missing_field_or_unexpected_type_refuses() {
         ("portfolio", "cash", json!("-1")),
         ("portfolio", "buying_power", json!("-0.01")),
         ("portfolio", "buying_power", json!("1e3")),
+        ("portfolio", "buying_power", json!("1000.0")),
         ("positions", "symbol", json!("")),
         ("positions", "average_buy_price", json!("0")),
+        ("positions", "quantity", json!("3.0")),
+        ("positions", "average_buy_price", json!("85.120")),
         ("orders", "state", json!("in_doubt")),
         ("orders", "side", json!("short")),
         ("orders", "type", json!("trailing_stop")),
         ("orders", "time_in_force", json!("ioc")),
         ("orders", "market_hours", json!("overnight")),
         ("orders", "quantity", json!("2.0")),
+        ("orders", "limit_price", json!("84.50")),
+        ("orders", "stop_price", json!("81.00")),
+        ("orders", "filled_quantity", json!("0.50")),
         ("orders", "ref_id", json!(7)),
         ("tradability", "tradable", json!("true")),
+        ("quotes", "bid_price", json!("85.10")),
+        ("quotes", "ask_price", json!("85.130")),
     ];
     for (code, key, value) in odd_values {
         let (_, _, mut record) = targets().into_iter().find(|t| t.0 == code).unwrap();
@@ -354,6 +395,17 @@ fn any_unknown_or_missing_field_or_unexpected_type_refuses() {
         let outcome = with_record(code, record).preflight();
         unreadable(&outcome, code, &format!("{code}.{key} = {value}"));
     }
+}
+
+/// DEC-902 item 4's `id` (non-empty text), read fail-closed like the other rejects: a record
+/// with no id cannot be named, re-read or cancelled, so the whole orders read refuses rather
+/// than carry an order the executor could never refer to again.
+#[test]
+#[ignore = "pending E7-6"]
+fn an_order_record_with_an_empty_id_refuses() {
+    let record = order(OURS, "buy", "", "new", (Some("84.5"), None));
+    let outcome = with_record("orders", record).snapshot();
+    unreadable(&outcome, "orders", "an order record with an empty id");
 }
 
 #[test]
@@ -465,15 +517,15 @@ fn every_account_read_goes_through_the_scoped_read() {
 #[ignore = "pending E7-6"]
 fn no_number_is_invented() {
     let mut answers = Answers::flat();
-    answers.orders = json!({"orders": [order(OURS, "o1", "new", (None, None))]});
+    answers.orders = json!({"orders": [order(OURS, "buy", "o1", "new", (None, None))]});
     let open = answers.snapshot().unwrap().open_orders;
     assert_eq!(
         open,
-        vec![working("o1", "accepted", (None, None))],
+        vec![working("o1", Side::Buy, "accepted", (None, None))],
         "null stays none"
     );
     for key in ["limit_price", "stop_price", "filled_quantity"] {
-        let mut record = order(OURS, "o1", "new", (Some("84.5"), None));
+        let mut record = order(OURS, "buy", "o1", "new", (Some("84.5"), None));
         record.as_object_mut().unwrap().remove(key);
         let outcome = with_record("orders", record).snapshot();
         unreadable(
@@ -500,15 +552,50 @@ fn money_is_exact_decimal_text_and_a_json_number_refuses() {
     let mut answers = Answers::flat();
     answers.portfolio["cash"] = json!("1234567890123.123456789");
     answers.portfolio["buying_power"] = json!("0.000000001");
+    answers.positions = json!({"positions": [position(OURS, SYMBOL,
+        "123456789.123456789", "99999999.999999999")]});
+    let prices = (Some("0.123456789"), Some("0.987654321"));
+    let mut record = order(OURS, "buy", "o1", "new", prices);
+    record["quantity"] = json!("123456789.123456789");
+    record["filled_quantity"] = json!("0.135792468");
+    answers.orders = json!({"orders": [record]});
+    answers.quotes = json!({"quotes": [{"symbol": SYMBOL, "bid_price": "0.000000002",
+        "ask_price": "12345678.123456789"}]});
     let snapshot = answers.snapshot().unwrap();
     assert_eq!(snapshot.cash.to_string(), "1234567890123.123456789");
     assert_eq!(snapshot.buying_power.to_string(), "0.000000001");
+    assert_eq!(
+        snapshot.positions,
+        vec![held(SYMBOL, "123456789.123456789", "99999999.999999999")],
+        "a position's fields are the exact values their text names"
+    );
+    let mut expected = working("o1", Side::Buy, "accepted", prices);
+    expected.qty = Qty::parse("123456789.123456789").unwrap();
+    expected.filled_qty = Qty::parse("0.135792468").unwrap();
+    assert_eq!(
+        snapshot.open_orders,
+        vec![expected],
+        "an order's every money and quantity field is the exact value its text names"
+    );
+    let facts = answers.preflight().unwrap();
+    assert_eq!(
+        facts.quote,
+        Quote {
+            symbol: id(SYMBOL),
+            bid: Price::parse("0.000000002").unwrap(),
+            ask: Price::parse("12345678.123456789").unwrap(),
+        },
+        "the quote's prices are the exact values their text names"
+    );
     let numbers = [
         ("portfolio", "cash", json!(250.75)),
         ("portfolio", "buying_power", json!(1000)),
         ("positions", "quantity", json!(3)),
         ("positions", "average_buy_price", json!(85.12)),
         ("orders", "limit_price", json!(84.5)),
+        ("orders", "stop_price", json!(81)),
+        ("orders", "filled_quantity", json!(0.5)),
+        ("quotes", "bid_price", json!(85.1)),
         ("quotes", "ask_price", json!(85.13)),
     ];
     for (code, key, number) in numbers {
@@ -555,10 +642,12 @@ fn position_fields() -> impl Strategy<Value = Value> {
 
 fn order_fields() -> impl Strategy<Value = Value> {
     let limit = proptest::option::of(1u64..1_000_000);
-    (0usize..10, 0u32..1000, limit).prop_map(|(state, at, limit)| {
+    (0usize..10, 0u32..1000, any::<bool>(), limit).prop_map(|(state, at, sell, limit)| {
         let limit = limit.map(|l| decimal(l, 2));
+        let side = if sell { "sell" } else { "buy" };
         order(
             OURS,
+            side,
             &format!("o{at}"),
             STATES[state],
             (limit.as_deref(), None),
@@ -632,8 +721,14 @@ fn the_snapshot_matches_an_independent_oracle_over_random_records() {
         let open = orders.iter().filter(ours).filter_map(|(r, _)| {
             let state = text(r, "state");
             let status = WORKING.iter().find(|(s, _)| *s == state)?.1;
+            let side = if text(r, "side") == "sell" {
+                Side::Sell
+            } else {
+                Side::Buy
+            };
             Some(working(
                 &text(r, "id"),
+                side,
                 status,
                 (r["limit_price"].as_str(), None),
             ))
