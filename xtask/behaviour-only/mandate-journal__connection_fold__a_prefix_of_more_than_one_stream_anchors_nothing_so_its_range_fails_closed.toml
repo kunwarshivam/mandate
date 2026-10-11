@@ -1,0 +1,9 @@
+file = "crates/mandate-journal/tests/connection_fold.rs"
+test = "a_prefix_of_more_than_one_stream_anchors_nothing_so_its_range_fails_closed"
+reason = """
+E7-17's follow-up (DEC-913, the founder-approved tightening): `ConnectionAnchor::from_verified`
+and the fold it shares are implemented, and a prefix whose rows span two streams, chained as one
+chain, still binds and anchors its last row's stream, so this test fails on that anchored answer
+rather than at a stub. The code PR of the fix that refuses the mixed prefix with `Broken` deletes
+this file with the test's `#[ignore]` line.
+"""
