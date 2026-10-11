@@ -9,11 +9,15 @@
 
 mod common;
 
+use std::sync::{Arc, Mutex};
+
 use common::{FakeClock, FakeTransport, scenario};
 use mandate_accounting::Side;
 use mandate_alpaca::client::{RetryPolicy, TradingClient};
-use mandate_alpaca::error::WireError;
-use mandate_alpaca::http::{Credentials, HttpRequest, Method, is_paper_trading_path};
+use mandate_alpaca::error::{TransportError, WireError};
+use mandate_alpaca::http::{
+    Credentials, HttpRequest, Method, Response, TradingTransport, is_paper_trading_path,
+};
 use mandate_alpaca::{KEY_ID_VAR, PAPER_HOST, Pause, SECRET_VAR, TokioPause, record, wire};
 use mandate_executor::{BrokerOutcome, BrokerUnknown};
 
@@ -1761,6 +1765,314 @@ async fn a_cancel_refused_as_not_cancelable_reads_the_order_back() {
         order.status, "filled",
         "§5.7's `PendingCancel --> Filled: filled first` row, never a confirmation"
     );
+}
+
+/// The `submit_bracket_accepted` entry, as Alpaca lists it once the bracket fills completely: the
+/// parent under the entry's own `client_order_id`, `filled`, with its two sell legs still nested
+/// under it (the recording's own ids kept — each leg's broker `id` and broker-named
+/// `client_order_id` — so the listing differs from the recording by the fill alone; DEC-878
+/// item 1: no broker order carries the placement's handle).
+fn filled_bracket_entry() -> serde_json::Value {
+    let mut parent: serde_json::Value =
+        serde_json::from_slice(&common::body("submit_bracket_accepted", 0))
+            .unwrap_or_else(|e| panic!("the recorded bracket parses: {e}"));
+    parent["status"] = serde_json::json!("filled");
+    parent["filled_at"] = serde_json::json!("2026-09-26T23:21:11.63400562Z");
+    parent["filled_avg_price"] = serde_json::json!("1");
+    parent["filled_qty"] = serde_json::json!("1");
+    parent
+}
+
+/// The recording's entry, under the entry's own `client_order_id`: the id Alpaca holds, which
+/// the placement's handle names before its last `-p` (trading-domain spec §2.3, DEC-878 item 1).
+const BRACKET_ENTRY: &str = "md-daea915c1fc0042bcc19a4caed";
+/// The placement's platform handle, `{entry}-p{record}` (§2.3, DEC-160 item 3): the name no
+/// Alpaca order carries, so a request that asks by it is answered by the broker's own 404.
+const BRACKET_PLACEMENT: &str = "md-daea915c1fc0042bcc19a4caed-p1";
+/// The take-profit leg's broker order id in the recording: the leg the platform names
+/// `{placement}-tp` and Alpaca names with its own UUID (DEC-878).
+const TAKE_PROFIT_LEG_ID: &str = "fe22b5be-837b-4684-b222-0090fdd838cc";
+/// The stop leg's broker order id in the recording, the platform's `{placement}-sl`.
+const STOP_LEG_ID: &str = "30ab5fda-7d66-4263-82cf-2a1d40bf404f";
+
+/// The paper host's answers on a filled bracket's cancel path, dispatched by what was asked
+/// rather than scripted into a sequence, so a test pins which requests exist, not their order.
+///
+/// The open-orders read (`nested=true`) answers the page a filled bracket lists; a read by a
+/// `client_order_id` Alpaca holds answers that order, and any other name — the placement's
+/// handle included, which DEC-878 item 1 keeps the platform's own and never a broker id —
+/// answers the recorded 404 (`order_by_client_id_absent`); a `DELETE` by an order id is taken
+/// and answered empty, as the recorded `cancel_confirmed` DELETE is; and a read by an order id
+/// answers the order `canceled`, the read-back DEC-867 item 3 confirms a cancel by.
+#[derive(Clone)]
+struct FilledBracketHost {
+    open_orders: String,
+    entry: Option<String>,
+    canceled_leg: String,
+    absent: String,
+    sent: Arc<Mutex<Vec<String>>>,
+}
+
+impl FilledBracketHost {
+    /// On a broker whose open-orders page is `listing`; a read by the entry's
+    /// `client_order_id` answers it only while the page lists it, as no read can name an order
+    /// the page does not hold.
+    fn answering(listing: serde_json::Value) -> Self {
+        let page = listing
+            .as_array()
+            .unwrap_or_else(|| panic!("the open-orders page is a list: {listing}"));
+        let entry = page
+            .iter()
+            .find(|open| {
+                open.get("client_order_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(BRACKET_ENTRY)
+            })
+            .cloned();
+        let mut canceled = filled_bracket_entry()["legs"][0].clone();
+        canceled["status"] = serde_json::json!("canceled");
+        Self {
+            open_orders: listing.to_string(),
+            entry: entry.map(|found| found.to_string()),
+            canceled_leg: canceled.to_string(),
+            absent: String::from_utf8(common::body("order_by_client_id_absent", 0))
+                .unwrap_or_else(|e| panic!("the recorded absence is text: {e}")),
+            sent: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Everything the client sent, as `METHOD path` lines, in order.
+    fn sent_lines(&self) -> Vec<String> {
+        let mut sent = match self.sent.lock() {
+            Ok(sent) => sent,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        std::mem::take(&mut *sent)
+    }
+}
+
+impl TradingTransport for FilledBracketHost {
+    async fn send(&self, request: &HttpRequest) -> Result<Response, TransportError> {
+        let path = request.path_and_query();
+        {
+            let mut sent = match self.sent.lock() {
+                Ok(sent) => sent,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            sent.push(format!("{} {}", request.method().as_str(), path));
+        }
+        let answer =
+            if request.method() == Method::Get && path.starts_with("/v2/orders?status=open") {
+                Response {
+                    status: 200,
+                    body: self.open_orders.as_bytes().to_vec(),
+                }
+            } else if request.method() == Method::Get
+                && path.starts_with("/v2/orders:by_client_order_id?client_order_id=")
+            {
+                let asked = path.rsplit("client_order_id=").next().unwrap_or_default();
+                match (&self.entry, asked == BRACKET_ENTRY) {
+                    (Some(answer), true) => Response {
+                        status: 200,
+                        body: answer.as_bytes().to_vec(),
+                    },
+                    _ => Response {
+                        status: 404,
+                        body: self.absent.as_bytes().to_vec(),
+                    },
+                }
+            } else if request.method() == Method::Delete && path.starts_with("/v2/orders/") {
+                Response {
+                    status: 204,
+                    body: Vec::new(),
+                }
+            } else if request.method() == Method::Get && path.starts_with("/v2/orders/") {
+                Response {
+                    status: 200,
+                    body: self.canceled_leg.as_bytes().to_vec(),
+                }
+            } else {
+                Response {
+                    status: 404,
+                    body: self.absent.as_bytes().to_vec(),
+                }
+            };
+        Ok(answer)
+    }
+}
+
+/// One request to cancel a filled bracket's placement, by the platform's handle for it.
+fn cancel_bracket_placement() -> mandate_executor::BrokerRequest {
+    mandate_executor::BrokerRequest::Cancel {
+        client_order_id: client_order_id(BRACKET_PLACEMENT),
+    }
+}
+
+/// E7-4 (DEC-878's "Not decided here: the cancel of a bracket's placement", #1270's "Not
+/// done"), §5.4's marketable exit sequence, DEC-867 item 3: cancelling the placement of a
+/// completely filled bracket — the handle `{entry}-p{record}`, which no Alpaca order carries —
+/// cancels the two legs the broker holds nested under the filled entry, each by **its own**
+/// broker order id read from the open-orders snapshot, never for the handle itself, whose every
+/// answer is the broker's 404 (DEC-878 items 1 and 2).
+#[ignore = "pending E7-4"]
+#[tokio::test]
+async fn cancelling_a_brackets_placement_cancels_its_two_legs_by_their_own_broker_ids() {
+    let transport = FilledBracketHost::answering(serde_json::json!([filled_bracket_entry()]));
+    let client = TradingClient::new(
+        transport.clone(),
+        FakeClock::default(),
+        RetryPolicy::default(),
+    );
+    let outcome = client
+        .call_one(&cancel_bracket_placement())
+        .await
+        .unwrap_or_else(|e| panic!("cancelling the placement of nested legs is an answer: {e}"));
+    assert_eq!(
+        outcome,
+        BrokerOutcome::CancelAccepted {
+            client_order_id: BRACKET_PLACEMENT.to_owned()
+        },
+        "the placement is cancelled with its legs — the exit sequence's first step (§5.4) — and \
+         confirmed by the legs' read-backs (DEC-867 item 3), never by the request alone"
+    );
+    let sent = transport.sent_lines();
+    for leg in [TAKE_PROFIT_LEG_ID, STOP_LEG_ID] {
+        assert!(
+            sent.contains(&format!("DELETE /v2/orders/{leg}")),
+            "both legs the broker holds nested under the filled entry are cancelled, each by its \
+             own broker order id (DEC-878 items 1 and 2): {sent:?}"
+        );
+    }
+    assert!(
+        sent.iter().all(|line| !line.contains(BRACKET_PLACEMENT)),
+        "the handle is the platform's, never a broker id, so no request asks Alpaca for it \
+         (DEC-878 item 1): {sent:?}"
+    );
+}
+
+/// The recordings `filled_bracket_entry` builds, with an entry whose own status is `status` and
+/// nothing of it filled: the listing of an entry that does not rest as a filled bracket does.
+fn entry_in_status(status: &str) -> serde_json::Value {
+    let mut entry = filled_bracket_entry();
+    entry["status"] = serde_json::json!(status);
+    entry["filled_at"] = serde_json::Value::Null;
+    entry["filled_avg_price"] = serde_json::Value::Null;
+    entry["filled_qty"] = serde_json::json!("0");
+    serde_json::json!([entry])
+}
+
+/// The recording's listing with its legs changed by `change`, so a case names the one shape that
+/// keeps the placement from resting whole (DEC-878 item 2).
+fn legs_changed(change: impl Fn(&mut Vec<serde_json::Value>)) -> serde_json::Value {
+    let mut entry = filled_bracket_entry();
+    let mut legs = entry["legs"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("the recording nests its bracket's legs"));
+    change(&mut legs);
+    entry["legs"] = serde_json::json!(legs);
+    serde_json::json!([entry])
+}
+
+/// Every listing that leaves a filled bracket's placement short of DEC-878 item 2's whole
+/// bracket: the entry listed `filled` with exactly two resting sell legs nested under it, the
+/// recorded stop and take-profit (a missing stop never reads as covering, item 9). Each is a
+/// real doubt, so a cancel of the placement against it fails closed (rule 3: what cannot be
+/// shown resting is never assumed).
+fn listings_without_a_resting_bracket() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("nothing listed", serde_json::json!([])),
+        (
+            "the entry canceled, its legs resting",
+            entry_in_status("canceled"),
+        ),
+        (
+            "the entry accepted, not filled",
+            entry_in_status("accepted"),
+        ),
+        (
+            "the take-profit resting alone, the stop gone",
+            legs_changed(|legs| legs.truncate(1)),
+        ),
+        (
+            "a third leg beside the two, done",
+            legs_changed(|legs| {
+                let mut done = legs[1].clone();
+                done["id"] = serde_json::json!("9b3ba3a5-4e21-4179-9f3f-4ba2c11f70e1");
+                done["client_order_id"] = serde_json::json!("1f7c3314-a11d-4464-872b-05f671c148ad");
+                done["status"] = serde_json::json!("canceled");
+                legs.push(done);
+            }),
+        ),
+        (
+            "both legs that buy",
+            legs_changed(|legs| {
+                for leg in legs {
+                    leg["side"] = serde_json::json!("buy");
+                }
+            }),
+        ),
+        (
+            "the stop partly filled",
+            legs_changed(|legs| {
+                legs[1]["status"] = serde_json::json!("partially_filled");
+                legs[1]["filled_qty"] = serde_json::json!("0.4");
+            }),
+        ),
+        (
+            "the stop pending a cancel",
+            legs_changed(|legs| {
+                legs[1]["status"] = serde_json::json!("pending_cancel");
+            }),
+        ),
+        (
+            "the stop for 2 where the take-profit has 1",
+            legs_changed(|legs| {
+                legs[1]["qty"] = serde_json::json!("2");
+            }),
+        ),
+    ]
+}
+
+/// E7-4 (DEC-878 items 2 and 9, rule 3), #1270's "Not done": a cancel of a bracket's placement
+/// whose open-orders snapshot cannot show the entry carrying exactly two resting sell legs is
+/// never confirmed and never answered as an absence — which is what today's lookup by the
+/// handle answers, since Alpaca holds no order by that name. The connector fails closed: no leg
+/// is deleted, no request asks for the handle, and the placement stays held or doubted rather
+/// than assumed cancelled, so risk never widens.
+#[ignore = "pending E7-4"]
+#[tokio::test]
+async fn a_bracket_placement_without_its_whole_bracket_resting_is_never_assumed_cancelled() {
+    for (case, listing) in listings_without_a_resting_bracket() {
+        let transport = FilledBracketHost::answering(listing);
+        let client = TradingClient::new(
+            transport.clone(),
+            FakeClock::default(),
+            RetryPolicy::default(),
+        );
+        let outcome = client.call_one(&cancel_bracket_placement()).await;
+        let sent = transport.sent_lines();
+        assert!(
+            sent.iter().all(|line| !line.contains(BRACKET_PLACEMENT)),
+            "{case}: no request asks the broker for the handle `{BRACKET_PLACEMENT}`, which no \
+             broker order carries (DEC-878 item 1): {sent:?}"
+        );
+        assert!(
+            !sent.iter().any(|line| line.starts_with("DELETE ")),
+            "{case}: a bracket the snapshot cannot show resting whole is refused, never \
+             cancelled (rule 3, DEC-878 item 2): {sent:?}"
+        );
+        assert!(
+            !matches!(&outcome, Ok(BrokerOutcome::CancelAccepted { .. })),
+            "{case}: a cancel nothing confirms is not confirmed (DEC-867 item 3): {outcome:?}"
+        );
+        assert!(
+            !matches!(&outcome, Ok(BrokerOutcome::Absent { .. })),
+            "{case}: legs the broker may still hold are never assumed gone by a 404 asked for a \
+             name the broker does not hold; the placement stays in doubt rather than assumed \
+             cancelled (rule 3, DEC-878 items 1 and 5): {outcome:?}"
+        );
+    }
 }
 
 #[tokio::test]

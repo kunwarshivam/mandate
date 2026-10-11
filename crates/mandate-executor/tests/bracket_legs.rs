@@ -590,3 +590,59 @@ fn a_risk_exit_after_the_reconciliation_is_never_held_by_the_legs() {
         exit.requests
     );
 }
+
+/// DEC-878 item 1, the "Not decided here" it parks for this slice and #1270's "Not done", rule 3:
+/// the in-doubt lookup of a filled bracket's placement never asks the broker for the handle
+/// `{entry}-p{record}`, which no Alpaca order carries and whose every answer is the broker's
+/// 404. The doubt is settled through the entry — the legs Alpaca nests under it — so the
+/// placement is asked after by the entry's own id, and until that settles it the placement
+/// stays `Unknown`: in doubt, holding exits, never confirmed absent by a name the broker does
+/// not hold.
+#[ignore = "pending E7-4"]
+#[test]
+fn the_doubted_bracket_placement_is_asked_after_by_its_entry_never_by_its_handle() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, entry, protection) = filled_bracket(&ports);
+    let half_bracket = listed_entry(
+        &entry,
+        vec![take_profit_leg("new", "10"), stop_leg("canceled", "10")],
+    );
+    let ran = shell.run(after_the_fill(&shell, vec![half_bracket]), &ports);
+    assert_eq!(
+        adopted(&ran, &protection),
+        (true, true),
+        "a half-legged bracket keeps today's fail-safe adoption, its `CompensatingEvent` \
+         included (DEC-878 item 5): {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        !queried(&ran, &protection),
+        "no lookup asks the broker for the handle `{protection}`, which no Alpaca order \
+         carries (DEC-878 item 1): {:?}",
+        ran.requests
+    );
+    assert!(
+        queried(&ran, &entry),
+        "the doubt is settled through the entry whose nested legs Alpaca lists, so the \
+         lookup names the entry's own id (DEC-878 item 2, #1270's Not done): {:?}",
+        ran.requests
+    );
+    let state = shell
+        .state
+        .orders()
+        .values()
+        .find(|order| order.client_order_id.as_str() == protection)
+        .map(|order| order.state);
+    assert_eq!(
+        state,
+        Some(OrderState::Unknown),
+        "the placement stays in doubt, never assumed gone whatever the broker answered by a \
+         name it does not hold (rule 3, DEC-878 item 1)"
+    );
+}

@@ -1,0 +1,12 @@
+file = "crates/mandate-executor/tests/bracket_legs.rs"
+test = "the_doubted_bracket_placement_is_asked_after_by_its_entry_never_by_its_handle"
+reason = """
+E7-4, the in-doubt lookup DEC-878 item 5 keeps from #1270's implementation ("it only clears
+once the lookup asks by the entry"): reconciliation's adoption and `listing.rs::query_unknown`
+are implemented, and the ask goes out by the handle `{entry}-p{record}`, which Alpaca always
+answers 404, so a real doubt is never settled and each absence folds toward
+`Unknown -> Intent` on a name the broker does not hold. The test reaches no stub — it panics on
+the request the run sends, not on any stub's report — until E7-4's fix asks after such a
+placement by its entry and reads the nested legs, and deletes this file with its `#[ignore]`
+line.
+"""
