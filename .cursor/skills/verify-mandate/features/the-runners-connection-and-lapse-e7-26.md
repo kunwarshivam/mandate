@@ -8,7 +8,10 @@
   record on the control stream, the environment from the confirmed mandate, and DEC-529
   item 3's lapse: a live run refuses unless the account is flat and the record is unspent,
   each refusal with its own reason code), re-exported by
-  `crates/mandate-paper/src/lib.rs` as `PaperError`'s `Connection` and `Lapse` variants.
+  `crates/mandate-paper/src/lib.rs` as `PaperError`'s `Connection` and `Lapse` variants. The
+  runner's `live` cargo feature (`crates/mandate-paper/Cargo.toml`, the crate
+  `xtask/layers.toml` marks `live_feature`) is the only door to the Robinhood connector:
+  the default build's connection seam refuses `connector_not_built` (DEC-910 item 1).
 - **Tests:** `crates/mandate-paper/tests/connection.rs`: the connection refusals (no record, a
   revoked record — a revoked paper record included, a lone revocation with no prior
   establishment, a revocation of another connection refused never, and a re-establishment after
@@ -20,8 +23,7 @@
   the connector the default build does not hold, which is LT-1's runtime build test) and the
   lapse pins (a spent record deploys nothing, a fill on a stream the record does not bind
   spending nothing, a non-flat account refusing ahead of the spend, the unspent-and-flat pair
-  proceeding to the builder and the gate, and a paper run making no check at all), each a
-  pending test on its stub until E7-26's implementation lands (DEC-77), beside a live test
-  pinning every refusal's message and reason code, and an agreeing paper record keeping the
-  whole paper connection, the account stream included.
+  proceeding to the builder and the gate, and a paper run making no check at all), pinning the
+  implemented seam beside a live test that pins every refusal's message and reason code, and an
+  agreeing paper record keeping the whole paper connection, the account stream included.
 - **Run:** `cargo nextest run -p mandate-paper`.
