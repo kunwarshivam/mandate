@@ -12,6 +12,7 @@ import { DISCARDED, QUESTIONS } from "./apps";
 import { WALLPAPERS, randomWallpaper } from "./art";
 import { APP_ORIGIN } from "./app-tab";
 import { GREETING, TIPS } from "./assistant";
+import { heroPhoneOrderClass, type HeroRow } from "./hero-order";
 import { BODY, MONO, PIXEL } from "./letter";
 import { PLAYLIST } from "./music";
 import { TOUR, TOUR_VIDEO, tourVtt } from "./tour";
@@ -248,6 +249,43 @@ describe("the landing page's structure", () => {
     levels.forEach((level, i) => {
       if (i > 0) expect(level - levels[i - 1]).toBeLessThanOrEqual(1);
     });
+  });
+});
+
+describe("the hero on a phone (critique C-2)", () => {
+  /** Renders the landing page and finds the header and the three rows C-2 orders, each by what is already on it. */
+  function heroRowsOf(): Record<HeroRow, HTMLElement> {
+    renderLanding();
+    const header = home().querySelector<HTMLElement>(":scope > header")!;
+    return {
+      subhead: within(header).getByText(SUBHEAD).closest("p")!,
+      actions: header.querySelector<HTMLElement>('[data-slot="hero-actions"]')!,
+      "beta-line": within(header).getByText(/Private beta, opening a few people at a time/).closest("p")!,
+    };
+  }
+
+  /** The place the row's phone class gives it in the header's grid, top to bottom. */
+  function orderAt(row: HeroRow, rows: Record<HeroRow, HTMLElement>): number {
+    for (const name of ["subhead", "actions", "beta-line"] as const) expect(rows[name], `${name} is on the page`).toBeTruthy();
+    const digits = heroPhoneOrderClass(row).match(/order-(\d+)/)?.[1];
+    expect(digits, `${row}'s class places it in the header's order`).toBeDefined();
+    return Number(digits);
+  }
+
+  it.skip("pending E11-9: on a phone, the actions stand directly under the subhead and the beta line after them (C-2)", () => {
+    const rows = heroRowsOf();
+    for (const row of ["subhead", "actions", "beta-line"] as const) expect(rows[row].className, row).toContain(heroPhoneOrderClass(row));
+    expect(orderAt("actions", rows), "the buttons directly under the subhead").toBe(orderAt("subhead", rows) + 1);
+    expect(orderAt("beta-line", rows), "the beta line after them").toBe(orderAt("actions", rows) + 1);
+  });
+
+  it.skip("pending E11-9: on the desktop, the beta line keeps its place between the subhead and the actions (C-2)", () => {
+    const rows = heroRowsOf();
+    for (const row of ["subhead", "actions", "beta-line"] as const) {
+      expect(heroPhoneOrderClass(row), `${row}'s move holds only below the page's sm boundary`).toMatch(/^max-sm:order-\d+$/);
+    }
+    expect(rows["beta-line"].compareDocumentPosition(rows.subhead) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(rows["beta-line"].compareDocumentPosition(rows.actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
