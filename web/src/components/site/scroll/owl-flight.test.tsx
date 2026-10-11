@@ -95,6 +95,13 @@ describe("when it has nowhere to go", () => {
     vi.useRealTimers();
   });
 
+  /**
+   * Reaching the perch here means running every 16 ms flight frame in real CPU until the springs
+   * settle — about 1.2 s on a quiet core, and past vitest's default 5 s on a loaded CI runner,
+   * where this test and the touch test below each timed out (runs 38151297901 and its rerun,
+   * 38092475158, on heads that do not touch this file). Both get the same headroom the two
+   * tests around them already carry, which pass CI at these timeouts.
+   */
   it("stands perched once every spring has come to rest, and asks for no more frames", () => {
     const { canvas, frames, asked, until } = clock();
     until(4000);
@@ -102,7 +109,7 @@ describe("when it has nowhere to go", () => {
     frames.mockClear();
     until(4600);
     expect(asked(), "a standing owl asks for no frame").toBe(0);
-  });
+  }, 20_000);
 
   it("blinks while it stands with two paints and no frame, and turns its head to glance on its springs, then stands again", () => {
     const { g, canvas, frames, asked, until } = clock();
@@ -148,6 +155,7 @@ describe("when it has nowhere to go", () => {
     document.documentElement.removeAttribute("data-mode");
   }, 30_000);
 
+  /** Flight frames to the perch, as above: timed out on a loaded CI runner at vitest's default 5 s. */
   it("a touch does not wake it, as it has no pointer to follow", () => {
     const { canvas, frames, asked, until } = clock();
     until(4000);
@@ -155,7 +163,7 @@ describe("when it has nowhere to go", () => {
     frames.mockClear();
     window.dispatchEvent(Object.assign(new Event("pointermove"), { pointerType: "touch", clientX: 10, clientY: 10 }));
     expect(asked()).toBe(0);
-  });
+  }, 20_000);
 
   it("bobs on the air in CSS as it flies and stands, by its own size, and only with motion allowed and not while peeking", () => {
     const { canvas, until } = clock();
