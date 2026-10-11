@@ -428,6 +428,39 @@ fn a_lone_revocation_without_any_establishment_refuses() {
     assert_eq!(refused, Err(ConnectionRefusal::Revoked));
 }
 
+/// DEC-910 item 2 and `AGENTS.md` rule 3: a stream holds one record at one `seq` (journal
+/// spec §5.1), but a slice the run reads could disagree; an equal-`seq` establishment and
+/// revocation of the connection resolve to the revocation — the safe default that refuses,
+/// never a tie that imports an establishment's data over a revocation — and the outcome does
+/// not depend on the order the records are read in: this order and the one after it hold the
+/// same pair read both ways, and the revocation outranks the establishment in each.
+#[test]
+fn a_same_seq_revocation_outranks_the_establishment_read_before_it() {
+    let mandate = live_mandate();
+    let id = mandate.connection_id.as_str();
+    let records = vec![
+        established(7, id, "robinhood", "live", ACCOUNT),
+        revoked(7, id),
+    ];
+    let refused = connection(&records, &mandate, ACCOUNT);
+    assert_eq!(refused, Err(ConnectionRefusal::Revoked));
+}
+
+/// DEC-910 item 2 and `AGENTS.md` rule 3, the other half of the tie: the same equal-`seq`
+/// pair read the other way round refuses exactly the same — the revocation outranks the
+/// establishment wherever the slice holds it, so no input order un-refuses the connection.
+#[test]
+fn a_same_seq_revocation_outranks_the_establishment_read_after_it() {
+    let mandate = live_mandate();
+    let id = mandate.connection_id.as_str();
+    let records = vec![
+        revoked(7, id),
+        established(7, id, "robinhood", "live", ACCOUNT),
+    ];
+    let refused = connection(&records, &mandate, ACCOUNT);
+    assert_eq!(refused, Err(ConnectionRefusal::Revoked));
+}
+
 /// `AGENTS.md` rule 3 and DEC-910 item 2: a record a member the run reads is missing from, or
 /// that holds it in another shape, refuses as unreadable, never a guess at what it meant: a
 /// record with a member missing, a version 1 record — journal spec §9.8's version-1 member set
@@ -533,6 +566,23 @@ fn a_fill_on_a_stream_the_record_does_not_bind_does_not_spend_it() {
             let clean = lapse(&live_connection(), &rows, &flat);
             assert_eq!(clean, Ok(()), "{stream} {filled}");
         }
+    }
+}
+
+/// DEC-910 item 3 (journal spec §2): only an account stream — `acct:{workspace_id}:{account_ref}`
+/// — can spend the record, so an agent stream whose own id segment *is* the bound `account_ref`
+/// spends nothing either: the stream type and the account segment name the record's stream
+/// together, and a fill that matches only one of them never spends.
+#[test]
+fn a_fill_on_an_agent_stream_sharing_the_bound_segment_does_not_spend_it() {
+    let flat = Held {
+        positions: 0,
+        open_orders: 0,
+    };
+    for filled in ["FillApplied", "LateFillApplied"] {
+        let rows = vec![row_on("agent:ws_live:acct_live", 1, filled)];
+        let clean = lapse(&live_connection(), &rows, &flat);
+        assert_eq!(clean, Ok(()), "{filled}");
     }
 }
 
