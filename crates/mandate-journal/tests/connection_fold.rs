@@ -10,7 +10,10 @@
 //! `connection_ranges` section, and on every split of every full-chain sequence against the
 //! full-chain run and an independent scan of the records the rules judge. Journal spec v0.37
 //! (DEC-888) refuses a `ConnectionRevoked` on an account stream under rule 68, and fails a range
-//! closed at it without an anchor: judged against the `connection_revocations` section.
+//! closed at it without an anchor: judged against the `connection_revocations` section. DEC-913,
+//! the founder-approved tightening, refuses a prefix whose rows span more than one stream in
+//! `from_verified` — `bind` still binds such a prefix, since the trusted start commits to its
+//! tail — so its range runs unanchored and fails closed at its first judged record.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -1023,6 +1026,41 @@ fn sealed(rows: &[StoredEvent]) -> Vec<StoredEvent> {
     sealed
 }
 
+/// The rows of `rows`, sealed as one chain over their given order instead of each stream on its
+/// own: `seq` is each row's position in the order given, `prev_hash` the row before it whatever
+/// its stream, so the rows of two streams pass §11's checks 1 to 6 as one chain and `bind` binds
+/// them — the shape a writer that numbers one range's rows of several streams together, or a
+/// caller that hands two streams' rows to an anchor fold as one prefix, assembles. The
+/// mixed-stream tests pin `from_verified` refusing it (DEC-913).
+fn sealed_as_one_chain(rows: &[StoredEvent]) -> Vec<StoredEvent> {
+    let mut prev_hash = Digest::ZERO;
+    let mut sealed = Vec::new();
+    for (position, row) in rows.iter().enumerate() {
+        let seq = u64::try_from(position).unwrap() + 1;
+        let mut body = parse(&row.body).unwrap().as_object().cloned().unwrap();
+        for (name, value) in [
+            ("seq", Value::Int(Int::new(seq).unwrap())),
+            ("prev_hash", Value::Str(prev_hash.to_hex())),
+            ("recorded_at", Value::Str(row.recorded_at.clone())),
+            ("artifact_refs", Value::Array(vec![])),
+            ("config_refs", Value::Object(BTreeMap::new())),
+        ] {
+            body.insert(Key::new(name).unwrap(), value);
+        }
+        let body = to_canonical(&Value::Object(body));
+        let hash = Digest::of(&body);
+        sealed.push(StoredEvent {
+            seq,
+            prev_hash,
+            hash,
+            body,
+            ..row.clone()
+        });
+        prev_hash = hash;
+    }
+    sealed
+}
+
 /// The trusted start of the range of `prefix`'s stream just after it.
 fn start_after(prefix: &[StoredEvent]) -> TrustedStart {
     TrustedStart {
@@ -1197,6 +1235,143 @@ fn a_forged_short_or_unbound_prefix_runs_the_range_unanchored() {
         let got = verify_connection_lifecycle_from(verified_start(rows, start), range);
         assert_eq!(got, at(&range[0], ConnectionCheck::Unanchored), "{name}");
     }
+}
+
+/// DEC-913, the founder-approved tightening: a prefix whose rows span two streams — the control
+/// stream's request and establishment, then an account stream's `connect` check, chained to them
+/// as one chain — binds, because the trusted start commits to its tail, so `bind` refuses
+/// nothing. The tightened `from_verified` refuses the mixed prefix itself, so the range runs
+/// unanchored and fails closed at the establishment copy, its first judged record — the very
+/// record the looser reading anchored and passed.
+#[test]
+fn a_prefix_of_more_than_one_stream_anchors_nothing_so_its_range_fails_closed() {
+    let own = control(&["request X A1", "establish X A1"]);
+    let checked = written_rows(&[check("connect")]);
+    let copy = written_rows(&[("established_copy", set("event_id", &id(1)))]);
+    let chain = sealed_as_one_chain(&[own, checked, copy].concat());
+    let (prefix, range) = chain.split_at(3);
+    let start = start_after(prefix);
+    assert!(
+        bind(prefix, start).is_ok(),
+        "the trusted start commits to the mixed chain's tail, so `bind` refuses nothing: the \
+         refusal this test pins is `from_verified`'s"
+    );
+    let got = verify_connection_lifecycle_from(verified_start(prefix, start), range);
+    assert_eq!(
+        got,
+        at(&range[0], ConnectionCheck::Unanchored),
+        "a prefix whose rows span two streams anchors nothing (DEC-913 item 1), so the range \
+         runs unanchored and fails closed at its first judged record; the looser reading bound \
+         such a prefix, anchored the last row's stream, and passed that stream's own \
+         establishment copy"
+    );
+    assert!(
+        matches!(
+            bind(prefix, start).map(|bound| ConnectionAnchor::from_verified(&bound)),
+            Ok(Err(ConnectionAnchorError::Broken))
+        ),
+        "the refusal is the mixed prefix itself, DEC-892 item 6's reading of rows of more than \
+         one stream for the connection anchor: not a chain the fold can read"
+    );
+}
+
+/// DEC-913 item 1's belt: the refusal is of "more than one stream", not of two exactly — a prefix
+/// that spans **three** streams, the control stream's request and establishment, an account
+/// stream's `connect` check, and another control stream's revocation in its chain, is refused
+/// `Broken` the same way, and its range fails closed unanchored at its first judged record.
+#[test]
+fn a_prefix_of_three_streams_anchors_nothing_so_its_range_fails_closed() {
+    let own = control(&["request X A1", "establish X A1"]);
+    let checked = written_rows(&[check("connect")]);
+    let revoked = control(&["revoke X ws=ws_01J8Z3"]);
+    let copy = written_rows(&[("established_copy", set("event_id", &id(1)))]);
+    let chain = sealed_as_one_chain(&[own, checked, revoked, copy].concat());
+    let (prefix, range) = chain.split_at(4);
+    let start = start_after(prefix);
+    let streams: BTreeSet<&str> = prefix.iter().map(|row| row.stream_id.as_str()).collect();
+    assert_eq!(streams.len(), 3, "the prefix spans three streams");
+    assert!(
+        bind(prefix, start).is_ok(),
+        "the trusted start commits to the mixed chain's tail, so `bind` refuses nothing: the \
+         refusal this test pins is `from_verified`'s"
+    );
+    assert!(
+        matches!(
+            bind(prefix, start).map(|bound| ConnectionAnchor::from_verified(&bound)),
+            Ok(Err(ConnectionAnchorError::Broken))
+        ),
+        "DEC-892 item 6's reading of rows of more than one stream refuses three streams' rows as \
+         it refuses two"
+    );
+    let got = verify_connection_lifecycle_from(verified_start(prefix, start), range);
+    assert_eq!(
+        got,
+        at(&range[0], ConnectionCheck::Unanchored),
+        "the range runs unanchored and fails closed at its first judged record, the copy another \
+         control stream's revocation never reaches"
+    );
+}
+
+/// The control for DEC-913's refusal: a bound prefix of one stream still anchors its range, and
+/// that range's judged records are judged as today, so the tightening refuses the prefix's mixed
+/// rows and not its streams' records. The prefix is the `connect` check alone; its range is the
+/// establishment copy it admits, which an unanchored run would fail closed at.
+#[test]
+fn a_bound_prefix_of_one_stream_still_anchors_and_judges_its_range() {
+    let chain = sealed(&written_rows(&[
+        check("connect"),
+        ("established_copy", String::new()),
+    ]));
+    let (prefix, range) = chain.split_at(1);
+    let start = start_after(prefix);
+    assert!(
+        matches!(verified_start(prefix, start), ConnectionStart::Anchored(_)),
+        "the single-stream prefix binds and folds clean, as it must after the tightening too"
+    );
+    let got = verify_connection_lifecycle_from(verified_start(prefix, start), range);
+    assert_eq!(
+        got,
+        Ok(()),
+        "the anchored range passes its own stream's copy, as today"
+    );
+    assert_eq!(
+        verify_connection_lifecycle(&chain),
+        Ok(()),
+        "the full chain agrees: the fold, not the anchor, admits the copy"
+    );
+}
+
+/// DEC-913 item 4's narrow reading, against over-refusing: the decision refuses a prefix only
+/// because its rows span more than one stream, so a uniform prefix of one stream the fold never
+/// reads still anchors. The prefix is a rotation copy on an agent stream, a record
+/// `connection_rows` skips wherever it sits; `from_verified` remains `Ok` for it, and the anchored
+/// range over the agent stream's next row runs as today, judging nothing there.
+#[test]
+fn a_uniform_prefix_of_one_stream_the_fold_never_reads_still_anchors() {
+    let agent = |more: &str| ("rotated_copy", more.to_owned());
+    let on = set("stream_id", r#""agent:ws_01J8Z2:agent_01""#);
+    let chain = sealed(&written_rows(&[agent(&on), agent(&on)]));
+    let (prefix, range) = chain.split_at(1);
+    let start = start_after(prefix);
+    assert!(
+        matches!(
+            bind(prefix, start).map(|bound| ConnectionAnchor::from_verified(&bound)),
+            Ok(Ok(_))
+        ),
+        "DEC-913 refuses a prefix only for spanning more than one stream: a uniform prefix of an \
+         agent stream, whose `ConnectionCredentialRotated` no fold reads, still anchors"
+    );
+    let anchored = verified_start(prefix, start);
+    assert!(
+        matches!(anchored, ConnectionStart::Anchored(_)),
+        "the caller runs the range from the anchor, as for any one-stream prefix"
+    );
+    assert_eq!(
+        verify_connection_lifecycle_from(anchored, range),
+        Ok(()),
+        "the anchored range runs as today: `connection_rows` skips the agent stream, so no rule \
+         judges the record"
+    );
 }
 
 /// DEC-889 item 2: an anchored run judges its anchor's stream only, and fails closed at the first
