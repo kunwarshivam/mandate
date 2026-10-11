@@ -140,8 +140,11 @@ impl LapseRefusal {
 /// the mandate itself states, and the account stream `account_ref` the record must bind. A
 /// paper mandate whose connection no record names keeps today's run (V-001's paper default,
 /// LT-14); a live mandate requires an established record the build can serve, and a revoked
-/// one refuses wherever the stream holds it. Each disagreement fails closed before anything
-/// runs, in this order: no record ([`ConnectionRefusal::Unrecorded`]), revoked
+/// one refuses wherever the stream holds it. The record that decides is the latest by `seq`,
+/// and a same-`seq` tie between the connection's establishment and its revocation resolves to
+/// the revocation — the safe default that refuses, order-independent, and latent (journal
+/// spec §5.1 gives one `seq` to one record on a stream). Each disagreement fails closed before
+/// anything runs, in this order: no record ([`ConnectionRefusal::Unrecorded`]), revoked
 /// ([`ConnectionRefusal::Revoked`]), a member the run cannot read
 /// ([`ConnectionRefusal::Unreadable`]), another environment
 /// ([`ConnectionRefusal::Environment`]), another broker ([`ConnectionRefusal::Broker`]), another
@@ -156,18 +159,16 @@ pub fn connection(
     account_ref: &str,
 ) -> Result<Connection, ConnectionRefusal> {
     let named = mandate.connection_id.as_str();
-    let mut latest = None;
-    for record in records {
-        let ours = matches!(
+    let ours = |record: &ControlRecord| {
+        matches!(
             record.event_type.as_str(),
             "ConnectionEstablished" | "ConnectionRevoked"
-        ) && member(record, "connection_id") == Some(named);
-        let is_later =
-            ours && latest.is_none_or(|earlier: &ControlRecord| earlier.seq < record.seq);
-        if is_later {
-            latest = Some(record);
-        }
-    }
+        ) && member(record, "connection_id") == Some(named)
+    };
+    let latest = records
+        .iter()
+        .filter(|record| ours(record))
+        .max_by_key(|record| (record.seq, revocation_rank(record)));
     let Some(record) = latest else {
         return paper_default(mandate, account_ref);
     };
@@ -202,6 +203,16 @@ pub fn connection(
 /// reading of one ([DEC-910](../../../docs/project/decisions/DEC-910.md) item 2).
 fn member<'a>(record: &'a ControlRecord, name: &str) -> Option<&'a str> {
     record.payload.get(name).and_then(Value::as_str)
+}
+
+/// The rank the connection's records are collated by after `seq`: [`true`] for the
+/// connection's `ConnectionRevoked` (journal spec §9.2), so a revocation at the same `seq` as
+/// an establishment outranks it — the safe default that refuses, never a tie that imports an
+/// establishment's data over a revocation, and one that does not depend on the order the
+/// records are read in (`AGENTS.md` rule 3, DEC-910 item 2). Journal spec §5.1 gives one
+/// `seq` to one record on a stream, so the tie is latent; the pins hold it anyway.
+fn revocation_rank(record: &ControlRecord) -> bool {
+    record.event_type == "ConnectionRevoked"
 }
 
 /// V-001's paper default (DEC-910 item 2): a paper mandate whose connection no record names
@@ -241,27 +252,41 @@ fn broker_serving(text: &str, environment: Environment) -> Result<Broker, String
     }
 }
 
-/// The Robinhood a record chooses in this build (DEC-910 item 1's runtime seam): the default
-/// build holds no Robinhood host or connector, so its choice refuses here and no run of this
-/// build can reach a Robinhood host at all (LT-1). The runner's `live` feature is the only door,
-/// and no CI or release build enables it.
-#[cfg(not(feature = "live"))]
+/// The Robinhood a record chooses (DEC-910 item 1's runtime seam): one code path, compiled in
+/// every build, chooses — and only the `live` feature lets a build serve the choice, so the
+/// default build's seam refuses [`ConnectionRefusal::NotBuilt`] and no run of it can reach a
+/// Robinhood host at all (LT-1). No CI or release build enables the feature, so the suite
+/// runs in the default build the ungated pin below names, and [`robinhood_linked`] is the only
+/// part the feature gates. **Caveat for the next contributor:** under a locally built
+/// `--features live` the ungated test `a_live_record_refuses_the_connector_this_build_does_not_hold`
+/// fails by design — that is the settled #1297 reading ("CI's only build of this suite is the
+/// default one"); no CI job runs it.
 fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
-    let _ = (environment, account_ref);
-    Err(ConnectionRefusal::NotBuilt)
-}
-
-/// The Robinhood a record chooses in a `live` build (DEC-910 item 1): the feature is the only
-/// door, no CI or release build enables it, and the founder builds it locally from a commit on
-/// `main` (DEC-529 item 3). The hosts and the connector the cycle serves it with are the live
-/// arm's, which the cycle's own wiring calls after this seam.
-#[cfg(feature = "live")]
-fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
+    if !robinhood_linked() {
+        return Err(ConnectionRefusal::NotBuilt);
+    }
     Ok(Connection {
         broker: Broker::Robinhood,
         environment,
         account_ref: account_ref.to_owned(),
     })
+}
+
+/// Whether this build serves the Robinhood a record chooses (DEC-910 item 1): only the
+/// runner's `live` feature (DEC-529 item 3) may hold a connector for it, and no CI or release
+/// build enables the feature, so this is [`false`] exactly in the default build.
+#[cfg(not(feature = "live"))]
+fn robinhood_linked() -> bool {
+    false
+}
+
+/// Whether this build serves the Robinhood a record chooses (DEC-910 item 1): the `live`
+/// feature's door, opened only by a `--features live` build the founder builds locally from a
+/// commit on `main` (DEC-529 item 3). What serves the choice behind the door — the pinned host,
+/// the connector, the preflight — is the live build's own surface, not this function's.
+#[cfg(feature = "live")]
+fn robinhood_linked() -> bool {
+    true
 }
 
 /// DEC-529 item 3's lapse check (G1a): a live run refuses to start unless the account the
