@@ -694,7 +694,7 @@ This document describes the target design. Most of it is not built yet. The Rust
 
 | Component in this document | Crates today |
 |---|---|
-| Agent runtime | `mandate-runtime` (the pure state machine and kill switches); `mandate-shell` (the process shell and the `mandate-tracer` binary) |
+| Agent runtime | `mandate-runtime` (the pure state machine and kill switches); `mandate-shell` (the process shell) |
 | Risk engine | `mandate-risk` (the gate); `mandate-spec` (the mandate, its validation, policy, risk state, change classification); `mandate-builder` (autonomy and the order builder) |
 | Execution gateway and connectors | `mandate-executor` (the idempotent executor, reconciliation, protective exits); `mandate-alpaca` (the Alpaca paper connector) |
 | Journal and state | `mandate-journal`, `mandate-journal-pg` (the Postgres hot store), `mandate-journal-cold` (the cold store and export), `mandate-artifacts-fs` (the artifact store), `mandate-accounting` (the account fold) |

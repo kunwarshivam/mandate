@@ -199,7 +199,7 @@ flowchart BT
 | 7 | `mandate-backtest` | The backtest loop, a moving-average baseline, and an exact-decimal metrics report, pinned by a committed golden report | yes | yes |
 | 7 | `mandate-alpaca` | The Alpaca paper connector behind transport traits: trading and data clients, wire parsing with no floats, the instrument snapshot and latest quote, recorded fixtures | yes | no |
 | 7 | `mandate-cli` | `mandate download`, `mandate inspect`, `mandate journal verify`, `mandate artifact put` and `get`; the owner's approval inbox and commands as library code, not yet wired to the binary | yes | no |
-| 8 | `mandate-shell` | The composition crate and `mandate-tracer` binary: adapters and stages that wire the core crates together; it holds no trading logic (every tracer stage refuses until its upstream source lands) | yes | no |
+| 8 | `mandate-shell` | The composition crate: adapters and stages that wire the core crates together; it holds no trading logic (every stage refuses until its upstream source lands) | yes | no |
 | tool | `mandate-refcases` | One named test per reference case, driven by `fixtures/refcases/*.json`; `status.toml` records which cases pass | yes | no |
 | tool | `xtask` | The CI pipeline as a binary: `cargo xtask check` | no | no |
 
