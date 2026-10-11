@@ -119,6 +119,86 @@ fn assert_absent(refused: Result<Artifacts, Cause>) {
     assert_eq!(code, Some("absent"), "{:?}", refused.err());
 }
 
+/// The registered fee schedule, calendar and rule set are each judged as its E7-7 file was: every
+/// member is one the run reads, the rule set's `gate`, `ruleset_version` and `story` strings are
+/// its reviewed ones, a quote-age bound in text or at zero is refused, so are calendars with
+/// entries in either array or a date that is no date, a fee for another environment, and an
+/// object with an extra member — never a reviewed default in its place, and the quote-age
+/// bound's own edge, sixty seconds, still loads. These pin the readers #1296 kept and its
+/// rewrite of the tracer's file tests left unguarded (its post-merge review Major 1),
+/// restoring the deleted
+/// `each_artifact_member_is_read_and_each_unreviewed_value_refused`.
+#[test]
+fn each_config_object_member_is_read_and_each_unreviewed_value_refused() {
+    let rule_sets = [
+        (
+            "gate",
+            RULES.replace("trading-domain-9.1", "trading-domain-9.2"),
+        ),
+        ("ruleset_version", RULES.replace(r#""v1""#, r#""v2""#)),
+        ("story", RULES.replace("E7-7", "E7-8")),
+        (
+            "text-quote-age",
+            RULES.replace(
+                r#""iex_quote_max_age_s":10"#,
+                r#""iex_quote_max_age_s":"10""#,
+            ),
+        ),
+        (
+            "zero-quote-age",
+            RULES.replace(r#""iex_quote_max_age_s":10"#, r#""iex_quote_max_age_s":0"#),
+        ),
+        (
+            "extra-member",
+            RULES.replace(r#"{"executor"#, r#"{"aa_note":"x","executor"#),
+        ),
+    ];
+    for (name, rules) in rule_sets {
+        assert_ne!(rules, RULES, "the edit applied for {name}");
+        assert_absent(Stream::deployed(SNAPSHOT, &rules, FEE).artifacts());
+    }
+    let calendars = [
+        (
+            "holidays",
+            CALENDAR.replace(r#""holidays":[]"#, r#""holidays":["2026-11-26"]"#),
+        ),
+        (
+            "special-sessions",
+            CALENDAR.replace(
+                r#""special_sessions":[]"#,
+                r#""special_sessions":["2026-11-27"]"#,
+            ),
+        ),
+        (
+            "calendar-first",
+            CALENDAR.replace("2026-01-01", "2026-13-01"),
+        ),
+        (
+            "extra-member",
+            CALENDAR.replace(r#"{"first"#, r#"{"aa_note":"x","first"#),
+        ),
+    ];
+    for (name, calendar) in calendars {
+        assert_ne!(calendar, CALENDAR, "the edit applied for {name}");
+        assert_absent(Stream::with_calendar(SNAPSHOT, RULES, FEE, &calendar).artifacts());
+    }
+    let extra_fee = FEE.replace(r#"{"effective_from"#, r#"{"aa_note":"x","effective_from"#);
+    assert_ne!(extra_fee, FEE, "the edit applied");
+    assert_absent(Stream::deployed(SNAPSHOT, RULES, &extra_fee).artifacts());
+    let live = FEE.replace(r#""environment":"paper""#, r#""environment":"live""#);
+    let refused = Stream::deployed(SNAPSHOT, RULES, &live).artifacts();
+    let code = refused.as_ref().err().map(Cause::code);
+    assert_eq!(code, Some("environment_mismatch"), "{:?}", refused.err());
+    let sixty = RULES.replace(r#""iex_quote_max_age_s":10"#, r#""iex_quote_max_age_s":60"#);
+    assert_ne!(sixty, RULES, "the edit applied");
+    let bound = Stream::deployed(SNAPSHOT, &sixty, FEE).artifacts();
+    assert!(
+        bound.is_ok(),
+        "the quote-age bound's own edge: {:?}",
+        bound.err()
+    );
+}
+
 /// Twenty-five daily SPY bars ending on Friday 2026-09-25, the last session completed at [`NOW`].
 fn daily(root: &Path, symbol: &str) -> PathBuf {
     let id = DatasetId::new(

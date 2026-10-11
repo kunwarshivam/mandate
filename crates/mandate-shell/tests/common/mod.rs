@@ -76,8 +76,34 @@ impl Stream {
         Self::of(&spy_mandate(content), snapshot, rules, fee, content)
     }
 
+    /// The deployment with `calendar` registered as its trading calendar, for the refusals that
+    /// mutate it.
+    pub fn with_calendar(snapshot: &str, rules: &str, fee: &str, calendar: &str) -> Self {
+        let content = model();
+        Self::of_objects(
+            &spy_mandate(&content),
+            snapshot,
+            rules,
+            fee,
+            calendar,
+            &content,
+        )
+    }
+
     /// The deployment of `mandate`, with `content` registered as its pinned model.
     pub fn of(mandate: &str, snapshot: &str, rules: &str, fee: &str, content: &str) -> Self {
+        Self::of_objects(mandate, snapshot, rules, fee, CALENDAR, content)
+    }
+
+    /// [`Stream::of`] with the registered trading calendar named too.
+    pub fn of_objects(
+        mandate: &str,
+        snapshot: &str,
+        rules: &str,
+        fee: &str,
+        calendar: &str,
+        content: &str,
+    ) -> Self {
         let document = to_canonical(&json(mandate));
         let version = reference(&document);
         let paths: Vec<String> = ENVELOPE.split(' ').map(|p| format!("/{p}")).collect();
@@ -108,7 +134,7 @@ impl Stream {
         stream.record("ConfigSnapshotRegistered", &model);
         for (kind, object) in [
             ("fee_config", fee),
-            ("trading_calendar", CALENDAR),
+            ("trading_calendar", calendar),
             ("rule_set", rules),
             ("instrument_snapshot", snapshot),
         ] {
