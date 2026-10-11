@@ -73,7 +73,6 @@ fn json(text: &str) -> Value {
 /// grant has not arrived — the answers the run folded hold none, and the deadline is still
 /// ahead — so the submit stays blocked and nothing is sent.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_unanswered_ask_holds_the_submit_before_its_deadline() {
     let held = grant(&[], &ask(), at(NOW_S));
     assert_eq!(
@@ -88,7 +87,6 @@ fn an_unanswered_ask_holds_the_submit_before_its_deadline() {
 /// run's clock is before the ask's deadline. Once released, the cycle's own one-order door
 /// (FT-1) still governs what is submitted, once.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_grant_repeating_the_requests_hash_releases_the_submit() {
     let ask = ask();
     let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
@@ -100,7 +98,6 @@ fn a_grant_repeating_the_requests_hash_releases_the_submit() {
 /// is a refusal with nothing sent: the grant never binds the order the run would send, so the
 /// run ends refused rather than sending it.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_answer_repeating_another_hash_refuses_with_nothing_sent() {
     let ask = ask();
     let differing = hash_of(b"another order's content");
@@ -118,7 +115,6 @@ fn an_answer_repeating_another_hash_refuses_with_nothing_sent() {
 /// LT-4, mandate spec §6.4's lifecycle (DEC-912 item 1): an admitted skip denies the ask, so
 /// nothing is sent; the deny is the owner's answer, never a guess.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_skip_of_the_ask_denies_it() {
     let ask = ask();
     let answers = vec![answer(1, APPROVAL, "skipped", &ask.content_hash)];
@@ -130,7 +126,6 @@ fn a_skip_of_the_ask_denies_it() {
 /// deadline, and a grant read at or after it is late — so neither sends anything, however the
 /// answers arrived.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_silent_or_late_ask_denies_at_its_deadline() {
     let ask = ask();
     let on_time_answer_too_late = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
@@ -146,7 +141,6 @@ fn a_silent_or_late_ask_denies_at_its_deadline() {
 /// a grant of another approval, however much its hash and verdict agree, never releases this
 /// ask's submit, and the run keeps waiting on its own.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_answer_of_another_ask_never_releases_this_one() {
     let ask = ask();
     let answers = vec![answer(
@@ -167,7 +161,6 @@ fn an_answer_of_another_ask_never_releases_this_one() {
 /// a verdict missing or not text, a content hash missing — is never a guess: it refuses as a
 /// difference, and nothing is sent.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_answer_the_run_cannot_read_refuses_as_a_difference() {
     let ask = ask();
     let no_verdict = format!(
@@ -196,7 +189,6 @@ fn an_answer_the_run_cannot_read_refuses_as_a_difference() {
 /// matching hash and an approving verdict between the two answers is a command row, not an
 /// answer, and no release reads it.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_first_answer_of_the_ask_decides_whatever_rows_follow() {
     let ask = ask();
     let differing_first = answer(
@@ -228,7 +220,6 @@ fn the_first_answer_of_the_ask_decides_whatever_rows_follow() {
 /// collar, a broker ask inside the wider band and outside the narrower one, and no constant
 /// can sit where the collar's `x` belongs (trading-domain spec §9.6's two equity tiers).
 #[test]
-#[ignore = "pending E7-26"]
 fn the_collars_own_aggressiveness_decides_the_agreement() {
     let wide = Fraction::parse("0.02").expect("the wide collar fixture parses");
     let narrow = Fraction::parse("0.01").expect("the narrow collar fixture parses");
@@ -256,7 +247,6 @@ fn the_collars_own_aggressiveness_decides_the_agreement() {
 /// (10.123456789 × 101 ÷ 100, eleven places, which no price holds), and the end the band keeps
 /// is **10.224691356** — truncated toward zero, verified against `Price::collar_bound` itself.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_collars_ceiling_rounds_inward_at_nine_places() {
     let collar = Fraction::parse("0.01").expect("the collar fixture parses");
     let iex = Price::parse("10.123456789").expect("the iex ask parses");
@@ -284,7 +274,6 @@ fn the_collars_ceiling_rounds_inward_at_nine_places() {
 /// is **10.022222222**: a price sitting exactly on the inward-rounded floor stays inside and
 /// one grid step below it refuses, pinning the lower end as tightly as the ceiling test above.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_collars_floor_rounds_inward_at_nine_places() {
     let collar = Fraction::parse("0.01").expect("the collar fixture parses");
     let iex = Price::parse("10.123456789").expect("the iex ask parses");
@@ -308,7 +297,6 @@ fn the_collars_floor_rounds_inward_at_nine_places() {
 /// prices — the tolerance the decision states, no other number — is the quote the collar and
 /// the mark may use, and the opening proceeds.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_broker_quote_within_the_collar_proceeds() {
     let collar = Fraction::parse("0.01").expect("the collar fixture parses");
     let agreed = cross_check(
@@ -323,7 +311,6 @@ fn a_broker_quote_within_the_collar_proceeds() {
 /// beyond the collar — the bad tick the cross-check exists for — refuses the opening before
 /// any submission, in whichever direction it jumps.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_broker_quote_beyond_the_collar_refuses_before_any_submission() {
     let collar = Fraction::parse("0.01").expect("the collar fixture parses");
     let iex = Price::parse("100").expect("the iex ask parses");
@@ -345,7 +332,6 @@ fn a_broker_quote_beyond_the_collar_refuses_before_any_submission() {
 /// independent quote refuses the opening: an opening already requires a fresh IEX quote, and a
 /// check that cannot be made is not passed.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_missing_quote_refuses_the_opening() {
     let collar = Fraction::parse("0.01").expect("the collar fixture parses");
     let broker = Some(Price::parse("100").expect("the broker ask parses"));
@@ -359,7 +345,6 @@ fn a_missing_quote_refuses_the_opening() {
 /// LT-10's first half (DEC-912 item 3): the run may end when the entry is terminal and any
 /// filled quantity is covered — a stop resting over the whole of it, or nothing filled at all.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_terminal_covered_or_flat_entry_may_end_the_run() {
     let covered = Watched {
         entry_terminal: true,
@@ -373,7 +358,6 @@ fn a_terminal_covered_or_flat_entry_may_end_the_run() {
 /// LT-10 (DEC-912 item 3): a filled quantity left with no protection resting over it keeps the
 /// run reading — inside its bounds, unsettled.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_uncovered_quantity_keeps_the_run_reading() {
     let uncovered = Watched {
         entry_terminal: true,
@@ -388,7 +372,6 @@ fn an_uncovered_quantity_keeps_the_run_reading() {
 /// only once the unprotected interval is journaled and its alert key — the executor's
 /// `unprotected_interval_limit` — is in the run's report.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_uncovered_quantity_ends_only_with_its_alert_key_reported() {
     let alerted = Watched {
         entry_terminal: true,
@@ -404,7 +387,6 @@ fn an_uncovered_quantity_ends_only_with_its_alert_key_reported() {
 /// notifications spec §4.2 `protection` row's other key) is another alarm's key, and a report
 /// holding it still shows nothing for **this** interval, so the run keeps reading.
 #[test]
-#[ignore = "pending E7-26"]
 fn another_interval_alert_key_holds_the_run_open() {
     let wrong_key = Watched {
         entry_terminal: true,
@@ -422,7 +404,6 @@ fn another_interval_alert_key_holds_the_run_open() {
 /// LT-10 (DEC-912 item 3): the entry must be terminal before the run may end, whatever else
 /// the reads say, so an entry still working keeps the run reading.
 #[test]
-#[ignore = "pending E7-26"]
 fn an_entry_still_working_keeps_the_run_reading() {
     let working = Watched {
         entry_terminal: false,
@@ -438,7 +419,6 @@ fn an_entry_still_working_keeps_the_run_reading() {
 /// again and refuses — and a watch whose LT-10 holds ends clean at it, needing no further
 /// read.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_reads_fail_closed_past_the_runs_cap() {
     let unsettled = Watched {
         entry_terminal: true,
@@ -464,7 +444,6 @@ fn the_reads_fail_closed_past_the_runs_cap() {
 /// control stream — named as the journal names them, so `mandate journal export` takes each
 /// name as it is.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_placing_run_ends_holding_the_streams_its_export_reads() {
     let held = evidence(
         Some("the workspace journal the run appended to"),
@@ -501,7 +480,6 @@ fn a_placing_run_ends_holding_the_streams_its_export_reads() {
 /// the evidence of another run's own names names another run's streams, so no constant can stand
 /// where the arguments belong.
 #[test]
-#[ignore = "pending E7-26"]
 fn the_streams_derive_from_the_runs_own_names() {
     let held = evidence(
         Some("the rehearsal journal the run appended to"),
@@ -520,7 +498,6 @@ fn the_streams_derive_from_the_runs_own_names() {
 /// DEC-912 item 4: a run that kept no journal — the dry run — wrote nothing the export could
 /// read, so it names no stream and exports nothing.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_run_keeping_no_journal_exports_nothing() {
     let refused = evidence(None, "ws_live", "agent_01", "acct_live");
     assert_eq!(refused, Err(EvidenceRefusal::JournalAbsent));

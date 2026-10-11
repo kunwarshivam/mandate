@@ -57,6 +57,14 @@ pub fn evidence(
     agent: &str,
     account_ref: &str,
 ) -> Result<Evidence, EvidenceRefusal> {
-    let _ = (journal, workspace, agent, account_ref);
-    Err(EvidenceRefusal::Unimplemented { story: "E7-26" })
+    if journal.is_none() {
+        return Err(EvidenceRefusal::JournalAbsent);
+    }
+    Ok(Evidence {
+        streams: [
+            format!("agent:{workspace}:{agent}"),
+            format!("acct:{workspace}:{account_ref}"),
+            format!("ctl:{workspace}"),
+        ],
+    })
 }
