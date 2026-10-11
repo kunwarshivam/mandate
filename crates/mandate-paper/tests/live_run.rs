@@ -188,6 +188,93 @@ fn an_answer_the_run_cannot_read_refuses_as_a_difference() {
     }
 }
 
+/// LT-4, mandate spec §6.4 (DEC-912 item 1): the answers decide the ask **in journal order** —
+/// "the submit is released by the answers in journal order: the first answer naming the ask's
+/// approval decides it" — so a differing hash answered first refuses the run whatever a later
+/// matching grant says ("any difference is a refusal with nothing sent"), and a row that is not
+/// an `ApprovalResponseSubmitted` decides nothing: even one carrying the ask's approval, a
+/// matching hash and an approving verdict between the two answers is a command row, not an
+/// answer, and no release reads it.
+#[test]
+#[ignore = "pending E7-26"]
+fn the_first_answer_of_the_ask_decides_whatever_rows_follow() {
+    let ask = ask();
+    let differing_first = answer(
+        1,
+        APPROVAL,
+        "approved",
+        &hash_of(b"another order's content"),
+    );
+    let not_an_answer = record(
+        2,
+        "OwnerCommandIssued",
+        &format!(
+            r#"{{"approval":"{APPROVAL}","content_hash":"{}","verdict":"approved"}}"#,
+            ask.content_hash
+        ),
+    );
+    let matching_last = answer(3, APPROVAL, "approved", &ask.content_hash);
+    let answers = vec![differing_first, not_an_answer, matching_last];
+    let refused = grant(&answers, &ask, at(NOW_S));
+    assert_eq!(
+        refused,
+        Err(GrantRefusal::Mismatched),
+        "the first answer decides, and a command row never asks for the submit"
+    );
+}
+
+/// DEC-529 item 12 (DEC-912 item 2): the tolerance is the collar's own aggressiveness, the
+/// fraction the gate reads — so the same reads that agree at a 2% collar disagree at the 1%
+/// collar, a broker ask inside the wider band and outside the narrower one, and no constant
+/// can sit where the collar's `x` belongs (trading-domain spec §9.6's two equity tiers).
+#[test]
+#[ignore = "pending E7-26"]
+fn the_collars_own_aggressiveness_decides_the_agreement() {
+    let wide = Fraction::parse("0.02").expect("the wide collar fixture parses");
+    let narrow = Fraction::parse("0.01").expect("the narrow collar fixture parses");
+    let between_the_bands = cross_check(
+        Some(Price::parse("101.5").expect("the broker ask parses")),
+        Some(Price::parse("100").expect("the iex ask parses")),
+        wide,
+    );
+    let same_reads_narrower = cross_check(
+        Some(Price::parse("101.5").expect("the broker ask parses")),
+        Some(Price::parse("100").expect("the iex ask parses")),
+        narrow,
+    );
+    assert_eq!(
+        (between_the_bands, same_reads_narrower),
+        (Ok(()), Err(QuoteRefusal::Disagreement))
+    );
+}
+
+/// DEC-529 item 12 (DEC-912 item 2, [DEC-163](../../../docs/project/04-decision-log.md#decisions)
+/// item 2): the collar's band ends round inward, exactly as `Price::collar_bound` rounds them —
+/// the buy's ceiling truncates down at the 9 places a price holds — so a price sitting exactly
+/// on the inward-rounded end stays inside and one grid step past it refuses: an IEX ask of
+/// 10.123456789 at a 1% collar prices an exact ceiling of 10.22469335689, which no price
+/// holds, and the band's end it keeps is 10.224693356.
+#[test]
+#[ignore = "pending E7-26"]
+fn the_collars_ends_round_inward_at_nine_places() {
+    let collar = Fraction::parse("0.01").expect("the collar fixture parses");
+    let iex = Price::parse("10.123456789").expect("the iex ask parses");
+    let on_the_rounded_end = cross_check(
+        Some(Price::parse("10.224693356").expect("the broker ask parses")),
+        Some(iex),
+        collar,
+    );
+    let one_grid_step_past = cross_check(
+        Some(Price::parse("10.224693357").expect("the broker ask parses")),
+        Some(iex),
+        collar,
+    );
+    assert_eq!(
+        (on_the_rounded_end, one_grid_step_past),
+        (Ok(()), Err(QuoteRefusal::Disagreement))
+    );
+}
+
 /// DEC-529 item 12 (DEC-912 item 2): a broker quote inside the collar the independent IEX ask
 /// prices — the tolerance the decision states, no other number — is the quote the collar and
 /// the mark may use, and the opening proceeds.
@@ -283,6 +370,26 @@ fn an_uncovered_quantity_ends_only_with_its_alert_key_reported() {
     assert_eq!(ended, Ok(()));
 }
 
+/// LT-10's second half (DEC-912 item 3): only the unprotected interval's own alert key
+/// releases the uncovered run — the executor's other protection alert (`stop_watchdog`, the
+/// notifications spec §4.2 `protection` row's other key) is another alarm's key, and a report
+/// holding it still shows nothing for **this** interval, so the run keeps reading.
+#[test]
+#[ignore = "pending E7-26"]
+fn another_interval_alert_key_holds_the_run_open() {
+    let wrong_key = Watched {
+        entry_terminal: true,
+        uncovered: true,
+        alerted: Some("stop_watchdog"),
+    };
+    let held = lt10(&wrong_key, at(NOW_S), at(CAP_S));
+    assert_eq!(
+        held,
+        Err(Lt10Refusal::Unsettled),
+        "the run ends only on the unprotected interval's own key"
+    );
+}
+
 /// LT-10 (DEC-912 item 3): the entry must be terminal before the run may end, whatever else
 /// the reads say, so an entry still working keeps the run reading.
 #[test]
@@ -359,6 +466,26 @@ fn a_placing_run_ends_holding_the_streams_its_export_reads() {
             "{name} must be a §2 stream id"
         );
     }
+}
+
+/// DEC-912 item 4: the stream names derive from the run's own workspace, agent and account ref —
+/// the evidence of another run's own names names another run's streams, so no constant can stand
+/// where the arguments belong.
+#[test]
+#[ignore = "pending E7-26"]
+fn the_streams_derive_from_the_runs_own_names() {
+    let held = evidence(
+        Some("the rehearsal journal the run appended to"),
+        "ws_rehearsal",
+        "agent_rh",
+        "acct_rh",
+    );
+    let derived = [
+        "agent:ws_rehearsal:agent_rh".to_owned(),
+        "acct:ws_rehearsal:acct_rh".to_owned(),
+        "ctl:ws_rehearsal".to_owned(),
+    ];
+    assert_eq!(held, Ok(Evidence { streams: derived }));
 }
 
 /// DEC-912 item 4: a run that kept no journal — the dry run — wrote nothing the export could

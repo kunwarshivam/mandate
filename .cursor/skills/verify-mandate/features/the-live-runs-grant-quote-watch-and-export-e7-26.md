@@ -23,17 +23,24 @@
   credential or order.
 - **Tests:** `crates/mandate-paper/tests/live_run.rs`: the grant pins (an unanswered ask holding
   the submit before its deadline; a grant repeating the request's hash releasing it; an answer
-  repeating another hash refusing with nothing sent, whatever its verdict; a skip denying; a
-  silent or late ask denying at its deadline; an answer of another approval never releasing this
-  one; an answer the run cannot read refusing as a difference), the cross-check pins (a broker
-  quote within the collar proceeding; one beyond it in either direction refusing before any
-  submission; a missing quote of either side refusing), the watch pins (a terminal covered or
-  flat entry ending the run; an uncovered quantity keeping it reading; an uncovered quantity
-  ending only with its alert key reported; an entry still working keeping it reading; the reads
-  failing closed past the cap, a settled watch ending clean at it), the export pins (a placing
-  run holding the three streams its export reads, each a journal-spec §2 stream id of its type; a
-  run keeping no journal exporting nothing), and a live test that pins every refusal's message
-  and reason code, the stub's own report with them (DEC-137).
+  repeating another hash refusing with nothing sent, whatever its verdict; the first answer of
+  the ask deciding it whatever rows follow — the journal order, with a command row that is not
+  an answer consulting nothing; a skip denying; a silent or late ask denying at its deadline;
+  an answer of another approval never releasing this one; an answer the run cannot read refusing
+  as a difference), the cross-check pins (a broker quote within the collar proceeding; one
+  beyond it in either direction refusing before any submission; a missing quote of either side
+  refusing; the collar's own aggressiveness deciding the agreement — the same reads agreeing at
+  2% and refusing at 1%; the band's ends rounding inward at nine places as `Price::collar_bound`
+  rounds them, a price on the rounded end proceeding and one grid step past it refusing), the
+  watch pins (a terminal covered or flat entry ending the run; an uncovered quantity keeping it
+  reading; an uncovered quantity ending only with its alert key reported; another interval's
+  alert key — `stop_watchdog`, the other key of the notifications spec §4.2 `protection` row —
+  holding the run open; an entry still working keeping it reading; the reads failing closed
+  past the cap, a settled watch ending clean at it), the export pins (a placing run holding the
+  three streams its export reads, each a journal-spec §2 stream id of its type; the stream names
+  deriving from the run's own workspace, agent and account ref; a run keeping no journal
+  exporting nothing), and a live test that pins every refusal's message and reason code, the
+  stub's own report with them (DEC-137).
 - **Run:** `cargo nextest run -p mandate-paper` (the live suite) and `cargo nextest run -p
   mandate-paper --run-ignored ignored-only --no-fail-fast` (the pending pins, each failing at its
   stub until E7-26's implementation lands).
