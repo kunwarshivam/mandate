@@ -1,14 +1,17 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/shell/app-shell";
+import { twoStockSwing } from "@/fixtures/mandates";
 import type { Scenario } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS } from "@/fixtures/workspace";
 import { useHandoff } from "@/lib/handoff";
 import type { Role } from "@/lib/roles";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
+import { shownOnDesktop, shownOnPhone } from "@/test/viewport";
 import { ConversationsProvider } from "./conversations";
 import { MessagesScreen, type ThreadView } from "./messages-screen";
+import { threadSlugClass } from "./thread-slug-class";
 
 const swingThread = `/messages/${AGENT_IDS.swing}`;
 
@@ -93,6 +96,36 @@ describe("the thread's bar on a phone (DEC-482)", () => {
       .filter((l) => phoneOnly(l) && !l.closest("nav"));
     expect(other.map((l) => l.getAttribute("href"))).toEqual([href]);
     expect(within(bar()).getByRole("navigation", { name: "Thread views" })).toHaveClass("max-lg:hidden");
+  });
+});
+
+describe("the thread header's slug (critique C-16)", () => {
+  const header = () => main().querySelector<HTMLElement>("[data-slot=thread-bar]")!;
+  const slug = () => within(header()).getByText(twoStockSwing.name).closest("span")!;
+
+  it.skip("pending E11-9: on a phone, the thread header drops the slug while the owl and the name still say which agent it is (C-16)", () => {
+    renderThread(AGENT_IDS.swing);
+    expect(slug()).toHaveClass(threadSlugClass());
+    expect(shownOnPhone(slug()), "the slug is gone from the phone thread header").toBe(false);
+    expect(shownOnPhone(header().querySelector("[data-slot=owl]")!), "the owl stays").toBe(true);
+    expect(shownOnPhone(within(header()).getByRole("link", { name: "Agent 2" })), "the name stays").toBe(true);
+  });
+
+  it.skip("pending E11-9: from lg the header keeps the slug, and only the slug leaves the phone's row (C-16)", () => {
+    renderThread(AGENT_IDS.swing);
+    expect(threadSlugClass(), "the drop holds only below the bar's own lg boundary").toMatch(/^max-lg:hidden$/);
+    expect(shownOnDesktop(slug()), "the desktop header keeps the slug").toBe(true);
+    const chips = [...header().querySelectorAll<HTMLElement>("[data-slot=mode-badge]")];
+    expect(chips.filter(shownOnPhone), "the mode chip stays on the phone, where the slug sat beside it").toHaveLength(1);
+    expect(chips.filter(shownOnDesktop), "the mode chip stays on the desktop").toHaveLength(1);
+    expect(shownOnPhone(within(header()).getByRole("link", { name: "Back to Messages" })), "the way back stays").toBe(true);
+    expect(
+      within(header())
+        .getAllByRole("link")
+        .filter((l) => shownOnPhone(l) && l.getAttribute("href") === `${swingThread}/desk`),
+      "the other view stays at its own address, whatever plan D's naming lands on",
+    ).toHaveLength(1);
+    expect(shownOnPhone(header().querySelector<HTMLElement>("[data-slot=environment-badge]")!), "the paper badge stays").toBe(true);
   });
 });
 
