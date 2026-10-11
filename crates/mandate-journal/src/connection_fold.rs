@@ -219,17 +219,20 @@ impl ConnectionAnchor {
     /// The anchor of one stream after `prefix`, its rows `seq` 1 to `from_seq − 1` that
     /// [`VerifiedPrefix::bind`] verified from genesis and bound to the range's trusted start
     /// (DEC-892, DEC-889). `Broken` when the prefix breaks rule 66, 67, 68, or 131, since a broken
-    /// chain anchors nothing (DEC-885 I5); the caller then runs the range
-    /// [`ConnectionStart::Unanchored`], as it does when `bind` refuses the rows.
+    /// chain anchors nothing (DEC-885 I5), or when the prefix's rows span more than one stream,
+    /// since rows of more than one stream are no one stream's chain to fold (DEC-913 item 1); an
+    /// empty prefix keeps its meaning (DEC-913 item 1, DEC-889 item 2). The caller then runs the
+    /// range [`ConnectionStart::Unanchored`], as it does when `bind` refuses the rows.
     pub fn from_verified(
         prefix: &VerifiedPrefix<'_>,
     ) -> Result<ConnectionAnchor, ConnectionAnchorError> {
         let rows = prefix.rows();
         let stream = rows.last().map(|row| row.stream_id.clone());
         let mut folds = Folds::default();
-        folds
-            .run(&connection_rows(rows))
-            .is_none()
+        let one_stream = rows
+            .iter()
+            .all(|row| Some(row.stream_id.as_str()) == stream.as_deref());
+        (folds.run(&connection_rows(rows)).is_none() && one_stream)
             .then_some(ConnectionAnchor { stream, folds })
             .ok_or(ConnectionAnchorError::Broken)
     }
