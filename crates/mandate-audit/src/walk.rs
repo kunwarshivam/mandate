@@ -328,6 +328,28 @@ mod tests {
     }
 
     #[test]
+    fn the_failed_run_reads_back_its_first_failure() {
+        let failed = run_of(Some(7), None);
+        assert_eq!(
+            (
+                failed.checked(),
+                failed.first_failure(),
+                failed.to_hash(),
+                failed.result(),
+            ),
+            (
+                7,
+                Some(FirstFailure {
+                    check: "seq_gap",
+                    seq: Some(7),
+                }),
+                None,
+                RunResult::Fail,
+            )
+        );
+    }
+
+    #[test]
     fn result_follows_rules_132_and_133() {
         let rows = [
             (run_of(Some(7), None), RunResult::Fail),
