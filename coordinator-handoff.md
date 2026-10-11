@@ -201,3 +201,34 @@ Read everything above for process; this section supersedes "State right now" abo
 14. **FYI: the DEC-903–909 landing-wave collision** with L2's reserved-range plan (above); L2's delegation-window PR must renumber to the next free.
 15. **FYI: #1293's CI-fix story** — the shell previously refused a protective action through an E7-3 stub door opened by the doubt-settling wiring; fixed by waiting for the gathered reconcile. Worth a glance at the ruling: a doubt behind an unapplied fill asks nothing and waits (never the handle, never Absent).
 16. **FYI: AGENTS.md updated on main** (work-log expectation, live feature gate DEC-529, schema-mutants, ten-minute check budget DEC-464).
+
+---
+
+# Coordinator state at 2026-10-11 ~05:10 UTC (GLM-5.3 coordinator, continuing)
+
+Supersedes the "state at 02:50" section above.
+
+## Merged this session (11 total, each through CI + different-model review + DEC-175 as kunwarshivam)
+#1280 (4190a8d1), #1291 (022a9b64), #1292 (e569c5a1), #1293 (a58a053c), #1294 (cb6fe69f),
+#1295 (e063468f), #1298 (2dd59dfe), #1296 (347f658f). See each PR body for its review verdict,
+which names the exact approved head; /1296's covers the main-merge with byte-identity proof
+(patch-id 130fd82d, re-anchored by its reviewer).
+
+## THE PAPER PATH'S CODE IS COMPLETE — E2 is READY FOR THE FOUNDER
+- E3 merged tonight in two stacked parts (#1295 + #1296): the tracer world is deleted; `mandate-paper` is the only binary; the shell drops `mandate-backtest`.
+- Re-verified tonight by dispatch (read-only): D1c is already merged (#710 tests, #725 impl, #733 follow-ups), and with it D2a-D2c; V0 and D1b/D2b long merged.
+- E2's prerequisites are ALL satisfied: **E3, D1c, D2c, V0**. THE FOUNDER'S MANUAL PAPER RUN (E2) CAN GO NOW. The brief's E2 row: run per the brief's manual-paper-run section, then a docs PR records the evidence. Record the open-orders read after the fill (Alpaca's nested-leg shape is unconfirmed) — the E2/E7-4 note from DEC-878.
+- Claim #859 closed (M2/O1a/O1b already merged).
+
+## Live path state
+- #1297 (G1a tests, DEC-910) in independent review (Ling); CI 24/24 green. #1298 (the DEC-854 precondition pins, DEC-911) merged; its implementation (adding the two crypto `limit` cells, deleting the three rows, extending the canonical text + B2a pin) is building now and should be the next merge; after #1297 and that impl merge, dispatch the **G1a implementation** (the runner's connection choice, the lapse check, the live-feature door — LT-1, DEC-529 item 3), then **G1b** (ask openings wait for the grant, the quote cross-check DEC-529 item 12, bounded reads, journal export), then the rehearsal R0 is reached.
+- Per the G1a tests PR's own finding: mandate-alpaca's profile lacked §5.2's crypto limit cells (DEC-854's consequence); the cells implementation PR closes it.
+
+## Reviewer routes tonight (for whoever continues)
+kimi-k3: DOWN all night (connection errors). glm-5.3-flash: DOWN. Longcat + Step-5: rate-limited periodically; Longcat recovered once. Ling-3.1 and Mimo-2.6: fresh, careful, VERIFIED GOOD (both did rigorous reviews; Ling caught a genuine 4-minor doc-consistency set on #1295). Nemotron-3.5: AVOID for review — one review of #1295 was voided for wrong-tree + two-dot-diff misreads (documented in #1295's body). GLM-5.3 GB300 (builders) healthy throughout.
+Practical brief-writing notes that matter: force worktree-first with a `git rev-parse HEAD` check; force three-dot diffs vs moved main; explain the squash-merge two-dot artifact explicitly.
+
+## Open items to carry
+1. **FOUNDER: E2 ready** (above). Also #878 (Cloudflare cutover), DEC-877 item 4 (protective submissions vs rule 13), the E7-28 build-guard offer, usage credits / Oct 14 for the Claude lanes, dispatch-server restart.
+2. **Backlog minors recorded tonight** (non-blocking, tracked by the reviews): three stale doc references from #1295's Ling review (tests/observed.rs:68 "as tests/tracer.rs's scripted broker does"; docs/specs/agent-harness.md:747 lists the deleted binary as current; mandate-paper/tests/lines.rs:4 "in the words mandate-tracer prints"); the pre-existing flaky pending test protective_sell_quantity_never_exceeds_the_position_in_any_script (E7-2 properties, passed 1/8-2/8 ignored-only runs — can flake CI's fast-pending); #1297's M-A (no dedicated scope-level Tradability drive); the stale work-tracker M6 row (says M2/O1a/S2 are next, but all are merged - true it up at session end).
+3. Session-end duties: update 08-work-tracker.md + 11-work-log.md (AGENTS.md now names the work log explicitly), post the summary on issue #165, keep the morning list current (items 12-16 above stand; add E2-ready).
