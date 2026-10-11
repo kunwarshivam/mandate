@@ -1914,7 +1914,6 @@ fn cancel_bracket_placement() -> mandate_executor::BrokerRequest {
 /// cancels the two legs the broker holds nested under the filled entry, each by **its own**
 /// broker order id read from the open-orders snapshot, never for the handle itself, whose every
 /// answer is the broker's 404 (DEC-878 items 1 and 2).
-#[ignore = "pending E7-4"]
 #[tokio::test]
 async fn cancelling_a_brackets_placement_cancels_its_two_legs_by_their_own_broker_ids() {
     let transport = FilledBracketHost::answering(serde_json::json!([filled_bracket_entry()]));
@@ -2040,7 +2039,6 @@ fn listings_without_a_resting_bracket() -> Vec<(&'static str, serde_json::Value)
 /// handle answers, since Alpaca holds no order by that name. The connector fails closed: no leg
 /// is deleted, no request asks for the handle, and the placement stays held or doubted rather
 /// than assumed cancelled, so risk never widens.
-#[ignore = "pending E7-4"]
 #[tokio::test]
 async fn a_bracket_placement_without_its_whole_bracket_resting_is_never_assumed_cancelled() {
     for (case, listing) in listings_without_a_resting_bracket() {
