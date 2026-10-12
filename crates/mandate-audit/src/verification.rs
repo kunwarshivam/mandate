@@ -7,7 +7,12 @@
 
 use mandate_canon::Digest;
 use mandate_identity::demand::{Permitted, ReadRecords};
-use mandate_journal::{ColdRead, StartRequest, StoredEvent, TrustedStart, TrustedStartError};
+use mandate_journal::{
+    ColdRead, ResolvedStart, StartRequest, StoredEvent, StreamId, TrustedStart, TrustedStartError,
+    resolve_start_from_rows,
+};
+
+use crate::{owns, segment};
 
 /// The most events one run covers (§4.8.1): the range's, never the prefix before it.
 pub const MAX_RUN_EVENTS: u64 = 1_000_000;
@@ -114,8 +119,61 @@ pub fn plan(
     snapshot: &ControlSnapshot<'_>,
     cold: &dyn ColdSource,
 ) -> Result<Plan, VerificationRefusal> {
-    let _ = (tenant, request, snapshot, cold);
-    Err(VerificationRefusal::Unimplemented { story: "E12-3" })
+    let workspace = segment(tenant).map_err(|_| VerificationRefusal::NotFound)?;
+    StreamId::parse(request.stream_id)
+        .filter(|stream| owns(&workspace, stream))
+        .ok_or(VerificationRefusal::NotFound)?;
+    let Some(head) = snapshot.stream_head else {
+        return Err(VerificationRefusal::NotFound);
+    };
+    let to_seq = request.to_seq.unwrap_or(head);
+    if request.from_seq == 0 || to_seq < request.from_seq || to_seq > head {
+        return Err(VerificationRefusal::Range);
+    }
+    if to_seq.saturating_sub(request.from_seq) >= MAX_RUN_EVENTS {
+        return Err(VerificationRefusal::Range);
+    }
+    let resolved = resolve_start_from_rows(
+        snapshot.control,
+        request.stream_id,
+        request.from_seq,
+        request.trusted_start,
+    )
+    .map_err(VerificationRefusal::TrustedStart)?;
+    let (start, recorded_start) = match resolved {
+        ResolvedStart::Ready(start) => match request.trusted_start {
+            StartRequest::Genesis => (start, RecordedStart::Genesis),
+            StartRequest::Anchor { anchor_event_id } => (
+                start,
+                RecordedStart::Anchor {
+                    anchor_event_id: anchor_event_id.to_owned(),
+                },
+            ),
+            StartRequest::Manifest { .. } => {
+                return Err(VerificationRefusal::TrustedStart(
+                    TrustedStartError::Refused,
+                ));
+            }
+        },
+        ResolvedStart::Manifest(pending) => match request.trusted_start {
+            StartRequest::Manifest { manifest_hash } => {
+                let confirmed = pending
+                    .confirm(cold.manifest(&manifest_hash))
+                    .map_err(VerificationRefusal::TrustedStart)?;
+                (confirmed, RecordedStart::Manifest { manifest_hash })
+            }
+            StartRequest::Genesis | StartRequest::Anchor { .. } => {
+                return Err(VerificationRefusal::TrustedStart(
+                    TrustedStartError::Refused,
+                ));
+            }
+        },
+    };
+    Ok(Plan {
+        to_seq,
+        start,
+        recorded_start,
+    })
 }
 
 #[cfg(test)]

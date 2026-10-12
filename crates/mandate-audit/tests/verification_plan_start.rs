@@ -145,7 +145,6 @@ fn control(stamped: bool) -> (Vec<StoredEvent>, Digest, Vec<u8>, String) {
 /// the cold store is asked anything; [`step_7_asks_the_cold_store_for_a_manifest_start_only`] is
 /// the control, the same request in range asking it once.
 #[test]
-#[ignore = "pending E12-3"]
 fn oversized_request_reads_no_cold_object() {
     let (rows, manifest_hash, bytes, _) = control(true);
     let by = StartRequest::Manifest { manifest_hash };
@@ -169,7 +168,6 @@ fn oversized_request_reads_no_cold_object() {
 /// and an absent or unreadable object `ColdUnreadable`. An anchor start asks nothing. Each plan
 /// records the start it was asked for.
 #[test]
-#[ignore = "pending E12-3"]
 fn step_7_asks_the_cold_store_for_a_manifest_start_only() {
     let (rows, manifest_hash, bytes, anchor_event_id) = control(true);
     let manifest = StartRequest::Manifest { manifest_hash };
@@ -225,7 +223,6 @@ fn step_7_asks_the_cold_store_for_a_manifest_start_only() {
 /// (step 5), 1,000,003 events (step 6) and an unrecorded manifest (step 7). The earliest fault set
 /// is the refusal; with none, the request is planned.
 #[test]
-#[ignore = "pending E12-3"]
 fn refusals_follow_dec_788s_order() {
     let (rows, hash, bytes, _) = control(true);
     let foreign = format!("acct:{}:ACCT1", text(WS_B));
@@ -269,7 +266,6 @@ fn refusals_follow_dec_788s_order() {
 /// segment from another `first_seq` and a segment of another stream each refuse the start
 /// `TrustedStart(Refused)`, and none asks the cold store.
 #[test]
-#[ignore = "pending E12-3"]
 fn step_7_refuses_a_start_that_does_not_fit() {
     let (stamped, manifest_hash, bytes, id) = control(true);
     let (unstamped, ..) = control(false);

@@ -8,14 +8,17 @@
 //! anything is served (API-16, AU-6), and the members `GET /verifications/{id}` serves rebuild
 //! from that record alone (§4.8.1 "The record", "Result").
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Int, Key, Object, Value, to_canonical};
 use mandate_identity::demand::{Permitted, ReadRecords};
-use mandate_journal::{ArtifactSource, Environment, StoredEvent};
+use mandate_journal::{
+    ArtifactSource, Environment, RangeWalkError, StoredEvent, StreamId, walk_range,
+};
 use mandate_time::UtcNanos;
 
 use crate::verification::{
     ColdSource, ControlSnapshot, Plan, RecordedStart, VerificationRefusal, VerificationRequest,
 };
+use crate::{owns, segment};
 
 /// §4.8.1's `first_failure` and the record's `failure` (§9.13 rule 111): the check's code, one
 /// of §11's, and the position it was reported at — for a per-event check, the position walked
@@ -220,6 +223,27 @@ impl Run {
     }
 }
 
+/// The events the walk reads for the range `from_seq` to `to_seq`, out of the snapshot's whole
+/// slice (DEC-916 item 2): the rows the store holds for the range's own positions, in their
+/// stored order, from the first row whose `seq` reaches `from_seq` up to the first whose `seq`
+/// passes `to_seq` — the rows before `from_seq` are the folds' prefix and the rows after
+/// `to_seq` the segment checks' remainder, neither of them read. A row the store holds twice
+/// for one position stays, so the walk's own leftover clause (§11 check 3, rule 111) answers it.
+fn range_rows(rows: &[StoredEvent], from_seq: u64, to_seq: u64) -> &[StoredEvent] {
+    rows.iter()
+        .position(|row| row.seq >= from_seq)
+        .and_then(|starts_at| {
+            let read = rows
+                .get(starts_at..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|row| row.seq <= to_seq)
+                .count();
+            rows.get(starts_at..starts_at.saturating_add(read))
+        })
+        .unwrap_or_default()
+}
+
 /// §4.8.1's coverage walk (AU-8): the events of `from_seq` to `to_seq` of the request's stream,
 /// the positions the [`Plan`] resolved, walked in `seq` order from the plan's trusted start,
 /// each judged by §11's checks 1 to 6, the first failure reported at the position walked
@@ -241,9 +265,12 @@ impl Run {
 /// rows and the cold store's manifests from them.
 ///
 /// # Errors
-/// [`VerificationRefusal::NotFound`] until DEC-916's row scope holds and the walk has not run;
-/// the walk records what it finds, so no other refusal is the walk's before DEC-897 item 5(b)'s
-/// unread-token refusal, whose name is still open.
+/// [`VerificationRefusal::NotFound`] for a row of the snapshot that is not a row of the request's
+/// own stream (DEC-916), or for a stream the caller's workspace does not hold, before any
+/// position is judged and with nothing recorded; [`VerificationRefusal::Range`] when the plan and
+/// the range cannot pair, or the record could not hold a position or count outside journal spec
+/// §4 rule 4's canonical integers. The walk records what it finds, so no other refusal is the
+/// walk's before DEC-897 item 5(b)'s unread-token refusal, whose name is still open.
 #[allow(
     clippy::too_many_arguments,
     reason = "each is one of §4.8.1's reads or one envelope member's source; bundling them would \
@@ -259,10 +286,227 @@ pub fn walk(
     artifacts: &dyn ArtifactSource,
     envelope: &RunEnvelope,
 ) -> Result<Run, VerificationRefusal> {
-    let _ = (
-        tenant, request, plan, snapshot, rows, cold, artifacts, envelope,
-    );
-    Err(VerificationRefusal::Unimplemented { story: "E12-3" })
+    let workspace = segment(tenant).map_err(|_| VerificationRefusal::NotFound)?;
+    let stream = StreamId::parse(request.stream_id)
+        .filter(|stream| owns(&workspace, stream))
+        .ok_or(VerificationRefusal::NotFound)?;
+    let off_stream = rows.iter().any(|row| row.stream_id != stream.as_str());
+    if off_stream {
+        return Err(VerificationRefusal::NotFound);
+    }
+    let start = plan.start();
+    let from_seq = start.from_seq;
+    let to_seq = plan.to_seq();
+    let read = range_rows(rows, from_seq, to_seq);
+    let walked = match walk_range(read, start, to_seq, artifacts) {
+        Ok(walked) => walked,
+        Err(RangeWalkError::NotARange) => return Err(VerificationRefusal::Range),
+        Err(RangeWalkError::Unimplemented { story }) => {
+            return Err(VerificationRefusal::Unimplemented { story });
+        }
+    };
+    let failure = walked.outcome.err().map(|found| FirstFailure {
+        check: found.check.code(),
+        seq: Some(found.seq),
+    });
+    let to_hash = walked.outcome.ok();
+    let mut run = Run {
+        stream_id: stream.as_str().to_owned(),
+        from_seq,
+        to_seq,
+        checked: walked.checked,
+        failure,
+        incomplete: None,
+        to_hash,
+        start: plan.recorded_start().clone(),
+        draft: Vec::new(),
+    };
+    let _ = (snapshot, cold);
+    let control = format!("ctl:{workspace}");
+    run.draft = the_record(&run, start.prev_hash, envelope, &control)?;
+    Ok(run)
+}
+
+/// One member of the record this run drafts, at a name §3's envelope or §9.13's record lists:
+/// each is a canonical key (journal spec §4.1), and the walk answers the one case the drafting
+/// can still fail, a value outside journal spec §4 rule 4's integers, with its `range` refusal.
+fn member(object: &mut Object, name: &str, value: Value) -> Result<(), VerificationRefusal> {
+    let key = Key::new(name).map_err(|_| VerificationRefusal::Range)?;
+    object.insert(key, value);
+    Ok(())
+}
+
+/// One counted member of the record — a `seq`, or rule 132's `checked` — as the canonical
+/// integer the journal records (journal spec §4 rule 4); the walk refuses a range whose members
+/// no journal could record with its `range` refusal.
+fn counted(number: u64) -> Result<Value, VerificationRefusal> {
+    Ok(Value::Int(
+        Int::new(number).ok_or(VerificationRefusal::Range)?,
+    ))
+}
+
+/// The run's `VerificationRun` version 2 record (§9.13, DEC-788 item 1): §3's envelope without
+/// the journal-assigned fields, `trigger` `request` (rule 110) with the requester as its actor,
+/// `causation_id` `null` (DEC-897 item 4), and one checked range at the members rules 107, 110,
+/// 111, 132 and 133 read — the trusted `prev_hash` the plan bound (rule 107), `to_hash` `null`
+/// exactly when a failure left none (rule 111), the start the record names (rule 132), the
+/// three-way `result` (rule 133), and `incomplete` null while no check stands unfinished. The
+/// record names no configuration (§9.13), lists no artifact (its digests are bare, not refs), and
+/// carries no personal data. The writer appends it on the workspace's own `control` stream
+/// (API-16, AU-6); every member the route serves rebuilds from it alone (§4.8.1 "The record").
+fn the_record(
+    run: &Run,
+    prev_hash: Digest,
+    envelope: &RunEnvelope,
+    control: &str,
+) -> Result<Vec<u8>, VerificationRefusal> {
+    let mut start = Object::new();
+    let mut manifest_hash = Value::Null;
+    let mut anchor_event_id = Value::Null;
+    let kind = match &run.start {
+        RecordedStart::Genesis => "genesis",
+        RecordedStart::Manifest {
+            manifest_hash: named,
+        } => {
+            manifest_hash = Value::Str(named.to_hex());
+            "manifest"
+        }
+        RecordedStart::Anchor {
+            anchor_event_id: named,
+        } => {
+            anchor_event_id = Value::Str(named.clone());
+            "anchor"
+        }
+    };
+    member(&mut start, "kind", Value::Str(kind.to_owned()))?;
+    member(&mut start, "manifest_hash", manifest_hash)?;
+    member(&mut start, "anchor_event_id", anchor_event_id)?;
+    let failure = match run.failure {
+        None => Value::Null,
+        Some(found) => {
+            let mut object = Object::new();
+            member(&mut object, "check", Value::Str(found.check.to_owned()))?;
+            member(
+                &mut object,
+                "seq",
+                match found.seq {
+                    Some(seq) => counted(seq)?,
+                    None => Value::Null,
+                },
+            )?;
+            Value::Object(object)
+        }
+    };
+    let incomplete = match run.incomplete {
+        None => Value::Null,
+        Some(unfinished) => {
+            let mut object = Object::new();
+            member(
+                &mut object,
+                "check",
+                Value::Str(unfinished.check().to_owned()),
+            )?;
+            member(
+                &mut object,
+                "cause",
+                Value::Str(unfinished.cause.code().to_owned()),
+            )?;
+            Value::Object(object)
+        }
+    };
+    let mut range = Object::new();
+    member(&mut range, "stream_id", Value::Str(run.stream_id.clone()))?;
+    member(&mut range, "from_seq", counted(run.from_seq)?)?;
+    member(&mut range, "to_seq", counted(run.to_seq)?)?;
+    member(&mut range, "prev_hash", Value::Str(prev_hash.to_hex()))?;
+    member(
+        &mut range,
+        "to_hash",
+        match run.to_hash {
+            Some(to_hash) => Value::Str(to_hash.to_hex()),
+            None => Value::Null,
+        },
+    )?;
+    member(&mut range, "start", Value::Object(start))?;
+    member(&mut range, "checked", counted(run.checked)?)?;
+    member(&mut range, "failure", failure)?;
+    member(&mut range, "incomplete", incomplete)?;
+    let mut payload = Object::new();
+    member(&mut payload, "trigger", Value::Str("request".to_owned()))?;
+    member(
+        &mut payload,
+        "ranges",
+        Value::Array(vec![Value::Object(range)]),
+    )?;
+    member(
+        &mut payload,
+        "result",
+        Value::Str(run.result().code().to_owned()),
+    )?;
+    let mut actor = Object::new();
+    member(
+        &mut actor,
+        "kind",
+        Value::Str(envelope.requester.kind.code().to_owned()),
+    )?;
+    member(&mut actor, "id", Value::Str(envelope.requester.id.clone()))?;
+    member(
+        &mut actor,
+        "version",
+        Value::Str(envelope.requester.version.clone()),
+    )?;
+    member(
+        &mut actor,
+        "build",
+        match envelope.requester.build {
+            Some(build) => Value::Str(format!("sha256:{build}")),
+            None => Value::Null,
+        },
+    )?;
+    let mut record = Object::new();
+    member(&mut record, "envelope_version", counted(1)?)?;
+    member(
+        &mut record,
+        "environment",
+        Value::Str(envelope.environment.as_str().to_owned()),
+    )?;
+    member(
+        &mut record,
+        "event_id",
+        Value::Str(envelope.event_id.clone()),
+    )?;
+    member(&mut record, "stream_id", Value::Str(control.to_owned()))?;
+    member(
+        &mut record,
+        "event_type",
+        Value::Str("VerificationRun".to_owned()),
+    )?;
+    member(&mut record, "schema_version", counted(2)?)?;
+    member(
+        &mut record,
+        "event_time",
+        Value::Str(envelope.event_time.to_string()),
+    )?;
+    member(
+        &mut record,
+        "clock_source",
+        Value::Str(envelope.clock_source.clone()),
+    )?;
+    member(&mut record, "causation_id", Value::Null)?;
+    member(
+        &mut record,
+        "correlation_id",
+        match &envelope.correlation_id {
+            Some(correlation) => Value::Str(correlation.clone()),
+            None => Value::Null,
+        },
+    )?;
+    member(&mut record, "actor", Value::Object(actor))?;
+    member(&mut record, "config_refs", Value::Object(Object::new()))?;
+    member(&mut record, "payload", Value::Object(payload))?;
+    member(&mut record, "artifact_refs", Value::Array(Vec::new()))?;
+    member(&mut record, "pii_refs", Value::Array(Vec::new()))?;
+    Ok(to_canonical(&Value::Object(record)))
 }
 
 #[cfg(test)]
