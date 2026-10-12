@@ -272,14 +272,14 @@ describe("the hero on a phone (critique C-2)", () => {
     return Number(digits);
   }
 
-  it.skip("pending E11-9: on a phone, the actions stand directly under the subhead and the beta line after them (C-2)", () => {
+  it("pending E11-9: on a phone, the actions stand directly under the subhead and the beta line after them (C-2)", () => {
     const rows = heroRowsOf();
     for (const row of ["subhead", "actions", "beta-line"] as const) expect(rows[row].className, row).toContain(heroPhoneOrderClass(row));
     expect(orderAt("actions", rows), "the buttons directly under the subhead").toBe(orderAt("subhead", rows) + 1);
     expect(orderAt("beta-line", rows), "the beta line after them").toBe(orderAt("actions", rows) + 1);
   });
 
-  it.skip("pending E11-9: on the desktop, the beta line keeps its place between the subhead and the actions (C-2)", () => {
+  it("pending E11-9: on the desktop, the beta line keeps its place between the subhead and the actions (C-2)", () => {
     const rows = heroRowsOf();
     for (const row of ["subhead", "actions", "beta-line"] as const) {
       expect(heroPhoneOrderClass(row), `${row}'s move holds only below the page's sm boundary`).toMatch(/^max-sm:order-\d+$/);
