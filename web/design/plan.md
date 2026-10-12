@@ -288,7 +288,8 @@ item above (C-3, C-9) are not repeated.
 - [x] **The status strip's state chips outlined**, not ink. (C-26) Done in [#1257](https://github.com/kunwarshivam/mandate/pull/1257).
 - [ ] **Workspace out of More** until one section is built (a DEC amending DEC-513 item 2); its
       subtitle drops "Rules". (C-20)
-- [ ] **One left edge across densities** on the audit screens. (C-17)
+- [x] **One left edge across densities** on the audit screens. (C-17) Done in
+      [#1317](https://github.com/kunwarshivam/mandate/pull/1317).
 - [x] **One paragraph per set of shared rules** on the Approvals rail. (C-12) Done in [#1189](https://github.com/kunwarshivam/mandate/pull/1189).
 - [x] **The phone thread header without the slug.** (C-16) Done in [#1314](https://github.com/kunwarshivam/mandate/pull/1314).
 - [x] **The welcome page's buttons above the fold on a phone.** (C-2) Done in [#1316](https://github.com/kunwarshivam/mandate/pull/1316).

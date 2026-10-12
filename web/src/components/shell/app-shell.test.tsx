@@ -6,6 +6,7 @@ import * as agentsNew from "@/app/(app)/agents/new/page";
 import * as agents from "@/app/(app)/agents/page";
 import * as approvals from "@/app/(app)/approvals/page";
 import * as audit from "@/app/(app)/audit/page";
+import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page";
 import * as dashboard from "@/app/(app)/page";
 import * as settings from "@/app/(app)/settings/page";
@@ -312,7 +313,7 @@ function declaredIn(selector: string): Record<string, string> {
 }
 
 describe("one left edge across densities on the audit screens (critique C-17)", () => {
-  it.skip("pending E11-9: the dense column keeps the calm page's left edge and only widens to the right (C-17)", () => {
+  it("pending E11-9: the dense column keeps the calm page's left edge and only widens to the right (C-17)", () => {
     const classes = denseEdgeClass().split(" ").filter(Boolean);
     expect(classes.length, "one helper's classes, not a spread of utilities").toBeGreaterThan(0);
     expect(classes, "the left edge stays the calm page's own; everything right of it widens").toEqual([
@@ -344,7 +345,7 @@ describe("one left edge across densities on the audit screens (critique C-17)", 
     for (const cls of classes) expect(settingsMain.classList, "the whole density shares the column, not Audit alone").toContain(cls);
   });
 
-  it.skip("pending E11-9: the tag stays on the page's foot, the calm column keeps its frame, and the widening bounds stay (C-17)", () => {
+  it("pending E11-9: the tag stays on the page's foot, the calm column keeps its frame, and the widening bounds stay (C-17)", () => {
     const classes = denseEdgeClass().split(" ").filter(Boolean);
     setPathname("/audit");
     const auditVisit = renderWithRuntime(
@@ -391,6 +392,22 @@ describe("one left edge across densities on the audit screens (critique C-17)", 
     expect(densityFor("/connections")).toBe("dense");
     expect(densityFor("/")).toBe("calm");
     expect(densityFor("/messages")).toBe("calm");
+  });
+
+  it("the third dense route shares the column, and neither the foot nor a full width follows it (C-17)", () => {
+    const classes = denseEdgeClass().split(" ").filter(Boolean);
+    setPathname("/connections");
+    renderWithRuntime(
+      <AppShell>
+        <connections.default />
+      </AppShell>,
+    );
+    const main = screen.getByRole("main");
+    expect(main).toHaveAttribute("data-density", "dense");
+    for (const cls of classes) expect(main.classList, "the density's third route draws the same column Audit does").toContain(cls);
+    expect(main.classList, "a w-full kept behind the inset would push the column's right edge past the window by the inset").not.toContain("w-full");
+    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
+    expect(foot, "the tag's row stays density-blind; a dense foot would read the 90rem bound and put the tag back at 40px").not.toHaveAttribute("data-density", "dense");
   });
 });
 
