@@ -253,3 +253,37 @@ Practical brief-writing notes that matter: force worktree-first with a `git rev-
   #1296's Decisions-needed (it is named in #1295's; the founder should be told); docs/specs/agent-harness.md:747
   still names the deleted binary as current (backlog row); ragged doc reflows in three places; the now-unused
   tests/fixtures/tracer/mandate-{ask,deny,small-orders}.json referenced only by generate.py.
+
+## Session record (2026-10-11, night through ~08:30 UTC) — 30 PRs merged, live path code-complete
+
+### Merged (30, all through the full DEC-175 pipeline: review -> body verdict -> label -> merge-approved.sh; oldest first)
+- Continuation of the earlier session's wave: #1300 #1301 #1302 #1303 (G1b tests, DEC-912; 3 review rounds) #1304 (L2 prefix tests, DEC-913) #1305 (E8-10 NoticeAttempted v2 impl) #1306 (L5 walk tests, DEC-916; PASS after a rate-limit interruption + resume) #1307 #1309 (web C-2/C-16 tests; PASS, CI-gated on the owl flake until #1312 landed; both then merged via GitHub's auto-merge the moment label+green CI aligned — substantively compliant, verified post-hoc) #1312 (owl-flight CI flake fix, on-runner proven) #1310 (L2 prefix fix impl + review minors landed live) #1313 (G1b wiring implementation, DEC-914 mechanics; 2 review rounds, one STOP-verified minor) #1311 (wiring tests, DEC-914) #1314 #1316 #1317 (web C-16/C-2/C-17 implementations; #1316 needed a main-merge with the plan-tick conflict resolved to the union) #1315 (C-17 tests) #1318 (landing window-zoom WAAPI fix, on-runner proven) #1319 (L5 walk+plan implementation; zero missed mutants).
+- Also merged earlier in the session per the previous record: through #1299 and the #1303-branch fix rounds.
+
+### Critical path COMPLETE
+- G1a (earlier), G1b tests (#1303), G1b impl (#1308), wiring tests (#1311), wiring impl (#1313) all on main. mandate-paper has ZERO pending tests and its mutant gate is strict (no stub exemption left).
+- R0's remaining rows (owners named in the #1308/#1311 reviews): the shell-side LT-10 install (mandate-shell row; DEC-475's private Session boundary), the runtime grant->submit continuation (stream L / M7), the G1a live door compile-in, DEC-529's founder-held live-door items. Paper path: E2 remains THE founder's manual run; every prerequisite merged.
+
+### Founder decisions waiting (the morning list)
+1. **DEC-917 (Proposed, #1321)** — one word: accept = merge #1321 then merge main into #1320's branch then merge #1320 (both reviewed PASS, founder-ready; the review's §For-the-FOUNDER paragraph is in #1321's body). Decline = #1320 stays blocked; nothing else at risk. The ES-22 text is silent on tests (verified); the guard's tests-as-code reading was the implementation's extension.
+2. **DEC-914 item 3 collar_x** — paper re-implements the tier byte-identical (disclosed thrice, double-pinned); accept + backlog an exposure PR, or direct the exposure now. Either way is safe tonight's code.
+3. #1296: remediation (#1302) merged long since; keep-or-revert remains the founder's after-the-fact call. Recommendation: keep.
+4. Standing: #878, DEC-877 item 4, E7-28 build-guard offer, lanes' Oct-14 resumes / usage credits, dispatch-server restart.
+5. New backlog rows recorded in reviews: the PG-gated call-site evidence pin (#1313 Minor 2); the web docs drift 68rem-vs-80rem (DESIGN.md/reference.md vs the live stylesheet); the WAAPI watcher's id-matching precision minor (#1318); the L2 connection_ranges vector follow-up = #1320 (PASS, behind DEC-917); the owl-runs' e2e runner flake class (mode.test.tsx/agent-header/routes under extreme load — quiet runs green).
+
+### Process learnings this session (binding precedents)
+- A pending test with WRONG expectations passes every CI gate (it "fails at its stub" either way): #1303's collar round failed review for typed-not-recomputed arithmetic. Reviewers must HAND-RECOMPUTE pins' values; builders must EMPIRICALLY run the referenced function (scratch test) before pushing expectations.
+- A review-minor may be STOPPED rather than implemented when the fixture genuinely cannot express the assertion (#1313's placing-half journal:None) — route it to the right gated row (the PG tests), never fake the assertion, never weaken the pin.
+- GitHub auto-merge can fire once label + green CI align on a PR — verify any such merge's conditions were all satisfied post-hoc (#1307/#1309 were; the merge-approved script remains the intended path).
+- The spec-guard counts tests-only crates/ files as code (false positive; the DEC-917 proposal fixes the classifier). Until resolved, tests+spec co-changes need the founder's carve-out or override.
+- Wrong-tree/two-dot review misreads keep recurring on free-tier models; the worktree-first + rev-parse + three-dot brief template (used all night) prevents them.
+
+### Reviewer routes (updated)
+- Proven good tonight: Mimo-2.6 (7 reviews incl. #1305/#1310/#1313-delta/#1315/#1317/#1316/#1320), Step-5 (4 heavyweight: #1303 rounds, #1311, #1319, #1321; deep satisfiability scratch proofs), Ling-3.1 (#1307-adjacent early round, #1312-style resume of #1306's review context, #1318). Longcat: rate-limited at every attempt tonight. kimi-k3 / glm-5.3-flash: still down. Nemotron: still avoided (prior void). Builders on default GLM: healthy throughout.
+- All builders tonight were default-GLM subagents (sustained ~4-6 concurrent builders + 2-4 concurrent reviewers on one machine, disk floor ~103 GB free at worst).
+
+### State at close
+- Open PRs: #1320 (PASS + ACCEPT-JOINT, blocked on DEC-917), #1321 (reviewed PASS, founder decides; DO NOT coordinator-merge), #878 (founder-held, unchanged).
+- Worktrees: all merged-PR worktrees/branches removed (space policy held all night). Remaining on disk: none of ours.
+- The Claude lane sessions (parked): auto-resume Oct 14 or on founder credits, unchanged.
+- Founder's morning actions, in order: (1) E2 manual paper run — fully unblocked; (2) DEC-917 one word; (3) skim #1308/#1311 reviews' R0-gap lists if scheduling the sedation rows; (4) claude.ai cleanups per the standing reminder (delete the routine trigger and the inert probe session).
