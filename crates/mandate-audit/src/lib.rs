@@ -27,6 +27,7 @@ use mandate_journal::{MemoryJournal, StoredEvent, StreamId};
 mod timeline;
 mod trace;
 mod verification;
+mod walk;
 
 pub use timeline::{MAX_CONSUMED_PER_STREAM, StreamCursor, Timeline, TimelineQuery, TimelineRead};
 pub use trace::{
@@ -36,6 +37,10 @@ pub use trace::{
 pub use verification::{
     ColdSource, ControlSnapshot, MAX_RUN_EVENTS, Plan, RecordedStart, VerificationRefusal,
     VerificationRequest, plan,
+};
+pub use walk::{
+    FirstFailure, IncompleteCause, IncompleteCheck, Requester, RequesterKind, Run, RunEnvelope,
+    RunResult, walk,
 };
 
 /// The largest page (DEC-760 item 1).
