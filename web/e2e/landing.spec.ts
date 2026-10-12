@@ -134,6 +134,49 @@ const centre = async (page: Page, selector: string) => {
   return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height };
 };
 
+/**
+ * Where the window's closing zoom ends, asked of the closing animation itself rather than of a
+ * recorded frame. The desktop hides the window the moment the zoom finishes — before its rest
+ * pose is ever painted — so a frame log's last sample is wherever the runner's main thread last
+ * woke, which on the CI runner can be far from the end: run 38181774959 (claude/l4-c2-impl, a
+ * head that does not touch the desktop) sampled the closing zoom 0.83px taller than its taskbar
+ * button (end.h 33.8260498046875 vs ≤ 33), and run 38183683644 (claude/l4-c17-impl, also no
+ * desktop changes) sampled it 198.28662109375px from the windows menu and 38.8236083984375 tall.
+ * Seek the animation to its declared end for one paused frame, measure that, and let it run on:
+ * the assertions then test the zoom's real end, wherever the runner's clock stops.
+ */
+async function endsOn(page: Page, id: string) {
+  const pose = page.evaluate(
+    (id) =>
+      new Promise<{ x: number; y: number; w: number; h: number } | null>((resolve) => {
+        const tick = (n: number) => {
+          const el = document.getElementById(id);
+          if (!el || el.hidden || n > 400) return resolve(null);
+          const closing = el.getAnimations().find((a) => {
+            const effect = a.effect;
+            if (!(effect instanceof KeyframeEffect)) return false;
+            const { endTime } = effect.getComputedTiming();
+            if (endTime === null || !Number.isFinite(endTime)) return false;
+            const opacity = effect.getKeyframes().at(-1)?.opacity;
+            return opacity === "0" || opacity === 0;
+          });
+          if (!closing) return requestAnimationFrame(() => tick(n + 1));
+          const effect = closing.effect as KeyframeEffect;
+          const was = closing.currentTime ?? 0;
+          closing.pause();
+          closing.currentTime = effect.getComputedTiming().endTime ?? 0;
+          const box = el.getBoundingClientRect();
+          closing.currentTime = was;
+          closing.play();
+          resolve({ x: box.left + box.width / 2, y: box.top + box.height / 2, w: box.width, h: box.height });
+        };
+        requestAnimationFrame(() => tick(0));
+      }),
+    id,
+  );
+  return pose;
+}
+
 test("a window zooms out of the icon that opened it and into its taskbar button, as a Mac's do", async ({ page }) => {
   await open(page, 1440);
   const frames = await track(page);
@@ -154,11 +197,12 @@ test("a window zooms out of the icon that opened it and into its taskbar button,
   expect(last.opacity).toBe(1);
 
   const task = await centre(page, "[data-task=guestbook]");
+  const pose = endsOn(page, "win-guestbook");
   await frames.reset();
   await page.getByRole("button", { name: "Minimize guestbook.cgi" }).click();
+  const end = (await pose)!;
   await expect(page.locator("#win-guestbook")).toBeHidden();
   const going = (await frames.frames()).filter((f) => f !== null);
-  const end = going.at(-1)!;
   expect(going.length, "minimizing moves too").toBeGreaterThan(5);
   expect(Math.abs(end.x - task.x), "and ends on the taskbar button").toBeLessThan(12);
   expect(Math.abs(end.y - task.y)).toBeLessThan(12);
@@ -219,11 +263,12 @@ test("the Mac on the desktop redraws it as System 7, which the server keeps draw
   await expect(page.locator("#win-guestbook")).toBeVisible();
   await page.waitForTimeout(500);
   const menu = await centre(page, "[data-slot=window-menu]");
+  const pose = endsOn(page, "win-guestbook");
   await frames.reset();
   await page.getByRole("button", { name: "Minimize guestbook.cgi" }).click();
+  const end = (await pose)!;
   await expect(page.locator("#win-guestbook")).toBeHidden();
   const going = (await frames.frames()).filter((f) => f !== null);
-  const end = going.at(-1)!;
   expect(going.length, "collapsing moves").toBeGreaterThan(5);
   expect(Math.abs(end.x - menu.x), "and ends on the windows menu").toBeLessThan(12);
   expect(Math.abs(end.y - menu.y)).toBeLessThan(12);
