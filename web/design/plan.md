@@ -292,7 +292,7 @@ item above (C-3, C-9) are not repeated.
       [#1317](https://github.com/kunwarshivam/mandate/pull/1317).
 - [x] **One paragraph per set of shared rules** on the Approvals rail. (C-12) Done in [#1189](https://github.com/kunwarshivam/mandate/pull/1189).
 - [x] **The phone thread header without the slug.** (C-16) Done in [#1314](https://github.com/kunwarshivam/mandate/pull/1314).
-- [ ] **The welcome page's buttons above the fold on a phone.** (C-2)
+- [x] **The welcome page's buttons above the fold on a phone.** (C-2) Done in [#1316](https://github.com/kunwarshivam/mandate/pull/1316).
 - [x] **The brand owl never wears an agent's colour.** The founder decided it on 2026-10-09
       (DEC-739 item 2, amending DEC-452's "choose the color at random"): the brand owl wears
       `--logo`, the wordmark's colour, and the per-load pick is gone. (C-15) Done in
