@@ -190,6 +190,30 @@ fn clean_chain(stream_id: &str, head: u64) -> (Vec<StoredEvent>, Vec<Digest>) {
     chained_from(stream_id, (1, ZERO), head)
 }
 
+/// A clean [`row`] of the own stream whose `config_refs` names one reference, `reference`:
+/// canonical, its columns its body's, and its hash its body's, so only check 6's `config_refs`
+/// half can fail it (§11 check 6: every referenced artifact exists and re-hashes).
+fn configured(seq: u64, prev_hash: Digest, reference: &str) -> StoredEvent {
+    let clean = row(&own(), seq, prev_hash, "MarkUpdated", mark(), &[]);
+    let body = match parse(&clean.body).expect("the clean row parses") {
+        Value::Object(mut members) => {
+            members.insert(
+                member("config_refs"),
+                parse(format!(r#"{{"profile":"{reference}"}}"#).as_bytes())
+                    .expect("the config refs are canonical"),
+            );
+            Value::Object(members)
+        }
+        _ => panic!("the clean row is an object"),
+    };
+    let bytes = to_canonical(&body);
+    StoredEvent {
+        hash: Digest::of(&bytes),
+        body: bytes,
+        ..clean
+    }
+}
+
 /// The control row of a `SegmentExported` of `stream_id` over seqs `first..=last`, at ctl `seq`:
 /// `first_prev_hash` is its first row's `prev_hash` and `last_hash` its last row's. The cold-store
 /// manifest object returned beside it carries the same six members in §6.2's form, so rule 117's
@@ -419,7 +443,6 @@ fn range_at<'a>(record: &'a Value, name: &str) -> Option<&'a Value> {
 /// trusted start's segment boundary without stopping at it, and records `to_hash` as the event at
 /// `to_seq`'s, never the head's.
 #[test]
-#[ignore = "pending E12-3"]
 fn a_clean_range_walks_every_event_but_never_its_tail() {
     let (rows, hashes) = clean_chain(&own(), 12);
     let (segment, manifest_hash, bytes) = segment_start(&own(), 1, 4, hashes[2], 12, hashes[11]);
@@ -458,6 +481,63 @@ fn a_clean_range_walks_every_event_but_never_its_tail() {
     );
 }
 
+/// §11 check 6 and DEC-897 item 5(a) on the check's other half: the `config_refs` values of the
+/// range's rows are `sha256:` refs (journal §6.3), so the same existence-and-re-hash loop reads
+/// them — a config the store cannot answer fails `artifact_missing` at its event, an outage
+/// never a pass, and a store answering the right bytes keeps the range whole. The wrong-bytes
+/// arm fails `artifact_mismatch` beside them.
+#[test]
+fn a_config_ref_the_store_cannot_answer_fails_the_range_alike() {
+    let under = ArtifactRef::of(b"a config the range reads");
+    let reference = under.to_string();
+    let mut rows = Vec::new();
+    let mut hashes = Vec::new();
+    let mut prev = ZERO;
+    for seq in 1..=5 {
+        let written = if seq == 3 {
+            configured(3, prev, &reference)
+        } else {
+            row(&own(), seq, prev, "MarkUpdated", mark(), &[])
+        };
+        prev = written.hash;
+        hashes.push(written.hash);
+        rows.push(written);
+    }
+    let cases = [
+        (
+            "the store answers with the right bytes",
+            Ok(b"a config the range reads".to_vec()),
+            passed(5, hashes[4]),
+        ),
+        (
+            "the store does not answer",
+            Err(ArtifactError::Unavailable),
+            failed("artifact_missing", 3, 2),
+        ),
+        (
+            "the store answers with other bytes",
+            Ok(b"other bytes".to_vec()),
+            failed("artifact_mismatch", 3, 2),
+        ),
+    ];
+    for (name, answer, want) in cases {
+        let answered = OneArtifact(under, answer);
+        let got = run_of(
+            &own(),
+            (1, Some(5)),
+            StartRequest::Genesis,
+            &snap(5, Vec::new(), rows.clone()),
+            &Stores {
+                cold: &NoCold,
+                artifacts: &answered,
+            },
+            &by_user(),
+        )
+        .map(|run| outcome(&run));
+        assert_eq!(got, want, "{name}");
+    }
+}
+
 /// §4.8.1 "Coverage": "The first event read must be `from_seq` and the last `to_seq`"; §11 check 5:
 /// `prev_hash` equals "the previous event's hash (or the trusted start)". The position
 /// `from_seq` is judged against the trusted start's `prev_hash` whatever the row there holds: a
@@ -466,7 +546,6 @@ fn a_clean_range_walks_every_event_but_never_its_tail() {
 /// row fails `seq_gap` at `from_seq` (AU-8's seeded deletion at the boundary); each walked
 /// nothing.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_walk_starts_at_the_from_event_and_its_trusted_start() {
     let (prefix, prefix_hashes) = clean_chain(&own(), 3);
     let (range_rows, range_hashes) = chained_from(&own(), (4, prefix_hashes[2]), 7);
@@ -515,7 +594,6 @@ fn the_walk_starts_at_the_from_event_and_its_trusted_start() {
 /// `seq_gap` at the position the walk first cannot reconcile, counting only the positions
 /// before it — never past the recorded failure (rule 132's bound on `checked`).
 #[test]
-#[ignore = "pending E12-3"]
 fn missing_reordered_duplicated_and_truncated_ranges_fail_seq_gap() {
     let (rows, hashes) = clean_chain(&own(), 8);
     let mut deleted = rows.clone();
@@ -543,6 +621,36 @@ fn missing_reordered_duplicated_and_truncated_ranges_fail_seq_gap() {
     assert_eq!(walked, passed(8, hashes[7]), "the clean chain, to the head");
 }
 
+/// §11 checks 1 and 2 at the run's own level (the seeded property pins check 4's rehash and the
+/// walk pins checks 3 and 5; the journal's own unit tests pin `check_row`, this is the run over
+/// them): a row the walk reaches whose body does not re-canonicalize to its own bytes fails
+/// `non_canonical`, and one whose `seq` column is not its body's fails `column_mismatch` — each
+/// at the position the walk judged, whatever the failing row's own `seq` column says, counting
+/// only the positions that walked before it (§9.13 rule 111); the clean chain still passes.
+#[test]
+fn non_canonical_and_column_mismatch_rows_fail_at_their_positions() {
+    let (rows, hashes) = clean_chain(&own(), 6);
+    let mut spaced = rows.clone();
+    spaced[3].body.insert(1, b' ');
+    assert_eq!(
+        own_walked((1, Some(6)), &snap(6, Vec::new(), spaced)),
+        failed("non_canonical", 4, 3),
+        "a body that does not re-canonicalize fails check 1 at its position"
+    );
+    let mut mislabeled = rows.clone();
+    mislabeled[2].seq = mislabeled[2].seq.saturating_add(1);
+    assert_eq!(
+        own_walked((1, Some(6)), &snap(6, Vec::new(), mislabeled)),
+        failed("column_mismatch", 3, 2),
+        "a seq column that is not its body's fails check 2 at its position"
+    );
+    assert_eq!(
+        own_walked((1, Some(6)), &snap(6, Vec::new(), rows)),
+        passed(6, hashes[5]),
+        "the clean chain still passes"
+    );
+}
+
 /// AU-1 and DEC-916: a verification reads only streams whose `stream_id` names the caller's
 /// workspace, and the walk's rows are no exception — another workspace's rows (cleanly chained,
 /// so no per-event check can tell them from the range's own), a sibling stream's of the same
@@ -550,7 +658,6 @@ fn missing_reordered_duplicated_and_truncated_ranges_fail_seq_gap() {
 /// not parse all refuse the run the one `NotFound` (DEC-760 item 4's shape), before any position
 /// is judged and with nothing recorded; the range's own rows still walk.
 #[test]
-#[ignore = "pending E12-3"]
 fn rows_of_another_stream_refuse_the_run_alike() {
     let (own_rows, own_hashes) = clean_chain(&own(), 3);
     let mut one_foreign = own_rows.clone();
@@ -595,7 +702,6 @@ fn rows_of_another_stream_refuse_the_run_alike() {
 /// store is a found fault, never a pass. Bytes that do not re-hash to their reference fail
 /// `artifact_mismatch`; a store answering with the right bytes keeps the range whole.
 #[test]
-#[ignore = "pending E12-3"]
 fn an_artifact_the_store_cannot_answer_fails_artifact_missing() {
     let under = ArtifactRef::of(b"an artifact the range reads");
     let reference = under.to_string();
@@ -656,7 +762,6 @@ fn an_artifact_the_store_cannot_answer_fails_artifact_missing() {
 /// for the requester. §9.13's own validator (`Draft::parse`) accepts each record: rules 107,
 /// 110, 111, 132 and 133 judge it as the journal's append will.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_record_drafts_the_run_and_claims_no_cause() {
     let user = by_user();
     let service = written_by(
@@ -966,7 +1071,6 @@ fn the_record_drafts_the_run_and_claims_no_cause() {
 /// trusted start and the three-way `result` — reads out of the drafted record at the value the
 /// run serves, on a passed range and a failed one alike.
 #[test]
-#[ignore = "pending E12-3"]
 fn the_result_rebuilds_from_the_record_alone() {
     let (rows, hashes) = clean_chain(&own(), 9);
     let (segment, manifest_hash, bytes) = segment_start(&own(), 1, 4, hashes[2], 9, hashes[8]);
@@ -1109,7 +1213,6 @@ fn the_result_rebuilds_from_the_record_alone() {
 /// count, the first failure's check and position, the head it verified, and the three-way result
 /// (rules 132 and 133).
 #[test]
-#[ignore = "pending E12-3"]
 fn seeded_corruptions_fail_where_the_oracle_walks() {
     let strategy = (2u64..=24, proptest::option::of(1u64..24), 0u8..6, 0u8..255);
     let body = |(head, tail, kind, raw): (u64, Option<u64>, u8, u8)| -> Result<(), TestCaseError> {

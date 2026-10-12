@@ -55,7 +55,6 @@ fn own() -> String {
 /// segment has `WS_A`'s as a prefix), an own stream that holds no event, and malformed ids are all
 /// the one `NotFound`, while the same request on an own stream that holds events is planned.
 #[test]
-#[ignore = "pending E12-3"]
 fn foreign_absent_and_malformed_streams_refuse_alike() {
     let w = text(WS_A);
     let refused = [
@@ -86,7 +85,6 @@ fn foreign_absent_and_malformed_streams_refuse_alike() {
 /// reaches the trusted start, which a genesis start passes only from seq 1. Every boundary is a
 /// written row, then a seeded property draws the rest.
 #[test]
-#[ignore = "pending E12-3"]
 fn range_refusals_follow_the_head_at_start() {
     let genesis = |to| Ok((to, TrustedStart::GENESIS, RecordedStart::Genesis));
     let rows = [
@@ -136,7 +134,6 @@ fn range_refusals_follow_the_head_at_start() {
 /// only": 1,000,000 events pass the bound and 1,000,001 are `Range`, from seq 1 or after a prefix
 /// of 2,000,000, with `to_seq` given or the head. A range that passes it meets the trusted start.
 #[test]
-#[ignore = "pending E12-3"]
 fn size_bound_counts_the_range_only() {
     let cases = [
         (
