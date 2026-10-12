@@ -27,7 +27,24 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
-- **2026-10-11, the overnight coordinator session: 30 merges, both paths at their gates.** One continuous session ran the full DEC-175 pipeline on thirty PRs (#1280-#1319 plus fix rounds), absorbing all four dormant lane queues locally after the claude.ai exhaustion froze them: the paper path reached complete code (E3 and every E2 prerequisite merged - the founder's manual E2 run is unblocked), the live path's E7-26 row landed end-to-end (G1a tests #1297, G1b tests #1303 and implementation #1308, the wiring tests #1311 and implementation #1313; mandate-paper now holds zero pending tests under a strict mutant gate), L2's mixed-stream prefix tightening landed with its Python-oracle vector follow-up reviewed (#1304, #1310, #1320 - the latter staged behind a founder decision), L3's E8-10 notice v2 (#1305), L4's web rows C-2/C-16/C-17 tests and implementations (#1307-#1317), L5's verification walk and plan stages (#1306, #1319), and two root-caused CI-reliability fixes (#1312 owl-flight, #1318 window-zoom). Three reviews failed work before it merged, per DEC-79 reviews' record (#1303's wrong-expectation pin round, #1313's STOP-verified fixture, #1316's plan-tick conflict). Founder decisions staged with full record on the handoff branch (commit 283188e4): E2 ready, DEC-917 one-word (unblocks #1320), DEC-914 item 3's collar_x exposure, #1296 keep-or-revert. Lessons that held: a pending test with wrong expectations passes every CI gate - reviewers hand-recompute, builders verify against the real function; an unexpressible review minor routes to its justified gated row, never a faked assertion; GitHub auto-merge can complete a PR once label and green CI align - verify its conditions post-hoc as #1307/#1309 were.
+- **2026-10-11, the overnight coordinator session: 30 merges, both paths at their gates.** One
+  continuous session ran the full DEC-175 pipeline on thirty PRs (#1280 and #1291-#1319 plus fix
+  rounds), absorbing the dormant lane queues after the claude.ai exhaustion froze them: the paper
+  path reached complete code (E3 and every E2 prerequisite merged - the founder's manual E2 run is
+  unblocked), the live path's E7-26 row landed end-to-end (G1a #1297, G1b #1303 and #1308, the
+  wiring #1311 and #1313; `mandate-paper` now holds zero pending tests under a strict mutant gate),
+  L2's prefix tightening landed with its vector follow-up reviewed (#1304, #1310, #1320 - staged
+  behind a founder decision), L3's E8-10 notice v2 (#1305), L4's web rows C-2/C-16/C-17 (#1307-
+  #1317), L5's walk and plan (#1306, #1319), and two root-caused CI-reliability fixes (#1312,
+  #1318). Two review rounds failed work before it merged, per the reviews' record (#1303's
+  wrong-expectation pin, #1313's STOP-verified fixture); a third PR (#1316) needed a main-merge to
+  resolve a plan-tick conflict before its PASS. Founder decisions staged with the full record on
+  the handoff branch (commit 283188e4): E2 ready, DEC-917 one-word (unblocks #1320), DEC-914 item
+  3's collar_x exposure, #1296 keep-or-revert. Lessons that held: a pending test with wrong
+  expectations passes every CI gate - reviewers hand-recompute, builders verify against the real
+  function; an unexpressible review minor routes to its justified gated row, never a faked
+  assertion; GitHub auto-merge can complete a PR once label and green CI align - verify its
+  conditions post-hoc, as #1307/#1309 were.
 - **2026-10-09, the coordinator handover.** The previous coordinator and its lane leads ended;
   session `01BFjCWYU2cDwPmFkR3RAHQK` took the role, ran Sonnet reviews, merged `main` into stalled
   branches and fixed findings across the five demo lanes (DEC-820). The founder decided DEC-833 and
