@@ -8,7 +8,7 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_executor::{ClientOrderId, OrderType, Purpose, SubmitOrder, TimeInForce};
 use mandate_modelhost::Signal;
 use mandate_num::{Price, Qty};
-use mandate_paper::{Outcome, PaperError, lines, stderr_line};
+use mandate_paper::{Cycle, Outcome, PaperError, lines, stderr_line};
 use mandate_shell::{Report, ShellError};
 
 const ENTRY: &str = "md-01JPAPERENTRY0000000000001";
@@ -32,7 +32,10 @@ fn entry() -> SubmitOrder {
 }
 
 fn cycle(report: Report) -> Outcome {
-    Outcome::Cycle(Box::new(report))
+    Outcome::Cycle(Box::new(Cycle {
+        report,
+        evidence: None,
+    }))
 }
 
 /// Brief step 3: a dry run names the order it would place, by its id alone, and says nothing was

@@ -68,7 +68,10 @@ pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, grant};
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
-pub use wiring::{answers, asked, collar_x, reported, session_cap, watched};
+pub use wiring::{
+    CollarMembers, answers, asked, collar_x, cross_check_the_opening, reported, session_cap,
+    wait_for_the_grant, watch_may_end, watched,
+};
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
 /// host (FT-3, FT-4).
@@ -106,8 +109,24 @@ pub trait Ports {
 pub enum Outcome {
     /// `Flat` or `Undecided`: nothing stored, handed on or sent (DEC-157 item 4).
     NoOutput(Signal),
-    /// The cycle ran: what it submitted, or the order it would have placed (boxed: it is large).
-    Cycle(Box<Report>),
+    /// The cycle ran: what it submitted, or the order it would have placed (boxed: it is large),
+    /// beside the exportable evidence its report names (DEC-914 item 6).
+    Cycle(Box<Cycle>),
+}
+
+/// One finished cycle's report (DEC-914 item 6: the shell's `Report` cannot hold a
+/// `mandate-paper` type, so the evidence the run named at its report attaches here, beside
+/// it): the cycle's own report, and the streams the placing run's `journal export` reads,
+/// named from the journal the run appended to — `None` when the run appended to no journal, so
+/// nothing it holds exports (R0 step 4's dry run; [`EvidenceRefusal::JournalAbsent`] at the
+/// report seam, which is a naming refused and never a run failed: the order lines print as
+/// they did, and the refusal names no DSN, rule 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cycle {
+    /// The cycle's own report: what it submitted, or the order it would have placed.
+    pub report: Report,
+    /// The evidence a placing run names at its report; [`None`] when the run kept no journal.
+    pub evidence: Option<Evidence>,
 }
 
 /// Why a run stopped. After any of them nothing further is sent.
@@ -365,7 +384,15 @@ pub fn run<P: Ports>(
     let report = production_cycle(sources, setup)
         .run_observed_watched(observation, output, &watch)
         .map_err(PaperError::Shell)?;
-    Ok(Outcome::Cycle(Box::new(report)))
+    let evidence = wiring::reported(
+        args.journal.as_deref(),
+        args.place_one_order,
+        &args.workspace,
+        &args.agent,
+        &args.account_ref,
+    )
+    .ok();
+    Ok(Outcome::Cycle(Box::new(Cycle { report, evidence })))
 }
 
 /// The closes the host read as DEC-846 item 3's canonical object: `[session, close]` pairs,
@@ -496,14 +523,18 @@ where
 pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
     Ok(match outcome {
         Outcome::NoOutput(signal) => vec![format!("the model output {signal:?}; nothing sent")],
-        Outcome::Cycle(report) => {
-            let would_place = report.would_place.iter().map(|order| {
+        Outcome::Cycle(cycle) => {
+            let would_place = cycle.report.would_place.iter().map(|order| {
                 format!(
                     "would place {} (nothing sent; pass --place-one-order)",
                     order.client_order_id.as_str()
                 )
             });
-            let submitted = report.submitted.iter().map(|id| format!("submitted {id}"));
+            let submitted = cycle
+                .report
+                .submitted
+                .iter()
+                .map(|id| format!("submitted {id}"));
             would_place.chain(submitted).collect()
         }
     })

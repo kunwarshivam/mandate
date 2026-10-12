@@ -2,9 +2,10 @@
 //! [first live trade brief](../../../docs/project/tasks/first-live-trade.md)'s G1b): the `ask`
 //! opening that waits for the founder's grant (LT-4), the broker quote checked against the
 //! independent IEX quote within the collar (DEC-529 item 12), the bounded reads until LT-10,
-//! and the streams the run's `journal export` reads. Every pending test fails on its stub until
-//! E7-26's implementation lands (DEC-77); every fixture is a recorded record or a parsed
-//! decimal, holds no credential and reaches no host (ES-19, LT-1, `AGENTS.md` rule 8).
+//! and the streams the run's `journal export` reads. These are the seams' pins, live since
+//! #1308 closed them; the wiring's own pins (DEC-914) live beside them in `live_wiring.rs`.
+//! Every fixture is a recorded record or a parsed decimal, holds no credential and reaches no
+//! host (ES-19, LT-1, `AGENTS.md` rule 8).
 
 use mandate_canon::{Digest, Value};
 use mandate_journal::{StreamId, StreamType};

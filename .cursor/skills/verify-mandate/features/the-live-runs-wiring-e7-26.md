@@ -15,18 +15,26 @@
   verbatim in journal order, never re-sorted), `collar_x` (the collar's own tier for the asset
   class, read through the registered gate configuration's members so no second number sits
   between the gate's collar and `cross_check`'s band), `watched` (the `Watched` each wake's
-  LT-10 question observes: terminal in exactly `filled`/`canceled`/`expired`/`rejected`,
+  LT-10 question observes: terminal in exactly `filled`/`canceled`/`expired`/`rejected` — the
+  codec's other nine states, `unknown` and `pending_cancel` included, leave the run reading —
   `uncovered` as the executor answers, `alerted` only on the report's own
   `unprotected_interval_limit` key), `session_cap` (DEC-877 item 1's instant: the bound's
   regular session's end, 16:00 New York on a full day, the early close on a short one, a bound
   no session holds failing closed), and `reported` (the evidence named at the run's report from
   the journal the run appended to: placing runs name the agent, account and control streams of
-  journal spec §2, a run without `--place-one-order` names nothing) — re-exported by
-  `crates/mandate-paper/src/lib.rs`; every stub reports `Unimplemented { story: "E7-26" }`
-  until the wiring implementation lands (the call sites inside `run()`'s live arm are that PR's,
-  per DEC-914 item 7).
-- **Tests:** `crates/mandate-paper/tests/live_wiring.rs`, every pin pending on E7-26 until the
-  wiring lands: the ask pins (the ask's members verbatim off the journaled row, a
+  journal spec §2, a run without `--place-one-order` names nothing), implemented since this row
+  closed its pins. The runner's call frames beside them: `wait_for_the_grant` (the ask wait that
+  re-reads the control stream per wake at DEC-853 item 6's interval, holds the submit on the
+  first answer of the ask's approval and never submits itself), `cross_check_the_opening` (the
+  gate's own members read into the collar's `x` first, then `cross_check` over the two asks,
+  before the intent leaves) and `watch_may_end` (the watch's per-wake LT-10 question over
+  `watched`, at the cap `session_cap` reads, in place of the paper watch's bare terminal read),
+  each wired over row inputs only; `run()` names its placed cycle's evidence at its outcome
+  (`mandate_paper::Cycle`, beside the shell's `Report`, which cannot hold a `mandate-paper`
+  type). `connection.rs`'s `member` reads the wiring's text members (`pub(crate)`, the flip
+  #1311 reserved to the implementation).
+- **Tests:** `crates/mandate-paper/tests/live_wiring.rs`, every pin live since the wiring
+  landed: the ask pins (the ask's members verbatim off the journaled row, a
   drifted/rebuilt order's hash never releasing; the run waiting on its own youngest ask — a
   dead youngest one denying without falling back on an older live ask; an ask it cannot read
   refusing as a difference), the fold pins (the control rows folded verbatim in journal order,
@@ -39,7 +47,12 @@
   covered-or-flat ending, uncovered holding, the cap failing an unsettled watch closed), the cap
   pins (16:00 New York on the full day, the early close on the short day, a bound no session
   holds refusing), and the evidence pins (a placing run naming the three §2 streams from its
-  own typed ids; a run that wrote nothing — no DSN, or a dry run holding one — naming nothing).
-- **Run:** `cargo nextest run -p mandate-paper` (the live suite plus this row's pending pins);
-  `cargo nextest run -p mandate-paper --run-ignored ignored-only --no-fail-fast` (every pending
-  pin fails at its stub).
+  own typed ids; a run that wrote nothing — no DSN, or a dry run holding one — naming nothing);
+  the fifth-state fixtures (#1311's review: the codec's whole thirteen walked against
+  DEC-858 item 4's four, `unknown` keeping the run reading and `pending_cancel` failing it
+  closed at the cap, never a clean end), the wait-cadence fixture (the control stream re-read
+  per wake; the deadline denying at the ask's own bound) and the cross-check frame's tier
+  fixture beside them. `tests/run.rs`'s dry run names no exportable stream.
+- **Run:** `cargo nextest run -p mandate-paper` (the whole suite live and passing, no ignored
+  test in the crate); `cargo check -p mandate-paper --features live` (the wiring compiles
+  under the founder's feature, which no CI or release build enables).

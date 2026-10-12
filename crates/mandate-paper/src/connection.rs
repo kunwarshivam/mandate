@@ -200,8 +200,11 @@ pub fn connection(
 
 /// One text member of `record`'s payload, or [`None`] when it is missing or holds not text: a
 /// member the run reads off the record, and [`ConnectionRefusal::Unreadable`] is the only
-/// reading of one ([DEC-910](../../../docs/project/decisions/DEC-910.md) item 2).
-fn member<'a>(record: &'a ControlRecord, name: &str) -> Option<&'a str> {
+/// reading of one ([DEC-910](../../../docs/project/decisions/DEC-910.md) item 2). The E7-26
+/// wiring reads its rows' text members through this same reader (DEC-914 items 1 and 2:
+/// `asked`'s recorded `content_hash` member is one), so it is `pub(crate)` — the visibility
+/// flip #1311 reserved to the wiring implementation PR, this one.
+pub(crate) fn member<'a>(record: &'a ControlRecord, name: &str) -> Option<&'a str> {
     record.payload.get(name).and_then(Value::as_str)
 }
 

@@ -359,9 +359,10 @@ impl Drop for Scene {
 fn a_placing_run_stores_the_closes_and_sends_one_order() {
     let mut scene = Scene::new("place", 231..256);
     let outcome = scene.run();
-    let Ok(Outcome::Cycle(report)) = outcome else {
+    let Ok(Outcome::Cycle(cycle)) = outcome else {
         panic!("{outcome:?}")
     };
+    let report = &cycle.report;
     let posts = scene.posts();
     let counts = (report.submitted.len(), posts.len(), scene.ports.connects);
     assert_eq!(counts, (1, 1, 1), "one credential read, one order");
@@ -372,11 +373,13 @@ fn a_placing_run_stores_the_closes_and_sends_one_order() {
     dry.args.place_one_order = false;
     dry.args.journal = Some("postgres://paper@127.0.0.1:1/nobody_listens".to_owned());
     let outcome = dry.run();
-    let Ok(Outcome::Cycle(report)) = outcome else {
+    let Ok(Outcome::Cycle(cycle)) = outcome else {
         panic!("{outcome:?}")
     };
+    let (report, evidence) = (&cycle.report, cycle.evidence.as_ref());
     assert_eq!((report.submitted.len(), dry.posts().len()), (0, 0));
     assert!(report.would_place.is_some(), "a dry run reports the order");
+    assert_eq!(evidence, None, "a dry run names no exportable stream");
 }
 
 /// FT-4 (DEC-157 item 4): falling closes are the host's `Flat`, so the run stores nothing, hands
@@ -487,9 +490,10 @@ fn two_equities_differ_only_in_their_journaled_inputs() {
         let Equity(id, symbol, _, _) = equity;
         let mut scene = Scene::of(symbol, equity, 231..256);
         let outcome = scene.run();
-        let Ok(Outcome::Cycle(report)) = outcome else {
+        let Ok(Outcome::Cycle(cycle)) = outcome else {
             panic!("{symbol}: {outcome:?}")
         };
+        let report = &cycle.report;
         let posts = scene.posts();
         assert_eq!((report.submitted.len(), posts.len()), (1, 1), "{symbol}");
         assert_eq!(posts[0].get("symbol").and_then(Value::as_str), Some(id));
@@ -584,9 +588,10 @@ fn a_placing_run_watches_its_entry_to_the_registered_bound() {
     scene.at(LATE);
     scene.ports.broker.rests = true;
     let outcome = scene.run();
-    let Ok(Outcome::Cycle(report)) = outcome else {
+    let Ok(Outcome::Cycle(cycle)) = outcome else {
         panic!("{outcome:?}")
     };
+    let report = &cycle.report;
     assert_eq!((report.submitted.len(), scene.posts().len()), (1, 1));
     let secs = |text| UtcNanos::parse_rfc3339(text).unwrap().secs();
     let log = scene.ports.broker.log.borrow().clone();
