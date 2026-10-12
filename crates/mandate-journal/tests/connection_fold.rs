@@ -13,7 +13,8 @@
 //! closed at it without an anchor: judged against the `connection_revocations` section. DEC-913,
 //! the founder-approved tightening, refuses a prefix whose rows span more than one stream in
 //! `from_verified` — `bind` still binds such a prefix, since the trusted start commits to its
-//! tail — so its range runs unanchored and fails closed at its first judged record.
+//! tail — so its range runs unanchored and fails closed at its first judged record; the vectors
+//! pin it through their `one_chain` seal, and a uniform prefix of one unread stream still anchors.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -882,10 +883,15 @@ fn judged(row: &StoredEvent) -> bool {
 /// range's own trusted start and folded into its anchor (DEC-892 item 3, DEC-889), or the range is
 /// unanchored when `before` is `null` (its rows then start at `seq` 101, so `bind` refuses the empty
 /// prefix), and the answer must be the vector's, located by the range row's stream and `seq`, with
-/// its code. A `before` that breaks a rule anchors nothing (I5).
+/// its code. A `before` that breaks a rule anchors nothing (I5). A case that seals `one_chain`
+/// stores its whole chain as one chain over its rows' given order, `seq` by position and
+/// `prev_hash` across streams, so a `before` of several streams still binds and the anchor itself
+/// refuses it (DEC-913 item 1): a mixed prefix anchors nothing without being broken, and its range
+/// fails closed unanchored at its first judged record, the location an unread chain fails at.
 fn judge_range(section: &Value, case: &Value) {
     let label = text(case, "name");
     let unanchored = case.get("before") == Some(&Value::Null);
+    let one_chain = text(case, "seal") == "one_chain";
     let before = list(case, "before");
     let records = [before, list(case, "records")].concat();
     let records = Object::from([(Key::new("records").unwrap(), Value::Array(records))]);
@@ -893,7 +899,11 @@ fn judge_range(section: &Value, case: &Value) {
     if unanchored {
         chain.iter_mut().for_each(|row| row.seq += 100);
     }
-    let chain = sealed(&chain);
+    let chain = if one_chain {
+        sealed_as_one_chain(&chain)
+    } else {
+        sealed(&chain)
+    };
     let (prefix, range) = chain.split_at(before.len());
     let start = TrustedStart {
         from_seq: range[0].seq,
@@ -915,9 +925,14 @@ fn judge_range(section: &Value, case: &Value) {
     };
     let clean = !unanchored && verify_connection_lifecycle(prefix).is_ok();
     let anchored = matches!(start, ConnectionStart::Anchored(_));
+    let streams: BTreeSet<&str> = prefix.iter().map(|row| row.stream_id.as_str()).collect();
+    let mixed = one_chain && streams.len() > 1;
     assert_eq!(
-        anchored, clean,
-        "{label}: I5, a broken chain anchors nothing, and no anchor unread"
+        anchored,
+        clean && !mixed,
+        "{label}: I5, a broken chain anchors nothing, and no anchor unread; DEC-913 item 1: a \
+         one-chain prefix of more than one stream anchors nothing without being broken, its own \
+         refusal in `from_verified` rather than `bind`'s, so only a one-stream prefix anchors clean"
     );
     let got = verify_connection_lifecycle_from(start, range);
     assert_eq!(got, want, "{label}");
@@ -1031,7 +1046,9 @@ fn sealed(rows: &[StoredEvent]) -> Vec<StoredEvent> {
 /// its stream, so the rows of two streams pass §11's checks 1 to 6 as one chain and `bind` binds
 /// them — the shape a writer that numbers one range's rows of several streams together, or a
 /// caller that hands two streams' rows to an anchor fold as one prefix, assembles. The
-/// mixed-stream tests pin `from_verified` refusing it (DEC-913).
+/// mixed-stream tests pin `from_verified` refusing it (DEC-913), and the `one_chain` range
+/// vectors, through [`judge_range`], seal their chains this way, so their mixed prefixes bind and
+/// the anchor itself is what refuses them.
 fn sealed_as_one_chain(rows: &[StoredEvent]) -> Vec<StoredEvent> {
     let mut prev_hash = Digest::ZERO;
     let mut sealed = Vec::new();
@@ -1085,9 +1102,11 @@ fn verified_start(prefix: &[StoredEvent], start: TrustedStart) -> ConnectionStar
     }
 }
 
-/// §11 (v0.35, DEC-885) over the 22 `connection_ranges` and `connection_requests`'
+/// §11 (v0.35, DEC-885) over the 25 `connection_ranges` and `connection_requests`'
 /// `range_after_an_unseen_request`, each judged by [`judge_range`] from its verified anchor, or
-/// unanchored when `bind` refuses its empty prefix.
+/// unanchored when `bind` refuses its empty prefix; the three DEC-913 vectors among them: the two
+/// one-chain mixed prefixes, refused their anchor by `from_verified` itself, and the uniform
+/// agent-stream prefix, which still anchors.
 #[test]
 fn every_range_vector_is_judged_from_its_verified_anchor_as_its_vector_says() {
     let mut judged_cases = 0;
@@ -1101,7 +1120,7 @@ fn every_range_vector_is_judged_from_its_verified_anchor_as_its_vector_says() {
             judged_cases += 1;
         }
     }
-    assert_eq!(judged_cases, 23, "22 `connection_ranges` and one request");
+    assert_eq!(judged_cases, 26, "25 `connection_ranges` and one request");
 }
 
 /// Each stream's rows of `chain`, in commit order (DEC-889).

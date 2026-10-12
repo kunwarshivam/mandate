@@ -17246,6 +17246,29 @@ connection_ranges:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
+    refused_stop:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CAA000000000000000CA
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: OwnerCommandRefused
+      schema_version: 1
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8ZNB00000000000000000C6
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs: {}
+      payload:
+        command: stop
+        reason: step_up_stale
+        effective_at: '2026-09-22T13:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
   invalid_drafts: []
   valid_drafts: []
   sequences:
@@ -18170,6 +18193,148 @@ connection_ranges:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
+  - name: one_chain_prefix_of_two_streams_anchors_nothing
+    clause: '§11, DEC-913 item 1: a prefix sealed as one chain over two streams'' rows, the control stream''s request and establishment then the account stream''s connect check, binds, since the trusted start commits to its tail, but anchors nothing, so its range fails closed at its first judged record'
+    records:
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+    expect:
+      outcome: Unanchored
+      code: connection_lifecycle_mismatch
+      index: 0
+    scope: range
+    before:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S00A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+          account_ref: 01J8Z2ACCT00000000000000A1
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    seal: one_chain
+  - name: one_chain_prefix_of_three_streams_anchors_nothing
+    clause: '§11, DEC-913 item 1''s belt: the refusal reads more than one stream, not two exactly, so a one-chain prefix of three streams — this one carries another workspace''s revocation too — anchors nothing the same way'
+    records:
+    - base_draft: established_copy
+      changes:
+      - path: event_id
+        value: 01J8Z4S04A0000000000000000
+      - path: causation_id
+        value: 01J8Z4C1A000000000000000C1
+    expect:
+      outcome: Unanchored
+      code: connection_lifecycle_mismatch
+      index: 0
+    scope: range
+    before:
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S00A0000000000000000
+      - path: event_type
+        value: ConnectionRequested
+      - path: schema_version
+        value: 1
+      - path: causation_id
+        value: null
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+          account_ref: 01J8Z2ACCT00000000000000A1
+          broker: alpaca
+          environment: paper
+          user: user_owner_01
+          step_up:
+            assertion_id: assert_owner_09
+            authenticated_at: '2026-09-22T12:59:50.000000000Z'
+            method: cli_confirm
+    - base_draft: established_v2
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
+    - base_draft: checked_start
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+      - path: payload.occasion
+        value: connect
+      - path: payload.results
+        value:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+    - base_draft: rotated
+      changes:
+      - path: event_id
+        value: 01J8Z4S03A0000000000000000
+      - path: event_type
+        value: ConnectionRevoked
+      - path: payload
+        value:
+          connection_id: conn_alpaca_paper
+      - path: stream_id
+        value: ctl:ws_01J8Z3
+    seal: one_chain
+  - name: uniform_prefix_of_one_unread_stream_still_anchors
+    clause: '§11, DEC-913 item 4''s narrow letter: the refusal is of the span only, so a uniform prefix of one stream the fold never reads — an agent stream''s refusal — still anchors, and its anchored range runs as today'
+    records:
+    - base_draft: refused_stop
+      changes:
+      - path: event_id
+        value: 01J8Z4S02A0000000000000000
+    expect:
+      outcome: Valid
+    scope: range
+    before:
+    - base_draft: refused_stop
+      changes:
+      - path: event_id
+        value: 01J8Z4S01A0000000000000000
   chains: []
 connection_revocations:
   spec: docs/specs/journal.md v0.37 §9.8 rule 68 and §11 (DEC-888)

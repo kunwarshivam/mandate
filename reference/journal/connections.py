@@ -17,8 +17,11 @@ import copy
 from common import change, delete
 from control import (
     ACCOUNT_STREAM_REF,
+    AGENT,
     EXECUTOR,
     MCP_BROKERS,
+    OWNER_INPUT,
+    RUNTIME,
     SERVICES,
     STREAM,
     WORKSPACE,
@@ -52,6 +55,7 @@ IDS = {
     "established_copy": "01J8Z4C7A000000000000000C7",
     "rotated_copy": "01J8Z4C8A000000000000000C8",
     "requested": "01J8Z4C9A000000000000000C9",
+    "refused_stop": "01J8Z4CAA000000000000000CA",
 }
 ON_ACCOUNT = ("checked_start", "state_degraded", "refreshed", "established_copy", "rotated_copy")
 # Member names a credential, a broker account number, or the account fingerprint would sit in
@@ -1117,11 +1121,22 @@ def stream_mismatch(
     drafts: list[dict], skip: frozenset[str] = frozenset(), full_chain: bool = True, folds: dict | None = None, start: int = 0
 ) -> tuple[int, str] | None:
     """The first record that breaks rule 66, 67, 68, or 131. Each rule holds on its own stream
-    (§9.8), so each stream has its own fold. `folds` is the connection anchor a range starts from
-    and `start` its records' count (DEC-885); a full chain starts from nothing."""
+    (§9.8), so each stream has its own fold, over the records the rules read (`READ`, the fold's
+    own `connection_rows`): a record of a stream or a kind no rule reads is skipped wherever it
+    sits, as an agent stream's (DEC-913 item 4). `folds` is the connection anchor a range starts
+    from and `start` its records' count (DEC-885); a full chain starts from nothing."""
     folds = {} if folds is None else folds
     for i, d in enumerate(drafts):
         p, kind = d["payload"], d["event_type"]
+        read = (
+            kind in READ["ctl"]
+            if d["stream_id"].startswith("ctl:")
+            else kind in READ["acct"]
+            if d["stream_id"].startswith("acct:")
+            else False
+        )
+        if not read:
+            continue
         cid = p.get("connection_id")
         stream = d["stream_id"].split(":")[0] if "stream.per_stream" in skip else d["stream_id"]
         f = folds.setdefault(stream, new_fold())
@@ -1251,6 +1266,17 @@ def stream_mismatch(
 # range with no connection anchor fails closed at its first; a revocation no rule refuses.
 JUDGED = {"ctl": ("ConnectionRequested", "ConnectionEstablished", "ConnectionCredentialRotated", "ConnectionRefused")}
 
+# The records the fold reads, per stream kind (§9.8): the connection records of the control stream
+# and of an account stream, everything else — another stream's, or another kind's — skipped wherever
+# it sits, so no rule judges it (the fold's `connection_rows`). What a range judges (`JUDGED`) is
+# these less the control stream's revocation, which the fold reads and no rule refuses.
+READ = {
+    "ctl": ("ConnectionEstablished", "ConnectionRevoked", "ConnectionCredentialRotated", "ConnectionRefused",
+            "ConnectionRequested"),
+    "acct": ("ConnectionChecked", "ConnectionStateChanged", "ConnectionCredentialRefreshed", "ConnectionEstablished",
+             "ConnectionCredentialRotated", "ConnectionRevoked"),
+}
+
 
 def judged(d: dict, skip: frozenset[str]) -> bool:
     kind = d["event_type"]
@@ -1262,8 +1288,14 @@ def judged(d: dict, skip: frozenset[str]) -> bool:
 def connection_anchor(before: list[dict] | None, skip: frozenset[str]) -> dict | None:
     """The connection anchor (DEC-885): each stream's fold over the stored chain before the range's
     trusted start, folded from seq 1 as the full-chain run folds it. A caller that cannot read that
-    chain has none, and neither has one whose chain breaks a rule before the range."""
+    chain has none, and neither has one whose chain breaks a rule before the range. A prefix whose
+    rows span more than one stream is no one stream's chain to fold, so it anchors none either, and
+    its range fails closed as a refused anchor's (DEC-913 item 1); an empty prefix still anchors,
+    since no row sits on another stream (DEC-889 item 2). A uniform prefix of one stream anchors
+    still, whatever the fold reads of it, since the refusal is of the span only (DEC-913 item 4)."""
     if before is None:
+        return None
+    if len({d["stream_id"] for d in before}) > 1 and "range.mixed_prefix" not in skip:
         return None
     folds: dict[str, dict] = {}
     if stream_mismatch(before, skip, True, folds) is not None and "range.broken_prefix" not in skip:
@@ -1285,13 +1317,37 @@ def range_mismatch(before: list[dict] | None, drafts: list[dict], skip: frozense
     return next(((i, "unanchored") for i, d in enumerate(drafts) if judged(d, skip)), None)
 
 
-def range_case(name: str, clause: str, before: list[dict] | None, records: list[dict], mismatch: tuple[int, str] | None = None) -> dict:
+def range_case(
+    name: str,
+    clause: str,
+    before: list[dict] | None,
+    records: list[dict],
+    mismatch: tuple[int, str] | None = None,
+    one_chain: bool = False,
+) -> dict:
     records, before = copy.deepcopy(records), copy.deepcopy(before)
     case = {**sequence(name, clause, records, None if mismatch is None or mismatch[1] == "unanchored" else mismatch),
             "scope": "range", "before": before}
+    if one_chain:
+        # The stored chain is one chain over its rows' given order — `seq` by position, `prev_hash`
+        # across streams — as a writer that numbers one range's rows of several streams together
+        # assembles it, so it binds (DEC-913 item 3) and the anchor itself must refuse it.
+        case["seal"] = "one_chain"
     if mismatch is not None and mismatch[1] == "unanchored":
         case["expect"] = {"outcome": "Unanchored", "code": "connection_lifecycle_mismatch", "index": mismatch[0]}
     return case
+
+
+def revoked_elsewhere(index: int) -> dict:
+    """The revocation on another workspace's control stream: a third stream for the one-chain
+    belt's prefix to span."""
+    return with_changes(revoked(index), change("stream_id", f"ctl:{OTHER_WORKSPACE}"))
+
+
+def agent_refusal(index: int) -> dict:
+    """The agent stream's record no connection rule reads wherever it sits (DEC-913 item 4): the
+    runtime's refusal of the owner's stop command, of the control section's own base drafts."""
+    return record("refused_stop", index)
 
 
 def range_cases() -> list[dict]:
@@ -1336,24 +1392,53 @@ def range_cases() -> list[dict]:
         range_case("unanchored_revocations_only", "§11, §9.8", None, [revoked(3)]),
         range_case("anchor_on_a_broken_chain", "§11: a chain that breaks a rule before the range anchors nothing",
                    [*live, established(2)], [record("rotated", 3)], (0, "unanchored")),
+        range_case("one_chain_prefix_of_two_streams_anchors_nothing",
+                   "§11, DEC-913 item 1: a prefix sealed as one chain over two streams' rows, the control stream's "
+                   "request and establishment then the account stream's connect check, binds, since the trusted "
+                   "start commits to its tail, but anchors nothing, so its range fails closed at its first judged record",
+                   [REQUESTED, established(1), checked(2, "connect")], [bound(3)], (0, "unanchored"), one_chain=True),
+        range_case("one_chain_prefix_of_three_streams_anchors_nothing",
+                   "§11, DEC-913 item 1's belt: the refusal reads more than one stream, not two exactly, so a "
+                   "one-chain prefix of three streams — this one carries another workspace's revocation too — "
+                   "anchors nothing the same way",
+                   [REQUESTED, established(1), checked(2, "connect"), revoked_elsewhere(3)], [bound(4)],
+                   (0, "unanchored"), one_chain=True),
+        range_case("uniform_prefix_of_one_unread_stream_still_anchors",
+                   "§11, DEC-913 item 4's narrow letter: the refusal is of the span only, so a uniform prefix of "
+                   "one stream the fold never reads — an agent stream's refusal — still anchors, and its anchored "
+                   "range runs as today",
+                   [agent_refusal(1)], [agent_refusal(2)]),
     ]
 
 
-RANGE_MUTANTS = ("range.anchor_ignored", "range.unanchored_empty", "range.existence_skipped", "range.revoke_judged", "range.broken_prefix")
+RANGE_MUTANTS = (
+    "range.anchor_ignored",
+    "range.unanchored_empty",
+    "range.existence_skipped",
+    "range.revoke_judged",
+    "range.broken_prefix",
+    "range.mixed_prefix",
+)
 
 
 def range_agreement(drafts: list[dict], skip: frozenset[str]) -> list[str]:
     """DEC-885's invariants on every split of a full chain, against the full-chain run and an
     independent scan: an anchored range agrees with the full chain on every record in it, and an
-    unanchored range reports no rule, failing closed exactly at its first judged record."""
+    unanchored range reports no rule, failing closed exactly at its first judged record. A split
+    whose rows before it span more than one stream is no anchored split: its prefix anchors
+    nothing (DEC-913 item 1), so the range fails closed exactly as an unread one, at its first
+    judged record."""
     problems, full = [], stream_mismatch(drafts)
     for k in range(1, len(drafts)):
         clean = full is None or full[0] >= k
         want = (full[0] - k, full[1]) if full is not None and clean else None
-        if clean and range_mismatch(drafts[:k], drafts[k:], skip) != want:
-            problems.append(found("ranges.agree", f"split at {k}: expected {want}"))
         first = next((i for i, d in enumerate(drafts[k:]) if d["event_type"] in JUDGED["ctl"] or d["stream_id"].startswith("acct:")), None)
-        if range_mismatch(None, drafts[k:], skip) != (None if first is None else (first, "unanchored")):
+        unread = None if first is None else (first, "unanchored")
+        mixed = len({d["stream_id"] for d in drafts[:k]}) > 1 and "range.mixed_prefix" not in skip
+        agree = unread if mixed else want
+        if clean and range_mismatch(drafts[:k], drafts[k:], skip) != agree:
+            problems.append(found("ranges.agree", f"split at {k}: expected {agree}"))
+        if range_mismatch(None, drafts[k:], skip) != unread:
             problems.append(found("ranges.unanchored", f"split at {k}: expected fail-closed at {first}"))
     return problems
 
@@ -1944,10 +2029,37 @@ def run_request_mutants(section: dict) -> list[str]:
     return escaped
 
 
+def agent_refusal_draft() -> dict:
+    """The base draft of the agent stream's record the connection rules never read (DEC-913
+    item 4, the narrow-reading control): the runtime's `OwnerCommandRefused` of the control
+    section's own `refused_stop`, a record a journal can append, which no connection rule judges
+    wherever it sits. Carried by the range section alone, so the connections section's eight
+    base drafts stay as they are."""
+    return {
+        "envelope_version": 1,
+        "environment": "paper",
+        "event_id": IDS["refused_stop"],
+        "stream_id": f"agent:{WORKSPACE}:{AGENT}",
+        "event_type": "OwnerCommandRefused",
+        "schema_version": 1,
+        "event_time": AT,
+        "clock_source": "local",
+        "causation_id": OWNER_INPUT["stop"],
+        "correlation_id": None,
+        "actor": dict(RUNTIME),
+        "config_refs": {},
+        "payload": {"command": "stop", "reason": "step_up_stale", "effective_at": AT},
+        "artifact_refs": [],
+        "pii_refs": [],
+    }
+
+
 def build_range_section() -> dict:
     """The `connection_ranges` section (DEC-885): a section of its own, as `connection_requests`
-    is, so the fold's tests keep their answers until the range run's code change reads it (ES-22)."""
-    drafts = {**base_drafts(), "requested": request_drafts()["requested"]}
+    is, so the fold's tests keep their answers until the range run's code change reads it (ES-22).
+    DEC-913's anchor tightening reads it: the one-chain mixed prefixes refuse their own anchor, and
+    the uniform agent-stream prefix anchors as before."""
+    drafts = {**base_drafts(), "requested": request_drafts()["requested"], "refused_stop": agent_refusal_draft()}
     return {"spec": SPEC, "drafts": drafts, "invalid_drafts": [], "valid_drafts": [], "sequences": range_cases(), "chains": []}
 
 
