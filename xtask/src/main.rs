@@ -7561,18 +7561,32 @@ fn entry_with_id<'a>(value: &'a serde_json::Value, id: &str) -> Option<&'a serde
 }
 
 /// Splits changed paths into protected paths and code paths. A protected file under a code
-/// directory (`crates/mandate-refcases/status.toml`) counts only as protected.
+/// directory (`crates/mandate-refcases/status.toml`) counts only as protected, and a crate's
+/// tests-directory file is tests, not code (DEC-917): it alters no behavior a spec describes,
+/// which is what ES-22's split is for.
 fn classify<'a>(changed: impl Iterator<Item = &'a str>) -> (Vec<&'a str>, Vec<&'a str>) {
     let mut protected = Vec::new();
     let mut code = Vec::new();
     for file in changed {
         if PROTECTED_PATHS.iter().any(|p| file.starts_with(p)) {
             protected.push(file);
-        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) {
+        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) && !is_crate_tests_path(file) {
             code.push(file);
         }
     }
     (protected, code)
+}
+
+/// Whether a path is a file of a crate's tests directory (`crates/<crate>/tests/…`), which DEC-917
+/// reads as tests, not code. A `src` file stays code wholesale even when it holds `#[cfg(test)]`
+/// modules inline; `xtask/src/` matches no crate and stays code.
+fn is_crate_tests_path(file: &str) -> bool {
+    let mut segments = file.split('/');
+    segments.next() == Some("crates")
+        && segments
+            .next()
+            .is_some_and(|crate_name| !crate_name.is_empty())
+        && segments.next() == Some("tests")
 }
 
 fn contains_dec_id(text: &str) -> bool {
@@ -8806,6 +8820,27 @@ mod tests {
                 "docs/specs/journal.md"
             ]
         );
+        assert_eq!(
+            code,
+            ["crates/mandate-journal/src/lib.rs", "xtask/src/main.rs"]
+        );
+    }
+
+    /// DEC-917: a crate's tests-directory file is tests, not code, while a `src` file of the same
+    /// crate and `xtask/src/` stay code wholesale.
+    #[test]
+    fn crate_tests_files_are_tests_not_code_but_src_stays_code() {
+        let (protected, code) = classify(
+            [
+                "crates/mandate-journal/tests/connection_fold.rs",
+                "crates/mandate-journal/src/lib.rs",
+                "docs/specs/journal.md",
+                "xtask/src/main.rs",
+                "docs/project/06-backlog-v1.md",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(protected, ["docs/specs/journal.md"]);
         assert_eq!(
             code,
             ["crates/mandate-journal/src/lib.rs", "xtask/src/main.rs"]
@@ -10720,6 +10755,46 @@ mod tests {
             problems,
             Vec::<String>::new(),
             "a cited spec-only PR passes"
+        );
+        Ok(())
+    }
+
+    /// DEC-917: PR #1320's shape — a spec change whose only Rust change is a crate's
+    /// tests-directory file — is not code, so the DEC citation is the only thing the guard still
+    /// asks for, and a `src` file beside the same spec change is still split off.
+    #[test]
+    fn a_tests_only_change_beside_a_spec_change_needs_only_a_dec_citation() -> Result<()> {
+        let MovedBase { fx, main_tip, .. } = Fixture::moved_base(
+            "base-tests-and-spec",
+            &["docs/specs/pr.md", "crates/c/tests/connection_fold.rs"],
+        )?;
+        let cited = spec_guard_problems(&fx.0, &main_tip, "Cites DEC-917.")?;
+        assert_eq!(
+            cited,
+            Vec::<String>::new(),
+            "a tests file plus a spec file passes with a citation: {cited:?}"
+        );
+        let uncited = spec_guard_problems(&fx.0, &main_tip, "")?;
+        assert!(
+            uncited.iter().any(|p| p.contains("no DEC-<n> is cited")),
+            "{uncited:?}"
+        );
+        assert!(
+            !uncited.iter().any(|p| p.contains("together with code")),
+            "no code file changed: {uncited:?}"
+        );
+        let MovedBase {
+            fx: src_fx,
+            main_tip: src_tip,
+            ..
+        } = Fixture::moved_base(
+            "base-src-stays-code",
+            &["docs/specs/pr.md", "crates/c/src/lib.rs"],
+        )?;
+        let problems = spec_guard_problems(&src_fx.0, &src_tip, "Cites DEC-917.")?;
+        assert!(
+            problems.iter().any(|p| p.contains("together with code")),
+            "a citation does not excuse a src file's riding along: {problems:?}"
         );
         Ok(())
     }
