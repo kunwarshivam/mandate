@@ -120,7 +120,7 @@ screens an owner lives in, dense (`data-density="dense"`) for audit, settings an
 
 | Token | Calm | Dense | Use |
 |---|---|---|---|
-| `--content-max` | 68rem | 90rem | Widest content column |
+| `--content-max` | 80rem | 90rem | Widest content column |
 | `--container-measure` | 58ch | 58ch | Reading measure |
 | `--page-x` | 1.25 / 1.75 / 2.5rem | the same | Page padding at phone / tablet / desktop |
 | `--page-top` / `--page-bottom` | 1.5 (2.25 desktop) / 4rem | the same | Above the first line / below the last section |

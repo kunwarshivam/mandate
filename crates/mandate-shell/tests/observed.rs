@@ -65,7 +65,7 @@ fn stream() -> Stream {
 }
 
 /// A fresh paper broker that accepts the one submission, counting each `POST /v2/orders`, and
-/// finds no order by its client id, as `tests/tracer.rs`'s scripted broker does.
+/// finds no order by its client id.
 #[derive(Clone, Default)]
 struct Broker {
     posts: Rc<Cell<usize>>,
