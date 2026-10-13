@@ -1,0 +1,93 @@
+//! The live door in the run (E7-26, the [first live trade
+//! brief](../../../docs/project/tasks/first-live-trade.md)'s G1a wiring row — "the G1a live door
+//! compile-in" of the #1308 review's R0-gap list and the work tracker's M6 row): the run-level
+//! frames the runner calls the merged connection seams ([`connection`](crate::connection),
+//! [`lapse`](crate::lapse), #1301, DEC-910) through. #1301 implemented the seams and #1313
+//! closed the G1b wiring frames, but no pin observes `run()` calling either door seam — the only
+//! evidence the door's live arm holds today is that it compiles (`cargo check -p mandate-paper
+//! --features live`), so this module is the row's run-level half: the frames with final
+//! signatures the seams come to the run through, every stub reporting `Unimplemented { story:
+//! "E7-26" }` per DEC-137 until the row's implementation lands (DEC-77), and the call sites
+//! inside `run()` (`chosen` ahead of the shell's own answers and every credential read,
+//! `unspent` before anything runs) left to that implementation to write and its review to judge
+//! against DEC-910's sentences and DEC-918's readings — the discipline DEC-914 item 7 gave the
+//! G1b wiring. The adjacent rows keep their own contracts: the G1b frames' call sites stay
+//! stream L / M7's remainder's, the shell watch's own loop stays the shell row's, and the live
+//! arm's connector, preflight and account-stream journal read stay the door implementation's
+//! under these signatures. Nothing here reaches a host, a credential or a broker (LT-1,
+//! `AGENTS.md` rules 7 and 8): every input arrives as a control-stream record, a journaled
+//! row, a parsed mandate or the run's own identifiers.
+
+use mandate_journal::{StoredEvent, StreamId};
+use mandate_shell::control::ControlRecord;
+use mandate_spec::Mandate;
+
+use crate::PaperError;
+use crate::connection::{Connection, Held};
+
+/// The connection the run uses (DEC-918 item 1; DEC-910 item 2; the task file's row G1a:
+/// "The connector chosen from the connection record and the environment from the confirmed
+/// mandate"): the connector chosen from the connection record `records` hold for the
+/// `mandate`'s connection, the environment the mandate itself states, and the account stream
+/// the record must bind. `records` are the run's own control-stream read, handed verbatim and
+/// in the journal's order, never a re-read behind a second query; `account_ref` is the run's own
+/// (`--account-ref`), the stream every record of this connection must bind or refuse
+/// `connection_account`. Every refusal of the door reaches the run as
+/// [`PaperError::Connection`](crate::PaperError::Connection) — the transparent variant the
+/// merged suite pins — so the run's report names the door's own refusal ahead of the shell's
+/// own `DeploymentRefusal::Live` and every credential read (FT-3; R0's step 4: "the exact
+/// refusal").
+///
+/// # Errors
+/// Any [`PaperError::Connection`] that applies, before anything runs.
+pub fn chosen(
+    records: &[ControlRecord],
+    mandate: &Mandate,
+    account_ref: &str,
+) -> Result<Connection, PaperError> {
+    let _ = (records, mandate, account_ref);
+    Err(PaperError::Unimplemented { story: "E7-26" })
+}
+
+/// The account stream whose rows the door's lapse reads (DEC-918 item 3; DEC-910 item 3:
+/// "The runner reads the account stream through the same journal it reads the control stream
+/// from"): journal spec §2's `acct:{workspace_id}:{account_ref}`, derived from the run's own
+/// workspace and account ref — never a constant where the run's own names belong, the
+/// derivation discipline DEC-914 item 6 gave the export names. The stream the record binds and
+/// the lapse reads is this one alone; a form §2 cannot hold (a workspace or ref whose segments
+/// the journal's stream ids refuse) is no stream a run could read, so the naming fails closed
+/// with `Cause::Absent` at the reconcile stage, where the run's own account truth is reconciled
+/// — never a fallback onto another stream the id could be smashed into (`AGENTS.md` rule 3).
+/// A run that kept no journal has no account stream either — its control-stream read already
+/// refused one — so the naming invents no refusal of its own.
+///
+/// # Errors
+/// [`PaperError::Shell`] with `Cause::Absent` when the journal's §2 forms cannot parse the
+/// stream the run's own names name.
+pub fn account_stream(workspace: &str, account_ref: &str) -> Result<StreamId, PaperError> {
+    let _ = (workspace, account_ref);
+    Err(PaperError::Unimplemented { story: "E7-26" })
+}
+
+/// The flat-and-unspent half of the door (DEC-918 item 4; DEC-529 item 3; DEC-910 item 3):
+/// DEC-529 item 3's lapse, wrapped for the run — a live run refuses to start unless the account
+/// the connection binds is flat and the record is unspent, before anything runs, and a paper run
+/// makes no check (LT-14). `rows` are the journal's own read of the account stream
+/// [`account_stream`] names — the same journal the control stream came from, ungated by
+/// `--place-one-order` (DEC-529 item 3's lapse refuses a spent record before anything runs, R0
+/// step 4's dry run included, where the evidence's placing filter names nothing because the run
+/// appended to nothing); `held` counts what the connector's snapshot listed (DEC-470 item 1),
+/// handed by the live arm's preflight, re-derived by nothing here. Every refusal reaches the
+/// run as [`PaperError::Lapse`](crate::PaperError::Lapse).
+///
+/// # Errors
+/// Any [`PaperError::Lapse`] that applies — the account not flat, or a fill on the bound
+/// account stream spending the record — before anything runs.
+pub fn unspent(
+    connection: &Connection,
+    rows: &[StoredEvent],
+    held: &Held,
+) -> Result<(), PaperError> {
+    let _ = (connection, rows, held);
+    Err(PaperError::Unimplemented { story: "E7-26" })
+}
