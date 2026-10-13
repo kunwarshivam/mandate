@@ -22,6 +22,7 @@
 //! constant here (FT-2).
 
 mod connection;
+mod door;
 mod evidence;
 mod grant;
 mod lt10;
@@ -64,6 +65,7 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
+pub use door::{account_stream, chosen, unspent};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, grant};
 pub use lt10::{Lt10Refusal, Watched, lt10};
