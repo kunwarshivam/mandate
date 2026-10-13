@@ -10,9 +10,10 @@
 //!
 //! The fixtures follow `mandate-shell`'s own in-module precedent
 //! (`crates/mandate-shell/src/paper/tests.rs`): the shared mandate fixture's bytes are read
-//! from the suite's fixture file — the same document `tests/common/mod.rs`'s
-//! `spy_mandate` deploys — so no copy of it can drift, and nothing else is imported from any
-//! tests directory.
+//! from the suite's fixture file — the same file `tests/common/mod.rs`'s `spy_mandate`
+//! derives its document from (after its AAPL-to-SPY and model-hash substitutions, which the
+//! probes do not need: the door reads the deployed document's own members alone) — so no copy
+//! of it can drift, and nothing else is imported from any tests directory.
 
 use std::cell::Cell;
 use std::fs;
@@ -21,14 +22,16 @@ use mandate_alpaca::AlpacaPaperHttp;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, to_canonical};
 use mandate_journal::ArtifactStore;
-use mandate_shell::control::ControlRecord;
+use mandate_shell::control::{ControlRecord, DeploymentRefusal};
 use mandate_shell::{Cause, ShellError, Stage};
 
 use crate::{Args, ConnectionRefusal, PaperError, Ports, SystemClock, run};
 
-/// The paper mandate fixture the suite deploys (`tests/common/mod.rs`'s `spy_mandate` over the
-/// same bytes): its connection `conn_alpaca_paper_01` is the connection the records below
-/// establish and revoke, and its environment is the paper one a paper run keeps (V-001, LT-14).
+/// The paper mandate fixture the suite derives its deployed document from
+/// (`tests/common/mod.rs`'s `spy_mandate` over this file's bytes, after its AAPL-to-SPY and
+/// model-hash substitutions): its connection `conn_alpaca_paper_01` is the connection the
+/// records below establish and revoke, and its environment is the paper one a paper run keeps
+/// (V-001, LT-14).
 const MANDATE: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/mandate.json");
 
 /// The run's account ref, the stream every record of the connection must bind: an opaque id
@@ -196,6 +199,34 @@ fn a_live_deployment_refuses_through_the_door_ahead_of_the_shells_live() -> Resu
         probe.connects.get(),
         0,
         "no credential read before the door"
+    );
+    Ok(())
+}
+
+/// DEC-918 item 3's own bound at `run()`'s level — "the door performs no validation of its own,
+/// **never answers where the shell refuses**, and only ever adds a refusal in front of the
+/// shell's": a stopped agent is the shell's own answer, so the door's pre-read falls through it
+/// and the fold answers `stopped` unchanged — even where the stopped deployment names a
+/// **live-environment** document, the one walk where a wrongly-engaging door would sit in front
+/// with its own refusal instead. Pinning the walk's `AgentStopped` arm exactly (the fold's own
+/// stopped case, and zero connects: the fold refuses before any credential too).
+#[test]
+fn a_stopped_deployment_answers_at_the_fold_not_the_door() -> Result<(), String> {
+    let live = MANDATE.replace(r#""paper""#, r#""live""#);
+    let stopped = record(2, "AgentStopped", r#"{"agent_id":"agent_spy"}"#)?;
+    let (args, mut probe) = scene("stopped-live", &live, WORKSPACE, vec![stopped])?;
+    let outcome = run(&args, &[], &mut probe);
+    let refused = outcome
+        .err()
+        .ok_or_else(|| "the stop must refuse the run".to_owned())?;
+    assert!(
+        matches!(refused, PaperError::Deployment(DeploymentRefusal::Stopped)),
+        "{refused:?}: the fold's stopped answer, never the door's own"
+    );
+    assert_eq!(
+        probe.connects.get(),
+        0,
+        "no credential read before the fold's own answer"
     );
     Ok(())
 }
