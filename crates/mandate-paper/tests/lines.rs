@@ -1,7 +1,7 @@
 //! What the `mandate-paper` binary prints after a run that refused nothing (E7-19 slice 5, E1a-bin,
 //! the brief's founder steps 3 and 4, DEC-846 item 6): the order a dry run would place, each order
 //! submitted, or the model's `Flat` or `Undecided`, one line each, ids and the signal only
-//! (`AGENTS.md` rule 7). The expected lines are written out here, in the words `mandate-tracer`
+//! (`AGENTS.md` rule 7). The expected lines are written out here, in the words `mandate-paper`
 //! prints, never derived from the outcome.
 
 use mandate_accounting::{InstrumentId, Side};

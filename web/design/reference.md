@@ -135,7 +135,7 @@ Mobile first, from 320px. Below 64rem the phone has a top header (the mark and t
 |---|---|---|---|
 | `--dock-h` / `--dock-gap` | The desktop dock and the space below it; content, scroll padding and toasts clear both (`--dock-clearance`) | 4rem / 1rem | the same |
 | `--status-row` | The status strip and the phone's feed banner under the header, one height so either can replace the other | 2.125rem | 2.125rem |
-| `--content-max` | Widest content column | 68rem | 90rem |
+| `--content-max` | Widest content column | 80rem | 90rem |
 | `--container-measure` | Reading measure (`max-w-measure`): under 80 characters a line | 58ch | 58ch |
 | `--page-x` | Page padding at phone / tablet (40rem) / desktop (64rem) | 1.25rem / 1.75rem / 2.5rem | the same |
 | `--page-top` | Space above the first line of a screen | 1.5rem / 2.25rem (desktop) | the same |
