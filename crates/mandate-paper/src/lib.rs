@@ -652,3 +652,6 @@ pub fn stderr_line(error: &PaperError) -> String {
         other => other.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests;
