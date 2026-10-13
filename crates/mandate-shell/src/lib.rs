@@ -48,12 +48,14 @@ pub mod lt10;
 pub mod map;
 pub mod paper;
 pub mod stages;
+pub mod tail;
 pub mod tracer;
 pub mod watch;
 
 pub use error::{Cause, ShellError};
 pub use lt10::watch_may_end;
 pub use stages::Stage;
+pub use tail::tailed;
 pub use tracer::{ProductionCycle, Report, Setup, run_observed, run_observed_watched};
 pub use watch::{Watch, close_window_bound, poll_interval};
 
