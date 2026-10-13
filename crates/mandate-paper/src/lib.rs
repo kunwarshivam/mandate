@@ -44,7 +44,9 @@ use mandate_alpaca::{
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
-use mandate_journal::{ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact};
+use mandate_journal::{
+    ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
+};
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::Price;
@@ -61,8 +63,8 @@ use mandate_shell::paper::{
 };
 use mandate_shell::{Cause, Report, Setup, ShellError, Stage, Watch, production_cycle};
 use mandate_shell::{close_window_bound, poll_interval};
-use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::Mandate;
+use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
 pub use connection::{
@@ -466,11 +468,7 @@ fn deployed_document(
     let mut ordered: Vec<&ControlRecord> = records.iter().collect();
     ordered.sort_by_key(|record| record.seq);
     let ours = |record: &ControlRecord| {
-        record
-            .payload
-            .get("agent_id")
-            .and_then(Value::as_str)
-            == Some(agent.as_str())
+        record.payload.get("agent_id").and_then(Value::as_str) == Some(agent.as_str())
     };
     let mut deployed: Option<Option<ArtifactRef>> = None;
     for record in &ordered {
@@ -484,10 +482,7 @@ fn deployed_document(
                     .get("mandate_version")
                     .and_then(Value::as_str)
                     .and_then(ArtifactRef::parse);
-                match version {
-                    Some(version) => deployed = Some(Some(version)),
-                    None => return None,
-                }
+                deployed = Some(Some(version?));
             }
             "AgentStopped" => deployed = deployed.map(|_| None),
             _ => {}

@@ -61,14 +61,14 @@ pub fn chosen(
 /// [`PaperError::Shell`] with `Cause::Absent` when the journal's §2 forms cannot parse the
 /// stream the run's own names name.
 pub fn account_stream(workspace: &str, account_ref: &str) -> Result<StreamId, PaperError> {
-    StreamId::parse(&format!("acct:{workspace}:{account_ref}")).ok_or_else(|| {
-        PaperError::Shell(ShellError::Refused {
+    StreamId::parse(&format!("acct:{workspace}:{account_ref}")).ok_or(PaperError::Shell(
+        ShellError::Refused {
             stage: Stage::Reconcile,
             cause: Cause::Absent {
                 what: "the account stream the connection binds",
             },
-        })
-    })
+        },
+    ))
 }
 
 /// The flat-and-unspent half of the door (DEC-918 item 4; DEC-529 item 3; DEC-910 item 3):
