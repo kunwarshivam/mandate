@@ -1,24 +1,43 @@
 //! The paper adapter's one run (E7-19 slice 5, E1a, DEC-846): SPY deployed as the shell's tests
-//! deploy it, a real store and bars, a scripted broker, and no network (ES-19, rule 8).
+//! deploy it, a real store and bars, a scripted broker, and no network (ES-19, rule 8). One
+//! test places its order through a real Postgres journal, the suite's PG class — it skips
+//! unless `MANDATE_PG_URL` is set, as `tests/binary.rs`'s Postgres test does (DEC-109).
 
+/// The shell's shared test fixtures (the deployment the `Scene` deploys), under `shell_common`
+/// here so the journal trio below can include `mandate-journal`'s fixtures as `common`, the
+/// name its conformance suite's own `super::common` reads. `tests/binary.rs` includes the same
+/// trio at its crate root, with `common` free for the journal's.
 #[path = "../../mandate-shell/tests/common/mod.rs"]
-mod common;
+mod shell_common;
 
-use common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
+#[path = "../../mandate-journal/tests/common/mod.rs"]
+mod common;
+#[path = "../../mandate-journal/tests/conformance/mod.rs"]
+#[allow(
+    unused_imports,
+    unused_macros,
+    reason = "only `support`'s backend trait is used here; the suite runs in `mandate-journal-pg`"
+)]
+mod conformance;
+#[path = "../../mandate-journal-pg/tests/support/mod.rs"]
+mod support;
+
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{BarsRequest, DataTransport, HttpRequest, Method, Pause, QuoteRequest};
 use mandate_alpaca::{Response, TradingTransport, TransportError};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{DecStr, Value, to_canonical};
-use mandate_journal::{ArtifactRef, ArtifactStore, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactStore, StreamId, get_artifact};
+use mandate_journal_pg::APP_ROLE;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
-use mandate_paper::{Args, Outcome, PaperError, Ports, run};
+use mandate_paper::{Args, Evidence, Outcome, PaperError, Ports, run};
 use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+use shell_common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
@@ -380,6 +399,54 @@ fn a_placing_run_stores_the_closes_and_sends_one_order() {
     assert_eq!((report.submitted.len(), dry.posts().len()), (0, 0));
     assert!(report.would_place.is_some(), "a dry run reports the order");
     assert_eq!(evidence, None, "a dry run names no exportable stream");
+}
+
+/// #1313's review Minor 2, DEC-914 item 6, the founder's run's step 6, journal spec §2: a placing
+/// run that appended to its journal names the three §2 streams its export reads. The assertion
+/// cannot live beside the dry half's `None` above: `Scene::of` builds every `Args` with
+/// `journal: None`, so the placing half's `Some` needs the journal the run appended to, and that
+/// journal is Postgres — the suite's PG class, skipped unless `MANDATE_PG_URL` is set (DEC-109,
+/// `tests/binary.rs`'s idiom) and the run still fails through the whole cycle without it. Full
+/// value equality, so an always-`None` regression and a hardcoded-names regression both fail. The
+/// fakes still drive the run — the scripted records, broker and clock — only the journal is real:
+/// the two streams the cycle appended to hold the run's own rows in the journal the DSN names, so
+/// the kept evidence is earned by appends, not merely derived from the DSN.
+#[test]
+fn a_placing_run_that_appended_names_the_streams_its_export_reads() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let mut scene = Scene::new("pg-place", 231..256);
+    let url = std::env::var(support::URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    scene.args.journal = Some(format!("{url}{joiner}options={options}"));
+    let outcome = scene.run();
+    let Ok(Outcome::Cycle(cycle)) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(
+        (cycle.report.submitted.len(), scene.posts().len()),
+        (1, 1),
+        "a placing run through the journal it kept places one order"
+    );
+    assert_eq!(
+        cycle.evidence,
+        Some(Evidence {
+            streams: [
+                "agent:ws_paper:agent_spy".to_owned(),
+                "acct:ws_paper:acct_paper".to_owned(),
+                "ctl:ws_paper".to_owned(),
+            ]
+        }),
+        "a placing run that appended to its journal names the three §2 streams its export reads"
+    );
+    let journal = db.journal();
+    for name in ["agent:ws_paper:agent_spy", "acct:ws_paper:acct_paper"] {
+        let stream = StreamId::parse(name).unwrap();
+        let rows = db.block_on(journal.rows(&stream)).unwrap();
+        assert!(!rows.is_empty(), "{name} holds the rows the run appended");
+    }
 }
 
 /// FT-4 (DEC-157 item 4): falling closes are the host's `Flat`, so the run stores nothing, hands
