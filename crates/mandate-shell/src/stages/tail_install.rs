@@ -136,7 +136,7 @@ fn result_member(copy: &Value) -> Option<&str> {
 /// the control stream's tailed rows to the runtime as the `Input::Journal` its owner-input
 /// routing reads, so an answer committed while no run was open reaches the replayed fold and is
 /// copied once: the ledger gains the `ApprovalResponded` whose `causation_id` is the committed
-/// answer's own event id, admitted as the grant it is. Kills the nothing-handed mis-wirings — a
+/// answer's own event id, admitted as the grant it is. Kills the nothing-handed wrong wirings — a
 /// body that answers nothing, a read that never happens, a hand that replaces the tail.
 #[test]
 fn the_open_cycle_hands_the_tailed_ctl_rows_to_the_runtime() -> Result<(), String> {
