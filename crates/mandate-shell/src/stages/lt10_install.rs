@@ -27,8 +27,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mandate_alpaca::Pause;
 use mandate_accounting::Side;
+use mandate_alpaca::Pause;
 use mandate_canon::Digest;
 use mandate_domain::CapabilityProfile;
 use mandate_executor::{
@@ -144,9 +144,7 @@ impl Executor for Scripted {
     }
 
     fn protected(&mut self, instrument: &mandate_accounting::InstrumentId) -> Result<bool, Cause> {
-        self.asked
-            .borrow_mut()
-            .push(instrument.as_str().to_owned());
+        self.asked.borrow_mut().push(instrument.as_str().to_owned());
         Ok(self.covered)
     }
 
@@ -227,10 +225,10 @@ fn watched_of(
     String,
 > {
     let mut stages = world.stages();
-    stages.artifacts = Some(Arc::new(BTreeMap::from([(
-        Digest::of(CLOSES),
-        CLOSES.to_vec(),
-    )])) as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>);
+    stages.artifacts = Some(
+        Arc::new(BTreeMap::from([(Digest::of(CLOSES), CLOSES.to_vec())]))
+            as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>,
+    );
     let executor = Scripted::new(world, facts.covered, facts.its_own_key);
     let asked = Rc::clone(&executor.asked);
     stages.executor = Box::new(executor);
@@ -256,8 +254,11 @@ fn watched_of(
         as_of: RiskClock::from_secs(setup()?.now.secs()),
         data_ref: Digest::of(CLOSES),
     };
-    let report = ProductionCycle::new(stages, setup()?)
-        .run_observed_watched(observation, output().map_err(|cause| cause.to_string())?, &watch);
+    let report = ProductionCycle::new(stages, setup()?).run_observed_watched(
+        observation,
+        output().map_err(|cause| cause.to_string())?,
+        &watch,
+    );
     Ok((report, reads, asked, pauses))
 }
 
