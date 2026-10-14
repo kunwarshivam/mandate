@@ -1839,6 +1839,12 @@ impl Executor for CoreExecutor {
         Ok(effects)
     }
 
+    fn protected(&mut self, instrument: &InstrumentId) -> Result<bool, Cause> {
+        let context = self.context()?;
+        let ports = context.ports();
+        Ok(is_protected(&self.state.borrow(), instrument, &ports)?)
+    }
+
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
         fold(&mut self.state.borrow_mut(), event)?;
         Ok(())

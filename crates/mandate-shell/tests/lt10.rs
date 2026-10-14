@@ -1,12 +1,11 @@
 //! The shell watch's end pins (E7-26's shell-side row; LT-10, DEC-912 item 3, DEC-858 items 4
 //! and 5, DEC-853 item 5, DEC-877 item 1): the per-wake question the shell's own watch asks in
-//! place of the bare terminal read it ends on today. Every pin is `pending E7-26` and fails at
-//! the stub's own report until the implementation PR wires [`watch_may_end`] into
-//! `Session::watch` (DEC-77, DEC-137); the paper run's one whole share can never fill partly
-//! (DEC-877 item 3), so the uncovered half is pinned here over the facts handed in, never over
-//! a broker read the paper broker cannot produce. Every fact is typed, no value is computed by
-//! the code under test, and nothing here reaches a host, writes a journal or names an order
-//! (`AGENTS.md` rules 7 and 8).
+//! place of the bare terminal read it kept before E7-26, wired into `Session::watch` since the
+//! row's implementation PR (DEC-77, DEC-137, DEC-914 item 7). The paper run's one whole share
+//! can never fill partly (DEC-877 item 3), so the uncovered half is pinned here over the facts
+//! handed in, never over a broker read the paper broker cannot produce. Every fact is typed, no
+//! value is computed by the code under test, and nothing here reaches a host, writes a journal
+//! or names an order (`AGENTS.md` rules 7 and 8).
 
 use mandate_shell::{Cause, ShellError, Stage, watch_may_end};
 use mandate_time::UtcNanos;
@@ -30,7 +29,6 @@ fn at(text: &str) -> UtcNanos {
 /// quantity is covered — nothing filled (flat) or the profile's strongest protection resting
 /// over the whole of it". A terminal entry with nothing uncovered may end the run, in each of
 /// DEC-858 item 4's four terminal states.
-#[ignore = "pending E7-26"]
 #[test]
 fn a_terminal_covered_or_flat_entry_may_end_the_run() {
     for read in ["filled", "canceled", "expired", "rejected"] {
@@ -42,7 +40,6 @@ fn a_terminal_covered_or_flat_entry_may_end_the_run() {
 /// LT-10's first half and DEC-912 item 3: "Until either half holds the run keeps reading" — a
 /// filled quantity left with no protection resting over it keeps the run reading, inside its
 /// bounds.
-#[ignore = "pending E7-26"]
 #[test]
 fn an_uncovered_quantity_keeps_the_run_reading() {
     let held = watch_may_end(Some("filled"), true, &[], at(TUESDAY), at(TUESDAY_BOUND));
@@ -53,7 +50,6 @@ fn an_uncovered_quantity_keeps_the_run_reading() {
 /// but only once the unprotected interval is journaled and its alert key is in the run's
 /// report" — notifications spec §4.2's `protection` row keys it
 /// `unprotected_interval_limit`.
-#[ignore = "pending E7-26"]
 #[test]
 fn an_uncovered_quantity_ends_only_with_its_alert_key_reported() {
     let ended = watch_may_end(
@@ -70,7 +66,6 @@ fn an_uncovered_quantity_ends_only_with_its_alert_key_reported() {
 /// `stop_watchdog`" — only the interval's own key reports an uncovered run. The watchdog's
 /// key is another alarm's and shows nothing for this interval, so a report holding it still
 /// keeps the run reading.
-#[ignore = "pending E7-26"]
 #[test]
 fn another_interval_alert_key_holds_the_run_open() {
     let held = watch_may_end(
@@ -89,7 +84,6 @@ fn another_interval_alert_key_holds_the_run_open() {
 /// own key releases nothing here either: the entry's terminal read is LT-10's first half, and
 /// only the two halves together end the run — so the facts carry the key, and the run reads
 /// on anyway.
-#[ignore = "pending E7-26"]
 #[test]
 fn an_entry_still_working_keeps_the_run_reading() {
     for read in [Some("accepted"), None] {
@@ -111,7 +105,6 @@ fn an_entry_still_working_keeps_the_run_reading() {
 /// `partially_filled`, `pending_cancel`, `pending_replace`, `unknown`, `replaced` and
 /// `abandoned` keep it reading — `replaced` and `abandoned` terminal to the executor's
 /// reservation, never to the watch (#1311's review (i) named the same gap in the paper crate).
-#[ignore = "pending E7-26"]
 #[test]
 fn the_watch_ends_only_on_the_codecs_four_terminal_states() {
     let states = [
@@ -145,7 +138,6 @@ fn the_watch_ends_only_on_the_codecs_four_terminal_states() {
 /// watch never reads again — and a watch whose LT-10 holds ends clean at it, needing no
 /// further read: the settled answer comes before the cap's, so a settled run ends before the
 /// cap ever refuses it.
-#[ignore = "pending E7-26"]
 #[test]
 fn the_cap_fails_an_unsettled_watch_closed_on_a_full_day() {
     let unsettled = watch_may_end(
@@ -172,7 +164,6 @@ fn the_cap_fails_an_unsettled_watch_closed_on_a_full_day() {
 /// DEC-877 item 1: "the early close on a short one" — Thursday 2026-12-24 closes at 13:00
 /// New York, so the cap is 18:00 UTC, never 16:00. At it, inclusive, a watch whose LT-10 does
 /// not hold fails closed with the shell's existing `cancel_unconfirmed` refusal.
-#[ignore = "pending E7-26"]
 #[test]
 fn the_cap_fails_an_unsettled_watch_closed_at_the_early_close() {
     let unsettled = watch_may_end(Some("canceled"), true, &[], at(EVE_CAP), at(EVE_BOUND));
@@ -186,7 +177,6 @@ fn the_cap_fails_an_unsettled_watch_closed_at_the_early_close() {
 /// cannot place the run inside the regular session" — at the watch, a bound no regular
 /// session holds fails the run closed as absent (`AGENTS.md` rule 3), never a cap it guesses:
 /// a Saturday, the evening after the session, the morning before it.
-#[ignore = "pending E7-26"]
 #[test]
 fn a_bound_no_session_holds_fails_the_watch_closed() {
     for bound in [

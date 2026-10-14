@@ -945,6 +945,14 @@ impl Executor for PaperExecutor {
         Ok(Vec::new())
     }
 
+    fn protected(&mut self, instrument: &InstrumentId) -> Result<bool, Cause> {
+        self.world.called(Stage::Executor);
+        let _ = instrument;
+        Err(Cause::Absent {
+            what: "the paper double executor's protection answer",
+        })
+    }
+
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
         self.world
             .tally
@@ -1214,6 +1222,11 @@ impl Executor for Stubbed {
         input: mandate_executor::Input,
     ) -> Result<Vec<mandate_executor::Effect>, Cause> {
         let _ = input;
+        self.refuse()
+    }
+
+    fn protected(&mut self, instrument: &InstrumentId) -> Result<bool, Cause> {
+        let _ = instrument;
         self.refuse()
     }
 
