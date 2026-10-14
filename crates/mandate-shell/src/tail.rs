@@ -6,13 +6,13 @@
 //! `mandate-runtime`'s escalation half owns the answering itself: "The owner's answer arrives only
 //! as a control-stream `ApprovalResponseSubmitted`, tailed and handed in as `Input::Journal`"
 //! (`crates/mandate-runtime/src/escalation.rs`), and an admitted grant's re-validation "journals and
-//! hands an intent, which is the bound order and nothing else (EI-4)". What that half lacks today is
-//! the **tail**: the shell's `Session` "folds only its agent and account streams ... and reads no
-//! control stream", and its blanket fold actor "is what admission never admits (EI-10), so the
-//! control-stream tail that maps the envelope's `actor.kind` is stream L's, with the tail itself
-//! (M7 brief, Decisions needed 5)" (`crates/mandate-shell/src/tracer.rs`). DEC-155 item 5 settles
-//! where it lives: "The notifier driver and the control-stream tail belong in the shell." This
-//! module is that tail's fold: the one read of the workspace control stream, turned into the
+//! hands an intent, which is the bound order and nothing else (EI-4)". What that half lacked before
+//! this module was the **tail**: the shell's `Session` "folds only its agent and account streams"
+//! and read no control stream, and its blanket fold actor "is what admission never admits (EI-10),
+//! so the control-stream tail that maps the envelope's `actor.kind` is stream L's, with the tail
+//! itself (M7 brief, Decisions needed 5)" (`crates/mandate-shell/src/tracer.rs`). DEC-155 item 5
+//! settles where it lives: "The notifier driver and the control-stream tail belong in the shell."
+//! This module is that tail's fold: the one read of the workspace control stream, turned into the
 //! [`FoldedEvent`]s the runtime is handed as `Input::Journal`, one per row, verbatim.
 //!
 //! The tail **judges nothing** (DEC-138 item 3: the shell "holds no trading logic", and every
@@ -30,18 +30,26 @@
 //! contract's own fail-closed sentence — so no fold can admit a grant the envelope did not carry
 //! a `user` for (EI-10, check 3).
 //!
-//! What the tail does **not** decide is where it is read from: the replay at the stream open, the
-//! per-wake re-read of the live grant wait (DEC-914 item 2's "a read taken again on every wake"),
-//! and the cursor each starts from are the implementation PR's call sites, written with it and
-//! judged by its review against DEC-914 item 7's reservation. Nothing here reads a journal, a
-//! clock, a host or an order (`AGENTS.md` rules 7 and 8): `rows` arrive as the journal's own
-//! `ORDER BY seq` read handed in.
+//! Where the fold is read from is the install this module's implementation PR wrote, in
+//! [`crate::tracer`]: the `Session` takes **one read of `ctl:{workspace}` at the open** — after
+//! `Input::Started`'s recovery and the cycle's one-order guard, before the cycle proposes anything —
+//! hands the rows to [`tailed`], and hands each folded event to the runtime as the `Input::Journal`
+//! its owner-input routing reads, in the journal's own order. The cursor is the whole stream every
+//! time: the runtime's own copy fold is the idempotence ("a control-stream event this runtime has
+//! already copied is inert, however often it is tailed", EI-3, DEC-155 item 2), and a cursor that
+//! handed only the rows after some remembered head would be the filter DEC-914 item 2 forbids. The
+//! **per-wake re-read of the live grant wait** (DEC-914 item 2's "a read taken again on every
+//! wake") is the runner's call site, `mandate-paper`'s `wait_for_the_grant`, outside this crate's
+//! boundary (DEC-475) and named its own row's in the first live trade brief; the call order of what
+//! is this crate's is the implementation PR's to write and its review's to judge (DEC-914 item 7).
+//! Nothing here reads a journal, a clock, a host or an order (`AGENTS.md` rules 7 and 8): `rows`
+//! arrive as the journal's own `ORDER BY seq` read handed in.
 
+use mandate_canon::Value;
 use mandate_journal::StoredEvent;
-use mandate_runtime::FoldedEvent;
+use mandate_runtime::{ActorKind, EventId, FoldedEvent, Seq};
 
-use crate::error::{Cause, ShellError};
-use crate::stages::Stage;
+use crate::error::ShellError;
 
 /// The events the runtime is handed of one read of the workspace control stream (stream L / M7's
 /// remainder; DEC-155 item 2; journal spec §2's copy rule): `rows` — the journal's own
@@ -74,9 +82,58 @@ use crate::stages::Stage;
 /// payload member (`payload`) — each a stop with nothing handed, the whole read refused rather
 /// than a partial fold handed on.
 pub fn tailed(rows: &[StoredEvent]) -> Result<Vec<FoldedEvent>, ShellError> {
-    let _ = rows;
-    Err(ShellError::Refused {
-        stage: Stage::Journal,
-        cause: Cause::Unimplemented { story: "E7-26" },
-    })
+    let mut handed = Vec::new();
+    for row in rows {
+        let body = mandate_canon::parse(&row.body).map_err(|_| ShellError::Envelope {
+            field: "stored body",
+        })?;
+        let payload = body
+            .get("payload")
+            .cloned()
+            .ok_or(ShellError::Envelope { field: "payload" })?;
+        let causation = body
+            .get("causation_id")
+            .and_then(Value::as_str)
+            .map(|id| EventId(id.to_owned()));
+        handed.push(FoldedEvent {
+            stream: row.stream_id.clone(),
+            seq: Seq(row.seq),
+            event_id: EventId(row.event_id.clone()),
+            event_type: row.event_type.clone(),
+            causation_id: causation,
+            actor: folded_actor(&body),
+            payload,
+        });
+    }
+    Ok(handed)
+}
+
+/// The envelope's own `actor.kind`, folded per journal spec §3: `user` — the only kind admission
+/// ever admits a response from (check 3, EI-10) — folds [`ActorKind::User`], and `system`, `agent`,
+/// `broker` and `platform_operator` fold their own kinds. The last arm is the fail-closed fold of
+/// everything else: the `client` of journal spec v0.22 — "A client is never a `user`, so a rule
+/// that requires a user actor" refuses — and every kind the tail cannot read, from an actor that
+/// is not an object to a kind spelled amiss, fold [`ActorKind::System`], what admission never
+/// admits, so no reading of this map can carry a grant the envelope's writer did not stand behind
+/// (DEC-176: the refusing reading). The chain names every kind §3 lists in its own arm and no
+/// defaulting combinator, and its last arm is the fail-closed fold rather than a permitting
+/// fallback, so the crate's fail-closed fence (`stages::fail_closed`) keeps it total.
+fn folded_actor(body: &Value) -> ActorKind {
+    let kind = body
+        .get("actor")
+        .and_then(|actor| actor.get("kind"))
+        .and_then(Value::as_str);
+    if kind == Some("user") {
+        ActorKind::User
+    } else if kind == Some("system") {
+        ActorKind::System
+    } else if kind == Some("agent") {
+        ActorKind::Agent
+    } else if kind == Some("broker") {
+        ActorKind::Broker
+    } else if kind == Some("platform_operator") {
+        ActorKind::PlatformOperator
+    } else {
+        ActorKind::System
+    }
 }

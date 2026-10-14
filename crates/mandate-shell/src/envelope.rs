@@ -31,6 +31,16 @@ pub fn account_stream(workspace: &str, account_ref: &str) -> String {
     format!("acct:{workspace}:{account_ref}")
 }
 
+/// The workspace control stream: `ctl:{workspace}` (journal spec §2), whose single writer is the
+/// workspace control services — in Phase 1, the founder's CLI — and never this shell, so the shell
+/// only ever reads it: the control-stream tail (DEC-155 items 2 and 5) takes its read through the
+/// journal port and takes no ownership, which keeps the owner's writer unfenced ([DEC-131
+/// item 18](../../../docs/project/04-decision-log.md) fences a long-lived writer, not the CLI's
+/// one-shot).
+pub fn control_stream(workspace: &str) -> String {
+    format!("ctl:{workspace}")
+}
+
 /// Who writes a stream's drafts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Writer {
