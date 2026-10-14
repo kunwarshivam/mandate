@@ -61,15 +61,18 @@ fn at(text: &str) -> Result<UtcNanos, String> {
 
 /// The watch's clock: the injected cell the runner's watch reads (ES-21 — the shell reads no wall
 /// clock), moving `interval` forward per pause, exactly as the run-level fixtures' `Clock` does.
+/// The fixture steps whole seconds only, and a step the calendar cannot hold leaves the clock
+/// standing at the instant it read — neither happens in any probe, whose pauses are the watch's
+/// own bounded `interval` and whose days end inside the calendar's years.
 struct Clock {
-    secs: Rc<Cell<i64>>,
+    instant: Rc<Cell<UtcNanos>>,
     pauses: Rc<RefCell<Vec<Duration>>>,
 }
 
 impl Clock {
     fn start(text: &str) -> Result<Self, String> {
         Ok(Self {
-            secs: Rc::new(Cell::new(at(text)?.secs())),
+            instant: Rc::new(Cell::new(at(text)?)),
             pauses: Rc::default(),
         })
     }
@@ -77,7 +80,7 @@ impl Clock {
 
 impl Pause for Clock {
     fn now(&self) -> UtcNanos {
-        UtcNanos::from_parts(self.secs.get(), 0).expect("the fixture's own seconds")
+        self.instant.get()
     }
 
     async fn pause(&self, duration: Duration) {
@@ -87,8 +90,12 @@ impl Pause for Clock {
             "the watch paused more than its budget of {PAUSE_BUDGET} pauses: a loop that never ends"
         );
         self.pauses.borrow_mut().push(duration);
-        let step = i64::try_from(duration.as_secs()).expect("a whole second");
-        self.secs.set(self.secs.get() + step);
+        if let Ok(step) = i64::try_from(duration.as_secs()) {
+            let moved = UtcNanos::from_parts(self.instant.get().secs().saturating_add(step), 0);
+            if let Ok(next) = moved {
+                self.instant.set(next);
+            }
+        }
     }
 }
 
@@ -166,7 +173,7 @@ struct Readable {
 impl Connector for Readable {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         if let BrokerRequest::GetOrderByClientId(client) = request {
-            self.reads.set(self.reads.get() + 1);
+            self.reads.set(self.reads.get().saturating_add(1));
             return Ok(BrokerOutcome::Order(entry(client, self.status)?));
         }
         self.inner.call(request)
@@ -206,6 +213,15 @@ struct Facts {
     its_own_key: bool,
 }
 
+/// The answer of one whole cycle and its watch, with the probes' counters: the broker-order
+/// reads the connector double took, the executor's protection asks, and the clock's pauses.
+type Watched = (
+    Result<crate::tracer::Report, crate::error::ShellError>,
+    Rc<Cell<u32>>,
+    Rc<RefCell<Vec<String>>>,
+    Rc<RefCell<Vec<Duration>>>,
+);
+
 /// One whole cycle and its watch over the doubles' world, through the runner's own door, with
 /// the probe's facts scripted at the two edges the watch reads: the bound and interval the watch
 /// is handed, the clock starting at `start`. Returns the run's answer and the probe's counters.
@@ -215,20 +231,11 @@ fn watched_of(
     bound: &str,
     start: &str,
     interval: u64,
-) -> Result<
-    (
-        Result<crate::tracer::Report, crate::error::ShellError>,
-        Rc<Cell<u32>>,
-        Rc<RefCell<Vec<String>>>,
-        Rc<RefCell<Vec<Duration>>>,
-    ),
-    String,
-> {
+) -> Result<Watched, String> {
     let mut stages = world.stages();
-    stages.artifacts = Some(
-        Arc::new(BTreeMap::from([(Digest::of(CLOSES), CLOSES.to_vec())]))
-            as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>,
-    );
+    let artifacts: Arc<dyn mandate_journal::ArtifactSource + Send + Sync> =
+        Arc::new(BTreeMap::from([(Digest::of(CLOSES), CLOSES.to_vec())]));
+    stages.artifacts = Some(artifacts);
     let executor = Scripted::new(world, facts.covered, facts.its_own_key);
     let asked = Rc::clone(&executor.asked);
     stages.executor = Box::new(executor);
