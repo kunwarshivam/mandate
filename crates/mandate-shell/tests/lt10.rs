@@ -1,11 +1,12 @@
 //! The shell watch's end pins (E7-26's shell-side row; LT-10, DEC-912 item 3, DEC-858 items 4
 //! and 5, DEC-853 item 5, DEC-877 item 1): the per-wake question the shell's own watch asks in
-//! place of the bare terminal read it kept before E7-26, wired into `Session::watch` since the
-//! row's implementation PR (DEC-77, DEC-137, DEC-914 item 7). The paper run's one whole share
-//! can never fill partly (DEC-877 item 3), so the uncovered half is pinned here over the facts
-//! handed in, never over a broker read the paper broker cannot produce. Every fact is typed, no
-//! value is computed by the code under test, and nothing here reaches a host, writes a journal
-//! or names an order (`AGENTS.md` rules 7 and 8).
+//! place of the bare terminal read it ends on today. Every pin is `pending E7-26` and fails at
+//! the stub's own report until the implementation PR wires [`watch_may_end`] into
+//! `Session::watch` (DEC-77, DEC-137); the paper run's one whole share can never fill partly
+//! (DEC-877 item 3), so the uncovered half is pinned here over the facts handed in, never over
+//! a broker read the paper broker cannot produce. Every fact is typed, no value is computed by
+//! the code under test, and nothing here reaches a host, writes a journal or names an order
+//! (`AGENTS.md` rules 7 and 8).
 
 use mandate_shell::{Cause, ShellError, Stage, watch_may_end};
 use mandate_time::UtcNanos;
