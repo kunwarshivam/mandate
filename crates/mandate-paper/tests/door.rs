@@ -120,7 +120,6 @@ fn through_the_door(records: &[ControlRecord], mandate: &Mandate) -> Result<Conn
 /// run exactly — the default build's Alpaca connector, the mandate's own paper environment, over
 /// the account stream the run was given — and an agreeing Alpaca-paper record changes nothing
 /// the run does.
-#[ignore = "pending E7-26"]
 #[test]
 fn a_paper_run_through_the_door_keeps_todays_connection() {
     let expected = Connection {
@@ -156,7 +155,6 @@ fn a_paper_run_through_the_door_keeps_todays_connection() {
 /// carries each door refusal verbatim — a revoked record, a record binding another account
 /// stream, and LT-1's runtime build test (a live record choosing the Robinhood connector this
 /// build does not hold, the arm a locally built `--features live` turns by design).
-#[ignore = "pending E7-26"]
 #[test]
 fn the_door_names_its_own_refusal_where_the_shell_would_answer_live() {
     let mandate = paper_mandate();
@@ -193,7 +191,6 @@ fn the_door_names_its_own_refusal_where_the_shell_would_answer_live() {
 /// account ref — `acct:{workspace_id}:{account_ref}` — so it parses as a §2 stream id of the
 /// account type, and another run's names name another run's stream, never a constant where the
 /// run's own belong.
-#[ignore = "pending E7-26"]
 #[test]
 fn the_lapse_reads_the_account_stream_derived_from_the_runs_own_names() {
     let bound = account_stream(WORKSPACE, ACCOUNT);
@@ -218,7 +215,6 @@ fn the_lapse_reads_the_account_stream_derived_from_the_runs_own_names() {
 /// naming fails closed with the absent stream the connection binds, at the stage the run
 /// reconciles the account's own truth, never a fallback onto another stream the id could be
 /// smashed into.
-#[ignore = "pending E7-26"]
 #[test]
 fn a_stream_the_journal_cannot_form_refuses_the_run() {
     let refused = account_stream("ws:live", ACCOUNT);
@@ -241,7 +237,6 @@ fn a_stream_the_journal_cannot_form_refuses_the_run() {
 /// item 3, through the frame the run calls: the rows are the journal's own read of the account
 /// stream the record binds, so a fill there spends the record and a fill on any other stream of
 /// the same journal spends nothing — the run's report carrying the door's refusal verbatim.
-#[ignore = "pending E7-26"]
 #[test]
 fn a_fill_on_the_runs_own_account_stream_spends_the_record_through_the_door() {
     let live = live_connection();
@@ -270,7 +265,6 @@ fn a_fill_on_the_runs_own_account_stream_spends_the_record_through_the_door() {
 /// run calls — a snapshot's positions and working orders reach the refusal exactly as the
 /// connector answered them, re-derived by nothing (a frame that re-counted the rows beside the
 /// executor's own fold would drift, and its counts would fail here).
-#[ignore = "pending E7-26"]
 #[test]
 fn the_flat_half_refuses_ahead_of_the_spend_with_the_snapshots_own_counts() {
     let live = live_connection();
@@ -297,7 +291,6 @@ fn the_flat_half_refuses_ahead_of_the_spend_with_the_snapshots_own_counts() {
 /// flat refusal and no spent refusal, whatever the counts its snapshot answered and whatever
 /// fills the stream it reads holds, so the door changes no Alpaca paper outcome: today's paper
 /// path starts exactly as it did.
-#[ignore = "pending E7-26"]
 #[test]
 fn a_paper_connection_makes_no_lapse_check_through_the_door() {
     let paper = Connection {

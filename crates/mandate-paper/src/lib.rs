@@ -13,8 +13,10 @@
 //! E1a, [DEC-846](../../../docs/project/decisions/DEC-846.md)).
 //!
 //! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
-//! refusal, the control stream, E19-11's phase 1 and the artifacts (DEC-505), before any
-//! credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
+//! refusal, the control stream, the live door the connection record and the confirmed mandate
+//! choose (E7-26, [`chosen`](crate::chosen), [`account_stream`](crate::account_stream),
+//! [`unspent`](crate::unspent), DEC-918) and E19-11's phase 1 and the artifacts (DEC-505),
+//! before any credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
 //! (FT-1, FT-6), which watches the one submission to the registered close window's start at the
@@ -42,7 +44,9 @@ use mandate_alpaca::{
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
-use mandate_journal::{ArtifactRef, ArtifactStore, StoredEvent, StreamId};
+use mandate_journal::{
+    ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
+};
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::Price;
@@ -59,6 +63,7 @@ use mandate_shell::paper::{
 };
 use mandate_shell::{Cause, Report, Setup, ShellError, Stage, Watch, production_cycle};
 use mandate_shell::{close_window_bound, poll_interval};
+use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
@@ -282,6 +287,7 @@ pub fn run<P: Ports>(
             approver_users: 1,
         },
     };
+    the_live_door(&records, &store, &facts.agent, args)?;
     let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
     let mandate = confirmed.mandate();
     let ([instrument], [model]) = (
@@ -395,6 +401,100 @@ pub fn run<P: Ports>(
     )
     .ok();
     Ok(Outcome::Cycle(Box::new(Cycle { report, evidence })))
+}
+
+/// The live door the run calls ahead of its own answers (E7-26, DEC-918 items 1 to 4; DEC-910
+/// item 2: "These checks refuse before anything runs, ahead of the shell's own
+/// `DeploymentRefusal::Live`, which stays for the shell's fold"): the connection choice
+/// [`chosen`], the account stream's naming [`account_stream`] and DEC-529 item 3's
+/// flat-and-unspent check [`unspent`], in that order, over the records the run's own single
+/// control-stream read holds and the deployment's own document, all before the shell's phase-1
+/// fold and so before every credential read too (FT-3: [`Ports::connect`], the only one, comes
+/// later, behind the fold). The door engages where the run holds the deployment's own document
+/// ([`deployed_document`]); where it holds none — no deployment, a stopped agent, or a document
+/// the fold itself would refuse — the door answers nothing, the shell's fold answers behind it
+/// with its own refusal unchanged, so the door never answers where the shell refuses and
+/// performs no validation of its own (DEC-918 item 3's bounds: only ever a refusal in front of
+/// the shell's).
+///
+/// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
+/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The rows and the
+/// snapshot counts the check reads are the live arm's to hand — its journal read of the named
+/// stream and its preflight, neither of which any build runs yet (the `live` feature stays
+/// compile-only; the default build's `connector_not_built` stands in front of the live arm's
+/// read, DEC-910 item 3) — so the call carries the empty rows and counts of no live arm, and
+/// they decide nothing in any build that runs today: the default build's only surviving choice is
+/// a paper connection, and DEC-529 item 3's lapse makes no check on one (LT-14).
+///
+/// # Errors
+/// Any [`PaperError`] of the door's three frames, before the shell's fold and before anything
+/// runs.
+fn the_live_door(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    agent: &AgentId,
+    args: &Args,
+) -> Result<(), PaperError> {
+    let Some(document) = deployed_document(records, store, agent) else {
+        return Ok(());
+    };
+    let connection = chosen(records, &document, &args.account_ref)?;
+    account_stream(&args.workspace, &args.account_ref)?;
+    unspent(
+        &connection,
+        &[],
+        &Held {
+            positions: 0,
+            open_orders: 0,
+        },
+    )
+}
+
+/// The deployment's own mandate document, read from the same records and artifact store the
+/// shell's phase-1 fold reads (DEC-918 item 3: "the run holds the same records and the same
+/// artifact store phase-1 folds"): the fold's own walk — the records in `seq` order, the
+/// agent's latest `AgentDeployed` behind no later `AgentStopped`, the version's checked read
+/// ([`get_artifact`] re-hashes as the fold does) and the document's parse — and nothing else.
+/// No V-rule and no live-environment stop: a live mandate is exactly the case whose exact
+/// refusal the door owes ahead of the fold's `DeploymentRefusal::Live` (DEC-910 item 2), and no
+/// validation of the door's own exists (DEC-918 item 3). Every failure falls through to
+/// [`None`], where the shell's fold answers with its own refusal behind the door, so the
+/// reading can only over-refuse (the DEC-176-safe side).
+fn deployed_document(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    agent: &AgentId,
+) -> Option<Mandate> {
+    let mut ordered: Vec<&ControlRecord> = records.iter().collect();
+    ordered.sort_by_key(|record| record.seq);
+    let ours = |record: &ControlRecord| {
+        record.payload.get("agent_id").and_then(Value::as_str) == Some(agent.as_str())
+    };
+    let mut deployed: Option<Option<ArtifactRef>> = None;
+    for record in &ordered {
+        if !ours(record) {
+            continue;
+        }
+        match record.event_type.as_str() {
+            "AgentDeployed" => {
+                let version = record
+                    .payload
+                    .get("mandate_version")
+                    .and_then(Value::as_str)
+                    .and_then(ArtifactRef::parse);
+                deployed = Some(Some(version?));
+            }
+            "AgentStopped" => deployed = deployed.map(|_| None),
+            _ => {}
+        }
+    }
+    let version = match deployed {
+        Some(Some(version)) => version,
+        Some(None) | None => return None,
+    };
+    let bytes = get_artifact(store, &version).ok()?;
+    let document = mandate_canon::parse(&bytes).ok()?;
+    Mandate::parse(&document).ok()
 }
 
 /// The closes the host read as DEC-846 item 3's canonical object: `[session, close]` pairs,
@@ -552,3 +652,6 @@ pub fn stderr_line(error: &PaperError) -> String {
         other => other.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests;

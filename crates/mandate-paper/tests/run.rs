@@ -32,7 +32,7 @@ use mandate_journal_pg::APP_ROLE;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
-use mandate_paper::{Args, Evidence, Outcome, PaperError, Ports, run};
+use mandate_paper::{Args, ConnectionRefusal, Evidence, Outcome, PaperError, Ports, run};
 use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
@@ -483,7 +483,10 @@ fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
 }
 
 /// FT-3, FT-10 (DEC-505 item 1, TI-5, rule 7): no credential is read before any of phase 1's or the
-/// registrations' refusals: agent undeployed or stopped; document missing, corrupt or live; version
+/// registrations' refusals: agent undeployed or stopped; document missing, corrupt or live — a live
+/// deployment refusing through the door ahead of the fold, its connection record unrecorded
+/// (`ConnectionRefusal::Unrecorded`, DEC-918 item 3; the shell's own `DeploymentRefusal::Live`
+/// stays for the shell's fold behind the door); version
 /// unconfirmed; a kind unregistered; a fee schedule not yet in effect; or a configured host.
 #[test]
 fn every_refusal_before_the_credentials_reads_none() {
@@ -532,10 +535,10 @@ fn every_refusal_before_the_credentials_reads_none() {
                 DeploymentRefusal::Stopped => "stopped",
                 DeploymentRefusal::DocumentMissing => "missing",
                 DeploymentRefusal::DocumentCorrupt => "corrupt",
-                DeploymentRefusal::Live => "live",
                 DeploymentRefusal::Violations(_) => "unconfirmed",
                 _ => "another deployment refusal",
             },
+            Err(PaperError::Connection(ConnectionRefusal::Unrecorded)) => "live",
             Err(PaperError::Configuration(ConfigRefusal::Unregistered { kind: "rule_set" })) => {
                 "unregistered"
             }

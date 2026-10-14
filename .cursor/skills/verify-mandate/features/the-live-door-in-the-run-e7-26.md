@@ -9,7 +9,9 @@
   `docs/project/decisions/DEC-918.md` (this row's readings); LT-1, LT-14, FT-3; the founder's
   run's step 4 ("the exact refusal"); #1308's "Not done" line ("The G1a door in `run()`. Per
   this dispatch, `connection()`/`lapse()` are unchanged and unwired") and #1297's ("wiring the
-  seams into `run()` ahead of every credential read (FT-3)").
+  seams into `run()` ahead of every credential read (FT-3)"), implemented since
+  [PR #1328](https://github.com/kunwarshivam/mandate/pull/1328) landed the frames, the call
+  sites and the probes.
 - **Code:** `mandate-paper`, `crates/mandate-paper/` (layer 9, safety-critical):
   `crates/mandate-paper/src/door.rs` — `chosen` (the connection the run uses: the records the
   run's own single control-stream read hands verbatim and in journal order, the deployed
@@ -22,16 +24,29 @@
   `Cause::Absent` at the reconcile stage, never a fallback onto another stream), and
   `unspent` (DEC-529 item 3's lapse wrapped for the run: the journal's own account-stream rows
   and the connector snapshot's own `Held` counts, re-derived by nothing; every refusal reaching
-  the run as `PaperError::Lapse`) — re-exported by `crates/mandate-paper/src/lib.rs`. Every
-  stub reports `Unimplemented { story: "E7-26" }` per DEC-137 until this row's implementation
-  lands; the call sites inside `run()` (`chosen` before every credential read, `unspent` before
-  anything runs, both ahead of the shell's own live refusals) are that implementation's to
-  write and its review's to judge, per DEC-914 item 7's precedent (no pin of this PR edits
-  `run()`, `connection.rs` or any shell file; the G1b frames' call sites stay stream L / M7's
-  remainder's, the shell watch's loop the shell row's, and the live arm's connector, preflight
-  and account-stream journal read the door implementation's under these signatures).
-- **Tests:** `crates/mandate-paper/tests/door.rs`, every pin pending on E7-26 until the row's
-  implementation lands:
+  the run as `PaperError::Lapse`) — re-exported by `crates/mandate-paper/src/lib.rs`, each
+  frame the seam's own call since PR #1328 implemented them. The call sites inside `run()`,
+  written by the same PR per DEC-918 items 3 and 4: one `the_live_door` frame called between
+  the control-stream read and `confirmed_version` — ahead of the shell's phase-1 fold and so
+  ahead of every credential read — in the order `chosen` (over the deployment's own document,
+  read by the `deployed_document` pre-read that mirrors the fold's walk to the parsed mandate
+  and nothing else: no V-rule, no live-environment stop, every failure falling through to the
+  fold's own refusal, so the door never answers where the shell refuses and only ever adds a
+  refusal in front of the shell's), then `account_stream` (ungated by the placing flag), then
+  `unspent` before anything runs — carrying the empty rows and counts of a live arm no build
+  runs (the feature stays compile-only; the default build's `connector_not_built` stands in
+  front of it, DEC-910 item 3) until the live arm's row hands the journal's own rows and the
+  snapshot's own counts. The four run-level probes beside them live in `crates/mandate-paper/src/tests.rs`
+  (the DEC-77 amendment's in-module slot): the revoked record, the live deployment, the
+  foreign-account record and the fail-closed naming, each refusing through the door ahead of
+  the fold and of every credential read (`run::every_refusal_before_the_credentials_reads_none`'s
+  live arm moved with them, per the coordinator's ruling carried in PR #1328's body). The G1b
+  frames' call sites stay stream L / M7's remainder's, the shell watch's loop the shell row's,
+  and the live arm's connector, preflight and account-stream journal read the live arm's under
+  these signatures.
+- **Tests:** `crates/mandate-paper/tests/door.rs`, every pin live since
+  [PR #1328](https://github.com/kunwarshivam/mandate/pull/1328) un-ignored them (the pin
+  bodies byte-identical to the tests PR's):
   `a_paper_run_through_the_door_keeps_todays_connection`,
   `the_door_names_its_own_refusal_where_the_shell_would_answer_live`,
   `the_lapse_reads_the_account_stream_derived_from_the_runs_own_names`,
@@ -46,9 +61,13 @@
   built `--features live` turns by design, no CI job ever running it there), §2's account
   stream form and type (another run's names naming another run's stream; a form the journal
   cannot hold failing closed, never a fallback stream), the bound stream alone spending, and
-  DEC-470 item 1's counts carried as data, re-derived by nothing.
-- **Run:** `cargo nextest run -p mandate-paper` (the living suite green, the row's pins
-  ignored); `cargo nextest run -p mandate-paper --run-ignored ignored-only` (every pin failing
-  at its stub's own report until the implementation lands);
+  DEC-470 item 1's counts carried as data, re-derived by nothing. `crates/mandate-paper/src/tests.rs`'s
+  four run-level probes pin the call-site order DEC-918 item 4 left to the implementation's
+  review (the revoked record's exact message, the live deployment's `connection_unrecorded`
+  ahead of the shell's `live`, the foreign-account record's `connection_account`, and the
+  fail-closed naming ungated by the placing flag — each of the four wrong wirings the review's
+  hunt names failing a probe).
+- **Run:** `cargo nextest run -p mandate-paper` (the whole suite live and passing, no ignored
+  test in the crate);
   `cargo check -p mandate-paper --features live` (the frames compile under the founder's
   feature, which no CI or release build enables).
