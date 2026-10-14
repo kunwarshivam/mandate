@@ -1839,6 +1839,12 @@ impl Executor for CoreExecutor {
         Ok(effects)
     }
 
+    fn protected(&mut self, instrument: &InstrumentId) -> Result<bool, Cause> {
+        let context = self.context()?;
+        let ports = context.ports();
+        Ok(is_protected(&self.state.borrow(), instrument, &ports)?)
+    }
+
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
         fold(&mut self.state.borrow_mut(), event)?;
         Ok(())
@@ -2426,6 +2432,63 @@ mod tests {
             })
         ));
         assert!(!core.state().started());
+        Ok(())
+    }
+
+    /// One bought share folded through the account stream's own `FillApplied` (§9.5), no
+    /// protection resting over it: the position the fold holds.
+    fn fill_applied_held_share() -> Result<mandate_executor::FoldedEvent, String> {
+        Ok(mandate_executor::FoldedEvent {
+            stream: "acct:tracer:tracer-paper".to_owned(),
+            seq: mandate_executor::Seq(2),
+            event_id: mandate_executor::EventId("10000100000000000000000001".to_owned()),
+            event_type: "FillApplied".to_owned(),
+            causation_id: None,
+            payload: value_object(&[
+                (
+                    "fill_id",
+                    Value::Str("the folded fill of the one held share".to_owned()),
+                ),
+                ("instrument_id", Value::Str("SPY".to_owned())),
+                ("qty_gross", Value::Str("1".to_owned())),
+                ("price", Value::Str("255.2".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                (
+                    "risk_clock",
+                    Value::Str("2026-09-29T19:49:45.000000000Z".to_owned()),
+                ),
+            ])?,
+        })
+    }
+
+    /// The watch's covered fact is the executor's own, which this row's review round 2 holds
+    /// against the CI-missed `CoreExecutor::protected → Ok(true)` mutant: no test had a held
+    /// position against the real executor's answer, so a lying always-covered body lived with
+    /// the whole suite green — the exact release LT-10's first half exists to refuse
+    /// (DEC-912 item 3: "The run may end when the entry is **terminal** and any filled quantity
+    /// is covered… Until either half holds the run keeps reading"). One held share with no
+    /// protection resting over it answers `unprotected` — `is_protected`'s own rule 3, the
+    /// snapshot that knows neither class nor increment reporting unprotected rather than
+    /// guessing covered — and the adapter's body must carry that fact to the seam's
+    /// `uncovered`, never stand in front of it. The mutant answers `Ok(true)` here and the
+    /// watch ends a run it must keep reading.
+    #[test]
+    fn the_core_executors_protection_answer_is_its_own_fact_over_a_held_unprotected_position()
+    -> Result<(), String> {
+        let (mut core, _) = CoreExecutor::pair(account_scope(), Some(test_executor_context()?));
+        core.committed(&stream_opened()?)
+            .map_err(|error| error.to_string())?;
+        core.committed(&fill_applied_held_share()?)
+            .map_err(|error| error.to_string())?;
+        let answer = core
+            .protected(
+                &mandate_accounting::InstrumentId::new("SPY").map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| format!("the executor answers its own fold: {error:?}"))?;
+        assert!(
+            !answer,
+            "a held share with no protection resting over it is uncovered, never guessed covered: {answer}"
+        );
         Ok(())
     }
 

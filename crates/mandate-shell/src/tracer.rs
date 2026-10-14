@@ -27,12 +27,13 @@ use crate::envelope::{
     draft_bytes,
 };
 use crate::error::{Cause, ShellError, refused};
+use crate::lt10::watch_may_end;
 use crate::map;
 use crate::stages::{
     Admitted, Classifier, ExitPath, Gate, GovernedRefs, JournalWriter, Sizing, Stage, Stages,
 };
 use crate::tail::tailed;
-use crate::watch::{Watch, session_end};
+use crate::watch::Watch;
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,8 +83,10 @@ pub fn run_observed(
 /// [`run_observed`], then E1b's bounded watch over the one submission (DEC-853 items 5 and 6,
 /// FT-11): a run that submitted nothing watches nothing. Each wake pauses `watch.interval`, reads
 /// the entry back by its client order id and ticks the executor at the clock's time; the first
-/// wake at or past `watch.bound` hands the executor `CancelOpenings` instead of the read. The watch
-/// ends once the broker reports the entry terminal.
+/// wake at or past `watch.bound` hands the executor `CancelOpenings` instead of the read. The
+/// watch ends when the run's LT-10 holds ([`watch_may_end`], DEC-912 item 3): the entry terminal
+/// in DEC-858 item 4's four with any filled quantity covered, or the uncovered interval's own
+/// alert key reported, past which it fails closed at the session's end.
 ///
 /// # Errors
 /// Every [`ShellError`] is a stop after which nothing further is sent.
@@ -209,9 +212,6 @@ impl ProductionCycle {
         )
     }
 }
-
-/// The broker statuses after which an entry can neither fill nor be cancelled (DEC-858 item 4).
-const TERMINAL_STATUSES: [&str; 4] = ["filled", "canceled", "expired", "rejected"];
 
 /// The one instrument the mandate pins. The tracer trades exactly one (DEC-138).
 fn pinned(view: &MandateView) -> Result<InstrumentId, ShellError> {
@@ -493,8 +493,11 @@ impl<'s> Session<'s> {
     /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
     /// the event time to the clock, and reads the entry back by its client order id, then ticks the
     /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
-    /// of the read. It ends once the broker reports the entry terminal. A run that submitted
-    /// nothing watches nothing.
+    /// of the read. Every wake asks the run's LT-10 question ([`watch_may_end`], DEC-912 item 3),
+    /// in place of the bare terminal read the watch kept before E7-26 (DEC-858 item 4, DEC-914
+    /// item 7): the run may end only when the entry is terminal in DEC-858 item 4's four and any
+    /// filled quantity is covered, or the unprotected interval's own alert key is in the run's
+    /// report. A run that submitted nothing watches nothing.
     ///
     /// The cap (DEC-877 item 1): the first wake at or past the end of the bound's regular session
     /// stops the run with [`ShellError::CancelUnconfirmed`] before any read there, so nothing is
@@ -519,13 +522,13 @@ impl<'s> Session<'s> {
                 })
             })?;
         let agent = mandate_executor::AgentId(self.setup.deployment.agent.0.clone());
-        let cap = session_end(watch.bound).map_err(refused(Stage::Executor))?;
         let mut cancel_handed = false;
+        let mut read: Option<String> = None;
         loop {
             runtime.block_on(watch.pause.pause(watch.interval));
             let now = watch.pause.now();
-            if now >= cap {
-                return Err(ShellError::CancelUnconfirmed);
+            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound)? {
+                return Ok(());
             }
             self.event_time = now;
             if !cancel_handed && now >= watch.bound {
@@ -542,16 +545,50 @@ impl<'s> Session<'s> {
                 .stages
                 .connector
                 .call(&BrokerRequest::GetOrderByClientId(entry.clone()));
-            let terminal = matches!(&answer, Ok(BrokerOutcome::Order(order))
-                if TERMINAL_STATUSES.contains(&order.status.as_str()));
+            read = match &answer {
+                Ok(BrokerOutcome::Order(order)) => Some(order.status.clone()),
+                Ok(BrokerOutcome::Submitted(..))
+                | Ok(BrokerOutcome::DuplicateClientOrderId { .. })
+                | Ok(BrokerOutcome::Rejected(..))
+                | Ok(BrokerOutcome::Absent { .. })
+                | Ok(BrokerOutcome::OpenOrders(..))
+                | Ok(BrokerOutcome::Positions(..))
+                | Ok(BrokerOutcome::Account(..))
+                | Ok(BrokerOutcome::Activities { .. })
+                | Ok(BrokerOutcome::CancelAccepted { .. })
+                | Ok(BrokerOutcome::AccountWideAccepted)
+                | Ok(BrokerOutcome::Listed { .. }) => None,
+                Err(..) => None,
+            };
             self.step_watched(map::broker_input(answer).map_err(refused(Stage::Connector))?)?;
             self.step_watched(mandate_executor::Input::Tick(
                 mandate_executor::RiskClock::from_secs(now.secs()),
             ))?;
-            if terminal {
+            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound)? {
                 return Ok(());
             }
         }
+    }
+
+    /// One wake's LT-10 question (DEC-912 item 3): may the run end at `now`? The facts are the
+    /// wake's own — the entry's last broker read, the executor's protection answer for the
+    /// instrument (`crate::stages::Executor::protected`, never a guess at covered) and the alert
+    /// keys the run's own report holds — and the answer is [`watch_may_end`]'s: the run ends only
+    /// on a settled LT-10, reads on inside its bounds, and past the bound's session end fails
+    /// closed with the shell's `cancel_unconfirmed` refusal, never reading again.
+    fn lt10_holds(
+        &mut self,
+        instrument: &InstrumentId,
+        read: Option<&str>,
+        now: UtcNanos,
+        bound: UtcNanos,
+    ) -> Result<bool, ShellError> {
+        let covered = self
+            .stages
+            .executor
+            .protected(instrument)
+            .map_err(refused(Stage::Executor))?;
+        watch_may_end(read, !covered, &self.report.alerts, now, bound)
     }
 
     /// One executor step during the watch and everything it asks for. A reconciliation it asks

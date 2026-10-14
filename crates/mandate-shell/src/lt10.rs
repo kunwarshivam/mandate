@@ -6,11 +6,11 @@
 //! [DEC-853](../../../docs/project/decisions/DEC-853.md) item 5;
 //! [DEC-877](../../../docs/project/decisions/DEC-877.md) item 1).
 //!
-//! The shell's watch ends today on the bare terminal read of the `TERMINAL_STATUSES` check in
-//! `crate::tracer`, and a terminal entry with its protection not yet resting over the filled
-//! quantity is exactly the unprotected interval LT-10 exists for (DEC-912's rejected
-//! alternative: "End the watch once the entry is terminal, as the paper watch does"). This seam
-//! is the per-wake question that replaces that read **inside the shell's own watch loop**: the
+//! The shell's watch ended, before this row, on the bare terminal read of its `TERMINAL_STATUSES`
+//! check, and a terminal entry with its protection not yet resting over the filled quantity is
+//! exactly the unprotected interval LT-10 exists for (DEC-912's rejected alternative: "End the
+//! watch once the entry is terminal, as the paper watch does"). This seam is the per-wake
+//! question that replaces that read **inside the shell's own watch loop**: the
 //! cycle's `Session` is private to this crate (DEC-475 — its assembled stages and setup stay
 //! private, "callers can supply model opinions but cannot replace the builder, gate, journal or
 //! executor"), so the install is this crate's row and no caller's, and the question is asked
@@ -22,8 +22,9 @@
 
 use mandate_time::UtcNanos;
 
-use crate::error::{Cause, ShellError};
+use crate::error::{ShellError, refused};
 use crate::stages::Stage;
+use crate::watch::session_end;
 
 /// The watch's per-wake LT-10 question (DEC-912 item 3): may the run end at `now`?
 ///
@@ -59,18 +60,20 @@ use crate::stages::Stage;
 ///   `Ok(true)` above is answered first, so a watch whose LT-10 holds ends clean at or past
 ///   the cap, needing no further read — a settled run ends before the cap ever refuses it.
 ///
-/// # Body
+/// # The install
 ///
-/// The body of every stub in the tests PR (DEC-77): each pin of this seam is
-/// `pending E7-26` and fails here at the stub's own report. The implementation PR wires the
-/// question into `crate::tracer`'s `Session::watch` in place of the bare terminal read and
-/// deletes this body only.
+/// `crate::tracer`'s `Session::watch` asks this at every wake, in place of the bare terminal
+/// read it kept before this row (DEC-914 item 7: the call site is this implementation row's to
+/// write and its review's to judge): once over the facts the run already holds, before the wake
+/// sends anything, which stops a capped watch before it reads there (DEC-877 item 1: "The watch
+/// stops at the first wake at or past that instant, before any read there"), and once over the
+/// wake's own fresh read and the executor's protection answer after the wake has handed both to
+/// the executor, so a read that settles LT-10 ends the run at its own wake, never the next one.
 ///
 /// # Errors
 ///
-/// [`ShellError::Refused`] with [`Cause::Unimplemented`] while the stub stands, with
-/// [`Cause::Absent`] for a bound no regular session holds (FT-8), and
-/// [`ShellError::CancelUnconfirmed`] at or past the cap with LT-10 not holding.
+/// [`ShellError::Refused`] with [`crate::error::Cause::Absent`] for a bound no regular session holds (FT-8),
+/// and [`ShellError::CancelUnconfirmed`] at or past the cap with LT-10 not holding.
 pub fn watch_may_end(
     read: Option<&str>,
     uncovered: bool,
@@ -78,9 +81,14 @@ pub fn watch_may_end(
     now: UtcNanos,
     bound: UtcNanos,
 ) -> Result<bool, ShellError> {
-    let _ = (read, uncovered, alerts, now, bound);
-    Err(ShellError::Refused {
-        stage: Stage::Executor,
-        cause: Cause::Unimplemented { story: "E7-26" },
-    })
+    let cap = session_end(bound).map_err(refused(Stage::Executor))?;
+    let terminal = matches!(read, Some("filled" | "canceled" | "expired" | "rejected"));
+    let settled = terminal && (!uncovered || alerts.contains(&"unprotected_interval_limit"));
+    if settled {
+        return Ok(true);
+    }
+    if now >= cap {
+        return Err(ShellError::CancelUnconfirmed);
+    }
+    Ok(false)
 }

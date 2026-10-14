@@ -8,6 +8,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::Digest;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
@@ -243,6 +244,13 @@ pub trait Executor {
         &mut self,
         input: mandate_executor::Input,
     ) -> Result<Vec<mandate_executor::Effect>, Cause>;
+    /// The watch's protection fact (LT-10, DEC-912 item 3): whether the filled quantity the
+    /// executor holds in `instrument` is covered right now — nothing filled, or the profile's
+    /// strongest protection resting over the whole of it (`mandate_executor::is_protected`,
+    /// the executor's public protection probe). The watch asks this at every wake beside its
+    /// broker read; an answer the executor cannot give is a stop after which no further read
+    /// happens, never a guess at covered (`AGENTS.md` rule 3).
+    fn protected(&mut self, instrument: &InstrumentId) -> Result<bool, Cause>;
     /// Folds one committed account-stream event back, which is how a single writer learns that its
     /// own append committed (journal spec §5.1).
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause>;
@@ -300,6 +308,8 @@ pub struct Stages {
 mod doubles;
 #[cfg(test)]
 mod fail_closed;
+#[cfg(test)]
+mod lt10_install;
 #[cfg(test)]
 mod observed;
 #[cfg(test)]

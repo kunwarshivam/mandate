@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Value};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError, FoldedEvent};
@@ -1186,6 +1187,11 @@ impl Executor for Recording {
             self.log.borrow_mut().push("started".to_owned());
         }
         self.inner.step(input)
+    }
+
+    fn protected(&mut self, instrument: &InstrumentId) -> Result<bool, Cause> {
+        self.log.borrow_mut().push("protection".to_owned());
+        self.inner.protected(instrument)
     }
 
     fn committed(&mut self, event: &FoldedEvent) -> Result<(), Cause> {
