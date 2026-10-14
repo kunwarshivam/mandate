@@ -27,6 +27,28 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
+  closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard
+  refusing spec and code in one PR (#1323 `29d0914c`, the agent-harness line alone in #1324
+  `3c57494b`). The G1a live door opened and closed under DEC-918 (#1325 `7f849845`, #1328
+  `14939ab3`), carrying the DEC-77 amendment's coordinator ruling that moved the merged FT-3
+  pin's live arm in `tests/run.rs` from the shell's fold to the door's refusal - the pin had
+  frozen run()'s pre-G1a answer, inverted against the Accepted DEC-918. #1313's review Minor 2
+  closed as the PG-gated call-site evidence pin, a real schema-per-test Postgres journal naming
+  the `Some` at run()'s outcome (#1327 `e04f9521`). The shell-side LT-10 watch installed its
+  two-point-per-wake ask in place of the bare terminal read (#1326 `518db19a`, #1331
+  `c1d09835`): terminal-uncovered was discovered unreachable through today's production watch,
+  the adapter-level hold kills the CI-missed `protected → Ok(true)` mutant, and the row is
+  coordinator-salvaged, both of its builder sessions having been cancelled mid-run. The
+  control-stream tail - the R0 list's "grant-to-submit continuation (stream L / M7's
+  remainder)" resolved to the shell's tail per the M7 brief - installed its open-replay read
+  at the cycle open (#1329 `cf88e7f2`, #1330 `72c67ec6`), disclosing the EI-11 ledger gap for a
+  runtime row. Each implementation PR took one FAIL review round before its PASS, every fix a
+  review-ruled in-module probe (#1328 the missed `AgentStopped` mutant; #1330 the unpinned
+  install; #1331 the missed covered mutant); Step-5 and Mimo-2.6 carried the two-round reviews,
+  and Ling-3.1-flash passed #1327's then rate-limited. `mandate-paper` and `mandate-shell` both
+  hold zero pending tests; the R0 rehearsal now waits on S2, B3, K1b, B2b and the C and G rows,
+  the founder's DEC-529 live-door items, and the paper path's E2.
 - **2026-10-11, the overnight coordinator session: 30 merges, both paths at their gates.** One
   continuous session ran the full DEC-175 pipeline on thirty PRs (#1280 and #1291-#1319 plus fix
   rounds), absorbing the dormant lane queues after the claude.ai exhaustion froze them: the paper
