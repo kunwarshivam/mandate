@@ -309,6 +309,8 @@ mod doubles;
 #[cfg(test)]
 mod fail_closed;
 #[cfg(test)]
+mod lt10_install;
+#[cfg(test)]
 mod observed;
 #[cfg(test)]
 mod tail_install;
