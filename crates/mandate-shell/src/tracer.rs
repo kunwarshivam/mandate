@@ -23,7 +23,8 @@ use mandate_runtime::{
 use mandate_time::UtcNanos;
 
 use crate::envelope::{
-    DraftFields, Envelope, IdSpace, Ids, Writer, account_stream, agent_stream, draft_bytes,
+    DraftFields, Envelope, IdSpace, Ids, Writer, account_stream, agent_stream, control_stream,
+    draft_bytes,
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::lt10::watch_may_end;
@@ -31,6 +32,7 @@ use crate::map;
 use crate::stages::{
     Admitted, Classifier, ExitPath, Gate, GovernedRefs, JournalWriter, Sizing, Stage, Stages,
 };
+use crate::tail::tailed;
 use crate::watch::Watch;
 
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
@@ -147,6 +149,7 @@ fn open_cycle<'s>(
     if session.cycle_open && !setup.new_cycle {
         return Err(ShellError::CycleAlreadyOpen);
     }
+    session.tail_the_control_stream()?;
     if let Some(observation) = observation {
         session.observe(observation)?;
     }
@@ -296,6 +299,50 @@ impl<'s> Session<'s> {
             }
         }
         Ok(session)
+    }
+
+    /// The control-stream tail's install at the open (E7-26, DEC-155 items 2 and 5): one read of
+    /// the workspace control stream — `ctl:{workspace}`, whose single writer is the workspace
+    /// control services, in Phase 1 the founder's CLI (journal spec §2), so unlike the two owned
+    /// streams no ownership is taken and nothing here fences the owner — folded by [`tailed`] and
+    /// handed to the runtime one event per row, each as the `Input::Journal` its owner-input
+    /// routing reads, in the journal's own order ("The owner's answer arrives only as a
+    /// control-stream `ApprovalResponseSubmitted`, tailed and handed in as `Input::Journal`",
+    /// `crates/mandate-runtime/src/escalation.rs`). Every row is handed and the runtime's own arms
+    /// decide what each acts on (DEC-138 item 3, DEC-914 item 2: never re-sorted, never filtered).
+    ///
+    /// The read is the **whole stream**, taken after `Input::Started`'s recovery and the cycle's
+    /// one-order guard, before the cycle proposes anything, so an answer committed while no run was
+    /// open is still judged — "If the runtime is down, the event waits in the journal and is judged
+    /// when it is read" (the M7 brief) — against the replayed state, as the same brief's restart
+    /// row reads: "A control-stream response committed before the crash is re-tailed and judged at
+    /// `max(submitted_at, folded clock)`". No cursor is kept beside the journal's own
+    /// `ORDER BY seq`: the runtime's copy fold is the idempotence ("copied ... at most once: a
+    /// control-stream event this runtime has already copied is inert, however often it is tailed",
+    /// EI-3, DEC-155 item 2), and a cursor that handed only the rows after a remembered head would
+    /// be the filter DEC-914 item 2 forbids. The guard in front keeps the answers from opening a
+    /// second cycle behind an already-open intent; the wait between runs is the owner's, never the
+    /// shell's (DEC-912 item 1: the runner's live wait releases, it never submits, and its
+    /// per-wake re-read is the runner's own call site).
+    ///
+    /// Nothing here folds the control rows into the runtime's replay state: `Input::Journal` is the
+    /// answer's whole path, and the runtime's own fold reserves what it does not interpret as
+    /// `NotInterpreted` (DEC-85) — the deployment and registration records journal spec §9.2 lays
+    /// on the same stream among them, which the shell reads through the validation context, never
+    /// through the runtime — so a state fold of the read would refuse a workspace whose control
+    /// stream this tail can read whole. The call order is this row's to write and its review's to
+    /// judge (DEC-914 item 7).
+    fn tail_the_control_stream(&mut self) -> Result<(), ShellError> {
+        let stream = control_stream(&self.setup.deployment.workspace.0);
+        let rows = self
+            .stages
+            .journal
+            .read(&stream)
+            .map_err(refused(Stage::Journal))?;
+        for event in tailed(&rows)? {
+            self.feed(Input::Journal(event))?;
+        }
+        Ok(())
     }
 
     /// Hands the runtime `observation` once its data is in the run's store under its `data_ref`
@@ -1001,10 +1048,12 @@ mod tests {
     }
 }
 
-/// The actor every event the tracer folds is read as. The tracer folds only its agent and account
-/// streams, where no response is admitted from anyone, and reads no control stream; `system` is
-/// what admission never admits (EI-10), so the control-stream tail that maps the envelope's
-/// `actor.kind` is stream L's, with the tail itself (M7 brief, Decisions needed 5).
+/// The actor every event the tracer's own fold replays is read as: the agent and account streams
+/// it appends and rewinds, where no response is admitted from anyone; `system` is what admission
+/// never admits (EI-10), so nothing the tracer folds by hand can pose as an owner. The control
+/// stream is not folded through this actor: `Session::tail_the_control_stream` tails it through
+/// [`crate::tail::tailed`], whose fold maps the envelope's own `actor.kind` (M7 brief, Decisions
+/// needed 5).
 const TRACER_ACTOR: ActorKind = ActorKind::System;
 
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from

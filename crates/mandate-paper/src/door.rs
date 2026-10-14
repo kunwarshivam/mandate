@@ -2,28 +2,25 @@
 //! brief](../../../docs/project/tasks/first-live-trade.md)'s G1a wiring row — "the G1a live door
 //! compile-in" of the #1308 review's R0-gap list and the work tracker's M6 row): the run-level
 //! frames the runner calls the merged connection seams ([`connection`](crate::connection),
-//! [`lapse`](crate::lapse), #1301, DEC-910) through. #1301 implemented the seams and #1313
-//! closed the G1b wiring frames, but no pin observes `run()` calling either door seam — the only
-//! evidence the door's live arm holds today is that it compiles (`cargo check -p mandate-paper
-//! --features live`), so this module is the row's run-level half: the frames with final
-//! signatures the seams come to the run through, every stub reporting `Unimplemented { story:
-//! "E7-26" }` per DEC-137 until the row's implementation lands (DEC-77), and the call sites
-//! inside `run()` (`chosen` ahead of the shell's own answers and every credential read,
-//! `unspent` before anything runs) left to that implementation to write and its review to judge
-//! against DEC-910's sentences and DEC-918's readings — the discipline DEC-914 item 7 gave the
-//! G1b wiring. The adjacent rows keep their own contracts: the G1b frames' call sites stay
-//! stream L / M7's remainder's, the shell watch's own loop stays the shell row's, and the live
-//! arm's connector, preflight and account-stream journal read stay the door implementation's
-//! under these signatures. Nothing here reaches a host, a credential or a broker (LT-1,
-//! `AGENTS.md` rules 7 and 8): every input arrives as a control-stream record, a journaled
-//! row, a parsed mandate or the run's own identifiers.
+//! [`lapse`](crate::lapse), #1301, DEC-910) through, implemented since this row closed its pins.
+//! Each frame is the seam's own call with the run's error variant wrapped around its refusal
+//! (DEC-918 item 1), and the call sites inside `run()` — `chosen` ahead of the shell's own
+//! fold and every credential read, `account_stream` and `unspent` before anything runs — are
+//! [`run`'s`](crate::run) own, judged against DEC-910's sentences and DEC-918's readings. The
+//! adjacent rows keep their own contracts: the G1b frames' call sites stay stream L / M7's
+//! remainder's, the shell watch's own loop stays the shell row's, and the live arm's connector,
+//! preflight and account-stream journal read stay the live arm's under these signatures. Nothing
+//! here reaches a host, a credential or a broker (LT-1, `AGENTS.md` rules 7 and 8): every input
+//! arrives as a control-stream record, a journaled row, a parsed mandate or the run's own
+//! identifiers.
 
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_shell::control::ControlRecord;
+use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
 
 use crate::PaperError;
-use crate::connection::{Connection, Held};
+use crate::connection::{Connection, Held, connection, lapse};
 
 /// The connection the run uses (DEC-918 item 1; DEC-910 item 2; the task file's row G1a:
 /// "The connector chosen from the connection record and the environment from the confirmed
@@ -45,8 +42,7 @@ pub fn chosen(
     mandate: &Mandate,
     account_ref: &str,
 ) -> Result<Connection, PaperError> {
-    let _ = (records, mandate, account_ref);
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    connection(records, mandate, account_ref).map_err(PaperError::Connection)
 }
 
 /// The account stream whose rows the door's lapse reads (DEC-918 item 3; DEC-910 item 3:
@@ -65,8 +61,14 @@ pub fn chosen(
 /// [`PaperError::Shell`] with `Cause::Absent` when the journal's §2 forms cannot parse the
 /// stream the run's own names name.
 pub fn account_stream(workspace: &str, account_ref: &str) -> Result<StreamId, PaperError> {
-    let _ = (workspace, account_ref);
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    StreamId::parse(&format!("acct:{workspace}:{account_ref}")).ok_or(PaperError::Shell(
+        ShellError::Refused {
+            stage: Stage::Reconcile,
+            cause: Cause::Absent {
+                what: "the account stream the connection binds",
+            },
+        },
+    ))
 }
 
 /// The flat-and-unspent half of the door (DEC-918 item 4; DEC-529 item 3; DEC-910 item 3):
@@ -88,6 +90,5 @@ pub fn unspent(
     rows: &[StoredEvent],
     held: &Held,
 ) -> Result<(), PaperError> {
-    let _ = (connection, rows, held);
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    lapse(connection, rows, held).map_err(PaperError::Lapse)
 }
