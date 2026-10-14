@@ -302,3 +302,5 @@ mod doubles;
 mod fail_closed;
 #[cfg(test)]
 mod observed;
+#[cfg(test)]
+mod tail_install;

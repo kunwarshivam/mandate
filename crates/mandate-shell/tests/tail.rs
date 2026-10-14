@@ -126,7 +126,6 @@ fn folded(seq: u64, event_type: &str, actor: ActorKind, payload: &str) -> Folded
 /// envelope's own `user` (`crates/mandate-shell/src/tracer.rs`: "the control-stream tail that
 /// maps the envelope's `actor.kind` is stream L's"), never the tracer's blanket `System`, so
 /// admission (mandate-approval, EI-10's check 3) can admit the founder's own grant and no other.
-#[ignore = "pending E7-26"]
 #[test]
 fn the_tail_hands_the_runtime_the_owners_answer_verbatim() {
     let answer = row(7, "ApprovalResponseSubmitted", "user", &answer_payload());
@@ -152,7 +151,6 @@ fn the_tail_hands_the_runtime_the_owners_answer_verbatim() {
 /// after the answers, an `AgentDeployed` record between them — and the seqs stay the rows' own
 /// (3, 9 and 31, not the read's indices), for the runtime's own arms to decide what each acts on:
 /// nothing between is the tail's to judge (DEC-138 item 3).
-#[ignore = "pending E7-26"]
 #[test]
 fn the_tail_hands_the_journal_s_read_whole_in_its_own_order() {
     assert_eq!(
@@ -196,7 +194,6 @@ fn the_tail_hands_the_journal_s_read_whole_in_its_own_order() {
 /// kind the tail can read, folds `System`, what admission never admits
 /// (`crates/mandate-shell/src/tracer.rs`'s own `TRACER_ACTOR` carrier), so no reading of the
 /// envelope can carry a grant the writer did not stand behind (EI-10, DEC-176: the refusing one).
-#[ignore = "pending E7-26"]
 #[test]
 fn only_the_envelope_s_own_user_folds_as_a_user() {
     let named = [
@@ -237,7 +234,6 @@ fn only_the_envelope_s_own_user_folds_as_a_user() {
 /// the envelope's own refusals and **nothing handed**, the whole read refused rather than a
 /// partial fold guessed on (#1311's pinned rule: "an answer the run cannot read refuses as a
 /// difference" — never a guess, never a skip).
-#[ignore = "pending E7-26"]
 #[test]
 fn a_row_the_tail_cannot_read_refuses_as_a_difference() {
     let unreadable = StoredEvent {

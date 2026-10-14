@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::{Digest, Int, Key, Object, Value};
+use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
 use mandate_domain::{
     CapabilityProfile, Cell, Idempotency, MarketSession, OrderType as ProfileOrderType,
     ProtectionForm, QuantityForm, Retry, Row, TimeInForce as ProfileTif,
@@ -236,6 +236,54 @@ pub fn agent_stream() -> String {
 
 pub fn account_stream() -> String {
     crate::envelope::account_stream("tracer", "tracer-paper")
+}
+
+/// The workspace control stream of the tail's install probes (journal spec §2): `ctl:tracer`,
+/// the founder's CLI's stream, which no run takes ownership of.
+pub fn control_stream() -> String {
+    crate::envelope::control_stream("tracer")
+}
+
+/// One committed row of a stream another writer owns, as the journal hands committed rows back
+/// (E7-26's install probes): the writer's own canonical body bytes — the only place the envelope's
+/// `actor.kind` and the payload members live — beside the journal-assigned columns, and a `prev_hash`
+/// the ledger double never verifies, because a seeded chain is not what the probes read. The body
+/// is composed exactly as the fixtures of `tests/tail.rs` compose theirs, so the tail's fold reads
+/// the same shape over the same members (DEC-914 item 2: no member from anywhere but the row's own
+/// body).
+pub fn seed(
+    world: &World,
+    stream: &str,
+    seq: u64,
+    event_id: &str,
+    event_type: &str,
+    kind: &str,
+    payload: &str,
+) -> Result<(), String> {
+    let envelope = format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{stream}","event_type":"{event_type}","schema_version":1,"event_time":"{NOW}","clock_source":"local","causation_id":null,"correlation_id":null,"actor":{{"kind":"{kind}","id":"user-founder","version":"0.1.0","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
+    );
+    let value = parse(envelope.as_bytes()).map_err(|error| error.to_string())?;
+    let body = to_canonical(&value);
+    world
+        .ledger
+        .borrow_mut()
+        .streams
+        .entry(stream.to_owned())
+        .or_default()
+        .push(StoredEvent {
+            stream_id: stream.to_owned(),
+            seq,
+            event_id: event_id.to_owned(),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: NOW.to_owned(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::of(&body),
+            body,
+        });
+    Ok(())
 }
 
 /// The pinned model the fixture mandate's envelope names. The fail-closed suite hands the cycle a
