@@ -850,6 +850,28 @@ fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     Ok(())
 }
 
+/// #1355's second defect, journal spec §9.1 rule 5 and DEC-938: a classifier that cannot answer
+/// leaves no classification and so no decider, so the step journals no `DecisionMade` (whose
+/// `deny` would need a non-null `decided_by` the spec has no label for) and the run stops at
+/// Classify, never as the journal's refusal of an unlabelled deny.
+#[test]
+fn a_classifier_refusal_journals_no_unlabelled_deny() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stub(&mut stages, Stage::Classify, &world);
+    let error = refusal(run_with(stages)?)?;
+    assert_eq!(error.stage(), Some(Stage::Classify), "{error}");
+    let ledger = world.ledger.borrow();
+    assert_eq!(
+        ledger.count("DecisionMade"),
+        0,
+        "no decision without its decider"
+    );
+    assert_eq!(ledger.count("IntentProposed"), 0);
+    assert_eq!(world.tally.borrow().submissions, 0);
+    Ok(())
+}
+
 /// PB-2: the gate's denial is journaled as a decision, alerted, and sends nothing.
 #[test]
 fn a_gate_denial_is_journaled_and_sends_nothing() -> Result<(), String> {
