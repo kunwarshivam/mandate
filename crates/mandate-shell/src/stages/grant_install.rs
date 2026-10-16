@@ -73,7 +73,7 @@ impl Pause for Clock {
 
 /// An hour past the fixture's run clock (2026-09-25T20:00:00Z): no probe's watch pauses that
 /// far, so a watch that never ends fails at once rather than running until the harness times out.
-const PAUSE_HORIZON_S: i64 = 1_790_373_600;
+const PAUSE_HORIZON_S: i64 = 1_790_370_000;
 
 /// The run clock as the fixture's setup holds it.
 fn clock() -> Result<Clock, String> {
