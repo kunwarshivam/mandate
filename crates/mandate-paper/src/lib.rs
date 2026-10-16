@@ -53,8 +53,8 @@ use mandate_num::Price;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
-    ConfigRefusal, ControlRecord, DeploymentRefusal, Pinned, RunFacts, configuration,
-    confirmed_version,
+    ConfigRefusal, ControlRecord, DeploymentRefusal, LiveAdmission, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
@@ -292,6 +292,7 @@ pub fn run<P: Ports>(
             workspace_users: 1,
             approver_users: 1,
         },
+        live: LiveAdmission::refusing(),
     };
     the_live_door(&records, &store, &facts.agent, args)?;
     let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;

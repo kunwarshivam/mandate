@@ -36,6 +36,78 @@ pub struct RunFacts {
     pub validation_date: Date,
     /// One user and one approver, the founder (DEC-505 item 3).
     pub membership: Membership,
+    /// What DEC-924 item 1's admission of a live deployment reads. A paper deployment ignores it.
+    pub live: LiveAdmission,
+}
+
+/// Whether the binary was built with the runner's `live` feature (DEC-924 item 1, DEC-529
+/// item 3). The shell cannot declare the feature (only the runner may, `xtask/layers.toml`), so
+/// the runner says which build it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Build {
+    Default,
+    Live,
+}
+
+/// Whether the run passed `--confirm-live` (DEC-924 item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirmation {
+    Absent,
+    ConfirmLive,
+}
+
+/// What the live door's connection and unspent checks answered for this run (DEC-924 item 1,
+/// DEC-918 item 1, DEC-919). Only `Passed` admits, and the runner hands it only when `chosen`
+/// and `unspent` both passed on the run's own control-stream records, its journal read of the
+/// account stream and its snapshot's held counts. `unsupplied`'s refusal, a placeholder read or
+/// an unchecked run is `NotPassed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoorChecks {
+    NotPassed,
+    Passed,
+}
+
+/// The MCP host the run dials and the pinned Robinhood host constant it must equal (DEC-924
+/// items 1 and 3). The constant is written in one place, behind the runner's `live` feature, so
+/// the runner hands it here rather than the shell holding a second copy; a build that pins no
+/// host hands `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpHost {
+    pub dialed: Option<String>,
+    pub pinned: Option<&'static str>,
+}
+
+/// DEC-924 item 1's four conditions for a live deployment, as the run supplies them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveAdmission {
+    pub build: Build,
+    pub confirmation: Confirmation,
+    pub door: DoorChecks,
+    pub host: McpHost,
+}
+
+impl LiveAdmission {
+    /// The value every caller passes until the runner holds the flag, the host constant and the
+    /// door's real inputs: each of the four conditions missing, so a live deployment refuses
+    /// [`DeploymentRefusal::Live`] exactly as before DEC-924.
+    pub fn refusing() -> Self {
+        Self {
+            build: Build::Default,
+            confirmation: Confirmation::Absent,
+            door: DoorChecks::NotPassed,
+            host: McpHost {
+                dialed: None,
+                pinned: None,
+            },
+        }
+    }
+
+    /// Whether all four of DEC-924 item 1's conditions hold: the `live` build, `--confirm-live`,
+    /// the door's checks passed, and a dialed host equal, byte for byte, to a non-empty pinned
+    /// constant. Any one missing refuses (item 2).
+    pub fn admits(&self) -> bool {
+        false
+    }
 }
 
 /// Phase 1's answer: the version a paper run deploys, the stored document that re-hashes to it,
@@ -105,7 +177,9 @@ pub enum DeploymentRefusal {
     StoreUnavailable,
     #[error("the stored document is not a canonical mandate")]
     DocumentUnreadable,
-    #[error("the deployed mandate's environment is live")]
+    /// A live deployment missing any of DEC-924 item 1's four conditions, refused before any
+    /// credential is read (item 2).
+    #[error("the deployed mandate's environment is live and the run does not admit it")]
     Live,
     #[error("a control-stream record could not be folded")]
     Fold,
@@ -169,7 +243,7 @@ pub fn confirmed_version(
     })?;
     let value = mandate_canon::parse(&bytes).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
     let mandate = Mandate::parse(&value).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
-    if mandate.environment == Environment::Live {
+    if mandate.environment == Environment::Live && !run.live.admits() {
         return Err(DeploymentRefusal::Live);
     }
     let documents = |digest: &Digest| {

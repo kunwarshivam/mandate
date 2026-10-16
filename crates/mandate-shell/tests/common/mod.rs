@@ -14,7 +14,7 @@ use mandate_canon::{Digest, Value, to_canonical};
 use mandate_num::{Price, Qty, Usd};
 use mandate_shell::Cause;
 use mandate_shell::control::{
-    Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
+    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
     confirmed_version,
 };
 use mandate_shell::paper::{Artifacts, BrokerFacts, LiquidityFacts, PaperFacts};
@@ -189,6 +189,7 @@ impl Stream {
                 workspace_users: 1,
                 approver_users: 1,
             },
+            live: LiveAdmission::refusing(),
         };
         let confirmed = confirmed_version(&self.records, &self.store, &run).unwrap();
         let mandate = confirmed.mandate();
