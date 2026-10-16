@@ -16,6 +16,8 @@ use mandate_mcp::{CallClass, McpError, Tools};
 use mandate_num::{Fraction, Price, Qty, ShareIncrement};
 use serde_json::{Map, Value};
 
+use crate::Tickers;
+
 const REVIEW: &str = "review_equity_order";
 const PLACE: &str = "place_equity_order";
 const CANCEL: &str = "cancel_equity_order";
@@ -29,11 +31,17 @@ const NOT_OFFERED: ConnectorError = ConnectorError::NotSent {
     code: "not_offered",
 };
 
+/// An order whose instrument has no registered ticker, refused before any call: nothing guesses
+/// what Robinhood names it (DEC-956 item 1).
+const NO_SYMBOL: ConnectorError = ConnectorError::NotSent { code: "no_symbol" };
+
 /// The connector for one agentic account, whose number the founder typed (CN-8). It has no
 /// `Debug`: the account number is personal data (journal spec §6.4).
 pub struct RobinhoodConnector<T> {
     pub(crate) tools: T,
     pub(crate) account_number: String,
+    /// The Robinhood ticker of each registered instrument (DEC-956 item 1).
+    pub(crate) tickers: Tickers,
     /// The order each place answered, by our key: its broker `order_id` is what a `Cancel` goes
     /// by, and its instrument and side are what a cancel's answer is read against. After a restart
     /// it is rebuilt from the journal by [`Self::restore`] (DEC-860 item 7).
@@ -44,14 +52,23 @@ pub struct RobinhoodConnector<T> {
 }
 
 impl<T: Tools> RobinhoodConnector<T> {
-    /// Every request names `account_number`, and only it.
-    pub fn new(tools: T, account_number: String) -> Self {
+    /// Every request names `account_number`, and only it, and each instrument by its ticker in
+    /// `tickers`.
+    pub fn new(tools: T, account_number: String, tickers: Tickers) -> Self {
         Self {
             tools,
             account_number,
+            tickers,
             placed: BTreeMap::new(),
             in_doubt: BTreeSet::new(),
         }
+    }
+
+    /// Replaces the registered tickers with `tickers` (DEC-956 item 1): a session opened before
+    /// the run read its confirmed mandate registers the pinned instrument's ticker here, before
+    /// its preflight, and every call from then on names instruments by it.
+    pub fn register(&mut self, tickers: Tickers) {
+        self.tickers = tickers;
     }
 
     /// The connector after a restart: [`Self::new`] with its `ClientOrderId` → `order_id` map
@@ -70,9 +87,10 @@ impl<T: Tools> RobinhoodConnector<T> {
     pub fn restore(
         tools: T,
         account_number: String,
+        tickers: Tickers,
         records: &[FoldedEvent],
     ) -> Result<Self, crate::RobinhoodError> {
-        let mut connector = Self::new(tools, account_number);
+        let mut connector = Self::new(tools, account_number, tickers);
         let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
         let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
         let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();
@@ -186,7 +204,7 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// purpose draws on `RiskReducing` and is placed whatever the review says, so the broker
     /// accepts or rejects it (`AGENTS.md` rule 13, DEC-860 item 6).
     async fn submit(&mut self, order: &SubmitOrder) -> Result<BrokerOutcome, ConnectorError> {
-        let mut arguments = self.arguments(order).ok_or(NOT_OFFERED)?;
+        let (mut arguments, ticker) = self.arguments(order)?;
         let key = &order.client_order_id;
         if self.in_doubt.contains(key) || self.placed.contains_key(key) {
             return Err(IN_DOUBT);
@@ -209,7 +227,7 @@ impl<T: Tools> RobinhoodConnector<T> {
             .tools
             .call_tool(class, PLACE, &Value::Object(arguments))
             .await;
-        let placed = placed(order, answer).ok_or(IN_DOUBT)?;
+        let placed = placed(order, &ticker, answer).ok_or(IN_DOUBT)?;
         self.in_doubt.remove(key);
         self.placed.insert(key.clone(), placed.clone());
         Ok(BrokerOutcome::Submitted(placed))
@@ -222,7 +240,9 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// [`BrokerOutcome::CancelAccepted`], the broker's confirmation; any other state is that
     /// order, as [`BrokerOutcome::Order`], so the executor keeps the cancel unconfirmed and waits
     /// for the broker's own cancelled state (DEC-867 item 2; trading spec §5.7). A record that
-    /// cannot be read is `Unreadable` (DEC-864).
+    /// cannot be read, or names another ticker than the order's, is `Unreadable` (DEC-864,
+    /// DEC-956 item 1). The cancel goes by the `order_id` alone, so an order whose ticker is not
+    /// registered is still cancelled (`AGENTS.md` rule 13), and only its answer is unreadable.
     async fn cancel(&mut self, key: &ClientOrderId) -> Result<BrokerOutcome, ConnectorError> {
         let placed = self
             .placed
@@ -247,7 +267,11 @@ impl<T: Tools> RobinhoodConnector<T> {
         match tool_result(&answer).ok_or(ConnectorError::Unreadable { code: "cancel" })? {
             ToolResult::Content(record) => {
                 let unreadable = ConnectorError::Unreadable { code: "cancel" };
-                let order = order_record(&record, &placed).ok_or(unreadable)?;
+                let ticker = self
+                    .tickers
+                    .ticker(&placed.instrument)
+                    .map_err(|_| unreadable)?;
+                let order = order_record(&record, &placed, ticker).ok_or(unreadable)?;
                 if order.status == "canceled" {
                     Ok(BrokerOutcome::CancelAccepted { client_order_id })
                 } else {
@@ -263,24 +287,34 @@ impl<T: Tools> RobinhoodConnector<T> {
         }
     }
 
-    /// The review's and the place's arguments, or `None` for an order the profile does not offer:
-    /// an order type and quantity form without a cell, a bracket or an OCO no cell lists,
-    /// extended hours (no row), or a time in force the contract cannot spell (`ioc`).
-    fn arguments(&self, order: &SubmitOrder) -> Option<Map<String, Value>> {
-        let profile = crate::profile::robinhood().ok()?;
+    /// The review's and the place's arguments, and the registered ticker they name the instrument
+    /// by (DEC-956 item 1). `NotSent` (`not_offered`) for an order the profile does not offer: an
+    /// order type and quantity form without a cell, a bracket or an OCO no cell lists, extended
+    /// hours (no row), or a time in force the contract cannot spell (`ioc`); `NotSent`
+    /// (`no_symbol`) for an instrument with no registered ticker.
+    fn arguments(
+        &self,
+        order: &SubmitOrder,
+    ) -> Result<(Map<String, Value>, InstrumentId), ConnectorError> {
+        let profile = crate::profile::robinhood().map_err(|_| NOT_OFFERED)?;
         if order.extended_hours || !offered(&profile, order) {
-            return None;
+            return Err(NOT_OFFERED);
         }
         let time_in_force = match order.tif {
             TimeInForce::Day => "gfd",
             TimeInForce::Gtc => "gtc",
-            TimeInForce::Ioc => return None,
+            TimeInForce::Ioc => return Err(NOT_OFFERED),
         };
+        let ticker = self
+            .tickers
+            .ticker(&order.instrument)
+            .map_err(|_| NO_SYMBOL)?
+            .clone();
         let (side, order_type) = wire_names(order);
         let text = |value: &str| Value::String(value.to_owned());
         let mut arguments = Map::new();
         arguments.insert("account_number".to_owned(), text(&self.account_number));
-        arguments.insert("symbol".to_owned(), text(order.instrument.as_str()));
+        arguments.insert("symbol".to_owned(), text(ticker.as_str()));
         arguments.insert("side".to_owned(), text(side));
         arguments.insert("type".to_owned(), text(order_type));
         arguments.insert("quantity".to_owned(), text(&order.qty.to_string()));
@@ -292,7 +326,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         if let Some(stop) = order.stop_price {
             arguments.insert("stop_price".to_owned(), text(&stop.to_string()));
         }
-        Some(arguments)
+        Ok((arguments, ticker))
     }
 }
 
@@ -410,10 +444,15 @@ fn review_refusal(
     }))
 }
 
-/// The order a place answered, or `None` unless the answer is exactly an order record: no
-/// `isError`, an `id`, a `state` of the contract's ten, and decimal-text numbers (DEC-860 item 4;
-/// connections spec §6.2 rule 5). Side and instrument are the request's.
-fn placed(order: &SubmitOrder, answer: Result<String, McpError>) -> Option<BrokerOrder> {
+/// The order a place answered, or `None` unless the answer is exactly an order record for the
+/// `ticker` sent: no `isError`, an `id`, a `state` of the contract's ten, and decimal-text
+/// numbers (DEC-860 item 4; connections spec §6.2 rule 5; DEC-956 item 1). Side and instrument
+/// are the request's.
+fn placed(
+    order: &SubmitOrder,
+    ticker: &InstrumentId,
+    answer: Result<String, McpError>,
+) -> Option<BrokerOrder> {
     let ToolResult::Content(record) = tool_result(&answer.ok()?)? else {
         return None;
     };
@@ -432,14 +471,22 @@ fn placed(order: &SubmitOrder, answer: Result<String, McpError>) -> Option<Broke
         legs: Vec::new(),
         created_on: None,
     };
-    order_record(&record, &requested)
+    order_record(&record, &requested, ticker)
 }
 
-/// An order record read as an order: no `isError`, an `id`, a `state` of the contract's ten, and
-/// decimal-text numbers (connections spec §6.2 rule 5). Our key, the instrument and the side are
-/// `known`'s, which the record is about; `None` for anything else.
-fn order_record(record: &Map<String, Value>, known: &BrokerOrder) -> Option<BrokerOrder> {
+/// An order record read as an order: no `isError`, an `id`, a `state` of the contract's ten,
+/// decimal-text numbers (connections spec §6.2 rule 5), and the `symbol` `ticker`, the one the
+/// order was sent under (DEC-956 item 1). Our key, the instrument and the side are `known`'s,
+/// which the record is about; `None` for anything else.
+fn order_record(
+    record: &Map<String, Value>,
+    known: &BrokerOrder,
+    ticker: &InstrumentId,
+) -> Option<BrokerOrder> {
     let text = |field: &str| record.get(field).and_then(Value::as_str);
+    if text("symbol")? != ticker.as_str() {
+        return None;
+    }
     let qty = |field: &str| Qty::parse(text(field)?).ok();
     let price = |field: &str| match record.get(field) {
         None | Some(Value::Null) => Some(None),

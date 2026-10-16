@@ -19,7 +19,7 @@ use mandate_num::{Fraction, Price, Qty, Usd};
 use mandate_paper::{
     BrokerAsk, CollarMembers, PaperError, QuoteRefusal, broker_cross_check, fresh_ask,
 };
-use mandate_robinhood::{Quote, RobinhoodConnector, Tools};
+use mandate_robinhood::{Quote, RobinhoodConnector, Tickers, Tools};
 use mandate_shell::robinhood::RobinhoodBridge;
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
@@ -81,7 +81,7 @@ impl Fixture {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("a runtime builds");
-        let connector = RobinhoodConnector::new(self.clone(), "5QR00001".to_owned());
+        let connector = RobinhoodConnector::new(self.clone(), "5QR00001".to_owned(), tickers());
         BrokerAsk::robinhood(RobinhoodBridge::new(runtime, connector))
     }
 }
@@ -401,4 +401,10 @@ proptest! {
             prop_assert_eq!(refused(result), Some(QuoteRefusal::Disagreement));
         }
     }
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }

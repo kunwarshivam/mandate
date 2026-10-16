@@ -22,7 +22,7 @@ use mandate_executor::{
 };
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty};
-use mandate_robinhood::{AccountRead, RobinhoodConnector, RobinhoodError, Tools};
+use mandate_robinhood::{AccountRead, RobinhoodConnector, RobinhoodError, Tickers, Tools};
 use proptest::collection::vec;
 use proptest::prelude::any;
 use proptest::test_runner::{Config, TestRunner};
@@ -79,7 +79,10 @@ fn connector(answers: &[(&'static str, Value)]) -> (RobinhoodConnector<Scripted>
         answers,
         calls: Rc::clone(&calls),
     };
-    (RobinhoodConnector::new(tools, OURS.to_owned()), calls)
+    (
+        RobinhoodConnector::new(tools, OURS.to_owned(), tickers()),
+        calls,
+    )
 }
 
 fn ready<F: Future>(future: F) -> F::Output {
@@ -327,7 +330,7 @@ fn an_answer_that_cannot_be_attributed_refuses_the_whole_read() {
 #[test]
 fn a_failed_account_check_holds_no_exit_on_the_agentic_account() {
     let order = json!({"id": "rh-1", "state": "confirmed", "quantity": "2",
-        "filled_quantity": "0", "limit_price": "475", "stop_price": null});
+        "filled_quantity": "0", "limit_price": "475", "stop_price": null, "symbol": "SPY"});
     let mut cancelled = order.clone();
     cancelled["state"] = json!("cancelled");
     let script = [
@@ -431,7 +434,7 @@ fn every_read_checks_the_account_list_afresh() {
         lists: RefCell::new(lists),
         calls: Rc::clone(&calls),
     };
-    let c = RobinhoodConnector::new(tools, OURS.to_owned());
+    let c = RobinhoodConnector::new(tools, OURS.to_owned(), tickers());
     assert_eq!(
         ready(c.read(AccountRead::Positions, &Map::new())),
         Ok(vec![])
@@ -624,4 +627,10 @@ fn the_one_member_envelope_check_is_the_preflights_not_the_reads() {
         &sole,
         "a preflight read refuses an envelope holding more than its records member",
     );
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }

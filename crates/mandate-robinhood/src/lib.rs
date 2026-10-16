@@ -22,12 +22,14 @@ mod listing;
 mod preflight;
 mod profile;
 mod scope;
+mod tickers;
 
 pub use connector::RobinhoodConnector;
 pub use mandate_mcp::Tools;
 pub use preflight::{AccountSnapshot, PreflightFacts, Quote};
 pub use profile::robinhood as robinhood_profile;
 pub use scope::AccountRead;
+pub use tickers::Tickers;
 
 use mandate_canon::Digest;
 use mandate_executor::ClientOrderId;
@@ -59,6 +61,14 @@ pub enum RobinhoodError {
     /// item 6).
     #[error("the agentic account may not trade the symbol")]
     NotTradable,
+    /// The instrument has no registered Robinhood ticker, or its snapshot's `symbol` is empty;
+    /// nothing is sent for it (DEC-956 item 1).
+    #[error("the instrument has no registered Robinhood symbol")]
+    NoSymbol,
+    /// Two registered instruments share one ticker, or one instrument is registered under two;
+    /// none of them is mapped (DEC-956 item 1).
+    #[error("the registered instruments do not map one to one onto Robinhood symbols")]
+    AmbiguousSymbol,
 }
 
 /// The `ref_id` for the order with this idempotency key (DEC-860 item 1): a UUID version 8

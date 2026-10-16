@@ -26,7 +26,7 @@ use mandate_executor::{
 };
 use mandate_num::Usd;
 use mandate_robinhood::{
-    AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, Tools, robinhood_profile,
+    AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, Tickers, Tools, robinhood_profile,
 };
 use tokio::runtime::Runtime;
 
@@ -66,6 +66,20 @@ impl<T: Tools> RobinhoodBridge<T> {
         self.runtime
             .block_on(robinhood.preflight_facts(symbol))
             .map_err(|_| unread())
+    }
+
+    /// Registers the run's tickers with the connector (`RobinhoodConnector::register`, DEC-956
+    /// item 1): the session is opened before the run reads its confirmed mandate, so the pinned
+    /// instrument's `(asset id, symbol)` is handed over here, before the preflight.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when the connector is held by another stage; nothing is registered.
+    pub fn register(&self, tickers: Tickers) -> Result<(), Cause> {
+        let mut robinhood = self.connector.try_borrow_mut().map_err(|_| Cause::Absent {
+            what: "the Robinhood connector, held by another stage",
+        })?;
+        robinhood.register(tickers);
+        Ok(())
     }
 
     /// The agentic account's snapshot (`RobinhoodConnector::account_snapshot`), driven on the
