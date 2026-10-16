@@ -646,8 +646,11 @@ fn broker_fees(fees: Usd) -> Result<Value, ExecutorError> {
 ///
 /// The fee is keyed as the journal keys every fee (journal spec §6): `family` `equities`, `day` the
 /// fill's New York trade date as the account's calendar derives it, `accrued` at full precision,
-/// and `charged` zero, because a simulated fee is never charged by the broker. The components
-/// travel beside them.
+/// and `charged` zero, because a simulated fee is never charged by the broker. The three equity
+/// components travel beside them, each always present and `null` where the side owes none, as
+/// `FeesCharged` version 1 registers them, and the record names the fee configuration its fill
+/// was accounted under; a snapshot that names none leaves it unbound, and the journal refuses it
+/// (DEC-948 item 3).
 ///
 /// DEC-87's per-order TAF cap is `max(0, cap − TAF already charged on the fill's client order)`.
 /// The order's `prior` filled quantity is replayed first as one earlier execution under the same
@@ -708,10 +711,24 @@ fn simulated_fee(
         ("simulated", Value::Bool(true)),
         ("client_order_id", text(id.as_str())),
     ];
-    for fee in &components {
-        pairs.push((fee_name(fee.kind), text(fee.usd.to_string())));
+    for kind in [FeeKind::Sec, FeeKind::Taf, FeeKind::Cat] {
+        let owed = components
+            .iter()
+            .filter(|fee| fee.kind == kind)
+            .try_fold(None, |total: Option<Usd>, fee| {
+                total.unwrap_or(Usd::ZERO).checked_add(fee.usd).map(Some)
+            })?;
+        let value = match owed {
+            Some(usd) => text(usd.to_string()),
+            None => Value::Null,
+        };
+        pairs.push((fee_name(kind), value));
     }
-    batch.journal("FeesCharged", None, pairs)?;
+    let refs = match batch.ports.instruments.fill_refs(&fill.instrument) {
+        Some(refs) => config_refs(&[("fee_config", Some(refs.fee_config.as_str()))])?,
+        None => Object::new(),
+    };
+    batch.journal_with_refs("FeesCharged", None, refs, pairs)?;
     Ok(())
 }
 

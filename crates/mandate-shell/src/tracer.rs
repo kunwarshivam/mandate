@@ -799,13 +799,23 @@ impl<'s> Session<'s> {
         self.perform_executor(ticked)
     }
 
-    /// Recovery, then the startup account report and reconciliation. The account report commits
+    /// Recovery, then the startup account report and reconciliation. The executor is ticked at the
+    /// run clock's second before its start, so every record the start leads to carries the run's
+    /// risk clock, never zero (mandate spec §5.2, DEC-948 item 4); that tick only sets the clock,
+    /// and evaluates nothing until [`Session::tick_executor`]. The account report commits
     /// first; the runtime holds every opening until it and a clean `ReconciliationRun` have both
     /// folded (DEC-458), and a mismatch keeps it held.
     pub(crate) fn start(&mut self) -> Result<(), ShellError> {
         let agent_epoch = self.epoch(&self.agent_stream.clone());
         self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
         let account_epoch = self.epoch(&self.account_stream.clone());
+        let run_clock = mandate_executor::RiskClock::from_secs(self.setup.now.secs());
+        let ticked = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::Tick(run_clock))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(ticked)?;
         let profile = self.stages.connector.profile().map_err(|_| {
             refused(Stage::Connector)(Cause::Untrusted {
                 what: "the connector's capability profile",
@@ -824,14 +834,21 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Executor))?;
         let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
         let (verdict, more) = self.reconcile_once(&reconciliation_requests)?;
-        let later = self.settle(more)?;
-        if verdict == ReconciliationVerdict::Mismatch
-            || later.contains(&ReconciliationVerdict::Mismatch)
-        {
-            self.report.alerts.push("reconciliation_mismatch");
-            return Err(ShellError::ReconciliationMismatch);
+        self.stop_on(verdict)?;
+        self.settle(more)
+    }
+
+    /// A mismatch stops the run fail-safe, wherever the reconciliation ran (trading spec §11,
+    /// `AGENTS.md` rule 3): its alert key goes into the report, opaque as rule 6 requires, and
+    /// the run answers [`ShellError::ReconciliationMismatch`], after which nothing is sent.
+    fn stop_on(&mut self, verdict: ReconciliationVerdict) -> Result<(), ShellError> {
+        match verdict {
+            ReconciliationVerdict::Clean | ReconciliationVerdict::Adopted => Ok(()),
+            ReconciliationVerdict::Mismatch => {
+                self.report.alerts.push("reconciliation_mismatch");
+                Err(ShellError::ReconciliationMismatch)
+            }
         }
-        Ok(())
     }
 
     /// One reconciliation over `requests` (trading spec §11): the snapshot gathered through the
@@ -869,23 +886,22 @@ impl<'s> Session<'s> {
     /// as the first was (DEC-858 item 3, DEC-938 item 5), never stepped answer by answer. A fill
     /// is ingested once, so the reconciliation after a late fill asks for none; one still asking
     /// after [`RECONCILIATION_ROUNDS`] rounds stops the run at Reconcile, so a broker that keeps
-    /// reporting new fills can never hold the run in a loop. Answers each round's verdict.
-    fn settle(
-        &mut self,
-        mut requests: Vec<BrokerRequest>,
-    ) -> Result<Vec<ReconciliationVerdict>, ShellError> {
-        let mut verdicts = Vec::new();
+    /// reporting new fills can never hold the run in a loop. A round that mismatches stops the
+    /// run there ([`Session::stop_on`]), so a round it asked for never runs.
+    fn settle(&mut self, mut requests: Vec<BrokerRequest>) -> Result<(), ShellError> {
+        let mut rounds = 0_usize;
         while !requests.is_empty() {
-            if verdicts.len() >= RECONCILIATION_ROUNDS {
+            if rounds >= RECONCILIATION_ROUNDS {
                 return Err(refused(Stage::Reconcile)(Cause::Absent {
                     what: "a reconciliation that settles",
                 }));
             }
             let (verdict, next) = self.reconcile_once(&requests)?;
-            verdicts.push(verdict);
+            rounds = rounds.saturating_add(1);
+            self.stop_on(verdict)?;
             requests = next;
         }
-        Ok(verdicts)
+        Ok(())
     }
 
     /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
@@ -993,7 +1009,7 @@ impl<'s> Session<'s> {
 
     /// One executor step during the watch and everything it asks for. A reconciliation it asks
     /// for is gathered and run through the reconciler, as at the start, never stepped answer by
-    /// answer (DEC-858 item 3).
+    /// answer (DEC-858 item 3). A mismatch there stops the run as the startup's does.
     fn step_watched(&mut self, input: mandate_executor::Input) -> Result<(), ShellError> {
         let effects = self
             .stages
@@ -1001,7 +1017,7 @@ impl<'s> Session<'s> {
             .step(input)
             .map_err(refused(Stage::Executor))?;
         let requests = self.prepare_reconciliation(effects)?;
-        self.settle(requests).map(|_| ())
+        self.settle(requests)
     }
 
     /// Runs `effects` and everything they lead to, gathering the reconciliation reads they ask
@@ -1373,7 +1389,7 @@ impl<'s> Session<'s> {
                     event_id: mandate_executor::EventId(row.event_id.clone()),
                     event_type: row.event_type.clone(),
                     causation_id: causation.map(mandate_executor::EventId),
-                    payload,
+                    payload: with_environment(row, payload)?,
                 })
                 .map_err(refused(Stage::Executor))?;
         }
@@ -1414,10 +1430,11 @@ fn consecutive_executor_journals(
 mod tests {
     use std::collections::VecDeque;
 
-    use mandate_canon::{Object, Value};
+    use mandate_canon::{Digest, Key, Object, Value};
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
+    use mandate_journal::StoredEvent;
 
-    use super::consecutive_executor_journals;
+    use super::{consecutive_executor_journals, with_environment};
 
     fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
         EventDraft {
@@ -1450,6 +1467,54 @@ mod tests {
         assert!(matches!(effects.front(), Some(Effect::Notify(_))));
         assert_eq!(effects.len(), 1);
     }
+
+    fn stored(event_type: &str) -> StoredEvent {
+        StoredEvent {
+            stream_id: "acct:ws:acct".to_owned(),
+            seq: 1,
+            event_id: "00000900000000000000000001".to_owned(),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: "2026-10-16T00:00:00.000000000Z".to_owned(),
+            prev_hash: Digest::of(b""),
+            hash: Digest::of(b""),
+            body: Vec::new(),
+        }
+    }
+
+    fn payload(members: &[(&str, &str)]) -> Result<Value, String> {
+        let mut object = Object::new();
+        for (name, value) in members {
+            let key = Key::new(name).map_err(|_| format!("the member name {name}"))?;
+            object.insert(key, Value::Str((*value).to_owned()));
+        }
+        Ok(Value::Object(object))
+    }
+
+    fn handed(event_type: &str, payload: Value) -> Result<Value, String> {
+        with_environment(&stored(event_type), payload).map_err(|error| error.to_string())
+    }
+
+    /// DEC-948 item 2: the executor is handed the envelope's environment on a `StreamOpened`
+    /// whose payload names none; a payload's own environment, and every other record, are handed
+    /// on exactly as stored.
+    #[test]
+    fn only_a_stream_opened_without_one_takes_the_envelopes_environment() -> Result<(), String> {
+        assert_eq!(
+            handed("StreamOpened", payload(&[("stream_type", "account")])?)?,
+            payload(&[("environment", "paper"), ("stream_type", "account")])?
+        );
+        let named = payload(&[("environment", "live"), ("stream_type", "account")])?;
+        assert_eq!(
+            handed("StreamOpened", named.clone())?,
+            named,
+            "a payload's own environment is never replaced, so the fold still refuses a mismatch"
+        );
+        let other = payload(&[("result", "clean")])?;
+        assert_eq!(handed("ReconciliationRun", other.clone())?, other);
+        Ok(())
+    }
 }
 
 /// The actor every event the tracer's own fold replays is read as: the agent and account streams
@@ -1469,6 +1534,23 @@ const MARK_FEED: &str = "iex";
 /// The most reconciliations one [`Session::settle`] runs: the one asked for, and the one a late
 /// fill it ingested asks for (DEC-938 item 5).
 const RECONCILIATION_ROUNDS: usize = 2;
+
+/// The executor reads its stream's environment from `StreamOpened`'s `environment` member, which
+/// journal spec §9's registered schema carries in the envelope instead (ADR-0001 ES-23). The
+/// shell hands the executor the environment the journal stored with the record, so a paper
+/// stream books paper's simulated fees (trading spec §10, DEC-948 item 2); every other record,
+/// and a payload that names its own, is handed on as stored.
+fn with_environment(row: &StoredEvent, payload: Value) -> Result<Value, ShellError> {
+    const MEMBER: &str = "environment";
+    let Value::Object(mut members) = payload else {
+        return Ok(payload);
+    };
+    if row.event_type == "StreamOpened" && !members.contains_key(MEMBER) {
+        let key = Key::new(MEMBER).map_err(|_| ShellError::Envelope { field: MEMBER })?;
+        members.insert(key, Value::Str(row.environment.clone()));
+    }
+    Ok(Value::Object(members))
+}
 
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from
 /// anything the shell remembers, so what is folded is what was committed.

@@ -857,6 +857,21 @@ fn a_mismatch_in_an_asked_for_reconciliation_stops_the_startup() -> Result<(), S
     Ok(())
 }
 
+/// #1369 review: once a round mismatches, the startup stops there; a round that mismatched and
+/// asked for another, as one that ingested a late fill does, never has that next round run.
+#[test]
+fn a_mismatch_stops_the_reconciliations_it_asked_for() -> Result<(), String> {
+    for (round, ran) in [(0, 1), (1, 2)] {
+        let world = World::default();
+        let (outcome, rounds) = asking(&world, 2, Some(round))?;
+        let error = refusal(outcome)?;
+        assert_eq!(error.code(), "reconciliation_mismatch", "round {round}");
+        assert_eq!(rounds, ran, "no round runs after round {round}'s mismatch");
+        assert_eq!(world.tally.borrow().submissions, 0);
+    }
+    Ok(())
+}
+
 /// TI-6, TI-12, PB-3, PB-16: a second run over the same journal replays it, restarts, reconciles,
 /// and refuses a new cycle; across both runs there is exactly one submission and one intent.
 #[test]
