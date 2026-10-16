@@ -3098,6 +3098,7 @@ mod sequence_tests {
         Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
             fill_id: FillId(format!("f-{intent}")),
             client_order_id: Some(format!("md-{intent}")),
+            broker_order_id: None,
             instrument: aapl()?,
             side: Side::Sell,
             qty: Qty::parse(qty)?,
@@ -4392,6 +4393,7 @@ mod sequence_tests {
             Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
                 fill_id: FillId("f-w".to_owned()),
                 client_order_id: Some(exit.clone()),
+                broker_order_id: None,
                 instrument: aapl()?,
                 side: Side::Sell,
                 qty: Qty::parse("4")?,
@@ -6426,6 +6428,7 @@ mod sequence_tests {
         Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
             fill_id: FillId(format!("f-{id}")),
             client_order_id: Some(id.to_owned()),
+            broker_order_id: None,
             instrument: aapl()?,
             side: Side::Buy,
             qty: Qty::parse(qty)?,
@@ -9801,6 +9804,7 @@ mod sequence_tests {
                             Some(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
                                 fill_id: FillId(format!("f-{}", desk.fills)),
                                 client_order_id: Some(id.clone()),
+                                broker_order_id: None,
                                 instrument: aapl().map_err(failed)?,
                                 side: Side::Sell,
                                 qty: Qty::parse(&qty.to_string())
@@ -9930,6 +9934,7 @@ mod sequence_tests {
                             Some(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
                                 fill_id: FillId(format!("f-{}", desk.fills)),
                                 client_order_id: Some(id.clone()),
+                                broker_order_id: None,
                                 instrument: aapl().map_err(failed)?,
                                 side: Side::Sell,
                                 qty: Qty::parse(&qty.to_string())
@@ -12608,6 +12613,7 @@ mod sequence_tests {
         Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
             fill_id: FillId(format!("f-external-{qty}")),
             client_order_id: None,
+            broker_order_id: None,
             instrument: aapl()?,
             side: Side::Sell,
             qty: Qty::parse(qty)?,

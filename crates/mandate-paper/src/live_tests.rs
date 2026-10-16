@@ -550,6 +550,7 @@ fn args(acknowledged: Environment) -> Args {
         store: std::env::temp_dir().join("live-start-unused-store"),
         bars: std::env::temp_dir().join("live-start-unused-bars"),
         place_one_order: false,
+        reconcile_only: false,
         acknowledged,
     }
 }

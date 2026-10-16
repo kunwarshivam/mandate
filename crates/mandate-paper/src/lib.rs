@@ -66,12 +66,12 @@ use mandate_shell::control::{
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
-    Artifacts, BrokerFacts, GateQuote, PaperClock, PaperFacts, daily_closes, fresh_quote,
-    liquidity_facts, load_contexts_with_clock, preflight,
+    Artifacts, BrokerFacts, DeploymentInput, GateQuote, PaperClock, PaperFacts, daily_closes,
+    fresh_quote, liquidity_facts, load_contexts_with_clock, preflight, reconcile_context,
 };
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{
-    Cause, Mark, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
+    Booked, Cause, Mark, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
@@ -115,6 +115,9 @@ pub struct Args {
     pub store: PathBuf,
     pub bars: PathBuf,
     pub place_one_order: bool,
+    /// `--reconcile-only` (DEC-955 item 6): book the deployment's own unbooked fills to the
+    /// journal and exit, before any market read, model or cycle. It never places.
+    pub reconcile_only: bool,
     /// The environment the founder acknowledged: `--confirm-paper` or `--confirm-live`, exactly
     /// one. The run refuses unless it is the confirmed mandate's own (LT-9, DEC-937 item 3).
     pub acknowledged: Environment,
@@ -262,6 +265,17 @@ pub enum Outcome {
     /// The cycle ran: what it submitted, or the order it would have placed (boxed: it is large),
     /// beside the exportable evidence its report names (DEC-914 item 6).
     Cycle(Box<Cycle>),
+    /// `--reconcile-only` ran: the deployment's own unbooked fills were booked and nothing was
+    /// sent (DEC-955 item 6).
+    Reconciled(Reconciled),
+}
+
+/// What a `--reconcile-only` run booked: how many fill records it journaled, and that a second
+/// pass over the journal it wrote found nothing more owed (DEC-955 item 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reconciled {
+    /// The fill records journaled, `FillApplied` and `LateFillApplied` together.
+    pub fills: usize,
 }
 
 /// One finished cycle's report (DEC-914 item 6: the shell's `Report` cannot hold a
@@ -348,8 +362,9 @@ pub enum PaperError {
 
 /// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
 /// `--journal`, `--store` and `--bars`, each with a value; exactly one acknowledgement,
-/// `--confirm-paper` or `--confirm-live` (DEC-937 item 3); and `--place-one-order`, which needs
-/// `--journal`. Any other argument is unknown, so none names a mandate, a configuration, a model
+/// `--confirm-paper` or `--confirm-live` (DEC-937 item 3); `--place-one-order`, which needs
+/// `--journal`; and `--reconcile-only` (DEC-955 item 6), which needs `--journal` and excludes
+/// `--place-one-order`. Any other argument is unknown, so none names a mandate, a configuration, a model
 /// output or a host.
 ///
 /// # Errors
@@ -358,6 +373,7 @@ pub enum PaperError {
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError> {
     let mut values: [Option<String>; 6] = Default::default();
     let (mut paper, mut live, mut place_one_order) = (false, false, false);
+    let mut reconcile_only = false;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         let Some(at) = FLAGS.iter().position(|flag| *flag == arg) else {
@@ -365,6 +381,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError
                 "--confirm-paper" => paper = true,
                 "--confirm-live" => live = true,
                 "--place-one-order" => place_one_order = true,
+                "--reconcile-only" => reconcile_only = true,
                 _ => return Err(usage("an argument is unknown".to_owned())),
             }
             continue;
@@ -392,6 +409,14 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError
     if place_one_order && journal.is_none() {
         return Err(usage("--place-one-order needs --journal".to_owned()));
     }
+    if reconcile_only && journal.is_none() {
+        return Err(usage("--reconcile-only needs --journal".to_owned()));
+    }
+    if reconcile_only && place_one_order {
+        return Err(usage(
+            "--reconcile-only and --place-one-order are exclusive".to_owned(),
+        ));
+    }
     let required = |value: Option<String>, flag: &str| {
         value.ok_or_else(|| usage(format!("{flag} is required")))
     };
@@ -403,6 +428,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError
         store: required(store, "--store")?.into(),
         bars: required(bars, "--bars")?.into(),
         place_one_order,
+        reconcile_only,
         acknowledged,
     })
 }
@@ -572,14 +598,39 @@ pub fn run<P: Ports>(
             args.account_ref.clone(),
         )
         .map_err(refused(Stage::Validate))?;
-    let session = match early {
-        Some(session) => session,
+    if args.reconcile_only && args.journal.is_none() {
+        return Err(usage("--reconcile-only needs --journal".to_owned()));
+    }
+    let (session, paper) = match early {
+        Some(session) => (session, false),
         None => {
             let (connection, _) =
                 door.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
-            ports.connect(&connection, None)?
+            let session = ports.connect(&connection, None)?;
+            (session, connection.environment == Environment::Paper)
         }
     };
+    let booking = Booking {
+        session: &session,
+        artifacts: &artifacts,
+        deployed: &deployed,
+        version: confirmed.version(),
+        paper,
+        args,
+    };
+    let booked = booking.book(clock.now())?;
+    if args.reconcile_only {
+        let again = booking.book(clock.now())?;
+        if again.fills != 0 {
+            return Err(absent(
+                Stage::Reconcile,
+                "a journal that owes no fill once booked",
+            ));
+        }
+        return Ok(Outcome::Reconciled(Reconciled {
+            fills: booked.fills,
+        }));
+    }
     let broker = session
         .preflight(&artifacts, clock.clone())
         .map_err(refused(Stage::Reconcile))?;
@@ -695,6 +746,75 @@ pub fn run<P: Ports>(
     )
     .ok();
     Ok(Outcome::Cycle(Box::new(Cycle { report, evidence })))
+}
+
+/// The own-fill reconciliation a run performs before its preflight is judged (DEC-955): a
+/// placing or `--reconcile-only` run on a paper connection books the deployment's own unbooked
+/// fills to its journal, through a cycle whose executor context answers no binding request
+/// ([`reconcile_context`]), before DEC-470 item 1's flat-account check, which is unchanged. A
+/// dry run keeps nothing (DEC-157 item 6) and a live connection keeps its own lapse (DEC-529
+/// item 3), so neither books.
+struct Booking<'r, S> {
+    session: &'r S,
+    artifacts: &'r Artifacts,
+    deployed: &'r DeploymentInput,
+    version: mandate_canon::Digest,
+    /// Whether the run's connection is a paper one; a live run books nothing.
+    paper: bool,
+    args: &'r Args,
+}
+
+impl<S: Session> Booking<'_, S> {
+    /// One own-fill pass at `now`, or nothing booked where the run books nothing.
+    ///
+    /// # Errors
+    /// [`PaperError::Store`] when the store cannot be opened, and every [`PaperError::Shell`]
+    /// stop of [`ProductionCycle::book_own_fills`].
+    fn book(&self, now: UtcNanos) -> Result<Booked, PaperError> {
+        let journal = self
+            .args
+            .journal
+            .clone()
+            .filter(|_| self.args.place_one_order || self.args.reconcile_only)
+            .filter(|_| self.paper);
+        let Some(journal) = journal else {
+            return Ok(Booked::default());
+        };
+        let store = FsArtifactStore::open(&self.args.store).map_err(|_| PaperError::Store)?;
+        let deployment = self.deployed.deployment();
+        let context = reconcile_context(self.artifacts, &deployment.agent)
+            .map_err(refused(Stage::Reconcile))?;
+        let identity = self.artifacts.production_identity();
+        let ticker = identity.symbol.clone();
+        let asset_id = InstrumentId::new(identity.asset_id.as_str())
+            .map_err(|_| absent(Stage::Validate, "the pinned asset id"))?;
+        let sources = Sources {
+            mandate: store.object_path(&ArtifactRef::from_digest(self.version)),
+            journal: Some(journal),
+            recorded_at: now,
+            agent: deployment.agent.clone(),
+            workspace: deployment.workspace.0.clone(),
+            account_ref: self.deployed.account_ref().to_owned(),
+            executor: Some(context),
+            run: None,
+            artifacts: Some(Arc::new(store)),
+            symbols: BrokerSymbols::registered([(ticker, asset_id)]),
+            transport: (),
+        };
+        let setup = Setup {
+            deployment: deployment.clone(),
+            account_ref: self.deployed.account_ref().to_owned(),
+            now,
+            place_one_order: false,
+            new_cycle: false,
+        };
+        let booked = self
+            .session
+            .cycle(sources, setup)
+            .map_err(refused(Stage::Reconcile))?
+            .book_own_fills()?;
+        Ok(booked)
+    }
 }
 
 /// Whether this binary was built with the runner's `live` feature, as the shell's admission
@@ -1248,6 +1368,10 @@ pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
                 .iter()
                 .map(|id| format!("submitted {id}"));
             would_place.chain(submitted).collect()
+        }
+        Outcome::Reconciled(Reconciled { fills }) => {
+            let records = if *fills == 1 { "record" } else { "records" };
+            vec![format!("booked {fills} fill {records}; nothing sent")]
         }
     })
 }

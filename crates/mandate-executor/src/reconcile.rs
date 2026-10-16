@@ -3060,6 +3060,7 @@ pub(crate) mod tests {
             Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
                 fill_id: FillId("f-1".to_owned()),
                 client_order_id: Some(entry.clone()),
+                broker_order_id: None,
                 instrument: aapl()?,
                 side: Side::Buy,
                 qty: Qty::parse("10")?,

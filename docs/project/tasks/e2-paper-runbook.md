@@ -238,11 +238,34 @@ Expected: non-zero exit, one stderr line ending `a paper account with no positio
 and no POST. Prove it: re-export the agent stream to a new filename and confirm its `seq` did not grow. If a
 second `submitted` ever appears, stop and report it.
 
+### 8a. Book a fill the journal missed (`--reconcile-only`, DEC-955)
+
+If a placing run stopped after its order filled (as on 2026-10-16, section 11), the account stream
+can hold the entry `filled` with no `FillApplied` or `LateFillApplied`. Book it without placing:
+```bash
+$P $RUN --reconcile-only ; echo "exit=$?"
+```
+It reads the account stream, and only if the stream owns a submitted order whose fill it has not
+booked does it read the broker, with GETs only: that order by its own client order id, and the
+account's `FILL` activities. It appends the fill records the broker's word calls for (here one
+`LateFillApplied` at the broker's price), checks that nothing more is owed, and prints
+`booked <n> fill record(s); nothing sent`, exit 0. It reads no quote or bars, runs no model and
+places nothing; it needs `--journal` and is refused beside `--place-one-order`. A second
+invocation prints `booked 0 fill records; nothing sent`. A placing run does the same booking
+before its preflight, so after this the second run (section 8) is still refused at Validate while
+the position is open: DEC-470 item 1 is unchanged. Prove it with the section 7b export: the
+account stream gains exactly the fill record(s) and still verifies.
+
+If the broker and the journal disagree (for example the entry reads filled and no matching fill
+activity is listed), the run stops before any append with `the tracer stopped at Reconcile: the
+broker and the journal disagree on <client_order_id>'s fills (<reason>)` and exits non-zero.
+Nothing is journaled or sent; report the line, and do not work around it.
+
 ## 9. Common refusals (stderr, exit non-zero) and what to do
 
 | Message / code | Meaning | Do |
 |---|---|---|
-| `--confirm-paper is required`, `<flag> needs a value`, `an argument is unknown` | usage | only the six value flags, `--confirm-paper`, `--place-one-order` exist |
+| `--confirm-paper is required`, `<flag> needs a value`, `an argument is unknown` | usage | only the six value flags, `--confirm-paper`, `--place-one-order` and `--reconcile-only` exist |
 | `the control stream could not be read` | no or wrong `--journal`, DB down, wrong role or search_path | check DSN, `PGPASSWORD`, section 0 SQL |
 | `<VAR> looks like a URL; ...` | an `*ALPACA*` env var holds a host | unset it |
 | `the paper credentials or client are unavailable` | the two env vars unset or empty | export both |
@@ -253,6 +276,7 @@ second `submitted` ever appears, stop and report it.
 | `... a paper account with no position and no open order` / `an active, unblocked paper account` / `a paper account without accrued fees` | account not flat or blocked | clean the paper account (also the expected second-run refusal) |
 | `... a current, uncrossed IEX quote` or a session refusal | stale quote or outside 09:30-15:50 | retry inside the window |
 | `the gate did not allow the proposal (<reason>)` / `the order builder proposed a quantity of zero` | gate denial / `max_order_usd` below one share | never work around a denial; for zero qty make a new mandate version |
+| `... Reconcile: the broker and the journal disagree on <id>'s fills (<reason>)` | the own-fill booking found the broker's fills and the journal disagreeing (DEC-955 item 4); nothing written or sent | stop and report the line |
 | `the proposal classified ask, and the tracer acts only on auto` | autonomy does not make the opening `auto` | fix autonomy in a new version |
 | `cancel_unconfirmed` (alone) | watch bound hit, cancel not confirmed | check the paper dashboard now, cancel by hand, report it |
 | CLI codes: `owner_user_invalid`, `workspace_already_open`, `instrument_snapshot_invalid`, `instrument_unregistered`, `version_invalid`, `code_mismatch`, `version_unconfirmed`, `version_superseded`, `agent_active`, `mandate_not_paper`, `config_file_unreadable` | a step 4 gesture refused, nothing written | fix the input; `code_mismatch` = re-show the code; `version_superseded` = a later confirm exists |
@@ -584,3 +608,9 @@ failure of §8. While the position is open, every paper run is refused at the sa
 paper run can ever book this fill, and the fill price (763.75) lives only at the broker. Booking it
 needs a path that reconciles without placing. That is a new story for the founder to schedule, and
 it must not loosen the flat-account check.
+
+**Booking path (DEC-955).** The gap above is closed by `--reconcile-only` (section 8a): run it once
+on this account to book the 763.75 fill as a `LateFillApplied`, then re-export the account stream.
+A placing run now books the same way before its preflight and is still refused at Validate while
+the position is open.
+

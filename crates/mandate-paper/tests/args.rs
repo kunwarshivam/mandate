@@ -40,6 +40,7 @@ fn each_flag_reaches_its_field() {
         store: PathBuf::from("s"),
         bars: PathBuf::from("b"),
         place_one_order: true,
+        reconcile_only: false,
         acknowledged: Environment::Paper,
     };
     assert_eq!(placing.unwrap(), expected);
@@ -89,4 +90,32 @@ fn anything_else_is_a_usage_error() {
             &format!("{extra} is no input"),
         );
     }
+}
+
+/// DEC-955 item 6: `--reconcile-only` books the deployment's own unbooked fills to the journal
+/// and places nothing, so it needs the journal it books to and is refused beside
+/// `--place-one-order`.
+#[test]
+fn reconcile_only_needs_its_journal_and_never_places() {
+    let only = parsed(&format!(
+        "{IDS} --journal d --confirm-paper --reconcile-only"
+    ))
+    .unwrap();
+    assert_eq!((only.reconcile_only, only.place_one_order), (true, false));
+    let placing = parsed(&format!(
+        "{IDS} --journal d --confirm-paper --place-one-order"
+    ))
+    .unwrap();
+    assert!(
+        !placing.reconcile_only,
+        "a placing run is not reconcile-only"
+    );
+    usage(
+        &format!("{IDS} --confirm-paper --reconcile-only"),
+        "--reconcile-only needs --journal",
+    );
+    usage(
+        &format!("{IDS} --journal d --confirm-paper --reconcile-only --place-one-order"),
+        "--reconcile-only never places",
+    );
 }

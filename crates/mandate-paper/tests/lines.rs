@@ -8,7 +8,7 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_executor::{ClientOrderId, OrderType, Purpose, SubmitOrder, TimeInForce};
 use mandate_modelhost::Signal;
 use mandate_num::{Price, Qty};
-use mandate_paper::{Cycle, Outcome, PaperError, lines, stderr_line};
+use mandate_paper::{Cycle, Outcome, PaperError, Reconciled, lines, stderr_line};
 use mandate_shell::{Report, ShellError};
 
 const ENTRY: &str = "md-01JPAPERENTRY0000000000001";
@@ -74,6 +74,18 @@ fn no_output_names_the_signal_and_that_nothing_was_sent() {
     assert_eq!(flat, ["the model output Flat; nothing sent"]);
     let undecided = lines(&Outcome::NoOutput(Signal::Undecided)).unwrap();
     assert_eq!(undecided, ["the model output Undecided; nothing sent"]);
+}
+
+/// DEC-955 item 6: `--reconcile-only` prints how many fill records it booked and that nothing was
+/// sent, a count and no value (rule 7).
+#[test]
+fn reconcile_only_names_the_count_booked_and_that_nothing_was_sent() {
+    let one = lines(&Outcome::Reconciled(Reconciled { fills: 1 })).unwrap();
+    assert_eq!(one, ["booked 1 fill record; nothing sent"]);
+    let none = lines(&Outcome::Reconciled(Reconciled { fills: 0 })).unwrap();
+    assert_eq!(none, ["booked 0 fill records; nothing sent"]);
+    let two = lines(&Outcome::Reconciled(Reconciled { fills: 2 })).unwrap();
+    assert_eq!(two, ["booked 2 fill records; nothing sent"]);
 }
 
 /// DEC-877 item 1, rule 6: the cap's fail-closed stop prints its stable code alone on stderr, the

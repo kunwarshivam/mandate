@@ -82,6 +82,14 @@ pub enum ExecutorError {
     /// (task brief interpretation 15).
     #[error("the snapshot was taken at head {snapshot}, but the stream is at {head}")]
     SnapshotOvertaken { snapshot: u64, head: u64 },
+    /// The own-fill reconciliation found the broker and the journal disagreeing about an order
+    /// the journal owns (DEC-955 item 4): nothing is drafted, and the run stops. It names the
+    /// order's opaque id and a reason code only (`AGENTS.md` rule 6).
+    #[error("the broker and the journal disagree on {client_order_id}'s fills ({reason})")]
+    OwnFillMismatch {
+        client_order_id: String,
+        reason: &'static str,
+    },
     #[error(transparent)]
     Json(#[from] JsonError),
     #[error(transparent)]
@@ -127,6 +135,7 @@ impl ExecutorError {
             Self::UnmappedBrokerStatus { .. } => "unmapped_broker_status",
             Self::UnknownOrder { .. } => "unknown_order",
             Self::SnapshotOvertaken { .. } => "snapshot_overtaken",
+            Self::OwnFillMismatch { .. } => "own_fill_mismatch",
             Self::Json(_) => "payload_rejected",
             Self::Num(_) => "arithmetic",
             Self::Time(_) => "time",
@@ -136,7 +145,7 @@ impl ExecutorError {
 
     /// Every code this crate can answer with, in the order [`Self::code`] matches them. The set is
     /// closed, which is what `hand::every_error_code_is_stable_and_unique` checks (ES-09).
-    pub const CODES: [&'static str; 24] = [
+    pub const CODES: [&'static str; 25] = [
         "unimplemented",
         "not_interpreted",
         "sequence_out_of_order",
@@ -157,6 +166,7 @@ impl ExecutorError {
         "unmapped_broker_status",
         "unknown_order",
         "snapshot_overtaken",
+        "own_fill_mismatch",
         "payload_rejected",
         "arithmetic",
         "time",

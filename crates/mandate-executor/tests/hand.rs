@@ -6514,6 +6514,10 @@ fn every_error_code_is_stable_and_unique() {
             snapshot: 1,
             head: 2,
         },
+        ExecutorError::OwnFillMismatch {
+            client_order_id: "x".to_owned(),
+            reason: "fills_short",
+        },
     ];
     for sample in &samples {
         assert!(
@@ -6528,7 +6532,7 @@ fn every_error_code_is_stable_and_unique() {
     }
     assert_eq!(
         codes.len(),
-        24,
+        25,
         "the set is closed: a new variant adds a row here and a match arm in `code()`"
     );
 }
