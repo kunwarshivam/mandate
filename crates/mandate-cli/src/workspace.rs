@@ -24,6 +24,9 @@ pub struct OpenArgs {
     /// The workspace whose control stream to open.
     #[arg(long, value_name = "ID")]
     pub workspace: String,
+    /// `paper`, the default, or `live`: the workspace's environment, for life (DEC-952).
+    #[arg(long, value_name = "ENV", default_value = "paper")]
+    pub environment: String,
     #[command(flatten)]
     pub target: JournalArgs,
 }

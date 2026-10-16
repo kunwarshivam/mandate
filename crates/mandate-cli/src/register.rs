@@ -24,6 +24,12 @@ pub struct OwnerArgs {
     /// or a name.
     #[arg(long, value_name = "ID")]
     pub user: String,
+    /// `paper`, the default, or `live`: the environment the owner acts in, which must be the
+    /// workspace's own (DEC-952). A `live` gesture is admitted only for a `live` mandate on a
+    /// Robinhood connection the owner recorded through `connection record` and has not spent
+    /// (DEC-529 item 3).
+    #[arg(long, value_name = "ENV", default_value = "paper")]
+    pub environment: String,
 }
 
 impl OwnerArgs {
