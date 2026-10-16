@@ -8,7 +8,13 @@
   implemented: `agentic_account` and `read`, the reads scoped to the agentic account, CN-8,
   DEC-875, and their filter-key allowlist, DEC-879; C4 implemented: `account_snapshot` and
   `preflight_facts`, DEC-470 item 1's facts from the scoped reads, quotes and tradability,
-  DEC-902).
+  DEC-902). The tool seam `Tools` is `mandate-mcp`'s, implemented for `McpClient`
+  (`crates/mandate-mcp/src/tools.rs`, DEC-928 item 1). In the shell,
+  `crates/mandate-shell/src/robinhood.rs` (DEC-928 items 2 and 3): `RobinhoodBridge`, one
+  runtime and one connector; `RobinhoodShellConnector`, the shell's `Connector` with Robinhood's
+  profile; and `RobinhoodReconciler`, which reads the agentic account and refuses until
+  Robinhood's account fields have a source. `mandate-shell-rh-sim`, `crates/mandate-shell-rh-sim/`
+  (layer 11, tests only, DEC-928 item 4), is the shell's simulator harness.
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),
   `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870, DEC-872, DEC-874 and DEC-876: the
   `order_id` map rebuilt from the account stream, the distinct-id property, the odd-id and
@@ -35,4 +41,5 @@
   against `SimServer` over loopback, a halted symbol `NotTradable` before the quote, the served
   reads refusing what the core does not hold, and the core's own portfolio, positions, average
   and tradability figures), kept in the simulator's crate so no product crate depends on it.
-- **Run:** `cargo nextest run -p mandate-robinhood -p mandate-rh-sim`.
+- **Run:** `cargo nextest run -p mandate-robinhood -p mandate-rh-sim -p mandate-shell-rh-sim`, and
+  `cargo nextest run -p mandate-mcp tools`.

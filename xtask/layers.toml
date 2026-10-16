@@ -263,8 +263,8 @@ allowed_external = ["serde_json", "thiserror"]
 [crates.mandate-shell-rh-sim]
 layer = 11
 safety_critical = true
-pure = true
-allowed_external = []
+pure = false
+allowed_external = ["serde_json", "tokio"]
 
 [crates.mandate-builder]
 layer = 5

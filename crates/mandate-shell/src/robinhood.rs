@@ -14,9 +14,9 @@ use std::rc::Rc;
 
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError, Reconciliation,
+    BrokerConnector, BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError, Reconciliation,
 };
-use mandate_robinhood::{RobinhoodConnector, Tools};
+use mandate_robinhood::{RobinhoodConnector, Tools, robinhood_profile};
 use tokio::runtime::Runtime;
 
 use crate::error::Cause;
@@ -56,17 +56,21 @@ impl<T: Tools> Connector for RobinhoodShellConnector<T> {
     /// Robinhood's profile (trading spec §5.2, DEC-860 item 5), so the executor's protection reads
     /// the stop-limit Robinhood offers and never Alpaca's forms (DEC-838 item 5).
     fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
-        mandate_alpaca::alpaca_profile()
+        robinhood_profile()
     }
 
     /// One request, answered as `RobinhoodConnector::call` answers it. A request made while the
     /// reconciler holds the connector is `NotSent` (`connector_busy`) with nothing called; the
     /// stages run one at a time, so it marks a wiring fault, never a broker answer.
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
-        let _ = (request, &self.bridge);
-        Err(ConnectorError::NotSent {
-            code: "unimplemented",
-        })
+        let mut connector =
+            self.bridge
+                .connector
+                .try_borrow_mut()
+                .map_err(|_| ConnectorError::NotSent {
+                    code: "connector_busy",
+                })?;
+        self.bridge.runtime.block_on(connector.call(request))
     }
 }
 
@@ -105,13 +109,24 @@ impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
         requests: &[BrokerRequest],
     ) -> Result<BrokerSnapshot, Cause> {
         let _ = (connector, requests);
-        let _ = &self.bridge;
-        Err(Cause::Unimplemented { story: "E7-6" })
+        let busy = Cause::Absent {
+            what: "the Robinhood connector, held by another stage",
+        };
+        let robinhood = self.bridge.connector.try_borrow().map_err(|_| busy)?;
+        let read = self.bridge.runtime.block_on(robinhood.account_snapshot());
+        read.map_err(|_| Cause::Absent {
+            what: ACCOUNT_UNREAD,
+        })?;
+        Err(Cause::Absent {
+            what: STATUS_UNPUBLISHED,
+        })
     }
 
     /// No Robinhood snapshot is ever handed out, so none is reconciled (DEC-928 item 3).
     fn reconcile(&mut self, snapshot: &BrokerSnapshot) -> Result<Reconciliation, Cause> {
         let _ = snapshot;
-        Err(Cause::Unimplemented { story: "E7-6" })
+        Err(Cause::Absent {
+            what: STATUS_UNPUBLISHED,
+        })
     }
 }

@@ -28,7 +28,7 @@ impl Tools for McpClient {
         tool: &'static str,
         arguments: &Value,
     ) -> Result<String, McpError> {
-        let _ = (class, tool, arguments);
-        Err(McpError::Malformed)
+        let result = McpClient::call_tool(self, class, tool, arguments).await?;
+        Ok(result.as_json().to_owned())
     }
 }

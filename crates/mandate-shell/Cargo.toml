@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "The process shell that binds the runtime, the executor, and the Alpaca paper connector (backlog E7-7, DEC-475 item 6)"
+description = "The process shell that binds the runtime, the executor, and the Alpaca paper and Robinhood connectors (backlog E7-7, DEC-475 item 6, DEC-928)"
 
 [lints]
 workspace = true

@@ -365,7 +365,7 @@ fn nothing_outside_the_profile_is_sent() {
     ] {
         assert_eq!(
             shell.connector.call(&request),
-            Err(not_offered.clone()),
+            Err(not_offered),
             "{request:?}"
         );
     }
