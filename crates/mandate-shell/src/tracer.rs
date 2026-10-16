@@ -1289,10 +1289,11 @@ fn consecutive_executor_journals(
 mod tests {
     use std::collections::VecDeque;
 
-    use mandate_canon::{Object, Value};
+    use mandate_canon::{Digest, Key, Object, Value};
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
+    use mandate_journal::StoredEvent;
 
-    use super::consecutive_executor_journals;
+    use super::{consecutive_executor_journals, with_environment};
 
     fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
         EventDraft {
@@ -1324,6 +1325,58 @@ mod tests {
         );
         assert!(matches!(effects.front(), Some(Effect::Notify(_))));
         assert_eq!(effects.len(), 1);
+    }
+
+    fn stored(event_type: &str) -> StoredEvent {
+        StoredEvent {
+            stream_id: "acct:ws:acct".to_owned(),
+            seq: 1,
+            event_id: "00000900000000000000000001".to_owned(),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: "2026-10-16T00:00:00.000000000Z".to_owned(),
+            prev_hash: Digest::of(b""),
+            hash: Digest::of(b""),
+            body: Vec::new(),
+        }
+    }
+
+    fn payload(members: &[(&str, &str)]) -> Value {
+        let mut object = Object::new();
+        for (name, value) in members {
+            object.insert(
+                Key::new(name).unwrap_or_else(|_| panic!("{name}")),
+                Value::Str((*value).to_owned()),
+            );
+        }
+        Value::Object(object)
+    }
+
+    /// DEC-948 item 2: the executor is handed the envelope's environment on a `StreamOpened`
+    /// whose payload names none; a payload's own environment, and every other record, are handed
+    /// on exactly as stored.
+    #[test]
+    fn only_a_stream_opened_without_one_takes_the_envelopes_environment() {
+        let bare = payload(&[("stream_type", "account")]);
+        assert_eq!(
+            with_environment(&stored("StreamOpened"), bare).ok(),
+            Some(payload(&[
+                ("environment", "paper"),
+                ("stream_type", "account")
+            ]))
+        );
+        let named = payload(&[("environment", "live"), ("stream_type", "account")]);
+        assert_eq!(
+            with_environment(&stored("StreamOpened"), named.clone()).ok(),
+            Some(named),
+            "a payload's own environment is never replaced, so the fold still refuses a mismatch"
+        );
+        let other = payload(&[("result", "clean")]);
+        assert_eq!(
+            with_environment(&stored("ReconciliationRun"), other.clone()).ok(),
+            Some(other)
+        );
     }
 }
 

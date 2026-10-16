@@ -2434,6 +2434,71 @@ fn a_fill_the_reconciliation_ingests_is_counted_once_in_the_models_cash() {
     }
 }
 
+/// DEC-948 item 5's boundary: a report folded at the snapshot's own head was folded before the
+/// snapshot was taken, so it is an earlier base, never the snapshot's own report. A report at 19000
+/// after the startup's 20000, then a buy of 10 at 150 the reconciliation ingests, puts the model at
+/// 17500, measured from the 19000: the broker's 17500 is in the band. Measured from the 20000 the
+/// report replaced, as for the snapshot's own report, the model would read 18500 and mismatch.
+#[test]
+fn a_report_folded_at_the_snapshots_head_is_an_earlier_base() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let config = config();
+    let fixed = FixedInstruments;
+    let ports = Ports {
+        instruments: &Registered,
+        ..ports(&ids, &mandates, &fixed, &config)
+    };
+    let mut shell = fresh(&ports);
+    let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "10",
+            "filled",
+        ))),
+        &ports,
+    );
+    let mut earlier = broker_account();
+    earlier.cash = usd("19000");
+    shell.run(Input::BrokerUpdate(BrokerUpdate::Account(earlier)), &ports);
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
+    taken.fills = vec![broker_fill("f-1", Some(&id), "10", "150")];
+    taken.positions = vec![broker_position(AAPL, "10")];
+    taken.account.cash = usd("17500");
+    let run = reconcile(&shell.state, &taken, &ports).expect("runs");
+    let recorded = run
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            mandate_executor::Effect::Journal(draft)
+                if draft.event_type == "AccountSnapshotRecorded" =>
+            {
+                Some(draft)
+            }
+            mandate_executor::Effect::Journal(_)
+            | mandate_executor::Effect::Broker(_)
+            | mandate_executor::Effect::Timer(_)
+            | mandate_executor::Effect::Notify(_) => None,
+        })
+        .expect("the cash is compared");
+    assert_eq!(
+        (
+            recorded.payload.get("model_cash").cloned(),
+            recorded.payload.get("cash_in_band").cloned()
+        ),
+        (Some(text("17500")), Some(Value::Bool(true)))
+    );
+    assert_ne!(
+        run.verdict,
+        mandate_executor::ReconciliationVerdict::Mismatch
+    );
+}
+
 fn reconciled_cash(cash: &str, in_band: bool) {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
