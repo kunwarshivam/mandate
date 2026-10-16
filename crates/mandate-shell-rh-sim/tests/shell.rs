@@ -389,8 +389,9 @@ fn nothing_outside_the_profile_is_sent() {
 }
 
 /// The account the reconciler reads from the simulator's agentic account (DEC-933 item 1): its
-/// cash 750.25 and buying power 10,000 as reported, the status the agentic check stands for, and
-/// every unpublished figure at the value that adds no buying power and lifts no limit.
+/// cash 750.25 as reported, its buying power of 10,000 clamped to that cash, the status the
+/// agentic check stands for, and every unpublished figure at the value that adds no buying power
+/// and lifts no limit.
 fn mapped_account() -> BrokerAccount {
     let usd = |text: &str| Usd::parse(text).unwrap();
     BrokerAccount {
@@ -402,7 +403,7 @@ fn mapped_account() -> BrokerAccount {
         multiplier: 1,
         equity: usd("750.25"),
         cash: usd("750.25"),
-        buying_power: usd("10000"),
+        buying_power: usd("750.25"),
         non_marginable_buying_power: usd("750.25"),
         accrued_fees: Usd::ZERO,
         last_equity: Usd::ZERO,

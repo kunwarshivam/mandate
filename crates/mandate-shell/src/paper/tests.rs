@@ -1420,9 +1420,12 @@ fn the_robinhood_facts_are_its_account_beside_alpacas_market_reads() -> Result<(
     let richer =
         robinhood_facts(market()?, &robinhood_preflight("1100", Vec::new())?).map_err(text)?;
     assert_eq!(
-        richer.account.non_marginable_buying_power,
-        usd("1000")?,
-        "never more than the cash"
+        (
+            richer.account.buying_power,
+            richer.account.non_marginable_buying_power
+        ),
+        (usd("1000")?, usd("1000")?),
+        "a broker figure above the cash is clamped to the cash, in both buying power fields"
     );
     Ok(())
 }

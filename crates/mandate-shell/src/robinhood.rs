@@ -142,8 +142,8 @@ pub fn robinhood_account_rules() -> AccountRules {
 /// The agentic account's snapshot as the executor's [`BrokerAccount`] (DEC-933 item 1, the
 /// recommendation of DEC-928's note to the founder, under DEC-929):
 ///
-/// - `cash` and `buying_power` are `get_portfolio`'s, and `non_marginable_buying_power` is the
-///   lower of the two (DEC-620 item 2), so the gate never spends more than cash;
+/// - `cash` is `get_portfolio`'s, and `buying_power` and `non_marginable_buying_power` are the
+///   lower of its cash and buying power (DEC-620 item 2), so no figure exceeds cash;
 /// - `status` is `ACTIVE` and no flag is set, because a snapshot exists only when every one of
 ///   its reads found the recorded account listed `agentic_allowed` (DEC-875); any other answer
 ///   refused the read;
@@ -158,6 +158,7 @@ pub fn robinhood_account_rules() -> AccountRules {
 #[must_use]
 pub fn robinhood_account(snapshot: &AccountSnapshot) -> BrokerAccount {
     let cash = snapshot.cash;
+    let one_x = cash.min(snapshot.buying_power);
     BrokerAccount {
         status: "ACTIVE".to_owned(),
         crypto_status: "INACTIVE".to_owned(),
@@ -167,8 +168,8 @@ pub fn robinhood_account(snapshot: &AccountSnapshot) -> BrokerAccount {
         multiplier: 1,
         equity: cash,
         cash,
-        buying_power: snapshot.buying_power,
-        non_marginable_buying_power: cash.min(snapshot.buying_power),
+        buying_power: one_x,
+        non_marginable_buying_power: one_x,
         accrued_fees: Usd::ZERO,
         last_equity: Usd::ZERO,
         maintenance_margin: cash,
