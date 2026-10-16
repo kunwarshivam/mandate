@@ -269,7 +269,7 @@ pub struct Wake {
 
 /// The open session of a cycle that asked (G1b, DEC-940), as the runner's grant wait drives it:
 /// the session stays the shell's (DEC-475), and the runner reads, wakes and releases through
-/// these three calls only.
+/// these four calls only.
 pub trait AskedCycle {
     /// The agent stream's rows as the journal reads them now: the ask the cycle journaled is the
     /// youngest `ApprovalRequested` among them (DEC-914 item 1).
@@ -288,6 +288,18 @@ pub trait AskedCycle {
     /// # Errors
     /// Every [`ShellError`] is a stop after which nothing is sent.
     fn wake(&mut self, now: UtcNanos, mark: &Mark) -> Result<Wake, ShellError>;
+
+    /// One wake at or past the ask's deadline, `now` (DEC-949): the risk clock ticked to `now`
+    /// alone, so the runtime closes the ask with its own `ApprovalTimedOut` (journal spec §9.7,
+    /// rule 135; mandate spec §6.4's `on_timeout: skip`), then both streams read back. No mark is
+    /// journaled and no answer is handed: an answer the runtime has not yet read is late at
+    /// `now`, so nothing it holds can release the opening, and the deny needs no quote. An
+    /// opening the runtime releases is still held, never sent; an exit or a protective order
+    /// passes the door as at every wake (rule 13).
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a stop after which nothing is sent.
+    fn expire(&mut self, now: UtcNanos) -> Result<Wake, ShellError>;
 
     /// Sends the one opening the runtime released and the wait let leave.
     ///
@@ -480,6 +492,21 @@ impl AskedCycle for Session<'_> {
             self.feed_asked(Input::Journal(event))?;
         }
         self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
+        Ok(Wake {
+            agent: self.agent_rows()?,
+            control,
+        })
+    }
+
+    fn expire(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
+        self.event_time = now;
+        self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
+        let stream = control_stream(&self.setup.deployment.workspace.0);
+        let control = self
+            .stages
+            .journal
+            .read(&stream)
+            .map_err(refused(Stage::Journal))?;
         Ok(Wake {
             agent: self.agent_rows()?,
             control,

@@ -318,13 +318,31 @@ where
         })?;
     loop {
         let read = reads()?;
-        match answers(&read.control, &read.agent, &ask, pause.now()) {
+        let now = pause.now();
+        match answers(&read.control, &read.agent, &ask, now) {
             Ok(()) => return Ok(()),
             Err(GrantRefusal::Unanswered) => {}
             Err(refusal) => return Err(PaperError::Grant(refusal)),
         }
-        runtime.block_on(pause.pause(interval));
+        runtime.block_on(pause.pause(interval.min(until(now, ask.deadline))));
     }
+}
+
+/// The time from `now` to `deadline`, the wait's last pause (DEC-949 item 2): the wake after it is
+/// at the deadline itself, so the runtime is ticked there and closes the ask. `now` is before the
+/// deadline whenever the wait pauses — at or after it the fold has already denied — so a
+/// `deadline` already reached reads as no time left.
+fn until(now: UtcNanos, deadline: UtcNanos) -> Duration {
+    let nanos = |at: UtcNanos| {
+        i128::from(at.secs())
+            .checked_mul(1_000_000_000)
+            .and_then(|whole| whole.checked_add(i128::from(at.nanos())))
+    };
+    nanos(deadline)
+        .zip(nanos(now))
+        .and_then(|(deadline, now)| deadline.checked_sub(now))
+        .and_then(|left| u64::try_from(left).ok())
+        .map_or(Duration::ZERO, Duration::from_nanos)
 }
 
 /// The registered gate configuration's own collar members (the very members
@@ -495,9 +513,10 @@ pub fn watch_may_end(
 /// ([`AskedCycle::submit`]). A timeout, a deny, a difference, a refused cross-check or a stopped
 /// wake each end the run with nothing sent (`AGENTS.md` rule 3); exits and protective orders are
 /// never held by the shell, so nothing here can hold one (rule 13). A wake at or past the ask's
-/// deadline hands the runtime nothing: the fold denies the timeout there with no read, and the
-/// approval stays pending on the journal for the runtime's own fold (DEC-912 item 1; DEC-940
-/// item 7).
+/// deadline — the wait's last pause ends at it, and an ask bound already past it takes one — reads
+/// no quote and hands the runtime no answer: it ticks the runtime's clock alone
+/// ([`AskedCycle::expire`]), so the runtime journals its own `ApprovalTimedOut` (`on_timeout:
+/// skip`, caused by the ask), and the fold denies the timeout (DEC-949, closing DEC-940 item 7).
 ///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing is sent.
@@ -514,16 +533,24 @@ where
     C: FnOnce() -> Result<(), PaperError>,
 {
     let agent_rows = cycle.agent_rows().map_err(PaperError::Shell)?;
-    let deadline = asked(&agent_rows, pause.now())
-        .map_err(PaperError::Grant)?
-        .deadline;
+    let deadline = match asked(&agent_rows, pause.now()) {
+        Ok(ask) => ask.deadline,
+        Err(GrantRefusal::TimedOut) => {
+            cycle.expire(pause.now()).map_err(PaperError::Shell)?;
+            return Err(PaperError::Grant(GrantRefusal::TimedOut));
+        }
+        Err(refusal) => return Err(PaperError::Grant(refusal)),
+    };
     let reads = || {
         let now = pause.now();
         if now >= deadline {
-            return Ok(WakeRead {
-                agent: agent_rows.clone(),
-                control: Vec::new(),
-            });
+            return cycle
+                .expire(now)
+                .map(|wake| WakeRead {
+                    agent: wake.agent,
+                    control: wake.control,
+                })
+                .map_err(PaperError::Shell);
         }
         let mark = fresh()?;
         cycle
