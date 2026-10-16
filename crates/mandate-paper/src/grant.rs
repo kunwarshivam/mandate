@@ -127,8 +127,57 @@ pub fn grant(
     ask: &Asked,
     now: UtcNanos,
 ) -> Result<(), GrantRefusal> {
-    let _ = (control, agent, ask, now);
-    Err(GrantRefusal::Unimplemented { story: "E7-26" })
+    let held = || {
+        if now >= ask.deadline {
+            GrantRefusal::TimedOut
+        } else {
+            GrantRefusal::Unanswered
+        }
+    };
+    let ours = |row: &Journaled| member(&row.record, "approval") == Some(ask.approval.as_str());
+    let answering =
+        |row: &&Journaled| row.record.event_type == "ApprovalResponseSubmitted" && ours(row);
+    for answer in control.iter().filter(answering) {
+        let (verdict, content_hash) = match (
+            member(&answer.record, "verdict"),
+            member(&answer.record, "content_hash"),
+        ) {
+            (Some(verdict), Some(content_hash)) => (verdict, content_hash),
+            _ => return Err(GrantRefusal::Mismatched),
+        };
+        if content_hash != ask.content_hash {
+            return Err(GrantRefusal::Mismatched);
+        }
+        match verdict {
+            "approved" => {}
+            "skipped" => return Err(GrantRefusal::Denied),
+            _ => return Err(GrantRefusal::Mismatched),
+        }
+        let Some(copy) = caused_by(agent, "ApprovalResponded", &answer.event_id) else {
+            return Err(held());
+        };
+        if !ours(copy) || member(&copy.record, "verdict") != Some("approved") {
+            return Err(GrantRefusal::Mismatched);
+        }
+        match member(&copy.record, "result") {
+            Some("admitted") => {}
+            Some("refused" | "counted") => continue,
+            _ => return Err(GrantRefusal::Mismatched),
+        }
+        let Some(revalidation) = caused_by(agent, "ApprovalRevalidated", &copy.event_id) else {
+            return Err(held());
+        };
+        if !ours(revalidation) {
+            return Err(GrantRefusal::Mismatched);
+        }
+        return match member(&revalidation.record, "result") {
+            Some("act") if now < ask.deadline => Ok(()),
+            Some("act") => Err(GrantRefusal::TimedOut),
+            Some("skip") => Err(GrantRefusal::Denied),
+            _ => Err(GrantRefusal::Mismatched),
+        };
+    }
+    Err(held())
 }
 
 /// The first of `rows`, in journal order, of `event_type` whose `causation_id` is `cause`: the
