@@ -1343,14 +1343,14 @@ mod tests {
     }
 
     fn payload(members: &[(&str, &str)]) -> Value {
-        let mut object = Object::new();
-        for (name, value) in members {
-            object.insert(
-                Key::new(name).unwrap_or_else(|_| panic!("{name}")),
-                Value::Str((*value).to_owned()),
-            );
-        }
-        Value::Object(object)
+        Value::Object(
+            members
+                .iter()
+                .filter_map(|(name, value)| {
+                    Some((Key::new(name).ok()?, Value::Str((*value).to_owned())))
+                })
+                .collect::<Object>(),
+        )
     }
 
     /// DEC-948 item 2: the executor is handed the envelope's environment on a `StreamOpened`
