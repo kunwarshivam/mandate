@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// The event types §9.1 closes on the agent stream, and the §9.7 records closed there by this module.
-const CLOSED: [&str; 13] = [
+const CLOSED: [&str; 14] = [
     "StreamOpened",
     "ObservationRecorded",
     "ModelOutputRecorded",
@@ -26,6 +26,7 @@ const CLOSED: [&str; 13] = [
     "ApprovalResponded",
     "ApprovalRevalidated",
     "ApprovalTimedOut",
+    "ApprovalCanceled",
     "AgentModeChanged",
     "KillSwitchActivated",
     "OwnerExitRequested",
@@ -762,6 +763,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "ApprovalResponded" => Some(&APPROVAL_RESPONDED),
         "ApprovalRevalidated" => Some(&APPROVAL_REVALIDATED),
         "ApprovalTimedOut" => Some(&APPROVAL_TIMED_OUT),
+        "ApprovalCanceled" => Some(&APPROVAL_CANCELED),
         "AgentModeChanged" => Some(&AGENT_MODE_CHANGED),
         "KillSwitchActivated" => Some(&KILL_SWITCH_ACTIVATED),
         "OwnerExitRequested" => Some(&OWNER_EXIT_REQUESTED),
@@ -1033,6 +1035,22 @@ static APPROVAL_REVALIDATED: Ty = Ty::Record(&[
 /// 135, its cause, is checked with the copy rules in [`subject_and_copy`].
 static APPROVAL_TIMED_OUT: Ty =
     Ty::Record(&[("approval", Ty::Ulid), ("on_timeout", Ty::OneOf(&["skip"]))]);
+
+/// Journal spec v0.43 §9.7 (DEC-950): a tightening canceled a pending ask. The five reasons the
+/// runtime writes, and no legacy `rebound`; no rule reads its cause.
+static APPROVAL_CANCELED: Ty = Ty::Record(&[
+    ("approval", Ty::Ulid),
+    (
+        "reason",
+        Ty::OneOf(&[
+            "version_applied",
+            "mode_tightened",
+            "owner_pause",
+            "owner_stop",
+            "kill_switch",
+        ]),
+    ),
+]);
 
 /// Rules 47 to 49 (journal spec §9.7): a reason exactly when refused, a quorum exactly when check 7
 /// was judged, and a skip judged by checks 1 to 5 only.
