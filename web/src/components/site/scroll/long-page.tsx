@@ -176,14 +176,23 @@ export function LongPage() {
 
       <Wont />
 
-      <section id={SIGN_UP_ID} aria-labelledby={`${SIGN_UP_ID}-title`} className="scroll-mt-14 bg-background" data-slot="sign-up">
-        <div className={cn(WRAP, "grid justify-items-center py-24 sm:py-32")}>
-          <div className="grid w-full max-w-[38rem] gap-6 rounded-3xl bg-card p-7 ring-1 ring-foreground/10 sm:p-10" data-reveal="">
-            <h2 id={`${SIGN_UP_ID}-title`} className={cn(styles.display, DISPLAY_MD)}>
-              Put an agent to work.
+      <section id={SIGN_UP_ID} aria-labelledby={`${SIGN_UP_ID}-title`} className="scroll-mt-14 bg-highlight text-highlight-foreground" data-slot="sign-up">
+        <div className={cn(WRAP, "grid items-center gap-16 py-24 sm:py-32 lg:grid-cols-12")}>
+          <div className="grid content-start gap-6 lg:col-span-6">
+            <h2 id={`${SIGN_UP_ID}-title`} className={cn(styles.display, DISPLAY)} data-reveal="">
+              Put an agent <i>to work.</i>
             </h2>
-            <p className={LEAD}>We&apos;re letting people in a few at a time. It&apos;s free during the beta.</p>
-            <BetaForm id={PAGE_FORM_ID} look="page" />
+            <p className="max-w-[30rem] text-[1.125rem] leading-[1.6] text-pretty sm:text-[1.25rem]" style={nth(1)} data-reveal="">
+              We&apos;re letting people in a few at a time. It&apos;s free during the beta, and every agent starts on paper money.
+            </p>
+          </div>
+          <div className="relative lg:col-span-6" style={nth(2)} data-reveal="">
+            <span aria-hidden className="absolute -top-10 right-10 sm:-top-12" style={{ color: "var(--logo)" }} data-slot="sign-up-owl">
+              <BrandOwl className="size-12 sm:size-14" />
+            </span>
+            <div className="grid gap-6 rounded-3xl bg-card p-7 text-foreground ring-1 ring-foreground sm:p-10">
+              <BetaForm id={PAGE_FORM_ID} look="page" />
+            </div>
           </div>
         </div>
       </section>
