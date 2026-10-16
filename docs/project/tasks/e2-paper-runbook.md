@@ -325,3 +325,28 @@ the exchange's stamps by tens of milliseconds. Not worked around (no clock adjus
 loop); nothing placed. The next run needs an NTP-disciplined host (for example chrony, with its
 offset recorded before the run) or a founder decision on a clock tolerance, which would loosen a
 check (DEC-79).
+
+### Run on an NTP-synced host: stopped at the clock check (16:17 to 16:19 UTC)
+
+A fresh cloud session with network access set to Full, to run E2 under DEC-936. chrony 4.x was
+installed from apt and started with `time.google.com`, `time.cloudflare.com`, `216.239.35.0`,
+`162.159.200.1` and `pool.ntp.org` (`makestep 0.1 -1`). DNS now resolves (the pool names became
+addresses), but no NTP server answered: every source stayed at `Reach 0`, and a plain
+client query (48-byte mode-3 packet to UDP 123) timed out against all four targets. Output at
+16:18:57 UTC:
+```
+^? 216.239.35.0      0   7     0     -     +0ns[   +0ns] +/-    0ns
+^? 162.159.200.1     0   7     0     -     +0ns[   +0ns] +/-    0ns
+(six more sources, all Reach 0)
+Reference ID    : 00000000 ()
+System time     : 0.000000000 seconds fast of NTP time
+Leap status     : Not synchronised
+216.239.35.0  Total TX : 8  Total RX : 0
+162.159.200.1 Total TX : 8  Total RX : 0
+```
+The Full network level opens outbound HTTP(S) through the session's proxy only; UDP 123 is still
+refused. Under DEC-936 item 2 this host does not run E2, so the run stopped here: nothing was
+built into a journal, no Alpaca call was made, no dry run and no order. Setting the clock from an
+HTTP `Date` header or from Alpaca's stamps is not an NTP source (DEC-936, alternatives) and was not
+tried. E2 needs a host with UDP 123 egress (a VM or the founder's machine with chrony or
+systemd-timesyncd), or a new founder decision.
