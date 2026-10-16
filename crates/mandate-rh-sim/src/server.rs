@@ -130,6 +130,13 @@ impl SimServer {
         })
     }
 
+    /// The rehearsal server: `script`'s core behind the OAuth login, on `127.0.0.1:port`.
+    pub fn rehearse(_script: crate::Script, _port: u16) -> Result<Self, ServerError> {
+        Err(ServerError::Listen(
+            "the rehearsal server is not built yet".to_owned(),
+        ))
+    }
+
     /// The address the server listens on.
     pub fn addr(&self) -> Result<SocketAddr, ServerError> {
         Ok(self.addr)

@@ -24,7 +24,7 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
-use crate::endpoint::{Build, PinnedEndpoint, scheme_allowed};
+use crate::endpoint::{Build, PinnedEndpoint, host_allowed, scheme_allowed};
 use crate::error::McpError;
 use crate::frame;
 use crate::transport::{
@@ -538,14 +538,26 @@ fn well_known(url: &Url, prefix: &str) -> Url {
 }
 
 /// A URL the authorization server names: no credentials or fragment, `https` (loopback `http` in
-/// this crate's test build), on one of `auth_hosts`. Nothing of the text reaches the error.
+/// this crate's test build and the rehearsal build, which dials only loopback), on one of
+/// `auth_hosts`. Nothing of the text reaches the error.
 fn on_auth_host(text: &str, auth_hosts: &[&str]) -> Result<Url, McpError> {
+    on_auth_host_for(text, auth_hosts, Build::CURRENT)
+}
+
+pub(crate) fn on_auth_host_for(
+    text: &str,
+    auth_hosts: &[&str],
+    build: Build,
+) -> Result<Url, McpError> {
     let url = Url::parse(text).map_err(|_| McpError::EndpointShape)?;
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return Err(McpError::EndpointShape);
     }
-    if !scheme_allowed(&url, Build::CURRENT) {
+    if !scheme_allowed(&url, build) {
         return Err(McpError::NotHttps);
+    }
+    if !host_allowed(&url, build) {
+        return Err(McpError::OffLoopback);
     }
     if !url
         .host_str()

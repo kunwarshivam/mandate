@@ -48,8 +48,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+mod script;
 mod server;
 
+pub use script::{Script, ScriptError, ScriptedFill};
 pub use server::{CONTRACT, Garble, INJECTION, ServerError, SimServer, Variant};
 
 use mandate_num::{Price, Qty, Rounding, ShareIncrement, Usd};

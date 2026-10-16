@@ -6,17 +6,22 @@ use reqwest::Url;
 
 use crate::error::McpError;
 
-/// Which build is running: only this crate's own test build may dial plain `http`, and only on
-/// a loopback address, where its tests' server listens.
+/// Which build is running: this crate's own test build and the `rh-sim` rehearsal build may dial
+/// plain `http`, and only on a loopback address, where the test server or the simulator listens;
+/// the rehearsal build dials nothing but loopback, so it can never reach a broker (DEC-922 items
+/// 1 and 2). Every other build, the `live` one included, is [`Build::Production`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Build {
     Test,
+    Rehearsal,
     Production,
 }
 
 impl Build {
     pub(crate) const CURRENT: Self = if cfg!(test) {
         Self::Test
+    } else if cfg!(feature = "rh-sim") {
+        Self::Rehearsal
     } else {
         Self::Production
     };
@@ -53,6 +58,9 @@ impl PinnedEndpoint {
         if !scheme_allowed(&url, build) {
             return Err(McpError::NotHttps);
         }
+        if !host_allowed(&url, build) {
+            return Err(McpError::OffLoopback);
+        }
         if url.host_str() != Some(pinned_host) {
             return Err(McpError::HostNotPinned);
         }
@@ -64,13 +72,19 @@ impl PinnedEndpoint {
     }
 }
 
-/// `https`, or plain `http` to a loopback address in this crate's test build.
+/// `https`, or plain `http` to a loopback address in this crate's test build or the rehearsal
+/// build.
 pub(crate) fn scheme_allowed(url: &Url, build: Build) -> bool {
     match url.scheme() {
         "https" => true,
         "http" => build == Build::Test && is_loopback(url),
         _ => false,
     }
+}
+
+/// Any host, except in the rehearsal build, which dials only a loopback address.
+pub(crate) fn host_allowed(_url: &Url, _build: Build) -> bool {
+    true
 }
 
 /// An IP literal on loopback; a name such as `localhost` is not, since resolving it is a lookup.
