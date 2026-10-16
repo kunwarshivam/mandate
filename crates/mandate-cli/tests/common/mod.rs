@@ -147,16 +147,20 @@ fn draft_in(
     to_canonical(&envelope)
 }
 
-/// The cause and payload of the runtime's record that ended `asked` with `event_type`.
+/// The cause and payload of the runtime's record that ended `asked` with `event_type`, as the
+/// runtime journals it (journal spec §9.7): an `ApprovalTimedOut` is `{approval, on_timeout:
+/// skip}`, caused by the ask it ends (rule 135); an `ApprovalCanceled` names the approval and an
+/// owner pause as its reason, with no cause.
 pub fn ending(asked: &Asked, event_type: &str) -> (Option<String>, Value) {
-    let _ = event_type;
-    (
-        None,
-        object(&[
-            ("approval", text(&asked.approval)),
-            ("reason", text("owner_pause")),
-        ]),
-    )
+    let approval = ("approval", text(&asked.approval));
+    if event_type == "ApprovalTimedOut" {
+        (
+            Some(asked.approval.clone()),
+            object(&[approval, ("on_timeout", text("skip"))]),
+        )
+    } else {
+        (None, object(&[approval, ("reason", text("owner_pause"))]))
+    }
 }
 
 /// [`Fixture::ended`]'s record of `asked` as the draft bytes the fixture journals, under
