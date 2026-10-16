@@ -41,6 +41,7 @@
 //! envelope, and host controls are the harness the fail-closed suite tests (DEC-157 item 1).
 
 pub mod adapters;
+pub mod approvers;
 pub mod control;
 pub mod envelope;
 mod error;

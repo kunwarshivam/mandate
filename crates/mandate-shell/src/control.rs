@@ -20,6 +20,8 @@ use mandate_spec::validate::{RegisteredModel, Violation, validate};
 use mandate_spec::{Mandate, ValidationContext};
 use mandate_time::{Date, UtcNanos};
 
+use crate::approvers::{Members, members};
+
 /// One record of the workspace control stream as the run read it: its sequence number, type and
 /// payload (journal spec §9.2). The journal has already verified the chain it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +129,7 @@ pub struct ConfirmedVersion {
     mandate: Mandate,
     context: Folded,
     unpriced: ValidationContext,
+    members: Members,
 }
 
 /// What phase 1's fold found, to show before any credential is read.
@@ -305,11 +308,13 @@ pub fn confirmed_version(
         registry: context.registry.clone(),
         connection_environment: context.connection_environment,
     };
+    let members = members(records, connection.as_str());
     Ok(ConfirmedVersion {
         version: version.digest(),
         mandate,
         context: folded,
         unpriced: context,
+        members,
     })
 }
 
@@ -327,6 +332,12 @@ impl ConfirmedVersion {
     /// What the fold found.
     pub fn context(&self) -> &Folded {
         &self.context
+    }
+
+    /// The workspace's members the stream shows, which the mandate's approver references
+    /// resolve against (DEC-953).
+    pub fn members(&self) -> &Members {
+        &self.members
     }
 
     /// Phase 2: V-002 on the account equity the run's GET-only preflight read from the broker,
