@@ -58,7 +58,6 @@ fn schema_at(member: &str) -> Option<(InvalidReason, String)> {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn version_2_carries_the_brokers_order_id_or_null() {
     for id in [r#""rh-order-1""#, "null"] {
         let parsed = Draft::parse(&order_state(1, 2, Some(id)))
@@ -68,7 +67,6 @@ fn version_2_carries_the_brokers_order_id_or_null() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn version_2_is_closed_and_every_member_is_required() {
     let complete = order_state(1, 2, Some(r#""rh-order-1""#));
     for (member, _) in VERSION_1 {
@@ -109,7 +107,6 @@ fn version_1_is_never_edited_and_no_later_version_is_registered() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_stream_holding_both_versions_appends_them_in_order() {
     let mut journal = journal_with(0);
     let epoch = journal.take_ownership(&stream());
