@@ -27,12 +27,14 @@ in `paper` (`environment_mismatch`, R1b).
 **Result on `main` at `bf150da`** (before R1): the rehearsal stopped at `connection record`,
 which refused `check_missing` because no command wrote the `ConnectionChecked` it requires.
 
-**Re-run on #1378's branch (`claude/r0-live-run-wiring`, after R2 to R4):** the same table: 1a to
-2d pass and the run stops at 2e's `check_missing`, so nothing the branch changed is reached yet;
-its R2 to R4 are proven by the tests in `crates/mandate-paper/src/live_tests.rs`,
-`crates/mandate-shell/tests/control.rs` and `crates/mandate-shell-rh-sim/tests/shell.rs`, and the runner's step now also needs
-`MANDATE_RH_ACCOUNT_NUMBER`, which the script sets. The next run past R1 should stop at R8, or at
-R5 without the founder's Alpaca keys.
+**Re-run on #1390's branch (`claude/r0-live-run-wiring` at `7980209`, R1 and R1b merged, R2 to
+R4 fixed):** 1a to 2k pass. 2l, the dry run, logs in on the simulator's page, reads the agentic
+account's snapshot, passes the lapse and the shell's full fold (a live deployment refused
+admission would have stopped at `DeploymentRefusal::Live`), passes the configuration, and stops at
+`the tracer stopped at Validate: a paper mandate` ([R9](#the-blocker-chain-beyond-step-2e)): the
+shell's artifacts accept a paper mandate only. 2m and 2s stop there too, so nothing is sent; 2n
+and the agent stream's export find nothing, and the control and account streams export and
+verify. The runner's step needs `MANDATE_RH_ACCOUNT_NUMBER`, which the script sets.
 
 ## How to run it
 
@@ -117,8 +119,9 @@ once the one before is fixed.
 | R7 | the restart (R0 step 7) | the startup reconciliation | A restart after a lost place answer must adopt exactly one matching order or keep it `Unknown` (DEC-529 item 4) | **Item 10** (`claude/unknown-adoption-run-path`) | — |
 
 | R8 | the opening refused by the broker, or read as external activity | the Robinhood cycle's instrument names | The executor sends the asset id as the order's symbol, which Robinhood does not accept, and `RobinhoodReconciler` reads its snapshot past `BrokerSymbols` (DEC-938), so the account's positions name tickers | None named (DEC-947's "Not decided here") | Map the asset id to the registered ticker in `RobinhoodShellConnector`'s requests, and the snapshot's tickers back to asset ids in `RobinhoodReconciler`, as `Platform` does for Alpaca's answers |
+| R9 | `the tracer stopped at Validate: a paper mandate`, **observed at 2l** | `crates/mandate-shell/src/paper/artifacts.rs:119` (`Artifacts::from_registered`) | The shell's run artifacts refuse every mandate whose environment is not `paper`: a lock from the paper adapter's first slice, which the live admission (DEC-924, DEC-947) now reaches | None named | Accept a `live` mandate in `from_registered` only when the `ConfirmedVersion` it is handed was admitted live (it can only exist for a live mandate after DEC-924's four conditions held), so the paper-only lock stays for every caller that has no live admission; a shell change with its own decision and tests |
 
-So the rehearsal can pass only after R8 lands, with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
+So the rehearsal can pass only after R8 and R9 land, with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
 9 and 10, and only on the founder's machine (R5). Without the founder's Alpaca paper keys, a run
 past R1 now stops at the Robinhood preflight with `MARKET_UNREAD`, after the login, the snapshot,
 the lapse and the full fold (DEC-947 item 5).
