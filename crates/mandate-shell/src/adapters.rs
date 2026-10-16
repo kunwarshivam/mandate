@@ -79,6 +79,7 @@ use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 
+use crate::approvers::{Members, resolve};
 use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
@@ -852,6 +853,9 @@ pub struct RunContext {
     pub validation: ValidationContext,
     pub policies: Vec<PolicyLevel>,
     pub author: String,
+    /// The workspace's members, which [`runtime_view`] resolves the mandate's approver
+    /// references against (DEC-953).
+    pub members: Members,
     pub restricted_instruments: BTreeSet<InstrumentId>,
     pub decision: Option<DecisionContext>,
     /// The effective policy set and model registry (DEC-484, D4b). `Some` makes the run write
@@ -912,13 +916,7 @@ fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<Ma
         mandate_domain::Environment::Paper => mandate_journal::Environment::Paper,
         mandate_domain::Environment::Live => mandate_journal::Environment::Live,
     };
-    let approvers = document
-        .autonomy
-        .approval
-        .approvers
-        .iter()
-        .map(|approver| approver.as_str().to_owned())
-        .collect();
+    let approvers = resolve(&document.autonomy.approval.approvers, &context.members);
     Ok(MandateView {
         version: format!(
             "sha256:{}",
@@ -3624,6 +3622,7 @@ mod tests {
             },
             policies: Vec::new(),
             author: String::new(),
+            members: crate::approvers::Members::Unread,
             restricted_instruments: BTreeSet::new(),
             decision: Some(DecisionContext {
                 builder: None,

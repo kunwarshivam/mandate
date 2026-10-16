@@ -48,7 +48,7 @@ OWNER=founder
 AGENT=agent_r0
 CONNECTION=conn_rh_rehearsal_01
 ACCOUNT_REF=01J0R0REHEARSA1ACC0VNT0000
-CHECKED=01J0R0REHEARSA1CHECK0000000
+RH_ACCOUNT=RHSIM00000001
 SYMBOL=RHETF
 ASSET_ID=5f0c3c1e-7d1a-4c8e-9b0a-2e6f1d3a9c41
 SCHEMA=r0_rehearsal_$$
@@ -155,8 +155,10 @@ SQL
 }
 start_postgres
 JOURNAL=(--journal "$DSN" --store "$STORE")
-AS_OWNER=(--workspace "$WORKSPACE" --user "$OWNER")
-LIVE_OWNER=(--workspace "$WORKSPACE" --user "$OWNER" --environment live)
+# The rehearsal's workspace is live from its first event, and every owner command states it
+# (DEC-952: paper and live never share a stream).
+AS_OWNER=(--workspace "$WORKSPACE" --user "$OWNER" --environment live)
+LIVE_OWNER=("${AS_OWNER[@]}")
 
 # --- R0 step 2: the rehearsal ----------------------------------------------------------------
 # The simulator's one agentic account; the runner scopes every request to it (CN-8, DEC-947).
@@ -171,7 +173,7 @@ for _ in $(seq 50); do grep -q 'serving' "$WORK/sim.out" 2>/dev/null && break; s
 ENDPOINT=$(sed -n 's/^mandate-rh-sim: serving //p' "$WORK/sim.out")
 step 2a 'resource' curl -sf "${ENDPOINT%/mcp}/.well-known/oauth-protected-resource/mcp" || true
 
-step 2b 'opened ctl:' cli workspace open --workspace "$WORKSPACE" "${JOURNAL[@]}" || true
+step 2b 'opened ctl:' cli workspace open --workspace "$WORKSPACE" --environment live "${JOURNAL[@]}" || true
 
 cat >"$WORK/instrument.json" <<JSON
 {"asset_class":"us_equity","etp":"plain","etp_classified_at":"$(date -u +%Y-%m-%dT00:00:00Z)","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"$ASSET_ID","symbol":"$SYMBOL"}
@@ -184,10 +186,44 @@ step 2c-rules 'registered' cli config register --kind rule_set "$TRACER/rule-set
 step 2d 'registered' cli model register quant.ma_crossover 1.0.0 "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 MODEL_HASH=$(grep -rl '"kind":"quant_model_content"' "$STORE" | head -n 1 | xargs -r basename || true)
 
+# login ERR: the founder's two clicks on the simulator's login page, once the run prints its URL.
+login() {
+  local err=$1 url request
+  for _ in $(seq 300); do
+    url=$(sed -n 's/^open this address in a browser to log in: //p' "$err" | head -n 1)
+    [ -n "$url" ] && break
+    kill -0 "$2" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  [ -n "$url" ] || return 0
+  request=$(curl -sf "$url" | grep -Eo 'name="request" value="[^"]+"' | sed 's/.*value="//; s/"$//')
+  curl -sf -L -o /dev/null -d "request=$request&decision=approve" "${ENDPOINT%/mcp}/oauth/approve"
+}
+
+# 2d2: the connect check (R1, DEC-946): the runner logs in on the simulator's page, reads the
+# contract and the agentic account, and journals ConnectionChecked; 2e and 2f bind its event id.
+connect_check() {
+  local id=2d2 pid status=0 result=FAIL
+  mkdir -p "$WORK/out"
+  env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" \
+    "$BIN/mandate-paper" --connect-check --workspace "$WORKSPACE" --account-ref "$ACCOUNT_REF" \
+    --connection "$CONNECTION" --journal "$DSN" --confirm-live >"$WORK/out/$id.out" 2>"$WORK/out/$id.err" &
+  pid=$!
+  login "$WORK/out/$id.err" "$pid" || true
+  wait "$pid" || status=$?
+  if [ "$status" = 0 ] && grep -q '^checked ' "$WORK/out/$id.out"; then result=PASS; fi
+  [ "$result" = PASS ] || FAILED=1
+  report "$id" "$result" "$status" "mandate-paper --connect-check --workspace $WORKSPACE --account-ref $ACCOUNT_REF --connection $CONNECTION --journal $DSN --confirm-live"
+}
+connect_check
+CHECKED=$(sed -n 's/^checked //p' "$WORK/out/2d2.out" | head -n 1)
+CHECKED=${CHECKED:-none}
+
 RECORD_ARGS=(connection record "${LIVE_OWNER[@]:0:4}" --environment live --connection "$CONNECTION"
   --broker robinhood --account-ref "$ACCOUNT_REF" --checked "$CHECKED" --margin-attestation cash_account
   --scope get_accounts --scope get_equity_orders --scope get_equity_positions --scope get_portfolio
-  --scope get_quotes --scope review_equity_order --scope place_equity_order --scope cancel_equity_order
+  --scope get_equity_quotes --scope get_equity_tradability --scope review_equity_order
+  --scope place_equity_order --scope cancel_equity_order
   "${JOURNAL[@]}")
 step 2e '^code ' cli "${RECORD_ARGS[@]}" || true
 CODE=$(sed -n 's/^code //p' "$WORK/out/2e.out" | head -n 1)
@@ -224,20 +260,6 @@ step 2k '^deployed' cli agent deploy "$AGENT" "$VERSION" --code "${CODE:-none}" 
 
 RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
   --account-ref "$ACCOUNT_REF" --journal "$DSN" --store "$STORE" --bars "$BARS" --confirm-live)
-
-# login ERR: the founder's two clicks on the simulator's login page, once the run prints its URL.
-login() {
-  local err=$1 url request
-  for _ in $(seq 300); do
-    url=$(sed -n 's/^open this address in a browser to log in: //p' "$err" | head -n 1)
-    [ -n "$url" ] && break
-    kill -0 "$2" 2>/dev/null || return 0
-    sleep 0.1
-  done
-  [ -n "$url" ] || return 0
-  request=$(curl -sf "$url" | grep -Eo 'name="request" value="[^"]+"' | sed 's/.*value="//; s/"$//')
-  curl -sf -L -o /dev/null -d "request=$request&decision=approve" "${ENDPOINT%/mcp}/oauth/approve"
-}
 
 # run ID EXIT EXPECT ARGS...: the runner in the background, logged in through the simulator's
 # page. EXIT is `ok` for a run that must exit 0, or `refused` for one that must exit non-zero

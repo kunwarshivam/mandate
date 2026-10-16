@@ -16,17 +16,21 @@ use std::net::Ipv4Addr;
 
 use std::rc::Rc;
 
-use mandate_alpaca::{AlpacaPaperHttp, Credentials, DataTransport, Pause, TradingTransport};
+use mandate_alpaca::{
+    AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TradingTransport,
+};
 use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, Tools, TransportConfig,
 };
 use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
 use mandate_shell::adapters::Sources;
-use mandate_shell::paper::{Artifacts, BrokerFacts, market_facts, robinhood_facts};
+use mandate_shell::paper::{Artifacts, BrokerFacts, fresh_quote, market_facts, robinhood_facts};
 use mandate_shell::robinhood::RobinhoodBridge;
 use mandate_shell::{Cause, ProductionCycle, Setup, robinhood_production_cycle};
+use tokio::runtime::Runtime;
 
+use crate::connect_check::{ACCOUNT_NUMBER_VAR, Observed, SeenContract, observe};
 use crate::{BrokerAsk, PaperError, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
@@ -48,9 +52,6 @@ const PINNED_HOST: Option<&str> = None;
 
 /// The variable the rehearsal build reads the simulator's endpoint from (DEC-922 item 2).
 pub const REHEARSAL_ENDPOINT_VAR: &str = "MANDATE_RH_SIM_ENDPOINT";
-
-/// The variable a Robinhood run reads the agentic account's number from (CN-8, DEC-947 item 5).
-pub const ACCOUNT_NUMBER_VAR: &str = "MANDATE_RH_ACCOUNT_NUMBER";
 
 /// The simulator's host, the one the rehearsal build pins (DEC-922 items 1 and 2, DEC-947 item
 /// 3): the loopback address `mandate-rh-sim` listens on. It reaches no broker, so every build may
@@ -228,51 +229,50 @@ fn loopback(text: &str) -> Option<RobinhoodEndpoint> {
     })
 }
 
-/// The Robinhood session of a `live` or rehearsal build (DEC-937 item 2, DEC-947 item 4): the
-/// founder's login at `dial`'s endpoint, then the MCP session over the login's token on the
-/// runtime the session keeps (DEC-928 item 2): the transport pinned to the endpoint carrying the
-/// token as its bearer, the client whose tool contract is checked at connect, and the one
-/// Robinhood connector scoped to `dial`'s account number. The Alpaca paper client for the market
-/// reads is built from the environment's paper keys when they are there; without them the
-/// session's preflight refuses (DEC-933 item 2). The URL to open is shown on stderr; nothing
-/// else is, and nothing is sent but the login, the handshake and the tool listing.
+/// The founder's login at the endpoint this build pins, read from the process environment as
+/// [`endpoint`] reads it: the connect check's login (DEC-946), which observes the session itself
+/// ([`LoggedIn::observe`]).
 ///
 /// # Errors
-/// [`PaperError::Credentials`] when the login, the transport or the session's handshake fails;
-/// no error names a token.
-pub(crate) fn connect(dial: &Dial) -> Result<Linked, PaperError> {
-    let endpoint = &dial.endpoint;
+/// [`PaperError::Endpoint`] before anything is sent, or [`PaperError::Credentials`] when the
+/// login fails; neither names a token.
+pub(crate) fn login_from_env() -> Result<LoggedIn, PaperError> {
+    let rehearsal =
+        std::env::var_os(REHEARSAL_ENDPOINT_VAR).map(|value| value.to_string_lossy().into_owned());
+    let endpoint = endpoint(Build::CURRENT, rehearsal.as_deref()).map_err(PaperError::Endpoint)?;
+    logged_in(endpoint)
+}
+
+/// The founder's login at `endpoint` (DEC-937 item 2), on the current-thread runtime the MCP
+/// session will run on (DEC-928 item 2). The URL to open is shown on stderr; nothing else is.
+///
+/// # Errors
+/// [`PaperError::Credentials`] when the login fails; no error names a token.
+fn logged_in(endpoint: RobinhoodEndpoint) -> Result<LoggedIn, PaperError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| PaperError::Credentials)?;
     let mut show = |url: &str| eprintln!("open this address in a browser to log in: {url}");
-    let client = runtime
-        .block_on(session(endpoint, &mut show))
+    let token = runtime
+        .block_on(login(&endpoint, &mut show))
         .map_err(|_| PaperError::Credentials)?;
-    let connector = RobinhoodConnector::new(client, dial.account_number.clone());
-    let market = Credentials::from_env()
-        .ok()
-        .and_then(|keys| AlpacaPaperHttp::new(keys).ok());
-    Ok(Linked::new(
-        RobinhoodBridge::new(runtime, connector),
-        market,
-    ))
+    Ok(LoggedIn {
+        runtime,
+        token,
+        endpoint,
+    })
 }
 
-/// The login at `endpoint`, then the MCP client over its token (O2): the first connection's
-/// contract check, so a server listing a fund-movement tool or missing an allowlisted one gives
-/// no client at all (connections spec §8.1, DEC-839).
-async fn session(
-    endpoint: &RobinhoodEndpoint,
-    show: &mut dyn FnMut(&str),
-) -> Result<McpClient, McpError> {
-    let token = login(endpoint, show).await?;
-    let pinned = PinnedEndpoint::new(&endpoint.host, &endpoint.url)?;
-    let clock = Box::new(SystemMonotonic::start());
-    let transport =
-        McpTransport::new(pinned, TransportConfig::CONSERVATIVE, clock)?.authorized(token)?;
-    McpClient::connect(transport, None).await
+/// The Robinhood session of a `live` or rehearsal build (DEC-947 item 4): the founder's login at
+/// `dial`'s endpoint, then [`LoggedIn::session`] scoped to `dial`'s account number. Nothing is
+/// sent but the login, the handshake and the tool listing.
+///
+/// # Errors
+/// [`PaperError::Credentials`] when the login or the session's handshake fails; no error names
+/// a token.
+pub(crate) fn connect(dial: &Dial) -> Result<Linked, PaperError> {
+    logged_in(dial.endpoint.clone())?.session(&dial.account_number)
 }
 
 /// O1b's login at `endpoint`, its host the one authorization host: discovery, registration of
@@ -303,6 +303,92 @@ async fn login(
 pub struct Linked<T = McpClient, M = AlpacaPaperHttp> {
     bridge: Rc<RobinhoodBridge<T>>,
     market: Option<M>,
+}
+
+/// The founder's login: the token, in memory only (LT-9), the runtime the MCP session will be
+/// connected on (DEC-928 item 2), and the endpoint it was made at. Nothing is read or sent until
+/// it becomes a session ([`LoggedIn::session`]) or is observed by the connect check.
+pub struct LoggedIn {
+    runtime: Runtime,
+    token: AccessToken,
+    endpoint: RobinhoodEndpoint,
+}
+
+impl LoggedIn {
+    /// The connect check's reads (DEC-946): the first connect over an MCP session carrying the
+    /// login's token, which reports the listed contract rather than refusing it
+    /// ([`McpClient::connect_to_check`]), and, when it listed, the recorded account through the
+    /// connector's own account check. A session that cannot be made or listed reads nothing, so
+    /// every check fails closed. The token leaves memory with the session (LT-9).
+    pub(crate) fn observe(self, account_number: &str) -> Observed {
+        let Self {
+            runtime,
+            token,
+            endpoint,
+        } = self;
+        runtime.block_on(async {
+            let unread = Observed {
+                contract: None,
+                agentic_account_read: false,
+            };
+            let Ok(pinned) = PinnedEndpoint::new(&endpoint.host, &endpoint.url) else {
+                return unread;
+            };
+            let clock = Box::new(SystemMonotonic::start());
+            let Ok(transport) = McpTransport::new(pinned, TransportConfig::CONSERVATIVE, clock)
+            else {
+                return unread;
+            };
+            let transport = transport.with_bearer(token);
+            let Ok((client, listed)) = McpClient::connect_to_check(transport).await else {
+                return unread;
+            };
+            let Ok(hash) = client
+                .contract()
+                .map(|hash| mandate_canon::Digest::from_bytes(*hash.as_bytes()).to_hex())
+            else {
+                return unread;
+            };
+            let connector = RobinhoodConnector::new(client, account_number.to_owned());
+            observe(Some(SeenContract { listed, hash }), &connector).await
+        })
+    }
+
+    /// The MCP session over the login's token (O2, DEC-947 item 4): the transport pinned to the
+    /// login's endpoint carrying the token as its bearer, the client whose tool contract is
+    /// checked as a first connection's (a fund-movement tool or a missing allowlisted one gives no
+    /// client, connections spec §8.1), and the one Robinhood connector scoped to
+    /// `account_number` (CN-8), in the shell's bridge on the login's runtime. The Alpaca paper
+    /// client for the market reads is built from the environment's paper keys when they are
+    /// there, with no request; without them the session's preflight refuses (DEC-947 item 5).
+    ///
+    /// # Errors
+    /// [`PaperError::Credentials`] when the transport or the handshake fails; no error names a
+    /// token.
+    pub(crate) fn session(self, account_number: &str) -> Result<Linked, PaperError> {
+        let Self {
+            runtime,
+            token,
+            endpoint,
+        } = self;
+        let pinned = PinnedEndpoint::new(&endpoint.host, &endpoint.url)
+            .map_err(|_| PaperError::Credentials)?;
+        let clock = Box::new(SystemMonotonic::start());
+        let transport = McpTransport::new(pinned, TransportConfig::CONSERVATIVE, clock)
+            .map_err(|_| PaperError::Credentials)?
+            .with_bearer(token);
+        let client = runtime
+            .block_on(McpClient::connect(transport, None))
+            .map_err(|_| PaperError::Credentials)?;
+        let connector = RobinhoodConnector::new(client, account_number.to_owned());
+        let market = Credentials::from_env()
+            .ok()
+            .and_then(|keys| AlpacaPaperHttp::new(keys).ok());
+        Ok(Linked::new(
+            RobinhoodBridge::new(runtime, connector),
+            market,
+        ))
+    }
 }
 
 impl<T: Tools, M> Linked<T, M> {
@@ -336,11 +422,20 @@ impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session fo
     }
 
     /// The shell's Robinhood cycle over this session's bridge (DEC-947 item 4).
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
         Ok(robinhood_production_cycle(
-            with_bridge(sources, self.bridge),
+            with_bridge(sources, Rc::clone(&self.bridge)),
             setup,
         ))
+    }
+
+    /// The independent IEX quote is Alpaca's data client's (DEC-943 item 2), so a session the
+    /// environment gave no Alpaca paper keys refuses as its preflight does.
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        let market = self.market.as_ref().ok_or(Cause::Absent {
+            what: MARKET_UNREAD,
+        })?;
+        fresh_quote(artifacts, market.clone(), pause)
     }
 
     /// Robinhood's own ask, read through this session's bridge at the check (DEC-945 items 1

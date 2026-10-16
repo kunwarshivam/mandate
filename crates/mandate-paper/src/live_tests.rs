@@ -190,7 +190,15 @@ impl Session for Snapshotting {
         Err(Cause::Absent { what: "unread" })
     }
 
-    fn cycle(self, _sources: Sources<()>, _setup: Setup) -> Result<ProductionCycle, Cause> {
+    fn cycle(&self, _sources: Sources<()>, _setup: Setup) -> Result<ProductionCycle, Cause> {
+        Err(Cause::Absent { what: "unread" })
+    }
+
+    fn fresh_quote<P: mandate_alpaca::Pause>(
+        &self,
+        _artifacts: &Artifacts,
+        _pause: P,
+    ) -> Result<mandate_alpaca::LatestQuote, Cause> {
         Err(Cause::Absent { what: "unread" })
     }
 

@@ -87,9 +87,10 @@ pub struct McpTransport {
     budget: Mutex<RateBudget>,
     clock: Box<dyn Monotonic>,
     session: Mutex<Option<HeaderValue>>,
-    /// `Bearer` and the login's token, marked sensitive, once [`McpTransport::authorized`].
-    bearer: Option<HeaderValue>,
     next_id: AtomicU64,
+    /// The login's token, sent as `authorization: Bearer` on every request when set; a
+    /// [`SecretString`](secrecy::SecretString) only, never printed (LT-9).
+    bearer: Option<AccessToken>,
 }
 
 impl McpTransport {
@@ -107,25 +108,18 @@ impl McpTransport {
             budget: Mutex::new(budget),
             clock,
             session: Mutex::new(None),
-            bearer: None,
             next_id: AtomicU64::new(1),
+            bearer: None,
         })
     }
 
-    /// This transport carrying the login's `token` as every request's `authorization: Bearer`
-    /// (O2, DEC-947 item 4). The header is marked sensitive, so no printout of a request shows
-    /// it, and the token is never logged or in an error (LT-9).
-    ///
-    /// # Errors
-    /// [`McpError::Malformed`] for a token no header value can carry; nothing is sent.
-    pub fn authorized(self, token: AccessToken) -> Result<Self, McpError> {
-        let text = format!("Bearer {}", token.secret.expose_secret());
-        let mut bearer = HeaderValue::from_str(&text).map_err(|_| McpError::Malformed)?;
-        bearer.set_sensitive(true);
-        Ok(Self {
-            bearer: Some(bearer),
+    /// This transport with the login's `token` as the bearer of every request it sends (O2,
+    /// DEC-946).
+    pub fn with_bearer(self, token: AccessToken) -> Self {
+        Self {
+            bearer: Some(token),
             ..self
-        })
+        }
     }
 
     /// Sends request `method` and returns its result, or the server's JSON-RPC error as
@@ -199,8 +193,12 @@ impl McpTransport {
         if let Some(session) = &session {
             headers.insert(SESSION_HEADER, session.clone());
         }
-        if let Some(bearer) = &self.bearer {
-            headers.insert(AUTHORIZATION, bearer.clone());
+        if let Some(token) = &self.bearer {
+            let mut bearer =
+                HeaderValue::from_str(&format!("Bearer {}", token.secret.expose_secret()))
+                    .map_err(|_| McpError::Malformed)?;
+            bearer.set_sensitive(true);
+            headers.insert(AUTHORIZATION, bearer);
         }
         let response = self
             .client

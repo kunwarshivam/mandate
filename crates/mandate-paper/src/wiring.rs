@@ -28,7 +28,7 @@ use mandate_journal::StoredEvent;
 use mandate_num::{Fraction, Price, Usd};
 use mandate_robinhood::Quote;
 use mandate_shell::control::ControlRecord;
-use mandate_shell::{AskedCycle, Cause, ShellError, Stage};
+use mandate_shell::{AskedCycle, Cause, Mark, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
 use crate::PaperError;
@@ -483,9 +483,12 @@ pub fn watch_may_end(
 /// The asked opening's way out of the run (G1b's wiring row; DEC-912 items 1 and 2; DEC-914
 /// items 1 to 3 and 7; DEC-920 item 1; DEC-940 items 1 and 4): the production caller of
 /// [`wait_for_the_grant`]. The ask is bound off the agent stream as the cycle left it; each wake
-/// is the shell's own ([`AskedCycle::wake`]) — the control stream tailed whole and handed to the
-/// runtime, which journals its `ApprovalResponded` and `ApprovalRevalidated`, then both streams
-/// read back at the clock `pause` keeps — and the wait folds each read through [`answers`], so
+/// before the deadline first reads `fresh`, the caller's fresh IEX quote handed to the binding
+/// gate and returned as its risk mark (DEC-943 item 2), and a read that fails stops the wait
+/// with nothing sent; then the wake is the shell's own ([`AskedCycle::wake`]) — the mark
+/// journaled, the control stream tailed whole and handed to the runtime, which journals its
+/// `ApprovalResponded` and `ApprovalRevalidated` against that mark, then both streams read back
+/// at the clock `pause` keeps — and the wait folds each read through [`answers`], so
 /// it releases only on the runtime's admitted, re-validated grant of the first deciding answer.
 /// Then `cross_check` — the caller's [`cross_check_the_opening`] over the collar's own `x` —
 /// runs before anything leaves, and only then the one held opening is sent
@@ -498,14 +501,16 @@ pub fn watch_may_end(
 ///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing is sent.
-pub fn granted_opening<P, C>(
+pub fn granted_opening<P, F, C>(
     cycle: &mut dyn AskedCycle,
     pause: &P,
     interval: Duration,
+    mut fresh: F,
     cross_check: C,
 ) -> Result<(), PaperError>
 where
     P: Pause + ?Sized,
+    F: FnMut() -> Result<Mark, PaperError>,
     C: FnOnce() -> Result<(), PaperError>,
 {
     let agent_rows = cycle.agent_rows().map_err(PaperError::Shell)?;
@@ -520,8 +525,9 @@ where
                 control: Vec::new(),
             });
         }
+        let mark = fresh()?;
         cycle
-            .wake(now)
+            .wake(now, &mark)
             .map(|wake| WakeRead {
                 agent: wake.agent,
                 control: wake.control,

@@ -74,10 +74,6 @@ fn the_approvals_commands_take_an_agent_and_one_approval_each() {
             ErrorKind::MissingRequiredArgument,
         ),
         (format!("{approve} --wait-s 31"), ErrorKind::ValueValidation),
-        (
-            format!("{approve} --environment live"),
-            ErrorKind::UnknownArgument,
-        ),
         (format!("{approve} --all"), ErrorKind::UnknownArgument),
         (
             format!("mandate approvals skip A1 {TAIL}"),
@@ -307,6 +303,7 @@ fn every_command_refuses_without_a_database() {
         let owner = || OwnerArgs {
             workspace: workspace.into(),
             user: who.into(),
+            environment: "paper".into(),
         };
         let journal = || target(&dsn, &store);
         let agent = AGENT.to_owned();

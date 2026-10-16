@@ -401,7 +401,7 @@ fn event_time_never_moves_a_deadline() {
         "MarkUpdated",
         with_clock(
             &[
-                ("instrument", text("AAPL")),
+                ("instrument_id", text("AAPL")),
                 ("price", text("151")),
                 ("event_time", text("2026-09-26T23:59:59Z")),
             ],

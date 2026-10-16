@@ -43,7 +43,7 @@ pub fn mark(seq: u64, price: &str, at: i64) -> FoldedEvent {
         "MarkUpdated",
         with_clock(
             &[
-                ("instrument", text("AAPL")),
+                ("instrument_id", text("AAPL")),
                 ("price", text(price)),
                 ("source", text("fixture")),
                 ("feed", text("sip")),

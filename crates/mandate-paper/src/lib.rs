@@ -24,6 +24,7 @@
 //! constant here (FT-2).
 
 mod ask;
+mod connect_check;
 mod connection;
 mod door;
 mod evidence;
@@ -49,7 +50,7 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
 use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
-    ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
+    AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_mcp::{McpClient, Tools};
@@ -65,12 +66,12 @@ use mandate_shell::control::{
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
-    Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
-    load_contexts_with_clock, preflight,
+    Artifacts, BrokerFacts, GateQuote, PaperClock, PaperFacts, daily_closes, fresh_quote,
+    liquidity_facts, load_contexts_with_clock, preflight,
 };
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{
-    Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
+    Cause, Mark, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
@@ -78,6 +79,10 @@ use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
 pub use ask::{BrokerAsk, QuoteRead};
+pub use connect_check::{
+    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Checked, Observed, SeenContract, connect_check,
+    observe, parse_check,
+};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
@@ -88,8 +93,8 @@ pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
-    ACCOUNT_NUMBER_VAR, Build, Dial, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR,
-    REHEARSAL_HOST, RobinhoodEndpoint, dial, endpoint, pinned_host,
+    Build, Dial, EndpointRefusal, Linked, LoggedIn, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
+    RobinhoodEndpoint, dial, endpoint, pinned_host,
 };
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
@@ -162,7 +167,15 @@ pub trait Session {
     ///
     /// # Errors
     /// [`Cause::Absent`] when the session cannot carry a cycle.
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+
+    /// A fresh IEX quote for the pinned instrument, read at an asked opening's wake so the grant
+    /// is judged on a quote of its own wake, never on the preflight's (DEC-943 item 2): the
+    /// preflight's own read, its age bound and its skew tolerance unchanged.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when no current, uncrossed IEX quote of the instrument is read.
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause>;
 
     /// Where the broker's own ask for the pinned instrument comes from: the quote an asked
     /// opening's cross-check compares with the independent IEX ask before it leaves (DEC-529
@@ -189,8 +202,15 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
         preflight(artifacts, self.clone(), self.clone(), pause)
     }
 
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
-        Ok(production_cycle(with_transport(sources, self), setup))
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+        Ok(production_cycle(
+            with_transport(sources, self.clone()),
+            setup,
+        ))
+    }
+
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        fresh_quote(artifacts, self.clone(), pause)
     }
 
     /// Alpaca's own quote is the IEX quote its data client read at the preflight.
@@ -311,6 +331,17 @@ pub enum PaperError {
     /// The run's exportable evidence fails closed (G1b, the founder's run's step 6).
     #[error(transparent)]
     Evidence(#[from] EvidenceRefusal),
+    /// The connect check ran and a check failed; the failure is journaled as `event_id`
+    /// (DEC-946). It names the check and its reason, never the account.
+    #[error("the connection check failed: {check} {reason} (journaled as {event_id})")]
+    ConnectCheck {
+        event_id: String,
+        check: &'static str,
+        reason: &'static str,
+    },
+    /// The account stream could not be read or written; nothing further was sent.
+    #[error("the journal could not be written")]
+    Journal,
     #[error(transparent)]
     Shell(#[from] ShellError),
 }
@@ -430,6 +461,26 @@ impl Opening {
             self.quote_max_age,
         )
     }
+}
+
+/// One wake's fresh quote (DEC-943 item 2): `session`'s own IEX read through
+/// [`Session::fresh_quote`], handed to the binding gate's `gate` so every binding request from
+/// now on judges it, and returned as the wake's risk mark. A read that fails refuses as
+/// untrusted market data, and the wait it stops sends nothing.
+///
+/// # Errors
+/// [`PaperError::Shell`] at [`Stage::MarketData`] when no current, uncrossed IEX quote is read.
+pub fn fresh_mark<S: Session, P: Pause>(
+    session: &S,
+    artifacts: &Artifacts,
+    pause: P,
+    gate: &GateQuote,
+) -> Result<Mark, PaperError> {
+    let quote = session
+        .fresh_quote(artifacts, pause)
+        .map_err(refused(Stage::MarketData))?;
+    gate.hand(&quote);
+    Ok(Mark::of_iex(&quote))
 }
 
 /// The run's clock as the binding gate reads it, immediately before submission.
@@ -568,6 +619,7 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let at_preflight = Mark::of_iex(&broker.quote);
     let ticker = InstrumentId::new(&instrument.symbol)
         .map_err(|_| absent(Stage::Validate, "the pinned ticker"))?;
     let asset_id = InstrumentId::new(instrument.asset_id.as_str())
@@ -583,6 +635,7 @@ pub fn run<P: Ports>(
     let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
         .map_err(refused(Stage::Validate))?;
+    let contexts_quote = contexts.quote.clone();
     let registered = artifacts
         .production_configuration()
         .map_err(refused(Stage::Validate))?;
@@ -617,6 +670,7 @@ pub fn run<P: Ports>(
         symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport: (),
     };
+    let fresh = || fresh_mark(&session, &artifacts, watch.pause.clone(), &contexts_quote);
     let report = session
         .cycle(sources, setup)
         .map_err(refused(Stage::Reconcile))?
@@ -624,8 +678,9 @@ pub fn run<P: Ports>(
             observation,
             output,
             &watch,
+            &at_preflight,
             |asked| {
-                granted_opening(asked, &watch.pause, watch.interval, || {
+                granted_opening(asked, &watch.pause, watch.interval, fresh, || {
                     opening.cross_check(&collar, &watch.pause)
                 })
             },
@@ -987,10 +1042,17 @@ impl<T: Tools + 'static> Session for Connected<T> {
         }
     }
 
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
         match self {
             Self::Alpaca(transport) => transport.cycle(sources, setup),
             Self::Robinhood(linked) => linked.cycle(sources, setup),
+        }
+    }
+
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.fresh_quote(artifacts, pause),
+            Self::Robinhood(linked) => linked.fresh_quote(artifacts, pause),
         }
     }
 
@@ -1052,7 +1114,8 @@ where
     A: IntoIterator<Item = String>,
     V: IntoIterator<Item = (OsString, OsString)>,
 {
-    let args = parse(args)?;
+    let mut args = args.into_iter().peekable();
+    let check = args.next_if(|first| first == CONNECT_CHECK).is_some();
     let vars: Vec<(String, String)> = vars
         .into_iter()
         .map(|(name, value)| {
@@ -1060,10 +1123,103 @@ where
             (name, value.to_string_lossy().into_owned())
         })
         .collect();
+    if check {
+        let args = parse_check(args)?;
+        let mut ports = ProductionCheck {
+            journal: args.journal.clone(),
+        };
+        let checked = connect_check(&args, &vars, &mut ports)?;
+        return Ok(vec![format!("checked {}", checked.event_id)]);
+    }
+    let args = parse(args)?;
     let mut ports = Production {
         journal: args.journal.clone(),
     };
     lines(&run(&args, &vars, &mut ports)?)
+}
+
+/// The first argument that selects the connect check (DEC-946) instead of a run.
+pub const CONNECT_CHECK: &str = "--connect-check";
+
+/// The connect check's ports in the binary (DEC-946): core dumps off, the founder's login at the
+/// endpoint this build pins and the reads over its session ([`robinhood::login_from_env`],
+/// [`Linked::observe`]), the system clock, and the account stream in the Postgres journal at
+/// `journal`. No error names the DSN, the token or the account number (rule 7).
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProductionCheck {
+    pub journal: String,
+}
+
+/// The DSN may hold a password, so `Debug` never prints it (rule 7).
+impl std::fmt::Debug for ProductionCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProductionCheck")
+            .field("journal", &"<redacted>")
+            .finish()
+    }
+}
+
+impl ProductionCheck {
+    /// `work` against the journal on a runtime of its own, any failure [`PaperError::Journal`].
+    fn journal<T, F>(&self, work: impl FnOnce(PgJournal) -> F) -> Result<T, PaperError>
+    where
+        F: Future<Output = Result<T, PaperError>>,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| PaperError::Journal)?;
+        runtime.block_on(async {
+            let journal = PgJournal::from_dsn(&self.journal).map_err(|_| PaperError::Journal)?;
+            work(journal).await
+        })
+    }
+}
+
+impl CheckPorts for ProductionCheck {
+    /// [`disable_core_dumps`].
+    fn harden(&mut self) -> Result<(), PaperError> {
+        disable_core_dumps()
+    }
+
+    fn observe(&mut self, account_number: &str) -> Result<Observed, PaperError> {
+        Ok(robinhood::login_from_env()?.observe(account_number))
+    }
+
+    fn now(&self) -> UtcNanos {
+        SystemClock.now()
+    }
+
+    fn own(&mut self, stream: &StreamId) -> Result<(u64, u64), PaperError> {
+        self.journal(|journal| async move {
+            let epoch = journal
+                .take_ownership(stream)
+                .await
+                .map_err(|_| PaperError::Journal)?;
+            let head = journal
+                .head(stream)
+                .await
+                .map_err(|_| PaperError::Journal)?;
+            Ok((epoch, head.seq))
+        })
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        head: u64,
+        epoch: u64,
+        at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> Result<AppendOutcome, PaperError> {
+        let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        self.journal(|journal| async move {
+            journal
+                .append(stream, head, epoch, at, &drafts)
+                .await
+                .map_err(|_| PaperError::Journal)
+        })
+    }
 }
 
 /// What a run that refused nothing prints, one line each: the order a dry run would place

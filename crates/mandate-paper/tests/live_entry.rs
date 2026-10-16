@@ -19,7 +19,9 @@ use mandate_paper::{
     acknowledge, dial, disable_core_dumps, endpoint, parse, pinned_host,
 };
 use mandate_shell::control::ControlRecord;
-use rustix::process::{DumpableBehavior, Resource, Rlimit, dumpable_behavior, getrlimit};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use rustix::process::{DumpableBehavior, dumpable_behavior};
+use rustix::process::{Resource, Rlimit, getrlimit};
 
 const IDS: &str = "--workspace w --agent a --account-ref r --store s --bars b";
 
@@ -195,7 +197,8 @@ fn the_binarys_ports_harden_the_process() {
     assert_no_core_dumps();
 }
 
-/// The process's core-file limit is zero, soft and hard, and it is not dumpable.
+/// The process's core-file limit is zero, soft and hard, on every unix target, and on Linux it
+/// is not dumpable either (DEC-954): macOS has no dumpable flag, and CI runs this there too.
 fn assert_no_core_dumps() {
     let limit = getrlimit(Resource::Core);
     let expected = Rlimit {
@@ -206,8 +209,11 @@ fn assert_no_core_dumps() {
         (limit.current, limit.maximum),
         (expected.current, expected.maximum)
     );
-    let behavior = dumpable_behavior().expect("the kernel answers");
-    assert_eq!(behavior, DumpableBehavior::NotDumpable);
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    assert_eq!(
+        dumpable_behavior().expect("the kernel answers"),
+        DumpableBehavior::NotDumpable
+    );
 }
 
 /// LT-1 (DEC-937 item 2): the default build holds no Robinhood host, so it has no endpoint to

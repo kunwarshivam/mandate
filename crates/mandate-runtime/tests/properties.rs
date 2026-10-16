@@ -239,7 +239,10 @@ fn play_with(
                     ACCOUNT_STREAM,
                     seq,
                     "MarkUpdated",
-                    with_clock(&[("instrument", text("AAPL")), ("price", text("150"))], *at),
+                    with_clock(
+                        &[("instrument_id", text("AAPL")), ("price", text("150"))],
+                        *at,
+                    ),
                 );
                 shell.fold_one(&mark).expect("a mark folds");
                 shell.run(Input::Journal(mark), &ports)
@@ -625,7 +628,7 @@ proptest! {
             ACCOUNT_STREAM,
             second,
             "MarkUpdated",
-            with_clock(&[("instrument", text("AAPL")), ("price", text("150"))], 100),
+            with_clock(&[("instrument_id", text("AAPL")), ("price", text("150"))], 100),
         );
         let error = fold(&mut state, &next).expect_err("only seq 2 may follow seq 1");
         prop_assert_eq!(error.code(), "sequence_out_of_order");
@@ -1077,7 +1080,7 @@ proptest! {
                         seq,
                         "MarkUpdated",
                         with_clock(
-                            &[("instrument", text("AAPL")), ("price", text("150"))],
+                            &[("instrument_id", text("AAPL")), ("price", text("150"))],
                             *at,
                         ),
                     );
