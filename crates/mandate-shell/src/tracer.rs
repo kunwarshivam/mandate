@@ -177,6 +177,7 @@ fn open_asking<'s>(
     if let Some(observation) = observation {
         session.observe(observation)?;
     }
+    session.tick_executor()?;
     let fed = session
         .feed(Input::ModelOutput(output))
         .and_then(|()| session.feed(Input::Tick(clock)));
@@ -782,9 +783,26 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
+    /// The executor learns the run's injected clock (ES-21) before the cycle's output reaches
+    /// the runtime, so the intent's `OrderSubmitted` carries the run's time and a restart's
+    /// listing of it starts five minutes before that (DEC-941 item 5). It follows the startup
+    /// reconciliation and the control stream's tail, so a held release, an overdue opening or a
+    /// ladder step it starts runs only after a pause or kill the control stream holds.
+    fn tick_executor(&mut self) -> Result<(), ShellError> {
+        let ticked = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::Tick(
+                mandate_executor::RiskClock::from_secs(self.setup.now.secs()),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(ticked)
+    }
+
     /// Recovery, then the startup account report and reconciliation. The executor is ticked at the
     /// run clock's second before its start, so every record the start leads to carries the run's
-    /// risk clock, never zero (mandate spec §5.2, DEC-948 item 4). The account report commits
+    /// risk clock, never zero (mandate spec §5.2, DEC-948 item 4); that tick only sets the clock,
+    /// and evaluates nothing until [`Session::tick_executor`]. The account report commits
     /// first; the runtime holds every opening until it and a clean `ReconciliationRun` have both
     /// folded (DEC-458), and a mismatch keeps it held.
     pub(crate) fn start(&mut self) -> Result<(), ShellError> {

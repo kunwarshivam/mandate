@@ -239,6 +239,32 @@ enum Writer {
     Opener,
 }
 
+/// DEC-952: paper and live never share a stream. An owner's event is appended only to a control
+/// stream opened in the owner's own environment, which its first event fixed; one of the other
+/// environment is refused `workspace_environment` before anything is appended, rather than left
+/// to the journal's `environment_mismatch`. A stream with no event yet is the journal's to refuse.
+/// [`commit`] and [`commit_caused`] check it themselves; the callers of [`commit_choice`] check it
+/// before they store the object their event names, so a refused event stores nothing either.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `workspace_environment`; [`ControlError::Journal`] when the
+/// stream cannot be read.
+pub(crate) fn same_environment(
+    journal: &dyn ControlJournal,
+    stream: &StreamId,
+    owner: &Owner,
+) -> Result<(), ControlError> {
+    let rows = journal.rows(stream)?;
+    match rows.first() {
+        Some(first) if first.environment != owner.environment.as_str() => {
+            Err(ControlError::Refused {
+                reason: "workspace_environment",
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
 const OPENER_ID: &str = "control_services";
 
 /// Commits `ctl:{workspace}`'s `StreamOpened` in the owner's environment, as the vectors'
@@ -653,6 +679,7 @@ pub(crate) fn commit(
         event_id,
         repeat,
     } = decided;
+    same_environment(journal, &stream, owner)?;
     for name in timed {
         key.push((name, seconds(now.secs)?));
     }
@@ -719,6 +746,7 @@ pub(crate) fn commit_caused(
         mut key,
     } = caused;
     let stream = control_stream(owner)?;
+    same_environment(journal, &stream, owner)?;
     let mut bound = key.clone();
     bound.push(("causation_id", text(&causation_id)));
     let event_id = derive(&stream, event_type, &object(bound)?, true, head)?;
