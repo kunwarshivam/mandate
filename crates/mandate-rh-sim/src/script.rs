@@ -2,7 +2,8 @@
 //! from one JSON object. `accounts` is required; `session` (`closed`, `overnight`, `extended` or
 //! `regular`, closed when absent), `quotes` (symbol to price) and `fills` are not. A fill names a
 //! symbol, a side, a price and, optionally, a quantity, the whole unfilled quantity when absent;
-//! the server uses it once, on the first placed order of that symbol and side it can fill.
+//! the server uses it once, on the first placed order of that symbol and side it can fill, in
+//! any account, a re-sent place of an order still working included.
 //!
 //! Read strictly: a member the script does not define, a number written as a JSON number rather
 //! than canonical decimal text, or a value outside its enumeration refuses the whole script, so

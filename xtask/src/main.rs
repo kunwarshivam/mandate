@@ -1765,9 +1765,10 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
         }
         for (feature, enables) in &pkg.features {
             let rehearsal = enables.iter().find(|enabled| {
-                enabled
-                    .rsplit_once('/')
-                    .is_some_and(|(_, feature)| feature == REHEARSAL)
+                *enabled == REHEARSAL
+                    || enabled
+                        .rsplit_once('/')
+                        .is_some_and(|(_, feature)| feature == REHEARSAL)
             });
             if let Some(enabled) = rehearsal {
                 problems.push(format!(
@@ -12697,9 +12698,10 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// DEC-922 item 1: no crate turns on another's `rh-sim`, by a feature naming `<crate>/rh-sim`
-    /// or `<crate>?/rh-sim` or by a dependency of any kind listing it, so only an explicit flag
-    /// builds it; a crate's own `rh-sim` feature, and a dependency without it, are allowed.
+    /// DEC-922 item 1: nothing turns `rh-sim` on, neither another feature of its own crate
+    /// (`default` included) nor a feature of another naming `<crate>/rh-sim` or `<crate>?/rh-sim`,
+    /// nor a dependency of any kind listing it, so only an explicit flag builds it; a crate's own
+    /// `rh-sim` feature, and a dependency without it, are allowed.
     #[test]
     fn nothing_turns_on_another_crates_rh_sim() -> Result<()> {
         let policy = live_policy();
@@ -12713,6 +12715,13 @@ jq -r "$filter" "$src"
             Vec::<String>::new(),
             "a crate's own `rh-sim` feature is allowed"
         );
+        for own in ["default", "all"] {
+            let lib = with_features(member("a-lib", &[]), &[("rh-sim", &[]), (own, &["rh-sim"])]);
+            let crates = vec![member(RUNNER, &[]), lib, member("a-tool", &[])];
+            let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+            assert_eq!(problems.len(), 1, "{own}: {problems:?}");
+            assert!(problems[0].contains("`a-lib`"), "{problems:?}");
+        }
         for enabled in ["a-lib/rh-sim", "a-lib?/rh-sim"] {
             let tool = with_features(member("a-tool", &[]), &[("go", &[enabled])]);
             let problems = live_feature_problems(
