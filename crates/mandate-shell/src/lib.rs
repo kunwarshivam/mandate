@@ -47,6 +47,7 @@ pub mod host;
 pub mod lt10;
 pub mod map;
 pub mod paper;
+pub mod robinhood;
 pub mod stages;
 pub mod tail;
 pub mod tracer;

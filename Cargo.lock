@@ -1987,11 +1987,28 @@ dependencies = [
  "mandate-modelhost",
  "mandate-num",
  "mandate-risk",
+ "mandate-robinhood",
  "mandate-runtime",
  "mandate-spec",
  "mandate-time",
  "proptest",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "mandate-shell-rh-sim"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-executor",
+ "mandate-mcp",
+ "mandate-num",
+ "mandate-rh-sim",
+ "mandate-robinhood",
+ "mandate-shell",
+ "serde_json",
  "tokio",
 ]
 

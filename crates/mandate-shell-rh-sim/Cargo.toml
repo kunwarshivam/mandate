@@ -1,0 +1,22 @@
+[package]
+name = "mandate-shell-rh-sim"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The shell's Robinhood connector and reconciler tested against the simulated Robinhood server (E7-6, DEC-928): a harness crate with no code of its own"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+mandate-accounting.workspace = true
+mandate-canon.workspace = true
+mandate-executor.workspace = true
+mandate-mcp.workspace = true
+mandate-num.workspace = true
+mandate-rh-sim.workspace = true
+mandate-robinhood.workspace = true
+mandate-shell.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt"] }
