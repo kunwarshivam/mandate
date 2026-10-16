@@ -412,8 +412,10 @@ fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
 /// left, and journals its adoption as `OrderStateChanged` version 2 carrying the broker's
 /// `order_id`. The broker holds one order and saw one place: nothing was sent again. The
 /// reconciliation that follows reads the broker's working order, whose record carries no key of
-/// ours (U-R2), so the restart stops before its cycle; DEC-529 item 3 refuses a run on an account
-/// that holds an order anyway.
+/// ours (U-R2), and stops the restart before its cycle, fail closed: today on a known defect,
+/// the executor's `ExternalActivityIngested` draft naming `instrument` where the journal's schema
+/// refuses it, which this test does not pin. The run is refused on such an account anyway
+/// (DEC-529 item 3, DEC-470 item 1).
 #[test]
 fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
     let server = broker(true);
