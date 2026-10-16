@@ -189,11 +189,11 @@ pub fn reconcile_context(artifacts: &Artifacts, agent: &AgentId) -> Result<Execu
 /// [`reconcile_context`]'s view: the reviewed agent on the reviewed instrument, as
 /// [`TrustedPaperContext`] answers them, with no market fact and a binding gate that answers no
 /// request (DEC-955 item 5).
-struct ReconcilingPaperContext {
-    agent: String,
-    asset: String,
-    increment: ShareIncrement,
-    config_refs: BindingGateConfigRefs,
+pub(super) struct ReconcilingPaperContext {
+    pub(super) agent: String,
+    pub(super) asset: String,
+    pub(super) increment: ShareIncrement,
+    pub(super) config_refs: BindingGateConfigRefs,
 }
 
 impl ReconcilingPaperContext {

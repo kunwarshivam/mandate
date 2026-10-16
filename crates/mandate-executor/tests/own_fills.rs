@@ -12,8 +12,8 @@ use std::collections::BTreeSet;
 
 use common::{
     ACCOUNT_STREAM, FixedInstruments, FixedMandate, Shell, TestIds, broker_fill, broker_order,
-    config, event, handoff, instrument, opening, ports, signed_qty, stream_opened, text,
-    with_clock,
+    config, event, handoff, instrument, opening, ports, protected_opening, signed_qty,
+    stream_opened, text, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -230,6 +230,68 @@ fn the_e2_entry_filled_at_the_broker_and_never_booked_books_one_late_fill() {
     assert!(again.is_empty(), "a booked fill is never booked twice");
 }
 
+/// The E2 bracket: the entry carried its protection, so once it read `filled` the stream also
+/// holds the placement of its two legs, an order of its own that no `OrderSubmitted` recorded.
+/// Only the entry is owed and asked about, and a fill naming it by our client order id (as the
+/// scripted broker's carries) is booked as Alpaca's by its order id is.
+#[test]
+fn the_bracket_entry_alone_is_owed_and_a_fill_named_by_our_id_is_booked() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let ran = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "1", "150", "142.5", Some("165")),
+        ),
+        &ports,
+    );
+    let id = ran
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the bracket entry is sent");
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(broker_order(
+            BROKER_ID,
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "1",
+            "0",
+            "new",
+        )))),
+        &ports,
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(filled(&id, "1"))),
+        &ports,
+    );
+    assert!(
+        shell.state.orders().len() > 1,
+        "the placement is an order of the stream's own: {:?}",
+        shell.state.orders().keys().collect::<Vec<_>>()
+    );
+    assert_eq!(owed_orders(&shell.state), vec![key(&id)], "only the entry");
+
+    let named = broker_fill("f-1", Some(&id), "1", "150");
+    let effects = book(&shell, &[filled(&id, "1")], &[named], &ports)
+        .unwrap_or_else(|e| panic!("books: {e}"));
+    assert_eq!(
+        fill_records(&effects),
+        vec![(
+            "LateFillApplied".to_owned(),
+            "f-1".to_owned(),
+            id,
+            "1".to_owned()
+        )]
+    );
+}
+
 /// An order the journal holds as working, filled at the broker, books an ordinary `FillApplied`
 /// and moves to `filled` by the fill (§5.7).
 #[test]
@@ -276,10 +338,16 @@ fn nothing_the_journal_does_not_own_is_booked() {
     assert!(effects.is_empty(), "nothing filled, nothing booked");
 
     let (shell, id) = filled_unbooked(&ports, "1");
+    let elsewhere = broker_fill(
+        "f-elsewhere",
+        Some("md-00000100000000000005000009"),
+        "1",
+        "150",
+    );
     let effects = book(
         &shell,
         &[filled(&id, "1")],
-        &[foreign, activity("f-1", "1")],
+        &[foreign, elsewhere, activity("f-1", "1")],
         &ports,
     )
     .unwrap_or_else(|e| panic!("books: {e}"));

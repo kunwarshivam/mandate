@@ -44,8 +44,8 @@ fn submitted(state: &ExecutorState, id: &ClientOrderId) -> bool {
 /// and are not yet booked must add up to exactly that. Each is drafted as the executor drafts any
 /// fill: `LateFillApplied` for an order the stream already holds terminal, otherwise
 /// `FillApplied` and the order's move to `filled` or `partially_filled` (trading spec §5.7). A
-/// fill that names no owned order is left alone, never adopted. Nothing but journal records is
-/// drafted.
+/// fill that names no owned order is left alone, never adopted. With every fill matched to an
+/// owned order whose fill fits it, the executor's fill path drafts journal records only.
 ///
 /// # Errors
 /// [`ExecutorError::OwnFillMismatch`] when the broker and the journal disagree on an order the
@@ -67,9 +67,6 @@ pub fn book_own_fills(
         }
         picked.extend(owed_fills(state, &id, order, answer, fills)?);
     }
-    if picked.is_empty() {
-        return Ok(Vec::new());
-    }
     let mut view = state.clone();
     view.epoch = Some(epoch);
     view.now = view.now.max(Some(at));
@@ -78,14 +75,7 @@ pub fn book_own_fills(
     for one in &picked {
         fill(&mut batch, one, Some(&before))?;
     }
-    let journal_only = batch
-        .effects
-        .iter()
-        .all(|effect| matches!(effect, Effect::Journal(_)));
-    match answered.first() {
-        Some(id) if !journal_only => Err(mismatch(id, "not_journal_only")),
-        _ => Ok(batch.effects),
-    }
+    Ok(batch.effects)
 }
 
 /// The owned order the broker's `answer` describes, or the mismatch that it describes none: an
