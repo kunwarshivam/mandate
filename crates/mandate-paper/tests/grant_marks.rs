@@ -397,8 +397,8 @@ impl DataTransport for Broker {
         }
     }
 
-    fn send_bars(&self, _: &BarsRequest) -> impl Future<Output = Result<Response, TransportError>> {
-        async { panic!("the grant's wake reads no bars") }
+    async fn send_bars(&self, _: &BarsRequest) -> Result<Response, TransportError> {
+        panic!("the grant's wake reads no bars")
     }
 }
 
