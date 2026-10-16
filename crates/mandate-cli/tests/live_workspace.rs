@@ -8,6 +8,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -16,6 +17,7 @@ use common::{
     object, owner, stream, text,
 };
 use mandate_artifacts_fs::FsArtifactStore;
+use mandate_canon::Digest;
 use mandate_canon::Value;
 use mandate_cli::approvals::skip;
 use mandate_cli::config::{ConfigKind, register};
@@ -23,6 +25,7 @@ use mandate_cli::connection::{Recorded, Request, record};
 use mandate_cli::control::{ControlError, ControlJournal, Owner};
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::register::ConfigCommand;
+use mandate_cli::version::create;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{Cli, Command};
 use mandate_journal::Environment;
@@ -242,6 +245,15 @@ fn every_owner_command_states_its_environment() {
         panic!("approvals list")
     };
     assert_eq!(args.owner.owner(), Ok(live()));
+    let line = format!(
+        "mandate approvals approve A1 --agent {AGENT} --code c0de --workspace {WORKSPACE} --user \
+         {OWNER} --journal postgres://h/j --store s --environment live"
+    );
+    let Command::Approvals(ApprovalsCommand::Approve(args)) = parse_line(&line).unwrap().command
+    else {
+        panic!("approvals approve")
+    };
+    assert_eq!(args.owner.owner(), Ok(live()));
     for (extra, environment) in [("", "paper"), ("--environment live", "live")] {
         let line = format!(
             "mandate workspace open --workspace {WORKSPACE} --journal postgres://h/j --store s \
@@ -252,5 +264,40 @@ fn every_owner_command_states_its_environment() {
             panic!("workspace open")
         };
         assert_eq!(args.environment, environment);
+    }
+}
+
+const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
+
+/// The paper fixture, or the same mandate made `live` on a Robinhood connection.
+fn mandate(environment: &str) -> String {
+    MANDATE
+        .replace(
+            r#""environment":"paper""#,
+            &format!(r#""environment":"{environment}""#),
+        )
+        .replace("conn_alpaca_paper_01", "conn_rh_live_01")
+}
+
+/// A version gesture in the other environment's workspace is refused before anything is stored
+/// or appended: a paper owner's paper mandate in a live workspace, and a live owner's live mandate
+/// in a paper one. Confirm and deploy pass the same check, `version::admitted`, once their version
+/// is found.
+#[test]
+fn a_version_gesture_is_refused_on_a_workspace_of_the_other_environment() {
+    for (workspace, by, document) in [("live", owner(), "paper"), ("paper", live(), "live")] {
+        let mut fx = opened(workspace);
+        let mut store: BTreeMap<Digest, Vec<u8>> = BTreeMap::new();
+        let bytes = mandate(document);
+        let created = create(
+            &mut fx.journal,
+            &mut store,
+            &by,
+            bytes.as_bytes(),
+            at(ASKED_AT),
+        );
+        assert_eq!(created.map(drop), REFUSED, "{workspace}");
+        assert!(store.is_empty(), "{workspace}: nothing stored");
+        assert_eq!(control_rows(&fx).len(), 1, "{workspace}: nothing appended");
     }
 }
