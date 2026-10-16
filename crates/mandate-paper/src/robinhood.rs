@@ -18,7 +18,7 @@ use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, TransportConfig,
 };
-use mandate_robinhood::RobinhoodConnector;
+use mandate_robinhood::{RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts};
 use mandate_shell::{Cause, ProductionCycle, Setup};
@@ -251,7 +251,8 @@ impl Linked {
             else {
                 return unread;
             };
-            let connector = RobinhoodConnector::new(client, account_number.to_owned());
+            let connector =
+                RobinhoodConnector::new(client, account_number.to_owned(), Tickers::default());
             observe(Some(SeenContract { listed, hash }), &connector).await
         })
     }

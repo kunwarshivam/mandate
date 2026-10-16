@@ -27,7 +27,7 @@ use mandate_executor::{
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
 use mandate_num::{SignedQty, Usd};
 use mandate_rh_sim::{Event, Fault, Garble, Session, Sim, SimServer, State, Variant};
-use mandate_robinhood::{Quote, RobinhoodConnector, Tools, ref_id, robinhood_profile};
+use mandate_robinhood::{Quote, RobinhoodConnector, Tickers, Tools, ref_id, robinhood_profile};
 use mandate_shell::Cause;
 use mandate_shell::adapters::CoreExecutor;
 use mandate_shell::robinhood::{
@@ -94,7 +94,7 @@ fn shell_for<'s>(server: &'s SimServer, account: &str, records: &[FoldedEvent]) 
         garble_place: Rc::clone(&garble_place),
         seen: Rc::clone(&seen),
     };
-    let robinhood = RobinhoodConnector::restore(tools, account.to_owned(), records).unwrap();
+    let robinhood = RobinhoodConnector::restore(tools, account.to_owned(), spy(), records).unwrap();
     let bridge = RobinhoodBridge::new(runtime(), robinhood);
     let scope = AccountScope {
         account: AccountRef("acct_rh".to_owned()),
@@ -656,4 +656,10 @@ fn the_bridges_quote_refuses_a_missing_or_garbled_answer() {
         "{garbled:?}"
     );
     assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
+}
+
+/// SPY registered as its own asset id, as these tests name it (DEC-956 item 1).
+fn spy() -> Tickers {
+    let asset = InstrumentId::new("SPY").unwrap();
+    Tickers::registered([(asset, "SPY".to_owned())]).unwrap()
 }

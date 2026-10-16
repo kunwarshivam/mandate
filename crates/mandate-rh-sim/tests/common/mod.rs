@@ -7,12 +7,25 @@
 
 pub mod wire;
 
+use mandate_accounting::InstrumentId;
 use mandate_num::{Price, Qty, Usd};
 use mandate_rh_sim::{Account, Event, OrderRequest, Session, Sim, SimError};
+use mandate_robinhood::Tickers;
 
 pub const AGENTIC: &str = "5QR00001";
 pub const NOT_AGENTIC: &str = "5QR00002";
 pub const DAY_TRADER: &str = "5QR00003";
+
+/// SPY's asset id, the instrument id the executor names it by (mandate spec §3); Robinhood names
+/// it by its ticker, `SPY`.
+pub const SPY_ASSET: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
+
+/// The registered instrument snapshot's pairing of [`SPY_ASSET`] with its symbol, `SPY`
+/// (DEC-956 item 1).
+pub fn tickers() -> Tickers {
+    let asset = InstrumentId::new(SPY_ASSET).unwrap();
+    Tickers::registered([(asset, "SPY".to_owned())]).unwrap()
+}
 
 pub fn price(text: &str) -> Price {
     Price::parse(text).unwrap()

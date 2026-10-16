@@ -24,7 +24,7 @@ use mandate_paper::{
     observe, parse_check,
 };
 use mandate_rh_sim::{Sim, SimServer, Variant};
-use mandate_robinhood::{RobinhoodConnector, Tools};
+use mandate_robinhood::{RobinhoodConnector, Tickers, Tools};
 use mandate_time::UtcNanos;
 use tokio::runtime::Builder;
 
@@ -617,7 +617,7 @@ fn the_account_read_against_the_simulator_admits_only_the_recorded_agentic_accou
             wire: RefCell::new(Wire::connect(&url)),
             seen: Rc::default(),
         };
-        let connector = RobinhoodConnector::new(tools, number.to_owned());
+        let connector = RobinhoodConnector::new(tools, number.to_owned(), Tickers::default());
         let observed = runtime.block_on(observe(seen.clone(), &connector));
         assert_eq!(
             observed,
@@ -633,7 +633,7 @@ fn the_account_read_against_the_simulator_admits_only_the_recorded_agentic_accou
         wire: RefCell::new(Wire::connect(&two.url().unwrap())),
         seen: Rc::default(),
     };
-    let connector = RobinhoodConnector::new(tools, AGENTIC.to_owned());
+    let connector = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
     let observed = runtime.block_on(observe(seen.clone(), &connector));
     assert!(!observed.agentic_account_read, "two agentic accounts");
     let seen_calls: Rc<RefCell<Vec<&'static str>>> = Rc::default();
@@ -641,7 +641,7 @@ fn the_account_read_against_the_simulator_admits_only_the_recorded_agentic_accou
         wire: RefCell::new(Wire::connect(&url)),
         seen: Rc::clone(&seen_calls),
     };
-    let connector = RobinhoodConnector::new(tools, AGENTIC.to_owned());
+    let connector = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
     let observed = runtime.block_on(observe(None, &connector));
     assert!(!observed.agentic_account_read);
     assert!(seen_calls.borrow().is_empty(), "{:?}", seen_calls.borrow());

@@ -16,6 +16,8 @@ use mandate_mcp::{CallClass, McpError, Tools};
 use mandate_num::{Fraction, Price, Qty, ShareIncrement};
 use serde_json::{Map, Value};
 
+use crate::Tickers;
+
 const REVIEW: &str = "review_equity_order";
 const PLACE: &str = "place_equity_order";
 const CANCEL: &str = "cancel_equity_order";
@@ -34,6 +36,8 @@ const NOT_OFFERED: ConnectorError = ConnectorError::NotSent {
 pub struct RobinhoodConnector<T> {
     pub(crate) tools: T,
     pub(crate) account_number: String,
+    /// The Robinhood ticker of each registered instrument (DEC-956 item 1).
+    pub(crate) tickers: Tickers,
     /// The order each place answered, by our key: its broker `order_id` is what a `Cancel` goes
     /// by, and its instrument and side are what a cancel's answer is read against. After a restart
     /// it is rebuilt from the journal by [`Self::restore`] (DEC-860 item 7).
@@ -44,11 +48,13 @@ pub struct RobinhoodConnector<T> {
 }
 
 impl<T: Tools> RobinhoodConnector<T> {
-    /// Every request names `account_number`, and only it.
-    pub fn new(tools: T, account_number: String) -> Self {
+    /// Every request names `account_number`, and only it, and each instrument by its ticker in
+    /// `tickers`.
+    pub fn new(tools: T, account_number: String, tickers: Tickers) -> Self {
         Self {
             tools,
             account_number,
+            tickers,
             placed: BTreeMap::new(),
             in_doubt: BTreeSet::new(),
         }
@@ -70,9 +76,10 @@ impl<T: Tools> RobinhoodConnector<T> {
     pub fn restore(
         tools: T,
         account_number: String,
+        tickers: Tickers,
         records: &[FoldedEvent],
     ) -> Result<Self, crate::RobinhoodError> {
-        let mut connector = Self::new(tools, account_number);
+        let mut connector = Self::new(tools, account_number, tickers);
         let mut submitted: BTreeMap<ClientOrderId, Option<(InstrumentId, Side)>> = BTreeMap::new();
         let mut ids: BTreeMap<ClientOrderId, BTreeSet<String>> = BTreeMap::new();
         let mut named: BTreeSet<ClientOrderId> = BTreeSet::new();

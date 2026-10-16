@@ -28,7 +28,7 @@ use mandate_executor::{
 };
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty};
-use mandate_robinhood::{RobinhoodConnector, Tools};
+use mandate_robinhood::{RobinhoodConnector, Tickers, Tools};
 use proptest::test_runner::{Config, TestRunner};
 use serde_json::{Value, json};
 
@@ -71,7 +71,8 @@ fn restored(
         calls: Rc::clone(&calls),
         state,
     };
-    let connector = RobinhoodConnector::restore(tools, ACCOUNT.to_owned(), records).unwrap();
+    let connector =
+        RobinhoodConnector::restore(tools, ACCOUNT.to_owned(), tickers(), records).unwrap();
     (connector, calls)
 }
 
@@ -775,7 +776,8 @@ fn rebuilt_within_seconds(records: &[FoldedEvent]) {
     let records = records.to_vec();
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
-        let rebuilt = RobinhoodConnector::restore(NoTools, ACCOUNT.to_owned(), &records).is_ok();
+        let rebuilt =
+            RobinhoodConnector::restore(NoTools, ACCOUNT.to_owned(), tickers(), &records).is_ok();
         done.send(rebuilt).unwrap();
     });
     assert_eq!(
@@ -1193,4 +1195,10 @@ fn interleaved(alternates: bool) {
         Ok(())
     });
     verdict.unwrap();
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }
