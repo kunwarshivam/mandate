@@ -1,10 +1,13 @@
 //! The fee configuration the fold charges with (trading-domain spec §6.2, §6.3), built from a dated
 //! schedule someone transcribed from the broker's published fee schedule, and validated here.
 //!
-//! This module holds **no** rates. §6.2 says "rates come from an effective-dated configuration
-//! transcribed from Alpaca's fee schedule", so the values are data a deployment supplies (with a
-//! content hash in `config_refs`), never constants in the crate (the coordinator's ruling on #174,
-//! 5861849917, option (i)). The constructor only refuses a schedule it cannot read exactly.
+//! §6.2 says "rates come from an effective-dated configuration transcribed from Alpaca's fee
+//! schedule", so a transcribed schedule is data a deployment supplies (with a content hash in
+//! `config_refs`), never constants in the crate (the coordinator's ruling on #174, 5861849917,
+//! option (i)). The constructor only refuses a schedule it cannot read exactly. The two
+//! schedules a registered fee artifact can name are the exception, each bound to one environment:
+//! [`PAPER_ONLY`]'s deliberate overestimate for `paper`, and [`ROBINHOOD_LIVE`], Robinhood's
+//! posted fees for `live` (DEC-958), which a test pins figure for figure to its dated file.
 
 use mandate_accounting::{Config, CryptoFees, EquityFees, TafCapBasis};
 use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate};
@@ -109,6 +112,44 @@ pub fn paper_only_fee_config(
         },
         calendar,
     )
+}
+
+/// The `schedule` a registered live fee artifact names to be priced by [`ROBINHOOD_LIVE`]
+/// ([DEC-958](../../../docs/project/decisions/DEC-958.md)).
+pub const ROBINHOOD_LIVE_SCHEDULE: &str = "robinhood_live_2026_10_16";
+
+/// Robinhood Financial's posted US equity fees for a live account, transcribed figure for figure
+/// from `config/fees/robinhood-live-2026-10-16.toml`, where each figure sits beside its source,
+/// URL and effective date: zero commission, SEC Section 31 and FINRA TAF on sells, CAT on buys and
+/// sells. Each is the highest rate in force or scheduled at transcription, so a live account is
+/// never priced below what it is charged: TAF stays at its posted rate through FINRA's
+/// October to December 2026 pause, and the cap applies per execution, the basis that charges more.
+/// A live run trades US equities only, so the crypto figures are never charged; they repeat
+/// [`PAPER_ONLY`]'s overestimate. **Accepted (agent, under DEC-929)** as values; the founder may
+/// revert (DEC-958).
+const ROBINHOOD_LIVE: FeeSchedule<'static> = FeeSchedule {
+    effective_from: "",
+    sec_rate: "0.0000206",
+    taf_per_share: "0.000195",
+    taf_cap: "9.79",
+    taf_cap_basis: "per_execution",
+    cat_per_share: "0.000003",
+    crypto_maker_bps: "250",
+    crypto_taker_bps: "250",
+};
+
+/// [`ROBINHOOD_LIVE`]'s configuration over `calendar`, for a stream opened in `environment` on a
+/// connection to `broker`, taking effect on `first_day`. Anything but `live` is refused as an
+/// environment mismatch, so no paper run is ever priced from it, and any broker but `robinhood`
+/// is refused by name: the figures are Robinhood's own (DEC-958).
+pub fn robinhood_live_fee_config(
+    environment: &str,
+    broker: &str,
+    calendar: TradingCalendar,
+    first_day: &str,
+) -> Result<Config, ExecutorError> {
+    let _ = (environment, broker, calendar, first_day, ROBINHOOD_LIVE);
+    Err(ExecutorError::Unimplemented { story: "R10" })
 }
 
 fn refused(field: &str) -> ExecutorError {

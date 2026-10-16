@@ -25,6 +25,8 @@ use std::collections::BTreeMap;
 
 pub const MANDATE: &str = include_str!("../fixtures/tracer/mandate.json");
 pub const FEE: &str = include_str!("../fixtures/tracer/config/fee-config.json");
+/// The live Robinhood fee schedule the R0 rehearsal registers (DEC-958).
+pub const LIVE_FEE: &str = include_str!("../../../../config/fees/robinhood-live-2026-10-16.json");
 pub const CALENDAR: &str = include_str!("../fixtures/tracer/config/trading-calendar.json");
 pub const RULES: &str = include_str!("../fixtures/tracer/config/rule-set.json");
 /// The E7-7 model artifact's bytes, inlined from the deleted fixture: their digest is the hash the
@@ -118,19 +120,23 @@ impl Stream {
     /// connection established as a live Robinhood one so V-001 agrees, the fee schedule naming
     /// `fee_environment`, and every record on the live workspace's own control stream.
     pub fn live(fee_environment: &str) -> Self {
+        Self::live_priced(&FEE.replace(
+            r#""environment":"paper""#,
+            &format!(r#""environment":"{fee_environment}""#),
+        ))
+    }
+
+    /// The same live deployment with `fee` registered as its fee schedule.
+    pub fn live_priced(fee: &str) -> Self {
         let content = model();
         let mandate =
             spy_mandate(&content).replace(r#""environment": "paper""#, r#""environment": "live""#);
-        let fee = FEE.replace(
-            r#""environment":"paper""#,
-            &format!(r#""environment":"{fee_environment}""#),
-        );
         let mut stream = Self {
             records: Vec::new(),
             store: BTreeMap::new(),
             origin: live_origin(),
         };
-        stream.fill(&mandate, SNAPSHOT, RULES, &fee, CALENDAR, &content);
+        stream.fill(&mandate, SNAPSHOT, RULES, fee, CALENDAR, &content);
         stream.record(
             "ConnectionEstablished",
             r#"{"broker":"robinhood","connection_id":"conn_alpaca_paper_01","environment":"live","scopes":["trading"]}"#,

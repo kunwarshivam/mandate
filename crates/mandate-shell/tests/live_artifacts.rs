@@ -20,7 +20,7 @@ use mandate_spec::context::{AgentId, Membership};
 use mandate_time::Date;
 use proptest::prelude::*;
 
-use common::{FEE, RULES, SNAPSHOT, Stream, live_origin, paper_origin};
+use common::{FEE, LIVE_FEE, RULES, SNAPSHOT, Stream, live_origin, paper_origin};
 
 /// The refusal of a binding journaled anywhere but the deployment's own stream and environment.
 const FOREIGN: &str = "every binding journaled on the deployment's own control stream";
@@ -75,7 +75,8 @@ fn absent(answer: &Result<Artifacts, Cause>) -> Option<&'static str> {
 }
 
 /// The paper-only fee schedule's own refusal of a live stream (`paper_only_fee_config`): the one
-/// check left after every provenance check passed, until a live fee schedule exists (R10).
+/// check left after every provenance check passed when a live run registers the paper schedule
+/// with its environment changed to `live` (R10 registers the live schedule instead, DEC-958).
 fn refused_only_by_the_paper_only_fees(answer: &Result<Artifacts, Cause>) -> bool {
     matches!(
         answer,
@@ -128,6 +129,62 @@ fn a_live_version_exists_only_when_the_run_held_every_condition() {
 fn a_live_run_refuses_a_fee_schedule_naming_paper() {
     let answer = artifacts(&Stream::live("paper"));
     assert_eq!(absent(&answer), Some(FEE_ELSEWHERE), "{:?}", answer.err());
+}
+
+/// The refusal of a fee artifact whose members are not exactly its schedule's.
+const FEE_MEMBERS: &str = "a config artifact with exactly its reviewed members";
+
+/// DEC-958: a live run whose every binding is its own live workspace's, priced by the registered
+/// live Robinhood schedule, builds its artifacts, and they charge Robinhood's posted rates.
+#[test]
+fn a_live_run_priced_by_the_live_robinhood_schedule_builds_its_artifacts() {
+    let answer = artifacts(&Stream::live_priced(LIVE_FEE));
+    assert!(answer.is_ok(), "{:?}", answer.err());
+}
+
+/// DEC-958: a paper run never prices from the live schedule: registered as it is, it names
+/// `live`, which is not the paper mandate's environment; renamed to `paper`, the live schedule
+/// itself refuses the paper stream.
+#[test]
+fn a_paper_run_refuses_the_live_schedule() {
+    let answer = artifacts(&Stream::deployed(SNAPSHOT, RULES, LIVE_FEE));
+    assert_eq!(absent(&answer), Some(FEE_ELSEWHERE), "{:?}", answer.err());
+    let renamed = LIVE_FEE.replace(r#""environment":"live""#, r#""environment":"paper""#);
+    let answer = artifacts(&Stream::deployed(SNAPSHOT, RULES, &renamed));
+    assert!(
+        matches!(
+            &answer,
+            Err(Cause::Executor(ExecutorError::EnvironmentMismatch { opened, found }))
+                if opened == "paper" && found == "live"
+        ),
+        "{:?}",
+        answer.err()
+    );
+}
+
+/// DEC-958: the live schedule serves the `robinhood` broker only, and each schedule's artifact has
+/// exactly its own members: the live one names its broker, the paper one does not.
+#[test]
+fn the_live_schedule_refuses_another_broker_and_any_other_shape() {
+    let alpaca = LIVE_FEE.replace(r#""broker":"robinhood""#, r#""broker":"alpaca""#);
+    let answer = artifacts(&Stream::live_priced(&alpaca));
+    assert!(
+        matches!(
+            &answer,
+            Err(Cause::Executor(ExecutorError::NonCanonicalPayload { field })) if field == "broker"
+        ),
+        "{:?}",
+        answer.err()
+    );
+    let unnamed = LIVE_FEE.replace(r#""broker":"robinhood","#, "");
+    let paper_named = FEE.replace(
+        r#"{"effective_from""#,
+        r#"{"broker":"robinhood","effective_from""#,
+    );
+    for fee in [unnamed, paper_named] {
+        let answer = artifacts(&Stream::live_priced(&fee));
+        assert_eq!(absent(&answer), Some(FEE_MEMBERS), "{fee}");
+    }
 }
 
 /// DEC-957 item 2: each binding of a live run journaled on a paper stream, on another
