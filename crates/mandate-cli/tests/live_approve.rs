@@ -205,6 +205,28 @@ fn every_other_live_deployment_is_refused_and_commits_nothing() {
             }),
         ),
         (
+            "live_not_one_instrument",
+            Box::new(|fx| {
+                let edit = [(
+                    r#""symbol":"SPY"}]"#,
+                    r#""symbol":"SPY"},{"asset_class":"us_equity","asset_id":"c0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"QQQ"}]"#,
+                )];
+                let version = store(fx, live_mandate(&edit));
+                connection(fx, "robinhood", "live", OWNER);
+                fx.ask_in("live", AGENT, &request(SPY, "1", &version))
+            }),
+        ),
+        (
+            "live_not_equity",
+            Box::new(|fx| {
+                let version = store(fx, live_mandate(&[]));
+                connection(fx, "robinhood", "live", OWNER);
+                let mut crypto = request(SPY, "1", &version);
+                crypto.bound.asset_class = AssetClass::Crypto;
+                fx.ask_in("live", AGENT, &crypto)
+            }),
+        ),
+        (
             "live_other_instrument",
             Box::new(|fx| {
                 let version = store(fx, live_mandate(&[]));

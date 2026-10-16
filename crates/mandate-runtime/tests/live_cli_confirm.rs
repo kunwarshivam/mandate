@@ -186,6 +186,20 @@ fn every_other_live_deployment_refuses_the_grant() {
     refused_for_method(&granted(&FixedPlan::opening(Autonomy::Ask), &live(Some(scope()))).1);
 }
 
+/// A backtest has no owner to step up: a scope handed to a backtest view admits nothing.
+#[test]
+fn a_backtest_view_never_admits_cli_confirm() {
+    let view = live(Some(scope()));
+    let backtest = MandateView {
+        approval: ApprovalSettings {
+            environment: Environment::Backtest,
+            ..view.approval
+        },
+        ..view
+    };
+    refused_for_method(&granted(&one_share(), &backtest).1);
+}
+
 /// DEC-923 item 4, rule 13: an exit on a live deployment with no scope is proposed and handed with
 /// no approval at all.
 #[test]

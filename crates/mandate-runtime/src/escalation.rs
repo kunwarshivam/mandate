@@ -411,7 +411,10 @@ fn answered(
                 environment: environment(settings.environment),
                 used_assertions: state.used_assertions(&event.event_id),
                 policy: PolicyOverlay::NONE,
-                live_cli_confirm: settings.live_cli_confirm.clone(),
+                live_cli_confirm: settings
+                    .live_cli_confirm
+                    .clone()
+                    .filter(|_| settings.environment == mandate_journal::Environment::Live),
             };
             let admission = admit(pending, &response, &context)?;
             let applied = quorum_applied(

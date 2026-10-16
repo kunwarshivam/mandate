@@ -285,16 +285,17 @@ fn live_grant(
 ) -> Result<(), ControlError> {
     let refused = |why: LiveRefusal| ControlError::Refused { reason: why.code() };
     let scope = live_scope(journal, store, owner, content);
-    if member_text(content, "action.asset_class") != Some("us_equity") {
-        return Err(refused(LiveRefusal::NotEquity));
-    }
+    let asset_class = match member_text(content, "action.asset_class") {
+        Some("us_equity") => AssetClass::UsEquity,
+        _ => AssetClass::Crypto,
+    };
     let order_usd = member_text(content, "action.order_usd")
         .and_then(|v| Usd::parse(v).ok())
         .ok_or_else(|| refused(LiveRefusal::OrderAboveLimit))?;
     let approver = OpaqueUser(owner.user.clone());
     let grant = LiveGrant {
         instrument: member_text(content, "action.instrument").unwrap_or_default(),
-        asset_class: AssetClass::UsEquity,
+        asset_class,
         order_usd,
         approver: &approver,
     };
