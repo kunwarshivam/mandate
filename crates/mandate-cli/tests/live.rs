@@ -487,6 +487,34 @@ fn every_other_live_combination_is_refused_with_its_code_and_writes_nothing() {
     assert_eq!(seen, CODES, "each code met");
 }
 
+/// An owner neither in `paper` nor in `live` is refused `paper_only` before anything is read
+/// (DEC-530 item 2): for a version the stream never created, not `version_unknown`; for a document
+/// that does not parse, not `mandate_invalid`.
+#[test]
+fn a_backtest_owner_is_refused_before_anything_is_read() {
+    let mut world = World::new();
+    let owner = in_env(Environment::Backtest);
+    let unknown = reference(&document(true));
+    let shown = confirmation(&world.journal, &world.store, &owner, &unknown, at(NOW));
+    assert_eq!(shown.map(|s| s.code), Err(refused("paper_only")));
+    let named = (AGENT, unknown.as_str());
+    let shown = deployment(&world.journal, &world.store, &owner, named, at(NOW));
+    assert_eq!(shown.map(|s| s.code), Err(refused("paper_only")));
+    let (journal, store, ids) = (&mut world.journal, &mut world.store, &mut world.ids);
+    let code = confirm_code(&unknown);
+    let done = confirm(journal, store, ids, &owner, &unknown, &code, at(NOW));
+    assert_eq!(reason(done), "paper_only");
+    let code = deploy_code(&unknown);
+    let done = deploy(journal, store, ids, &owner, AGENT, &unknown, &code, at(NOW));
+    assert_eq!(reason(done), "paper_only");
+    let done = create(journal, store, &owner, b"not json", at(NOW));
+    assert_eq!(reason(done), "paper_only");
+}
+
+fn refused(reason: &'static str) -> ControlError {
+    ControlError::Refused { reason }
+}
+
 /// The gestures' `--environment`: `paper` by default, `live` when given; any other value is
 /// refused `environment_invalid` before any journal is opened.
 #[test]
