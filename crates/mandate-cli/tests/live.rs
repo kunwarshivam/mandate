@@ -22,6 +22,8 @@ use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
 
 type Store = BTreeMap<Digest, Vec<u8>>;
+/// One of the three gestures, by an owner, on the paper or the live document.
+type Gesture = fn(&mut World, &Owner, bool) -> Result<Submitted, ControlError>;
 
 const NOW: i64 = 1_790_000_000;
 const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
@@ -270,8 +272,7 @@ fn a_live_mandate_on_the_owners_recorded_robinhood_connection_is_created_confirm
         Event::Account("FillApplied", OTHER_ACCOUNT),
     ]);
     let live = in_env(Environment::Live);
-    let steps: [fn(&mut World, &Owner, bool) -> Result<Submitted, ControlError>; 3] =
-        [World::create, World::confirm, World::deploy];
+    let steps: [Gesture; 3] = [World::create, World::confirm, World::deploy];
     let types = ["MandateVersionCreated", "MandateConfirmed", "AgentDeployed"];
     for (step, event_type) in steps.into_iter().zip(types) {
         let before = world.journal.attempts.len();

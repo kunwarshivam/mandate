@@ -1,7 +1,8 @@
 //! `mandate version create` and `mandate version confirm` (first paper trade brief, D2a; DEC-530).
 //! Each stores the mandate document and its mandate spec §10 record in the artifact store, then
 //! commits exactly one control-stream event naming them (journal spec §9.2, DEC-155 item 5). Both
-//! are paper only, and a confirmation takes a `cli_confirm` code bound to the version shown. What
+//! are paper only, but for a live mandate on the owner's own recorded Robinhood live connection
+//! ([`admitted`]; DEC-529 item 3, DEC-925), and a confirmation takes a `cli_confirm` code bound to the version shown. What
 //! `version confirm` prints before the code is typed comes with the commands, D2c.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +18,8 @@ use mandate_spec::{Mandate, MandateVersion, Pointer, ValidationContext, Violatio
 
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Shape,
-    Submitted, code_of, commit_choice, control_stream, decide, object, seconds, text,
+    Submitted, account_stream, code_of, commit_choice, control_stream, decide, object, seconds,
+    text,
 };
 
 pub(crate) const CREATED: &str = "MandateVersionCreated";
@@ -38,11 +40,12 @@ fn reference(digest: Digest) -> String {
     format!("sha256:{}", digest.to_hex())
 }
 
-pub(crate) fn paper_only(owner: &Owner) -> Result<(), ControlError> {
-    if owner.environment == Environment::Paper {
-        Ok(())
-    } else {
-        Err(refused("paper_only"))
+/// DEC-530 item 2, narrowed by DEC-529 item 3 (DEC-925): an owner neither in `paper` nor in `live`
+/// is refused `paper_only` before anything is read; [`admitted`] decides the rest.
+pub(crate) fn paper_or_live(owner: &Owner) -> Result<(), ControlError> {
+    match owner.environment {
+        Environment::Paper | Environment::Live => Ok(()),
+        Environment::Backtest => Err(refused("paper_only")),
     }
 }
 
@@ -64,8 +67,58 @@ pub fn admitted(
     owner: &Owner,
     document: &Value,
 ) -> Result<(), ControlError> {
-    let _ = (journal, owner, document);
-    Err(ControlError::Unimplemented { story: "K1b" })
+    let environment = document.get("environment").and_then(Value::as_str);
+    match (owner.environment, environment) {
+        (Environment::Paper, Some("paper")) => return Ok(()),
+        (Environment::Paper, _) => return Err(refused("mandate_not_paper")),
+        (Environment::Live, Some("live")) => {}
+        _ => return Err(refused("paper_only")),
+    }
+    let connection = document.get("connection_id").and_then(Value::as_str);
+    let rows = rows(journal, owner)?;
+    let latest = rows.iter().rev().find(|r| {
+        matches!(r.event_type.as_str(), ESTABLISHED | REVOKED)
+            && connection.is_some()
+            && r.member("connection_id") == connection
+    });
+    let record = latest
+        .filter(|r| recorded_live_robinhood(r, owner))
+        .ok_or_else(|| refused("paper_only"))?;
+    let account = record
+        .member("account_ref")
+        .ok_or_else(|| refused("paper_only"))?;
+    let stream = account_stream(owner, account).map_err(|_| refused("paper_only"))?;
+    let spent = journal
+        .rows(&stream)?
+        .iter()
+        .any(|r| matches!(r.event_type.as_str(), "FillApplied" | "LateFillApplied"));
+    if spent {
+        return Err(refused("connection_spent"));
+    }
+    Ok(())
+}
+
+const ESTABLISHED: &str = "ConnectionEstablished";
+const REVOKED: &str = "ConnectionRevoked";
+
+/// Whether `row` establishes a connection `owner.user` recorded through `connection record`: broker
+/// `robinhood`, environment `live`, a margin attestation, and `cli_confirm` step-up (DEC-529 items 3
+/// and 11, journal spec §9.8 rule 64).
+fn recorded_live_robinhood(row: &Row, owner: &Owner) -> bool {
+    let method = row
+        .payload
+        .get("step_up")
+        .and_then(|s| s.get("method"))
+        .and_then(Value::as_str);
+    row.event_type == ESTABLISHED
+        && row.member("broker") == Some("robinhood")
+        && row.member("environment") == Some("live")
+        && matches!(
+            row.member("margin_attestation"),
+            Some("cash_account" | "margin_disabled")
+        )
+        && method == Some("cli_confirm")
+        && row.member("user") == Some(owner.user.as_str())
 }
 
 /// One control-stream event as a command reads it.
@@ -176,12 +229,10 @@ pub fn create(
     document: &[u8],
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     let value = parse(document).map_err(|_| refused("mandate_invalid"))?;
     let mandate = Mandate::parse(&value).map_err(|_| refused("mandate_invalid"))?;
-    if value.get("environment").and_then(Value::as_str) != Some("paper") {
-        return Err(refused("mandate_not_paper"));
-    }
+    admitted(journal, owner, &value)?;
     let canonical = mandate
         .canonical_bytes()
         .map_err(|_| refused("mandate_invalid"))?;
@@ -350,12 +401,13 @@ pub fn confirm(
     code: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     let rows = rows(journal, owner)?;
     if latest(&rows, CREATED, version).is_none() {
         return Err(refused("version_unknown"));
     }
     let (document, mandate) = stored(store, version)?;
+    admitted(journal, owner, &document)?;
     let gesture = object(vec![
         ("gesture", text("mandate_confirm")),
         ("mandate_version", text(version)),
