@@ -27,7 +27,8 @@ use crate::types::{
 /// The order of the steps is part of the algorithm: **orders, then fills, then positions, then
 /// cash, then fees, then `ReconciliationRun`** (task brief interpretation 12).
 ///
-/// 1. **Open orders, by client order id.** The broker wins: every difference is adopted with
+/// 1. **Open orders, by client order id**, or, for a record naming none, by the one broker order id
+///    the order's journal carries (DEC-956 item 2). The broker wins: every difference is adopted with
 ///    `OrderStateChanged` plus a `CompensatingEvent` naming the difference and the corrected event
 ///    ids. An order the broker has and we do not is external activity (§7.1): every agent on the
 ///    account goes `exits_only` until the owner acknowledges. A reject naming a `client_order_id`
@@ -157,7 +158,13 @@ fn orders(
         let theirs = snapshot
             .open_orders
             .iter()
-            .find(|open| open.client_order_id.as_deref() == Some(id.as_str()));
+            .find(|open| open.client_order_id.as_deref() == Some(id.as_str()))
+            .or_else(|| {
+                snapshot
+                    .open_orders
+                    .iter()
+                    .find(|open| journaled_owner(&batch.view, open).as_ref() == Some(&id))
+            });
         let adopted = match theirs {
             Some(open) => match status_mapping(&open.status) {
                 Ok(StatusMapping::Becomes(state)) => state,
@@ -183,7 +190,7 @@ fn orders(
             .as_deref()
             .and_then(|raw| ClientOrderId::parse(raw).ok())
             .is_some_and(|id| batch.view.orders.contains_key(&id));
-        if ours {
+        if ours || journaled_owner(&batch.view, open).is_some() {
             continue;
         }
         let mut pairs = vec![
@@ -212,6 +219,28 @@ fn orders(
         )?;
     }
     Ok(())
+}
+
+/// The order of ours a broker record naming no key is, by its broker order id (DEC-956 item 2,
+/// DEC-869): the one order whose version-2 `OrderStateChanged` records carried exactly that id
+/// and no other, for the record's instrument and side. A Robinhood record never carries our key
+/// (U-R2), so this is how an order adopted by its listing stays adopted. A record naming a key,
+/// an id no order or two orders carried, an order that carried two ids, or another instrument or
+/// side is no order of ours, and nothing is guessed.
+fn journaled_owner(view: &ExecutorState, open: &BrokerOrder) -> Option<ClientOrderId> {
+    if open.client_order_id.is_some() {
+        return None;
+    }
+    let mut carried = view
+        .details
+        .iter()
+        .filter(|(_, detail)| detail.broker_order_ids.contains(&open.broker_order_id));
+    let (Some((id, detail)), None) = (carried.next(), carried.next()) else {
+        return None;
+    };
+    let order = view.orders.get(id)?;
+    let one_id = detail.broker_order_ids.len() == 1;
+    (one_id && order.instrument == open.instrument && order.side == open.side).then(|| id.clone())
 }
 
 /// Whether `id`, a live protective order no broker order is named for, is a filled bracket's
