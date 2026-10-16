@@ -649,6 +649,7 @@ fn event() -> impl Strategy<Value = Event> {
 
 /// No `live` mandate is ever admitted but on a Robinhood `live` connection the owner recorded
 /// through the CLI, not revoked since and unspent; every other draw refuses as the oracle says.
+/// Each owner acts in a workspace of its own environment (DEC-952).
 #[test]
 fn no_live_mandate_is_admitted_but_on_the_owners_unspent_robinhood_record() {
     let drawn = (
@@ -662,7 +663,11 @@ fn no_live_mandate_is_admitted_but_on_the_owners_unspent_robinhood_record() {
     );
     TestRunner::deterministic()
         .run(&drawn, |(events, environment, live_document)| {
-            let world = World::with(&events);
+            let workspace = match environment {
+                Environment::Paper => "paper",
+                Environment::Live | Environment::Backtest => "live",
+            };
+            let world = World::opened_with(workspace, &events);
             let owner = in_env(environment);
             let document = json(&document(live_document));
             let got = admitted(&world.journal, &owner, &document).map_err(|e| match e {

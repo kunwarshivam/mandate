@@ -56,11 +56,14 @@ pub(crate) fn paper_or_live(owner: &Owner) -> Result<(), ControlError> {
 /// since, by `owner.user` through the CLI: broker `robinhood`, environment `live`, a margin
 /// attestation, and `cli_confirm` step-up; and only while the record is unspent: no
 /// `FillApplied` or `LateFillApplied` on the account stream it binds (DEC-910 item 3), and no
-/// order there whose latest `OrderStateChanged` is `unknown` (V-001). It reads and writes nothing
-/// for a `paper` owner.
+/// order there whose latest `OrderStateChanged` is `unknown` (V-001). Either owner's control stream
+/// must be of the owner's environment (DEC-952), so every version gesture, its show-code step
+/// included, is refused in the other environment's workspace before anything is stored or minted;
+/// for a `paper` owner that is all it reads, and it writes nothing.
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `mandate_not_paper` for a `paper` owner and any other document;
+/// `workspace_environment` for a matching document in a workspace of the other environment;
 /// `paper_only` for an owner neither `paper` nor `live`, and for a `live` owner and any other
 /// document or connection; `connection_spent` for a spent record. [`ControlError::Journal`] when
 /// a stream cannot be read.
@@ -70,10 +73,11 @@ pub fn admitted(
     document: &Value,
 ) -> Result<(), ControlError> {
     let environment = document.get("environment").and_then(Value::as_str);
+    let stream = control_stream(owner)?;
     match (owner.environment, environment) {
-        (Environment::Paper, Some("paper")) => return Ok(()),
+        (Environment::Paper, Some("paper")) => return same_environment(journal, &stream, owner),
         (Environment::Paper, _) => return Err(refused("mandate_not_paper")),
-        (Environment::Live, Some("live")) => {}
+        (Environment::Live, Some("live")) => same_environment(journal, &stream, owner)?,
         _ => return Err(refused("paper_only")),
     }
     let connection = document
@@ -227,7 +231,6 @@ pub(crate) fn commit(
         Decision::Committed(earlier) => return Ok(earlier),
         Decision::Fresh(decided) => decided,
     };
-    same_environment(journal, &control_stream(owner)?, owner)?;
     store.put_artifact(&bytes).map_err(|e| store_error(&e))?;
     let mut artifact_refs = vec![version.to_owned(), record_ref];
     artifact_refs.sort();
