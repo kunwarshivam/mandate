@@ -157,9 +157,9 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
 ];
 
 /// The records journal spec v0.17 §9.7 closes (DEC-533), and `ApprovalTimedOut`, which v0.41
-/// closes there (DEC-944), each on its one stream with the configuration it names. Until J2's implementation catalogues and closes them, the journal refuses
-/// them as not catalogued or not registered; `the_approval_answers_are_catalogued_and_closed_on_their_streams`
-/// asserts what they become, so the table above leaves their schema reason alone.
+/// closes there (DEC-944), each on its one stream with the configuration it names.
+/// `the_approval_answers_are_catalogued_and_closed_on_their_streams` asserts what they are, so the
+/// table above leaves their schema reason alone.
 const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
     ("ApprovalResponseSubmitted", CTL, &[]),
     ("ApprovalResponded", AGENT, &[MAN]),
