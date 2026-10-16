@@ -4,7 +4,7 @@
 //! classification facts are the builder's [`buy_action`] and its protection is the executor's
 //! [`equity_bracket_prices`], so no money or quantity is computed here (DEC-138 item 3).
 
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
@@ -55,21 +55,21 @@ pub struct Contexts {
 /// preflight's. The gate's recheck is unchanged: the quote's age at the gate's own clock,
 /// `iex_quote_max_age_s` (DEC-935 item 2), and a stamp after that clock refuses.
 #[derive(Debug, Clone)]
-pub struct GateQuote(Rc<RefCell<SaneQuote>>);
+pub struct GateQuote(Rc<Cell<SaneQuote>>);
 
 impl GateQuote {
     pub(super) fn of(quote: &LatestQuote) -> Self {
-        Self(Rc::new(RefCell::new(sane(quote))))
+        Self(Rc::new(Cell::new(sane(quote))))
     }
 
     /// Hands the binding gate `quote`, a fresh IEX read the run judged at its read: every
     /// binding request from now on judges it in place of the one held before.
     pub fn hand(&self, quote: &LatestQuote) {
-        *self.0.borrow_mut() = sane(quote);
+        self.0.set(sane(quote));
     }
 
     fn current(&self) -> SaneQuote {
-        *self.0.borrow()
+        self.0.get()
     }
 }
 

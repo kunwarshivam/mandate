@@ -15,7 +15,7 @@
   (the preflight's own IEX read and the judge's checks). `crates/mandate-runtime/src/state.rs` —
   the fold reads the registered `instrument_id`. `crates/mandate-paper/src/wiring.rs` —
   `granted_opening` reads a fresh quote before each wake, a failed read stopping the wait;
-  `src/lib.rs` — `Session::fresh_quote`, and `run()` handing each read to the gate.
+  `src/lib.rs` — `Session::fresh_quote`, and `fresh_mark`, the read `run()` hands to the gate and journals as the wake's mark.
 - **Tests:** `crates/mandate-paper/tests/grant_marks.rs` (the runner's own wait over the
   production stages, the paper binding gate and the validating journal: a grant 30 s after the
   preflight placed once, a stale fresh read refusing with nothing sent, drift beyond the band

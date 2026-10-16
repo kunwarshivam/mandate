@@ -36,13 +36,13 @@ use mandate_executor::equity_bracket_prices;
 use mandate_journal::{AppendOutcome, ArtifactSource, StoredEvent};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, evaluate};
 use mandate_num::{Fraction, Price};
-use mandate_paper::{GrantRefusal, PaperError, granted_opening, lt10_end};
+use mandate_paper::{GrantRefusal, PaperError, fresh_mark, granted_opening, lt10_end};
 use mandate_runtime::{
     Classified, IntentBody, IntentHandoff, MandateView, ModelOutput, Observation, OrderExecution,
     Proposal, SignalInputs,
 };
 use mandate_shell::adapters::{Sources, StoreJournal, production};
-use mandate_shell::paper::{PaperClock, fresh_quote, load_contexts_with_clock};
+use mandate_shell::paper::{PaperClock, load_contexts_with_clock};
 use mandate_shell::stages::{Admitted, Classifier, JournalWriter, MandateSource, Sink, Sizing};
 use mandate_shell::{Cause, Mark, Report, Setup, ShellError, Watch, run_observed_asked_watched};
 use mandate_spec::validate::RegisteredModel;
@@ -497,7 +497,7 @@ static MANDATE_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// One placing run whose cycle asks, at [`PREFLIGHT`], waiting at a five-second interval: the
 /// founder grants it at the first pause `delay_s` seconds or more after the preflight, and from
 /// then the broker's quote is `after_grant`. The wait is the runner's own: each wake reads a
-/// fresh IEX quote through [`fresh_quote`], hands it to the binding gate, and journals its mark
+/// fresh IEX quote through the run's own [`fresh_mark`], hands it to the binding gate, and journals its mark
 /// before the runtime is handed the answers.
 fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
     let now = at(PREFLIGHT);
@@ -591,16 +591,7 @@ fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
         bound: at("2026-09-29T19:50:00Z"),
         interval: Duration::from_secs(5),
     };
-    let fresh = || {
-        let read = fresh_quote(&artifacts, broker.clone(), clock.clone()).map_err(|cause| {
-            PaperError::Shell(ShellError::Refused {
-                stage: mandate_shell::Stage::MarketData,
-                cause,
-            })
-        })?;
-        gate_quote.hand(&read);
-        Ok(Mark::of_iex(&read))
-    };
+    let fresh = || fresh_mark(&broker, &artifacts, clock.clone(), &gate_quote);
     let outcome = run_observed_asked_watched(
         &mut stages,
         &setup,

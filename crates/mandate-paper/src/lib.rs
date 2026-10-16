@@ -62,8 +62,8 @@ use mandate_shell::control::{
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
-    Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, fresh_quote, liquidity_facts,
-    load_contexts_with_clock, preflight,
+    Artifacts, BrokerFacts, GateQuote, PaperClock, PaperFacts, daily_closes, fresh_quote,
+    liquidity_facts, load_contexts_with_clock, preflight,
 };
 use mandate_shell::{
     Cause, Mark, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
@@ -413,6 +413,26 @@ impl Opening {
     }
 }
 
+/// One wake's fresh quote (DEC-943 item 2): `session`'s own IEX read through
+/// [`Session::fresh_quote`], handed to the binding gate's `gate` so every binding request from
+/// now on judges it, and returned as the wake's risk mark. A read that fails refuses as
+/// untrusted market data, and the wait it stops sends nothing.
+///
+/// # Errors
+/// [`PaperError::Shell`] at [`Stage::MarketData`] when no current, uncrossed IEX quote is read.
+pub fn fresh_mark<S: Session, P: Pause>(
+    session: &S,
+    artifacts: &Artifacts,
+    pause: P,
+    gate: &GateQuote,
+) -> Result<Mark, PaperError> {
+    let quote = session
+        .fresh_quote(artifacts, pause)
+        .map_err(refused(Stage::MarketData))?;
+    gate.hand(&quote);
+    Ok(Mark::of_iex(&quote))
+}
+
 /// The run's clock as the binding gate reads it, immediately before submission.
 struct PortClock<P>(P);
 
@@ -569,14 +589,7 @@ pub fn run<P: Ports>(
         artifacts: Some(Arc::new(store)),
         transport: (),
     };
-    let gate_quote = contexts_quote;
-    let fresh = || {
-        let quote = session
-            .fresh_quote(&artifacts, watch.pause.clone())
-            .map_err(refused(Stage::MarketData))?;
-        gate_quote.hand(&quote);
-        Ok(Mark::of_iex(&quote))
-    };
+    let fresh = || fresh_mark(&session, &artifacts, watch.pause.clone(), &contexts_quote);
     let report = session
         .cycle(sources, setup)
         .map_err(refused(Stage::Reconcile))?
