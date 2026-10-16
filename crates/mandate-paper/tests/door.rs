@@ -19,7 +19,7 @@ use mandate_canon::Digest;
 use mandate_domain::Environment;
 use mandate_journal::{StoredEvent, StreamType};
 use mandate_paper::{
-    Broker, Connection, Held, LapseRefusal, PaperError, account_stream, chosen, unspent,
+    Broker, Connection, Held, LapseRefusal, PaperError, account_stream, chosen, unspent, unsupplied,
 };
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
@@ -309,5 +309,57 @@ fn a_paper_connection_makes_no_lapse_check_through_the_door() {
         (clean, through_a_fill),
         (Ok(()), Ok(())),
         "a paper run makes no check, whatever it holds"
+    );
+}
+
+/// DEC-919 and DEC-529 item 3 — "The live build refuses to start unless the account is flat
+/// (DEC-470 item 1) and the connection record is unspent" — through the frame the door calls
+/// while the live arm hands no evidence: a live connection with no account-stream read and no
+/// snapshot refuses to start, named exactly in the run's report, rather than passing as an empty
+/// read with zero counts would, whichever broker the connection names, since the environment
+/// alone decides that the check applies (DEC-910 item 3).
+#[test]
+fn a_live_connection_with_no_lapse_evidence_refuses_to_start() {
+    let refused = unsupplied(&live_connection());
+    assert!(
+        matches!(refused, Err(PaperError::Lapse(LapseRefusal::NotSupplied))),
+        "{refused:?}: no read and no snapshot show nothing flat or unspent, so a live run refuses"
+    );
+    let printed = unsupplied(&live_connection()).map_err(|stopped| stopped.to_string());
+    assert_eq!(
+        printed,
+        Err("the lapse was handed no account-stream read and no account snapshot".to_owned()),
+        "the run's report names the missing evidence, never a pass"
+    );
+    let live_alpaca = Connection {
+        broker: Broker::Alpaca,
+        environment: Environment::Live,
+        account_ref: ACCOUNT.to_owned(),
+    };
+    let other_broker = unsupplied(&live_alpaca);
+    assert!(
+        matches!(
+            other_broker,
+            Err(PaperError::Lapse(LapseRefusal::NotSupplied))
+        ),
+        "{other_broker:?}: the live environment, not the broker, makes the check apply"
+    );
+}
+
+/// LT-14 and DEC-919 — "a paper run makes no check" (DEC-910 item 3) — through the frame the
+/// door calls while the live arm hands no evidence: a paper connection starts exactly as it did,
+/// so the refusal the missing evidence owes a live run changes no Alpaca paper outcome.
+#[test]
+fn a_paper_connection_with_no_lapse_evidence_starts_as_today() {
+    let paper = Connection {
+        broker: Broker::Alpaca,
+        environment: Environment::Paper,
+        account_ref: ACCOUNT.to_owned(),
+    };
+    let started = unsupplied(&paper).map_err(|stopped| stopped.to_string());
+    assert_eq!(
+        started,
+        Ok(()),
+        "a paper run makes no lapse check, evidence or none"
     );
 }
