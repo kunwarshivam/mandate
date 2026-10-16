@@ -109,27 +109,6 @@ fn marked(world: &World) -> Result<(), String> {
     )
 }
 
-/// The sink double over a granted intent: the runtime's granted intent carries no execution
-/// policy today (`mandate_runtime`'s `bound_proposal` sets none), and the production sink
-/// refuses it (DEC-940 item 6; [`a_granted_intent_reaches_the_executor_sink_with_its_asked_plan`]
-/// pins the fix). This double stands in for the follow-up that carries the policy: it hands the stock
-/// double the fixture sizing's own equity policy where the handoff holds none, so the probes
-/// can read the hold behind the sink.
-struct PolicySink(ConvertingSink);
-
-impl Sink for PolicySink {
-    fn hand(&mut self, handoff: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
-        let mut handoff = handoff.clone();
-        handoff.execution = handoff.execution.or(Some(OrderExecution {
-            asset_class: AssetClass::UsEquity,
-            tif: RuntimeTimeInForce::Day,
-            protection_required: false,
-            protection: None,
-        }));
-        self.0.hand(&handoff)
-    }
-}
-
 /// The paper double executor, answering the watch's protection question covered: the facts the
 /// LT-10 question reads are the caller's to judge here, never this double's.
 struct Covered(PaperExecutor);
@@ -160,20 +139,10 @@ impl Executor for Covered {
 }
 
 /// The doubles' stages with the classifier answering `autonomy`, the mandate naming the founder
-/// as its approver, the observation's closes stored, the instrument marked, and the sink
-/// handing a granted intent on.
+/// as its approver, the observation's closes stored, the instrument marked, and the doubles' stock
+/// sink, which refuses an intent with no execution policy as the production sink does: a granted
+/// intent carries the plan its request bound (DEC-942).
 fn cycle(world: &World, autonomy: Autonomy, place: bool) -> Result<ProductionCycle, String> {
-    assembled(
-        world,
-        autonomy,
-        place,
-        Box::new(PolicySink(ConvertingSink(world.clone()))),
-    )
-}
-
-/// [`cycle`] with the doubles' stock sink, which refuses an intent with no execution policy as
-/// the production sink does.
-fn stock(world: &World, autonomy: Autonomy, place: bool) -> Result<ProductionCycle, String> {
     assembled(
         world,
         autonomy,
@@ -592,8 +561,7 @@ impl Sink for RecordedExecutorSink {
 }
 
 /// DEC-940 item 6, gap 2, closed by DEC-942: the request is journaled at `ApprovalRequested`
-/// schema version 2 with the sizing's plan in its content, the journal's own draft check accepts
-/// it, and the grant's intent reaches the production `ExecutorSink` with exactly the plan the
+/// schema version 2 with the sizing's plan in its content, and the grant's intent reaches the production `ExecutorSink` with exactly the plan the
 /// sizing produced for the asked proposal, so the held opening is sent once on the release.
 #[test]
 fn a_granted_intent_reaches_the_executor_sink_with_its_asked_plan() -> Result<(), String> {
@@ -639,14 +607,23 @@ fn a_granted_intent_reaches_the_executor_sink_with_its_asked_plan() -> Result<()
     let [request] = &rows[..] else {
         return Err(format!("{} requests, not one", rows.len()));
     };
-    let draft = mandate_journal::Draft::parse(request)
-        .map_err(|e| format!("the journal refuses the request: {e:?}"))?;
-    assert_eq!(draft.event_type(), "ApprovalRequested");
     let envelope = mandate_canon::parse(request).map_err(|e| format!("{e:?}"))?;
     assert_eq!(
         envelope.get("schema_version").and_then(Value::as_int),
         Some(2),
         "a request that binds a plan is version 2"
+    );
+    let stated = envelope
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.get("execution"))
+        .map(mandate_canon::to_canonical);
+    assert_eq!(
+        stated.as_deref(),
+        Some(
+            &br#"{"asset_class":"us_equity","protection":null,"protection_required":false,"tif":"day"}"#[..]
+        ),
+        "the sizing's plan, as the content binds it"
     );
     let planned = Some(OrderExecution {
         asset_class: AssetClass::UsEquity,

@@ -254,6 +254,9 @@ fn replay(shell: &Shell, journal: &[FoldedEvent]) -> Result<Shell, RuntimeError>
     Ok(next)
 }
 
+/// One rewrite of a request's content.
+type Change = Box<dyn Fn(&mut Object)>;
+
 fn with_stop(stop: &str) -> impl Fn(&mut Object) + '_ {
     move |content: &mut Object| {
         let mut execution = content
@@ -338,6 +341,8 @@ fn a_plan_restated_under_a_new_hash_refuses_the_grant_of_the_old_one() {
     let (shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
     let journal = rewritten(&shell, with_stop("140"), true);
     let mut replayed = replay(&shell, &journal).expect("a restated request is well formed");
+    let epoch = replayed.epoch;
+    replayed.run(Input::Started(epoch), &ports);
     let grant = Answer::grant(next_control_seq(&replayed), &asked, ASKED_AT + 30).event();
     let ran = tail(&mut replayed, &grant, &ports);
     assert!(ran.handed.is_empty(), "nothing is handed");
@@ -353,7 +358,7 @@ fn a_plan_restated_under_a_new_hash_refuses_the_grant_of_the_old_one() {
 #[test]
 fn a_plan_not_written_as_the_builder_writes_it_refuses() {
     let (shell, _) = asked_with_a_bracket();
-    let changes: Vec<Box<dyn Fn(&mut Object)>> = vec![
+    let changes: Vec<Change> = vec![
         Box::new(with_stop("147.250")),
         Box::new(|content: &mut Object| {
             let mut execution = content

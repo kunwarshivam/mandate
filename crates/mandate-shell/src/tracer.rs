@@ -1074,11 +1074,13 @@ impl<'s> Session<'s> {
     /// A governed run writes `ModelOutputRecorded` with `model_registry` and `DecisionMade` with
     /// `model_registry` and `policy_set` beside `mandate_version`, at schema version 2 (journal
     /// spec v0.16, DEC-484 item 4). Every other record, and every record of an ungoverned run,
-    /// stays at version 1 with `mandate_version` alone.
-    fn agent_refs(&self, event_type: &str) -> Result<(u64, Object), ShellError> {
+    /// stays at version 1 with `mandate_version` alone, except an `ApprovalRequested` whose
+    /// content binds the builder's plan, which is version 2 ([`planned_request_version`]).
+    fn agent_refs(&self, draft: &EventDraft) -> Result<(u64, Object), ShellError> {
+        let event_type = draft.event_type.as_str();
         let mut refs = vec![("mandate_version", Value::Str(self.view.version.clone()))];
         let reference = |digest: Digest| Value::Str(format!("sha256:{digest}"));
-        let mut version = 1;
+        let mut version = planned_request_version(draft);
         if let Some(governed) = self.governed {
             let decision = event_type == "DecisionMade";
             if decision || event_type == "ModelOutputRecorded" {
@@ -1104,7 +1106,7 @@ impl<'s> Session<'s> {
         let bytes = drafts
             .iter()
             .map(|draft| {
-                let (schema_version, config_refs) = self.agent_refs(&draft.event_type)?;
+                let (schema_version, config_refs) = self.agent_refs(draft)?;
                 draft_bytes(
                     &Envelope {
                         stream: &stream,
@@ -1295,6 +1297,18 @@ mod tests {
         assert!(matches!(effects.front(), Some(Effect::Notify(_))));
         assert_eq!(effects.len(), 1);
     }
+}
+
+/// `ApprovalRequested`'s schema version for the content it carries: 2 when the content binds the
+/// order builder's plan, which version 1's closed content refuses, and 1 otherwise (DEC-942
+/// item 2). Every other agent-stream draft starts at version 1.
+fn planned_request_version(draft: &EventDraft) -> u64 {
+    let planned = draft.event_type == "ApprovalRequested"
+        && draft
+            .payload
+            .get("content")
+            .is_some_and(|content| content.get("execution").is_some());
+    if planned { 2 } else { 1 }
 }
 
 /// The actor every event the tracer's own fold replays is read as: the agent and account streams

@@ -8,7 +8,7 @@ use mandate_approval::{
     ApprovalRef, AskablePurpose, AssertionId, BoundAction, OpaqueUser, ReferenceMark, Request,
     RequestContent,
 };
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value, to_canonical};
 use mandate_num::Signed;
 
 use crate::error::RuntimeError;
@@ -849,6 +849,18 @@ fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeEr
     };
     let content_hash = payload::hash_from(text("content_hash")?)
         .ok_or_else(|| payload::non_canonical("content_hash"))?;
+    let execution = match payload.get("content") {
+        None => None,
+        Some(content) => {
+            if Digest::of(&to_canonical(content)) != content_hash.0 {
+                return Err(payload::non_canonical("content_hash"));
+            }
+            content
+                .get("execution")
+                .map(|stated| crate::escalation::recovered_plan(stated, asset_class))
+                .transpose()?
+        }
+    };
     let version = text("mandate_version")?;
     let bound = BoundAction {
         instrument: instrument.as_str().to_owned(),
@@ -875,7 +887,7 @@ fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeEr
                 evidence: Vec::new(),
                 risk_impact: Vec::new(),
                 deadline: mandate_approval::RiskClock(deadline.secs()),
-                execution: None,
+                execution,
             },
             content_hash,
             delivered: false,

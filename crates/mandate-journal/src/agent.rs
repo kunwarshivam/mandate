@@ -668,6 +668,13 @@ fn approval_requested_rules(p: Payload<'_>) -> Result<(), Invalid> {
             &format!("payload.{top}"),
         )?;
     }
+    if let Some(execution) = content.get("execution") {
+        ensure(
+            execution.get("asset_class") == p.0.get("asset_class"),
+            InvalidReason::Schema,
+            "payload.content.execution.asset_class",
+        )?;
+    }
     let content_deadline = content
         .get("deadline")
         .and_then(Value::as_str)
@@ -738,6 +745,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
             "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
             "DecisionMade" => Some(&DECISION_MADE),
             "AgentModeChanged" => Some(&AGENT_MODE_CHANGED_V2),
+            "ApprovalRequested" => Some(&APPROVAL_REQUESTED_V2),
             _ => None,
         };
     }
@@ -874,6 +882,69 @@ static INTENT_PROPOSED: Ty = Ty::Record(&[
 
 static REFERENCE_MARK: Ty = Ty::Record(&[("price", Ty::Decimal), ("seq", Ty::Int)]);
 
+const REQUESTED_ACTION: Ty = Ty::Record(&[
+    ("instrument", Ty::Str),
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("side", Ty::OneOf(&["buy"])),
+    ("qty", Ty::Decimal),
+    ("limit", Ty::Decimal),
+    ("order_usd", Ty::Decimal),
+    ("purpose", Ty::OneOf(&["open", "increase"])),
+]);
+
+const REQUESTED_TRIGGER: Ty =
+    Ty::Record(&[("mandate_version", Ty::DigestRef), ("decided_by", Ty::Str)]);
+
+const REQUESTED_EVIDENCE: Ty = Ty::Record(&[
+    (
+        "combined_score",
+        Ty::Record(&[("label", Ty::Str), ("value", Ty::Decimal)]),
+    ),
+    (
+        "outputs",
+        Ty::List(&Ty::Record(&[
+            ("event_id", Ty::Ulid),
+            ("artifact", Ty::Nullable(&Ty::DigestRef)),
+            (
+                "label",
+                Ty::OneOf(&["Output of software you selected", "platform-authored"]),
+            ),
+        ])),
+    ),
+]);
+
+const REQUESTED_RISK_IMPACT: Ty = Ty::List(&Ty::Record(&[
+    (
+        "field",
+        Ty::OneOf(&[
+            "order_usd",
+            "position_usd_after",
+            "gross_usd_after",
+            "bought_today_usd",
+            "drawdown",
+            "daily_pnl_fraction",
+        ]),
+    ),
+    ("value", Ty::Decimal),
+    ("cap", Ty::Nullable(&Ty::Decimal)),
+]));
+
+const REQUESTED_APPROVERS: Ty = Ty::Record(&[("required", Ty::Int), ("independent", Ty::Bool)]);
+
+/// The order builder's plan for the asked order, bound under the content hash (DEC-942 item 2).
+const REQUESTED_EXECUTION: Ty = Ty::Record(&[
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("tif", TIF),
+    ("protection_required", Ty::Bool),
+    (
+        "protection",
+        Ty::Nullable(&Ty::Record(&[
+            ("stop", Ty::Decimal),
+            ("take_profit", Ty::Nullable(&Ty::Decimal)),
+        ])),
+    ),
+]);
+
 static APPROVAL_REQUESTED: Ty = Ty::Record(&[
     ("instrument", Ty::Str),
     ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
@@ -893,71 +964,50 @@ static APPROVAL_REQUESTED: Ty = Ty::Record(&[
     (
         "content",
         Ty::Record(&[
-            (
-                "action",
-                Ty::Record(&[
-                    ("instrument", Ty::Str),
-                    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
-                    ("side", Ty::OneOf(&["buy"])),
-                    ("qty", Ty::Decimal),
-                    ("limit", Ty::Decimal),
-                    ("order_usd", Ty::Decimal),
-                    ("purpose", Ty::OneOf(&["open", "increase"])),
-                ]),
-            ),
-            (
-                "trigger",
-                Ty::Record(&[("mandate_version", Ty::DigestRef), ("decided_by", Ty::Str)]),
-            ),
-            (
-                "evidence",
-                Ty::Record(&[
-                    (
-                        "combined_score",
-                        Ty::Record(&[("label", Ty::Str), ("value", Ty::Decimal)]),
-                    ),
-                    (
-                        "outputs",
-                        Ty::List(&Ty::Record(&[
-                            ("event_id", Ty::Ulid),
-                            ("artifact", Ty::Nullable(&Ty::DigestRef)),
-                            (
-                                "label",
-                                Ty::OneOf(&[
-                                    "Output of software you selected",
-                                    "platform-authored",
-                                ]),
-                            ),
-                        ])),
-                    ),
-                ]),
-            ),
-            (
-                "risk_impact",
-                Ty::List(&Ty::Record(&[
-                    (
-                        "field",
-                        Ty::OneOf(&[
-                            "order_usd",
-                            "position_usd_after",
-                            "gross_usd_after",
-                            "bought_today_usd",
-                            "drawdown",
-                            "daily_pnl_fraction",
-                        ]),
-                    ),
-                    ("value", Ty::Decimal),
-                    ("cap", Ty::Nullable(&Ty::Decimal)),
-                ])),
-            ),
+            ("action", REQUESTED_ACTION),
+            ("trigger", REQUESTED_TRIGGER),
+            ("evidence", REQUESTED_EVIDENCE),
+            ("risk_impact", REQUESTED_RISK_IMPACT),
             ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
             ("deadline", Ty::RiskClock),
             ("default", Ty::Str),
             ("choices", Ty::List(&Ty::OneOf(&["approve", "skip"]))),
-            (
-                "approvers",
-                Ty::Record(&[("required", Ty::Int), ("independent", Ty::Bool)]),
-            ),
+            ("approvers", REQUESTED_APPROVERS),
+        ]),
+    ),
+    ("content_hash", Ty::DigestRef),
+]);
+
+/// Version 1 with the plan the builder produced as one more content member (DEC-942 item 2).
+static APPROVAL_REQUESTED_V2: Ty = Ty::Record(&[
+    ("instrument", Ty::Str),
+    ("asset_class", Ty::OneOf(&["us_equity", "crypto"])),
+    ("side", Ty::OneOf(&["buy"])),
+    ("qty", Ty::Decimal),
+    ("limit", Ty::Decimal),
+    ("purpose", Ty::OneOf(&["open", "increase"])),
+    ("mandate_version", Ty::DigestRef),
+    ("decided_by", Ty::Str),
+    ("combined_score", Ty::Decimal),
+    ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
+    ("approvers_required", Ty::Int),
+    ("independent_required", Ty::Bool),
+    ("deadline", Ty::Int),
+    ("timeout_s", Ty::Int),
+    ("on_timeout", Ty::OneOf(&["skip"])),
+    (
+        "content",
+        Ty::Record(&[
+            ("action", REQUESTED_ACTION),
+            ("trigger", REQUESTED_TRIGGER),
+            ("evidence", REQUESTED_EVIDENCE),
+            ("risk_impact", REQUESTED_RISK_IMPACT),
+            ("reference_mark", Ty::Nullable(&REFERENCE_MARK)),
+            ("deadline", Ty::RiskClock),
+            ("default", Ty::Str),
+            ("choices", Ty::List(&Ty::OneOf(&["approve", "skip"]))),
+            ("approvers", REQUESTED_APPROVERS),
+            ("execution", REQUESTED_EXECUTION),
         ]),
     ),
     ("content_hash", Ty::DigestRef),
