@@ -48,6 +48,8 @@ type Bend = fn(Value) -> Result<String, McpError>;
 struct Probe {
     garble_place: Cell<Option<Garble>>,
     bend: Cell<Option<(&'static str, Bend)>>,
+    /// How many answers of the bent tool pass unbent before the bend applies.
+    bend_after: Cell<usize>,
     classes: RefCell<Vec<(CallClass, &'static str)>>,
     /// Each call's tool and arguments, as the seam was handed them.
     sent: RefCell<Vec<(&'static str, Value)>>,
@@ -79,6 +81,11 @@ impl Tools for Loopback<'_> {
             .map_err(|_| McpError::Malformed)?;
         let result = message.get("result").cloned().ok_or(McpError::Malformed)?;
         match self.probe.bend.take() {
+            Some((bent, bend)) if bent == tool && self.probe.bend_after.get() > 0 => {
+                self.probe.bend_after.set(self.probe.bend_after.get() - 1);
+                self.probe.bend.set(Some((bent, bend)));
+                Ok(result.to_string())
+            }
             Some((bent, bend)) if bent == tool => bend(result),
             other => {
                 self.probe.bend.set(other);
@@ -1053,9 +1060,22 @@ fn a_record_names_our_key_only_by_our_ref_id() {
     );
 }
 
-/// An answer that adds a next-page cursor beside `orders`.
-fn paged(mut result: Value) -> Result<String, McpError> {
-    result["structuredContent"]["next_cursor"] = json!("page-2");
+/// An answer whose next-page cursor is not text.
+fn numbered_cursor(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next_cursor"] = json!(2);
+    Ok(result.to_string())
+}
+
+/// An answer whose next-page cursor is empty text, which names no page.
+fn empty_cursor(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next_cursor"] = json!("");
+    Ok(result.to_string())
+}
+
+/// An answer holding a member beside `orders` and `next_cursor`, such as another spelling of a
+/// cursor, which could name a page the connector would never read.
+fn unknown_member(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next"] = json!("page-2");
     Ok(result.to_string())
 }
 
@@ -1087,13 +1107,16 @@ fn without_side(mut result: Value) -> Result<String, McpError> {
     Ok(result.to_string())
 }
 
-/// DEC-941 items 1 and 3: a listing that may be a first page only, holds a record the executor
-/// cannot type, or is lost or refused is `Unknown`, never `Listed`, so the order stays
-/// `Unknown` and nothing is adopted from part of an answer; nothing is placed again.
+/// DEC-941 items 1 and 3, DEC-956 item 3: a listing whose cursor cannot be read, which holds a
+/// member that might name another page, holds a record the executor cannot type or of another
+/// ticker, or is lost or refused is `Unknown`, never `Listed`, so the order stays `Unknown` and
+/// nothing is adopted from part of an answer; nothing is placed again.
 #[test]
 fn a_listing_that_cannot_be_read_whole_leaves_the_order_unknown() {
-    let bends: [(&str, Bend); 7] = [
-        ("cursor", paged),
+    let bends: [(&str, Bend); 9] = [
+        ("cursor not text", numbered_cursor),
+        ("empty cursor", empty_cursor),
+        ("unknown member", unknown_member),
         ("another symbol", listed_as_qqq),
         ("stop_market", stop_market),
         ("tif", unmodelled_tif),
@@ -1327,4 +1350,140 @@ fn a_place_answered_for_another_ticker_is_unknown_and_never_placed_again() {
 fn a_cancel_answered_for_another_ticker_is_unreadable() {
     let (outcome, _) = cancel_answered(answered_as_qqq);
     assert_eq!(outcome, Err(ConnectorError::Unreadable { code: "cancel" }));
+}
+
+/// [`clocked`]'s server holding, after the order in doubt, `more` agentic SPY orders placed
+/// through the connector, its `get_equity_orders` answering `page` orders a page.
+fn paged_server(page: usize, more: usize) -> (SimServer, Vec<String>) {
+    let server = clocked(true);
+    server
+        .drive(|sim| sim.apply(Event::PageSize(page)))
+        .unwrap()
+        .unwrap();
+    let mut c = connector(&server);
+    let lost = run(&mut c, &submit(buy("01JLOST")));
+    assert!(matches!(lost, Err(ConnectorError::Unknown(_))), "{lost:?}");
+    for n in 0..more {
+        run(&mut c, &submit(buy(&format!("01JMORE{n:02}")))).unwrap();
+    }
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    (server, held.into_iter().map(|order| order.id).collect())
+}
+
+/// The `get_equity_orders` calls the connector sent, each one's `cursor` or `None`.
+fn cursors(probe: &Probe) -> Vec<Option<Value>> {
+    probe
+        .sent
+        .borrow()
+        .iter()
+        .filter(|(tool, _)| *tool == "get_equity_orders")
+        .map(|(_, args)| args.get("cursor").cloned())
+        .collect()
+}
+
+/// DEC-956 item 3: a listing the broker answers in pages is read page by page, each page behind
+/// a fresh account check, by the `next_cursor` the page before named, until a page names none;
+/// the executor is handed every record of every page, newest first, and nothing is placed.
+#[test]
+fn a_paged_listing_is_followed_to_its_last_page() {
+    let (server, held) = paged_server(1, 2);
+    let (mut c, probe) = probed(&server);
+    let (named, records) = listed(run(&mut c, &listing("01JLOST")));
+    assert_eq!(named, key("01JLOST").as_str());
+    let ids: Vec<&str> = records
+        .iter()
+        .map(|record| record.order.broker_order_id.as_str())
+        .collect();
+    assert_eq!(ids, held.iter().map(String::as_str).collect::<Vec<_>>());
+    let pages = cursors(&probe);
+    assert_eq!(pages.len(), 3, "{pages:?}");
+    assert_eq!(pages[0], None, "the first page is asked for with no cursor");
+    assert!(
+        pages[1..]
+            .iter()
+            .all(|cursor| cursor.as_ref().is_some_and(Value::is_string)),
+        "{pages:?}"
+    );
+    assert_ne!(pages[1], pages[2]);
+    let tools: Vec<String> = calls(&server).split_off(6);
+    assert_eq!(
+        tools,
+        [
+            "get_accounts",
+            "get_equity_orders",
+            "get_accounts",
+            "get_equity_orders",
+            "get_accounts",
+            "get_equity_orders"
+        ]
+    );
+    for (_, args) in probe
+        .sent
+        .borrow()
+        .iter()
+        .filter(|(tool, _)| *tool == "get_equity_orders")
+    {
+        assert_eq!(args["symbol"], "SPY");
+        assert_eq!(args["placed_agent"], "agentic");
+        assert_eq!(args["created_at_gte"], "2026-09-29T16:55:00.000000000Z");
+    }
+}
+
+/// DEC-956 item 3: a listing whose pages run past the connector's fixed bound of ten is never
+/// read as whole: the order stays `Unknown` after exactly ten pages, and nothing is placed.
+#[test]
+fn a_listing_past_its_page_bound_leaves_the_order_unknown() {
+    let (server, held) = paged_server(1, 10);
+    assert_eq!(held.len(), 11);
+    let (mut c, probe) = probed(&server);
+    let outcome = run(&mut c, &listing("01JLOST"));
+    assert!(
+        matches!(outcome, Err(ConnectorError::Unknown(_))),
+        "{outcome:?}"
+    );
+    assert_eq!(cursors(&probe).len(), 10);
+    let (fits, _) = paged_server(2, 10);
+    let (mut c, probe) = probed(&fits);
+    let (_, records) = listed(run(&mut c, &listing("01JLOST")));
+    assert_eq!(records.len(), 11, "six pages of two fit the bound");
+    assert_eq!(cursors(&probe).len(), 6);
+    let placed = |server: &SimServer| calls(server).iter().filter(|t| *t == PLACE).count();
+    assert_eq!((placed(&server), placed(&fits)), (11, 11));
+}
+
+/// A page's answer with a forged next-page cursor the broker never issued.
+fn forged_cursor(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next_cursor"] = json!("page-2");
+    Ok(result.to_string())
+}
+
+/// DEC-956 item 3: one later page that cannot be read leaves the whole listing unread: a page
+/// lost, refused, holding a record of another ticker or missing a field, holding a member that
+/// is not the cursor, or naming a cursor the broker refuses. The order stays `Unknown`, and the
+/// pages read before it are never handed over.
+#[test]
+fn a_garbled_later_page_leaves_the_order_unknown() {
+    let bends: [(&str, Bend); 6] = [
+        ("lost", lose),
+        ("refused", refuse),
+        ("another symbol", listed_as_qqq),
+        ("missing field", without_side),
+        ("unknown member", unknown_member),
+        ("forged cursor", forged_cursor),
+    ];
+    for (name, bend) in bends {
+        let (server, _) = paged_server(1, 2);
+        let (mut c, probe) = probed(&server);
+        probe.bend_after.set(1);
+        probe.bend.set(Some(("get_equity_orders", bend)));
+        let outcome = run(&mut c, &listing("01JLOST"));
+        assert!(
+            matches!(outcome, Err(ConnectorError::Unknown(_))),
+            "{name}: {outcome:?}"
+        );
+        assert!(
+            cursors(&probe).len() >= 2,
+            "{name}: the second page was read"
+        );
+    }
 }

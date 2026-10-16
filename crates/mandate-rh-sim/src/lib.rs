@@ -148,6 +148,9 @@ pub enum Event {
     /// The broker's clock: every order placed from then on was created at this instant, which
     /// `get_equity_orders`'s `created_at_gte` filters on (DEC-941 item 2).
     Clock(UtcNanos),
+    /// From then on `get_equity_orders` answers at most this many orders a page, naming the next
+    /// page by a `next_cursor` it takes back as `cursor` (DEC-956 item 3); zero is refused.
+    PageSize(usize),
 }
 
 /// A customer account. `pattern_day_trader` marks an account a day trade would restrict, so an
@@ -364,6 +367,7 @@ impl Sim {
             Event::EchoRefId(on) => self.echo_ref_id = on,
             Event::RefuseChangedResend(on) => self.refuse_changed_resend = on,
             Event::Clock(now) => self.now = Some(now),
+            Event::PageSize(_) => {}
         }
         Ok(())
     }
