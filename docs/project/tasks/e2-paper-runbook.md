@@ -58,6 +58,11 @@ Read this first, because the brief omits it: `mandate-paper` refuses to start wi
   Alpaca PAPER dashboard only.
 - **Flat paper account**: no position, no open order, zero accrued fees, status ACTIVE, not blocked
   (`crates/mandate-shell/src/paper/judge.rs`). Check and cancel in the Alpaca paper dashboard first.
+- **Clock (DEC-936)**: an NTP-disciplined host only. Before the dry run, record `chronyc tracking`
+  (`Leap status : Normal`, `System time` under 5 ms) or `timedatectl show -p NTPSynchronized`
+  (`yes`). The judge refuses a quote stamped after the host clock, and an unsynced clock that trails
+  the exchange by even a few ms refuses most SPY quotes (#1355). Cloud agent sessions without UDP 123
+  egress do not qualify.
 - **Window**: run `mandate-paper` on a US trading day between 09:30 and 15:50 New York (the judge needs the
   regular session outside the 10-minute close window, at the preflight and again at submission). Start in
   the morning: after the order the process stays up watching it, bounded by the close window.
