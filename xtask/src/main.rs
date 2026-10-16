@@ -19,8 +19,8 @@ usage: cargo xtask <command>
 commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
-                        spec-guard | refcases | reference | schemas | supply-chain | postgres |
-                        mutants | schema-mutants; or one part of test: test-nextest |
+                        spec-guard | portable | refcases | reference | schemas | supply-chain |
+                        postgres | mutants | schema-mutants; or one part of test: test-nextest |
                         test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -43,8 +43,8 @@ commands:
 /// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
-/// ci fast` still runs this whole group unsharded.
-const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
+/// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
+const FAST_JOB: [&str; 5] = ["lint", "test", "pending", "spec-guard", "portable"];
 /// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
 /// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
 /// them in separate jobs (DEC-871).
@@ -56,10 +56,11 @@ const FULL_JOB: [&str; 5] = [
     "supply-chain",
     "postgres",
 ];
-const PR_JOBS: [&str; 11] = [
+const PR_JOBS: [&str; 12] = [
     "lint",
     "test",
     "pending",
+    "portable",
     "refcases",
     "reference",
     "schemas",
@@ -208,6 +209,7 @@ fn ci(job: &str) -> Result<()> {
         }
         "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
+        "portable" => portable(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -284,6 +286,40 @@ fn ci(job: &str) -> Result<()> {
         }
         other => bail!("unknown CI job: {other}"),
     }
+}
+
+/// The runner on the host it runs on (DEC-954): clippy `-D warnings` over every target of
+/// `mandate-paper`, then its core-dump hardening tests, which read the kernel's answer back.
+/// CI's `fast-portable` job runs it on macOS, where the founder runs the CLIs, so a Linux-only
+/// call in the runner fails a required check; on Linux it repeats what `lint` and `test` cover.
+fn portable() -> Result<()> {
+    sh(
+        "cargo",
+        &[
+            "clippy",
+            "--locked",
+            "--package",
+            "mandate-paper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )?;
+    sh(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--package",
+            "mandate-paper",
+            "--lib",
+            "--test",
+            "live_entry",
+            "--",
+            "harden",
+        ],
+    )
 }
 
 /// One of [`TEST_PARTS`]; `partition`, a `K/N` counted from 1, runs only the nextest run's `K`th
@@ -2476,6 +2512,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PENDING_RESULT",
     "PLANNED_MUTANTS",
     "PLAN_RESULT",
+    "PORTABLE_RESULT",
     "POSTGRES_PASSWORD",
     "PYTHON_RESULT",
     "RUN_PRS",
@@ -11628,6 +11665,10 @@ mod tests {
             ),
             ("fast-python", "if: ${{ !github.event.pull_request.draft }}"),
             (
+                "fast-portable",
+                "if: ${{ !github.event.pull_request.draft }}",
+            ),
+            (
                 "fast",
                 "if: ${{ always() && !github.event.pull_request.draft }}",
             ),
@@ -11684,11 +11725,12 @@ mod tests {
 
     /// CI's fast jobs and the `cargo xtask ci` parts each runs, in order (DEC-871). The required
     /// `fast` verdict needs every one of them.
-    const FAST_CI_JOBS: [(&str, &[&str]); 4] = [
+    const FAST_CI_JOBS: [(&str, &[&str]); 5] = [
         ("fast-lint", &["lint", "spec-guard"]),
         ("fast-test", &["test-nextest"]),
         ("fast-pending", &["pending", "test-doc", "test-rh-sim"]),
         ("fast-python", &["test-python"]),
+        ("fast-portable", &["portable"]),
     ];
 
     /// The `cargo xtask ci <part>` parts a job's steps run, in order.
@@ -11826,7 +11868,7 @@ mod tests {
     }
 
     /// DEC-871's `fast` verdict, run as GitHub runs it (`bash -e`) over every combination of its
-    /// four parts' results: it passes only when every part succeeded, and a skipped part fails it.
+    /// five parts' results (DEC-954 adds `fast-portable`): it passes only when every part succeeded, and a skipped part fails it.
     #[test]
     fn fast_passes_only_when_every_part_succeeded() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -11837,6 +11879,7 @@ mod tests {
             "TEST_RESULT",
             "PENDING_RESULT",
             "PYTHON_RESULT",
+            "PORTABLE_RESULT",
         ];
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         for ((job, _), var) in FAST_CI_JOBS.iter().zip(vars) {
@@ -11847,7 +11890,7 @@ mod tests {
             );
         }
         let mut checked = 0usize;
-        for combination in 0..results.len().pow(4) {
+        for combination in 0..results.len().pow(5) {
             let mut command = Command::new("bash");
             command.args(["-e", "-c", &script]);
             let mut rest = combination;
@@ -11865,7 +11908,7 @@ mod tests {
             );
             checked = checked.saturating_add(1);
         }
-        assert_eq!(checked, 625, "every combination of four results is judged");
+        assert_eq!(checked, 3125, "every combination of five results is judged");
         Ok(())
     }
 
@@ -11937,10 +11980,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            8,
+            9,
             "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
-             `fast-python`, `full-checks`, the mutation plan, the mutants matrix, and \
-             `schema-mutants`"
+             `fast-python`, `fast-portable`, `full-checks`, the mutation plan, the mutants \
+             matrix, and `schema-mutants`"
         );
         for checkout in checkouts {
             assert!(
