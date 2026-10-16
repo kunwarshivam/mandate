@@ -18,6 +18,7 @@ use mandate_accounting::AssetClass;
 use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Value};
 use mandate_executor::Purpose;
+use mandate_risk::Verdict;
 use mandate_runtime::{
     Autonomy, IntentHandoff, Observation, OrderExecution, RiskClock,
     TimeInForce as RuntimeTimeInForce,
@@ -25,8 +26,8 @@ use mandate_runtime::{
 use mandate_time::UtcNanos;
 
 use super::doubles::{
-    AAPL, ConvertingSink, FixedClassifier, PaperExecutor, World, account_stream, agent_stream,
-    control_stream, instrument, output, seed, setup,
+    AAPL, ConvertingSink, FixedClassifier, FixedGate, PaperExecutor, World, account_stream,
+    agent_stream, control_stream, instrument, output, passed_checks, seed, setup,
 };
 use super::tail_install::ApprovableMandate;
 use crate::error::{Cause, ShellError};
@@ -57,6 +58,10 @@ impl Pause for Clock {
     }
 
     async fn pause(&self, duration: Duration) {
+        assert!(
+            self.instant.get().secs() < PAUSE_HORIZON_S,
+            "the watch paused past its horizon: a loop that never ends"
+        );
         if let Ok(step) = i64::try_from(duration.as_secs())
             && let Ok(next) =
                 UtcNanos::from_parts(self.instant.get().secs().saturating_add(step), 0)
@@ -65,6 +70,10 @@ impl Pause for Clock {
         }
     }
 }
+
+/// An hour past the fixture's run clock (2026-09-25T20:00:00Z): no probe's watch pauses that
+/// far, so a watch that never ends fails at once rather than running until the harness times out.
+const PAUSE_HORIZON_S: i64 = 1_790_373_600;
 
 /// The run clock as the fixture's setup holds it.
 fn clock() -> Result<Clock, String> {
@@ -681,4 +690,42 @@ fn the_door_holds_only_a_risk_adding_submission_while_the_wait_holds() {
             }
         }
     }
+}
+
+/// Only the classifier's `ask` keeps the session open: any other refusal of the cycle — here
+/// the gate's denial — stops the run with its own refusal, and the wait is never called.
+#[test]
+fn a_cycle_refused_otherwise_never_waits() -> Result<(), String> {
+    let world = World::default();
+    let clock = clock()?;
+    let waited = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&waited);
+    let mut stages = world.stages();
+    stages.gate = Box::new(FixedGate {
+        world: world.clone(),
+        verdict: Verdict::Deny,
+        checks: passed_checks(),
+    });
+    let artifacts: Arc<dyn mandate_journal::ArtifactSource + Send + Sync> =
+        Arc::new(BTreeMap::from([(Digest::of(CLOSES), CLOSES.to_vec())]));
+    stages.artifacts = Some(artifacts);
+    let report: Result<Report, ShellError> = ProductionCycle::new(stages, setup()?)
+        .run_observed_asked_watched(
+            observation()?,
+            output().map_err(|cause| cause.to_string())?,
+            &watch(&clock)?,
+            |_: &mut dyn AskedCycle| {
+                flag.set(true);
+                Ok(())
+            },
+            &watch_may_end,
+        );
+    assert_eq!(
+        report.as_ref().err().map(ShellError::code),
+        Some("gate_refused"),
+        "{report:?}"
+    );
+    assert!(!waited.get(), "a refusal other than the ask never waits");
+    assert_eq!(submissions(&world), 0);
+    Ok(())
 }
