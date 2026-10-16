@@ -92,3 +92,21 @@ pub fn unspent(
 ) -> Result<(), PaperError> {
     lapse(connection, rows, held).map_err(PaperError::Lapse)
 }
+
+/// The lapse where the run holds no evidence for it (DEC-919; DEC-529 item 3; DEC-910 item 3):
+/// the door's call until the live arm hands [`unspent`] the journal's own read of the account
+/// stream and the connector snapshot's own counts. A live connection refuses to start with
+/// [`LapseRefusal::NotSupplied`](crate::LapseRefusal::NotSupplied): no read and no snapshot, so
+/// nothing shows the account flat or the record unspent, where an empty read with zero counts
+/// would pass a spent or non-flat account silently (`AGENTS.md` rule 3). A paper connection
+/// makes no check, exactly as [`unspent`] makes none on one (LT-14), so today's paper path is
+/// unchanged. The only way past the refusal is the live arm's own call of [`unspent`] with the
+/// inputs its reads produced.
+///
+/// # Errors
+/// [`PaperError::Lapse`] with [`LapseRefusal::NotSupplied`](crate::LapseRefusal::NotSupplied)
+/// for a live connection, before anything runs.
+pub fn unsupplied(connection: &Connection) -> Result<(), PaperError> {
+    let _ = connection;
+    Err(PaperError::Unimplemented { story: "E7-26" })
+}
