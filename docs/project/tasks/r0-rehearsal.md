@@ -15,6 +15,14 @@ refuses as a consequence. Behind that first refusal, four more stand in the run,
 run reaches them (the [blocker chain](#the-blocker-chain-beyond-step-2e) below); only the grant
 (item 9) and the restart's `Unknown` adoption (item 10) are being built in a lane.
 
+**Re-run on #1378's branch (`claude/r0-live-run-wiring`, after R2 to R4):** the same table: 1a to
+2d pass and the run stops at 2e's `check_missing`, so nothing the branch changed is reached yet;
+its R2 to R4 are proven by the tests in `crates/mandate-paper/src/live_tests.rs`,
+`crates/mandate-shell/tests/control.rs`, `crates/mandate-shell-rh-sim/tests/shell.rs` and
+`crates/mandate-mcp/src/tests/bearer.rs`, and the runner's step now also needs
+`MANDATE_RH_ACCOUNT_NUMBER`, which the script sets. The next run past R1 should stop at R8, or at
+R5 without the founder's Alpaca keys.
+
 ## How to run it
 
 ```bash
