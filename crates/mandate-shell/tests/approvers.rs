@@ -92,6 +92,19 @@ fn the_owner_is_the_user_who_recorded_the_mandates_connection() {
     assert_eq!(members(&both, CONNECTION), owner(FOUNDER), "beside another");
     let gone = [established(1, CONNECTION, FOUNDER), revoked(2, CONNECTION)];
     assert_eq!(members(&gone, CONNECTION), Members::Unread, "revoked");
+    let signed = [
+        established(1, CONNECTION, FOUNDER),
+        record(
+            2,
+            "ConnectionRevoked",
+            &format!(r#"{{"connection_id":"{CONNECTION}","reason":"owner","user":"{FOUNDER}"}}"#),
+        ),
+    ];
+    assert_eq!(
+        members(&signed, CONNECTION),
+        Members::Unread,
+        "a revocation names no owner, whatever it carries"
+    );
     let back = [
         established(1, CONNECTION, FOUNDER),
         revoked(2, CONNECTION),
