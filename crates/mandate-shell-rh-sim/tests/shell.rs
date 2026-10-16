@@ -94,7 +94,8 @@ fn shell_for<'s>(server: &'s SimServer, account: &str, records: &[FoldedEvent]) 
         garble_place: Rc::clone(&garble_place),
         seen: Rc::clone(&seen),
     };
-    let robinhood = RobinhoodConnector::restore(tools, account.to_owned(), spy(), records).unwrap();
+    let robinhood =
+        RobinhoodConnector::restore(tools, account.to_owned(), tickers(), records).unwrap();
     let bridge = RobinhoodBridge::new(runtime(), robinhood);
     let scope = AccountScope {
         account: AccountRef("acct_rh".to_owned()),
@@ -658,8 +659,8 @@ fn the_bridges_quote_refuses_a_missing_or_garbled_answer() {
     assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
 }
 
-/// SPY registered as its own asset id, as these tests name it (DEC-956 item 1).
-fn spy() -> Tickers {
-    let asset = InstrumentId::new("SPY").unwrap();
-    Tickers::registered([(asset, "SPY".to_owned())]).unwrap()
+/// SPY and QQQ registered as their own asset ids, as these tests name them (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }

@@ -330,7 +330,7 @@ fn an_answer_that_cannot_be_attributed_refuses_the_whole_read() {
 #[test]
 fn a_failed_account_check_holds_no_exit_on_the_agentic_account() {
     let order = json!({"id": "rh-1", "state": "confirmed", "quantity": "2",
-        "filled_quantity": "0", "limit_price": "475", "stop_price": null});
+        "filled_quantity": "0", "limit_price": "475", "stop_price": null, "symbol": "SPY"});
     let mut cancelled = order.clone();
     cancelled["state"] = json!("cancelled");
     let script = [

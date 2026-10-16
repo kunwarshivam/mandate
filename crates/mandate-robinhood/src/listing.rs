@@ -5,6 +5,7 @@
 //! executor, which adopts exactly one match or leaves the order `Unknown`. The connector matches
 //! nothing itself and never places.
 
+use mandate_accounting::InstrumentId;
 use mandate_executor::{
     BrokerOutcome, BrokerUnknown, ClientOrderId, ConnectorError, ListedOrder, OrderListing,
     OrderType, TimeInForce,
@@ -30,18 +31,22 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// [`Self::read_sole_member`]: an answer holding anything beside `orders`, a next-page cursor
     /// included, is refused, because a first page alone could hide a second match. A refused or
     /// unreadable read, or one record that is not exactly an order record of a type and time in
-    /// force the executor models, is [`UNREAD`], so the order stays `Unknown`.
+    /// force the executor models, is [`UNREAD`], so the order stays `Unknown`. The instrument is
+    /// sent as its registered ticker and every record must name that ticker, which reads back as
+    /// the listing's asset id; an instrument with no ticker is [`UNREAD`] with nothing called
+    /// (DEC-956 item 1).
     pub(crate) async fn list(
         &self,
         listing: &OrderListing,
     ) -> Result<BrokerOutcome, ConnectorError> {
+        let ticker = self
+            .tickers
+            .ticker(&listing.instrument)
+            .map_err(|_| UNREAD)?;
         let since = UtcNanos::from_parts(listing.created_since.secs(), 0).map_err(|_| UNREAD)?;
         let text = |value: String| Value::String(value);
         let mut filters = Map::new();
-        filters.insert(
-            "symbol".to_owned(),
-            text(listing.instrument.as_str().to_owned()),
-        );
+        filters.insert("symbol".to_owned(), text(ticker.as_str().to_owned()));
         filters.insert("placed_agent".to_owned(), text("agentic".to_owned()));
         filters.insert("created_at_gte".to_owned(), text(since.to_string()));
         let records = self
@@ -51,7 +56,10 @@ impl<T: Tools> RobinhoodConnector<T> {
         let ours = ref_id(&listing.client_order_id).map_err(|_| UNREAD)?;
         let mut orders = Vec::with_capacity(records.len());
         for record in &records {
-            orders.push(listed(record, &listing.client_order_id, &ours).ok_or(UNREAD)?);
+            let read = listed(record, &listing.client_order_id, &ours, ticker);
+            let mut order = read.ok_or(UNREAD)?;
+            order.order.instrument = listing.instrument.clone();
+            orders.push(order);
         }
         Ok(BrokerOutcome::Listed {
             client_order_id: listing.client_order_id.as_str().to_owned(),
@@ -63,9 +71,18 @@ impl<T: Tools> RobinhoodConnector<T> {
 /// One `orders[]` record as the executor matches it (DEC-941 item 4). A record carrying our
 /// `ref_id` names our key; one carrying another `ref_id` names that text behind
 /// [`FOREIGN_REF_ID`], which no key of ours can equal, so it is never adopted; one carrying none
-/// names nothing, and the executor's look-alike rule decides (DEC-863).
-fn listed(record: &Map<String, Value>, key: &ClientOrderId, ours: &str) -> Option<ListedOrder> {
+/// names nothing, and the executor's look-alike rule decides (DEC-863). A record naming another
+/// ticker than the one listed for is `None` (DEC-956 item 1).
+fn listed(
+    record: &Map<String, Value>,
+    key: &ClientOrderId,
+    ours: &str,
+    ticker: &InstrumentId,
+) -> Option<ListedOrder> {
     let mut order = order_record(record)?;
+    if order.instrument != *ticker {
+        return None;
+    }
     let order_type = match record.get("type").and_then(Value::as_str)? {
         "limit" => OrderType::Limit,
         "market" => OrderType::Market,

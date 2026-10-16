@@ -20,13 +20,20 @@ pub struct Tickers {
 
 impl Tickers {
     /// The run's registered instruments, each as `(asset id, symbol)` from its instrument
-    /// snapshot.
+    /// snapshot. An empty symbol is [`RobinhoodError::NoSymbol`]; an asset under two symbols, or
+    /// a symbol under two assets, is [`RobinhoodError::AmbiguousSymbol`], since either reading
+    /// could send one instrument's order as another's. A pair given twice is one pair.
     pub fn registered(
         pairs: impl IntoIterator<Item = (InstrumentId, String)>,
     ) -> Result<Self, RobinhoodError> {
         let mut tickers = Self::default();
         for (asset, symbol) in pairs {
             let ticker = InstrumentId::new(&symbol).map_err(|_| RobinhoodError::NoSymbol)?;
+            let known = tickers.by_asset.get(&asset);
+            let taken = tickers.by_ticker.get(&ticker);
+            if known.is_some_and(|known| *known != ticker) || taken.is_some_and(|t| *t != asset) {
+                return Err(RobinhoodError::AmbiguousSymbol);
+            }
             tickers.by_asset.insert(asset.clone(), ticker.clone());
             tickers.by_ticker.insert(ticker, asset);
         }

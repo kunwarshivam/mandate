@@ -53,8 +53,10 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// `get_equity_orders`, each through [`Self::read_sole_member`] with no filter but the
     /// recorded account, on the `Ordinary` budget. A refusal of any read is the snapshot's
     /// refusal, unchanged; a record that is not exactly its assumed shape is
-    /// [`RobinhoodError::Unreadable`] with the read's code (DEC-902). No order, cancel or exit
-    /// waits on it (`AGENTS.md` rule 13).
+    /// [`RobinhoodError::Unreadable`] with the read's code (DEC-902). A position or an order in a
+    /// registered ticker names the instrument by its asset id; one in any other ticker stays as
+    /// the broker spelled it (DEC-956 item 1). No order, cancel or exit waits on it (`AGENTS.md`
+    /// rule 13).
     pub async fn account_snapshot(&self) -> Result<AccountSnapshot, RobinhoodError> {
         let empty = Map::new();
         let portfolio = self
@@ -65,12 +67,16 @@ impl<T: Tools> RobinhoodConnector<T> {
         let positions = self
             .read_sole_member(AccountRead::Positions, &empty)
             .await?;
-        let positions = mapped(&positions, position_record, "positions")?;
+        let mut positions = mapped(&positions, position_record, "positions")?;
+        for position in &mut positions {
+            position.instrument = self.tickers.platform(position.instrument.clone());
+        }
         let orders = self.read_sole_member(AccountRead::Orders, &empty).await?;
         let mut open_orders = Vec::new();
         for record in &orders {
-            let order =
+            let mut order =
                 order_record(record).ok_or(RobinhoodError::Unreadable { code: "orders" })?;
+            order.instrument = self.tickers.platform(order.instrument);
             if matches!(order.status.as_str(), "accepted" | "partially_filled") {
                 open_orders.push(order);
             }
@@ -83,25 +89,27 @@ impl<T: Tools> RobinhoodConnector<T> {
         })
     }
 
-    /// [`Self::account_snapshot`], then `get_equity_tradability` for `symbol` through
-    /// [`Self::read_sole_member`], and `get_equity_quotes` for `symbol` alone, which names no
-    /// account. A symbol the account may not trade is [`RobinhoodError::NotTradable`]; a quote
-    /// that is not exactly one record for `symbol`, or is crossed, is
-    /// [`RobinhoodError::Unreadable`] (DEC-902 items 6 and 7).
+    /// [`Self::account_snapshot`], then `get_equity_tradability` for `symbol`'s ticker through
+    /// [`Self::read_sole_member`], and `get_equity_quotes` for that ticker alone, which names no
+    /// account. An instrument with no registered ticker is [`RobinhoodError::NoSymbol`] before
+    /// anything is read (DEC-956 item 1). A symbol the account may not trade is
+    /// [`RobinhoodError::NotTradable`]; a tradability or a quote that is not exactly one record for
+    /// the ticker, or a crossed quote, is [`RobinhoodError::Unreadable`] (DEC-902 items 6 and 7).
     pub async fn preflight_facts(
         &self,
         symbol: &InstrumentId,
     ) -> Result<PreflightFacts, RobinhoodError> {
+        let ticker = self.tickers.ticker(symbol)?;
         let account = self.account_snapshot().await?;
         let mut filters = Map::new();
         filters.insert(
             "symbol".to_owned(),
-            Value::String(symbol.as_str().to_owned()),
+            Value::String(ticker.as_str().to_owned()),
         );
         let records = self
             .read_sole_member(AccountRead::Tradability, &filters)
             .await?;
-        let tradable = tradability_record(&the_one(&records, "tradability")?, symbol).ok_or(
+        let tradable = tradability_record(&the_one(&records, "tradability")?, ticker).ok_or(
             RobinhoodError::Unreadable {
                 code: "tradability",
             },
@@ -115,19 +123,22 @@ impl<T: Tools> RobinhoodConnector<T> {
 
     /// `get_equity_quotes` for the one symbol (DEC-902 item 7): no account read, because the
     /// contract names no account for it and its answer is about none, so the account check does
-    /// not run before it. Called on the `Ordinary` budget with exactly `{"symbols": [symbol]}`,
-    /// and answered by one uncrossed record for the symbol; the answer's `structuredContent`
+    /// not run before it. Called on the `Ordinary` budget with exactly `{"symbols": [ticker]}`,
+    /// `symbol`'s registered ticker (DEC-956 item 1), and answered by one uncrossed record for the
+    /// ticker, read as `symbol`'s quote; the answer's `structuredContent`
     /// holds its `quotes` member and nothing else. The runner reads it again at the opening's
     /// cross-check (DEC-945), so the ask it compares is the broker's latest, not the preflight's.
     ///
     /// # Errors
-    /// [`RobinhoodError::Unreadable`] (`quotes`) for a failed call, a refused one, and any
-    /// answer that is not that one record.
+    /// [`RobinhoodError::NoSymbol`] for an instrument with no registered ticker, with nothing
+    /// called; [`RobinhoodError::Unreadable`] (`quotes`) for a failed call, a refused one, and
+    /// any answer that is not that one record.
     pub async fn equity_quote(&self, symbol: &InstrumentId) -> Result<Quote, RobinhoodError> {
+        let ticker = self.tickers.ticker(symbol)?;
         let mut arguments = Map::new();
         arguments.insert(
             "symbols".to_owned(),
-            Value::Array(vec![Value::String(symbol.as_str().to_owned())]),
+            Value::Array(vec![Value::String(ticker.as_str().to_owned())]),
         );
         let answer = self
             .tools
@@ -148,7 +159,11 @@ impl<T: Tools> RobinhoodConnector<T> {
         let Value::Object(record) = record else {
             return Err(unreadable());
         };
-        quote_record(record, symbol).ok_or_else(unreadable)
+        let quote = quote_record(record, ticker).ok_or_else(unreadable)?;
+        Ok(Quote {
+            symbol: symbol.clone(),
+            ..quote
+        })
     }
 }
 
@@ -223,7 +238,7 @@ fn position_record(record: &Map<String, Value>) -> Option<BrokerPosition> {
 }
 
 /// The tradability record (DEC-902 item 6): the account, the symbol, byte-equal to the
-/// instrument's, and the boolean. A `false` is the caller's [`RobinhoodError::NotTradable`].
+/// instrument's ticker, and the boolean. A `false` is the caller's [`RobinhoodError::NotTradable`].
 fn tradability_record(record: &Map<String, Value>, symbol: &InstrumentId) -> Option<bool> {
     if !listed(record, &["account_number", "symbol", "tradable"]) {
         return None;
@@ -234,7 +249,7 @@ fn tradability_record(record: &Map<String, Value>, symbol: &InstrumentId) -> Opt
     record.get("tradable")?.as_bool()
 }
 
-/// The one quote record (DEC-902 item 7): the symbol, byte-equal to the instrument's, and its
+/// The one quote record (DEC-902 item 7): the symbol, byte-equal to the instrument's ticker, and its
 /// bid and ask, uncrossed, so a locked quote is allowed. No time field is assumed, so none is
 /// read.
 fn quote_record(record: &Map<String, Value>, symbol: &InstrumentId) -> Option<Quote> {
