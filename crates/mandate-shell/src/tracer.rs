@@ -1339,8 +1339,6 @@ const TRACER_ACTOR: ActorKind = ActorKind::System;
 /// fill it ingested asks for (DEC-938 item 5).
 const RECONCILIATION_ROUNDS: usize = 2;
 
-/// The payload and causation a stored body carries, read from its canonical bytes rather than from
-/// anything the shell remembers, so what is folded is what was committed.
 /// The executor reads its stream's environment from `StreamOpened`'s `environment` member, which
 /// journal spec §9's registered schema carries in the envelope instead (ADR-0001 ES-23). The
 /// shell hands the executor the environment the journal stored with the record, so a paper
@@ -1358,6 +1356,8 @@ fn with_environment(row: &StoredEvent, payload: Value) -> Result<Value, ShellErr
     Ok(Value::Object(members))
 }
 
+/// The payload and causation a stored body carries, read from its canonical bytes rather than from
+/// anything the shell remembers, so what is folded is what was committed.
 fn body_of(row: &StoredEvent) -> Result<(Value, Option<String>), ShellError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| ShellError::Envelope {
         field: "stored body",
