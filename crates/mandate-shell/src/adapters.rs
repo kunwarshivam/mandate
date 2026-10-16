@@ -40,6 +40,7 @@ use std::sync::Arc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
+use mandate_robinhood::Tools;
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
     BuilderMandate, Clip as BuilderClip, Direction, Market as BuilderMarket,
@@ -81,6 +82,7 @@ use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
+use crate::robinhood::RobinhoodBridge;
 use crate::stages::{
     Admitted, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
     MandateSource, Protection, Reconciler, Sink, Sizing, Stages,
@@ -2106,6 +2108,12 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         artifacts,
         transport: Box::new(AlpacaConnector { transport }),
     })
+}
+
+/// The production stages over one Robinhood session (DEC-947 item 4). Stub.
+pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<T>>>) -> Stages {
+    let _ = sources;
+    unimplemented!("E7-26")
 }
 
 /// The production stages over a caller-supplied connector.

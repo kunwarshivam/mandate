@@ -9,6 +9,7 @@ use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
 
+use crate::auth::AccessToken;
 use crate::budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 use crate::endpoint::{Build, PinnedEndpoint};
 use crate::error::{McpError, ServerText};
@@ -105,6 +106,16 @@ impl McpTransport {
             session: Mutex::new(None),
             next_id: AtomicU64::new(1),
         })
+    }
+
+    /// This transport carrying the login's `token` as every request's bearer (DEC-947 item 4).
+    /// Stub.
+    ///
+    /// # Errors
+    /// [`McpError::Unimplemented`] until implemented.
+    pub fn authorized(self, token: AccessToken) -> Result<Self, McpError> {
+        let _ = (self, token);
+        Err(McpError::Unimplemented { story: "E7-26" })
     }
 
     /// Sends request `method` and returns its result, or the server's JSON-RPC error as

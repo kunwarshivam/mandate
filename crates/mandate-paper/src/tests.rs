@@ -30,7 +30,8 @@ use mandate_domain::AssetClass;
 use mandate_num::{Fraction, Price, Usd};
 
 use crate::{
-    Args, CollarMembers, Connection, ConnectionRefusal, Opening, PaperError, Ports, QuoteRefusal,
+    Args, CollarMembers, Connection, ConnectionRefusal, Dial, Opening, PaperError, Ports,
+    QuoteRefusal,
     SystemClock, run,
 };
 
@@ -68,7 +69,11 @@ impl Ports for Probe {
             .ok_or(PaperError::Control)
     }
 
-    fn connect(&mut self, _connection: &Connection) -> Result<AlpacaPaperHttp, PaperError> {
+    fn connect(
+        &mut self,
+        _connection: &Connection,
+        _dial: Option<&Dial>,
+    ) -> Result<AlpacaPaperHttp, PaperError> {
         self.connects.set(self.connects.get().saturating_add(1));
         Err(PaperError::Credentials)
     }

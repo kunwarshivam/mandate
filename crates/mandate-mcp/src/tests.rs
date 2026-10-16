@@ -3,6 +3,7 @@
 
 mod answers;
 mod auth;
+mod bearer;
 mod bounds;
 mod budget;
 mod contract;

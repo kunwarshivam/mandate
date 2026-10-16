@@ -212,6 +212,19 @@ impl DeploymentRefusal {
     }
 }
 
+/// Phase 1's checks before any credential is read (DEC-947 item 2). Stub.
+///
+/// # Errors
+/// Every [`DeploymentRefusal`] the fold makes before the door's condition.
+pub fn checked_before_credentials(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    run: &RunFacts,
+) -> Result<(), DeploymentRefusal> {
+    let _ = (records, store, run);
+    Err(DeploymentRefusal::Unimplemented { story: "E7-26" })
+}
+
 /// Phase 1: the confirmed version `run.agent` is deployed with, from `records` and the documents
 /// in `store`, or why there is none. It needs no credential.
 pub fn confirmed_version(

@@ -67,6 +67,14 @@ impl<T: Tools> RobinhoodBridge<T> {
             .block_on(robinhood.preflight_facts(symbol))
             .map_err(|_| unread())
     }
+
+    /// The agentic account's snapshot (DEC-947 item 1). Stub.
+    ///
+    /// # Errors
+    /// [`Cause::Unimplemented`] until implemented.
+    pub fn account_snapshot(&self) -> Result<AccountSnapshot, Cause> {
+        Err(Cause::Unimplemented { story: "E7-26" })
+    }
 }
 
 /// The shell's [`Connector`] over the bridge: each request is the Robinhood connector's own,

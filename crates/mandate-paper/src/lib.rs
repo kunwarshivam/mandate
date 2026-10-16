@@ -57,8 +57,9 @@ use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
-    ConfigRefusal, ControlRecord, DeploymentRefusal, LiveAdmission, Pinned, RunFacts,
-    configuration, confirmed_version,
+    Build as BuiltWith, Confirmation, ConfigRefusal, ConfirmedVersion, ControlRecord,
+    DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Pinned, RunFacts, configuration,
+    confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
@@ -83,7 +84,8 @@ pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
 pub use robinhood::{
-    Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
+    ACCOUNT_NUMBER_VAR, Build, Dial, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR,
+    REHEARSAL_HOST, RobinhoodEndpoint, dial, endpoint, pinned_host,
 };
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, granted_opening,
@@ -122,7 +124,11 @@ pub trait Ports {
     /// The credentials and the session of the broker `connection` chose, or
     /// [`PaperError::Credentials`]; called at most once, only after every check that needs no
     /// credential, and for a live run only after [`Ports::harden`].
-    fn connect(&mut self, connection: &Connection) -> Result<Self::Session, PaperError>;
+    fn connect(
+        &mut self,
+        connection: &Connection,
+        dial: Option<&Dial>,
+    ) -> Result<Self::Session, PaperError>;
 
     /// Turns the process's core dumps off (LT-9), or [`PaperError::Harden`]; called once, for a
     /// live run only, after its acknowledgement and before [`Ports::connect`].
@@ -159,6 +165,14 @@ pub trait Session {
     /// or [`None`] when this session holds none — and then the cross-check refuses the opening
     /// and nothing is sent (rule 3).
     fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price>;
+
+    /// The agentic account's snapshot the live door's lapse counts (DEC-933 item 3, DEC-947
+    /// item 1), read and sending nothing, or [`None`] when this session reads none — and then a
+    /// live connection's lapse refuses `lapse_evidence_not_supplied` (DEC-919).
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when the read is refused or unreadable.
+    fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause>;
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
@@ -177,6 +191,11 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
     /// Alpaca's own quote is the IEX quote its data client read at the preflight.
     fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
         Some(facts.quote.ask)
+    }
+
+    /// An Alpaca paper session reads no Robinhood snapshot; a paper run's lapse makes no check.
+    fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
+        Ok(None)
     }
 }
 
@@ -469,7 +488,7 @@ pub fn run<P: Ports>(
         .map_err(refused(Stage::Validate))?;
     let connection =
         connection.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
-    let session = ports.connect(&connection)?;
+    let session = ports.connect(&connection, None)?;
     let broker = session
         .preflight(&artifacts, clock.clone())
         .map_err(refused(Stage::Reconcile))?;
@@ -575,6 +594,45 @@ pub fn run<P: Ports>(
     )
     .ok();
     Ok(Outcome::Cycle(Box::new(Cycle { report, evidence })))
+}
+
+/// Whether this binary was built with the runner's `live` feature, as the shell's admission
+/// reads it (DEC-924 item 1, DEC-947 item 3).
+pub const BUILT_WITH: BuiltWith = if cfg!(feature = "live") {
+    BuiltWith::Live
+} else {
+    BuiltWith::Default
+};
+
+/// DEC-924 item 1's admission from the run's own facts (DEC-947 item 3). Stub.
+pub fn live_admission(
+    built: BuiltWith,
+    acknowledged: Environment,
+    door: DoorChecks,
+    dialed: Option<&RobinhoodEndpoint>,
+    pinned: Option<&'static str>,
+) -> LiveAdmission {
+    let _ = (built, acknowledged, door, dialed, pinned);
+    LiveAdmission::refusing()
+}
+
+/// A live run's start (DEC-947 items 1 and 2). Stub.
+///
+/// # Errors
+/// Every [`PaperError`] of the steps.
+#[allow(clippy::too_many_arguments, reason = "stub; DEC-947")]
+fn live_start<P: Ports>(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    facts: &RunFacts,
+    connection: &Connection,
+    stream: &StreamId,
+    journal: Option<&str>,
+    dial: &Dial,
+    ports: &mut P,
+) -> Result<(ConfirmedVersion, P::Session), PaperError> {
+    let _ = (records, store, facts, connection, stream, journal, dial, ports);
+    Err(PaperError::Unimplemented { story: "E7-26" })
 }
 
 /// The live door the run calls ahead of its own answers (E7-26, DEC-918 items 1 to 4; DEC-910
@@ -741,7 +799,11 @@ impl Ports for Production {
     /// For Alpaca, `Credentials::from_env` and one [`AlpacaPaperHttp`]; for Robinhood, the
     /// founder's login at the endpoint this build pins ([`robinhood::connect`]). Either fails as
     /// [`PaperError::Credentials`], and no error names a key or a token.
-    fn connect(&mut self, connection: &Connection) -> Result<Connected, PaperError> {
+    fn connect(
+        &mut self,
+        connection: &Connection,
+        dial: Option<&Dial>,
+    ) -> Result<Connected, PaperError> {
         match connection.broker {
             Broker::Alpaca => {
                 let credentials = Credentials::from_env().map_err(|_| PaperError::Credentials)?;
@@ -749,7 +811,10 @@ impl Ports for Production {
                     .map(Connected::Alpaca)
                     .map_err(|_| PaperError::Credentials)
             }
-            Broker::Robinhood => robinhood::connect().map(Connected::Robinhood),
+            Broker::Robinhood => {
+                let dial = dial.ok_or(PaperError::Endpoint(EndpointRefusal::NotBuilt))?;
+                robinhood::connect(dial).map(Connected::Robinhood)
+            }
         }
     }
 
@@ -792,6 +857,13 @@ impl Session for Connected {
         match self {
             Self::Alpaca(transport) => transport.broker_ask(facts),
             Self::Robinhood(linked) => linked.broker_ask(facts),
+        }
+    }
+
+    fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.account_snapshot(),
+            Self::Robinhood(linked) => linked.account_snapshot(),
         }
     }
 }
@@ -893,3 +965,6 @@ pub fn stderr_line(error: &PaperError) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod live_tests;
