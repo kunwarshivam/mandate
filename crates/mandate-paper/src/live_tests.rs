@@ -22,7 +22,7 @@ use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
     Build as BuiltWith, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal,
-    DoorChecks, LiveAdmission, McpHost, RunFacts,
+    DoorChecks, LiveAdmission, McpHost, Origin, RunFacts,
 };
 use mandate_shell::paper::{Artifacts, BrokerFacts};
 use mandate_shell::robinhood::{ACCOUNT_UNREAD, RobinhoodBridge};
@@ -76,6 +76,10 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
         seq,
         event_type: event_type.to_owned(),
         payload: canonical(payload),
+        origin: Origin {
+            stream_id: "ctl:ws_live".to_owned(),
+            environment: Environment::Live,
+        },
     }
 }
 

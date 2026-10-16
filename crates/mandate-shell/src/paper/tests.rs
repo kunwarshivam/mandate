@@ -8,7 +8,7 @@ use mandate_alpaca::{
 };
 use mandate_builder::buy_action;
 use mandate_canon::Digest;
-use mandate_domain::AssetId;
+use mandate_domain::{AssetId, Environment};
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
     BrokerAccount, BrokerOrder, BrokerPosition, FillConfigRefs, InstrumentSnapshot, MandateView,
@@ -24,8 +24,8 @@ use mandate_time::{Date, UtcNanos};
 
 use crate::Cause;
 use crate::control::{
-    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
-    confirmed_version,
+    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Origin, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_canon::to_canonical;
 use mandate_spec::context::Membership;
@@ -132,6 +132,10 @@ impl Deployed {
             seq: seq.saturating_add(1),
             event_type: event_type.to_owned(),
             payload: parsed,
+            origin: Origin {
+                stream_id: "ctl:ws_spy".to_owned(),
+                environment: Environment::Paper,
+            },
         });
         Ok(())
     }

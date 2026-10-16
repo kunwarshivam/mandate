@@ -11,11 +11,12 @@ use mandate_alpaca::{
     MinuteBars, alpaca_account_rules, wire,
 };
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_num::{Price, Qty, Usd};
 use mandate_shell::Cause;
 use mandate_shell::control::{
-    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
-    confirmed_version,
+    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Origin, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_shell::paper::{Artifacts, BrokerFacts, LiquidityFacts, PaperFacts};
 use mandate_spec::context::{AgentId, Membership};
@@ -59,10 +60,28 @@ pub fn spy_mandate(content: &str) -> String {
 
 /// The control stream of a deployed SPY version, and the store of every object it names, each
 /// stored as written so its reference is the hash of those bytes.
-#[derive(Default)]
 pub struct Stream {
     pub records: Vec<ControlRecord>,
     pub store: BTreeMap<Digest, Vec<u8>>,
+    /// The stream every record is journaled on: the paper workspace `ws_spy` unless
+    /// [`Stream::live`] built it.
+    pub origin: Origin,
+}
+
+/// The paper workspace's control stream every paper fixture is journaled on.
+pub fn paper_origin() -> Origin {
+    Origin {
+        stream_id: "ctl:ws_spy".to_owned(),
+        environment: Environment::Paper,
+    }
+}
+
+/// The live workspace's own control stream (DEC-952 item 1).
+pub fn live_origin() -> Origin {
+    Origin {
+        stream_id: "ctl:ws_live".to_owned(),
+        environment: Environment::Live,
+    }
 }
 
 impl Stream {
@@ -95,6 +114,30 @@ impl Stream {
         Self::of_objects(mandate, snapshot, rules, fee, CALENDAR, content)
     }
 
+    /// The SPY deployment as a live workspace journals it (DEC-952 item 1): the mandate `live`, its
+    /// connection established as a live Robinhood one so V-001 agrees, the fee schedule naming
+    /// `fee_environment`, and every record on the live workspace's own control stream.
+    pub fn live(fee_environment: &str) -> Self {
+        let content = model();
+        let mandate =
+            spy_mandate(&content).replace(r#""environment": "paper""#, r#""environment": "live""#);
+        let fee = FEE.replace(
+            r#""environment":"paper""#,
+            &format!(r#""environment":"{fee_environment}""#),
+        );
+        let mut stream = Self {
+            records: Vec::new(),
+            store: BTreeMap::new(),
+            origin: live_origin(),
+        };
+        stream.fill(&mandate, SNAPSHOT, RULES, &fee, CALENDAR, &content);
+        stream.record(
+            "ConnectionEstablished",
+            r#"{"broker":"robinhood","connection_id":"conn_alpaca_paper_01","environment":"live","scopes":["trading"]}"#,
+        );
+        stream
+    }
+
     /// [`Stream::of`] with the registered trading calendar named too.
     pub fn of_objects(
         mandate: &str,
@@ -104,6 +147,27 @@ impl Stream {
         calendar: &str,
         content: &str,
     ) -> Self {
+        let mut stream = Self {
+            records: Vec::new(),
+            store: BTreeMap::new(),
+            origin: paper_origin(),
+        };
+        stream.fill(mandate, snapshot, rules, fee, calendar, content);
+        stream
+    }
+
+    /// Registers the model and the four configuration objects, then creates, confirms and deploys
+    /// `mandate`, each record on [`Stream::origin`]: the five registrations are records 0 to 4,
+    /// in the order model, fee, calendar, rule set, snapshot, and the deployment is record 7.
+    fn fill(
+        &mut self,
+        mandate: &str,
+        snapshot: &str,
+        rules: &str,
+        fee: &str,
+        calendar: &str,
+        content: &str,
+    ) {
         let document = to_canonical(&json(mandate));
         let version = reference(&document);
         let paths: Vec<String> = ENVELOPE.split(' ').map(|p| format!("/{p}")).collect();
@@ -112,7 +176,7 @@ impl Stream {
             .map(|path| format!(r#"{{"path":"{path}","source":"user_entered"}}"#))
             .collect();
         let confirmed: Vec<String> = paths.iter().map(|path| format!(r#""{path}""#)).collect();
-        let mut stream = Self::default();
+        let stream = self;
         stream.store.insert(Digest::of(&document), document);
         let model = format!(
             r#"{{"admits_instruments":false,"content_hash":"{}","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}}"#,
@@ -147,7 +211,6 @@ impl Stream {
         stream.record("MandateVersionCreated", &created);
         stream.record("MandateConfirmed", &confirmation);
         stream.record("AgentDeployed", &deployed);
-        stream
     }
 
     /// Stores `object`'s bytes as written and returns their reference.
@@ -162,6 +225,7 @@ impl Stream {
             seq: u64::try_from(self.records.len()).unwrap() + 1,
             event_type: event_type.to_owned(),
             payload: json(payload),
+            origin: self.origin.clone(),
         });
     }
 
@@ -182,6 +246,15 @@ impl Stream {
 
     /// [`Stream::inputs`] for a run on `day`.
     pub fn inputs_on(&self, day: Date) -> (ConfirmedVersion, Configuration) {
+        self.inputs_admitting(day, LiveAdmission::refusing())
+    }
+
+    /// [`Stream::inputs_on`] for a run that supplies `live` as its live admission.
+    pub fn inputs_admitting(
+        &self,
+        day: Date,
+        live: LiveAdmission,
+    ) -> (ConfirmedVersion, Configuration) {
         let run = RunFacts {
             agent: AgentId::new("agent_spy"),
             validation_date: day,
@@ -189,7 +262,7 @@ impl Stream {
                 workspace_users: 1,
                 approver_users: 1,
             },
-            live: LiveAdmission::refusing(),
+            live,
         };
         let confirmed = confirmed_version(&self.records, &self.store, &run).unwrap();
         let mandate = confirmed.mandate();

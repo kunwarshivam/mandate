@@ -61,7 +61,7 @@ use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
     Build as BuiltWith, ConfigRefusal, Confirmation, ConfirmedVersion, ControlRecord,
-    DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Pinned, RunFacts,
+    DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Origin, Pinned, RunFacts,
     checked_before_credentials, configuration, confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
@@ -1071,14 +1071,17 @@ impl<T: Tools + 'static> Session for Connected<T> {
     }
 }
 
-/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`.
+/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`,
+/// and the stream and environment it was journaled on (DEC-957).
 fn control_record(row: &StoredEvent) -> Result<ControlRecord, PaperError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| PaperError::Control)?;
     let payload = body.get("payload").ok_or(PaperError::Control)?.clone();
+    let origin = Origin::of(&row.stream_id, &row.environment).ok_or(PaperError::Control)?;
     Ok(ControlRecord {
         seq: row.seq,
         event_type: row.event_type.clone(),
         payload,
+        origin,
     })
 }
 

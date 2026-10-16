@@ -12,7 +12,7 @@ use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_num::Usd;
 use mandate_shell::control::{
     Build, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, DoorChecks,
-    LiveAdmission, McpHost, RunFacts, checked_before_credentials, confirmed_version,
+    LiveAdmission, McpHost, Origin, RunFacts, checked_before_credentials, confirmed_version,
 };
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::{Mandate, Violation};
@@ -58,6 +58,10 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
         seq,
         event_type,
         payload: json(payload),
+        origin: Origin {
+            stream_id: "ctl:ws_spy".to_owned(),
+            environment: Environment::Paper,
+        },
     }
 }
 

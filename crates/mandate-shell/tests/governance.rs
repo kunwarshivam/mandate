@@ -6,8 +6,9 @@
 use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_shell::control::{
-    ConfigRefusal as Refusal, ControlRecord, Governance, Pinned, governance,
+    ConfigRefusal as Refusal, ControlRecord, Governance, Origin, Pinned, governance,
 };
 use mandate_spec::policy::{LevelName, PolicyKey, PolicyValue, values_of};
 use mandate_spec::{Mandate, SchemaDec};
@@ -83,6 +84,10 @@ impl Stream {
             seq: u64::try_from(self.records.len()).unwrap() + 1,
             event_type: event_type.to_owned(),
             payload: json(payload),
+            origin: Origin {
+                stream_id: "ctl:ws_spy".to_owned(),
+                environment: Environment::Paper,
+            },
         });
         self
     }
