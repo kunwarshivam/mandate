@@ -65,10 +65,10 @@ use mandate_shell::paper::{
     Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
     load_contexts_with_clock, preflight,
 };
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{
     Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
-use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
