@@ -117,6 +117,7 @@ const REGISTERED: &[&str] = &[
     "GateDecided",
     "OrderSubmitted",
     "FillApplied",
+    "LateFillApplied",
     "MarkUpdated",
     "ReconciliationRun",
     "MandateVersionApplied",
@@ -1031,6 +1032,12 @@ const RISK_INPUT_PAYLOADS: &[(&str, &[&str], &str)] = &[
     ),
     (
         "FillApplied",
+        &[FEE, CAL, SET, INS],
+        r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
+        "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,
+    ),
+    (
+        "LateFillApplied",
         &[FEE, CAL, SET, INS],
         r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
         "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,

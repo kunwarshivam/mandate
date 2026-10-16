@@ -18,7 +18,6 @@ use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, TransportConfig,
 };
-use mandate_num::Price;
 use mandate_robinhood::RobinhoodConnector;
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts};
@@ -26,7 +25,7 @@ use mandate_shell::{Cause, ProductionCycle, Setup};
 use tokio::runtime::Runtime;
 
 use crate::connect_check::{Observed, SeenContract, observe};
-use crate::{PaperError, Session};
+use crate::{BrokerAsk, PaperError, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
 /// a Robinhood host is written, and only the runner's `live` feature compiles it (LT-1).
@@ -275,9 +274,10 @@ impl Session for Linked {
         })
     }
 
-    /// No Robinhood quote is read until the MCP session carries the token (O2), so an asked
-    /// opening's cross-check has no broker ask and refuses (DEC-940 item 4).
-    fn broker_ask(&self, _facts: &BrokerFacts) -> Option<Price> {
-        None
+    /// No Robinhood quote is read until the MCP session carries the token, so an asked
+    /// opening's cross-check has no broker ask and refuses (DEC-940 item 4); a session that
+    /// holds a connected bridge hands [`BrokerAsk::robinhood`] instead (DEC-945 item 4).
+    fn broker_ask(&self, _facts: &BrokerFacts) -> BrokerAsk {
+        BrokerAsk::Absent
     }
 }

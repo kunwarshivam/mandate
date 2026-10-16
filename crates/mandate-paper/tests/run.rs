@@ -28,7 +28,8 @@ use mandate_alpaca::{Response, TradingTransport, TransportError};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{DecStr, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_journal::{ArtifactRef, ArtifactStore, StreamId, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactStore, StoredEvent, StreamId, get_artifact};
+use mandate_journal::{TrustedStart, verify_events};
 use mandate_journal_pg::APP_ROLE;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
@@ -87,6 +88,10 @@ struct Broker {
     quote_offset_ns: Option<i128>,
     holds: bool,
     rests: bool,
+    /// The entry's fill, at the entry's own limit price, in the account activities once the entry
+    /// was sent, and the share it bought in the positions, named by the broker's ticker as the
+    /// paper broker reported #1355's (E2, 2026-10-16).
+    fills: bool,
     minutes: &'static str,
     posts: Rc<RefCell<Vec<Value>>>,
     clock: Clock,
@@ -132,6 +137,22 @@ impl Broker {
         };
         lookup.then(|| self.order(&entry, status, filled))
     }
+
+    /// The account activities once the entry has filled: one `FILL` of its whole quantity at its
+    /// limit price, or none before the entry was sent.
+    fn fill(&self) -> Vec<u8> {
+        let Some(entry) = self.posts.borrow().first().cloned() else {
+            return b"[]".to_vec();
+        };
+        let field = |name: &str| entry.get(name).and_then(Value::as_str).unwrap().to_owned();
+        let (id, qty, price) = (field("client_order_id"), field("qty"), field("limit_price"));
+        let symbol = self.equity.1;
+        let at = format!("{}9:59.000000000Z", self.minutes);
+        format!(
+            r#"[{{"activity_type":"FILL","client_order_id":"{id}","cum_qty":"{qty}","id":"20260929170000000::68099755-c7e6-40ea-8ba2-5dc644393428","leaves_qty":"0","order_id":"e02fc2d2-0ff3-444f-a0ab-6253613302fe","price":"{price}","qty":"{qty}","side":"buy","symbol":"{symbol}","transaction_time":"{at}","type":"fill"}}]"#
+        )
+        .into_bytes()
+    }
 }
 
 async fn answer(status: u16, body: Vec<u8>) -> Answer {
@@ -153,6 +174,9 @@ impl TradingTransport for Broker {
         let (status, body) = match (request.method(), path) {
             (Method::Get, "/v2/account") => (200, file("account.json")),
             (Method::Get, "/v2/positions") if self.holds => (200, file("position-aapl.json")),
+            (Method::Get, "/v2/positions") if self.fills && !self.posts.borrow().is_empty() => {
+                (200, file("position-aapl.json"))
+            }
             (Method::Get, path) if path == asset => (200, file("asset-aapl.json")),
             (Method::Post, "/v2/orders") => {
                 let sent = json(request.body().unwrap());
@@ -165,6 +189,9 @@ impl TradingTransport for Broker {
                 (204, Vec::new())
             }
             (_, lookup) if self.entry(lookup).is_some() => (200, self.entry(lookup).unwrap()),
+            (_, list) if list.starts_with("/v2/account/activities?") && self.fills => {
+                (200, self.fill())
+            }
             (_, lookup) if lookup.starts_with("/v2/orders:by_client_order_id") => {
                 (404, file("order-absent.json"))
             }
@@ -402,6 +429,7 @@ impl Scene {
                 quote_offset_ns: None,
                 holds,
                 rests: false,
+                fills: false,
                 minutes,
                 posts,
                 clock: clock.clone(),
@@ -997,6 +1025,87 @@ proptest! {
     }
 }
 
+/// #1355's first defect (E2, 2026-10-16), `AGENTS.md` rule 5, journal spec §9 and DEC-938: once
+/// the bracket entry reads `filled`, the reconciliation it asks for reads the broker's `FILL`,
+/// which names the share by its ticker, and journals it as the run's own fill. With a clock that
+/// moves at every read, as the founder's did, every append is accepted and the run ends having
+/// placed its one order, with no external-activity alert: the first real fill was refused there
+/// as `the journal answered Invalid`.
+#[test]
+fn a_filled_entry_journals_its_fill_and_the_run_ends() {
+    let mut scene = Scene::new("filled", 231..256);
+    scene.ports.broker.fills = true;
+    scene.advancing(1_000_000, 0);
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let Ok(Outcome::Cycle(cycle)) = outcome else {
+        unreachable!("placed_one matched a cycle")
+    };
+    assert!(
+        !cycle.report.alerts.contains(&"external_activity"),
+        "the run's own fill is never external activity: {:?}",
+        cycle.report.alerts
+    );
+}
+
+/// #1355's first defect through a real journal (the suite's PG class, DEC-109): the account
+/// stream holds the entry's fill, priced as the broker filled it, for the client order id and
+/// asset the run sent, and both streams the run appended to verify from genesis (journal spec
+/// §11). The entry already read `filled` when its fill arrived, so the fill is the
+/// `LateFillApplied` trading spec §5.7 journals for a fill of an order in a terminal state.
+#[test]
+fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let mut scene = Scene::new("pg-filled", 231..256);
+    scene.ports.broker.fills = true;
+    scene.advancing(1_000_000, 0);
+    let url = std::env::var(support::URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    scene.args.journal = Some(format!("{url}{joiner}options={options}"));
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let sent = &scene.posts()[0];
+    let field = |name: &str| sent.get(name).and_then(Value::as_str).unwrap().to_owned();
+    let journal = db.journal();
+    let account = StreamId::parse("acct:ws_paper:acct_paper").unwrap();
+    let rows = db.block_on(journal.rows(&account)).unwrap();
+    let fills: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type.ends_with("FillApplied"))
+        .collect();
+    let types: Vec<&str> = fills.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        ["LateFillApplied"],
+        "one fill record for the one fill"
+    );
+    let body = json(std::str::from_utf8(&fills[0].body).unwrap());
+    let payload = body.get("payload").unwrap();
+    let member = |name: &str| payload.get(name).and_then(Value::as_str).map(str::to_owned);
+    assert_eq!(
+        member("price"),
+        Some(field("limit_price")),
+        "the fill price"
+    );
+    assert_eq!(member("client_order_id"), Some(field("client_order_id")));
+    assert_eq!(
+        member("instrument_id"),
+        Some(field("symbol")),
+        "the asset sent"
+    );
+    assert_eq!(member("qty_gross"), Some(field("qty")));
+    let store = FsArtifactStore::open(&scene.args.store).unwrap();
+    for name in ["agent:ws_paper:agent_spy", "acct:ws_paper:acct_paper"] {
+        let stream = StreamId::parse(name).unwrap();
+        let rows = db.block_on(journal.rows(&stream)).unwrap();
+        let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
+        assert!(verified.is_ok(), "{name}: {verified:?}");
+    }
+}
+
 /// DEC-940, rule 3: a placing run whose cycle asks waits for the grant at the watch's interval,
 /// and an ask no answer reaches denies at its own deadline with nothing sent: the scratch
 /// journal no founder can answer on holds only the run's own ask.
@@ -1046,17 +1155,17 @@ fn an_alpaca_session_answers_its_own_iex_ask() {
         UtcNanos::parse_rfc3339(TUESDAY.0).unwrap(),
     );
     let ask = Some(facts.broker.quote.ask);
-    assert_eq!(
+    assert!(matches!(
         mandate_paper::Session::broker_ask(&scene.ports.broker, &facts.broker),
-        ask
-    );
+        mandate_paper::BrokerAsk::Quoted(quoted) if Some(quoted) == ask
+    ));
     let credentials =
         mandate_alpaca::Credentials::from_lookup(|_| Some("placeholder".to_owned())).unwrap();
     let connected = mandate_paper::Connected::Alpaca(
         mandate_alpaca::AlpacaPaperHttp::new(credentials).unwrap(),
     );
-    assert_eq!(
+    assert!(matches!(
         mandate_paper::Session::broker_ask(&connected, &facts.broker),
-        ask
-    );
+        mandate_paper::BrokerAsk::Quoted(quoted) if Some(quoted) == ask
+    ));
 }
