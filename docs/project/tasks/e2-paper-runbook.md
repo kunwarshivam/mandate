@@ -13,7 +13,7 @@ Read this first, because the brief omits it: `mandate-paper` refuses to start wi
 - **Build** (default features only; never `--features live`):
   `cargo build --release -p mandate-cli -p mandate-paper`
   Binaries: `target/release/mandate` and `target/release/mandate-paper`.
-- **Postgres 18, journal roles and schema.** There is no migrate command in the CLI; `deploy/bootstrap.sh`
+- **Postgres (18 in CI; 16 worked on 2026-10-16), journal roles and schema.** There is no migrate command in the CLI; `deploy/bootstrap.sh`
   is the repo's own recipe (VM-oriented). A local equivalent of its SQL, UNVERIFIED end to end (derived
   from `deploy/bootstrap.sh`; I did not run it):
   ```bash
@@ -30,6 +30,9 @@ Read this first, because the brief omits it: `mandate-paper` refuses to start wi
   { echo 'SET ROLE mandate_journal_owner; SET search_path = journal;'; cat migrations/0001_journal.sql; } \
     | sudo -u postgres psql -v ON_ERROR_STOP=1 mandate
   ```
+  Run on 2026-10-16 against PostgreSQL 16: this SQL and the migration applied cleanly and `e2_app` logs
+  in with `search_path = journal`. If the container restarts, `pg_ctlcluster 16 main start` again
+  before any command (otherwise every command fails `the journal failed: unavailable`).
   The DSN the commands take must log in as a member of `mandate_journal_app` (`PgJournal::from_dsn` docs),
   not as the superuser. (The tests' superuser `MANDATE_PG_URL` is a different thing; do not use it here.)
 - **Shell variables** (no password in the DSN: sqlx reads `PGPASSWORD`, `crates/mandate-cli/src/postgres.rs`):
@@ -156,7 +159,9 @@ $M version confirm $V --code <CODE> $O $J              # confirmed as event <id>
 $M agent deploy agent_spy $V $O $J                     # prints: code <CODE2> / warnings ...; commits nothing
 $M agent deploy agent_spy $V --code <CODE2> $O $J      # deployed as event <id> at seq <n>
 ```
-Read the printed warnings before typing the code: that is the confirmation. The brief also lists
+Read the printed warnings before typing the code: that is the confirmation. With the section 3
+sizing, both `version confirm` and `agent deploy` print `warnings W-002` (mandate spec: one full
+position's loss at its stop exceeds the daily loss budget); it is a warning, not a violation. The brief also lists
 `policy_set` and `model_registry` registrations (`--kind policy_set|model_registry`), but nothing on the
 paper run path reads them on main (`governance()` has no caller in `mandate-paper` or the shell's run), so
 they are skipped here. UNVERIFIED that no later check wants them; if a refusal names them, register them.
@@ -256,3 +261,40 @@ second `submitted` ever appears, stop and report it.
 - That Alpaca's SPY asset id is still `b28f4066-...` (the run compares it with the broker's record).
 - Whether the paper run ever waits on an `ask` grant (that wiring is described for the live arm); the
   fixture's autonomy makes openings `auto`, so it should not.
+
+## 11. The run of 2026-10-16 (agent-run under DEC-930): stopped at the dry run
+
+Preparation, all clean: PostgreSQL 16 schema; release build; SPY bars 2026-08-31 to 2026-10-15
+(33 rows, `inspect` 0 problems, no split); the paper account ACTIVE, unblocked, flat, no accrued
+fees, equity above 10,000; SPY's asset id `b28f4066-5c6d-479b-a2af-85dc1a8f16fb` matches
+`GET /v2/assets/SPY`; control stream seq 1 to 9 (workspace, four registrations, model, version
+`sha256:07d55fc806872d1c2568be9a9f49006e09a8855ec9a17a11ddd6c61a26780b21` created, confirmed,
+`agent_spy` deployed). The Nasdaq Trader directory was unreachable from the session (DEC-930
+item 3).
+
+Dry runs at 14:59 to 15:02 UTC, inside the regular session, no order sent:
+```
+the tracer stopped at Reconcile: a current IEX quote
+the tracer stopped at Reconcile: a current IEX quote
+the tracer stopped at Validate: a current asset record
+the tracer stopped at Validate: a current asset record
+```
+**Defect found (blocks every run).** `run()` reads `now` once, before any broker read
+(`crates/mandate-paper/src/lib.rs`, `let now = clock.now()`). The asset record is stamped
+`loaded_at` with the wall clock at its read (`crates/mandate-alpaca/src/client.rs`, `loaded_at:
+self.pause.now()`), and the judge requires it not after `now`
+(`AssetSnapshot::current` -> `judge_age`, `AheadOfClock`; `crates/mandate-shell/src/paper/judge.rs`,
+`a current asset record`). A read always happens after `now`, so the asset check refuses every
+real run; the quote check (`current_quote`: `quote_at > now`) refuses whenever the quote is newer
+than the run's start, which for SPY's IEX quote is almost always. The Reconcile refusal is the same
+kind: the container's clock trails Alpaca's by tens of milliseconds, so the freshest quote can be
+stamped after the read's own `now`. Tests pass because their clocks do not advance between the
+run's `now` and the reads. The fix (judge at a `now` taken after the reads, or one `now` per
+check) is a safety-critical change to the shell's judge and the paper run: tests first, mutants,
+and the different-model review. Per the brief the refusal was not worked around; nothing was
+placed, so sections 6 to 8 did not run.
+
+After stopping: `GET /v2/orders?status=open&nested=true` returned `[]` and `/v2/positions`
+`[]`. Exports: `ctl:ws_paper01` seq 1 to 9 `verified` (last hash
+`7f290a55ccfa4c7c640bff1cc7068bc797e113f6e2c07a2e19d635a6a109cc58`); the agent and account
+streams are `export_stream_empty` (no cycle was journaled).
