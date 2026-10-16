@@ -59,7 +59,9 @@ pub use error::{Cause, ShellError};
 pub use lt10::watch_may_end;
 pub use stages::Stage;
 pub use tail::tailed;
-pub use tracer::{ProductionCycle, Report, Setup, run_observed, run_observed_watched};
+pub use tracer::{
+    AskedCycle, MayEnd, ProductionCycle, Report, Setup, Wake, run_observed, run_observed_watched,
+};
 pub use watch::{Watch, close_window_bound, poll_interval};
 
 /// Assembles one production paper cycle. Callers provide deployment inputs and the paper transport;

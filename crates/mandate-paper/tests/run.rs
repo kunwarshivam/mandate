@@ -43,7 +43,7 @@ use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 use proptest::prelude::*;
-use shell_common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
+use shell_common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_facts, spy_mandate};
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
@@ -343,15 +343,33 @@ impl Scene {
     }
 
     fn of(name: &str, equity: Equity, closes: impl Iterator<Item = u32>) -> Scene {
+        Scene::deployed(name, equity, closes, |mandate| mandate)
+    }
+
+    /// [`Scene::new`] with the deployed mandate's routine rule asking for every opening.
+    fn asking(name: &str, closes: impl Iterator<Item = u32>) -> Scene {
+        Scene::deployed(name, SPY_ARCA, closes, |mandate| {
+            mandate.replace(r#""then": "auto""#, r#""then": "ask""#)
+        })
+    }
+
+    fn deployed(
+        name: &str,
+        equity: Equity,
+        closes: impl Iterator<Item = u32>,
+        edit: fn(String) -> String,
+    ) -> Scene {
         let Equity(id, symbol, listing, _) = equity;
         let closes: Vec<u32> = closes.collect();
         let root =
             std::env::temp_dir().join(format!("mandate-paper-{name}-{}", std::process::id()));
         fs::remove_dir_all(&root).ok();
         let quoted = format!("\"{symbol}\"");
-        let mandate = spy_mandate(&model())
-            .replace(SPY, id)
-            .replace("\"SPY\"", &quoted);
+        let mandate = edit(
+            spy_mandate(&model())
+                .replace(SPY, id)
+                .replace("\"SPY\"", &quoted),
+        );
         let snapshot = SNAPSHOT
             .replace("2026-09-21", "2026-09-25")
             .replace(SPY, id);
@@ -1086,4 +1104,68 @@ fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
         let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
         assert!(verified.is_ok(), "{name}: {verified:?}");
     }
+}
+
+/// DEC-940, rule 3: a placing run whose cycle asks waits for the grant at the watch's interval,
+/// and an ask no answer reaches denies at its own deadline with nothing sent: the scratch
+/// journal no founder can answer on holds only the run's own ask.
+#[test]
+fn an_asked_opening_no_answer_reaches_denies_at_its_deadline() {
+    let mut scene = Scene::asking("asked", 231..256);
+    let outcome = scene.run();
+    assert!(
+        matches!(
+            outcome,
+            Err(PaperError::Grant(mandate_paper::GrantRefusal::TimedOut))
+        ),
+        "{outcome:?}"
+    );
+    assert!(scene.posts().is_empty(), "nothing is sent");
+    assert_eq!(
+        scene.ports.clock.waited.get(),
+        600,
+        "the wait ran to the ask's own deadline, the mandate's 600 s timeout"
+    );
+}
+
+/// A dry run that asks never waits: it stops at the ask as before, nothing sent.
+#[test]
+fn a_dry_run_that_asks_stops_at_the_ask() {
+    let mut scene = Scene::asking("asked-dry", 231..256);
+    scene.args.place_one_order = false;
+    let outcome = scene.run();
+    assert!(
+        matches!(&outcome, Err(PaperError::Shell(stop)) if stop.code() == "autonomy_not_auto"),
+        "{outcome:?}"
+    );
+    assert!(scene.posts().is_empty());
+    assert_eq!(scene.ports.clock.waited.get(), 0, "no wait");
+}
+
+/// DEC-940 item 4: an Alpaca session's own ask, the quote an asked opening's cross-check compares,
+/// is the IEX ask its preflight read — through the test transport and through the binary's own
+/// `Connected` session alike (its placeholder credentials build a client and send nothing).
+#[test]
+fn an_alpaca_session_answers_its_own_iex_ask() {
+    let scene = Scene::new("broker-ask", 231..256);
+    let facts = spy_facts(
+        SPY,
+        "SPY",
+        mandate_alpaca::Exchange::Arca,
+        UtcNanos::parse_rfc3339(TUESDAY.0).unwrap(),
+    );
+    let ask = Some(facts.broker.quote.ask);
+    assert_eq!(
+        mandate_paper::Session::broker_ask(&scene.ports.broker, &facts.broker),
+        ask
+    );
+    let credentials =
+        mandate_alpaca::Credentials::from_lookup(|_| Some("placeholder".to_owned())).unwrap();
+    let connected = mandate_paper::Connected::Alpaca(
+        mandate_alpaca::AlpacaPaperHttp::new(credentials).unwrap(),
+    );
+    assert_eq!(
+        mandate_paper::Session::broker_ask(&connected, &facts.broker),
+        ask
+    );
 }

@@ -18,6 +18,7 @@ use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpError, PinnedEndpoint,
     SystemMonotonic, TransportConfig,
 };
+use mandate_num::Price;
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts};
 use mandate_shell::{Cause, ProductionCycle, Setup};
@@ -232,5 +233,11 @@ impl Session for Linked {
         Err(Cause::Absent {
             what: SESSION_UNBUILT,
         })
+    }
+
+    /// No Robinhood quote is read until the MCP session carries the token (O2), so an asked
+    /// opening's cross-check has no broker ask and refuses (DEC-940 item 4).
+    fn broker_ask(&self, _facts: &BrokerFacts) -> Option<Price> {
+        None
     }
 }
