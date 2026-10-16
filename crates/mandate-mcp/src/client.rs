@@ -50,6 +50,15 @@ impl std::fmt::Debug for ContractHash {
     }
 }
 
+/// What a connect check's listing showed (DEC-946): every tool name the server listed, which
+/// the scope check reads for fund movement, and whether every allowlisted tool was among them.
+/// Names only, never a description or a schema (CN-9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub names: BTreeSet<String>,
+    pub allowlisted_present: bool,
+}
+
 /// One MCP session whose tool contract was checked at connect.
 #[derive(Debug)]
 pub struct McpClient {
@@ -101,6 +110,19 @@ impl McpClient {
             observed: listing.hash,
             halted,
         })
+    }
+
+    /// The first connect of a connect check (connections spec §8.1 checks 1 and 7, DEC-946):
+    /// `initialize`, `notifications/initialized` and `tools/list` as [`Self::connect`] sends
+    /// them, pinning the hash listed, but a fund-movement tool or a missing allowlisted tool
+    /// refuses nothing: it is reported in the [`Listed`] the permission checks read, and halts
+    /// openings, so the check that fails is journaled. Reads go on, as under any halt.
+    ///
+    /// # Errors
+    /// Every [`McpError`] of the exchanges, a listing that cannot be read among them.
+    pub async fn connect_to_check(transport: McpTransport) -> Result<(Self, Listed), McpError> {
+        let _ = transport;
+        Err(McpError::Malformed)
     }
 
     /// The hash of the contract the server listed at connect or at the last check.

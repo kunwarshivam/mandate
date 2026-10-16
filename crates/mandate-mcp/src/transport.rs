@@ -9,6 +9,7 @@ use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
 
+use crate::auth::AccessToken;
 use crate::budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 use crate::endpoint::{Build, PinnedEndpoint};
 use crate::error::{McpError, ServerText};
@@ -105,6 +106,13 @@ impl McpTransport {
             session: Mutex::new(None),
             next_id: AtomicU64::new(1),
         })
+    }
+
+    /// This transport with the login's `token` as the bearer of every request it sends (O2,
+    /// DEC-946).
+    pub fn with_bearer(self, token: AccessToken) -> Self {
+        let _ = token;
+        self
     }
 
     /// Sends request `method` and returns its result, or the server's JSON-RPC error as

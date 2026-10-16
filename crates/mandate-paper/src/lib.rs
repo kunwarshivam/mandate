@@ -23,6 +23,7 @@
 //! registered rule set's interval (E1b, DEC-853 items 5 and 6, DEC-858). No product value is a
 //! constant here (FT-2).
 
+mod connect_check;
 mod connection;
 mod door;
 mod evidence;
@@ -73,6 +74,10 @@ use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
+pub use connect_check::{
+    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Checked, Observed, SeenContract, connect_check,
+    observe, parse_check,
+};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
@@ -285,6 +290,17 @@ pub enum PaperError {
     /// The run's exportable evidence fails closed (G1b, the founder's run's step 6).
     #[error(transparent)]
     Evidence(#[from] EvidenceRefusal),
+    /// The connect check ran and a check failed; the failure is journaled as `event_id`
+    /// (DEC-946). It names the check and its reason, never the account.
+    #[error("the connection check failed: {check} {reason} (journaled as {event_id})")]
+    ConnectCheck {
+        event_id: String,
+        check: &'static str,
+        reason: &'static str,
+    },
+    /// The account stream could not be read or written; nothing further was sent.
+    #[error("the journal could not be written")]
+    Journal,
     #[error(transparent)]
     Shell(#[from] ShellError),
 }
