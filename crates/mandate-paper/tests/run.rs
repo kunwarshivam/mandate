@@ -27,12 +27,16 @@ use mandate_alpaca::{BarsRequest, DataTransport, HttpRequest, Method, Pause, Quo
 use mandate_alpaca::{Response, TradingTransport, TransportError};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{DecStr, Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_journal::{ArtifactRef, ArtifactStore, StreamId, get_artifact};
 use mandate_journal_pg::APP_ROLE;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
-use mandate_paper::{Args, ConnectionRefusal, Evidence, Outcome, PaperError, Ports, run};
+use mandate_paper::{
+    Args, Broker as Chosen, Connection, ConnectionRefusal, Evidence, Outcome, PaperError, Ports,
+    run,
+};
 use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
@@ -213,10 +217,12 @@ struct Fake {
     broker: Broker,
     clock: Clock,
     connects: usize,
+    connections: Vec<Connection>,
+    hardens: usize,
 }
 
 impl Ports for Fake {
-    type Transport = Broker;
+    type Session = Broker;
     type Pause = Clock;
 
     fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError> {
@@ -224,9 +230,15 @@ impl Ports for Fake {
         Ok(self.records.clone())
     }
 
-    fn connect(&mut self) -> Result<Broker, PaperError> {
+    fn connect(&mut self, connection: &Connection) -> Result<Broker, PaperError> {
         self.connects += 1;
+        self.connections.push(connection.clone());
         Ok(self.broker.clone())
+    }
+
+    fn harden(&mut self) -> Result<(), PaperError> {
+        self.hardens += 1;
+        Ok(())
     }
 
     fn pause(&self) -> Clock {
@@ -307,6 +319,7 @@ impl Scene {
             store: root.join("store"),
             bars: bars.dataset_dir(&dataset),
             place_one_order: true,
+            acknowledged: Environment::Paper,
         };
         let (holds, minutes, posts) = (false, TUESDAY.1, Rc::default());
         let clock = Clock::at(TUESDAY.0);
@@ -324,6 +337,8 @@ impl Scene {
             },
             clock,
             connects: 0,
+            connections: Vec::new(),
+            hardens: 0,
         };
         Scene {
             equity,
@@ -399,6 +414,38 @@ fn a_placing_run_stores_the_closes_and_sends_one_order() {
     assert_eq!((report.submitted.len(), dry.posts().len()), (0, 0));
     assert!(report.would_place.is_some(), "a dry run reports the order");
     assert_eq!(evidence, None, "a dry run names no exportable stream");
+}
+
+/// G1a (DEC-932 items 1 and 3): a paper run hands its ports exactly the connection the door
+/// chose from the record and the mandate — the Alpaca paper connector over the run's own account
+/// stream — and never hardens the process, which only a live run does (LT-14: the paper path
+/// is unchanged). A paper deployment acknowledged with `--confirm-live` refuses before any
+/// credential is read and sends nothing: each environment needs its own acknowledgement.
+#[test]
+fn a_paper_run_connects_the_chosen_paper_connection_and_its_own_acknowledgement() {
+    let mut scene = Scene::new("chosen", 231..256);
+    let outcome = scene.run();
+    assert!(matches!(outcome, Ok(Outcome::Cycle(_))), "{outcome:?}");
+    let chosen = Connection {
+        broker: Chosen::Alpaca,
+        environment: Environment::Paper,
+        account_ref: "acct_paper".to_owned(),
+    };
+    assert_eq!(scene.ports.connections, vec![chosen]);
+    assert_eq!(scene.ports.hardens, 0, "a paper run keeps its core dumps");
+    let mut live = Scene::new("acknowledged-live", 231..256);
+    live.args.acknowledged = Environment::Live;
+    let refused = live.run();
+    assert!(
+        matches!(refused, Err(PaperError::PaperUnconfirmed)),
+        "{refused:?}"
+    );
+    let seen = (live.ports.connects, live.ports.hardens, live.posts().len());
+    assert_eq!(
+        seen,
+        (0, 0, 0),
+        "refused before any credential, nothing sent"
+    );
 }
 
 /// #1313's review Minor 2, DEC-914 item 6, the founder's run's step 6, journal spec §2: a placing

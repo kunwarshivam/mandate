@@ -11,6 +11,9 @@ workspace = true
 
 [features]
 live = []
+# The rehearsal against the simulator (DEC-922, DEC-932 item 2): the Robinhood login dials only
+# the loopback endpoint `MANDATE_RH_SIM_ENDPOINT` names. Nothing turns it on but an explicit flag.
+rh-sim = []
 
 [dependencies]
 mandate-accounting.workspace = true
@@ -20,12 +23,14 @@ mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
+mandate-mcp.workspace = true
 mandate-modelhost.workspace = true
 mandate-num.workspace = true
 mandate-runtime.workspace = true
 mandate-shell.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
+rustix.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "time"] }
 

@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use mandate_domain::Environment;
 use mandate_paper::{Args, PaperError, parse};
 
 const IDS: &str = "--workspace w --agent a --account-ref r --store s --bars b";
@@ -39,6 +40,7 @@ fn each_flag_reaches_its_field() {
         store: PathBuf::from("s"),
         bars: PathBuf::from("b"),
         place_one_order: true,
+        acknowledged: Environment::Paper,
     };
     assert_eq!(placing.unwrap(), expected);
     let dry = parsed(&format!("{IDS} --confirm-paper")).unwrap();
