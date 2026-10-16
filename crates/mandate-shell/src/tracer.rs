@@ -659,13 +659,22 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Recovery, then the startup account report and reconciliation. The account report commits
+    /// Recovery, then the startup account report and reconciliation. The executor is ticked at the
+    /// run clock's second before its start, so every record the start leads to carries the run's
+    /// risk clock, never zero (mandate spec §5.2, DEC-948 item 4). The account report commits
     /// first; the runtime holds every opening until it and a clean `ReconciliationRun` have both
     /// folded (DEC-458), and a mismatch keeps it held.
     pub(crate) fn start(&mut self) -> Result<(), ShellError> {
         let agent_epoch = self.epoch(&self.agent_stream.clone());
         self.feed(Input::Started(WriterEpoch(agent_epoch)))?;
         let account_epoch = self.epoch(&self.account_stream.clone());
+        let run_clock = mandate_executor::RiskClock::from_secs(self.setup.now.secs());
+        let ticked = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::Tick(run_clock))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(ticked)?;
         let profile = self.stages.connector.profile().map_err(|_| {
             refused(Stage::Connector)(Cause::Untrusted {
                 what: "the connector's capability profile",
