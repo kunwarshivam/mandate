@@ -3446,4 +3446,253 @@ pub(crate) mod tests {
         );
         Ok(())
     }
+
+    /// An `OrderStateChanged` at version 2 for `id`, in `state`, carrying `broker_order_id` (or
+    /// `null`), as the executor journals a broker record it read (journal spec §9.16).
+    fn journaled_state(
+        id: &ClientOrderId,
+        state: &str,
+        broker_order_id: Option<&str>,
+    ) -> Result<Value, ExecutorError> {
+        let null = || Value::Null;
+        object(vec![
+            ("client_order_id", Value::Str(id.as_str().to_owned())),
+            ("state", Value::Str(state.to_owned())),
+            (
+                "risk_clock",
+                crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+            ),
+            ("attempted", null()),
+            ("broker_status", Value::Str("accepted".to_owned())),
+            ("filled_qty", null()),
+            ("reject_code", null()),
+            ("replaces", null()),
+            ("replaced_by", null()),
+            ("replaced_by_broker_order_id", null()),
+            ("lookup", null()),
+            ("ignored", Value::Bool(false)),
+            ("cancel_requested", Value::Bool(false)),
+            ("cancel_confirmed", Value::Bool(false)),
+            ("cancel_overdue", Value::Bool(false)),
+            ("adopted", Value::Bool(false)),
+            ("ladder_step", Value::Bool(false)),
+            (
+                "broker_order_id",
+                broker_order_id.map_or(Value::Null, |id| Value::Str(id.to_owned())),
+            ),
+        ])
+    }
+
+    /// A stream holding our live AAPL buys, each `Accepted`, and for each the broker ids its
+    /// version-2 `OrderStateChanged` records carried, folded in journal order.
+    fn adopted_orders(
+        orders: &[(&ClientOrderId, &[Option<&str>])],
+    ) -> Result<ExecutorState, ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let stream = state.account_stream();
+        let mut seq = 0_u64;
+        let mut next = |state: &mut ExecutorState, event_type: &str, payload: Value| {
+            seq = seq.saturating_add(1);
+            fold(
+                state,
+                &FoldedEvent {
+                    stream: stream.clone(),
+                    seq: Seq(seq),
+                    event_id: EventId(format!("j-{seq}")),
+                    event_type: event_type.to_owned(),
+                    causation_id: None,
+                    payload,
+                },
+            )
+        };
+        next(
+            &mut state,
+            "StreamOpened",
+            object(vec![("environment", Value::Str("paper".to_owned()))])?,
+        )?;
+        for (id, ids) in orders {
+            state
+                .orders
+                .insert((*id).clone(), order(id, OrderState::Unknown)?);
+            for broker_id in *ids {
+                next(
+                    &mut state,
+                    "OrderStateChanged",
+                    journaled_state(id, "accepted", *broker_id)?,
+                )?;
+            }
+        }
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        Ok(state)
+    }
+
+    /// A working AAPL buy of 10 the broker lists under `broker_order_id`, its record naming
+    /// `client_order_id` (Robinhood's names none, U-R2).
+    fn listed_open(
+        broker_order_id: &str,
+        client_order_id: Option<&str>,
+        instrument: &str,
+        side: Side,
+    ) -> Result<BrokerOrder, ExecutorError> {
+        Ok(BrokerOrder {
+            broker_order_id: broker_order_id.to_owned(),
+            client_order_id: client_order_id.map(str::to_owned),
+            instrument: InstrumentId::new(instrument)?,
+            side,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            limit_price: None,
+            stop_price: None,
+            status: "accepted".to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        })
+    }
+
+    /// The reconciliation of `state` against a snapshot listing `open`: the event types it
+    /// drafts and the state each of our orders is left in.
+    fn reconciled_against(
+        state: &ExecutorState,
+        open: Vec<BrokerOrder>,
+    ) -> Result<(Vec<String>, Vec<(String, OrderState)>), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let listed = BrokerSnapshot {
+            open_orders: open,
+            taken_at_head: state.account_head(),
+            ..snapshot(ReconcileReason::Startup)?
+        };
+        let run = reconcile(state, &listed, &ports)?;
+        let mut after = state.clone();
+        let mut seq = after.account_head().0;
+        for effect in &run.effects {
+            if let Effect::Journal(draft) = effect {
+                seq = seq.saturating_add(1);
+                let stream = after.account_stream();
+                fold(
+                    &mut after,
+                    &FoldedEvent {
+                        stream,
+                        seq: Seq(seq),
+                        event_id: draft.event_id.clone(),
+                        event_type: draft.event_type.clone(),
+                        causation_id: None,
+                        payload: draft.payload.clone(),
+                    },
+                )?;
+            }
+        }
+        let states = after
+            .orders
+            .values()
+            .map(|order| (order.client_order_id.as_str().to_owned(), order.state))
+            .collect();
+        let drafted = drafted(&run.effects)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        Ok((drafted, states))
+    }
+
+    /// DEC-956 item 2 (DEC-869): an order adopted with its broker id stays adopted. The broker's
+    /// record carries no key of ours (U-R2), but its id is the one the order's version-2
+    /// `OrderStateChanged` journaled, for the same instrument and side, so the reconciliation
+    /// matches it: nothing is adopted `Unknown`, nothing is external activity, and the run is
+    /// clean. The match survives a restart, which folds the same records.
+    #[test]
+    fn an_order_adopted_with_its_broker_id_is_matched_by_that_id() -> Result<(), ExecutorError> {
+        let ours = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0")?;
+        let state = adopted_orders(&[(&ours, &[None, Some("rh-1"), Some("rh-1")])])?;
+        let open = listed_open("rh-1", None, "AAPL", Side::Buy)?;
+        let (drafted, states) = reconciled_against(&state, vec![open])?;
+        assert_eq!(drafted, ["ReconciliationRun"]);
+        assert_eq!(
+            states,
+            [(ours.as_str().to_owned(), OrderState::Accepted)],
+            "the adopted order is still accepted"
+        );
+        Ok(())
+    }
+
+    /// DEC-956 item 2: a broker id is a match only when it names one order of ours, once, for the
+    /// same instrument and side, on a record naming no key. Every other record is not that order:
+    /// ours is adopted `Unknown` and the record is external activity, as before (§11 step 1).
+    #[test]
+    fn a_broker_id_matches_only_one_order_of_ours_for_its_instrument_and_side()
+    -> Result<(), ExecutorError> {
+        let ours = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0")?;
+        let twin = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ1")?;
+        let one: &[Option<&str>] = &[Some("rh-1")];
+        let cases: [(&str, ExecutorState, BrokerOrder); 6] = [
+            (
+                "never journaled with an id",
+                adopted_orders(&[(&ours, &[None])])?,
+                listed_open("rh-1", None, "AAPL", Side::Buy)?,
+            ),
+            (
+                "another id",
+                adopted_orders(&[(&ours, one)])?,
+                listed_open("rh-2", None, "AAPL", Side::Buy)?,
+            ),
+            (
+                "another instrument",
+                adopted_orders(&[(&ours, one)])?,
+                listed_open("rh-1", None, "MSFT", Side::Buy)?,
+            ),
+            (
+                "another side",
+                adopted_orders(&[(&ours, one)])?,
+                listed_open("rh-1", None, "AAPL", Side::Sell)?,
+            ),
+            (
+                "a record naming another key",
+                adopted_orders(&[(&ours, one)])?,
+                listed_open("rh-1", Some("ext-7"), "AAPL", Side::Buy)?,
+            ),
+            (
+                "two ids under our key",
+                adopted_orders(&[(&ours, &[Some("rh-1"), Some("rh-9")])])?,
+                listed_open("rh-1", None, "AAPL", Side::Buy)?,
+            ),
+        ];
+        for (name, state, open) in cases {
+            let (drafted, states) = reconciled_against(&state, vec![open])?;
+            assert!(
+                drafted.contains(&"ExternalActivityIngested".to_owned()),
+                "{name}: {drafted:?}"
+            );
+            assert_eq!(
+                states,
+                [(ours.as_str().to_owned(), OrderState::Unknown)],
+                "{name}"
+            );
+        }
+        let shared = adopted_orders(&[(&ours, one), (&twin, one)])?;
+        let (drafted, states) =
+            reconciled_against(&shared, vec![listed_open("rh-1", None, "AAPL", Side::Buy)?])?;
+        assert!(
+            drafted.contains(&"ExternalActivityIngested".to_owned()),
+            "one id under two keys names neither: {drafted:?}"
+        );
+        assert_eq!(
+            states,
+            [
+                (ours.as_str().to_owned(), OrderState::Unknown),
+                (twin.as_str().to_owned(), OrderState::Unknown),
+            ]
+        );
+        Ok(())
+    }
 }
