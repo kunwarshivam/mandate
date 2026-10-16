@@ -1924,6 +1924,7 @@ dependencies = [
  "mandate-mcp",
  "mandate-num",
  "mandate-robinhood",
+ "mandate-time",
  "proptest",
  "serde_json",
  "sha2 0.11.0",
@@ -2003,13 +2004,20 @@ name = "mandate-shell-rh-sim"
 version = "0.0.0"
 dependencies = [
  "mandate-accounting",
+ "mandate-alpaca",
  "mandate-canon",
+ "mandate-domain",
  "mandate-executor",
+ "mandate-journal",
  "mandate-mcp",
+ "mandate-modelhost",
  "mandate-num",
  "mandate-rh-sim",
  "mandate-robinhood",
+ "mandate-runtime",
  "mandate-shell",
+ "mandate-spec",
+ "mandate-time",
  "serde_json",
  "tokio",
 ]

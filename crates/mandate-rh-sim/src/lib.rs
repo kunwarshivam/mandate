@@ -59,6 +59,7 @@ pub use script::{Script, ScriptError, ScriptedFill};
 pub use server::{CONTRACT, Garble, INJECTION, ServerError, SimServer, Variant};
 
 use mandate_num::{Price, Qty, Rounding, ShareIncrement, Usd};
+use mandate_time::UtcNanos;
 
 /// The ten values of `get_equity_orders`'s `state`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -144,6 +145,10 @@ pub enum Event {
     EndOfDay,
     EchoRefId(bool),
     RefuseChangedResend(bool),
+    /// The broker's clock: every order placed from then on was created at this instant, which
+    /// `get_equity_orders`'s `created_at_gte` filters on (DEC-941 item 2). The tests PR's stub
+    /// keeps no clock.
+    Clock(UtcNanos),
 }
 
 /// A customer account. `pattern_day_trader` marks an account a day trade would restrict, so an
@@ -343,6 +348,7 @@ impl Sim {
             }
             Event::EchoRefId(on) => self.echo_ref_id = on,
             Event::RefuseChangedResend(on) => self.refuse_changed_resend = on,
+            Event::Clock(_) => {}
         }
         Ok(())
     }
