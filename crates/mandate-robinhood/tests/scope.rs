@@ -171,10 +171,10 @@ fn only_the_agentic_accounts_records_reach_the_caller() {
         ];
         let (c, calls) = connector(&script);
         let outcome = ready(c.read(read, &Map::new()));
-        let mut sent = vec![(CallClass::Ordinary, "get_accounts", json!({}))];
+        let mut sent = vec![(CallClass::Read, "get_accounts", json!({}))];
         let expected = expected_check(&list).map(|_| {
             sent.push((
-                CallClass::Ordinary,
+                CallClass::Read,
                 tool_of(read),
                 json!({"account_number": OURS}),
             ));
@@ -277,7 +277,7 @@ fn a_read_naming_another_account_is_refused_with_nothing_called() {
     let ours = object(json!({"account_number": OURS, "tag": 0}));
     assert_eq!(read, Ok(vec![ours]));
     let last = calls.borrow().last().cloned();
-    let sent = (CallClass::Ordinary, "get_equity_orders", filters.into());
+    let sent = (CallClass::Read, "get_equity_orders", filters.into());
     assert_eq!(last, Some(sent), "the recorded account, named once");
 }
 
@@ -492,7 +492,7 @@ fn a_shorter_prefix_or_an_empty_number_is_a_near_miss_never_another_account() {
             unreadable(&outcome, &format!("{read:?} record {named:?}"));
             let sent = calls.borrow().last().cloned();
             let exact = json!({ "account_number": OURS });
-            let expected = (CallClass::Ordinary, tool_of(read), exact);
+            let expected = (CallClass::Read, tool_of(read), exact);
             assert_eq!(
                 sent,
                 Some(expected),
@@ -552,7 +552,7 @@ fn every_listed_filter_key_reaches_its_tool_as_given() {
         assert_eq!(outcome, Ok(vec![ours]), "{read:?}");
         filters.insert("account_number".to_owned(), json!(OURS));
         let sent = calls.borrow().last().cloned();
-        let expected = (CallClass::Ordinary, tool_of(read), Value::Object(filters));
+        let expected = (CallClass::Read, tool_of(read), Value::Object(filters));
         assert_eq!(sent, Some(expected), "{read:?}");
     }
 }

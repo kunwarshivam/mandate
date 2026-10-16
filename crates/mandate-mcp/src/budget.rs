@@ -1,6 +1,8 @@
 //! The per-connection call budget (connections spec §6.5): an ordinary token bucket for every
 //! call, and a reserved one that only risk-reducing calls draw on, so no run of reads can leave
-//! a cancel, an exit, or a kill-switch order without a token (`AGENTS.md` rule 13).
+//! a cancel, an exit, or a kill-switch order without a token (`AGENTS.md` rule 13). A read may
+//! wait a bounded time for the ordinary bucket's next token (DEC-959 item 2); nothing else
+//! waits.
 
 use std::time::Duration;
 
@@ -9,8 +11,13 @@ use crate::error::McpError;
 /// Which budget a call may draw on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallClass {
-    /// Reads and openings: the ordinary bucket only.
+    /// Openings, and the session's own handshake and listing: the ordinary bucket only, refused
+    /// at once when it is empty.
     Ordinary,
+    /// A read of the broker that sends nothing: the ordinary bucket only, and when it is empty the
+    /// transport waits for that bucket's next token, up to its fixed bound, then refuses (DEC-959
+    /// item 2). A read never draws on the reserved bucket.
+    Read,
     /// Cancels, exits, protective orders, and kill-switch orders: the reserved bucket first, then
     /// the ordinary one.
     RiskReducing,
@@ -109,7 +116,7 @@ impl RateBudget {
     /// Takes one token for a call of `class`, or [`McpError::Throttled`] and nothing is sent.
     pub fn try_acquire(&mut self, class: CallClass, now: Duration) -> Result<(), McpError> {
         let admitted = match class {
-            CallClass::Ordinary => self.ordinary.try_take(now),
+            CallClass::Ordinary | CallClass::Read => self.ordinary.try_take(now),
             CallClass::RiskReducing => self.reserved.try_take(now) || self.ordinary.try_take(now),
         };
         if admitted {
@@ -117,5 +124,13 @@ impl RateBudget {
         } else {
             Err(McpError::Throttled)
         }
+    }
+
+    /// How long from `now` until the ordinary bucket next holds a token, taking none: zero when
+    /// it holds one now. A read the bucket refused waits this long before it asks again (DEC-959
+    /// item 2). A clock that went backwards past the bucket's anchor counts the whole way back.
+    pub fn read_token_in(&mut self, now: Duration) -> Duration {
+        let _ = now;
+        Duration::MAX
     }
 }

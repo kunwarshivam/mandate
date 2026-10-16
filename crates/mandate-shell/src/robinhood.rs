@@ -68,6 +68,27 @@ impl<T: Tools> RobinhoodBridge<T> {
             .map_err(|_| unread())
     }
 
+    /// The preflight's reads on the account snapshot `account` the same run's lapse read
+    /// (`RobinhoodConnector::preflight_facts_on`, DEC-959 item 1): the tradability and the
+    /// quote, driven on the bridge's runtime, and no account figure read again. The caller has
+    /// judged `account` fresh; nothing is sent.
+    ///
+    /// # Errors
+    /// As [`Self::preflight_facts`].
+    pub fn preflight_facts_on(
+        &self,
+        account: AccountSnapshot,
+        symbol: &InstrumentId,
+    ) -> Result<PreflightFacts, Cause> {
+        let unread = || Cause::Absent {
+            what: ACCOUNT_UNREAD,
+        };
+        let robinhood = self.connector.try_borrow().map_err(|_| unread())?;
+        self.runtime
+            .block_on(robinhood.preflight_facts_on(account, symbol))
+            .map_err(|_| unread())
+    }
+
     /// The agentic account's snapshot (`RobinhoodConnector::account_snapshot`), driven on the
     /// bridge's runtime: the evidence the live door's lapse counts (DEC-933 item 3, DEC-947
     /// item 1). The account reads alone, scoped to the recorded account; no quote is read and

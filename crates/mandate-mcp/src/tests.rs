@@ -16,3 +16,4 @@ mod register;
 mod server;
 mod token;
 mod tools;
+mod wait;

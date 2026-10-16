@@ -472,8 +472,8 @@ fn the_reconciler_reads_only_the_agentic_account_and_maps_its_snapshot() {
     assert!(
         seen.borrow()
             .iter()
-            .all(|(class, ..)| *class == CallClass::Ordinary),
-        "reads never draw on the exits' budget"
+            .all(|(class, ..)| *class == CallClass::Read),
+        "reads are reads, and never draw on the exits' budget"
     );
     every_call_names_the_agentic_account(seen);
     assert!(
@@ -703,7 +703,7 @@ fn the_bridges_quote_is_the_brokers_latest_and_names_no_account() {
     assert_eq!(
         *shell.seen.borrow(),
         [(
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_quotes",
             json!({"symbols": ["SPY"]})
         )]

@@ -1,6 +1,8 @@
 //! The streamable HTTP transport: one `POST` per message to the pinned endpoint.
 
 use std::fmt::{self, Debug};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -25,6 +27,12 @@ const USER_AGENT: &str = concat!("mandate-mcp/", env!("CARGO_PKG_VERSION"));
 /// A monotonic clock: the time since any fixed origin. The budget paces against it.
 pub trait Monotonic: Debug + Send + Sync {
     fn elapsed(&self) -> Duration;
+
+    /// Waits `span` on this clock: a read waiting for its token (DEC-959 item 2). Tokio's timer
+    /// by default; a test clock moves itself instead.
+    fn pause(&self, span: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(tokio::time::sleep(span))
+    }
 }
 
 /// The process's monotonic clock, from the moment it was started.
@@ -59,6 +67,9 @@ pub struct TransportConfig {
     /// The most bytes an answer may have; the conservative default is 4 MiB.
     pub max_answer_bytes: usize,
     pub budget: BudgetConfig,
+    /// The longest a [`CallClass::Read`] waits for the ordinary bucket's next token before it is
+    /// refused [`McpError::Throttled`] (DEC-959 item 2); zero never waits. No other class waits.
+    pub read_wait: Duration,
 }
 
 impl TransportConfig {
@@ -77,6 +88,7 @@ impl TransportConfig {
                 refill_every: Duration::from_secs(1),
             },
         },
+        read_wait: Duration::from_secs(2),
     };
 }
 

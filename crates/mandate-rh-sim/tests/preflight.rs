@@ -74,32 +74,32 @@ fn connector(server: &SimServer) -> (RobinhoodConnector<Loopback>, Calls) {
 /// The preflight's nine calls of the reads, with the arguments the connector must send.
 fn preflight_calls() -> Vec<Call> {
     [
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_portfolio",
             json!({"account_number": AGENTIC}),
         ),
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_positions",
             json!({"account_number": AGENTIC}),
         ),
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_orders",
             json!({"account_number": AGENTIC}),
         ),
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_tradability",
             json!({"account_number": AGENTIC, "symbol": "SPY"}),
         ),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_quotes",
             json!({"symbols": ["SPY"]}),
         ),

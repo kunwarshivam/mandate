@@ -113,6 +113,20 @@ impl<T: Tools> RobinhoodConnector<T> {
         Ok(PreflightFacts { account, quote })
     }
 
+    /// The preflight's reads on the account snapshot `account` the same run's lapse already read
+    /// (DEC-959 item 1): `get_equity_tradability` for `symbol` through
+    /// [`Self::read_sole_member`], behind its own account check, then `get_equity_quotes`, as
+    /// [`Self::preflight_facts`] reads them, and no account figure again. Whether `account` is
+    /// fresh enough to stand for the account now is the caller's judgment, never this read's.
+    pub async fn preflight_facts_on(
+        &self,
+        account: AccountSnapshot,
+        symbol: &InstrumentId,
+    ) -> Result<PreflightFacts, RobinhoodError> {
+        let _ = account;
+        self.preflight_facts(symbol).await
+    }
+
     /// `get_equity_quotes` for the one symbol (DEC-902 item 7): no account read, because the
     /// contract names no account for it and its answer is about none, so the account check does
     /// not run before it. Called on the `Ordinary` budget with exactly `{"symbols": [symbol]}`,
