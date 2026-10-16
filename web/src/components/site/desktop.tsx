@@ -187,10 +187,6 @@ const SHORTCUTS: Shortcut[] = [
   { id: "guestbook", label: "Guestbook", icon: sprite(BOOK), app: "guestbook" },
   { id: "record", label: "The record", icon: sprite(LEDGER), app: "record" },
   { id: "questions", label: "Questions", icon: sprite(HELP), app: "questions" },
-  { id: "readme", label: "readme.txt", icon: sprite(NOTE), app: "readme" },
-  { id: "owl", label: "owl.jpg", icon: sprite(PICTURE), app: "owl" },
-  { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
-  { id: "winamp", label: "Winamp", icon: sprite(BOLT), amp: true },
   { id: "tour", label: "Tour.mp4", icon: sprite(FILM), app: "tour", right: true },
   { id: "bin", label: "Recycle Bin", icon: sprite(BIN), app: "bin", right: true },
   { id: "os", label: "Mac", icon: sprite(MAC), os: true, right: true },
@@ -408,9 +404,19 @@ function Check({ on }: { on: boolean }) {
  * The other desktop's computer is left out, since a menu would have to write its name; the keyboard
  * reaches it in Display, where it is a picture too.
  */
+/** Kept off the desktop so it stays uncluttered, but still in Start and the Mac's owl menu. */
+const MENU_ONLY: Shortcut[] = [
+  { id: "readme", label: "readme.txt", icon: sprite(NOTE), app: "readme" },
+  { id: "owl", label: "owl.jpg", icon: sprite(PICTURE), app: "owl" },
+  { id: "display", label: "Display", icon: sprite(MONITOR), app: "display" },
+  { id: "winamp", label: "Winamp", icon: sprite(BOLT), amp: true },
+];
+
 const LAUNCHER: Shortcut[] = [
   { id: "home", label: "Owlhead Home Page", icon: <BrandOwl className="size-6" />, app: "home" },
-  ...SHORTCUTS.slice(1).filter((s) => !("os" in s)),
+  ...SHORTCUTS.slice(1).filter((s) => !("os" in s) && !s.right),
+  ...MENU_ONLY,
+  ...SHORTCUTS.filter((s) => !("os" in s) && s.right),
   SIGN_IN,
 ];
 
