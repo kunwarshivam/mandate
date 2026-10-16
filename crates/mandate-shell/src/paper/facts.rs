@@ -25,6 +25,7 @@ use super::absent;
 use super::artifacts::Artifacts;
 use crate::adapters::{trusted_daily_bars, trusted_daily_closes, untrusted};
 use crate::error::Cause;
+use crate::robinhood::{robinhood_account, robinhood_account_rules};
 
 /// What the broker answered to the preflight's six GETs, exactly as `mandate-alpaca` read it, beside
 /// the account rules `mandate-alpaca` declares for it.
@@ -171,8 +172,19 @@ pub fn robinhood_facts(
     market: MarketFacts,
     robinhood: &PreflightFacts,
 ) -> Result<BrokerFacts, Cause> {
-    let _ = (market, robinhood);
-    Err(Cause::Unimplemented { story: "E7-6" })
+    if robinhood.quote.symbol != market.quote.instrument {
+        return Err(absent("the instrument's Robinhood quote"));
+    }
+    let snapshot = &robinhood.account;
+    Ok(BrokerFacts {
+        account: robinhood_account(snapshot),
+        account_rules: robinhood_account_rules(),
+        positions: snapshot.positions.clone(),
+        open_orders: snapshot.open_orders.clone(),
+        asset: market.asset,
+        quote: market.quote,
+        minute_bars: market.minute_bars,
+    })
 }
 
 fn preflight_runtime() -> Result<tokio::runtime::Runtime, Cause> {

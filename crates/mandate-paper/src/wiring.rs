@@ -376,8 +376,16 @@ pub fn robinhood_cross_check(
     iex: &LatestQuote,
     median_dollar_volume_20d: Option<Usd>,
 ) -> Result<(), PaperError> {
-    let _ = (collar, robinhood, iex, median_dollar_volume_20d);
-    Err(PaperError::Unimplemented { story: "E7-6" })
+    if robinhood.symbol != iex.instrument {
+        return Err(PaperError::CrossCheck(QuoteRefusal::Absent));
+    }
+    cross_check_the_opening(
+        collar,
+        AssetClass::UsEquity,
+        median_dollar_volume_20d,
+        Some(robinhood.ask),
+        Some(iex.ask),
+    )
 }
 
 /// The run-level call frame of the watch's end (E7-26's G1b wiring row; LT-10; DEC-912 item 3;

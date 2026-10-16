@@ -14,7 +14,9 @@
 //! arrives as a control-stream record, a journaled row, a parsed mandate or the run's own
 //! identifiers.
 
+use mandate_domain::Environment;
 use mandate_journal::{StoredEvent, StreamId};
+use mandate_journal_pg::PgJournal;
 use mandate_robinhood::AccountSnapshot;
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
@@ -113,6 +115,43 @@ pub fn lapse_read(
     stream: &StreamId,
     snapshot: Option<&AccountSnapshot>,
 ) -> Result<(), PaperError> {
-    let _ = (connection, journal, stream, snapshot);
-    Err(PaperError::Unimplemented { story: "E7-6" })
+    if connection.environment != Environment::Live {
+        return Ok(());
+    }
+    let snapshot = snapshot.ok_or_else(|| reconcile_absent("the agentic account's snapshot"))?;
+    let rows = account_rows(journal, stream)?;
+    unspent(connection, &rows, &held(snapshot))
+}
+
+/// What the snapshot lists, counted (DEC-470 item 1): every position record and every working
+/// order, re-derived by nothing else (DEC-918 item 1).
+fn held(snapshot: &AccountSnapshot) -> Held {
+    Held {
+        positions: snapshot.positions.len(),
+        open_orders: snapshot.open_orders.len(),
+    }
+}
+
+/// `stream`'s rows from the journal at `journal`, in `seq` order, or none for a run that kept no
+/// journal. The error names no DSN (`AGENTS.md` rule 7).
+fn account_rows(journal: Option<&str>, stream: &StreamId) -> Result<Vec<StoredEvent>, PaperError> {
+    let Some(dsn) = journal else {
+        return Ok(Vec::new());
+    };
+    let unread = || reconcile_absent("the account stream's rows");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| unread())?;
+    runtime.block_on(async {
+        let journal = PgJournal::from_dsn(dsn).map_err(|_| unread())?;
+        journal.rows(stream).await.map_err(|_| unread())
+    })
+}
+
+fn reconcile_absent(what: &'static str) -> PaperError {
+    PaperError::Shell(ShellError::Refused {
+        stage: Stage::Reconcile,
+        cause: Cause::Absent { what },
+    })
 }

@@ -17,12 +17,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{AccountType, InstrumentId};
+use mandate_alpaca::{AccountRules, DeclaredRegime};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    BrokerConnector, BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError, Reconciliation,
+    BrokerAccount, BrokerConnector, BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError,
+    Reconciliation,
 };
-use mandate_robinhood::{PreflightFacts, RobinhoodConnector, Tools, robinhood_profile};
+use mandate_num::Usd;
+use mandate_robinhood::{
+    AccountSnapshot, PreflightFacts, RobinhoodConnector, Tools, robinhood_profile,
+};
 use tokio::runtime::Runtime;
 
 use crate::adapters::ExecutorReconciler;
@@ -54,8 +59,13 @@ impl<T: Tools> RobinhoodBridge<T> {
     /// [`Cause::Absent`] naming [`ACCOUNT_UNREAD`] when any read is refused or unreadable, the
     /// symbol is not tradable, or the connector is held by another stage.
     pub fn preflight_facts(&self, symbol: &InstrumentId) -> Result<PreflightFacts, Cause> {
-        let _ = (symbol, &self.runtime);
-        Err(Cause::Unimplemented { story: "E7-6" })
+        let unread = || Cause::Absent {
+            what: ACCOUNT_UNREAD,
+        };
+        let robinhood = self.connector.try_borrow().map_err(|_| unread())?;
+        self.runtime
+            .block_on(robinhood.preflight_facts(symbol))
+            .map_err(|_| unread())
     }
 }
 
@@ -117,6 +127,52 @@ impl<T: Tools> RobinhoodReconciler<T> {
 /// account in its place.
 pub const ACCOUNT_UNREAD: &str = "the agentic account's snapshot";
 
+/// The account type and day-trading regime the Robinhood connector declares (trading spec §7.2):
+/// a cash account, on the founder's attestation for DEC-529's order (DEC-529 item 11, DEC-620
+/// item 2), under `legacy_pdt`, since the contract does not show Robinhood has moved to the
+/// intraday margin standard. No broker call answers it.
+#[must_use]
+pub fn robinhood_account_rules() -> AccountRules {
+    AccountRules {
+        account_type: AccountType::Cash,
+        regime: DeclaredRegime::LegacyPdt,
+    }
+}
+
+/// The agentic account's snapshot as the executor's [`BrokerAccount`] (DEC-933 item 1, the
+/// recommendation of DEC-928's note to the founder, under DEC-929):
+///
+/// - `cash` and `buying_power` are `get_portfolio`'s, and `non_marginable_buying_power` is the
+///   lower of the two (DEC-620 item 2), so the gate never spends more than cash;
+/// - `status` is `ACTIVE` and no flag is set, because a snapshot exists only when every one of
+///   its reads found the recorded account listed `agentic_allowed` (DEC-875); any other answer
+///   refused the read;
+/// - every figure Robinhood does not publish reads as the value that adds no buying power and
+///   lifts no limit: `crypto_status` `INACTIVE` (no crypto opening), `multiplier` 1 (DEC-529
+///   item 11), `equity` the cash alone (never more than a long-only account's equity),
+///   `last_equity` zero (§9.2's `legacy_pdt` day-trade budget always applies),
+///   `maintenance_margin` the whole equity (no maintenance excess), and `accrued_fees` zero,
+///   which the gate's buying power, the lower of cash and the broker's figure, never adds to.
+#[must_use]
+pub fn robinhood_account(snapshot: &AccountSnapshot) -> BrokerAccount {
+    let cash = snapshot.cash;
+    BrokerAccount {
+        status: "ACTIVE".to_owned(),
+        crypto_status: "INACTIVE".to_owned(),
+        trading_blocked: false,
+        account_blocked: false,
+        trade_suspended_by_user: false,
+        multiplier: 1,
+        equity: cash,
+        cash,
+        buying_power: snapshot.buying_power,
+        non_marginable_buying_power: cash.min(snapshot.buying_power),
+        accrued_fees: Usd::ZERO,
+        last_equity: Usd::ZERO,
+        maintenance_margin: cash,
+    }
+}
+
 impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
     /// The run's connector and the executor's requests are not used: the Robinhood connector
     /// offers none of the four reads they name, and the bridge's connector is the run's own.
@@ -128,21 +184,24 @@ impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
     ) -> Result<BrokerSnapshot, Cause> {
-        let _ = (connector, requests, &self.executor);
+        let _ = (connector, requests);
         let busy = Cause::Absent {
             what: "the Robinhood connector, held by another stage",
         };
         let robinhood = self.bridge.connector.try_borrow().map_err(|_| busy)?;
         let read = self.bridge.runtime.block_on(robinhood.account_snapshot());
-        read.map_err(|_| Cause::Absent {
+        let snapshot = read.map_err(|_| Cause::Absent {
             what: ACCOUNT_UNREAD,
         })?;
-        Err(Cause::Unimplemented { story: "E7-6" })
+        Ok(self.executor.without_activities(
+            snapshot.open_orders.clone(),
+            snapshot.positions.clone(),
+            robinhood_account(&snapshot),
+        ))
     }
 
     /// The executor's own reconciliation of the snapshot, as for every broker.
     fn reconcile(&mut self, snapshot: &BrokerSnapshot) -> Result<Reconciliation, Cause> {
-        let _ = snapshot;
-        Err(Cause::Unimplemented { story: "E7-6" })
+        self.executor.reconcile(snapshot)
     }
 }

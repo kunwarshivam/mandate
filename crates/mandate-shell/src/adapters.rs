@@ -2004,6 +2004,37 @@ fn unexpected_snapshot(outcome: BrokerOutcome, what: &'static str) -> Cause {
     }
 }
 
+impl ExecutorReconciler {
+    /// A startup snapshot of a broker that publishes no account activity (DEC-933 item 1): the
+    /// broker's open orders, positions and account, no fill, the executor's own cursor unmoved,
+    /// taken at the executor's head of the account stream.
+    pub(crate) fn without_activities(
+        &self,
+        open_orders: Vec<mandate_executor::BrokerOrder>,
+        positions: Vec<mandate_executor::BrokerPosition>,
+        account: mandate_executor::BrokerAccount,
+    ) -> mandate_executor::BrokerSnapshot {
+        let state = self.state.borrow();
+        let scope = state.scope();
+        let stream = account_stream(&scope.workspace.0, &scope.account.0);
+        mandate_executor::BrokerSnapshot {
+            open_orders,
+            positions,
+            account,
+            fills: Vec::new(),
+            cursor: match state.checkpoint() {
+                Some(cursor) => cursor.clone(),
+                None => mandate_executor::ActivityCursor(String::new()),
+            },
+            reason: mandate_executor::ReconcileReason::Startup,
+            taken_at_head: match state.head(&stream) {
+                Some(head) => head,
+                None => Seq(0),
+            },
+        }
+    }
+}
+
 impl Reconciler for ExecutorReconciler {
     fn snapshot(
         &mut self,

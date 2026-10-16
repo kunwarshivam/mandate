@@ -1372,7 +1372,6 @@ fn market() -> Result<MarketFacts, String> {
 /// equity, no maintenance excess, no crypto, 1×), under Robinhood's own account rules, with its
 /// positions and orders as read; the asset record, the IEX quote and the minute bars are Alpaca's.
 #[test]
-#[ignore = "pending E7-6"]
 fn the_robinhood_facts_are_its_account_beside_alpacas_market_reads() -> Result<(), String> {
     let held = BrokerPosition {
         instrument: symbol("AAPL")?,
@@ -1429,7 +1428,6 @@ fn the_robinhood_facts_are_its_account_beside_alpacas_market_reads() -> Result<(
 /// A flat Robinhood account passes the judge, and the gate reads it as a cash account under
 /// `legacy_pdt` with no prior-close equity and 1× buying power (DEC-933 item 1).
 #[test]
-#[ignore = "pending E7-6"]
 fn the_gate_reads_a_robinhood_account_as_cash_under_legacy_pdt() -> Result<(), String> {
     let loaded = artifacts()?;
     let robinhood =
@@ -1452,7 +1450,6 @@ fn the_gate_reads_a_robinhood_account_as_cash_under_legacy_pdt() -> Result<(), S
 
 /// A Robinhood quote of another instrument than the IEX quote is no quote of this run's.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_robinhood_quote_of_another_instrument_refuses_the_facts() -> Result<(), String> {
     let mut robinhood = robinhood_preflight("900", Vec::new())?;
     robinhood.quote.symbol = symbol("MSFT")?;

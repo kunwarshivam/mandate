@@ -452,7 +452,6 @@ const ACCOUNT_READS: [&str; 6] = [
 ];
 
 #[test]
-#[ignore = "pending E7-6"]
 fn the_reconciler_reads_only_the_agentic_account_and_maps_its_snapshot() {
     let server = read_server();
     let mut shell = shell(&server);
@@ -481,7 +480,6 @@ fn the_reconciler_reads_only_the_agentic_account_and_maps_its_snapshot() {
 /// The positions and working orders are the broker's as `mandate-robinhood` read them, a part
 /// filled order included, and the account is mapped the same way whatever the account holds.
 #[test]
-#[ignore = "pending E7-6"]
 fn the_reconcilers_snapshot_lists_what_the_account_holds() {
     let server = read_server_echoing(true);
     let mut shell = shell(&server);
@@ -538,7 +536,6 @@ fn an_account_that_is_not_agentic_is_never_read_and_its_snapshot_refuses() {
 /// The snapshot goes to the executor's own reconciliation, which refuses here only because this
 /// executor was given no trusted context; no broker call is made for it.
 #[test]
-#[ignore = "pending E7-6"]
 fn the_snapshot_goes_to_the_executors_own_reconciliation() {
     let server = server();
     let mut shell = shell(&server);
@@ -553,7 +550,6 @@ fn the_snapshot_goes_to_the_executors_own_reconciliation() {
 /// The bridge's preflight is `mandate-robinhood`'s own read, through the same session: the
 /// account reads, the tradability read and the quote, nothing placed (DEC-933 item 2).
 #[test]
-#[ignore = "pending E7-6"]
 fn the_bridges_preflight_reads_the_agentic_account_and_the_quote() {
     let server = read_server();
     let shell = shell(&server);
@@ -589,7 +585,6 @@ fn the_bridges_preflight_reads_the_agentic_account_and_the_quote() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn the_bridges_preflight_of_an_account_that_is_not_agentic_refuses() {
     let server = read_server();
     let shell = shell_for(&server, NOT_AGENTIC, &[]);

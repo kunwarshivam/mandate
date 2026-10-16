@@ -50,6 +50,7 @@ use mandate_journal::{
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::Price;
+use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
@@ -287,7 +288,7 @@ pub fn run<P: Ports>(
             approver_users: 1,
         },
     };
-    the_live_door(&records, &store, &facts.agent, args)?;
+    the_live_door(&records, &store, &facts.agent, args, None)?;
     let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
     let mandate = confirmed.mandate();
     let ([instrument], [model]) = (
@@ -418,13 +419,12 @@ pub fn run<P: Ports>(
 /// the shell's).
 ///
 /// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
-/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The rows and the
-/// snapshot counts the check reads are the live arm's to hand — its journal read of the named
-/// stream and its preflight, neither of which any build runs yet (the `live` feature stays
-/// compile-only; the default build's `connector_not_built` stands in front of the live arm's
-/// read, DEC-910 item 3) — so the call carries the empty rows and counts of no live arm, and
-/// they decide nothing in any build that runs today: the default build's only surviving choice is
-/// a paper connection, and DEC-529 item 3's lapse makes no check on one (LT-14).
+/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The lapse reads its
+/// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
+/// the named account stream, and the counts are the agentic account's own `snapshot`, which only
+/// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
+/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses here; a paper
+/// connection makes no check and reads nothing, so the paper run is unchanged (LT-14).
 ///
 /// # Errors
 /// Any [`PaperError`] of the door's three frames, before the shell's fold and before anything
@@ -434,20 +434,14 @@ fn the_live_door(
     store: &dyn ArtifactSource,
     agent: &AgentId,
     args: &Args,
+    snapshot: Option<&AccountSnapshot>,
 ) -> Result<(), PaperError> {
     let Some(document) = deployed_document(records, store, agent) else {
         return Ok(());
     };
     let connection = chosen(records, &document, &args.account_ref)?;
-    account_stream(&args.workspace, &args.account_ref)?;
-    unspent(
-        &connection,
-        &[],
-        &Held {
-            positions: 0,
-            open_orders: 0,
-        },
-    )
+    let stream = account_stream(&args.workspace, &args.account_ref)?;
+    lapse_read(&connection, args.journal.as_deref(), &stream, snapshot)
 }
 
 /// The deployment's own mandate document, read from the same records and artifact store the

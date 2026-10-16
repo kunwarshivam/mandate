@@ -375,7 +375,6 @@ fn reconcile_absent(result: &Result<(), PaperError>) -> Option<&'static str> {
 /// a zero quantity included, and every working order — so an account that is not flat refuses
 /// with those counts, before the journal is read.
 #[test]
-#[ignore = "pending E7-6"]
 fn the_lapse_counts_the_agentic_accounts_own_snapshot() {
     let held = snapshot(vec![position("1"), position("0")], vec![working()]);
     let refused = lapse_read(&live_connection(), None, &the_stream(), Some(&held));
@@ -406,7 +405,6 @@ fn the_lapse_counts_the_agentic_accounts_own_snapshot() {
 /// DEC-933 item 3 and DEC-918 item 2: a flat account of a run that kept no journal has no account
 /// stream to spend it, and starts.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_flat_snapshot_of_a_journalless_run_starts() {
     let flat = snapshot(Vec::new(), Vec::new());
     let started = lapse_read(&live_connection(), None, &the_stream(), Some(&flat));
@@ -416,7 +414,6 @@ fn a_flat_snapshot_of_a_journalless_run_starts() {
 /// DEC-933 item 3: the rows are the run's own journal's read of its account stream, so a journal
 /// that cannot be read refuses the live run rather than reading as an unspent record (rule 3).
 #[test]
-#[ignore = "pending E7-6"]
 fn an_unreadable_account_stream_refuses_the_live_run() {
     let flat = snapshot(Vec::new(), Vec::new());
     let refused = lapse_read(
@@ -435,7 +432,6 @@ fn an_unreadable_account_stream_refuses_the_live_run() {
 /// DEC-933 item 3: a live connection the run has no snapshot for cannot pass a lapse with
 /// nothing to count, whatever its journal.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_live_connection_with_no_snapshot_refuses() {
     for journal in [None, Some(UNREADABLE_JOURNAL)] {
         let refused = lapse_read(&live_connection(), journal, &the_stream(), None);
@@ -450,7 +446,6 @@ fn a_live_connection_with_no_snapshot_refuses() {
 /// LT-14: a paper connection makes no lapse check and reads nothing, so neither a missing
 /// snapshot, a held account nor an unreadable journal changes a paper run.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_paper_connection_reads_nothing_for_the_lapse() {
     let paper = Connection {
         broker: Broker::Alpaca,

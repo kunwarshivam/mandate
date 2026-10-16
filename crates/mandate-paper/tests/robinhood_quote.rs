@@ -55,7 +55,6 @@ fn illiquid() -> Option<Usd> {
 /// Robinhood's ask is compared, not its bid, with the IEX ask, within the liquid tier's 1% band
 /// at both ends: 101 and 99 agree, 101.01 and 98.99 do not.
 #[test]
-#[ignore = "pending E7-6"]
 fn robinhoods_ask_must_sit_within_the_collar_of_the_iex_ask() {
     for ask in ["100", "101", "99"] {
         let agreed =
@@ -79,7 +78,6 @@ fn robinhoods_ask_must_sit_within_the_collar_of_the_iex_ask() {
 /// the other member's 2% admits a 1.5% gap the liquid member refuses, an unknown volume reads the
 /// narrower liquid member, and an equity never reads the crypto member.
 #[test]
-#[ignore = "pending E7-6"]
 fn the_band_is_the_registered_tier_for_the_instruments_volume() {
     let gap = robinhood("SPY", "101", "101.5");
     let admitted = robinhood_cross_check(&collar(), &gap, &iex(), illiquid());
@@ -104,7 +102,6 @@ fn the_band_is_the_registered_tier_for_the_instruments_volume() {
 
 /// Quotes of two instruments cannot be compared, so the opening refuses as a missing quote.
 #[test]
-#[ignore = "pending E7-6"]
 fn quotes_of_two_instruments_refuse_as_absent() {
     let refused =
         robinhood_cross_check(&collar(), &robinhood("QQQ", "100", "100"), &iex(), liquid());
