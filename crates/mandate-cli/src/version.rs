@@ -19,8 +19,8 @@ use mandate_spec::{Mandate, MandateVersion, Pointer, ValidationContext, Violatio
 
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Shape,
-    Submitted, account_stream, code_of, commit_choice, control_stream, decide, object, seconds,
-    text,
+    Submitted, account_stream, code_of, commit_choice, control_stream, decide, object,
+    same_environment, seconds, text,
 };
 
 pub(crate) const CREATED: &str = "MandateVersionCreated";
@@ -227,6 +227,7 @@ pub(crate) fn commit(
         Decision::Committed(earlier) => return Ok(earlier),
         Decision::Fresh(decided) => decided,
     };
+    same_environment(journal, &control_stream(owner)?, owner)?;
     store.put_artifact(&bytes).map_err(|e| store_error(&e))?;
     let mut artifact_refs = vec![version.to_owned(), record_ref];
     artifact_refs.sort();

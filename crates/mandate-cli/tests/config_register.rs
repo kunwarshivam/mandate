@@ -252,18 +252,31 @@ fn a_model_is_registered_with_the_hosts_content_and_hash_only() {
     }
 }
 
+/// An owner neither in paper nor in live is refused `paper_only`, and a live owner on a paper
+/// workspace `workspace_environment` (DEC-952); neither stores nor appends anything.
 #[test]
 fn nothing_is_registered_outside_paper() {
-    for environment in [Environment::Live, Environment::Backtest] {
+    let paper = r#"{"environment":"paper","event_id":"01J8Y0A0A000000000000000S1","event_type":"StreamOpened","stream_id":"ctl:ws1"}"#;
+    for (environment, opened, reason) in [
+        (Environment::Backtest, None, "paper_only"),
+        (Environment::Live, Some(paper), "workspace_environment"),
+    ] {
         let owner = Owner {
             environment,
             ..owner()
         };
         let (mut journal, mut store) = (Journal::default(), Store::new());
+        if let Some(opening) = opened {
+            let control = stream(CONTROL);
+            let epoch = journal.take_ownership(&control).unwrap();
+            let outcome = journal.append(&control, 0, epoch, at(NOW).at, &[opening.as_bytes()]);
+            assert!(outcome.is_ok(), "{outcome:?}");
+            journal.attempts.clear();
+        }
         let registered = snapshot(&mut journal, &mut store, &owner, SPY.as_bytes());
         let modelled = model(&mut journal, &mut store, &owner, MODEL);
         let reasons = [refused(registered), refused(modelled)];
-        assert_eq!(reasons, ["paper_only"; 2], "{environment:?}");
+        assert_eq!(reasons, [reason; 2], "{environment:?}");
         assert!(!written(&journal, &store), "{environment:?}");
     }
 }

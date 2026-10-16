@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_journal::{ArtifactSource, Environment};
+use mandate_journal::ArtifactSource;
 use mandate_spec::Mandate;
 
 use crate::control::{
@@ -46,21 +46,12 @@ pub struct GestureOwnerArgs {
 }
 
 impl GestureOwnerArgs {
-    /// The owner these flags name, in the environment `--environment` names.
+    /// The owner these flags name, in the environment `--environment` names (DEC-925, DEC-952).
     ///
     /// # Errors
-    /// [`ControlError::Refused`] with `environment_invalid` for any environment but `paper` or
-    /// `live`, then [`OwnerArgs::owner`]'s.
+    /// [`OwnerArgs::owner`]'s.
     pub fn owner(&self) -> Result<Owner, ControlError> {
-        let environment = match self.owner.environment.as_str() {
-            "paper" => Environment::Paper,
-            "live" => Environment::Live,
-            _ => return Err(refused("environment_invalid")),
-        };
-        Ok(Owner {
-            environment,
-            ..self.owner.owner()?
-        })
+        self.owner.owner()
     }
 }
 

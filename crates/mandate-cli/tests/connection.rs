@@ -255,7 +255,7 @@ fn records_a_checked_live_robinhood_connection_as_version_2() {
         &mut j,
         CONTROL,
         "20000000000000000000000009",
-        ("ConnectionEstablished", 1, "paper"),
+        ("ConnectionEstablished", 1, "live"),
         alpaca,
     );
     let mut ids = FixedIds::default();
@@ -506,7 +506,7 @@ impl Racing {
             j,
             CONTROL,
             RIVAL,
-            ("ConnectionEstablished", 1, "paper"),
+            ("ConnectionEstablished", 1, "live"),
             payload,
         );
     }
