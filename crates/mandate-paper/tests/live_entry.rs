@@ -14,8 +14,9 @@ use std::path::PathBuf;
 use mandate_alpaca::AlpacaPaperHttp;
 use mandate_domain::Environment;
 use mandate_paper::{
-    Args, Broker, Build, Connection, EndpointRefusal, PaperError, Ports, REHEARSAL_ENDPOINT_VAR,
-    RobinhoodEndpoint, SystemClock, acknowledge, disable_core_dumps, endpoint, parse,
+    Args, Broker, Build, Connection, EndpointRefusal, PaperError, Ports, Production,
+    REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, SystemClock, acknowledge, disable_core_dumps,
+    endpoint, parse,
 };
 use mandate_shell::control::ControlRecord;
 use rustix::process::{DumpableBehavior, Resource, Rlimit, dumpable_behavior, getrlimit};
@@ -178,6 +179,20 @@ fn the_acknowledgement_refusals_name_the_flag_they_need() {
 #[test]
 fn hardening_turns_the_core_dumps_off() {
     disable_core_dumps().expect("the kernel takes both settings");
+    assert_no_core_dumps();
+}
+
+/// LT-9 through the binary's own ports: `Production::harden` is the same switch, read back from
+/// the kernel. Each test runs in its own process under nextest, so neither reads the other's.
+#[test]
+fn the_binarys_ports_harden_the_process() {
+    let mut ports = Production { journal: None };
+    ports.harden().expect("the kernel takes both settings");
+    assert_no_core_dumps();
+}
+
+/// The process's core-file limit is zero, soft and hard, and it is not dumpable.
+fn assert_no_core_dumps() {
     let limit = getrlimit(Resource::Core);
     let expected = Rlimit {
         current: Some(0),

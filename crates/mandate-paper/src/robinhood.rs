@@ -11,7 +11,6 @@
 //!   [`REHEARSAL_ENDPOINT_VAR`] and refuses any that is not plain `http` on a loopback address,
 //!   so it can never reach a broker (DEC-922 items 1 and 2).
 
-use std::ffi::OsString;
 use std::net::Ipv4Addr;
 
 use mandate_alpaca::Pause;
@@ -167,7 +166,8 @@ fn loopback(text: &str) -> Option<RobinhoodEndpoint> {
 /// [`PaperError::Endpoint`] before anything is sent, or [`PaperError::Credentials`] when the
 /// login fails; neither names a token.
 pub(crate) fn connect() -> Result<Linked, PaperError> {
-    let rehearsal = std::env::var_os(REHEARSAL_ENDPOINT_VAR).map(lossy);
+    let rehearsal =
+        std::env::var_os(REHEARSAL_ENDPOINT_VAR).map(|value| value.to_string_lossy().into_owned());
     let endpoint = endpoint(Build::CURRENT, rehearsal.as_deref()).map_err(PaperError::Endpoint)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -178,12 +178,6 @@ pub(crate) fn connect() -> Result<Linked, PaperError> {
         .block_on(login(&endpoint, &mut show))
         .map_err(|_| PaperError::Credentials)?;
     Ok(Linked { runtime, token })
-}
-
-/// A variable's value as text, lossily, so one that is not Unicode is refused as an endpoint
-/// rather than panicking.
-fn lossy(value: OsString) -> String {
-    value.to_string_lossy().into_owned()
 }
 
 /// O1b's login at `endpoint`, its host the one authorization host: discovery, registration of
