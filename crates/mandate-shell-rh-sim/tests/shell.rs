@@ -3,8 +3,10 @@
 //! re-send is deduplicated by the broker and a restored key is never sent again, a lost or
 //! garbled place answer is `Unknown`, `Cancel` goes by the broker's `order_id`, nothing outside
 //! the profile is sent, every call names the recorded agentic account, the profile is
-//! Robinhood's, and the reconciler reads only the agentic account and then refuses (DEC-928
-//! item 3). Oracles: the simulator's own orders and call log, and the requests the seam saw.
+//! Robinhood's, and the reconciler reads only the agentic account, maps its snapshot by the
+//! least-risk reading and hands it to the executor's own reconciliation (DEC-933 item 1), and the
+//! bridge's preflight reads the same account (DEC-933 item 2). Oracles: the simulator's own
+//! orders and call log, the requests the seam saw, and the snapshot written out field by field.
 
 #[path = "../../mandate-rh-sim/tests/common/mod.rs"]
 mod common;
@@ -17,18 +19,19 @@ use common::{AGENTIC, NOT_AGENTIC, account as holder, price, qty, sim};
 use mandate_accounting::{InstrumentId, Side as Way};
 use mandate_canon::parse;
 use mandate_executor::{
-    ActivityCursor, BrokerAccount, BrokerOutcome, BrokerRequest, BrokerSnapshot, ClientOrderId,
-    ConnectorError, EventId, FoldedEvent, IntentId, OrderType as Kind, Purpose, ReconcileReason,
-    Seq, SubmitOrder, TimeInForce as Tif,
+    AccountRef, AccountScope, ActivityCursor, BrokerAccount, BrokerOrder, BrokerOutcome,
+    BrokerPosition, BrokerRequest, BrokerSnapshot, ClientOrderId, ConnectorError, EventId,
+    FoldedEvent, IntentId, OrderType as Kind, Purpose, ReconcileReason, Seq, SubmitOrder,
+    TimeInForce as Tif, WorkspaceId,
 };
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
-use mandate_num::Usd;
+use mandate_num::{SignedQty, Usd};
 use mandate_rh_sim::{Event, Fault, Garble, Session, Sim, SimServer, State, Variant};
-use mandate_robinhood::{RobinhoodConnector, Tools, ref_id, robinhood_profile};
+use mandate_robinhood::{Quote, RobinhoodConnector, Tools, ref_id, robinhood_profile};
 use mandate_shell::Cause;
+use mandate_shell::adapters::CoreExecutor;
 use mandate_shell::robinhood::{
-    ACCOUNT_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
-    STATUS_UNPUBLISHED,
+    ACCOUNT_UNREAD, QUOTE_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
 };
 use mandate_shell::stages::{Connector, Reconciler};
 use serde_json::{Value, json};
@@ -71,6 +74,7 @@ impl Tools for Loopback<'_> {
 }
 
 struct Shell<'s> {
+    bridge: Rc<RobinhoodBridge<Loopback<'s>>>,
     connector: RobinhoodShellConnector<Loopback<'s>>,
     reconciler: RobinhoodReconciler<Loopback<'s>>,
     garble_place: Rc<Cell<Option<Garble>>>,
@@ -92,9 +96,15 @@ fn shell_for<'s>(server: &'s SimServer, account: &str, records: &[FoldedEvent]) 
     };
     let robinhood = RobinhoodConnector::restore(tools, account.to_owned(), records).unwrap();
     let bridge = RobinhoodBridge::new(runtime(), robinhood);
+    let scope = AccountScope {
+        account: AccountRef("acct_rh".to_owned()),
+        workspace: WorkspaceId("ws_rh".to_owned()),
+    };
+    let (_, executor) = CoreExecutor::pair(scope, None);
     Shell {
+        bridge: Rc::clone(&bridge),
         connector: RobinhoodShellConnector::new(Rc::clone(&bridge)),
-        reconciler: RobinhoodReconciler::new(bridge),
+        reconciler: RobinhoodReconciler::new(bridge, executor),
         garble_place,
         seen,
     }
@@ -113,6 +123,11 @@ fn server() -> SimServer {
 /// The server the reads run against: exactly one agentic account beside one that is not, since
 /// DEC-875 item 1 refuses every read of a session that lists two agentic accounts.
 fn read_server() -> SimServer {
+    read_server_echoing(false)
+}
+
+/// [`read_server`], echoing each order's `ref_id` as the broker deduplicates by it when `echo`.
+fn read_server_echoing(echo: bool) -> SimServer {
     let mut s = Sim::new(vec![
         holder(AGENTIC, true, false),
         holder(NOT_AGENTIC, false, false),
@@ -121,6 +136,7 @@ fn read_server() -> SimServer {
     s.apply(Event::Quote("SPY".to_owned(), price("500")))
         .unwrap();
     s.apply(Event::Session(Session::Regular)).unwrap();
+    s.apply(Event::EchoRefId(echo)).unwrap();
     SimServer::start(s, Variant::Honest).unwrap()
 }
 
@@ -372,11 +388,15 @@ fn nothing_outside_the_profile_is_sent() {
     assert!(calls(&server).is_empty());
 }
 
-fn account() -> BrokerAccount {
+/// The account the reconciler reads from the simulator's agentic account (DEC-933 item 1): its
+/// cash 750.25 as reported, its buying power of 10,000 clamped to that cash, the status the
+/// agentic check stands for, and every unpublished figure at the value that adds no buying power
+/// and lifts no limit.
+fn mapped_account() -> BrokerAccount {
     let usd = |text: &str| Usd::parse(text).unwrap();
     BrokerAccount {
         status: "ACTIVE".to_owned(),
-        crypto_status: "ACTIVE".to_owned(),
+        crypto_status: "INACTIVE".to_owned(),
         trading_blocked: false,
         account_blocked: false,
         trade_suspended_by_user: false,
@@ -385,9 +405,23 @@ fn account() -> BrokerAccount {
         cash: usd("750.25"),
         buying_power: usd("750.25"),
         non_marginable_buying_power: usd("750.25"),
-        accrued_fees: usd("0"),
-        last_equity: usd("750.25"),
-        maintenance_margin: usd("0"),
+        accrued_fees: Usd::ZERO,
+        last_equity: Usd::ZERO,
+        maintenance_margin: usd("750.25"),
+    }
+}
+
+/// A fresh executor's startup snapshot over `open_orders`, `positions` and the mapped account:
+/// no fill, the empty cursor, the empty stream's head.
+fn startup(open_orders: Vec<BrokerOrder>, positions: Vec<BrokerPosition>) -> BrokerSnapshot {
+    BrokerSnapshot {
+        open_orders,
+        positions,
+        account: mapped_account(),
+        fills: Vec::new(),
+        cursor: ActivityCursor(String::new()),
+        reason: ReconcileReason::Startup,
+        taken_at_head: Seq(0),
     }
 }
 
@@ -409,8 +443,17 @@ fn absent(cause: Result<BrokerSnapshot, Cause>) -> &'static str {
     }
 }
 
+const ACCOUNT_READS: [&str; 6] = [
+    "get_accounts",
+    "get_portfolio",
+    "get_accounts",
+    "get_equity_positions",
+    "get_accounts",
+    "get_equity_orders",
+];
+
 #[test]
-fn the_reconciler_reads_only_the_agentic_account_and_then_refuses() {
+fn the_reconciler_reads_only_the_agentic_account_and_maps_its_snapshot() {
     let server = read_server();
     let mut shell = shell(&server);
     let Shell {
@@ -420,16 +463,8 @@ fn the_reconciler_reads_only_the_agentic_account_and_then_refuses() {
         ..
     } = &mut shell;
     let snapshot = reconciler.snapshot(connector, &snapshot_requests());
-    assert_eq!(absent(snapshot), STATUS_UNPUBLISHED);
-    let reads = [
-        "get_accounts",
-        "get_portfolio",
-        "get_accounts",
-        "get_equity_positions",
-        "get_accounts",
-        "get_equity_orders",
-    ];
-    assert_eq!(calls(&server), reads);
+    assert_eq!(snapshot.unwrap(), startup(Vec::new(), Vec::new()));
+    assert_eq!(calls(&server), ACCOUNT_READS);
     assert!(
         seen.borrow()
             .iter()
@@ -441,6 +476,48 @@ fn the_reconciler_reads_only_the_agentic_account_and_then_refuses() {
         orders(&server).is_empty(),
         "a reconciliation places nothing"
     );
+}
+
+/// The positions and working orders are the broker's as `mandate-robinhood` read them, a part
+/// filled order included, and the account is mapped the same way whatever the account holds.
+#[test]
+fn the_reconcilers_snapshot_lists_what_the_account_holds() {
+    let server = read_server_echoing(true);
+    let mut shell = shell(&server);
+    let order = submitted(shell.connector.call(&buy("01JOPEN")));
+    server
+        .drive(|core| core.fill(&order.broker_order_id, qty("1"), price("498")))
+        .unwrap()
+        .unwrap();
+    let Shell {
+        connector,
+        reconciler,
+        ..
+    } = &mut shell;
+    let snapshot = reconciler
+        .snapshot(connector, &snapshot_requests())
+        .unwrap();
+    let position = BrokerPosition {
+        instrument: InstrumentId::new("SPY").unwrap(),
+        qty: SignedQty::parse("1").unwrap(),
+        avg_entry_price: price("498"),
+    };
+    let working = BrokerOrder {
+        broker_order_id: order.broker_order_id.clone(),
+        client_order_id: None,
+        instrument: InstrumentId::new("SPY").unwrap(),
+        side: Way::Buy,
+        qty: qty("2"),
+        filled_qty: qty("1"),
+        limit_price: Some(price("499")),
+        stop_price: None,
+        status: "partially_filled".to_owned(),
+        reject_code: None,
+        replaced_by_broker_order_id: None,
+        legs: Vec::new(),
+        created_on: None,
+    };
+    assert_eq!(snapshot, startup(vec![working], vec![position]));
 }
 
 #[test]
@@ -457,23 +534,126 @@ fn an_account_that_is_not_agentic_is_never_read_and_its_snapshot_refuses() {
     assert_eq!(calls(&server), ["get_accounts"]);
 }
 
+/// The snapshot goes to the executor's own reconciliation, which refuses here only because this
+/// executor was given no trusted context; no broker call is made for it.
 #[test]
-fn no_snapshot_is_reconciled_for_a_robinhood_account() {
+fn the_snapshot_goes_to_the_executors_own_reconciliation() {
     let server = server();
     let mut shell = shell(&server);
-    let snapshot = BrokerSnapshot {
-        open_orders: Vec::new(),
-        positions: Vec::new(),
-        account: account(),
-        fills: Vec::new(),
-        cursor: ActivityCursor(String::new()),
-        reason: ReconcileReason::Startup,
-        taken_at_head: Seq(0),
-    };
-    let refused = shell.reconciler.reconcile(&snapshot);
+    let refused = shell.reconciler.reconcile(&startup(Vec::new(), Vec::new()));
     assert!(
-        matches!(refused, Err(Cause::Absent { what }) if what == STATUS_UNPUBLISHED),
+        matches!(refused, Err(Cause::Absent { what }) if what == "the trusted executor context"),
         "{refused:?}"
     );
     assert!(calls(&server).is_empty());
+}
+
+/// The bridge's preflight is `mandate-robinhood`'s own read, through the same session: the
+/// account reads, the tradability read and the quote, nothing placed (DEC-933 item 2).
+#[test]
+fn the_bridges_preflight_reads_the_agentic_account_and_the_quote() {
+    let server = read_server();
+    let shell = shell(&server);
+    let facts = shell
+        .bridge
+        .preflight_facts(&InstrumentId::new("SPY").unwrap())
+        .unwrap();
+    assert_eq!(facts.account.cash, Usd::parse("750.25").unwrap());
+    assert_eq!(facts.account.buying_power, Usd::parse("10000").unwrap());
+    assert!(facts.account.positions.is_empty() && facts.account.open_orders.is_empty());
+    assert_eq!(
+        facts.quote,
+        Quote {
+            symbol: InstrumentId::new("SPY").unwrap(),
+            bid: price("500"),
+            ask: price("500"),
+        }
+    );
+    let mut reads = ACCOUNT_READS.to_vec();
+    reads.extend([
+        "get_accounts",
+        "get_equity_tradability",
+        "get_equity_quotes",
+    ]);
+    assert_eq!(calls(&server), reads);
+    for (_, tool, args) in shell.seen.borrow().iter() {
+        let expected = match *tool {
+            "get_accounts" | "get_equity_quotes" => None,
+            _ => Some(AGENTIC),
+        };
+        assert_eq!(args["account_number"].as_str(), expected, "{tool}: {args}");
+    }
+}
+
+#[test]
+fn the_bridges_preflight_of_an_account_that_is_not_agentic_refuses() {
+    let server = read_server();
+    let shell = shell_for(&server, NOT_AGENTIC, &[]);
+    let refused = shell
+        .bridge
+        .preflight_facts(&InstrumentId::new("SPY").unwrap());
+    assert!(
+        matches!(refused, Err(Cause::Absent { what }) if what == ACCOUNT_UNREAD),
+        "{refused:?}"
+    );
+    assert_eq!(calls(&server), ["get_accounts"]);
+}
+
+/// DEC-945 item 1: the bridge's quote read is `get_equity_quotes` alone, on the `Ordinary`
+/// budget with exactly `{"symbols": [symbol]}` and no account, answered with the simulator's
+/// locked quote; a second read answers the quote the broker holds then, not the first one.
+#[test]
+fn the_bridges_quote_is_the_brokers_latest_and_names_no_account() {
+    let server = read_server();
+    let shell = shell(&server);
+    let spy = InstrumentId::new("SPY").unwrap();
+    let quote = shell.bridge.equity_quote(&spy).unwrap();
+    assert_eq!(
+        quote,
+        Quote {
+            symbol: spy.clone(),
+            bid: price("500"),
+            ask: price("500"),
+        }
+    );
+    assert_eq!(calls(&server), ["get_equity_quotes"]);
+    assert_eq!(
+        *shell.seen.borrow(),
+        [(
+            CallClass::Ordinary,
+            "get_equity_quotes",
+            json!({"symbols": ["SPY"]})
+        )]
+    );
+    server
+        .drive(|sim| sim.apply(Event::Quote("SPY".to_owned(), price("501.25"))))
+        .unwrap()
+        .unwrap();
+    let moved = shell.bridge.equity_quote(&spy).unwrap();
+    assert_eq!((moved.bid, moved.ask), (price("501.25"), price("501.25")));
+    assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
+}
+
+/// DEC-945 item 1: a symbol the broker quotes nothing for, and a garbled answer, each refuse the
+/// read as [`QUOTE_UNREAD`]; nothing but the quote read is called.
+#[test]
+fn the_bridges_quote_refuses_a_missing_or_garbled_answer() {
+    let server = read_server();
+    let shell = shell(&server);
+    let missing = shell
+        .bridge
+        .equity_quote(&InstrumentId::new("QQQ").unwrap());
+    assert!(
+        matches!(missing, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
+        "{missing:?}"
+    );
+    server.garble_next(Garble::NotJson).unwrap();
+    let garbled = shell
+        .bridge
+        .equity_quote(&InstrumentId::new("SPY").unwrap());
+    assert!(
+        matches!(garbled, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
+        "{garbled:?}"
+    );
+    assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
 }

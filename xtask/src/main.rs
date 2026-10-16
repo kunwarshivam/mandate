@@ -459,13 +459,15 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
-/// `.github/scripts/` (DEC-329) and `deploy/` (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
+/// `.github/scripts/` (DEC-329), `deploy/` (the demo host's runbook, DEC-822) and `scripts/` (the
+/// founder's runbooks, R0's rehearsal first), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
     shellcheck_scripts(&root.join("deploy"))?;
+    shellcheck_scripts(&root.join("scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
     workspace_checks()
@@ -12709,10 +12711,12 @@ jq -r "$filter" "$src"
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
         let deploy = root.join("deploy");
+        let runbooks = root.join("scripts");
         fs::create_dir_all(&scripts)?;
         fs::create_dir_all(&workflows)?;
         fs::create_dir_all(&deploy)?;
-        for dir in [&scripts, &deploy] {
+        fs::create_dir_all(&runbooks)?;
+        for dir in [&scripts, &deploy, &runbooks] {
             fs::write(
                 dir.join("clean.sh"),
                 "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
@@ -12752,6 +12756,12 @@ jq -r "$filter" "$src"
             .err();
         fs::remove_file(deploy.join("planted.sh"))?;
 
+        fs::write(runbooks.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
+        let runbook_shellcheck = lint(&root, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
+        fs::remove_file(runbooks.join("planted.sh"))?;
+
         fs::write(
             workflows.join("planted.yml"),
             concat!(
@@ -12778,6 +12788,12 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("SC2086")),
             "a planted SC2086 under deploy/ fails the lint job too, got {deploy_shellcheck:?}"
+        );
+        assert!(
+            runbook_shellcheck
+                .as_deref()
+                .is_some_and(|err| err.contains("SC2086")),
+            "a planted SC2086 under scripts/ fails the lint job too, got {runbook_shellcheck:?}"
         );
         assert!(
             actionlint
@@ -17492,6 +17508,7 @@ jq -r "$filter" "$src"
         fs::create_dir_all(&workflows)?;
         fs::create_dir_all(root.join(".github/scripts"))?;
         fs::create_dir_all(root.join("deploy"))?;
+        fs::create_dir_all(root.join("scripts"))?;
         fs::write(
             root.join("deploy/clean.sh"),
             "#!/usr/bin/env bash\nset -euo pipefail\necho \"deployed\"\n",

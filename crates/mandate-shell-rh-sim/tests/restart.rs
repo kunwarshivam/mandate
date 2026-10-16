@@ -8,11 +8,11 @@
 //! `OrderStateChanged` version 2 with the broker's `order_id`; with no match the order stays
 //! `Unknown` and no opening in SPY is placed. Nothing is ever placed twice.
 //!
-//! The first run's startup reconciliation, and the second's where it must pass, read a flat
-//! account from a scripted stand-in: the Robinhood reconciler refuses every account until its
-//! account fields have a source (DEC-928 item 3, C4). Every order request goes to the shell's
-//! Robinhood connector over loopback. Oracles: the simulator's own orders and call log, and the
-//! account stream's own records.
+//! Every run reconciles through the Robinhood reconciler over the same bridge (C4, DEC-933),
+//! reading the simulator's own account. Every order request goes to the shell's Robinhood
+//! connector over loopback; the only stand-in drops an entry's bracket legs, which the builder
+//! still plans whatever the profile (B3). Oracles: the simulator's own orders and call log, and
+//! the account stream's own records.
 
 #[path = "../../mandate-rh-sim/tests/common/mod.rs"]
 mod common;
@@ -31,8 +31,8 @@ use common::{AGENTIC, NOT_AGENTIC, account as holder, price};
 use mandate_alpaca::Exchange;
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_executor::{
-    BrokerAccount, BrokerOutcome, BrokerRequest, ConnectorError, EventId, FoldedEvent, Seq,
-    SubmitOrder,
+    AccountRef, AccountScope, BrokerOutcome, BrokerRequest, ConnectorError, EventId, FoldedEvent,
+    Seq, SubmitOrder, WorkspaceId,
 };
 use mandate_journal::{ArtifactSource, StoredEvent};
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
@@ -41,13 +41,12 @@ use mandate_num::Price as Px;
 use mandate_rh_sim::{Event, Fault, Session, Sim, SimServer, Variant};
 use mandate_robinhood::{RobinhoodConnector, Tools, robinhood_profile};
 use mandate_runtime::{ModelOutput, Observation};
-use mandate_shell::adapters::{Sources, over};
+use mandate_shell::adapters::{CoreExecutor, Sources, over};
 use mandate_shell::paper::load_contexts;
-use mandate_shell::robinhood::{
-    RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector, STATUS_UNPUBLISHED,
-};
+use mandate_shell::robinhood::{RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector};
 use mandate_shell::stages::{Connector, Stages};
-use mandate_shell::{Cause, Report, Setup, ShellError, Stage, run_observed};
+use mandate_shell::symbols::BrokerSymbols;
+use mandate_shell::{Report, Setup, ShellError, run_observed};
 use mandate_spec::validate::RegisteredModel;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 use shell_common::{FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_facts, spy_mandate};
@@ -136,29 +135,20 @@ fn bridge(
     RobinhoodBridge::new(runtime, robinhood)
 }
 
-/// The Robinhood connector, with the startup reconciliation's four reads answered as a flat,
-/// active account by a scripted stand-in for C4's reconciler (DEC-928 item 3). The builder
-/// still plans a bracket whatever the profile (B3), so the stand-in hands the connector the
-/// entry without its legs, as Robinhood's profile places it; the journaled order is unchanged.
-struct FlatReads {
+/// The Robinhood connector, handing it each entry without its bracket legs: the builder still
+/// plans a bracket whatever the profile (B3), and Robinhood's profile places the entry alone.
+/// The journaled order is unchanged; every other request goes to the connector as it is.
+struct Unbracketed {
     robinhood: RobinhoodShellConnector<Loopback>,
-    account: BrokerAccount,
 }
 
-impl Connector for FlatReads {
+impl Connector for Unbracketed {
     fn profile(&self) -> Result<mandate_domain::CapabilityProfile, mandate_domain::ProfileError> {
         robinhood_profile()
     }
 
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         match request {
-            BrokerRequest::ListOpenOrders => Ok(BrokerOutcome::OpenOrders(Vec::new())),
-            BrokerRequest::ListPositions => Ok(BrokerOutcome::Positions(Vec::new())),
-            BrokerRequest::GetAccount => Ok(BrokerOutcome::Account(self.account.clone())),
-            BrokerRequest::ListActivities { since } => Ok(BrokerOutcome::Activities {
-                fills: Vec::new(),
-                cursor: since.clone(),
-            }),
             BrokerRequest::Submit(order) => {
                 let unbracketed = SubmitOrder {
                     bracket: None,
@@ -169,14 +159,6 @@ impl Connector for FlatReads {
             other => self.robinhood.call(other),
         }
     }
-}
-
-fn flat(bridge: &Rc<RobinhoodBridge<Loopback>>) -> Box<dyn Connector> {
-    let fixture = include_bytes!("../../mandate-shell/tests/fixtures/tracer/alpaca/account.json");
-    Box::new(FlatReads {
-        robinhood: RobinhoodShellConnector::new(Rc::clone(bridge)),
-        account: mandate_alpaca::wire::account(fixture).unwrap(),
-    })
 }
 
 /// The simulated broker at the first run's clock: one agentic account beside one that is not
@@ -248,8 +230,10 @@ fn observed(now: &str) -> (Observation, ModelOutput, Vec<u8>) {
     (observation, *output, bytes.into_bytes())
 }
 
-/// The production stages for SPY's run at `now` over `connector`, and the run's setup.
-fn stages(now: &str, connector: Box<dyn Connector>, store: Vec<u8>) -> (Stages, Setup) {
+/// The production stages for SPY's run at `now` over `bridge`'s connector, with the Robinhood
+/// reconciler over the same bridge in place of the executor's own (C4, DEC-933), and the run's
+/// setup.
+fn stages(now: &str, bridge: &Rc<RobinhoodBridge<Loopback>>, store: Vec<u8>) -> (Stages, Setup) {
     let stream = Stream::of(
         &mandate(),
         &SNAPSHOT.replace("2026-09-21", "2026-09-25"),
@@ -265,6 +249,7 @@ fn stages(now: &str, connector: Box<dyn Connector>, store: Vec<u8>) -> (Stages, 
     let agent = deployed.deployment().agent.clone();
     let facts = spy_facts(SPY, "SPY", Exchange::Arca, at(now));
     let contexts = load_contexts(&artifacts, &facts, at(now), &agent).unwrap();
+    let reconciled = load_contexts(&artifacts, &facts, at(now), &agent).unwrap();
     let file = MANDATE_FILE.get_or_init(|| {
         let path = std::env::temp_dir().join(format!(
             "mandate-shell-rh-sim-restart-{}.json",
@@ -284,7 +269,10 @@ fn stages(now: &str, connector: Box<dyn Connector>, store: Vec<u8>) -> (Stages, 
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
-        transport: connector,
+        symbols: BrokerSymbols::default(),
+        transport: Box::new(Unbracketed {
+            robinhood: RobinhoodShellConnector::new(Rc::clone(bridge)),
+        }) as Box<dyn Connector>,
     };
     let setup = Setup {
         deployment: deployed.deployment().clone(),
@@ -293,21 +281,25 @@ fn stages(now: &str, connector: Box<dyn Connector>, store: Vec<u8>) -> (Stages, 
         place_one_order: true,
         new_cycle: true,
     };
-    (over(sources), setup)
+    let mut stages = over(sources);
+    let scope = AccountScope {
+        account: AccountRef("acct_spy".to_owned()),
+        workspace: WorkspaceId("ws_spy".to_owned()),
+    };
+    let (executor, reconciler) = CoreExecutor::pair(scope, Some(reconciled.executor));
+    stages.executor = Box::new(executor);
+    stages.reconciler = Box::new(RobinhoodReconciler::new(Rc::clone(bridge), reconciler));
+    (stages, setup)
 }
 
-/// One run at `now` over `connector`, on `journal` when it is a restart.
+/// One run at `now` over `bridge`, on `journal` when it is a restart.
 fn run(
     now: &str,
-    connector: Box<dyn Connector>,
-    reconciler: Option<Box<dyn mandate_shell::stages::Reconciler>>,
+    bridge: &Rc<RobinhoodBridge<Loopback>>,
     journal: Option<Box<dyn mandate_shell::stages::JournalWriter>>,
 ) -> (Result<Report, ShellError>, Stages) {
     let (observation, output, bytes) = observed(now);
-    let (mut stages, setup) = stages(now, connector, bytes);
-    if let Some(reconciler) = reconciler {
-        stages.reconciler = reconciler;
-    }
+    let (mut stages, setup) = stages(now, bridge, bytes);
     if let Some(journal) = journal {
         stages.journal = journal;
     }
@@ -389,7 +381,7 @@ fn count(calls: &[String], tool: &str) -> usize {
 /// `Unknown` on the account stream, and the stages holding the journal the restart folds.
 fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
     let first = bridge(server, line, &[]);
-    let (outcome, stages) = run(FIRST, flat(&first), None, None);
+    let (outcome, stages) = run(FIRST, &first, None);
     let rows = account_rows(&stages);
     let [order] = submitted(&rows)
         .try_into()
@@ -418,7 +410,10 @@ fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
 /// LT-6, DEC-529 item 4 and DEC-869: the restart's `Started` lists the agentic account's orders
 /// once, before its startup reconciliation reads anything, finds the one order the lost answer
 /// left, and journals its adoption as `OrderStateChanged` version 2 carrying the broker's
-/// `order_id`. The broker holds one order and saw one place: nothing was sent again.
+/// `order_id`. The broker holds one order and saw one place: nothing was sent again. The
+/// reconciliation that follows reads the broker's working order, whose record carries no key of
+/// ours (U-R2), so the restart stops before its cycle; DEC-529 item 3 refuses a run on an account
+/// that holds an order anyway.
 #[test]
 fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
     let server = broker(true);
@@ -432,24 +427,20 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
 
     let records = folded(&account_rows(&first));
     let restart = bridge(&server, Line::Up, &records);
-    let connector = Box::new(RobinhoodShellConnector::new(Rc::clone(&restart)));
-    let reconciler = Box::new(RobinhoodReconciler::new(restart));
-    let (outcome, stages) = run(RESTART, connector, Some(reconciler), Some(first.journal));
+    let (outcome, stages) = run(RESTART, &restart, Some(first.journal));
 
-    let Err(ShellError::Refused {
-        stage: Stage::Reconcile,
-        cause: Cause::Absent { what },
-    }) = &outcome
-    else {
-        panic!("the restart stops at its reconciliation, DEC-928 item 3: {outcome:?}")
-    };
-    assert_eq!(*what, STATUS_UNPUBLISHED);
+    assert!(
+        outcome.is_err(),
+        "the broker's record carries no key of ours, so the reconciliation that follows the \
+         adoption stops the restart before its cycle: {outcome:?}"
+    );
     let rows = account_rows(&stages);
     let adopted = states(&rows);
+    let adoption = ("accepted".to_owned(), Some(order.id.clone()), 2);
     assert_eq!(
-        adopted.last(),
-        Some(&("accepted".to_owned(), Some(order.id.clone()), 2)),
-        "{adopted:?}"
+        adopted.get(1),
+        Some(&adoption),
+        "the first run's `unknown`, then the restart's adoption: {adopted:?}"
     );
     let after: Vec<String> = calls(&server).split_off(before.len());
     assert_eq!(
@@ -489,7 +480,7 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
 
     let records = folded(&account_rows(&first));
     let restart = bridge(&server, Line::Up, &records);
-    let (outcome, stages) = run(RESTART, flat(&restart), None, Some(first.journal));
+    let (outcome, stages) = run(RESTART, &restart, Some(first.journal));
 
     let rows = account_rows(&stages);
     assert!(

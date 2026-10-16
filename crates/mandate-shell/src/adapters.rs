@@ -85,6 +85,7 @@ use crate::stages::{
     Admitted, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
     MandateSource, Protection, Reconciler, Sink, Sizing, Stages,
 };
+use crate::symbols::{BrokerSymbols, Platform};
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
 /// and, mid-run, planned over a fold of the journal taken at request time (DEC-449): the
@@ -2005,6 +2006,37 @@ fn unexpected_snapshot(outcome: BrokerOutcome, what: &'static str) -> Cause {
     }
 }
 
+impl ExecutorReconciler {
+    /// A startup snapshot of a broker that publishes no account activity (DEC-933 item 1): the
+    /// broker's open orders, positions and account, no fill, the executor's own cursor unmoved,
+    /// taken at the executor's head of the account stream.
+    pub(crate) fn without_activities(
+        &self,
+        open_orders: Vec<mandate_executor::BrokerOrder>,
+        positions: Vec<mandate_executor::BrokerPosition>,
+        account: mandate_executor::BrokerAccount,
+    ) -> mandate_executor::BrokerSnapshot {
+        let state = self.state.borrow();
+        let scope = state.scope();
+        let stream = account_stream(&scope.workspace.0, &scope.account.0);
+        mandate_executor::BrokerSnapshot {
+            open_orders,
+            positions,
+            account,
+            fills: Vec::new(),
+            cursor: match state.checkpoint() {
+                Some(cursor) => cursor.clone(),
+                None => mandate_executor::ActivityCursor(String::new()),
+            },
+            reason: mandate_executor::ReconcileReason::Startup,
+            taken_at_head: match state.head(&stream) {
+                Some(head) => head,
+                None => Seq(0),
+            },
+        }
+    }
+}
+
 impl Reconciler for ExecutorReconciler {
     fn snapshot(
         &mut self,
@@ -2046,6 +2078,9 @@ pub struct Sources<T> {
     /// it commits the record, so `None`, or a store missing either object, stops a governed run
     /// at its first version-2 append, before any intent (journal spec §5.1, §11 check 6).
     pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// The broker's ticker for each instrument the run registered, so the connector's answers
+    /// name it by the asset id the executor sent (DEC-938 item 1). Empty maps nothing.
+    pub symbols: BrokerSymbols,
     pub transport: T,
 }
 
@@ -2061,6 +2096,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         executor,
         run,
         artifacts,
+        symbols,
         transport,
     } = sources;
     over(Sources {
@@ -2073,6 +2109,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         executor,
         run,
         artifacts,
+        symbols,
         transport: Box::new(AlpacaConnector { transport }),
     })
 }
@@ -2122,7 +2159,10 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             agent: sources.agent,
         }),
         executor: Box::new(executor),
-        connector: sources.transport,
+        connector: Box::new(Platform {
+            inner: sources.transport,
+            symbols: sources.symbols,
+        }),
         artifacts: sources.artifacts,
     }
 }

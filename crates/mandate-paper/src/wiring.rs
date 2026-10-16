@@ -21,16 +21,18 @@
 
 use std::time::Duration;
 
-use mandate_alpaca::Pause;
+use mandate_alpaca::{LatestQuote, Pause};
 use mandate_canon::Value;
 use mandate_domain::AssetClass;
 use mandate_journal::StoredEvent;
 use mandate_num::{Fraction, Price, Usd};
+use mandate_robinhood::Quote;
 use mandate_shell::control::ControlRecord;
-use mandate_shell::{Cause, ShellError, Stage};
+use mandate_shell::{AskedCycle, Cause, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
 use crate::PaperError;
+use crate::ask::BrokerAsk;
 use crate::connection::member;
 use crate::evidence::{Evidence, EvidenceRefusal, evidence};
 use crate::grant::{Asked, GrantRefusal, Journaled, grant};
@@ -387,6 +389,66 @@ pub fn cross_check_the_opening(
     cross_check(broker_ask, independent_ask, x).map_err(PaperError::CrossCheck)
 }
 
+/// The live opening's quote cross-check over the preflight's own two quotes (DEC-933 item 2;
+/// DEC-529 item 12): `robinhood` is the quote `mandate-robinhood`'s preflight read, the broker's
+/// own, and `iex` the latest IEX quote Alpaca's data client read, the independent one. Both must
+/// be of one instrument, or there is nothing to compare and the opening refuses as a missing
+/// quote; then the two asks go to [`cross_check_the_opening`] as a US equity, within the
+/// registered collar's own `x` for the instrument's 20-day median dollar volume.
+///
+/// # Errors
+/// [`PaperError::CrossCheck`]: `quote_absent` for quotes of two instruments, and every refusal of
+/// [`cross_check_the_opening`].
+pub fn robinhood_cross_check(
+    collar: &CollarMembers,
+    robinhood: &Quote,
+    iex: &LatestQuote,
+    median_dollar_volume_20d: Option<Usd>,
+) -> Result<(), PaperError> {
+    if robinhood.symbol != iex.instrument {
+        return Err(PaperError::CrossCheck(QuoteRefusal::Absent));
+    }
+    cross_check_the_opening(
+        collar,
+        AssetClass::UsEquity,
+        median_dollar_volume_20d,
+        Some(robinhood.ask),
+        Some(iex.ask),
+    )
+}
+
+/// The asked opening's cross-check at the check itself
+/// ([DEC-945](../../../docs/project/decisions/DEC-945.md) item 3; DEC-529 item 12; DEC-940 item
+/// 4): the broker's ask is asked of `broker` now, for the instrument `iex` is of, and held to
+/// `max_age` ([`BrokerAsk::ask`]); then it and `iex`'s ask go to [`cross_check_the_opening`]
+/// within the registered collar's own `x` for `asset_class` and the 20-day median dollar volume.
+/// It runs after the grant and before the one held opening is sent, and refuses with nothing
+/// sent.
+///
+/// # Errors
+/// [`PaperError::CrossCheck`]: `quote_absent` or `quote_stale` from the broker's read, and every
+/// refusal of [`cross_check_the_opening`].
+pub fn broker_cross_check<P: Pause + ?Sized>(
+    collar: &CollarMembers,
+    asset_class: AssetClass,
+    median_dollar_volume_20d: Option<Usd>,
+    broker: &BrokerAsk,
+    iex: &LatestQuote,
+    pause: &P,
+    max_age: Duration,
+) -> Result<(), PaperError> {
+    let ask = broker
+        .ask(&iex.instrument, pause, max_age)
+        .map_err(PaperError::CrossCheck)?;
+    cross_check_the_opening(
+        collar,
+        asset_class,
+        median_dollar_volume_20d,
+        Some(ask),
+        Some(iex.ask),
+    )
+}
+
 /// The run-level call frame of the watch's end (E7-26's G1b wiring row; LT-10; DEC-912 item 3;
 /// DEC-914 items 4, 5 and 7): the question the live watch asks at every wake in place of the
 /// bare terminal read the paper watch keeps (`mandate-shell`'s `TERMINAL_STATUSES` check,
@@ -416,6 +478,84 @@ pub fn watch_may_end(
     })?;
     let facts = watched(read, uncovered, alerts)?;
     lt10(&facts, now, cap).map_err(PaperError::Lt10)
+}
+
+/// The asked opening's way out of the run (G1b's wiring row; DEC-912 items 1 and 2; DEC-914
+/// items 1 to 3 and 7; DEC-920 item 1; DEC-940 items 1 and 4): the production caller of
+/// [`wait_for_the_grant`]. The ask is bound off the agent stream as the cycle left it; each wake
+/// is the shell's own ([`AskedCycle::wake`]) — the control stream tailed whole and handed to the
+/// runtime, which journals its `ApprovalResponded` and `ApprovalRevalidated`, then both streams
+/// read back at the clock `pause` keeps — and the wait folds each read through [`answers`], so
+/// it releases only on the runtime's admitted, re-validated grant of the first deciding answer.
+/// Then `cross_check` — the caller's [`cross_check_the_opening`] over the collar's own `x` —
+/// runs before anything leaves, and only then the one held opening is sent
+/// ([`AskedCycle::submit`]). A timeout, a deny, a difference, a refused cross-check or a stopped
+/// wake each end the run with nothing sent (`AGENTS.md` rule 3); exits and protective orders are
+/// never held by the shell, so nothing here can hold one (rule 13). A wake at or past the ask's
+/// deadline hands the runtime nothing: the fold denies the timeout there with no read, and the
+/// approval stays pending on the journal for the runtime's own fold (DEC-912 item 1; DEC-940
+/// item 7).
+///
+/// # Errors
+/// Every [`PaperError`] is a stop after which nothing is sent.
+pub fn granted_opening<P, C>(
+    cycle: &mut dyn AskedCycle,
+    pause: &P,
+    interval: Duration,
+    cross_check: C,
+) -> Result<(), PaperError>
+where
+    P: Pause + ?Sized,
+    C: FnOnce() -> Result<(), PaperError>,
+{
+    let agent_rows = cycle.agent_rows().map_err(PaperError::Shell)?;
+    let deadline = asked(&agent_rows, pause.now())
+        .map_err(PaperError::Grant)?
+        .deadline;
+    let reads = || {
+        let now = pause.now();
+        if now >= deadline {
+            return Ok(WakeRead {
+                agent: agent_rows.clone(),
+                control: Vec::new(),
+            });
+        }
+        cycle
+            .wake(now)
+            .map(|wake| WakeRead {
+                agent: wake.agent,
+                control: wake.control,
+            })
+            .map_err(PaperError::Shell)
+    };
+    wait_for_the_grant(&agent_rows, reads, pause, interval)?;
+    cross_check()?;
+    cycle.submit().map_err(PaperError::Shell)
+}
+
+/// The asked run's watch end (LT-10; DEC-914 items 4 and 5; DEC-940 item 5): [`watch_may_end`]
+/// — the cap over the bound, then [`watched`] and [`lt10`] — answered in the shell watch's own
+/// terms, which the shell asks at every wake of the asked run. A settled LT-10 ends the run
+/// (`true`); an unsettled one reads on (`false`); the cap fails closed with the shell's own
+/// `cancel_unconfirmed`, exactly as the shell's watch does; a bound no regular session holds
+/// stops with the shell's refusal; and any other answer fails closed as the cap does, never a
+/// guess at settled (`AGENTS.md` rule 3).
+///
+/// # Errors
+/// The shell's stop for the cap and for a bound no session holds.
+pub fn lt10_end(
+    read: Option<&str>,
+    uncovered: bool,
+    alerts: &[&'static str],
+    now: UtcNanos,
+    bound: UtcNanos,
+) -> Result<bool, ShellError> {
+    match watch_may_end(read, uncovered, alerts, now, bound) {
+        Ok(()) => Ok(true),
+        Err(PaperError::Lt10(Lt10Refusal::Unsettled)) => Ok(false),
+        Err(PaperError::Shell(stop)) => Err(stop),
+        Err(_) => Err(ShellError::CancelUnconfirmed),
+    }
 }
 
 /// One row's record, mapped one-to-one as the run's own control-stream read maps it (DEC-914

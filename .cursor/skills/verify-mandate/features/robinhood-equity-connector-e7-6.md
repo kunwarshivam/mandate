@@ -10,16 +10,20 @@
   `preflight_facts`, DEC-470 item 1's facts from the scoped reads, quotes and tradability,
   DEC-902; the brief's C3 listing implemented: `ListOrders` as one whole `get_equity_orders`
   read by `symbol`, `placed_agent` and `created_at_gte`,
-  `crates/mandate-robinhood/src/listing.rs`, DEC-529 item 4, DEC-941). The tool seam `Tools` is
-  `mandate-mcp`'s, implemented for `McpClient` (`crates/mandate-mcp/src/tools.rs`, DEC-928 item
-  1). In the shell,
-  `crates/mandate-shell/src/robinhood.rs` (DEC-928 items 2 and 3): `RobinhoodBridge`, one
-  runtime and one connector; `RobinhoodShellConnector`, the shell's `Connector` with Robinhood's
-  profile; and `RobinhoodReconciler`, which reads the agentic account and refuses until
-  Robinhood's account fields have a source. The shell ticks the executor at the run's clock
-  before the cycle's output (`crates/mandate-shell/src/tracer.rs`, DEC-941 item 5).
-  `mandate-shell-rh-sim`, `crates/mandate-shell-rh-sim/` (layer 11, tests only, DEC-928 item 4),
-  is the shell's simulator harness.
+  `crates/mandate-robinhood/src/listing.rs`, DEC-529 item 4, DEC-941). The tool seam `Tools` is `mandate-mcp`'s, implemented for `McpClient`
+  (`crates/mandate-mcp/src/tools.rs`, DEC-928 item 1). In the shell,
+  `crates/mandate-shell/src/robinhood.rs` (DEC-928 item 2, DEC-933): `RobinhoodBridge`, one
+  runtime and one connector, with `preflight_facts`; `RobinhoodShellConnector`, the shell's
+  `Connector` with Robinhood's profile; `robinhood_account` and `robinhood_account_rules`, the
+  least-risk mapping of the agentic account into `BrokerAccount` (DEC-933 item 1); and
+  `RobinhoodReconciler`, which reads the agentic account and hands the mapped snapshot to the
+  executor's own reconciliation. `crates/mandate-shell/src/paper/facts.rs`'s `robinhood_facts`
+  builds a Robinhood connection's `BrokerFacts` beside Alpaca's `market_facts`, and
+  `mandate-paper`'s `robinhood_cross_check` holds Robinhood's ask within the collar of the IEX
+  ask (DEC-933 item 2, DEC-529 item 12). The shell ticks the executor at the run's clock before
+  the cycle's output (`crates/mandate-shell/src/tracer.rs`, DEC-941 item 5).
+  `mandate-shell-rh-sim`, `crates/mandate-shell-rh-sim/`
+  (layer 11, tests only, DEC-928 item 4), is the shell's simulator harness.
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),
   `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870, DEC-872, DEC-874 and DEC-876: the
   `order_id` map rebuilt from the account stream, the distinct-id property, the odd-id and
@@ -52,6 +56,13 @@
   `crates/mandate-rh-sim/tests/preflight.rs` (C4, DEC-875 item 6 and DEC-902: the whole preflight
   against `SimServer` over loopback, a halted symbol `NotTradable` before the quote, the served
   reads refusing what the core does not hold, and the core's own portfolio, positions, average
-  and tradability figures), kept in the simulator's crate so no product crate depends on it.
-- **Run:** `cargo nextest run -p mandate-robinhood -p mandate-rh-sim -p mandate-shell-rh-sim`, and
-  `cargo nextest run -p mandate-mcp tools`.
+  and tradability figures), kept in the simulator's crate so no product crate depends on it;
+  `crates/mandate-shell-rh-sim/tests/shell.rs` (the shell's pair against `SimServer`: the
+  reconciler's mapped snapshot, empty and holding a part-filled order and its position, handed
+  to the executor's reconciliation, and the bridge's preflight), `crates/mandate-shell/src/paper/tests.rs`
+  (`robinhood_facts`: the mapped account and rules beside Alpaca's market reads, the gate reading
+  a cash account under `legacy_pdt`, and a quote of another instrument refusing), and
+  `crates/mandate-paper/tests/robinhood_quote.rs` (the cross-check's band, tier and instrument).
+- **Run:** `cargo nextest run -p mandate-robinhood -p mandate-rh-sim -p mandate-shell-rh-sim`,
+  `cargo nextest run -p mandate-mcp tools`, `cargo nextest run -p mandate-shell robinhood`, and
+  `cargo nextest run -p mandate-paper -E 'binary(robinhood_quote)'`.

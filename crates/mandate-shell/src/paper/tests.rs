@@ -1,20 +1,24 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use mandate_accounting::{AssetClass, InstrumentId, Side};
+use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_alpaca::{
-    Asset, AssetSnapshot, Exchange as BrokerExchange, Feed, LatestQuote, MinuteBar, MinuteBars,
-    alpaca_account_rules,
+    AccountRules, Asset, AssetSnapshot, DeclaredRegime, Exchange as BrokerExchange, Feed,
+    LatestQuote, MinuteBar, MinuteBars, alpaca_account_rules,
 };
 use mandate_builder::buy_action;
 use mandate_canon::Digest;
 use mandate_domain::AssetId;
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerAccount, BrokerOrder, BrokerPosition, InstrumentSnapshot, MandateView, Purpose,
+    BrokerAccount, BrokerOrder, BrokerPosition, FillConfigRefs, InstrumentSnapshot, MandateView,
+    Purpose,
 };
 use mandate_num::{Fraction, Price, Qty, SignedQty, Unit, Usd};
-use mandate_risk::{Exchange as GateExchange, GateConfig, SaneQuote};
+use mandate_risk::{DayTradeRegime, Exchange as GateExchange, GateConfig, SaneQuote};
+use mandate_robinhood::{
+    AccountSnapshot as RobinhoodSnapshot, PreflightFacts, Quote as RobinhoodQuote,
+};
 use mandate_runtime::{AgentId, ProtectionPrices};
 use mandate_time::{Date, UtcNanos};
 
@@ -30,7 +34,9 @@ use std::collections::BTreeMap;
 use super::artifacts::reference;
 use super::context::{PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template};
-use super::{Artifacts, BrokerFacts, LiquidityFacts, PaperFacts, load_contexts};
+use super::{
+    Artifacts, BrokerFacts, LiquidityFacts, MarketFacts, PaperFacts, load_contexts, robinhood_facts,
+};
 
 const NOW: &str = "2026-09-28T17:00:00Z";
 const AGENT: &str = "agent_spy";
@@ -400,6 +406,11 @@ fn the_registered_artifacts_bind_the_bytes_they_checked() -> Result<(), String> 
         "the registered rule set's quote bound"
     );
     assert_eq!(
+        loaded.quote_max_age(),
+        std::time::Duration::from_secs(10),
+        "the runner's cross-check reads the same bound (DEC-945 item 2)"
+    );
+    assert_eq!(
         loaded.instrument.etp_classified_at,
         at("2026-09-25T00:00:00Z")?
     );
@@ -523,6 +534,31 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         protection: None,
     };
     assert!(trusted.input(&request).is_some());
+    let refs = loaded.config_refs();
+    let registered = (
+        refs.fee_config.clone(),
+        refs.trading_calendar.clone(),
+        refs.instrument_snapshot.clone(),
+    );
+    let (Some(fee), Some(calendar), Some(snapshot)) = registered else {
+        return Err("the registered references".to_owned());
+    };
+    assert_eq!(
+        trusted.fill_refs(&reviewed),
+        Some(FillConfigRefs {
+            fee_config: fee,
+            settlement_calendar: calendar.clone(),
+            trading_calendar: calendar,
+            instrument_snapshot: snapshot,
+        }),
+        "the reviewed instrument's fill names the registered objects, settling on its trading \
+         calendar (DEC-938 item 2)"
+    );
+    assert_eq!(
+        trusted.fill_refs(&symbol("SPY")?),
+        None,
+        "another instrument's fill names none"
+    );
     Ok(())
 }
 
@@ -1331,6 +1367,132 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         ),
         format!("{template:?}"),
         "the reservation is the only field a request changes"
+    );
+    Ok(())
+}
+
+/// A Robinhood preflight of AAPL: cash 1,000 and buying power `buying_power`, and `positions`.
+fn robinhood_preflight(
+    buying_power: &str,
+    positions: Vec<BrokerPosition>,
+) -> Result<PreflightFacts, String> {
+    Ok(PreflightFacts {
+        account: RobinhoodSnapshot {
+            cash: usd("1000")?,
+            buying_power: usd(buying_power)?,
+            positions,
+            open_orders: Vec::new(),
+        },
+        quote: RobinhoodQuote {
+            symbol: symbol("AAPL")?,
+            bid: price("255.15")?,
+            ask: price("255.25")?,
+        },
+    })
+}
+
+fn market() -> Result<MarketFacts, String> {
+    let broker = facts()?.broker;
+    Ok(MarketFacts {
+        asset: broker.asset,
+        quote: broker.quote,
+        minute_bars: broker.minute_bars,
+    })
+}
+
+/// DEC-933 items 1 and 2: the account is Robinhood's, read by the least-risk mapping (the lower of
+/// cash and buying power as non-marginable buying power, the cash as equity, no prior-close
+/// equity, no maintenance excess, no crypto, 1×), under Robinhood's own account rules, with its
+/// positions and orders as read; the asset record, the IEX quote and the minute bars are Alpaca's.
+#[test]
+fn the_robinhood_facts_are_its_account_beside_alpacas_market_reads() -> Result<(), String> {
+    let held = BrokerPosition {
+        instrument: symbol("AAPL")?,
+        qty: SignedQty::parse("0").map_err(text)?,
+        avg_entry_price: price("250")?,
+    };
+    let robinhood = robinhood_preflight("900", vec![held.clone()])?;
+    let facts = robinhood_facts(market()?, &robinhood).map_err(text)?;
+    assert_eq!(
+        facts.account,
+        BrokerAccount {
+            status: "ACTIVE".to_owned(),
+            crypto_status: "INACTIVE".to_owned(),
+            trading_blocked: false,
+            account_blocked: false,
+            trade_suspended_by_user: false,
+            multiplier: 1,
+            equity: usd("1000")?,
+            cash: usd("1000")?,
+            buying_power: usd("900")?,
+            non_marginable_buying_power: usd("900")?,
+            accrued_fees: Usd::ZERO,
+            last_equity: Usd::ZERO,
+            maintenance_margin: usd("1000")?,
+        }
+    );
+    assert_eq!(
+        facts.account_rules,
+        AccountRules {
+            account_type: AccountType::Cash,
+            regime: DeclaredRegime::LegacyPdt,
+        }
+    );
+    assert_eq!(facts.positions, vec![held]);
+    assert!(facts.open_orders.is_empty());
+    let alpaca = market()?;
+    assert_eq!(facts.asset, alpaca.asset);
+    assert_eq!(
+        facts.quote, alpaca.quote,
+        "the gate's quote stays the IEX one"
+    );
+    assert_eq!(facts.minute_bars, alpaca.minute_bars);
+
+    let richer =
+        robinhood_facts(market()?, &robinhood_preflight("1100", Vec::new())?).map_err(text)?;
+    assert_eq!(
+        (
+            richer.account.buying_power,
+            richer.account.non_marginable_buying_power
+        ),
+        (usd("1000")?, usd("1000")?),
+        "a broker figure above the cash is clamped to the cash, in both buying power fields"
+    );
+    Ok(())
+}
+
+/// A flat Robinhood account passes the judge, and the gate reads it as a cash account under
+/// `legacy_pdt` with no prior-close equity and 1× buying power (DEC-933 item 1).
+#[test]
+fn the_gate_reads_a_robinhood_account_as_cash_under_legacy_pdt() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let robinhood =
+        robinhood_facts(market()?, &robinhood_preflight("900", Vec::new())?).map_err(text)?;
+    let paper = PaperFacts {
+        broker: robinhood,
+        liquidity: facts()?.liquidity,
+    };
+    load_contexts(&loaded, &paper, at(NOW)?, &agent()).map_err(text)?;
+    let template =
+        gate_template(&loaded, &paper, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
+    assert_eq!(template.account.account_type, AccountType::Cash);
+    assert_eq!(template.account.regime, DayTradeRegime::LegacyPdt);
+    assert_eq!(template.account.prior_close_equity, Usd::ZERO);
+    assert_eq!(template.account.equity, usd("1000")?);
+    assert_eq!(template.account.model_buying_power, usd("900")?);
+    assert!(!template.account.crypto_active);
+    Ok(())
+}
+
+/// A Robinhood quote of another instrument than the IEX quote is no quote of this run's.
+#[test]
+fn a_robinhood_quote_of_another_instrument_refuses_the_facts() -> Result<(), String> {
+    let mut robinhood = robinhood_preflight("900", Vec::new())?;
+    robinhood.quote.symbol = symbol("MSFT")?;
+    let refused = robinhood_facts(market()?, &robinhood);
+    assert!(
+        matches!(refused, Err(Cause::Absent { what }) if what == "the instrument's Robinhood quote"),
+        "{refused:?}"
     );
     Ok(())
 }

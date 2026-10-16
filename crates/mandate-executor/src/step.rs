@@ -180,7 +180,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Broker(Err(_)) => silence(batch),
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
-        Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one, None),
+        Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one, None).map(|_| ()),
         Input::BrokerUpdate(BrokerUpdate::Account(snapshot)) => account(batch, &snapshot),
         Input::BrokerUpdate(BrokerUpdate::Reject(refused)) => reject(batch, &refused),
         Input::BrokerSnapshot(snapshot) => {

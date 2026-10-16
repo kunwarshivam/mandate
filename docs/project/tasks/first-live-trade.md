@@ -311,6 +311,10 @@ sees its output during the run (`AGENTS.md` rule 8).
    founder checks the stop again periodically while the position is held and re-places it by
    hand if it lapsed (DEC-529 item 7).
 
+Steps 1 and 2 are scripted in `scripts/r0-rehearsal.sh`, which builds the rehearsal runner with
+`--features live,rh-sim,mandate-mcp/rh-sim`; its record on `main`, with each refusal and the line
+responsible, is [r0-rehearsal.md](r0-rehearsal.md).
+
 Step 4 is the first time real Robinhood answers are read: the response shapes are assumed until
 then. A refusal there for an unexpected shape is a finding for the connector, not something to
 work around.

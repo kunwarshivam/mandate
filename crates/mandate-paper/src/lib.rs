@@ -15,7 +15,7 @@
 //! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
 //! refusal, the control stream, the live door the connection record and the confirmed mandate
 //! choose (E7-26, [`chosen`](crate::chosen), [`account_stream`](crate::account_stream),
-//! [`unsupplied`](crate::unsupplied), DEC-918, DEC-919) and E19-11's phase 1 and the artifacts (DEC-505),
+//! [`lapse_read`](crate::lapse_read), [`unsupplied`](crate::unsupplied), DEC-918, DEC-919, DEC-933) and E19-11's phase 1 and the artifacts (DEC-505),
 //! before any credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
@@ -23,6 +23,7 @@
 //! registered rule set's interval (E1b, DEC-853 items 5 and 6, DEC-858). No product value is a
 //! constant here (FT-2).
 
+mod ask;
 mod connection;
 mod door;
 mod evidence;
@@ -42,17 +43,18 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AlpacaPaperHttp, Credentials, DataTransport, Pause, TokioPause, TradingTransport,
+    AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TokioPause, TradingTransport,
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
-use mandate_domain::Environment;
+use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
     ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
-use mandate_num::Price;
+use mandate_num::{Price, Usd};
+use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
@@ -64,6 +66,7 @@ use mandate_shell::paper::{
     Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
     load_contexts_with_clock, preflight,
 };
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{
     Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
@@ -72,21 +75,23 @@ use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
+pub use ask::{BrokerAsk, QuoteRead};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
-pub use door::{account_stream, chosen, unspent, unsupplied};
+pub use door::{account_stream, chosen, lapse_read, unspent, unsupplied};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
-pub use quote::{QuoteRefusal, cross_check};
+pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
-    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
-    session_cap, wait_for_the_grant, watch_may_end, watched,
+    CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
+    granted_opening, lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant,
+    watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -151,6 +156,13 @@ pub trait Session {
     /// # Errors
     /// [`Cause::Absent`] when the session cannot carry a cycle.
     fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+
+    /// Where the broker's own ask for the pinned instrument comes from: the quote an asked
+    /// opening's cross-check compares with the independent IEX ask before it leaves (DEC-529
+    /// item 12; DEC-940 item 4; DEC-945), taken before the cycle takes the session and asked at
+    /// the check. [`BrokerAsk::Absent`] when this session reads none — and then the cross-check
+    /// refuses the opening and nothing is sent (rule 3).
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk;
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
@@ -164,6 +176,11 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
 
     fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
         Ok(production_cycle(with_transport(sources, self), setup))
+    }
+
+    /// Alpaca's own quote is the IEX quote its data client read at the preflight.
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
+        BrokerAsk::Quoted(facts.quote.ask)
     }
 }
 
@@ -179,6 +196,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        symbols,
         transport: (),
     } = sources;
     Sources {
@@ -191,6 +209,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        symbols,
         transport,
     }
 }
@@ -273,7 +292,7 @@ pub enum PaperError {
     #[error(transparent)]
     Evidence(#[from] EvidenceRefusal),
     #[error(transparent)]
-    Shell(ShellError),
+    Shell(#[from] ShellError),
 }
 
 /// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
@@ -362,6 +381,37 @@ fn absent(stage: Stage, what: &'static str) -> PaperError {
     refused(stage)(Cause::Absent { what })
 }
 
+/// What an asked opening's cross-check reads (DEC-940 item 4; DEC-945 item 3): the pinned
+/// instrument's asset class and 20-day median dollar volume, which choose the collar's own `x`,
+/// where the broker's own ask is read at the check, the independent IEX quote the preflight
+/// read, and the age bound the broker's read is held to.
+struct Opening {
+    asset_class: AssetClass,
+    median_dollar_volume_20d: Usd,
+    broker_ask: BrokerAsk,
+    independent: LatestQuote,
+    quote_max_age: Duration,
+}
+
+impl Opening {
+    /// [`broker_cross_check`] over the registered collar's own members, at `pause`'s clock.
+    fn cross_check<P: Pause + ?Sized>(
+        &self,
+        collar: &CollarMembers,
+        pause: &P,
+    ) -> Result<(), PaperError> {
+        broker_cross_check(
+            collar,
+            self.asset_class,
+            Some(self.median_dollar_volume_20d),
+            &self.broker_ask,
+            &self.independent,
+            pause,
+            self.quote_max_age,
+        )
+    }
+}
+
 /// The run's clock as the binding gate reads it, immediately before submission.
 struct PortClock<P>(P);
 
@@ -400,7 +450,7 @@ pub fn run<P: Ports>(
         },
         live: LiveAdmission::refusing(),
     };
-    let connection = the_live_door(&records, &store, &facts.agent, args)?;
+    let connection = the_live_door(&records, &store, &facts.agent, args, None)?;
     if let Some(connection) = &connection {
         acknowledge(connection, args, ports)?;
     }
@@ -473,6 +523,17 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let ticker = InstrumentId::new(&instrument.symbol)
+        .map_err(|_| absent(Stage::Validate, "the pinned ticker"))?;
+    let asset_id = InstrumentId::new(instrument.asset_id.as_str())
+        .map_err(|_| absent(Stage::Validate, "the pinned asset id"))?;
+    let opening = Opening {
+        asset_class: instrument.asset_class,
+        median_dollar_volume_20d: liquidity.median_dollar_volume_20d,
+        broker_ask: session.broker_ask(&broker),
+        independent: broker.quote.clone(),
+        quote_max_age: artifacts.quote_max_age(),
+    };
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
@@ -480,6 +541,12 @@ pub fn run<P: Ports>(
     let registered = artifacts
         .production_configuration()
         .map_err(refused(Stage::Validate))?;
+    let collar = CollarMembers {
+        liquid_x: registered.gate.collar_liquid_x,
+        other_x: registered.gate.collar_other_x,
+        crypto_x: registered.gate.collar_crypto_x,
+        liquid_threshold_usd: registered.gate.collar_liquid_threshold_usd,
+    };
     let watch = Watch {
         pause: clock,
         bound: close_window_bound(now, registered.gate).map_err(refused(Stage::Validate))?,
@@ -502,13 +569,23 @@ pub fn run<P: Ports>(
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store)),
+        symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport: (),
     };
     let report = session
         .cycle(sources, setup)
         .map_err(refused(Stage::Reconcile))?
-        .run_observed_watched(observation, output, &watch)
-        .map_err(PaperError::Shell)?;
+        .run_observed_asked_watched(
+            observation,
+            output,
+            &watch,
+            |asked| {
+                granted_opening(asked, &watch.pause, watch.interval, || {
+                    opening.cross_check(&collar, &watch.pause)
+                })
+            },
+            &lt10_end,
+        )?;
     let evidence = wiring::reported(
         args.journal.as_deref(),
         args.place_one_order,
@@ -535,16 +612,14 @@ pub fn run<P: Ports>(
 /// the shell's).
 ///
 /// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
-/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The rows and the
-/// snapshot counts the check reads are the live arm's to hand — its journal read of the named
-/// stream and its preflight, neither of which any build runs yet (the `live` feature stays
-/// compile-only; the default build's `connector_not_built` stands in front of the live arm's
-/// read, DEC-910 item 3) — so the door holds no evidence and calls [`unsupplied`] (DEC-919),
-/// which refuses a live connection `lapse_evidence_not_supplied` rather than pass it on an empty
-/// read and zero counts. The live arm clears that refusal only by calling [`unspent`] with the
-/// rows its journal read returned and the counts its snapshot listed. In the default build the
-/// only connection to survive [`chosen`] is a paper one, and the lapse makes no check on it
-/// (LT-14), so today's paper path is unchanged.
+/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The lapse reads its
+/// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
+/// the named account stream, and the counts are the agentic account's own `snapshot`, which only
+/// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
+/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses
+/// `lapse_evidence_not_supplied` through [`unsupplied`] (DEC-919) rather than pass on an empty
+/// read; a paper connection makes no check and reads nothing, so the paper run is unchanged
+/// (LT-14).
 ///
 /// # Errors
 /// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
@@ -553,13 +628,14 @@ fn the_live_door(
     store: &dyn ArtifactSource,
     agent: &AgentId,
     args: &Args,
+    snapshot: Option<&AccountSnapshot>,
 ) -> Result<Option<Connection>, PaperError> {
     let Some(document) = deployed_document(records, store, agent) else {
         return Ok(None);
     };
     let connection = chosen(records, &document, &args.account_ref)?;
-    account_stream(&args.workspace, &args.account_ref)?;
-    unsupplied(&connection)?;
+    let stream = account_stream(&args.workspace, &args.account_ref)?;
+    lapse_read(&connection, args.journal.as_deref(), &stream, snapshot)?;
     Ok(Some(connection))
 }
 
@@ -729,6 +805,13 @@ impl Session for Connected {
         match self {
             Self::Alpaca(transport) => transport.cycle(sources, setup),
             Self::Robinhood(linked) => linked.cycle(sources, setup),
+        }
+    }
+
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
+        match self {
+            Self::Alpaca(transport) => transport.broker_ask(facts),
+            Self::Robinhood(linked) => linked.broker_ask(facts),
         }
     }
 }

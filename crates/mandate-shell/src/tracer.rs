@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_executor::{BrokerOutcome, BrokerRequest};
+use mandate_executor::{BrokerOutcome, BrokerRequest, ReconciliationVerdict};
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
@@ -100,7 +100,7 @@ pub fn run_observed_watched<P: Pause>(
     let admitted = admit(stages)?;
     let instrument = pinned(&admitted.view)?;
     let mut session = open_cycle(stages, setup, &admitted, Some(observation), output)?;
-    session.watch(&instrument, watch)?;
+    session.watch(&instrument, watch, &watch_may_end)?;
     Ok(session.report)
 }
 
@@ -143,6 +143,23 @@ fn open_cycle<'s>(
     observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Session<'s>, ShellError> {
+    match open_asking(stages, setup, admitted, observation, output)? {
+        (session, None) => Ok(session),
+        (_, Some(asked)) => Err(asked),
+    }
+}
+
+/// [`open_cycle`]'s cycle, handing back the session beside the classifier's refusal when the
+/// cycle asked (DEC-940 item 1): the ask's records are committed by then (the step's effects
+/// run before its refusal is reported), so the session can wait for the answer. Every other
+/// refusal stops the cycle as before.
+fn open_asking<'s>(
+    stages: &'s mut Stages,
+    setup: &'s Setup,
+    admitted: &'s Admitted,
+    observation: Option<Observation>,
+    output: mandate_runtime::ModelOutput,
+) -> Result<(Session<'s>, Option<ShellError>), ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
     let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
     session.start()?;
@@ -154,9 +171,26 @@ fn open_cycle<'s>(
         session.observe(observation)?;
     }
     session.tick_executor()?;
-    session.feed(Input::ModelOutput(output))?;
-    session.feed(Input::Tick(clock))?;
-    Ok(session)
+    let fed = session
+        .feed(Input::ModelOutput(output))
+        .and_then(|()| session.feed(Input::Tick(clock)));
+    match fed {
+        Ok(()) => Ok((session, None)),
+        Err(refusal) if asked(&refusal) => Ok((session, Some(refusal))),
+        Err(refusal) => Err(refusal),
+    }
+}
+
+/// Whether `refusal` is the classifier's `ask`, the one refusal after which the cycle's request
+/// is committed and waits for the owner's answer (mandate spec §6.4; DEC-940 item 1).
+fn asked(refusal: &ShellError) -> bool {
+    matches!(
+        refusal,
+        ShellError::Refused {
+            stage: Stage::Classify,
+            cause: Cause::NotAuto { autonomy: "ask" },
+        }
+    )
 }
 
 /// One production deployment cycle. Its assembled stages and setup are private, so callers can
@@ -214,6 +248,188 @@ impl ProductionCycle {
     }
 }
 
+/// One wake's read of the two streams an asked cycle's wait folds (DEC-920 item 1; DEC-940): the
+/// journal's own `ORDER BY seq` read of the agent stream the run appends to, where the runtime's
+/// `ApprovalResponded` and `ApprovalRevalidated` land, and of the workspace control stream, where
+/// the owner's answers land, both taken after the wake handed the runtime its answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Wake {
+    /// The agent stream's rows.
+    pub agent: Vec<StoredEvent>,
+    /// The workspace control stream's rows.
+    pub control: Vec<StoredEvent>,
+}
+
+/// The open session of a cycle that asked (G1b, DEC-940), as the runner's grant wait drives it:
+/// the session stays the shell's (DEC-475), and the runner reads, wakes and releases through
+/// these three calls only.
+pub trait AskedCycle {
+    /// The agent stream's rows as the journal reads them now: the ask the cycle journaled is the
+    /// youngest `ApprovalRequested` among them (DEC-914 item 1).
+    ///
+    /// # Errors
+    /// The journal's refusal.
+    fn agent_rows(&mut self) -> Result<Vec<StoredEvent>, ShellError>;
+
+    /// One wake at `now`: the control stream tailed whole and handed to the runtime as its
+    /// owner input, then the risk clock ticked to `now`, then both streams read back. An opening
+    /// the runtime releases is held, never sent, until [`AskedCycle::submit`].
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a stop after which nothing is sent.
+    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError>;
+
+    /// Sends the one opening the runtime released and the wait let leave.
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a stop; with no held opening, nothing is sent.
+    fn submit(&mut self) -> Result<(), ShellError>;
+}
+
+/// The watch's end question an asked run's caller hands in (LT-10, DEC-914 items 4 and 5,
+/// DEC-940): over the wake's broker read, the executor's uncovered answer, the report's alert
+/// keys, the wake's clock and the watch's bound, `Ok(true)` ends the run, `Ok(false)` reads on,
+/// and an error stops it, as [`watch_may_end`] answers.
+pub type MayEnd<'e> =
+    &'e dyn Fn(Option<&str>, bool, &[&'static str], UtcNanos, UtcNanos) -> Result<bool, ShellError>;
+
+impl ProductionCycle {
+    /// [`ProductionCycle::run_observed_watched`] for a run that may ask (G1b, DEC-940). A cycle
+    /// that never asks is exactly that run: `wait` is never called and the watch asks the
+    /// shell's own [`watch_may_end`]. A cycle that asks keeps its session open: a dry run stops
+    /// at the ask as before, because it appends to no journal an answer could reach; a placing
+    /// run hands the session to `wait` as an [`AskedCycle`], whose every wake hands the control
+    /// stream's answers to the runtime and reads both streams back, and whose opening the
+    /// runtime releases is held until `wait` submits it — so nothing is sent before the
+    /// runner's own release, and a `wait` that stops, or returns with the opening still held,
+    /// sends nothing (`AGENTS.md` rule 3). Only a risk-adding submission is held: an exit or a
+    /// protective order is sent as it always was (rule 13). After the submit the watch ends
+    /// through `may_end`, the caller's LT-10 question (DEC-914 items 4 and 5).
+    ///
+    /// # Errors
+    /// Every error is a stop after which nothing further is sent.
+    pub fn run_observed_asked_watched<P, E, W>(
+        &mut self,
+        observation: Observation,
+        output: mandate_runtime::ModelOutput,
+        watch: &Watch<P>,
+        wait: W,
+        may_end: MayEnd<'_>,
+    ) -> Result<Report, E>
+    where
+        P: Pause,
+        E: From<ShellError>,
+        W: FnOnce(&mut dyn AskedCycle) -> Result<(), E>,
+    {
+        let admitted = admit(&mut self.stages)?;
+        let instrument = pinned(&admitted.view)?;
+        let (mut session, asked) = open_asking(
+            &mut self.stages,
+            &self.setup,
+            &admitted,
+            Some(observation),
+            output,
+        )?;
+        let Some(asked) = asked else {
+            session.watch(&instrument, watch, &watch_may_end)?;
+            return Ok(session.report);
+        };
+        if !self.setup.place_one_order {
+            return Err(E::from(asked));
+        }
+        session.holding = true;
+        wait(&mut session)?;
+        session.holding = false;
+        if session.held.is_some() {
+            return Err(E::from(nothing_released()));
+        }
+        session.watch(&instrument, watch, may_end)?;
+        Ok(session.report)
+    }
+}
+
+/// What the broker door does with a submission while an asked cycle's wait may hold one
+/// (DEC-940 item 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Door {
+    /// Not held: the door's own one-order rule decides as it always did.
+    Pass,
+    /// A risk-adding submission while the wait holds: kept until [`AskedCycle::submit`].
+    Hold,
+    /// A second risk-adding submission while the wait holds, after one already held or sent:
+    /// refused, nothing sent (FT-1).
+    Second,
+}
+
+/// The broker door's hold (DEC-940 item 2): only while `holding`, and only a `purpose` that adds
+/// risk. An exit, a protective order or a flatten always passes (`AGENTS.md` rule 13).
+pub(crate) fn door(
+    holding: bool,
+    held: bool,
+    submitted: bool,
+    purpose: mandate_executor::Purpose,
+) -> Door {
+    if !(holding && purpose.adds_risk()) {
+        return Door::Pass;
+    }
+    if held || submitted {
+        return Door::Second;
+    }
+    Door::Hold
+}
+
+/// The stop of a held opening the wait never released, and of a submit with none held
+/// (DEC-940 item 2): nothing is sent.
+fn nothing_released() -> ShellError {
+    ShellError::Refused {
+        stage: Stage::Executor,
+        cause: Cause::Absent {
+            what: "the held opening the grant wait released",
+        },
+    }
+}
+
+impl AskedCycle for Session<'_> {
+    fn agent_rows(&mut self) -> Result<Vec<StoredEvent>, ShellError> {
+        self.stages
+            .journal
+            .read(&self.agent_stream)
+            .map_err(refused(Stage::Journal))
+    }
+
+    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
+        self.event_time = now;
+        let stream = control_stream(&self.setup.deployment.workspace.0);
+        let control = self
+            .stages
+            .journal
+            .read(&stream)
+            .map_err(refused(Stage::Journal))?;
+        for event in tailed(&control)? {
+            self.feed_asked(Input::Journal(event))?;
+        }
+        self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
+        Ok(Wake {
+            agent: self.agent_rows()?,
+            control,
+        })
+    }
+
+    fn submit(&mut self) -> Result<(), ShellError> {
+        let order = self.held.take().ok_or_else(nothing_released)?;
+        self.holding = false;
+        if let Some(answer) = self.broker(&BrokerRequest::Submit(order))? {
+            let effects = self
+                .stages
+                .executor
+                .step(answer)
+                .map_err(refused(Stage::Executor))?;
+            self.perform_executor(effects)?;
+        }
+        Ok(())
+    }
+}
+
 /// The one instrument the mandate pins. The tracer trades exactly one (DEC-138).
 fn pinned(view: &MandateView) -> Result<InstrumentId, ShellError> {
     let mut universe = view.working_universe.iter();
@@ -241,6 +457,10 @@ pub(crate) struct Session<'s> {
     submitted_drafts: BTreeSet<String>,
     /// Whether the replayed agent stream already carries an intent (TI-12).
     pub(crate) cycle_open: bool,
+    /// Whether an asked cycle's wait holds its released opening (DEC-940 item 2).
+    holding: bool,
+    /// The risk-adding submission held while `holding`, sent only by [`AskedCycle::submit`].
+    held: Option<mandate_executor::SubmitOrder>,
     pub(crate) report: Report,
     /// The time every record this session appends carries: the run's clock, then each wake's
     /// during a watch (DEC-858 item 3).
@@ -273,6 +493,8 @@ impl<'s> Session<'s> {
             recorded: BTreeSet::new(),
             submitted_drafts: BTreeSet::new(),
             cycle_open: false,
+            holding: false,
+            held: None,
             report: Report::default(),
             event_time: setup.now,
         };
@@ -478,10 +700,29 @@ impl<'s> Session<'s> {
             ))
             .map_err(refused(Stage::Executor))?;
         let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
+        let (verdict, more) = self.reconcile_once(&reconciliation_requests)?;
+        let later = self.settle(more)?;
+        if verdict == ReconciliationVerdict::Mismatch
+            || later.contains(&ReconciliationVerdict::Mismatch)
+        {
+            self.report.alerts.push("reconciliation_mismatch");
+            return Err(ShellError::ReconciliationMismatch);
+        }
+        Ok(())
+    }
+
+    /// One reconciliation over `requests` (trading spec §11): the snapshot gathered through the
+    /// run's connector, its account report stepped and performed first, then the reconciler's
+    /// effects performed, gathering any reconciliation they ask for rather than sending its reads
+    /// one by one. Answers the verdict and the requests of the reconciliation asked for next.
+    fn reconcile_once(
+        &mut self,
+        requests: &[BrokerRequest],
+    ) -> Result<(ReconciliationVerdict, Vec<BrokerRequest>), ShellError> {
         let snapshot = self
             .stages
             .reconciler
-            .snapshot(&mut *self.stages.connector, &reconciliation_requests)
+            .snapshot(&mut *self.stages.connector, requests)
             .map_err(refused(Stage::Reconcile))?;
         let account_effects = self
             .stages
@@ -496,15 +737,32 @@ impl<'s> Session<'s> {
             .reconciler
             .reconcile(&snapshot)
             .map_err(refused(Stage::Reconcile))?;
-        self.perform_executor(reconciled.effects)?;
-        match reconciled.verdict {
-            mandate_executor::ReconciliationVerdict::Clean
-            | mandate_executor::ReconciliationVerdict::Adopted => Ok(()),
-            mandate_executor::ReconciliationVerdict::Mismatch => {
-                self.report.alerts.push("reconciliation_mismatch");
-                Err(ShellError::ReconciliationMismatch)
+        let next = self.prepare_reconciliation(reconciled.effects)?;
+        Ok((reconciled.verdict, next))
+    }
+
+    /// Reconciles while a reconciliation asks for another, as a `LateFillApplied` it ingested
+    /// does (trading spec §5.7, the executor's reconciliation step 2): each is gathered and run
+    /// as the first was (DEC-858 item 3, DEC-938 item 5), never stepped answer by answer. A fill
+    /// is ingested once, so the reconciliation after a late fill asks for none; one still asking
+    /// after [`RECONCILIATION_ROUNDS`] rounds stops the run at Reconcile, so a broker that keeps
+    /// reporting new fills can never hold the run in a loop. Answers each round's verdict.
+    fn settle(
+        &mut self,
+        mut requests: Vec<BrokerRequest>,
+    ) -> Result<Vec<ReconciliationVerdict>, ShellError> {
+        let mut verdicts = Vec::new();
+        while !requests.is_empty() {
+            if verdicts.len() >= RECONCILIATION_ROUNDS {
+                return Err(refused(Stage::Reconcile)(Cause::Absent {
+                    what: "a reconciliation that settles",
+                }));
             }
+            let (verdict, next) = self.reconcile_once(&requests)?;
+            verdicts.push(verdict);
+            requests = next;
         }
+        Ok(verdicts)
     }
 
     /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
@@ -524,6 +782,7 @@ impl<'s> Session<'s> {
         &mut self,
         instrument: &InstrumentId,
         watch: &Watch<P>,
+        end: MayEnd<'_>,
     ) -> Result<(), ShellError> {
         let Some(entry) = self.report.submitted.first() else {
             return Ok(());
@@ -544,7 +803,7 @@ impl<'s> Session<'s> {
         loop {
             runtime.block_on(watch.pause.pause(watch.interval));
             let now = watch.pause.now();
-            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound)? {
+            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound, end)? {
                 return Ok(());
             }
             self.event_time = now;
@@ -581,7 +840,7 @@ impl<'s> Session<'s> {
             self.step_watched(mandate_executor::Input::Tick(
                 mandate_executor::RiskClock::from_secs(now.secs()),
             ))?;
-            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound)? {
+            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound, end)? {
                 return Ok(());
             }
         }
@@ -599,13 +858,14 @@ impl<'s> Session<'s> {
         read: Option<&str>,
         now: UtcNanos,
         bound: UtcNanos,
+        end: MayEnd<'_>,
     ) -> Result<bool, ShellError> {
         let covered = self
             .stages
             .executor
             .protected(instrument)
             .map_err(refused(Stage::Executor))?;
-        watch_may_end(read, !covered, &self.report.alerts, now, bound)
+        end(read, !covered, &self.report.alerts, now, bound)
     }
 
     /// One executor step during the watch and everything it asks for. A reconciliation it asks
@@ -618,28 +878,7 @@ impl<'s> Session<'s> {
             .step(input)
             .map_err(refused(Stage::Executor))?;
         let requests = self.prepare_reconciliation(effects)?;
-        if requests.is_empty() {
-            return Ok(());
-        }
-        let snapshot = self
-            .stages
-            .reconciler
-            .snapshot(&mut *self.stages.connector, &requests)
-            .map_err(refused(Stage::Reconcile))?;
-        let account = self
-            .stages
-            .executor
-            .step(mandate_executor::Input::BrokerUpdate(
-                mandate_executor::BrokerUpdate::Account(snapshot.account.clone()),
-            ))
-            .map_err(refused(Stage::Executor))?;
-        self.perform_executor(account)?;
-        let reconciled = self
-            .stages
-            .reconciler
-            .reconcile(&snapshot)
-            .map_err(refused(Stage::Reconcile))?;
-        self.perform_executor(reconciled.effects)
+        self.settle(requests).map(|_| ())
     }
 
     /// Runs `effects` and everything they lead to, gathering the reconciliation reads they ask
@@ -698,6 +937,18 @@ impl<'s> Session<'s> {
         match refusal {
             Some(refusal) => Err(refusal),
             None => Ok(()),
+        }
+    }
+
+    /// [`Session::feed`] during an asked cycle's wait (DEC-940 item 3): the classifier's `ask`
+    /// is the request's own classification — re-validation re-classifies the bound order, and
+    /// an `ask` by the same trigger is what the grant answered — so it stops nothing here; the
+    /// runtime's own `ApprovalRevalidated` decides, and the runner's fold reads it. Every other
+    /// refusal stops the wait.
+    fn feed_asked(&mut self, input: Input) -> Result<(), ShellError> {
+        match self.feed(input) {
+            Err(refusal) if asked(&refusal) => Ok(()),
+            fed => fed,
         }
     }
 
@@ -825,6 +1076,19 @@ impl<'s> Session<'s> {
             if !self.setup.place_one_order {
                 self.report.would_place = Some(order.clone());
                 return Ok(None);
+            }
+            match door(
+                self.holding,
+                self.held.is_some(),
+                !self.report.submitted.is_empty(),
+                order.purpose,
+            ) {
+                Door::Second => return Err(ShellError::SecondSubmission),
+                Door::Hold => {
+                    self.held = Some(order.clone());
+                    return Ok(None);
+                }
+                Door::Pass => {}
             }
             if !self.report.submitted.is_empty() {
                 return Err(ShellError::SecondSubmission);
@@ -1073,6 +1337,10 @@ mod tests {
 /// needed 5).
 const TRACER_ACTOR: ActorKind = ActorKind::System;
 
+/// The most reconciliations one [`Session::settle`] runs: the one asked for, and the one a late
+/// fill it ingested asks for (DEC-938 item 5).
+const RECONCILIATION_ROUNDS: usize = 2;
+
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from
 /// anything the shell remembers, so what is folded is what was committed.
 fn body_of(row: &StoredEvent) -> Result<(Value, Option<String>), ShellError> {
@@ -1125,16 +1393,26 @@ impl OrderPlan for Bridge<'_> {
         proposal
     }
 
+    /// Mandate spec §6.2's classification of a proposal the classifier answered. A classifier that
+    /// cannot answer leaves no classification and so no decider, and a `DecisionMade` that the dry
+    /// run allowed names its decider (journal spec §9.1 rule 5) from a closed set with no label
+    /// for that: like [`FlattenPlanner::plan`]'s, the refusal poisons the step, which
+    /// [`Session::step`] reads before it performs a single effect, so nothing of the step is
+    /// journaled or sent and the run stops at Classify (DEC-938 item 4). The fail-safe `deny`
+    /// handed back is never acted on.
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         let answer = self.classifier.classify(view, proposal);
         let (classified, cause) = match answer {
-            Err(cause) => (
-                Classified {
+            Err(cause) => {
+                self.findings.borrow_mut().poison = Some(ShellError::Refused {
+                    stage: Stage::Classify,
+                    cause,
+                });
+                return Classified {
                     autonomy: Autonomy::Deny,
                     decided_by: None,
-                },
-                Some(cause),
-            ),
+                };
+            }
             Ok(classified) if classified.autonomy == Autonomy::Auto => (classified, None),
             Ok(classified) => {
                 let cause = Cause::NotAuto {
