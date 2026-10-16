@@ -33,10 +33,12 @@
   and nothing else: no V-rule, no live-environment stop, every failure falling through to the
   fold's own refusal, so the door never answers where the shell refuses and only ever adds a
   refusal in front of the shell's), then `account_stream` (ungated by the placing flag), then
-  `unspent` before anything runs — carrying the empty rows and counts of a live arm no build
-  runs (the feature stays compile-only; the default build's `connector_not_built` stands in
-  front of it, DEC-910 item 3) until the live arm's row hands the journal's own rows and the
-  snapshot's own counts. The four run-level probes beside them live in `crates/mandate-paper/src/tests.rs`
+  the lapse before anything runs through `lapse_read` (DEC-933 item 3: for a live connection,
+  `Held` counted from the agentic account's own `mandate_robinhood::AccountSnapshot` and the
+  rows read from the run's own journal, none for a journalless run; a live connection with no
+  snapshot, or whose account stream cannot be read, refuses at the reconcile stage; a paper
+  connection reads nothing). `run()` hands no snapshot until the runner's ports connect the
+  Robinhood connector (DEC-928 item 5), so a live connection refuses at the door until then. The four run-level probes beside them live in `crates/mandate-paper/src/tests.rs`
   (the DEC-77 amendment's in-module slot): the revoked record, the live deployment, the
   foreign-account record and the fail-closed naming, each refusing through the door ahead of
   the fold and of every credential read (`run::every_refusal_before_the_credentials_reads_none`'s
@@ -53,7 +55,12 @@
   `a_stream_the_journal_cannot_form_refuses_the_run`,
   `a_fill_on_the_runs_own_account_stream_spends_the_record_through_the_door`,
   `the_flat_half_refuses_ahead_of_the_spend_with_the_snapshots_own_counts`, and
-  `a_paper_connection_makes_no_lapse_check_through_the_door` — pinning V-001's paper default
+  `a_paper_connection_makes_no_lapse_check_through_the_door`, and DEC-933's
+  `the_lapse_counts_the_agentic_accounts_own_snapshot`,
+  `a_flat_snapshot_of_a_journalless_run_starts`,
+  `an_unreadable_account_stream_refuses_the_live_run`,
+  `a_live_connection_with_no_snapshot_refuses` and
+  `a_paper_connection_reads_nothing_for_the_lapse` — pinning V-001's paper default
   and LT-14 (the run's own account stream carried, no flat or spent check on a paper
   connection, whatever it holds), the exact refusal the run's report holds where the shell
   would answer a V-rule or `live` (the revoked paper record, the record binding another
