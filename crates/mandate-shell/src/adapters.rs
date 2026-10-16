@@ -87,6 +87,7 @@ use crate::stages::{
     Admitted, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
     MandateSource, Protection, Reconciler, Sink, Sizing, Stages,
 };
+use crate::symbols::{BrokerSymbols, Platform};
 
 /// `mandate_risk::agent_flatten`, probed once against a synthetic request before anything starts
 /// and, mid-run, planned over a fold of the journal taken at request time (DEC-449): the
@@ -2079,6 +2080,9 @@ pub struct Sources<T> {
     /// it commits the record, so `None`, or a store missing either object, stops a governed run
     /// at its first version-2 append, before any intent (journal spec §5.1, §11 check 6).
     pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// The broker's ticker for each instrument the run registered, so the connector's answers
+    /// name it by the asset id the executor sent (DEC-938 item 1). Empty maps nothing.
+    pub symbols: BrokerSymbols,
     pub transport: T,
 }
 
@@ -2094,6 +2098,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         executor,
         run,
         artifacts,
+        symbols,
         transport,
     } = sources;
     over(Sources {
@@ -2106,6 +2111,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         executor,
         run,
         artifacts,
+        symbols,
         transport: Box::new(AlpacaConnector { transport }),
     })
 }
@@ -2125,6 +2131,7 @@ pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<
         executor,
         run,
         artifacts,
+        symbols,
         transport: bridge,
     } = sources;
     let connector: Box<dyn Connector> = Box::new(RobinhoodShellConnector::new(Rc::clone(&bridge)));
@@ -2139,6 +2146,7 @@ pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<
             executor,
             run,
             artifacts,
+            symbols,
             transport: connector,
         },
         |reconciler| Box::new(RobinhoodReconciler::new(bridge, reconciler)),
@@ -2199,7 +2207,10 @@ fn assembled(
             agent: sources.agent,
         }),
         executor: Box::new(executor),
-        connector: sources.transport,
+        connector: Box::new(Platform {
+            inner: sources.transport,
+            symbols: sources.symbols,
+        }),
         artifacts: sources.artifacts,
     }
 }

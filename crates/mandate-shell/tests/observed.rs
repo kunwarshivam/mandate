@@ -23,6 +23,7 @@ use mandate_runtime::{ModelOutput, Observation};
 use mandate_shell::adapters::{Sources, production};
 use mandate_shell::paper::load_contexts;
 use mandate_shell::stages::Stages;
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Report, Setup, ShellError, production_cycle, run_observed};
 use mandate_spec::validate::RegisteredModel;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
@@ -206,6 +207,7 @@ fn sources(now: &str, store: Option<Store>) -> (Sources<Broker>, Setup, Rc<Cell<
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: store.map(|store| Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        symbols: BrokerSymbols::default(),
         transport: broker,
     };
     let setup = Setup {

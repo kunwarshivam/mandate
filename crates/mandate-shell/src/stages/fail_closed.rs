@@ -29,9 +29,12 @@ use super::doubles::{
     PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, account_stream,
     agent_stream, equities_only, instrument, output, passed_checks, setup, stub,
 };
-use super::{Connector, Executor, ExitPath, JournalWriter, MandateSource, Protection, Stage};
+use super::{
+    Connector, Executor, ExitPath, JournalWriter, MandateSource, Protection, Reconciler, Stage,
+};
 use crate::adapters::{Disconnected, Sources, over};
 use crate::error::{Cause, ShellError};
+use crate::symbols::BrokerSymbols;
 use crate::tracer::{ProductionCycle, Report, Session, run_observed};
 
 /// Runs one production cycle over `world`'s ledger with `stages`, handing the cycle the host's
@@ -356,6 +359,7 @@ fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
         executor: None,
         run: None,
         artifacts: None,
+        symbols: BrokerSymbols::default(),
         transport: Box::new(Disconnected),
     });
     let error = refusal(run_with(stages)?)?;
@@ -750,6 +754,109 @@ fn reconcile_mismatch_pauses() -> Result<(), String> {
     Ok(())
 }
 
+/// A reconciler whose first `asks` reconciliations each ask for another, as one that ingested a
+/// late fill does, and whose round `n` is clean unless `mismatched` names it.
+struct AsksAgain {
+    inner: FixedReconciler,
+    asks: usize,
+    mismatched: Option<usize>,
+    rounds: Rc<RefCell<usize>>,
+}
+
+impl Reconciler for AsksAgain {
+    fn snapshot(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause> {
+        self.inner.snapshot(connector, requests)
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &mandate_executor::BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let round = *self.rounds.borrow();
+        *self.rounds.borrow_mut() = round.saturating_add(1);
+        self.inner.clean = self.mismatched != Some(round);
+        let mut reconciled = self.inner.reconcile(snapshot)?;
+        if round < self.asks {
+            let since = mandate_executor::ActivityCursor(String::new());
+            reconciled.effects.extend(
+                [
+                    BrokerRequest::ListOpenOrders,
+                    BrokerRequest::ListPositions,
+                    BrokerRequest::GetAccount,
+                    BrokerRequest::ListActivities { since },
+                ]
+                .map(mandate_executor::Effect::Broker),
+            );
+        }
+        Ok(reconciled)
+    }
+}
+
+/// The run over `world` with [`AsksAgain`] in the reconciler's place, and the rounds it ran.
+fn asking(
+    world: &World,
+    asks: usize,
+    mismatched: Option<usize>,
+) -> Result<(Result<Report, ShellError>, usize), String> {
+    let rounds = Rc::new(RefCell::new(0));
+    let mut stages = world.stages();
+    stages.reconciler = Box::new(AsksAgain {
+        inner: FixedReconciler {
+            world: world.clone(),
+            clean: true,
+        },
+        asks,
+        mismatched,
+        rounds: rounds.clone(),
+    });
+    let outcome = run_with(stages)?;
+    let ran = *rounds.borrow();
+    Ok((outcome, ran))
+}
+
+/// #1355, trading spec §5.7, DEC-938 item 5: a reconciliation that ingested a late fill asks for
+/// another, which the run gathers and reconciles as it did the first, never stepping its reads
+/// one by one; the startup settles once the reconciliation asks for no more, up to the first and
+/// two more, and stops at Reconcile with nothing sent when one still asks after that.
+#[test]
+fn a_reconciliation_asked_for_by_a_reconciliation_is_run_too() -> Result<(), String> {
+    for asks in 0..=2 {
+        let world = World::default();
+        let (outcome, ran) = asking(&world, asks, None)?;
+        let report = outcome.map_err(|e| format!("{asks}: {e}"))?;
+        assert_eq!(ran, asks + 1, "each asked-for reconciliation runs once");
+        assert_eq!(report.submitted.len(), 1, "{asks}: the run goes on");
+    }
+    let world = World::default();
+    let (outcome, ran) = asking(&world, 3, None)?;
+    let error = refusal(outcome)?;
+    assert_eq!(ran, 3, "no reconciliation past the bound");
+    assert_eq!(error.stage(), Some(Stage::Reconcile), "{error}");
+    assert!(
+        error.to_string().contains("a reconciliation that settles"),
+        "{error}"
+    );
+    assert_eq!(world.tally.borrow().submissions, 0);
+    Ok(())
+}
+
+/// A mismatch in a reconciliation the first asked for pauses and alerts as the first's would.
+#[test]
+fn a_mismatch_in_an_asked_for_reconciliation_stops_the_startup() -> Result<(), String> {
+    for round in 0..=1 {
+        let world = World::default();
+        let (outcome, _) = asking(&world, 1, Some(round))?;
+        let error = refusal(outcome)?;
+        assert_eq!(error.code(), "reconciliation_mismatch", "round {round}");
+        assert_eq!(world.tally.borrow().submissions, 0);
+    }
+    Ok(())
+}
+
 /// TI-6, TI-12, PB-3, PB-16: a second run over the same journal replays it, restarts, reconciles,
 /// and refuses a new cycle; across both runs there is exactly one submission and one intent.
 #[test]
@@ -845,6 +952,28 @@ fn ask_journals_the_decision_and_sends_nothing() -> Result<(), String> {
     let ledger = world.ledger.borrow();
     assert_eq!(ledger.count("DecisionMade"), 1);
     assert_eq!(ledger.count("ApprovalRequested"), 1);
+    assert_eq!(ledger.count("IntentProposed"), 0);
+    assert_eq!(world.tally.borrow().submissions, 0);
+    Ok(())
+}
+
+/// #1355's second defect, journal spec §9.1 rule 5 and DEC-938: a classifier that cannot answer
+/// leaves no classification and so no decider, so the step journals no `DecisionMade` (whose
+/// `deny` would need a non-null `decided_by` the spec has no label for) and the run stops at
+/// Classify, never as the journal's refusal of an unlabelled deny.
+#[test]
+fn a_classifier_refusal_journals_no_unlabelled_deny() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stub(&mut stages, Stage::Classify, &world);
+    let error = refusal(run_with(stages)?)?;
+    assert_eq!(error.stage(), Some(Stage::Classify), "{error}");
+    let ledger = world.ledger.borrow();
+    assert_eq!(
+        ledger.count("DecisionMade"),
+        0,
+        "no decision without its decider"
+    );
     assert_eq!(ledger.count("IntentProposed"), 0);
     assert_eq!(world.tally.borrow().submissions, 0);
     Ok(())

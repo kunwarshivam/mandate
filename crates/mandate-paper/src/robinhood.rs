@@ -21,14 +21,13 @@ use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, Tools, TransportConfig,
 };
-use mandate_num::Price;
 use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts, market_facts, robinhood_facts};
 use mandate_shell::robinhood::RobinhoodBridge;
 use mandate_shell::{Cause, ProductionCycle, Setup, robinhood_production_cycle};
 
-use crate::{PaperError, Session};
+use crate::{BrokerAsk, PaperError, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
 /// a Robinhood host is written, and only the runner's `live` feature without `rh-sim` compiles
@@ -344,10 +343,10 @@ impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session fo
         ))
     }
 
-    /// No Robinhood quote is read here, so an asked opening's cross-check has no broker ask and
-    /// refuses (DEC-940 item 4); the broker's ask is #1373's (DEC-945).
-    fn broker_ask(&self, _facts: &BrokerFacts) -> Option<Price> {
-        None
+    /// Robinhood's own ask, read through this session's bridge at the check (DEC-945 items 1
+    /// and 4), never the preflight's quote.
+    fn broker_ask(&self, _facts: &BrokerFacts) -> BrokerAsk {
+        BrokerAsk::robinhood(Rc::clone(&self.bridge))
     }
 
     /// The bridge's read of the agentic account (DEC-947 item 1).
@@ -371,6 +370,7 @@ fn with_bridge<T>(
         executor,
         run,
         artifacts,
+        symbols,
         transport: (),
     } = sources;
     Sources {
@@ -383,6 +383,7 @@ fn with_bridge<T>(
         executor,
         run,
         artifacts,
+        symbols,
         transport: bridge,
     }
 }

@@ -366,7 +366,9 @@ impl ShadowLedger {
                     if !ledger.applied.insert(fill.to_owned()) {
                         continue;
                     }
-                    let Some(name) = field(draft, "instrument") else {
+                    let Some(name) =
+                        field(draft, "instrument_id").or_else(|| field(draft, "instrument"))
+                    else {
                         continue;
                     };
                     let quantity = field(draft, "qty_gross").and_then(units).unwrap_or(0);

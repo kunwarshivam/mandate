@@ -393,7 +393,11 @@ fn a_dial_is_the_builds_endpoint_and_the_founders_account_number() {
     };
     assert_eq!(dialed.endpoint, expected);
     assert_eq!(dialed.account_number(), "RHSIM00000001");
-    assert!(!format!("{dialed:?}").contains("RHSIM"), "{dialed:?}");
+    assert_eq!(
+        format!("{dialed:?}"),
+        "Dial { .. }",
+        "the number is never printed"
+    );
     let number = vars(&[(ACCOUNT_NUMBER_VAR, "RHSIM00000001")]);
     assert_eq!(
         dial(Build::Rehearsal, &number).err(),

@@ -26,12 +26,17 @@ use mandate_journal::ArtifactStore;
 use mandate_shell::control::{ControlRecord, DeploymentRefusal};
 use mandate_shell::{Cause, ShellError, Stage};
 
+use std::time::Duration;
+
+use mandate_accounting::InstrumentId;
+use mandate_alpaca::{Feed, LatestQuote};
 use mandate_domain::AssetClass;
-use mandate_num::{Fraction, Price, Usd};
+use mandate_num::{Fraction, Price, Qty, Usd};
+use mandate_robinhood::Quote;
 
 use crate::{
-    Args, CollarMembers, Connection, ConnectionRefusal, Dial, Opening, PaperError, Ports,
-    QuoteRefusal, SystemClock, run,
+    Args, BrokerAsk, CollarMembers, Connection, ConnectionRefusal, Dial, Opening, PaperError,
+    Ports, QuoteRefusal, SystemClock, run,
 };
 
 /// The paper mandate fixture the suite derives its deployed document from
@@ -312,9 +317,26 @@ fn an_unformable_workspace_refuses_a_dry_run_before_anything_runs() -> Result<()
     Ok(())
 }
 
-/// DEC-940 item 4: the asked opening's cross-check is the collar's own over the preflight's two
-/// asks — agreeing asks pass, asks beyond the collar refuse, and a session with no broker ask
-/// refuses as a missing quote, so nothing leaves on a check that was not made (rule 3).
+/// A clock whose every read is a nanosecond after the last, from `T0`.
+struct Ticking(Cell<u32>);
+
+impl mandate_alpaca::Pause for Ticking {
+    fn now(&self) -> mandate_time::UtcNanos {
+        let nanos = self.0.get();
+        self.0.set(nanos.saturating_add(1));
+        mandate_time::UtcNanos::from_parts(1_792_162_800, nanos)
+            .unwrap_or(mandate_time::UtcNanos::EPOCH)
+    }
+
+    async fn pause(&self, _duration: std::time::Duration) {}
+}
+
+/// DEC-940 item 4 and DEC-945 item 3: the asked opening's cross-check is the collar's own over
+/// the broker's ask, read at the check for the preflight IEX quote's instrument and held to the
+/// opening's own quote age bound, and the IEX ask — agreeing asks pass, asks beyond the collar
+/// refuse, a session with no broker ask refuses as a missing quote, a quote of another
+/// instrument is missing too, and a read older than the bound is stale, so nothing leaves on a
+/// check that was not made (rule 3).
 #[test]
 fn the_asked_openings_cross_check_reads_both_asks_within_the_collar() -> Result<(), String> {
     let parse = |text: &str| Price::parse(text).map_err(|error| error.to_string());
@@ -324,25 +346,65 @@ fn the_asked_openings_cross_check_reads_both_asks_within_the_collar() -> Result<
         crypto_x: Fraction::parse("0.02").map_err(|error| error.to_string())?,
         liquid_threshold_usd: Usd::parse("50000000").map_err(|error| error.to_string())?,
     };
-    let opening = |broker_ask: Option<Price>| -> Result<Opening, String> {
+    let spy = InstrumentId::new("SPY").map_err(|error| format!("{error:?}"))?;
+    let independent = LatestQuote {
+        instrument: spy.clone(),
+        at: mandate_time::UtcNanos::EPOCH,
+        bid: parse("99")?,
+        bid_size: Qty::parse("1").map_err(|error| error.to_string())?,
+        ask: parse("100")?,
+        ask_size: Qty::parse("1").map_err(|error| error.to_string())?,
+        feed: Feed::Iex,
+        clock_skew: None,
+    };
+    let opening = |broker_ask: BrokerAsk, quote_max_age: Duration| -> Result<Opening, String> {
         Ok(Opening {
             asset_class: AssetClass::UsEquity,
             median_dollar_volume_20d: Usd::parse("60000000").map_err(|error| error.to_string())?,
             broker_ask,
-            independent_ask: parse("100")?,
+            independent: independent.clone(),
+            quote_max_age,
         })
     };
+    let read = |symbol: &str, ask: &str| -> Result<BrokerAsk, String> {
+        let quote = Quote {
+            symbol: InstrumentId::new(symbol).map_err(|error| format!("{error:?}"))?,
+            bid: parse("1")?,
+            ask: parse(ask)?,
+        };
+        Ok(BrokerAsk::Read(Box::new(move |asked: &InstrumentId| {
+            (asked == &quote.symbol).then(|| quote.clone())
+        })))
+    };
+    let clock = Ticking(Cell::new(0));
+    let second = Duration::from_secs(1);
     assert!(matches!(
-        opening(Some(parse("100.5")?))?.cross_check(&collar),
+        opening(BrokerAsk::Quoted(parse("100.5")?), second)?.cross_check(&collar, &clock),
         Ok(())
     ));
     assert!(matches!(
-        opening(Some(parse("101.5")?))?.cross_check(&collar),
+        opening(BrokerAsk::Quoted(parse("101.5")?), second)?.cross_check(&collar, &clock),
         Err(PaperError::CrossCheck(QuoteRefusal::Disagreement))
     ));
     assert!(matches!(
-        opening(None)?.cross_check(&collar),
+        opening(BrokerAsk::Absent, second)?.cross_check(&collar, &clock),
         Err(PaperError::CrossCheck(QuoteRefusal::Absent))
+    ));
+    assert!(matches!(
+        opening(read("SPY", "100.5")?, second)?.cross_check(&collar, &clock),
+        Ok(())
+    ));
+    assert!(matches!(
+        opening(read("SPY", "101.5")?, second)?.cross_check(&collar, &clock),
+        Err(PaperError::CrossCheck(QuoteRefusal::Disagreement))
+    ));
+    assert!(matches!(
+        opening(read("QQQ", "100")?, second)?.cross_check(&collar, &clock),
+        Err(PaperError::CrossCheck(QuoteRefusal::Absent))
+    ));
+    assert!(matches!(
+        opening(read("SPY", "100")?, Duration::ZERO)?.cross_check(&collar, &clock),
+        Err(PaperError::CrossCheck(QuoteRefusal::Stale))
     ));
     Ok(())
 }

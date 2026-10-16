@@ -33,8 +33,9 @@ use mandate_time::Date;
 use serde_json::json;
 
 use crate::{
-    Broker, Connection, Dial, LapseRefusal, Linked, PaperError, Ports, REHEARSAL_HOST,
-    RobinhoodEndpoint, Session, SystemClock, live_admission, live_start,
+    ACCOUNT_NUMBER_VAR, Args, Broker, BrokerAsk, Build, Built, Connected, Connection, Dial,
+    LapseRefusal, Linked, PaperError, Ports, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
+    RobinhoodEndpoint, Session, SystemClock, live_admission, live_start, live_started,
 };
 
 const MANDATE: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/mandate.json");
@@ -193,8 +194,8 @@ impl Session for Snapshotting {
         Err(Cause::Absent { what: "unread" })
     }
 
-    fn broker_ask(&self, _facts: &BrokerFacts) -> Option<Price> {
-        None
+    fn broker_ask(&self, _facts: &BrokerFacts) -> BrokerAsk {
+        BrokerAsk::Absent
     }
 
     fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
@@ -526,4 +527,159 @@ fn the_robinhood_session_reads_the_agentic_accounts_snapshot() {
         "{refused:?}"
     );
     assert_eq!(calls.borrow().as_slice(), ["get_accounts"]);
+}
+
+fn args(acknowledged: Environment) -> Args {
+    Args {
+        workspace: "ws_live".to_owned(),
+        agent: AGENT.to_owned(),
+        account_ref: ACCOUNT.to_owned(),
+        journal: None,
+        store: std::env::temp_dir().join("live-start-unused-store"),
+        bars: std::env::temp_dir().join("live-start-unused-bars"),
+        place_one_order: false,
+        acknowledged,
+    }
+}
+
+fn rehearsal_vars() -> Vec<(String, String)> {
+    vec![
+        (
+            REHEARSAL_ENDPOINT_VAR.to_owned(),
+            format!("http://{REHEARSAL_HOST}:8080/mcp"),
+        ),
+        (ACCOUNT_NUMBER_VAR.to_owned(), NUMBER.to_owned()),
+    ]
+}
+
+/// The rehearsal build: the simulator's endpoint and pin, compiled with `live`.
+const REHEARSAL: Built = Built {
+    build: Build::Rehearsal,
+    with: BuiltWith::Live,
+};
+
+fn refusing_facts() -> RunFacts {
+    RunFacts {
+        live: LiveAdmission::refusing(),
+        ..before()
+    }
+}
+
+/// R2 and R3 through the run's own start (DEC-947 items 2, 3 and 5): a live connection the door
+/// chose dials the build's endpoint and the founder's account number from the process
+/// environment, admits itself from the run's facts with the build's pin, and starts on the
+/// connected session's snapshot, the dial handed to the one connect.
+#[test]
+fn a_live_connection_starts_through_the_live_arm_with_the_runs_own_dial() {
+    let (records, store) = deployment("started", &[]);
+    let door = (live_robinhood(), stream());
+    let mut ports = LivePorts::answering(Ok(Some(flat())));
+    let mut facts = refusing_facts();
+    let started = live_started(
+        Some(&door),
+        &records,
+        &store,
+        &mut facts,
+        &args(Environment::Live),
+        &rehearsal_vars(),
+        REHEARSAL,
+        &mut ports,
+    )
+    .expect("the live run starts");
+    let (confirmed, _session) = started.expect("a live connection starts through the live arm");
+    assert_eq!(confirmed.mandate().environment, Environment::Live);
+    assert_eq!(ports.dials.borrow().as_slice(), [Some(the_dial())]);
+    assert_eq!(facts.live, before().live);
+}
+
+/// The live arm refuses before any connect when the run's own facts do not admit it: a paper
+/// acknowledgement, a build compiled without `live`, a dial the build cannot make.
+#[test]
+fn the_live_arm_refuses_before_the_connect_on_the_runs_own_facts() {
+    let (records, store) = deployment("started-refusals", &[]);
+    let door = (live_robinhood(), stream());
+    let unbuilt = Built {
+        with: BuiltWith::Default,
+        ..REHEARSAL
+    };
+    let cases = [
+        (Environment::Paper, REHEARSAL, rehearsal_vars(), "live"),
+        (Environment::Live, unbuilt, rehearsal_vars(), "live"),
+        (
+            Environment::Live,
+            REHEARSAL,
+            Vec::new(),
+            "rehearsal_endpoint_unset",
+        ),
+    ];
+    for (acknowledged, built, vars, code) in cases {
+        let mut ports = LivePorts::answering(Ok(Some(flat())));
+        let refused = live_started(
+            Some(&door),
+            &records,
+            &store,
+            &mut refusing_facts(),
+            &args(acknowledged),
+            &vars,
+            built,
+            &mut ports,
+        )
+        .err();
+        let found = match &refused {
+            Some(PaperError::Deployment(refusal)) => refusal.code(),
+            Some(PaperError::Endpoint(refusal)) => refusal.code(),
+            _ => "other",
+        };
+        assert_eq!(found, code, "{acknowledged:?} {built:?}: {refused:?}");
+        assert_eq!(ports.connects.get(), 0, "{code}");
+    }
+}
+
+/// The binary's session routes the live door's snapshot to its Robinhood arm (DEC-947 item 1).
+#[test]
+fn the_binarys_robinhood_session_reads_its_snapshot() {
+    let answers = BTreeMap::from([
+        (
+            "get_accounts",
+            json!({"accounts": [{"account_number": NUMBER, "agentic_allowed": true}]}),
+        ),
+        (
+            "get_portfolio",
+            json!({"account_number": NUMBER, "cash": "100", "buying_power": "100"}),
+        ),
+        ("get_equity_positions", json!({"positions": []})),
+        ("get_equity_orders", json!({"orders": []})),
+    ]);
+    let (linked, _) = linked(answers);
+    let session: Connected<Scripted> = Connected::Robinhood(linked);
+    assert_eq!(session.account_snapshot().ok(), Some(Some(flat())));
+}
+
+/// A paper connection, or none, is not the live arm's: it reads nothing and connects nothing.
+#[test]
+fn a_paper_connection_or_none_is_left_to_the_run() {
+    let (records, store) = deployment("started-paper", &[]);
+    let paper = (
+        Connection {
+            broker: Broker::Alpaca,
+            environment: Environment::Paper,
+            account_ref: ACCOUNT.to_owned(),
+        },
+        stream(),
+    );
+    for door in [Some(&paper), None] {
+        let mut ports = LivePorts::answering(Ok(Some(flat())));
+        let started = live_started(
+            door,
+            &records,
+            &store,
+            &mut refusing_facts(),
+            &args(Environment::Paper),
+            &rehearsal_vars(),
+            REHEARSAL,
+            &mut ports,
+        );
+        assert!(matches!(started, Ok(None)), "{:?}", started.err());
+        assert_eq!(ports.connects.get(), 0);
+    }
 }
