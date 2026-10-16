@@ -319,7 +319,6 @@ fn a_paper_connection_makes_no_lapse_check_through_the_door() {
 /// read with zero counts would, whichever broker the connection names, since the environment
 /// alone decides that the check applies (DEC-910 item 3).
 #[test]
-#[ignore = "pending E7-26"]
 fn a_live_connection_with_no_lapse_evidence_refuses_to_start() {
     let refused = unsupplied(&live_connection());
     assert!(
@@ -351,7 +350,6 @@ fn a_live_connection_with_no_lapse_evidence_refuses_to_start() {
 /// door calls while the live arm hands no evidence: a paper connection starts exactly as it did,
 /// so the refusal the missing evidence owes a live run changes no Alpaca paper outcome.
 #[test]
-#[ignore = "pending E7-26"]
 fn a_paper_connection_with_no_lapse_evidence_starts_as_today() {
     let paper = Connection {
         broker: Broker::Alpaca,

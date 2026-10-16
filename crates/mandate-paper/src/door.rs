@@ -14,13 +14,14 @@
 //! arrives as a control-stream record, a journaled row, a parsed mandate or the run's own
 //! identifiers.
 
+use mandate_domain::Environment;
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
 
 use crate::PaperError;
-use crate::connection::{Connection, Held, connection, lapse};
+use crate::connection::{Connection, Held, LapseRefusal, connection, lapse};
 
 /// The connection the run uses (DEC-918 item 1; DEC-910 item 2; the task file's row G1a:
 /// "The connector chosen from the connection record and the environment from the confirmed
@@ -107,6 +108,8 @@ pub fn unspent(
 /// [`PaperError::Lapse`] with [`LapseRefusal::NotSupplied`](crate::LapseRefusal::NotSupplied)
 /// for a live connection, before anything runs.
 pub fn unsupplied(connection: &Connection) -> Result<(), PaperError> {
-    let _ = connection;
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    if connection.environment == Environment::Live {
+        return Err(PaperError::Lapse(LapseRefusal::NotSupplied));
+    }
+    Ok(())
 }
