@@ -14,18 +14,23 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mandate_accounting::AssetClass;
 use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Value};
-use mandate_runtime::{Autonomy, Observation, RiskClock};
+use mandate_runtime::{
+    Autonomy, IntentHandoff, Observation, OrderExecution, RiskClock,
+    TimeInForce as RuntimeTimeInForce,
+};
 use mandate_time::UtcNanos;
 
 use super::doubles::{
-    FixedClassifier, World, agent_stream, control_stream, instrument, output, seed, setup,
+    AAPL, ConvertingSink, FixedClassifier, PaperExecutor, World, account_stream, agent_stream,
+    control_stream, instrument, output, seed, setup,
 };
 use super::tail_install::ApprovableMandate;
 use crate::error::{Cause, ShellError};
 use crate::lt10::watch_may_end;
-use crate::stages::Stage;
+use crate::stages::{Executor, Sink, Stage};
 use crate::tracer::{AskedCycle, ProductionCycle, Report, Wake};
 use crate::watch::Watch;
 
@@ -34,6 +39,10 @@ const CLOSES: &[u8] = br#"{"closes":[["2026-09-25","255.2"]]}"#;
 
 /// The founder's answer's event id on the control stream.
 const ANSWER: &str = "00000100000000000000000002";
+
+/// The account stream's opening and its mark.
+const MARK_OPENED: &str = "00000900000000000000000001";
+const MARK: &str = "00000900000000000000000002";
 
 /// The watch's clock: an injected cell moved on by each pause.
 #[derive(Clone)]
@@ -63,10 +72,121 @@ fn clock() -> Result<Clock, String> {
     })
 }
 
+/// The account stream as a mark left it: opened, and the pinned instrument's `MarkUpdated` at
+/// the run clock, the reference the ask records and re-validation compares with (DEC-156
+/// item 3): with no mark, drift cannot be computed and every grant skips.
+fn marked(world: &World) -> Result<(), String> {
+    let opened = r#"{"stream_type":"account","workspace_id":"tracer","broker":"alpaca","account_ref":"tracer-paper"}"#;
+    seed(
+        world,
+        &account_stream(),
+        1,
+        MARK_OPENED,
+        "StreamOpened",
+        "executor",
+        opened,
+    )?;
+    let at = setup()?.now.secs();
+    let mark = format!(r#"{{"instrument":"{AAPL}","price":"255.2","risk_clock":{at}}}"#);
+    seed(
+        world,
+        &account_stream(),
+        2,
+        MARK,
+        "MarkUpdated",
+        "executor",
+        &mark,
+    )
+}
+
+/// The sink double over a granted intent: the runtime's granted intent carries no execution
+/// policy today (`mandate_runtime`'s `bound_proposal` sets none), and the production sink
+/// refuses it (DEC-940 item 6; [`a_granted_intent_without_its_policy_stops_at_the_sink`] pins
+/// that). This double stands in for the follow-up that carries the policy: it hands the stock
+/// double the fixture sizing's own equity policy where the handoff holds none, so the probes
+/// can read the hold behind the sink.
+struct PolicySink(ConvertingSink);
+
+impl Sink for PolicySink {
+    fn hand(&mut self, handoff: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
+        let mut handoff = handoff.clone();
+        handoff.execution = handoff.execution.or(Some(OrderExecution {
+            asset_class: AssetClass::UsEquity,
+            tif: RuntimeTimeInForce::Day,
+            protection_required: false,
+            protection: None,
+        }));
+        self.0.hand(&handoff)
+    }
+}
+
+/// The paper double executor, answering the watch's protection question covered: the facts the
+/// LT-10 question reads are the caller's to judge here, never this double's.
+struct Covered(PaperExecutor);
+
+impl Executor for Covered {
+    fn reset(&mut self) -> Result<(), Cause> {
+        self.0.reset()
+    }
+
+    fn use_profile(&mut self, profile: mandate_domain::CapabilityProfile) -> Result<(), Cause> {
+        self.0.use_profile(profile)
+    }
+
+    fn step(
+        &mut self,
+        input: mandate_executor::Input,
+    ) -> Result<Vec<mandate_executor::Effect>, Cause> {
+        self.0.step(input)
+    }
+
+    fn protected(&mut self, _: &mandate_accounting::InstrumentId) -> Result<bool, Cause> {
+        Ok(true)
+    }
+
+    fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
+        self.0.committed(event)
+    }
+}
+
 /// The doubles' stages with the classifier answering `autonomy`, the mandate naming the founder
-/// as its approver, and the observation's closes stored.
+/// as its approver, the observation's closes stored, the instrument marked, and the sink
+/// handing a granted intent on.
 fn cycle(world: &World, autonomy: Autonomy, place: bool) -> Result<ProductionCycle, String> {
+    assembled(
+        world,
+        autonomy,
+        place,
+        Box::new(PolicySink(ConvertingSink(world.clone()))),
+    )
+}
+
+/// [`cycle`] with the doubles' stock sink, which refuses an intent with no execution policy as
+/// the production sink does.
+fn stock(world: &World, autonomy: Autonomy, place: bool) -> Result<ProductionCycle, String> {
+    assembled(
+        world,
+        autonomy,
+        place,
+        Box::new(ConvertingSink(world.clone())),
+    )
+}
+
+fn assembled(
+    world: &World,
+    autonomy: Autonomy,
+    place: bool,
+    sink: Box<dyn Sink>,
+) -> Result<ProductionCycle, String> {
+    marked(world)?;
     let mut stages = world.stages();
+    stages.sink = sink;
+    stages.executor = Box::new(Covered(PaperExecutor {
+        world: world.clone(),
+        seen: Default::default(),
+        inverted: false,
+        last_client_order_id: None,
+    }));
     stages.classifier = Box::new(FixedClassifier {
         world: world.clone(),
         autonomy,
@@ -91,11 +211,13 @@ fn observation() -> Result<Observation, String> {
     })
 }
 
-/// The watch the runner hands in: bound and interval as the fixtures' watches take them.
+/// The watch the runner hands in: bound ten seconds before the fixture session's 16:00 end, so
+/// the shell's own LT-10 question caps at the first wake past the run clock, and the caller's
+/// question, which ends every run it is asked about, tells the two apart.
 fn watch(clock: &Clock) -> Result<Watch<Clock>, String> {
     Ok(Watch {
         pause: clock.clone(),
-        bound: setup()?.now,
+        bound: UtcNanos::parse("2026-09-25T19:59:50.000000000Z").map_err(|e| e.to_string())?,
         interval: Duration::from_secs(30),
     })
 }
@@ -125,7 +247,7 @@ fn the_ask(world: &World) -> Result<(String, String), String> {
         .and_then(Value::as_str);
     match (id, hash) {
         (Some(id), Some(hash)) => Ok((id.to_owned(), hash.to_owned())),
-        _ => Err("the request names no id or hash".to_owned()),
+        (None, _) | (Some(_), None) => Err("the request names no id or hash".to_owned()),
     }
 }
 
@@ -266,7 +388,8 @@ fn a_cycle_that_never_asks_never_waits() -> Result<(), String> {
     assert_eq!(
         report.as_ref().err().map(ShellError::code),
         Some("cancel_unconfirmed"),
-        "the shell's own watch fails closed at the fixture's cap: {report:?}"
+        "the shell's own watch fails closed at the cap, where the caller's would have ended: \
+         {report:?}"
     );
     Ok(())
 }
@@ -438,5 +561,85 @@ fn the_wake_reads_the_runs_own_streams() -> Result<(), String> {
         (agent_ledger, control_ledger),
         "the wake reads both streams whole"
     );
+    Ok(())
+}
+
+/// DEC-940 item 6: today the runtime's granted intent carries no execution policy, and the sink
+/// refuses it as the production sink does — the wake stops the run and nothing is sent. The
+/// grant cannot open a position until the policy travels with the grant; until then the gap
+/// fails closed.
+#[test]
+fn a_granted_intent_without_its_policy_stops_at_the_sink() -> Result<(), String> {
+    let world = World::default();
+    let clock = clock()?;
+    let asks = Rc::new(Cell::new(0));
+    let end = ending(&asks);
+    let w = world.clone();
+    let now = clock.now();
+    let report: Result<Report, ShellError> = stock(&world, Autonomy::Ask, true)?
+        .run_observed_asked_watched(
+            observation()?,
+            output().map_err(|cause| cause.to_string())?,
+            &watch(&clock)?,
+            |asked: &mut dyn AskedCycle| {
+                answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
+                asked.wake(now)?;
+                asked.submit()
+            },
+            &end,
+        );
+    assert!(
+        matches!(
+            report,
+            Err(ShellError::Refused {
+                stage: Stage::Sink,
+                ..
+            })
+        ),
+        "{report:?}"
+    );
+    assert_eq!(world.ledger.borrow().count("IntentProposed"), 1);
+    assert_eq!(submissions(&world), 0, "nothing is sent");
+    Ok(())
+}
+
+/// DEC-156 item 3, DEC-940 item 6: with no mark folded, the ask records none, drift cannot be
+/// computed, and re-validation skips the grant — so the opening is never released, and the
+/// wait reads the skip.
+#[test]
+fn a_grant_with_no_mark_is_skipped_and_never_released() -> Result<(), String> {
+    let world = World::default();
+    let clock = clock()?;
+    let asks = Rc::new(Cell::new(0));
+    let end = ending(&asks);
+    let w = world.clone();
+    let now = clock.now();
+    let mut unmarked = cycle(&world, Autonomy::Ask, true)?;
+    world.ledger.borrow_mut().clear(&account_stream());
+    let result = Rc::new(RefCell::new(None));
+    let read = Rc::clone(&result);
+    let report: Result<Report, ShellError> = unmarked.run_observed_asked_watched(
+        observation()?,
+        output().map_err(|cause| cause.to_string())?,
+        &watch(&clock)?,
+        |asked: &mut dyn AskedCycle| {
+            answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
+            asked.wake(now)?;
+            *read.borrow_mut() = w
+                .ledger
+                .borrow()
+                .parsed("ApprovalRevalidated")
+                .first()
+                .and_then(|copy| copy.get("payload"))
+                .and_then(|payload| payload.get("reason"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            asked.submit()
+        },
+        &end,
+    );
+    assert_eq!(result.borrow().as_deref(), Some("drift"));
+    assert!(report.is_err(), "{report:?}");
+    assert_eq!(submissions(&world), 0, "nothing is sent");
     Ok(())
 }

@@ -418,7 +418,21 @@ pub fn watch_may_end(
     lt10(&facts, now, cap).map_err(PaperError::Lt10)
 }
 
-/// The asked opening's way out of the run (G1b, DEC-940).
+/// The asked opening's way out of the run (G1b's wiring row; DEC-912 items 1 and 2; DEC-914
+/// items 1 to 3 and 7; DEC-920 item 1; DEC-940 items 1 and 4): the production caller of
+/// [`wait_for_the_grant`]. The ask is bound off the agent stream as the cycle left it; each wake
+/// is the shell's own ([`AskedCycle::wake`]) — the control stream tailed whole and handed to the
+/// runtime, which journals its `ApprovalResponded` and `ApprovalRevalidated`, then both streams
+/// read back at the clock `pause` keeps — and the wait folds each read through [`answers`], so
+/// it releases only on the runtime's admitted, re-validated grant of the first deciding answer.
+/// Then `cross_check` — the caller's [`cross_check_the_opening`] over the collar's own `x` —
+/// runs before anything leaves, and only then the one held opening is sent
+/// ([`AskedCycle::submit`]). A timeout, a deny, a difference, a refused cross-check or a stopped
+/// wake each end the run with nothing sent (`AGENTS.md` rule 3); exits and protective orders are
+/// never held by the shell, so nothing here can hold one (rule 13). A wake at or past the ask's
+/// deadline hands the runtime nothing: the fold denies the timeout there with no read, and the
+/// approval stays pending on the journal for the runtime's own fold (DEC-912 item 1; DEC-940
+/// item 7).
 ///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing is sent.
@@ -432,11 +446,38 @@ where
     P: Pause + ?Sized,
     C: FnOnce() -> Result<(), PaperError>,
 {
-    let _ = (cycle, pause, interval, cross_check);
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    let agent_rows = cycle.agent_rows().map_err(PaperError::Shell)?;
+    let deadline = asked(&agent_rows, pause.now())
+        .map_err(PaperError::Grant)?
+        .deadline;
+    let reads = || {
+        let now = pause.now();
+        if now >= deadline {
+            return Ok(WakeRead {
+                agent: agent_rows.clone(),
+                control: Vec::new(),
+            });
+        }
+        cycle
+            .wake(now)
+            .map(|wake| WakeRead {
+                agent: wake.agent,
+                control: wake.control,
+            })
+            .map_err(PaperError::Shell)
+    };
+    wait_for_the_grant(&agent_rows, reads, pause, interval)?;
+    cross_check()?;
+    cycle.submit().map_err(PaperError::Shell)
 }
 
-/// The asked run's watch end, [`watch_may_end`] in the shell's terms (LT-10, DEC-940).
+/// The asked run's watch end (LT-10; DEC-914 items 4 and 5; DEC-940 item 5): [`watch_may_end`]
+/// — the cap over the bound, then [`watched`] and [`lt10`] — answered in the shell watch's own
+/// terms, which the shell asks at every wake of the asked run. A settled LT-10 ends the run
+/// (`true`); an unsettled one reads on (`false`); the cap fails closed with the shell's own
+/// `cancel_unconfirmed`, exactly as the shell's watch does; a bound no regular session holds
+/// stops with the shell's refusal; and any other answer fails closed as the cap does, never a
+/// guess at settled (`AGENTS.md` rule 3).
 ///
 /// # Errors
 /// The shell's stop for the cap and for a bound no session holds.
@@ -447,11 +488,12 @@ pub fn lt10_end(
     now: UtcNanos,
     bound: UtcNanos,
 ) -> Result<bool, ShellError> {
-    let _ = (read, uncovered, alerts, now, bound);
-    Err(ShellError::Refused {
-        stage: Stage::Executor,
-        cause: Cause::Unimplemented { story: "E7-26" },
-    })
+    match watch_may_end(read, uncovered, alerts, now, bound) {
+        Ok(()) => Ok(true),
+        Err(PaperError::Lt10(Lt10Refusal::Unsettled)) => Ok(false),
+        Err(PaperError::Shell(stop)) => Err(stop),
+        Err(_) => Err(ShellError::CancelUnconfirmed),
+    }
 }
 
 /// One row's record, mapped one-to-one as the run's own control-stream read maps it (DEC-914

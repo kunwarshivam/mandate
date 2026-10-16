@@ -100,7 +100,7 @@ pub fn run_observed_watched<P: Pause>(
     let admitted = admit(stages)?;
     let instrument = pinned(&admitted.view)?;
     let mut session = open_cycle(stages, setup, &admitted, Some(observation), output)?;
-    session.watch(&instrument, watch)?;
+    session.watch(&instrument, watch, &watch_may_end)?;
     Ok(session.report)
 }
 
@@ -143,6 +143,23 @@ fn open_cycle<'s>(
     observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Session<'s>, ShellError> {
+    match open_asking(stages, setup, admitted, observation, output)? {
+        (session, None) => Ok(session),
+        (_, Some(asked)) => Err(asked),
+    }
+}
+
+/// [`open_cycle`]'s cycle, handing back the session beside the classifier's refusal when the
+/// cycle asked (DEC-940 item 1): the ask's records are committed by then (the step's effects
+/// run before its refusal is reported), so the session can wait for the answer. Every other
+/// refusal stops the cycle as before.
+fn open_asking<'s>(
+    stages: &'s mut Stages,
+    setup: &'s Setup,
+    admitted: &'s Admitted,
+    observation: Option<Observation>,
+    output: mandate_runtime::ModelOutput,
+) -> Result<(Session<'s>, Option<ShellError>), ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
     let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
     session.start()?;
@@ -153,9 +170,26 @@ fn open_cycle<'s>(
     if let Some(observation) = observation {
         session.observe(observation)?;
     }
-    session.feed(Input::ModelOutput(output))?;
-    session.feed(Input::Tick(clock))?;
-    Ok(session)
+    let fed = session
+        .feed(Input::ModelOutput(output))
+        .and_then(|()| session.feed(Input::Tick(clock)));
+    match fed {
+        Ok(()) => Ok((session, None)),
+        Err(refusal) if asked(&refusal) => Ok((session, Some(refusal))),
+        Err(refusal) => Err(refusal),
+    }
+}
+
+/// Whether `refusal` is the classifier's `ask`, the one refusal after which the cycle's request
+/// is committed and waits for the owner's answer (mandate spec §6.4; DEC-940 item 1).
+fn asked(refusal: &ShellError) -> bool {
+    matches!(
+        refusal,
+        ShellError::Refused {
+            stage: Stage::Classify,
+            cause: Cause::NotAuto { autonomy: "ask" },
+        }
+    )
 }
 
 /// One production deployment cycle. Its assembled stages and setup are private, so callers can
@@ -259,7 +293,17 @@ pub type MayEnd<'e> =
     &'e dyn Fn(Option<&str>, bool, &[&'static str], UtcNanos, UtcNanos) -> Result<bool, ShellError>;
 
 impl ProductionCycle {
-    /// [`ProductionCycle::run_observed_watched`] for a run that may ask (G1b, DEC-940).
+    /// [`ProductionCycle::run_observed_watched`] for a run that may ask (G1b, DEC-940). A cycle
+    /// that never asks is exactly that run: `wait` is never called and the watch asks the
+    /// shell's own [`watch_may_end`]. A cycle that asks keeps its session open: a dry run stops
+    /// at the ask as before, because it appends to no journal an answer could reach; a placing
+    /// run hands the session to `wait` as an [`AskedCycle`], whose every wake hands the control
+    /// stream's answers to the runtime and reads both streams back, and whose opening the
+    /// runtime releases is held until `wait` submits it — so nothing is sent before the
+    /// runner's own release, and a `wait` that stops, or returns with the opening still held,
+    /// sends nothing (`AGENTS.md` rule 3). Only a risk-adding submission is held: an exit or a
+    /// protective order is sent as it always was (rule 13). After the submit the watch ends
+    /// through `may_end`, the caller's LT-10 question (DEC-914 items 4 and 5).
     ///
     /// # Errors
     /// Every error is a stop after which nothing further is sent.
@@ -276,11 +320,82 @@ impl ProductionCycle {
         E: From<ShellError>,
         W: FnOnce(&mut dyn AskedCycle) -> Result<(), E>,
     {
-        let _ = (observation, output, watch, wait, may_end);
-        Err(E::from(ShellError::Refused {
-            stage: Stage::Executor,
-            cause: Cause::Unimplemented { story: "E7-26" },
-        }))
+        let admitted = admit(&mut self.stages)?;
+        let instrument = pinned(&admitted.view)?;
+        let (mut session, asked) = open_asking(
+            &mut self.stages,
+            &self.setup,
+            &admitted,
+            Some(observation),
+            output,
+        )?;
+        let Some(asked) = asked else {
+            session.watch(&instrument, watch, &watch_may_end)?;
+            return Ok(session.report);
+        };
+        if !self.setup.place_one_order {
+            return Err(E::from(asked));
+        }
+        session.holding = true;
+        wait(&mut session)?;
+        session.holding = false;
+        if session.held.is_some() {
+            return Err(E::from(nothing_released()));
+        }
+        session.watch(&instrument, watch, may_end)?;
+        Ok(session.report)
+    }
+}
+
+/// The stop of a held opening the wait never released, and of a submit with none held
+/// (DEC-940 item 2): nothing is sent.
+fn nothing_released() -> ShellError {
+    ShellError::Refused {
+        stage: Stage::Executor,
+        cause: Cause::Absent {
+            what: "the held opening the grant wait released",
+        },
+    }
+}
+
+impl AskedCycle for Session<'_> {
+    fn agent_rows(&mut self) -> Result<Vec<StoredEvent>, ShellError> {
+        self.stages
+            .journal
+            .read(&self.agent_stream)
+            .map_err(refused(Stage::Journal))
+    }
+
+    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
+        self.event_time = now;
+        let stream = control_stream(&self.setup.deployment.workspace.0);
+        let control = self
+            .stages
+            .journal
+            .read(&stream)
+            .map_err(refused(Stage::Journal))?;
+        for event in tailed(&control)? {
+            self.feed_asked(Input::Journal(event))?;
+        }
+        self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
+        Ok(Wake {
+            agent: self.agent_rows()?,
+            control,
+        })
+    }
+
+    fn submit(&mut self) -> Result<(), ShellError> {
+        let order = self.held.take().ok_or_else(nothing_released)?;
+        self.holding = false;
+        if let Some(answer) = self.broker(&BrokerRequest::Submit(order))? {
+            let effects = self
+                .stages
+                .executor
+                .step(answer)
+                .map_err(refused(Stage::Executor))?;
+            self.perform_executor(effects)?;
+        }
+        Ok(())
     }
 }
 
@@ -311,6 +426,10 @@ pub(crate) struct Session<'s> {
     submitted_drafts: BTreeSet<String>,
     /// Whether the replayed agent stream already carries an intent (TI-12).
     pub(crate) cycle_open: bool,
+    /// Whether an asked cycle's wait holds its released opening (DEC-940 item 2).
+    holding: bool,
+    /// The risk-adding submission held while `holding`, sent only by [`AskedCycle::submit`].
+    held: Option<mandate_executor::SubmitOrder>,
     pub(crate) report: Report,
     /// The time every record this session appends carries: the run's clock, then each wake's
     /// during a watch (DEC-858 item 3).
@@ -343,6 +462,8 @@ impl<'s> Session<'s> {
             recorded: BTreeSet::new(),
             submitted_drafts: BTreeSet::new(),
             cycle_open: false,
+            holding: false,
+            held: None,
             report: Report::default(),
             event_time: setup.now,
         };
@@ -578,6 +699,7 @@ impl<'s> Session<'s> {
         &mut self,
         instrument: &InstrumentId,
         watch: &Watch<P>,
+        end: MayEnd<'_>,
     ) -> Result<(), ShellError> {
         let Some(entry) = self.report.submitted.first() else {
             return Ok(());
@@ -598,7 +720,7 @@ impl<'s> Session<'s> {
         loop {
             runtime.block_on(watch.pause.pause(watch.interval));
             let now = watch.pause.now();
-            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound)? {
+            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound, end)? {
                 return Ok(());
             }
             self.event_time = now;
@@ -635,7 +757,7 @@ impl<'s> Session<'s> {
             self.step_watched(mandate_executor::Input::Tick(
                 mandate_executor::RiskClock::from_secs(now.secs()),
             ))?;
-            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound)? {
+            if self.lt10_holds(instrument, read.as_deref(), now, watch.bound, end)? {
                 return Ok(());
             }
         }
@@ -653,13 +775,14 @@ impl<'s> Session<'s> {
         read: Option<&str>,
         now: UtcNanos,
         bound: UtcNanos,
+        end: MayEnd<'_>,
     ) -> Result<bool, ShellError> {
         let covered = self
             .stages
             .executor
             .protected(instrument)
             .map_err(refused(Stage::Executor))?;
-        watch_may_end(read, !covered, &self.report.alerts, now, bound)
+        end(read, !covered, &self.report.alerts, now, bound)
     }
 
     /// One executor step during the watch and everything it asks for. A reconciliation it asks
@@ -752,6 +875,18 @@ impl<'s> Session<'s> {
         match refusal {
             Some(refusal) => Err(refusal),
             None => Ok(()),
+        }
+    }
+
+    /// [`Session::feed`] during an asked cycle's wait (DEC-940 item 3): the classifier's `ask`
+    /// is the request's own classification — re-validation re-classifies the bound order, and
+    /// an `ask` by the same trigger is what the grant answered — so it stops nothing here; the
+    /// runtime's own `ApprovalRevalidated` decides, and the runner's fold reads it. Every other
+    /// refusal stops the wait.
+    fn feed_asked(&mut self, input: Input) -> Result<(), ShellError> {
+        match self.feed(input) {
+            Err(refusal) if asked(&refusal) => Ok(()),
+            fed => fed,
         }
     }
 
@@ -878,6 +1013,13 @@ impl<'s> Session<'s> {
             }
             if !self.setup.place_one_order {
                 self.report.would_place = Some(order.clone());
+                return Ok(None);
+            }
+            if self.holding && order.purpose.adds_risk() {
+                if self.held.is_some() || !self.report.submitted.is_empty() {
+                    return Err(ShellError::SecondSubmission);
+                }
+                self.held = Some(order.clone());
                 return Ok(None);
             }
             if !self.report.submitted.is_empty() {

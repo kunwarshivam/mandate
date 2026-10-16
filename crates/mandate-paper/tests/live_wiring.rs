@@ -1284,6 +1284,12 @@ fn a_raw_answer_alone_never_submits() {
         "{:?}",
         log.borrow()
     );
+    assert_eq!(
+        log.borrow().last().map(String::as_str),
+        Some("wake@1900"),
+        "the last wake is the last before the deadline: none at it hands the runtime a tick"
+    );
+    assert_eq!(log.borrow().len(), 11, "the binding read and ten wakes");
 }
 
 /// DEC-529 item 12: a cross-check that refuses after the grant sends nothing.
