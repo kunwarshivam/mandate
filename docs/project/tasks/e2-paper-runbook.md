@@ -350,3 +350,96 @@ built into a journal, no Alpaca call was made, no dry run and no order. Setting 
 HTTP `Date` header or from Alpaca's stamps is not an NTP source (DEC-936, alternatives) and was not
 tried. E2 needs a host with UDP 123 egress (a VM or the founder's machine with chrony or
 systemd-timesyncd), or a new founder decision.
+
+### Run on the founder's macOS laptop, NTP-synced: stopped at the dry run, classification facts for one share (16:30 to 16:45 UTC)
+
+**Clock (DEC-936).** `sntp` against three servers, before and after the founder stepped the clock
+with `sudo sntp -sS time.apple.com`:
+```
+16:30:31 UTC, before (the host trailed NTP by about 154 ms: not run)
++0.154425 +/- 0.078209 time.apple.com
++0.153544 +/- 0.017777 time.google.com
++0.154229 +/- 0.027352 time.cloudflare.com
+16:34:06 UTC, after the step
+-0.000450 +/- 0.078950 time.apple.com
+-0.001972 +/- 0.017728 time.google.com
+-0.001768 +/- 0.027305 time.cloudflare.com
+16:36:13 UTC, just before the dry run
+-0.002212 +/- 0.078958 time.apple.com
+```
+The host clock was within 2.2 ms of NTP, slightly ahead, for the run.
+
+**Preparation, all clean.** PostgreSQL 16.15 (Homebrew), §0's SQL and migration applied, `e2_app`
+logs in with `search_path = journal`; release build from this branch. The paper account was ACTIVE,
+not trading- or account-blocked, `accrued_fees` 0, equity above 10,000, 0 positions, 0 open
+orders; `GET /v2/assets/SPY` id `b28f4066-5c6d-479b-a2af-85dc1a8f16fb` (ARCA, tradable, active).
+Bars 2026-08-31 to 2026-10-15: 33 rows, `inspect` `problems: 0`, 0 true gaps, 0 splits. The Nasdaq
+Trader directory was reachable this time (DEC-930 item 3's gap is closed for this run):
+```
+ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+SPY|State Street SPDR S&P 500 ETF Trust|P|SPY|Y|40|N|SPY
+```
+`spy.json` dated `2026-10-16T00:00:00Z`, `etp: plain`. The mandate grep printed `allocation_usd`,
+`max_gross_exposure_usd` and `max_position_usd` 10000 and `max_order_usd` 5000. Control stream:
+```
+opened ctl:ws_paper01 as event 69772S86W1YMVYJV0SV0N719K7 at seq 1
+registered as event 0KBXZP8123BJ0SMKMDJ099TBC8 at seq 2   (fee_config)
+registered as event 4R4MRRQZG8SYH38TSPY3B11QWS at seq 3   (trading_calendar)
+registered as event 1M9996A876WKMX32PEC9V5YKZQ at seq 4   (rule_set)
+registered as event 2B203DGB7B1MTJ4HVJ0H… at seq 5 (instrument_snapshot; id cut, typos misreads its tail)
+registered as event 7ETJKWB14PKV4D6P276P19R279 at seq 6   (model quant.ma_crossover 1.0.0)
+created sha256:07d55fc806872d1c2568be9a9f49006e09a8855ec9a17a11ddd6c61a26780b21 as event 1SFXDPBPRQRWN9C3Y9FY4ZW9HS at seq 7
+code 2a56a26c / warnings W-002
+confirmed as event 40SEXPS7HK50CXBTMZXX3JTAWJ at seq 8
+code 0c66e84e / warnings W-002
+deployed as event 636N00RGGRNRK8QMDCE7AFV1SX at seq 9
+```
+
+**Dry run at 16:36:13 UTC**, inside the regular session:
+```
+the tracer stopped at Journal: the journal answered Invalid
+exit=1
+```
+The clock fix worked: the run passed Reconcile, Validate, the data and the model (the output was
+`Long`), and the gate's dry run allowed the proposal. It stopped later. A local build of this
+branch with temporary `eprintln!` lines (never committed; the branch is unchanged) showed two
+defects, one masking the other:
+
+1. **The classification facts are stated for one share** (blocks every run that sizes more than
+   one increment). `run_context` (`crates/mandate-shell/src/paper/context.rs`) builds the builder
+   context's `action` with `buy_action(..., artifacts.instrument.increment_qty)`, which is one share.
+   The builder then sized the proposal at the $5,000 cap: 6 SPY at limit 766.84. `BuilderPlan::classify`
+   (`crates/mandate-shell/src/adapters.rs`) requires `action.order_usd == qty × limit`
+   (`action_order_matches`): 766.84 against 4,601.04, so it refused `classification facts for the
+   proposed action`. That fails closed, which is correct, but no opening above one share can ever
+   be classified. The paper tests pass because their mandate (`max_order_usd` 300 against a 255.2
+   ask) sizes exactly one share.
+2. **The fail-safe `deny` is not a valid record.** On a classifier error, `Bridge::classify`
+   (`crates/mandate-shell/src/tracer.rs`) returns `Autonomy::Deny` with `decided_by: None`. The
+   runtime writes a `DecisionMade` with `dry_run: allow`, `autonomy: deny` and `decided_by: null`,
+   and the journal refuses it (`Invalid { reason: Schema, path: "payload.decided_by" }`, journal
+   spec §9.1 rule 5: `decided_by` is non-null exactly when `autonomy` is). So the run stops at
+   Journal, and the report never names the Classify cause. Fail-closed still holds; only the
+   reason is lost.
+
+Both are safety-critical changes (the shell's classification bridge and the paper context): tests
+first, mutants, and the different-model review. Per the brief, nothing was worked around: no
+mandate change (a version with `max_order_usd` between one and two shares is the founder's
+envelope decision, rule 11, and the brief said not to change the mandate), and no placing run, so
+§6 and §8 did not run.
+
+**After stopping.** `GET /v2/orders?status=open&limit=500&direction=asc&nested=true` returned `[]`
+and `/v2/positions` 0 rows, so there is no filled entry and no legs to classify as nested or top
+level. Exports: `ctl:ws_paper01` seq 1 to 9 `result: verified` (last hash
+`5546fd5a4a8b34d00124531f4c52fd8f13b9af0136735fd4df10e39b59755f7d`). The agent and account streams
+are `export_stream_empty` (the dry run journals nothing durable).
+
+**Runbook corrections.**
+- §0 on macOS: `brew install postgresql@16 && brew services start postgresql@16`, then
+  `psql postgres` replaces `sudo -u postgres psql`. `sed -i` needs `sed -i ''` on macOS.
+- §0 clock on macOS: `sntp time.apple.com` gives the offset. This laptop trailed NTP by 154 ms with
+  "Set time automatically" on; `sudo sntp -sS time.apple.com` (in a real terminal, since it asks for
+  a password) stepped it to under 3 ms.
+- §3: until defect 1 is fixed, a `max_order_usd` above one share (the runbook's $5,000) cannot pass
+  the paper run's classification. A one-share cap (above one ask, below two) would match the
+  facts. That is the founder's envelope decision; it was not taken here.
