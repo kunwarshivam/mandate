@@ -246,18 +246,16 @@ impl Linked {
             let Ok((client, listed)) = McpClient::connect_to_check(transport).await else {
                 return unread;
             };
-            let Ok(hash) = client.contract().map(|hash| hex(hash.as_bytes())) else {
+            let Ok(hash) = client
+                .contract()
+                .map(|hash| mandate_canon::Digest::from_bytes(*hash.as_bytes()).to_hex())
+            else {
                 return unread;
             };
             let connector = RobinhoodConnector::new(client, account_number.to_owned());
             observe(Some(SeenContract { listed, hash }), &connector).await
         })
     }
-}
-
-/// `bytes` as lower-case hex.
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 impl Session for Linked {

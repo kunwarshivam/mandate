@@ -292,7 +292,8 @@ fn stream_opened(
 
 /// `ConnectionChecked` (journal spec §9.8): every result, ascending by check (rule 57), each
 /// reason present exactly when it failed (rule 58), and the account's reference exactly when it
-/// was read, listed in the envelope's `pii_refs` too (rule 62).
+/// was read, listed in the envelope's `pii_refs` too (rule 62); its `risk_clock` is the check's
+/// time on its whole second (§4.7).
 fn connection_checked(
     stream: &StreamId,
     event_id: &str,
@@ -316,12 +317,13 @@ fn connection_checked(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let pii = report.account_pii_ref.as_ref().map(AccountPiiRef::as_str);
+    let risk_clock = UtcNanos::from_parts(at.secs(), 0).map_err(|_| absent("the risk clock"))?;
     let payload = object(vec![
         ("account_pii_ref", pii.map_or(Value::Null, text)),
         ("connection_id", text(report.connection_id.as_str())),
         ("occasion", text("connect")),
         ("results", Value::Array(results)),
-        ("risk_clock", text(&at.to_string())),
+        ("risk_clock", text(&risk_clock.to_string())),
     ])?;
     envelope(stream, event_id, "ConnectionChecked", at, payload, pii)
 }
