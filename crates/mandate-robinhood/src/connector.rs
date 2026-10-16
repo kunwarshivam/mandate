@@ -301,14 +301,15 @@ impl<T: Tools> BrokerConnector for RobinhoodConnector<T> {
         crate::profile::robinhood()
     }
 
-    /// `Submit` and `Cancel` (DEC-860); anything the profile does not offer is `NotSent`.
+    /// `Submit` and `Cancel` (DEC-860), and `ListOrders`, the shared fallback's listing (DEC-529
+    /// item 4, DEC-941); anything the profile does not offer is `NotSent`.
     async fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         match request {
             BrokerRequest::Submit(order) => self.submit(order).await,
             BrokerRequest::Cancel { client_order_id } => self.cancel(client_order_id).await,
+            BrokerRequest::ListOrders(listing) => self.list(listing).await,
             BrokerRequest::AcknowledgeReplace { .. }
             | BrokerRequest::GetOrderByClientId(_)
-            | BrokerRequest::ListOrders(_)
             | BrokerRequest::ListOpenOrders
             | BrokerRequest::ListPositions
             | BrokerRequest::GetAccount

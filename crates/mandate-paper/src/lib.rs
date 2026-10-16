@@ -53,14 +53,16 @@ use mandate_journal::{
     AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
+use mandate_mcp::{McpClient, Tools};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::{Price, Usd};
 use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
-    ConfigRefusal, ControlRecord, DeploymentRefusal, LiveAdmission, Pinned, RunFacts,
-    configuration, confirmed_version,
+    Build as BuiltWith, ConfigRefusal, Confirmation, ConfirmedVersion, ControlRecord,
+    DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Origin, Pinned, RunFacts,
+    checked_before_credentials, configuration, confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
@@ -91,7 +93,8 @@ pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
-    Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
+    Build, Dial, EndpointRefusal, Linked, LoggedIn, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
+    RobinhoodEndpoint, dial, endpoint, pinned_host,
 };
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
@@ -133,7 +136,11 @@ pub trait Ports {
     /// The credentials and the session of the broker `connection` chose, or
     /// [`PaperError::Credentials`]; called at most once, only after every check that needs no
     /// credential, and for a live run only after [`Ports::harden`].
-    fn connect(&mut self, connection: &Connection) -> Result<Self::Session, PaperError>;
+    fn connect(
+        &mut self,
+        connection: &Connection,
+        dial: Option<&Dial>,
+    ) -> Result<Self::Session, PaperError>;
 
     /// Turns the process's core dumps off (LT-9), or [`PaperError::Harden`]; called once, for a
     /// live run only, after its acknowledgement and before [`Ports::connect`].
@@ -179,6 +186,14 @@ pub trait Session {
     /// the check. [`BrokerAsk::Absent`] when this session reads none — and then the cross-check
     /// refuses the opening and nothing is sent (rule 3).
     fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk;
+
+    /// The agentic account's snapshot the live door's lapse counts (DEC-933 item 3, DEC-947
+    /// item 1), read and sending nothing, or [`None`] when this session reads none — and then a
+    /// live connection's lapse refuses `lapse_evidence_not_supplied` (DEC-919).
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when the read is refused or unreadable.
+    fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause>;
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
@@ -204,6 +219,11 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
     /// Alpaca's own quote is the IEX quote its data client read at the preflight.
     fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
         BrokerAsk::Quoted(facts.quote.ask)
+    }
+
+    /// An Alpaca paper session reads no Robinhood snapshot; a paper run's lapse makes no check.
+    fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
+        Ok(None)
     }
 }
 
@@ -518,7 +538,7 @@ pub fn run<P: Ports>(
     let day = clock.now().date();
     let records = ports.control_stream(&args.workspace)?;
     let mut store = FsArtifactStore::open(&args.store).map_err(|_| PaperError::Store)?;
-    let facts = RunFacts {
+    let mut facts = RunFacts {
         agent: AgentId::new(&args.agent),
         validation_date: day,
         membership: Membership {
@@ -527,11 +547,31 @@ pub fn run<P: Ports>(
         },
         live: LiveAdmission::refusing(),
     };
-    let connection = the_live_door(&records, &store, &facts.agent, args, None)?;
-    if let Some(connection) = &connection {
+    let door = the_live_door(&records, &store, &facts.agent, args)?;
+    if let Some((connection, _)) = &door {
         acknowledge(connection, args, ports)?;
     }
-    let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
+    let live = live_started(
+        door.as_ref(),
+        &records,
+        &store,
+        &mut facts,
+        args,
+        vars,
+        THIS_BUILD,
+        ports,
+    )?;
+    let (confirmed, early) = match live {
+        Some((confirmed, session)) => (confirmed, Some(session)),
+        None => {
+            if let Some((connection, stream)) = &door {
+                lapse_read(connection, args.journal.as_deref(), stream, None)?;
+            }
+            let confirmed =
+                confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
+            (confirmed, None)
+        }
+    };
     let mandate = confirmed.mandate();
     let ([instrument], [model]) = (
         mandate.universe.pinned_instruments.as_slice(),
@@ -558,18 +598,24 @@ pub fn run<P: Ports>(
             args.account_ref.clone(),
         )
         .map_err(refused(Stage::Validate))?;
-    let connection =
-        connection.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
     if args.reconcile_only && args.journal.is_none() {
         return Err(usage("--reconcile-only needs --journal".to_owned()));
     }
-    let session = ports.connect(&connection)?;
+    let (session, paper) = match early {
+        Some(session) => (session, false),
+        None => {
+            let (connection, _) =
+                door.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
+            let session = ports.connect(&connection, None)?;
+            (session, connection.environment == Environment::Paper)
+        }
+    };
     let booking = Booking {
         session: &session,
         artifacts: &artifacts,
         deployed: &deployed,
         version: confirmed.version(),
-        connection: &connection,
+        paper,
         args,
     };
     let booked = booking.book(clock.now())?;
@@ -713,7 +759,8 @@ struct Booking<'r, S> {
     artifacts: &'r Artifacts,
     deployed: &'r DeploymentInput,
     version: mandate_canon::Digest,
-    connection: &'r Connection,
+    /// Whether the run's connection is a paper one; a live run books nothing.
+    paper: bool,
     args: &'r Args,
 }
 
@@ -729,7 +776,7 @@ impl<S: Session> Booking<'_, S> {
             .journal
             .clone()
             .filter(|_| self.args.place_one_order || self.args.reconcile_only)
-            .filter(|_| self.connection.environment == Environment::Paper);
+            .filter(|_| self.paper);
         let Some(journal) = journal else {
             return Ok(Booked::default());
         };
@@ -770,29 +817,165 @@ impl<S: Session> Booking<'_, S> {
     }
 }
 
+/// Whether this binary was built with the runner's `live` feature, as the shell's admission
+/// reads it (DEC-924 item 1, DEC-947 item 3).
+pub const BUILT_WITH: BuiltWith = if cfg!(feature = "live") {
+    BuiltWith::Live
+} else {
+    BuiltWith::Default
+};
+
+/// Which build a run is, as its start reads it: the endpoint and pin it dials
+/// ([`Build`]) and whether the runner was compiled with `live` ([`BuiltWith`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Built {
+    build: Build,
+    with: BuiltWith,
+}
+
+/// This binary's build.
+const THIS_BUILD: Built = Built {
+    build: Build::CURRENT,
+    with: BUILT_WITH,
+};
+
+/// A live run's start (DEC-947 item 2): for a live connection the door chose, its dial of
+/// `built`'s endpoint from `vars`, its admission from the run's own facts, and [`live_start`],
+/// answering the confirmed version and the session it connected. [`None`] for a paper connection
+/// or none, which `run()` confirms itself, its session connected later, after the configuration
+/// (LT-14).
+///
+/// # Errors
+/// [`PaperError::Endpoint`] for a dial the build cannot make, and every [`PaperError`] of
+/// [`live_start`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the run's own inputs, each read once; DEC-947 item 2"
+)]
+fn live_started<P: Ports>(
+    door: Option<&(Connection, StreamId)>,
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    facts: &mut RunFacts,
+    args: &Args,
+    vars: &[(String, String)],
+    built: Built,
+    ports: &mut P,
+) -> Result<Option<(ConfirmedVersion, P::Session)>, PaperError> {
+    let Some((connection, stream)) = door else {
+        return Ok(None);
+    };
+    if connection.environment != Environment::Live {
+        return Ok(None);
+    }
+    let dial = dial(built.build, vars).map_err(PaperError::Endpoint)?;
+    facts.live = live_admission(
+        built.with,
+        args.acknowledged,
+        DoorChecks::NotPassed,
+        Some(&dial.endpoint),
+        pinned_host(built.build),
+    );
+    let journal = args.journal.as_deref();
+    live_start(
+        records, store, facts, connection, stream, journal, &dial, ports,
+    )
+    .map(Some)
+}
+
+/// DEC-924 item 1's admission from the run's own facts, one each (DEC-934, DEC-947 item 3): the
+/// build `built`, the acknowledgement `acknowledged` (only `--confirm-live` confirms), the door's
+/// answer `door`, and the host of the endpoint the run dials, `dialed`, beside the host its build
+/// pins, `pinned` ([`pinned_host`]). The shell's `admits` judges them; nothing here does.
+pub fn live_admission(
+    built: BuiltWith,
+    acknowledged: Environment,
+    door: DoorChecks,
+    dialed: Option<&RobinhoodEndpoint>,
+    pinned: Option<&'static str>,
+) -> LiveAdmission {
+    LiveAdmission {
+        build: built,
+        confirmation: match acknowledged {
+            Environment::Live => Confirmation::ConfirmLive,
+            Environment::Paper => Confirmation::Absent,
+        },
+        door,
+        host: McpHost {
+            dialed: dialed.map(|endpoint| endpoint.host.clone()),
+            pinned,
+        },
+    }
+}
+
+/// A live run's start (DEC-947 items 1 and 2, the R0 rehearsal's R2 and R3), in the order no
+/// credential is read before a check that needs none has passed, and nothing that can place is
+/// built before the door has passed on real evidence:
+///
+/// 1. the shell's fold before credentials ([`checked_before_credentials`]): the walk, the
+///    document, every V-rule but V-002, and the admission's build, `--confirm-live` and host;
+/// 2. the one [`Ports::connect`], with the run's `dial`: the login and the MCP session;
+/// 3. the agentic account's snapshot ([`Session::account_snapshot`]), the account reads alone;
+/// 4. the door's lapse on that snapshot and the account stream's rows ([`lapse_read`]);
+/// 5. the shell's full fold, with the door's condition now held (`DoorChecks::Passed`).
+///
+/// `facts` carry the admission as the run holds it before credentials, the door not passed.
+/// Any refusal after the connect leaves the session unused: it read, and it sent nothing.
+///
+/// # Errors
+/// [`PaperError::Deployment`] from either fold; [`PaperError::Credentials`] or
+/// [`PaperError::Endpoint`] from the connect; [`PaperError::Shell`] at `Stage::Reconcile` for an
+/// unread snapshot; any [`PaperError::Lapse`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the run's own inputs, each read once; DEC-947 item 2"
+)]
+fn live_start<P: Ports>(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    facts: &RunFacts,
+    connection: &Connection,
+    stream: &StreamId,
+    journal: Option<&str>,
+    dial: &Dial,
+    ports: &mut P,
+) -> Result<(ConfirmedVersion, P::Session), PaperError> {
+    checked_before_credentials(records, store, facts).map_err(PaperError::Deployment)?;
+    let session = ports.connect(connection, Some(dial))?;
+    let snapshot = session
+        .account_snapshot()
+        .map_err(refused(Stage::Reconcile))?;
+    lapse_read(connection, journal, stream, snapshot.as_ref())?;
+    let admitted = RunFacts {
+        live: LiveAdmission {
+            door: DoorChecks::Passed,
+            ..facts.live.clone()
+        },
+        ..facts.clone()
+    };
+    let confirmed = confirmed_version(records, store, &admitted).map_err(PaperError::Deployment)?;
+    Ok((confirmed, session))
+}
+
 /// The live door the run calls ahead of its own answers (E7-26, DEC-918 items 1 to 4; DEC-910
 /// item 2: "These checks refuse before anything runs, ahead of the shell's own
 /// `DeploymentRefusal::Live`, which stays for the shell's fold"): the connection choice
-/// [`chosen`], the account stream's naming [`account_stream`] and DEC-529 item 3's
-/// flat-and-unspent lapse, in that order, over the records the run's own single
-/// control-stream read holds and the deployment's own document, all before the shell's phase-1
-/// fold and so before every credential read too (FT-3: [`Ports::connect`], the only one, comes
-/// later, behind the fold). The door engages where the run holds the deployment's own document
-/// ([`deployed_document`]); where it holds none — no deployment, a stopped agent, or a document
-/// the fold itself would refuse — the door answers nothing, the shell's fold answers behind it
-/// with its own refusal unchanged, so the door never answers where the shell refuses and
-/// performs no validation of its own (DEC-918 item 3's bounds: only ever a refusal in front of
-/// the shell's).
+/// [`chosen`] and the account stream's naming [`account_stream`], in that order, over the records
+/// the run's own single control-stream read holds and the deployment's own document, all before
+/// the shell's phase-1 fold and every credential read (FT-3). The door engages where the run
+/// holds the deployment's own document ([`deployed_document`]); where it holds none — no
+/// deployment, a stopped agent, or a document the fold itself would refuse — the door answers
+/// nothing, the shell's fold answers behind it with its own refusal unchanged, so the door never
+/// answers where the shell refuses and performs no validation of its own (DEC-918 item 3's
+/// bounds: only ever a refusal in front of the shell's).
 ///
-/// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
-/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The lapse reads its
-/// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
-/// the named account stream, and the counts are the agentic account's own `snapshot`, which only
-/// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
-/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses
-/// `lapse_evidence_not_supplied` through [`unsupplied`] (DEC-919) rather than pass on an empty
-/// read; a paper connection makes no check and reads nothing, so the paper run is unchanged
-/// (LT-14).
+/// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2).
+/// DEC-529 item 3's lapse is the door's third check, made through [`lapse_read`] on the stream
+/// named here: for a paper connection at once, where it makes no check and reads nothing (LT-14);
+/// for a live one in [`live_start`], on the agentic account's own snapshot, which only the
+/// Robinhood session reads, so after the fold's credential-free checks and the one connect
+/// (DEC-933 item 3, DEC-947 items 1 and 2). A live connection whose session reads no snapshot
+/// still refuses `lapse_evidence_not_supplied` (DEC-919).
 ///
 /// # Errors
 /// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
@@ -801,15 +984,13 @@ fn the_live_door(
     store: &dyn ArtifactSource,
     agent: &AgentId,
     args: &Args,
-    snapshot: Option<&AccountSnapshot>,
-) -> Result<Option<Connection>, PaperError> {
+) -> Result<Option<(Connection, StreamId)>, PaperError> {
     let Some(document) = deployed_document(records, store, agent) else {
         return Ok(None);
     };
     let connection = chosen(records, &document, &args.account_ref)?;
     let stream = account_stream(&args.workspace, &args.account_ref)?;
-    lapse_read(&connection, args.journal.as_deref(), &stream, snapshot)?;
-    Ok(Some(connection))
+    Ok(Some((connection, stream)))
 }
 
 /// The founder's acknowledgement of the run's environment, checked as soon as the door has
@@ -934,7 +1115,11 @@ impl Ports for Production {
     /// For Alpaca, `Credentials::from_env` and one [`AlpacaPaperHttp`]; for Robinhood, the
     /// founder's login at the endpoint this build pins ([`robinhood::connect`]). Either fails as
     /// [`PaperError::Credentials`], and no error names a key or a token.
-    fn connect(&mut self, connection: &Connection) -> Result<Connected, PaperError> {
+    fn connect(
+        &mut self,
+        connection: &Connection,
+        dial: Option<&Dial>,
+    ) -> Result<Connected, PaperError> {
         match connection.broker {
             Broker::Alpaca => {
                 let credentials = Credentials::from_env().map_err(|_| PaperError::Credentials)?;
@@ -942,7 +1127,10 @@ impl Ports for Production {
                     .map(Connected::Alpaca)
                     .map_err(|_| PaperError::Credentials)
             }
-            Broker::Robinhood => robinhood::connect().map(Connected::Robinhood),
+            Broker::Robinhood => {
+                let dial = dial.ok_or(PaperError::Endpoint(EndpointRefusal::NotBuilt))?;
+                robinhood::connect(dial).map(Connected::Robinhood)
+            }
         }
     }
 
@@ -957,12 +1145,12 @@ impl Ports for Production {
 }
 
 /// The session [`Production::connect`] answers: the broker the connection record chose.
-pub enum Connected {
+pub enum Connected<T = McpClient> {
     Alpaca(AlpacaPaperHttp),
-    Robinhood(Linked),
+    Robinhood(Linked<T>),
 }
 
-impl Session for Connected {
+impl<T: Tools + 'static> Session for Connected<T> {
     fn preflight<P: Pause + Clone>(
         &self,
         artifacts: &Artifacts,
@@ -994,16 +1182,26 @@ impl Session for Connected {
             Self::Robinhood(linked) => linked.broker_ask(facts),
         }
     }
+
+    fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.account_snapshot(),
+            Self::Robinhood(linked) => linked.account_snapshot(),
+        }
+    }
 }
 
-/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`.
+/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`,
+/// and the stream and environment it was journaled on (DEC-957).
 fn control_record(row: &StoredEvent) -> Result<ControlRecord, PaperError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| PaperError::Control)?;
     let payload = body.get("payload").ok_or(PaperError::Control)?.clone();
+    let origin = Origin::of(&row.stream_id, &row.environment).ok_or(PaperError::Control)?;
     Ok(ControlRecord {
         seq: row.seq,
         event_type: row.event_type.clone(),
         payload,
+        origin,
     })
 }
 
@@ -1067,7 +1265,7 @@ where
 pub const CONNECT_CHECK: &str = "--connect-check";
 
 /// The connect check's ports in the binary (DEC-946): core dumps off, the founder's login at the
-/// endpoint this build pins and the reads over its session ([`robinhood::connect`],
+/// endpoint this build pins and the reads over its session ([`robinhood::login_from_env`],
 /// [`Linked::observe`]), the system clock, and the account stream in the Postgres journal at
 /// `journal`. No error names the DSN, the token or the account number (rule 7).
 #[derive(Clone, PartialEq, Eq)]
@@ -1108,7 +1306,7 @@ impl CheckPorts for ProductionCheck {
     }
 
     fn observe(&mut self, account_number: &str) -> Result<Observed, PaperError> {
-        Ok(robinhood::connect()?.observe(account_number))
+        Ok(robinhood::login_from_env()?.observe(account_number))
     }
 
     fn now(&self) -> UtcNanos {
@@ -1191,3 +1389,10 @@ pub fn stderr_line(error: &PaperError) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "test fixtures: a fixture that does not build fails the test"
+)]
+mod live_tests;

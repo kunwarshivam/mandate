@@ -6,21 +6,19 @@
 //! founder's grant is committed on the control stream by the clock itself, at the first pause
 //! that reaches the grant's delay, exactly as the CLI commits one while the run waits.
 //!
-//! Two seams are test doubles, each over a gap outside this lane that fails closed today: the
+//! One seam is a test double, over a gap outside this lane that fails closed today: the
 //! runtime's granted intent carries no execution policy until gap 2 lands (DEC-940 item 6;
 //! claim #1374), so the sink hands the executor the protection the mandate names, as the
-//! cycle's own request would have carried it; and the production view hands the runtime the
-//! mandate's approver references unresolved (`role:approver`), which admission check 3 never
-//! matches to a user, so the mandate stage names the founder as the role's one member, as the
-//! shell's own grant probes do, and the builder's two stages, which check the view they are
-//! handed against the mandate's own, are handed the mandate's reference back. Nothing here
+//! cycle's own request would have carried it. The mandate stage and the builder's two stages are
+//! the production ones: the view resolves the mandate's `role:approver` to the workspace owner,
+//! the user who recorded the mandate connection's `ConnectionEstablished` (DEC-953). Nothing here
 //! reaches a host or a credential (`AGENTS.md` rule 8).
 
 #[path = "../../mandate-shell/tests/common/mod.rs"]
 mod shell_common;
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -37,13 +35,10 @@ use mandate_journal::{AppendOutcome, ArtifactSource, StoredEvent};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, evaluate};
 use mandate_num::{Fraction, Price};
 use mandate_paper::{GrantRefusal, PaperError, fresh_mark, granted_opening, lt10_end};
-use mandate_runtime::{
-    Classified, IntentBody, IntentHandoff, MandateView, ModelOutput, Observation, OrderExecution,
-    Proposal, SignalInputs,
-};
+use mandate_runtime::{IntentBody, IntentHandoff, ModelOutput, Observation, OrderExecution};
 use mandate_shell::adapters::{Sources, StoreJournal, production};
 use mandate_shell::paper::{PaperClock, load_contexts_with_clock};
-use mandate_shell::stages::{Admitted, Classifier, JournalWriter, MandateSource, Sink, Sizing};
+use mandate_shell::stages::{JournalWriter, Sink};
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Cause, Mark, Report, Setup, ShellError, Watch, run_observed_asked_watched};
 use mandate_spec::validate::RegisteredModel;
@@ -101,6 +96,10 @@ impl Pause for Clock {
 
     async fn pause(&self, duration: Duration) {
         let step = i64::try_from(duration.as_nanos()).unwrap();
+        assert!(
+            step > 0,
+            "the run paused for no time: a loop that never ends"
+        );
         let next = self.nanos.get() + step;
         assert!(
             next - at(PREFLIGHT).secs() * NANOS_PER_S < 3_600 * NANOS_PER_S,
@@ -138,6 +137,17 @@ const PREFLIGHT_QUOTE: Quoted = Quoted {
     bid: "655.1",
     ask: "655.2",
 };
+
+/// The founder's opaque user id: the grant's responder.
+const FOUNDER: &str = "user_founder";
+
+/// The `ConnectionEstablished` of the mandate's connection as the CLI records it, by `owner`: the
+/// workspace owner, the one member every approver reference resolves to (DEC-953).
+fn connection(owner: &str) -> String {
+    format!(
+        r#"{{"account_ref":"acct_spy","broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper","scopes":["trading"],"user":"{owner}"}}"#
+    )
+}
 
 /// The validating in-memory journal the run appends to, shared so the founder's CLI can commit
 /// its grant on the control stream while the run waits.
@@ -248,46 +258,6 @@ impl Sink for PolicySink {
             });
         }
         self.0.hand(&handoff)
-    }
-}
-
-/// The mandate stage double: the production stage's own admission, with the approver role the
-/// mandate names resolved to its one member, the founder (admission check 3's list).
-struct Approvable(Box<dyn MandateSource>);
-
-impl MandateSource for Approvable {
-    fn admitted(&self) -> Result<Admitted, Cause> {
-        let mut admitted = self.0.admitted()?;
-        admitted.view.approval.approvers = BTreeSet::from(["user_founder".to_owned()]);
-        Ok(admitted)
-    }
-}
-
-/// The approver reference the mandate names.
-const ROLE: &str = "role:approver";
-
-/// `view` with its approvers the mandate's own reference again, as the builder's stages check it.
-fn unresolved(view: &MandateView) -> MandateView {
-    let mut view = view.clone();
-    view.approval.approvers = BTreeSet::from([ROLE.to_owned()]);
-    view
-}
-
-/// The production builder's sizing over the mandate's own view.
-struct Sizes(Box<dyn Sizing>);
-
-impl Sizing for Sizes {
-    fn size(&self, view: &MandateView, inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
-        self.0.size(&unresolved(view), inputs)
-    }
-}
-
-/// The production builder's classification over the mandate's own view.
-struct Classifies(Box<dyn Classifier>);
-
-impl Classifier for Classifies {
-    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
-        self.0.classify(&unresolved(view), proposal)
     }
 }
 
@@ -501,14 +471,22 @@ static MANDATE_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// fresh IEX quote through the run's own [`fresh_mark`], hands it to the binding gate, and journals its mark
 /// before the runtime is handed the answers.
 fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
+    granted_with_owner(Some(FOUNDER), delay_s, after_grant)
+}
+
+/// [`granted_after`] on a stream whose mandate connection was recorded by `owner`, or by no one.
+fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) -> Granted {
     let now = at(PREFLIGHT);
-    let stream = Stream::of(
+    let mut stream = Stream::of(
         &mandate(),
         &SNAPSHOT.replace("2026-09-21", "2026-09-25"),
         RULES,
         FEE,
         &model(),
     );
+    if let Some(owner) = owner {
+        stream.record("ConnectionEstablished", &connection(owner));
+    }
     let artifacts = stream
         .artifacts_on(Date::parse("2026-09-29").unwrap())
         .unwrap();
@@ -573,15 +551,6 @@ fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
         transport: broker.clone(),
     });
     stages.journal = Box::new(journal.clone());
-    let source = std::mem::replace(&mut stages.mandate, Box::new(Approvable(Box::new(Unread))));
-    stages.mandate = Box::new(Approvable(source));
-    let sizing = std::mem::replace(&mut stages.sizing, Box::new(Sizes(Box::new(Unsized))));
-    stages.sizing = Box::new(Sizes(sizing));
-    let classifier = std::mem::replace(
-        &mut stages.classifier,
-        Box::new(Classifies(Box::new(Unsized))),
-    );
-    stages.classifier = Box::new(Classifies(classifier));
     let sink = std::mem::replace(&mut stages.sink, Box::new(PolicySink(Box::new(Refusing))));
     stages.sink = Box::new(PolicySink(sink));
     let setup = Setup {
@@ -615,36 +584,6 @@ fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
     }
 }
 
-/// The placeholder the builder's stages are swapped out through; it sizes and classifies nothing.
-struct Unsized;
-
-impl Sizing for Unsized {
-    fn size(&self, _: &MandateView, _: &SignalInputs) -> Result<Option<Proposal>, Cause> {
-        Err(Cause::Absent {
-            what: "the production sizing",
-        })
-    }
-}
-
-impl Classifier for Unsized {
-    fn classify(&self, _: &MandateView, _: &Proposal) -> Result<Classified, Cause> {
-        Err(Cause::Absent {
-            what: "the production classifier",
-        })
-    }
-}
-
-/// The placeholder the production mandate stage is swapped out through; it admits nothing.
-struct Unread;
-
-impl MandateSource for Unread {
-    fn admitted(&self) -> Result<Admitted, Cause> {
-        Err(Cause::Absent {
-            what: "the production mandate stage",
-        })
-    }
-}
-
 /// The placeholder the production sink is swapped out through; it never hands anything.
 struct Refusing;
 
@@ -653,6 +592,27 @@ impl Sink for Refusing {
         Err(Cause::Absent {
             what: "the production sink",
         })
+    }
+}
+
+/// DEC-953: the founder's grant is admitted only when the founder is the workspace owner the
+/// stream names. With the connection recorded by another user, or by no one, the view resolves no
+/// approver the founder is, so admission refuses the grant `not_an_approver`, the wait holds to
+/// the deadline, and nothing is sent.
+#[test]
+fn a_grant_by_anyone_but_the_workspace_owner_is_refused_with_nothing_sent() {
+    for owner in [Some("user_other"), None] {
+        let run = granted_with_owner(owner, 30, PREFLIGHT_QUOTE);
+        assert!(run.outcome.is_err(), "{owner:?}: the run places nothing");
+        assert_eq!(run.broker.openings(), 0, "{owner:?}: no opening sent");
+        let copies = run.journal.payloads(AGENT_STREAM, "ApprovalResponded");
+        let [copy] = &copies[..] else {
+            panic!("{owner:?}: the runtime copies the one answer: {copies:?}");
+        };
+        let text = |name: &str| copy.get(name).and_then(Value::as_str);
+        assert_eq!(text("result"), Some("refused"), "{owner:?}");
+        assert_eq!(text("reason"), Some("not_an_approver"), "{owner:?}");
+        assert_eq!(run.revalidated(), None, "{owner:?}: nothing re-validated");
     }
 }
 
@@ -722,6 +682,64 @@ fn a_stale_fresh_read_at_the_grant_refuses_with_nothing_sent() {
             .payloads(AGENT_STREAM, "ApprovalResponded")
             .is_empty(),
         "the stale wake handed the runtime nothing"
+    );
+}
+
+/// DEC-949 (DEC-940 item 7), rule 3: an ask nobody answers inside its 600-second timeout is closed
+/// by the runtime itself. The wait ticks the runtime at the deadline, the runtime journals its
+/// `ApprovalTimedOut` — exactly `{approval, on_timeout: skip}`, caused by the ask it ends (journal
+/// spec §9.7, rule 135) — through the validating journal, the run ends denied, and nothing is
+/// sent.
+#[test]
+fn an_unanswered_ask_is_closed_by_the_runtimes_own_timeout_with_nothing_sent() {
+    let run = granted_after(700, PREFLIGHT_QUOTE);
+    assert!(
+        matches!(&run.outcome, Err(PaperError::Grant(GrantRefusal::TimedOut))),
+        "{:?}",
+        run.outcome.as_ref().err()
+    );
+    assert_eq!(run.broker.openings(), 0, "nothing is sent");
+    assert_eq!(
+        run.clock.now().secs(),
+        at(PREFLIGHT).secs() + 600,
+        "the run ends at the ask's deadline"
+    );
+    let rows = run.journal.rows(AGENT_STREAM);
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .expect("the run asked");
+    let timeouts: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type == "ApprovalTimedOut")
+        .collect();
+    let [timeout] = &timeouts[..] else {
+        panic!("the runtime closes the ask once: {}", timeouts.len());
+    };
+    let body = mandate_canon::parse(&timeout.body).unwrap();
+    assert_eq!(
+        body.get("payload").unwrap(),
+        &json(&format!(
+            r#"{{"approval":"{}","on_timeout":"skip"}}"#,
+            request.event_id
+        ))
+    );
+    assert_eq!(
+        body.get("causation_id").and_then(Value::as_str),
+        Some(request.event_id.as_str()),
+        "the timeout is caused by the ask it ends"
+    );
+    let deadline = UtcNanos::from_parts(at(PREFLIGHT).secs() + 600, 0).unwrap();
+    assert_eq!(
+        body.get("event_time").and_then(Value::as_str),
+        Some(deadline.to_string().as_str()),
+        "the timeout is journaled at the deadline's wake"
+    );
+    assert!(
+        run.journal
+            .payloads(AGENT_STREAM, "ApprovalResponded")
+            .is_empty(),
+        "no answer reached the runtime"
     );
 }
 

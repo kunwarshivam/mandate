@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_journal::{ArtifactSource, Environment};
+use mandate_journal::ArtifactSource;
 use mandate_spec::Mandate;
 
 use crate::control::{
@@ -43,29 +43,15 @@ pub enum AgentCommand {
 pub struct GestureOwnerArgs {
     #[command(flatten)]
     pub owner: OwnerArgs,
-    /// `paper`, the default, or `live`: the environment the owner acts in. A `live` gesture is
-    /// admitted only for a `live` mandate on a Robinhood connection the owner recorded through
-    /// `connection record` and has not spent (DEC-529 item 3).
-    #[arg(long, value_name = "ENV", default_value = "paper")]
-    pub environment: String,
 }
 
 impl GestureOwnerArgs {
-    /// The owner these flags name, in the environment `--environment` names.
+    /// The owner these flags name, in the environment `--environment` names (DEC-925, DEC-952).
     ///
     /// # Errors
-    /// [`ControlError::Refused`] with `environment_invalid` for any environment but `paper` or
-    /// `live`, then [`OwnerArgs::owner`]'s.
+    /// [`OwnerArgs::owner`]'s.
     pub fn owner(&self) -> Result<Owner, ControlError> {
-        let environment = match self.environment.as_str() {
-            "paper" => Environment::Paper,
-            "live" => Environment::Live,
-            _ => return Err(refused("environment_invalid")),
-        };
-        Ok(Owner {
-            environment,
-            ..self.owner.owner()?
-        })
+        self.owner.owner()
     }
 }
 

@@ -68,6 +68,24 @@ impl<T: Tools> RobinhoodBridge<T> {
             .map_err(|_| unread())
     }
 
+    /// The agentic account's snapshot (`RobinhoodConnector::account_snapshot`), driven on the
+    /// bridge's runtime: the evidence the live door's lapse counts (DEC-933 item 3, DEC-947
+    /// item 1). The account reads alone, scoped to the recorded account; no quote is read and
+    /// nothing is sent.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] naming [`ACCOUNT_UNREAD`] when any read is refused or unreadable, or
+    /// the connector is held by another stage.
+    pub fn account_snapshot(&self) -> Result<AccountSnapshot, Cause> {
+        let unread = || Cause::Absent {
+            what: ACCOUNT_UNREAD,
+        };
+        let robinhood = self.connector.try_borrow().map_err(|_| unread())?;
+        self.runtime
+            .block_on(robinhood.account_snapshot())
+            .map_err(|_| unread())
+    }
+
     /// `symbol`'s quote as `get_equity_quotes` answers it now
     /// (`RobinhoodConnector::equity_quote`), driven on the bridge's runtime: the broker's own ask
     /// the runner's opening cross-check reads at the check (DEC-945). It names no account and

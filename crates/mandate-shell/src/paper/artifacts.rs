@@ -7,7 +7,7 @@ use std::time::Duration;
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::Exchange as BrokerExchange;
 use mandate_canon::{Digest, Key, Value};
-use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
+use mandate_domain::{AssetClass as DomainAssetClass, AssetId, Environment};
 use mandate_executor::{BindingGateConfigRefs, ExecutorConfig};
 use mandate_num::{Fraction, Qty, ShareIncrement};
 use mandate_risk::{EtpClass, Exchange as GateExchange, GateConfig};
@@ -15,6 +15,7 @@ use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{absent, usd};
+use crate::approvers::Members;
 use crate::control::{Configuration, ConfirmedVersion, SnapshotExchange};
 use crate::error::Cause;
 
@@ -35,6 +36,7 @@ pub struct Artifacts {
     pub(super) instrument: ReviewedInstrument,
     pub(super) quote_max_age: Duration,
     pub(super) config_refs: BindingGateConfigRefs,
+    pub(super) members: Members,
     gate_config: GateConfig,
     executor_config: ExecutorConfig,
 }
@@ -98,7 +100,13 @@ struct Artifact {
 
 impl Artifacts {
     /// The run's artifacts from the confirmed version and the effective registrations on the
-    /// control stream (E19-11, DEC-505), never from a file: the mandate and its one pinned model,
+    /// control stream (E19-11, DEC-505), never from a file. The deployment's stream must be in the
+    /// mandate's environment, and the model, fee schedule, calendar, rule set and instrument
+    /// snapshot must each have been registered on that same stream, so a live run binds only its
+    /// own live workspace's registrations and a paper run only its paper workspace's (DEC-952
+    /// item 1, DEC-957); a live mandate reaches here only from [`ConfirmedVersion`]s admitted on
+    /// all four of DEC-924 item 1's conditions. The fee schedule must name the mandate's
+    /// environment. Then: the mandate and its one pinned model,
     /// whose registered content is a DEC-504 content object (`kind` `quant_model_content`) naming
     /// the pin's own `model_id` and `model_version` under the pinned hash; the registered fee
     /// schedule, calendar and rule set, each judged as its file
@@ -114,8 +122,22 @@ impl Artifacts {
         configuration: &Configuration,
     ) -> Result<Self, Cause> {
         let mandate = confirmed.mandate().clone();
-        if mandate.environment != mandate_domain::Environment::Paper {
-            return Err(absent("a paper mandate"));
+        let deployed_on = confirmed.deployed_on();
+        let bindings = [
+            &configuration.model_version,
+            &configuration.fee_config,
+            &configuration.trading_calendar,
+            &configuration.rule_set,
+            &configuration.instrument_snapshot,
+        ];
+        if deployed_on.environment != mandate.environment
+            || bindings
+                .iter()
+                .any(|registered| registered.origin != *deployed_on)
+        {
+            return Err(absent(
+                "every binding journaled on the deployment's own control stream",
+            ));
         }
         let [pinned] = mandate.universe.pinned_instruments.as_slice() else {
             return Err(absent("one pinned production instrument"));
@@ -164,6 +186,9 @@ impl Artifacts {
         )?;
         let rules = artifact_from(configuration.rule_set.bytes.clone(), RULE_MEMBERS)?;
         let fees = fees(&fee, &calendar)?;
+        if required_text(&fee.value, "environment")? != environment_text(mandate.environment) {
+            return Err(absent("a fee schedule for the mandate's environment"));
+        }
         let (quote_max_age, gate_config, executor_config) = rule_set(&rules)?;
         let canonical_mandate = mandate
             .canonical_bytes()
@@ -184,6 +209,7 @@ impl Artifacts {
             instrument,
             quote_max_age,
             config_refs,
+            members: confirmed.members().clone(),
             gate_config,
             executor_config,
         })
@@ -451,6 +477,14 @@ fn require_text(value: &Value, name: &'static str, expected: &str) -> Result<(),
         Ok(())
     } else {
         Err(absent(name))
+    }
+}
+
+/// An environment as the fee schedule's `environment` member names it.
+fn environment_text(environment: Environment) -> &'static str {
+    match environment {
+        Environment::Paper => "paper",
+        Environment::Live => "live",
     }
 }
 

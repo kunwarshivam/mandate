@@ -28,7 +28,9 @@ use mandate_paper::{
     connect_check,
 };
 use mandate_time::UtcNanos;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use rustix::process::{DumpableBehavior, dumpable_behavior};
+use rustix::process::{Resource, getrlimit};
 
 const ACCOUNT_REF: &str = "01J0R1CHECK0ACC0VNT000000A";
 const STREAM: &str = "acct:ws_r1:01J0R1CHECK0ACC0VNT000000A";
@@ -139,13 +141,18 @@ fn an_append_at_a_stale_head_did_not_commit() {
 }
 
 /// LT-9 through the connect check's own ports: `ProductionCheck::harden` turns the process's
-/// core dumps off, read back from the kernel. Each test runs in its own process under nextest.
+/// core dumps off, read back from the kernel: a zero core-file limit, soft and hard, on every
+/// unix target, and on Linux not dumpable either (DEC-954). Each test runs in its own process
+/// under nextest.
 #[test]
 fn the_connect_checks_ports_harden_the_process() {
     let mut ports = ProductionCheck {
         journal: String::new(),
     };
     ports.harden().unwrap();
+    let limit = getrlimit(Resource::Core);
+    assert_eq!((limit.current, limit.maximum), (Some(0), Some(0)));
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     assert_eq!(dumpable_behavior().unwrap(), DumpableBehavior::NotDumpable);
 }
 

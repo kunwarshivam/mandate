@@ -1,6 +1,7 @@
 //! D1b (E10-16, DEC-527): `mandate config register` and `mandate model register`, run as the owner
-//! two required flags name, always in paper. The refusals need no database, and the Postgres binary
-//! test starts with them, so the pending gate sees the stub without one (DEC-510 item 3).
+//! two required flags name, in paper unless `--environment live` names a live workspace
+//! (DEC-952). The refusals need no database, and the Postgres binary test starts with them, so the
+//! pending gate sees the stub without one (DEC-510 item 3).
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
 mod common;
@@ -60,7 +61,11 @@ fn scratch(name: &str) -> PathBuf {
 
 fn owner_args(workspace: &str, user: &str) -> OwnerArgs {
     let (workspace, user) = (workspace.to_owned(), user.to_owned());
-    OwnerArgs { workspace, user }
+    OwnerArgs {
+        workspace,
+        user,
+        environment: "paper".to_owned(),
+    }
 }
 
 fn snapshot_args(owner: OwnerArgs, file: &Path, journal: &str, store: &Path) -> RegisterArgs {
@@ -92,7 +97,7 @@ fn refuses(code: &str, command: impl FnOnce(&mut Vec<u8>) -> anyhow::Result<Subm
 }
 
 #[test]
-fn the_owner_is_two_required_flags_and_always_paper() {
+fn the_owner_is_two_required_flags_and_paper_by_default() {
     let paper = Owner {
         workspace: "ws1".into(),
         user: "user_owner-01".into(),
@@ -131,11 +136,9 @@ fn the_owner_is_two_required_flags_and_always_paper() {
         let kind = Cli::try_parse_from(without).err().map(|e| e.kind());
         assert_eq!(kind, Some(ErrorKind::MissingRequiredArgument), "{flag}");
     }
-    for extra in [["--environment", "live"], ["--env", "live"]] {
-        let given: Vec<&str> = full.iter().copied().chain(extra).collect();
-        let kind = Cli::try_parse_from(given).err().map(|e| e.kind());
-        assert_eq!(kind, Some(ErrorKind::UnknownArgument), "{extra:?}");
-    }
+    let given: Vec<&str> = full.iter().copied().chain(["--env", "live"]).collect();
+    let kind = Cli::try_parse_from(given).err().map(|e| e.kind());
+    assert_eq!(kind, Some(ErrorKind::UnknownArgument), "--env");
     let model = "mandate model register quant.ma_crossover 1.0.0 --user u1 --journal j --store s";
     let kind = Cli::try_parse_from(model.split_whitespace())
         .err()

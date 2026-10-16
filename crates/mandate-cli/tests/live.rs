@@ -139,17 +139,28 @@ struct World {
 }
 
 impl World {
+    /// A live workspace (DEC-952): its control stream's registrations are `live`, so the live
+    /// owner's gestures append to a stream of their own environment.
     fn new() -> Self {
+        Self::opened("live")
+    }
+
+    /// A workspace whose control stream's registrations are in `environment`.
+    fn opened(environment: &str) -> Self {
         let mut world = Self::default();
-        world.seed(CONTROL, "paper", "ConfigSnapshotRegistered", MODEL);
+        world.seed(CONTROL, environment, "ConfigSnapshotRegistered", MODEL);
         world.store.put_artifact(SPY.as_bytes()).unwrap();
         let snapshot = SNAPSHOT.replace("@H", &reference(SPY));
-        world.seed(CONTROL, "paper", "ConfigSnapshotRegistered", &snapshot);
+        world.seed(CONTROL, environment, "ConfigSnapshotRegistered", &snapshot);
         world
     }
 
     fn with(events: &[Event]) -> Self {
-        let mut world = Self::new();
+        Self::opened_with("live", events)
+    }
+
+    fn opened_with(environment: &str, events: &[Event]) -> Self {
+        let mut world = Self::opened(environment);
         for event in events {
             world.apply(*event);
         }
@@ -314,10 +325,11 @@ fn a_live_mandate_on_the_owners_recorded_robinhood_connection_is_created_confirm
     assert!(again.is_ok(), "a re-run finds the deployment: {again:?}");
 }
 
-/// A paper owner's gestures on the paper fixture are unchanged by a recorded live connection.
+/// A paper owner's gestures on the paper fixture, in a paper workspace, are unchanged by a live
+/// connection's record.
 #[test]
 fn a_paper_owner_still_creates_confirms_and_deploys_a_paper_mandate() {
-    let mut world = World::with(&[Event::Establish(GOOD)]);
+    let mut world = World::opened_with("paper", &[Event::Establish(GOOD)]);
     let paper = owner();
     world.create(&paper, false).unwrap();
     world.confirm(&paper, false).unwrap();
@@ -637,6 +649,7 @@ fn event() -> impl Strategy<Value = Event> {
 
 /// No `live` mandate is ever admitted but on a Robinhood `live` connection the owner recorded
 /// through the CLI, not revoked since and unspent; every other draw refuses as the oracle says.
+/// Each owner acts in a workspace of its own environment (DEC-952).
 #[test]
 fn no_live_mandate_is_admitted_but_on_the_owners_unspent_robinhood_record() {
     let drawn = (
@@ -650,7 +663,11 @@ fn no_live_mandate_is_admitted_but_on_the_owners_unspent_robinhood_record() {
     );
     TestRunner::deterministic()
         .run(&drawn, |(events, environment, live_document)| {
-            let world = World::with(&events);
+            let workspace = match environment {
+                Environment::Paper => "paper",
+                Environment::Live | Environment::Backtest => "live",
+            };
+            let world = World::opened_with(workspace, &events);
             let owner = in_env(environment);
             let document = json(&document(live_document));
             let got = admitted(&world.journal, &owner, &document).map_err(|e| match e {

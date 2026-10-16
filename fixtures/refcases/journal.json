@@ -17081,6 +17081,316 @@
    }
   ]
  },
+ "approval_cancellations": {
+  "spec": "docs/specs/journal.md v0.43 §9.7 (DEC-950)",
+  "drafts": {
+   "canceled": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3P4A000000000000000Q6",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ApprovalCanceled",
+    "schema_version": 1,
+    "event_time": "2026-09-21T13:05:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "payload": {
+     "approval": "01J8Z3P0A000000000000000Q1",
+     "reason": "version_applied"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "approval.kind",
+    "clause": "§9.7 types",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.approval",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.approval"
+    }
+   },
+   {
+    "name": "approval.form",
+    "clause": "§9.7 types",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.approval",
+      "value": "not-a-ulid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.approval"
+    }
+   },
+   {
+    "name": "reason.kind",
+    "clause": "§9.7 types",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "reason.form",
+    "clause": "§9.7 types",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "rebound"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "approval.null",
+    "clause": "§9.7 types",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.approval",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.approval"
+    }
+   },
+   {
+    "name": "reason.null",
+    "clause": "§9.7 types",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "missing",
+    "clause": "§9.7 closed",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "extra",
+    "clause": "§9.7 closed",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.on_timeout",
+      "value": "skip"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.on_timeout"
+    }
+   },
+   {
+    "name": "without_its_mandate",
+    "clause": "§9 row: `ApprovalCanceled` names `mandate_version`",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "on_the_control_stream",
+    "clause": "§9 row: `ApprovalCanceled` is an agent-stream record",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "at_version_2",
+    "clause": "§9.7: closed at schema version 1 only",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "reason.mode_tightened",
+    "clause": "§9.7: every cancel reason the runtime writes",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "mode_tightened"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "reason.owner_pause",
+    "clause": "§9.7: every cancel reason the runtime writes",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "owner_pause"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "reason.owner_stop",
+    "clause": "§9.7: every cancel reason the runtime writes",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "owner_stop"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "reason.kill_switch",
+    "clause": "§9.7: every cancel reason the runtime writes",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "kill_switch"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "caused",
+    "clause": "§9.7: no rule reads the cause; a tightening that names its event is recorded",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": "01J8Z3P2A000000000000000Q3"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "correlated",
+    "clause": "§9.7: no rule reads the correlation",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "correlation_id",
+      "value": "01J8Z3P2A000000000000000Q3"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "another_approval",
+    "clause": "§9.7: any ask the runtime held pending",
+    "base_draft": "canceled",
+    "changes": [
+     {
+      "path": "payload.approval",
+      "value": "01J8Z3P2A000000000000000Q3"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
  "broker_profile": {
   "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
   "artifacts": [
