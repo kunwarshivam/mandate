@@ -200,10 +200,35 @@ fn each_order_of_a_replacement_carries_its_own_broker_id() {
     }
 }
 
-/// The fold does not read the member (§9.16): a stream replays to the same state whatever
-/// `broker_order_id` each `OrderStateChanged` carries, and without it, as version 1 wrote it.
+/// Every risk input the folded state answers: the orders, their reservations, the positions and
+/// fills, the agents' modes, the account's state and buying power, the unprotected intervals,
+/// the mismatched instruments, the reconciliation's checkpoint and head, and the risk clock.
+fn risk_inputs(state: &ExecutorState) -> String {
+    format!(
+        "{:?}",
+        (
+            state.orders(),
+            state.reservations(),
+            state.positions(),
+            state.fills(),
+            state.modes(),
+            state.account_state(),
+            state.buying_power(),
+            state.unprotected_intervals(),
+            state.mismatched(),
+            state.checkpoint(),
+            state.reconciled_through(),
+            state.risk_clock(),
+        )
+    )
+}
+
+/// The member changes no risk input (§9.16, DEC-869 item 4): a stream replays to the same orders,
+/// reservations, positions, modes and account whatever `broker_order_id` each
+/// `OrderStateChanged` carries, and without it, as version 1 wrote it. The fold keeps the ids
+/// only so a reconciliation can match a broker record naming no key of ours (DEC-956 item 2).
 #[test]
-fn the_fold_never_reads_the_brokers_order_id() {
+fn the_brokers_order_id_changes_no_risk_input() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
     let (mut shell, id, _) = placed(&ports);
@@ -244,7 +269,7 @@ fn the_fold_never_reads_the_brokers_order_id() {
             let id = ids.get(n % ids.len()).cloned().flatten();
             Some(id.map_or(Value::Null, Value::Str))
         });
-        prop_assert_eq!(&with, &without);
+        prop_assert_eq!(risk_inputs(&with), risk_inputs(&without));
         Ok(())
     });
     assert!(outcome.is_ok(), "{outcome:?}");
