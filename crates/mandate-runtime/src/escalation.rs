@@ -185,6 +185,7 @@ pub(crate) fn ask(
         evidence,
         risk_impact: Vec::new(),
         deadline: clock(deadline),
+        execution: None,
     };
     let (Ok(object), Ok(hash)) = (content_object(&content), content_hash(&content)) else {
         return Ok(());

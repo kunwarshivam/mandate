@@ -169,6 +169,7 @@ pub fn content(qty: &str, deadline: i64) -> RequestContent {
         evidence: Vec::new(),
         risk_impact: Vec::new(),
         deadline: RiskClock(deadline),
+        execution: None,
     }
 }
 

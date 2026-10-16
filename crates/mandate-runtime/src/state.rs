@@ -875,6 +875,7 @@ fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeEr
                 evidence: Vec::new(),
                 risk_impact: Vec::new(),
                 deadline: mandate_approval::RiskClock(deadline.secs()),
+                execution: None,
             },
             content_hash,
             delivered: false,

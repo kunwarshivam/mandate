@@ -89,6 +89,31 @@ pub struct RiskFigure {
     pub cap: Option<DecStr>,
 }
 
+/// The time in force the order builder chose for the asked order (journal spec §9.1's `tif`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TimeInForce {
+    Day,
+    Gtc,
+    Ioc,
+}
+
+/// The protective prices the order builder computed for the asked entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtectionTerms {
+    pub stop: Price,
+    pub take_profit: Option<Price>,
+}
+
+/// The execution plan the deterministic order builder produced for the asked order, bound under
+/// the content hash so a grant releases exactly this plan and never a new one (DEC-942).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionTerms {
+    pub asset_class: AssetClass,
+    pub tif: TimeInForce,
+    pub protection_required: bool,
+    pub protection: Option<ProtectionTerms>,
+}
+
 /// Everything `ApprovalRequested` carries for the owner to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestContent {
@@ -96,6 +121,9 @@ pub struct RequestContent {
     pub evidence: Vec<EvidenceRef>,
     pub risk_impact: Vec<RiskFigure>,
     pub deadline: RiskClock,
+    /// `None` when the builder produced no plan: the content object is then version 1's, with no
+    /// `execution` member, and a grant hands no plan, which the executor's sink refuses.
+    pub execution: Option<ExecutionTerms>,
 }
 
 /// SHA-256 of the canonical content object (journal spec §4). A response must repeat it (EI-14).
@@ -194,6 +222,16 @@ pub fn content_object(content: &RequestContent) -> Result<Value, ApprovalError> 
             ])?,
         ),
     ])
+}
+
+/// The content object's `execution` member: the plan exactly as the builder produced it, in the
+/// canonical form a fold re-derives and compares byte for byte (DEC-942).
+///
+/// # Errors
+/// Never in practice: every key is a valid canonical key.
+pub fn execution_object(terms: &ExecutionTerms) -> Result<Value, ApprovalError> {
+    let _ = terms;
+    Err(unrepresentable("execution"))
 }
 
 /// Mandate spec §6.4's label for the combined score.

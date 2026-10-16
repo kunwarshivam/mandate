@@ -89,6 +89,7 @@ fn request(instrument: &str, qty: &str, version: &str) -> RequestContent {
         evidence: Vec::new(),
         risk_impact: Vec::new(),
         deadline: RiskClock(ASKED_AT + TIMEOUT_S),
+        execution: None,
     }
 }
 
