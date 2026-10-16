@@ -38,6 +38,11 @@ use crate::types::{
 /// stopped and [`Input::Started`] resumes from that point rather than restarting the sequence
 /// (task brief interpretation 20).
 ///
+/// A tick before `Input::Started` only sets the risk clock, the latest tick the core has seen
+/// (mandate spec §5.2), so the records the start leads to carry the run's clock rather than zero;
+/// it evaluates nothing and emits nothing, and leaves the core unstarted (DEC-948 item 4). Every
+/// other input before the start is refused.
+///
 /// `Input::Started` is recovery. It never resubmits: for every `OrderSubmitted` the fold carries
 /// with no acknowledgment it emits a `GetOrderByClientId`, and an order the broker does not have
 /// returns to `Intent` only after `unknown_absent_lookups` absences spanning
@@ -50,6 +55,10 @@ pub fn handle(
 ) -> Result<Vec<Effect>, ExecutorError> {
     if let Input::Started(epoch) = input {
         return started(state, epoch, ports, binding_gate);
+    }
+    if let (false, Input::Tick(at)) = (state.started, &input) {
+        state.now = state.now.max(Some(*at));
+        return Ok(Vec::new());
     }
     if !state.started {
         return Err(ExecutorError::NotStarted);

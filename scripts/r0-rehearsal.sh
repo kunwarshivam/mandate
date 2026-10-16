@@ -155,8 +155,10 @@ SQL
 }
 start_postgres
 JOURNAL=(--journal "$DSN" --store "$STORE")
-AS_OWNER=(--workspace "$WORKSPACE" --user "$OWNER")
-LIVE_OWNER=(--workspace "$WORKSPACE" --user "$OWNER" --environment live)
+# The rehearsal's workspace is live from its first event, and every owner command states it
+# (DEC-952: paper and live never share a stream).
+AS_OWNER=(--workspace "$WORKSPACE" --user "$OWNER" --environment live)
+LIVE_OWNER=("${AS_OWNER[@]}")
 
 # --- R0 step 2: the rehearsal ----------------------------------------------------------------
 cat >"$WORK/sim.json" <<JSON
@@ -169,7 +171,7 @@ for _ in $(seq 50); do grep -q 'serving' "$WORK/sim.out" 2>/dev/null && break; s
 ENDPOINT=$(sed -n 's/^mandate-rh-sim: serving //p' "$WORK/sim.out")
 step 2a 'resource' curl -sf "${ENDPOINT%/mcp}/.well-known/oauth-protected-resource/mcp" || true
 
-step 2b 'opened ctl:' cli workspace open --workspace "$WORKSPACE" "${JOURNAL[@]}" || true
+step 2b 'opened ctl:' cli workspace open --workspace "$WORKSPACE" --environment live "${JOURNAL[@]}" || true
 
 cat >"$WORK/instrument.json" <<JSON
 {"asset_class":"us_equity","etp":"plain","etp_classified_at":"$(date -u +%Y-%m-%dT00:00:00Z)","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"$ASSET_ID","symbol":"$SYMBOL"}

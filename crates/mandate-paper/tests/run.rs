@@ -92,6 +92,9 @@ struct Broker {
     /// was sent, and the share it bought in the positions, named by the broker's ticker as the
     /// paper broker reported #1355's (E2, 2026-10-16).
     fills: bool,
+    /// The ticker the `FILL` names, when it is not the deployed equity's own: a fill in an
+    /// instrument the run never registered.
+    fill_symbol: Option<&'static str>,
     minutes: &'static str,
     posts: Rc<RefCell<Vec<Value>>>,
     clock: Clock,
@@ -138,6 +141,23 @@ impl Broker {
         lookup.then(|| self.order(&entry, status, filled))
     }
 
+    /// The account once the entry has filled: its cash less the one share the fill bought at the
+    /// entry's limit, 255.2, as the paper broker settles cash (trading spec §11's cash row), so the
+    /// watch's reconciliation after the fill compares a cash the fill really moved.
+    fn filled_account(&self) -> Vec<u8> {
+        let entry = self.posts.borrow().first().cloned().unwrap();
+        let field = |name: &str| entry.get(name).and_then(Value::as_str).unwrap().to_owned();
+        assert_eq!(
+            (field("qty"), field("limit_price")),
+            ("1".to_owned(), "255.2".to_owned()),
+            "the cash below is the fixture entry's"
+        );
+        let account = String::from_utf8(self.file("account.json")).unwrap();
+        account
+            .replace(r#""cash":"1000000""#, r#""cash":"999744.8""#)
+            .into_bytes()
+    }
+
     /// The account activities once the entry has filled: one `FILL` of its whole quantity at its
     /// limit price, or none before the entry was sent.
     fn fill(&self) -> Vec<u8> {
@@ -146,7 +166,7 @@ impl Broker {
         };
         let field = |name: &str| entry.get(name).and_then(Value::as_str).unwrap().to_owned();
         let (id, qty, price) = (field("client_order_id"), field("qty"), field("limit_price"));
-        let symbol = self.equity.1;
+        let symbol = self.fill_symbol.unwrap_or(self.equity.1);
         let at = format!("{}9:59.000000000Z", self.minutes);
         format!(
             r#"[{{"activity_type":"FILL","client_order_id":"{id}","cum_qty":"{qty}","id":"20260929170000000::68099755-c7e6-40ea-8ba2-5dc644393428","leaves_qty":"0","order_id":"e02fc2d2-0ff3-444f-a0ab-6253613302fe","price":"{price}","qty":"{qty}","side":"buy","symbol":"{symbol}","transaction_time":"{at}","type":"fill"}}]"#
@@ -172,6 +192,9 @@ impl TradingTransport for Broker {
         let asset = format!("/v2/assets/{}", self.equity.1);
         let file = |name| self.file(name);
         let (status, body) = match (request.method(), path) {
+            (Method::Get, "/v2/account") if self.fills && !self.posts.borrow().is_empty() => {
+                (200, self.filled_account())
+            }
             (Method::Get, "/v2/account") => (200, file("account.json")),
             (Method::Get, "/v2/positions") if self.holds => (200, file("position-aapl.json")),
             (Method::Get, "/v2/positions") if self.fills && !self.posts.borrow().is_empty() => {
@@ -430,6 +453,7 @@ impl Scene {
                 holds,
                 rests: false,
                 fills: false,
+                fill_symbol: None,
                 minutes,
                 posts,
                 clock: clock.clone(),
@@ -1104,6 +1128,130 @@ fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
         let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
         assert!(verified.is_ok(), "{name}: {verified:?}");
     }
+}
+
+/// #1369 review, DEC-938 item 1: a `FILL` naming a ticker the run never registered is external
+/// activity, whose `ExternalActivityIngested` has no registered schema. The journal refuses the
+/// batch, so the run stops at the journal, and nothing further reaches the broker: no request
+/// follows the activity read that found the fill.
+#[test]
+fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_journal() {
+    let mut scene = Scene::new("unregistered-fill", 231..256);
+    scene.ports.broker.fills = true;
+    scene.ports.broker.fill_symbol = Some("QQQ");
+    scene.advancing(1_000_000, 0);
+    let outcome = scene.run();
+    assert!(
+        matches!(
+            outcome,
+            Err(PaperError::Shell(ShellError::Refused {
+                stage: mandate_shell::Stage::Journal,
+                ..
+            }))
+        ),
+        "{}",
+        refused_at(&outcome)
+    );
+    assert_eq!(scene.posts().len(), 1, "the entry, and no other order");
+    let log = scene.ports.broker.log.borrow();
+    let found = log
+        .iter()
+        .rposition(|(_, path, _)| path.starts_with("/v2/account/activities?"))
+        .expect("the reconciliation read the activities");
+    assert_eq!(
+        log.get(found + 1..).map(<[_]>::len),
+        Some(0),
+        "nothing is sent after the refused fill: {:?}",
+        &log[found..]
+    );
+}
+
+/// DEC-948 items 2 to 4 through a real journal (the suite's PG class, DEC-109): the executor
+/// learns from its stream's envelope that it runs on paper, so the entry's fill books the
+/// simulated fee the registered fee configuration defines (trading spec §10), naming that
+/// configuration, for the client order id the run sent; and every account-stream record carries
+/// the run clock's risk clock or later, never 1970's zero (mandate spec §5.2).
+#[test]
+fn a_paper_fill_books_its_simulated_fee_at_the_run_clock() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let mut scene = Scene::new("pg-fee", 231..256);
+    scene.ports.broker.fills = true;
+    scene.advancing(1_000_000, 0);
+    let url = std::env::var(support::URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    scene.args.journal = Some(format!("{url}{joiner}options={options}"));
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let sent = scene.posts()[0].clone();
+    let journal = db.journal();
+    let account = StreamId::parse("acct:ws_paper:acct_paper").unwrap();
+    let rows = db.block_on(journal.rows(&account)).unwrap();
+    let bodies: Vec<(String, Value)> = rows
+        .iter()
+        .map(|row| {
+            let body = json(std::str::from_utf8(&row.body).unwrap());
+            (row.event_type.clone(), body)
+        })
+        .collect();
+    let refs = |event_type: &str, name: &str| {
+        bodies
+            .iter()
+            .find(|(t, _)| t == event_type)
+            .and_then(|(_, body)| body.get("config_refs")?.get(name)?.as_str())
+            .map(str::to_owned)
+    };
+    let fees: Vec<&Value> = bodies
+        .iter()
+        .filter(|(t, _)| t == "FeesCharged")
+        .filter_map(|(_, body)| body.get("payload"))
+        .collect();
+    let [fee] = fees[..] else {
+        panic!("one simulated fee for the one fill, not {}", fees.len());
+    };
+    let member = |name: &str| fee.get(name).cloned();
+    assert_eq!(member("simulated"), Some(Value::Bool(true)));
+    assert_eq!(
+        member("client_order_id"),
+        sent.get("client_order_id").cloned()
+    );
+    assert_eq!(member("family"), Some(Value::Str("equities".to_owned())));
+    assert_eq!(
+        member("charged"),
+        Some(Value::Str("0".to_owned())),
+        "a simulated fee is never charged by the broker"
+    );
+    assert!(
+        refs("FeesCharged", "fee_config").is_some(),
+        "the fee names its configuration"
+    );
+    assert_eq!(
+        refs("FeesCharged", "fee_config"),
+        refs("LateFillApplied", "fee_config"),
+        "the configuration its fill was accounted under"
+    );
+    let start = UtcNanos::parse_rfc3339(TUESDAY.0).unwrap();
+    let clocks: Vec<(&str, &str)> = bodies
+        .iter()
+        .filter_map(|(t, body)| {
+            let clock = body.get("payload")?.get("risk_clock")?.as_str()?;
+            Some((t.as_str(), clock))
+        })
+        .collect();
+    assert!(!clocks.is_empty());
+    for (event_type, clock) in clocks {
+        let at = UtcNanos::parse(clock).unwrap();
+        assert!(
+            at.secs() >= start.secs(),
+            "{event_type}'s risk clock {clock} is before the run clock {}",
+            TUESDAY.0
+        );
+    }
+    let store = FsArtifactStore::open(&scene.args.store).unwrap();
+    let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
+    assert!(verified.is_ok(), "{verified:?}");
 }
 
 /// DEC-940, rule 3: a placing run whose cycle asks waits for the grant at the watch's interval,

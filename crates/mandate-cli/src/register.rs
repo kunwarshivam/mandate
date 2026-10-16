@@ -1,6 +1,7 @@
 //! The `mandate config register` and `mandate model register` commands (first paper trade brief,
 //! D1b; DEC-527): [`crate::config::register`] and [`crate::config::register_model`] over P0's `--journal` and
-//! `--store`, run as the owner `--workspace` and `--user` name, always in paper.
+//! `--store`, run as the owner `--workspace` and `--user` name, in the environment `--environment`
+//! names, `paper` by default, which must be the workspace's own (DEC-952).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -13,8 +14,8 @@ use crate::config::{self, ConfigKind};
 use crate::control::{ControlError, Now, Owner, Submitted, control_stream};
 use crate::postgres::{JournalArgs, PgControlJournal};
 
-/// Who runs the command (DEC-527 items 1 and 3). There is no environment: the owner is always in
-/// paper.
+/// Who runs the command (DEC-527 items 1 and 3), and the environment the owner acts in: `paper`
+/// unless the workspace is live (DEC-952).
 #[derive(Debug, Clone, Args)]
 pub struct OwnerArgs {
     /// The workspace whose control stream the command commits to.
@@ -24,18 +25,30 @@ pub struct OwnerArgs {
     /// or a name.
     #[arg(long, value_name = "ID")]
     pub user: String,
+    /// `paper`, the default, or `live`: the environment the owner acts in, which must be the
+    /// workspace's own (DEC-952). A `live` gesture is admitted only for a `live` mandate on a
+    /// Robinhood connection the owner recorded through `connection record` and has not spent
+    /// (DEC-529 item 3).
+    #[arg(long, value_name = "ENV", default_value = "paper")]
+    pub environment: String,
 }
 
 impl OwnerArgs {
-    /// The owner these flags name, in `paper`.
+    /// The owner these flags name, in the environment `--environment` names.
     ///
     /// # Errors
-    /// [`ControlError::Refused`] with `owner_workspace_invalid` or `owner_user_invalid`.
+    /// [`ControlError::Refused`] with `environment_invalid` for any environment but `paper` or
+    /// `live`, then `owner_workspace_invalid` or `owner_user_invalid`.
     pub fn owner(&self) -> Result<Owner, ControlError> {
+        let environment = match self.environment.as_str() {
+            "paper" => Environment::Paper,
+            "live" => Environment::Live,
+            _ => return Err(refused("environment_invalid")),
+        };
         let owner = Owner {
             workspace: self.workspace.clone(),
             user: self.user.clone(),
-            environment: Environment::Paper,
+            environment,
         };
         if control_stream(&owner).is_err() {
             return Err(refused("owner_workspace_invalid"));

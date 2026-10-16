@@ -27,13 +27,13 @@ use mandate_runtime::{
 use mandate_time::UtcNanos;
 
 use super::doubles::{
-    AAPL, ConvertingSink, FixedClassifier, FixedGate, PaperExecutor, World, agent_stream,
-    control_stream, instrument, output, passed_checks, seed, setup,
+    AAPL, ConvertingSink, FixedClassifier, FixedGate, FixedReconciler, PaperExecutor, World,
+    agent_stream, control_stream, instrument, output, passed_checks, seed, setup,
 };
 use super::tail_install::ApprovableMandate;
 use crate::error::{Cause, ShellError};
 use crate::lt10::watch_may_end;
-use crate::stages::{Executor, Sink, Stage};
+use crate::stages::{Connector, Executor, Reconciler, Sink, Stage, Stages};
 use crate::tracer::{AskedCycle, Door, Mark, ProductionCycle, Report, Wake, door};
 use crate::watch::Watch;
 
@@ -172,6 +172,17 @@ fn assembled(
     place: bool,
     sink: Box<dyn Sink>,
 ) -> Result<ProductionCycle, String> {
+    let (stages, setup) = parts(world, autonomy, place, sink)?;
+    Ok(ProductionCycle::new(stages, setup))
+}
+
+/// [`assembled`]'s stages and setup, for a probe that puts its own double in one stage's place.
+fn parts(
+    world: &World,
+    autonomy: Autonomy,
+    place: bool,
+    sink: Box<dyn Sink>,
+) -> Result<(Stages, crate::tracer::Setup), String> {
     let mut stages = world.stages();
     stages.sink = sink;
     stages.executor = Box::new(Covered(PaperExecutor {
@@ -192,7 +203,7 @@ fn assembled(
     stages.artifacts = Some(artifacts);
     let mut setup = setup()?;
     setup.place_one_order = place;
-    Ok(ProductionCycle::new(stages, setup))
+    Ok((stages, setup))
 }
 
 fn observation() -> Result<Observation, String> {
@@ -813,5 +824,166 @@ fn a_cycle_refused_otherwise_never_waits() -> Result<(), String> {
     );
     assert!(!waited.get(), "a refusal other than the ask never waits");
     assert_eq!(submissions(&world), 0);
+    Ok(())
+}
+
+/// The four reads one reconciliation gathers (trading spec §11).
+fn reconciliation_reads() -> [mandate_executor::Effect; 4] {
+    [
+        mandate_executor::BrokerRequest::ListOpenOrders,
+        mandate_executor::BrokerRequest::ListPositions,
+        mandate_executor::BrokerRequest::GetAccount,
+        mandate_executor::BrokerRequest::ListActivities {
+            since: mandate_executor::ActivityCursor(String::new()),
+        },
+    ]
+    .map(mandate_executor::Effect::Broker)
+}
+
+/// The covered paper double, asking for a reconciliation on every command the watch hands it,
+/// as the real executor does when a read finds the entry in a state it cannot account for.
+struct ReconcilesOnCommand(Covered);
+
+impl Executor for ReconcilesOnCommand {
+    fn reset(&mut self) -> Result<(), Cause> {
+        self.0.reset()
+    }
+
+    fn use_profile(&mut self, profile: mandate_domain::CapabilityProfile) -> Result<(), Cause> {
+        self.0.use_profile(profile)
+    }
+
+    fn step(
+        &mut self,
+        input: mandate_executor::Input,
+    ) -> Result<Vec<mandate_executor::Effect>, Cause> {
+        let commanded = matches!(input, mandate_executor::Input::Command(_));
+        let mut effects = self.0.step(input)?;
+        if commanded {
+            effects.extend(reconciliation_reads());
+        }
+        Ok(effects)
+    }
+
+    fn protected(&mut self, instrument: &mandate_accounting::InstrumentId) -> Result<bool, Cause> {
+        self.0.protected(instrument)
+    }
+
+    fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
+        self.0.committed(event)
+    }
+}
+
+/// A reconciler whose rounds before `mismatch_from` are clean and whose later rounds mismatch,
+/// each mismatched round asking for another as one that ingested a late fill does.
+struct MismatchesLater {
+    inner: FixedReconciler,
+    mismatch_from: usize,
+    rounds: Rc<Cell<usize>>,
+}
+
+impl Reconciler for MismatchesLater {
+    fn snapshot(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[mandate_executor::BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause> {
+        self.inner.snapshot(connector, requests)
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &mandate_executor::BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let round = self.rounds.get();
+        self.rounds.set(round.saturating_add(1));
+        self.inner.clean = round < self.mismatch_from;
+        let mut reconciled = self.inner.reconcile(snapshot)?;
+        if !self.inner.clean {
+            reconciled.effects.extend(reconciliation_reads());
+        }
+        Ok(reconciled)
+    }
+}
+
+/// #1369 review: a reconciliation the watch asks for that finds a mismatch stops the run, as the
+/// startup's does (trading spec §11, `AGENTS.md` rule 3): the run answers
+/// `reconciliation_mismatch`, the watch reads nothing more and the end question is never asked
+/// again, nothing further is sent, and the round the mismatch asked for is never run.
+#[test]
+fn a_mismatch_in_the_watch_stops_the_run() -> Result<(), String> {
+    let world = World::default();
+    let clock = clock()?;
+    let asks = Rc::new(Cell::new(0_u32));
+    let counted = Rc::clone(&asks);
+    let end = move |_: Option<&str>, _: bool, _: &[&'static str], _: UtcNanos, _: UtcNanos| {
+        counted.set(counted.get().saturating_add(1));
+        Ok(counted.get() > 4)
+    };
+    let rounds = Rc::new(Cell::new(0));
+    let (mut stages, setup) = parts(
+        &world,
+        Autonomy::Ask,
+        true,
+        Box::new(PolicySink(ConvertingSink(world.clone()))),
+    )?;
+    stages.executor = Box::new(ReconcilesOnCommand(Covered(PaperExecutor {
+        world: world.clone(),
+        seen: Default::default(),
+        inverted: false,
+        last_client_order_id: None,
+    })));
+    stages.reconciler = Box::new(MismatchesLater {
+        inner: FixedReconciler {
+            world: world.clone(),
+            clean: true,
+        },
+        mismatch_from: 1,
+        rounds: Rc::clone(&rounds),
+    });
+    let w = world.clone();
+    let now = clock.now();
+    let report: Result<Report, ShellError> = ProductionCycle::new(stages, setup)
+        .run_observed_asked_watched(
+            observation()?,
+            output().map_err(|cause| cause.to_string())?,
+            &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
+            |asked: &mut dyn AskedCycle| {
+                answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
+                asked.wake(now, &mark()?)?;
+                asked.submit()
+            },
+            &end,
+        );
+    assert_eq!(
+        report.as_ref().err().map(ShellError::code),
+        Some("reconciliation_mismatch"),
+        "the watch's mismatch stops the run: {report:?}"
+    );
+    assert_eq!(
+        rounds.get(),
+        2,
+        "the startup's round and the watch's mismatched one; the round it asked for never runs"
+    );
+    assert_eq!(asks.get(), 1, "the watch asks nothing after the mismatch");
+    assert_eq!(submissions(&world), 1, "nothing further is sent");
+    let results: Vec<String> = world
+        .ledger
+        .borrow()
+        .parsed("ReconciliationRun")
+        .iter()
+        .filter_map(|run| {
+            run.get("payload")
+                .and_then(|payload| payload.get("result"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(
+        results,
+        ["clean", "mismatch"],
+        "the mismatch is on the record"
+    );
     Ok(())
 }

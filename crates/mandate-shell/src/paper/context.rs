@@ -275,6 +275,7 @@ fn run_context(
         },
         policies: Vec::new(),
         author: "founder".to_owned(),
+        members: artifacts.members.clone(),
         restricted_instruments: BTreeSet::new(),
         decision: Some(DecisionContext {
             builder: Some(builder),
