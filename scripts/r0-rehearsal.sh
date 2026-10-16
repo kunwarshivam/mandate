@@ -180,7 +180,8 @@ cat >"$WORK/instrument.json" <<JSON
 JSON
 step 2c 'registered' cli config register --kind instrument_snapshot "$WORK/instrument.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 TRACER=$ROOT/crates/mandate-shell/tests/fixtures/tracer/config
-step 2c-fee 'registered' cli config register --kind fee_config "$TRACER/fee-config.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
+# The live Robinhood fee schedule (DEC-958): a live run refuses the tracer's paper-only one.
+step 2c-fee 'registered' cli config register --kind fee_config "$ROOT/config/fees/robinhood-live-2026-10-16.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 step 2c-cal 'registered' cli config register --kind trading_calendar "$TRACER/trading-calendar.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 step 2c-rules 'registered' cli config register --kind rule_set "$TRACER/rule-set.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 step 2d 'registered' cli model register quant.ma_crossover 1.0.0 "${AS_OWNER[@]}" "${JOURNAL[@]}" || true

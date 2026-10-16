@@ -179,7 +179,7 @@ impl Artifacts {
             etp: EtpClass::Plain,
             etp_classified_at: snapshot.etp_classified_at,
         };
-        let fee = artifact_from(configuration.fee_config.bytes.clone(), FEE_MEMBERS)?;
+        let fee = fee_artifact(configuration.fee_config.bytes.clone())?;
         let calendar = artifact_from(
             configuration.trading_calendar.bytes.clone(),
             CALENDAR_MEMBERS,
@@ -400,7 +400,11 @@ fn require_opaque_id(text: &str, fact: &'static str) -> Result<(), Cause> {
     }
 }
 
+/// The paper-only overestimate's schedule name, whose artifact has [`FEE_MEMBERS`].
+const PAPER_SCHEDULE: &str = "conservative_v1";
 const FEE_MEMBERS: &[&str] = &["effective_from", "environment", "schedule"];
+/// The live Robinhood schedule's artifact also names the broker it serves (DEC-958).
+const LIVE_FEE_MEMBERS: &[&str] = &["broker", "effective_from", "environment", "schedule"];
 const CALENDAR_MEMBERS: &[&str] = &["first", "holidays", "last", "special_sessions"];
 const RULE_MEMBERS: &[&str] = &[
     "executor",
@@ -411,9 +415,26 @@ const RULE_MEMBERS: &[&str] = &[
     "story",
 ];
 
-/// The reviewed fee schedule over the reviewed calendar.
+/// The registered fee schedule's artifact, with exactly the members its `schedule` names: the
+/// live Robinhood schedule's [`LIVE_FEE_MEMBERS`], and every other schedule the paper artifact's
+/// [`FEE_MEMBERS`], so a paper artifact reads exactly as before.
+fn fee_artifact(bytes: Vec<u8>) -> Result<Artifact, Cause> {
+    let value = mandate_canon::parse(&bytes).map_err(|_| absent("a canonical config artifact"))?;
+    let members = match value.get("schedule").and_then(Value::as_str) {
+        Some(mandate_executor::ROBINHOOD_LIVE_SCHEDULE) => LIVE_FEE_MEMBERS,
+        Some(_) | None => FEE_MEMBERS,
+    };
+    artifact_from(bytes, members)
+}
+
+/// The reviewed fee schedule over the reviewed calendar: the paper-only overestimate, which
+/// refuses any environment but `paper`, or the live Robinhood schedule, which refuses any
+/// environment but `live` and any broker but `robinhood` (DEC-958).
 fn fees(fee: &Artifact, calendar: &Artifact) -> Result<mandate_accounting::Config, Cause> {
-    require_text(&fee.value, "schedule", "conservative_v1")?;
+    let schedule = required_text(&fee.value, "schedule")?;
+    if schedule != PAPER_SCHEDULE && schedule != mandate_executor::ROBINHOOD_LIVE_SCHEDULE {
+        return Err(absent("schedule"));
+    }
     let first = Date::parse(required_text(&calendar.value, "first")?)
         .map_err(|_| absent("the trading calendar's first date"))?;
     let last = Date::parse(required_text(&calendar.value, "last")?)
@@ -422,11 +443,18 @@ fn fees(fee: &Artifact, calendar: &Artifact) -> Result<mandate_accounting::Confi
     require_empty_array(&calendar.value, "special_sessions")?;
     let calendar = TradingCalendar::new(first, last, [], [])
         .map_err(|_| absent("the effective trading calendar"))?;
-    mandate_executor::paper_only_fee_config(
-        required_text(&fee.value, "environment")?,
-        calendar,
-        required_text(&fee.value, "effective_from")?,
-    )
+    let environment = required_text(&fee.value, "environment")?;
+    let first_day = required_text(&fee.value, "effective_from")?;
+    if schedule == PAPER_SCHEDULE {
+        mandate_executor::paper_only_fee_config(environment, calendar, first_day)
+    } else {
+        mandate_executor::robinhood_live_fee_config(
+            environment,
+            required_text(&fee.value, "broker")?,
+            calendar,
+            first_day,
+        )
+    }
     .map_err(Cause::Executor)
 }
 
