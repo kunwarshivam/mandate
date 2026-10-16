@@ -25,8 +25,8 @@ use std::sync::Arc;
 
 use mandate_accounting::{
     Account, AccountType, AccountingError, AssetClass, CashDividend, Config, CorporateAction,
-    CryptoFees, EquityFees, Execution, FeeFamily, Input, InstrumentId, Liquidity, Position, Record,
-    Reservations, Side, Split, TafCapBasis,
+    CryptoFees, EquityFees, Execution, FeeFamily, FeeRounding, Input, InstrumentId, Liquidity,
+    Position, Record, Reservations, Side, Split, TafCapBasis,
 };
 use mandate_canon::DecStr;
 use mandate_num::{
@@ -629,6 +629,7 @@ fn config(fixture: &Json, case: &Json) -> Result<Config, String> {
             "taf_cap_basis",
             "cat_per_share",
             "charge",
+            "fee_rounding",
         ],
     )?;
     fixed(
@@ -640,6 +641,12 @@ fn config(fixture: &Json, case: &Json) -> Result<Config, String> {
         "per_execution" => TafCapBasis::PerExecution,
         "per_order" => TafCapBasis::PerOrder,
         other => return Err(format!("unknown taf_cap_basis `{other}`")),
+    };
+    let fee_rounding = match eq.get("fee_rounding").map(Json::as_str) {
+        None => FeeRounding::DailyTotal,
+        Some(Some("daily_total")) => FeeRounding::DailyTotal,
+        Some(Some("per_fee_per_fill")) => FeeRounding::PerFeePerFill,
+        Some(other) => return Err(format!("unknown fee_rounding `{other:?}`")),
     };
     let crypto = at(fees, "crypto")?;
     fields(
@@ -665,6 +672,7 @@ fn config(fixture: &Json, case: &Json) -> Result<Config, String> {
             )?,
             taf_cap: num(FeeCap::parse(dec_at(eq, "taf_cap")?.as_str()), "taf_cap")?,
             taf_cap_basis,
+            fee_rounding,
             cat_per_share: num(
                 FeePerShare::parse(dec_at(eq, "cat_per_share")?.as_str()),
                 "cat_per_share",

@@ -20,7 +20,7 @@ use mandate_executor::{BrokerOrder, BrokerPosition};
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_robinhood::{
-    AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, RobinhoodError, Tools,
+    AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, RobinhoodError, Tickers, Tools,
 };
 use proptest::collection::vec;
 use proptest::prelude::{Just, Strategy, any, prop_oneof};
@@ -130,7 +130,10 @@ impl Answers {
             answers: answers.iter().map(|(t, c)| (*t, wrap(c))).collect(),
             calls: Rc::clone(&calls),
         };
-        (RobinhoodConnector::new(tools, OURS.to_owned()), calls)
+        (
+            RobinhoodConnector::new(tools, OURS.to_owned(), tickers()),
+            calls,
+        )
     }
 
     fn snapshot(&self) -> Result<AccountSnapshot, RobinhoodError> {
@@ -785,4 +788,10 @@ fn the_snapshot_matches_an_independent_oracle_over_random_records() {
         Ok(())
     });
     verdict.unwrap();
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }

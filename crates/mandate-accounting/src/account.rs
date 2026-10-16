@@ -8,13 +8,14 @@ use mandate_time::{Date, UtcNanos, new_york_midnight};
 
 use crate::{
     AccountType, AccountingError, AssetClass, CashDividend, Config, CorporateAction, EquityFees,
-    Execution, Fee, FeeFamily, FeeKind, Input, InstrumentId, Liquidity, Reservations, Side, Split,
-    TafCapBasis,
+    Execution, Fee, FeeFamily, FeeKind, FeeRounding, Input, InstrumentId, Liquidity, Reservations,
+    Side, Split, TafCapBasis,
 };
 
 /// Cost-basis reduction: `round(B × |q| ÷ |Q|, 12, half_even)` (spec §8.1).
 const BASIS_REDUCTION_SCALE: u32 = 12;
-/// The equities daily charge: `round(total, 2, ceiling)` (spec §6.2).
+/// The equities daily charge, `round(total, 2, ceiling)`, and under `per_fee_per_fill` each fee of
+/// each fill, `round(fee, 2, ceiling)` (spec §6.2).
 const CHARGE_SCALE: u32 = 2;
 /// A crypto sell's USD fee: `round(x, 2, half_up)` (spec §6.3).
 const CRYPTO_USD_FEE_SCALE: u32 = 2;
@@ -25,6 +26,24 @@ const CASH_SCALE: u32 = 2;
 
 fn sum(values: impl IntoIterator<Item = Usd>) -> Result<Usd, NumError> {
     values.into_iter().try_fold(Usd::ZERO, Usd::checked_add)
+}
+
+/// A fill's equity fees as `rounding` books them (spec §6.2, DEC-960): at full precision under
+/// `DailyTotal`; under `PerFeePerFill` each fee rounded up to the cent on its own, so the fill never
+/// books less than a broker that rounds each fee of a trade separately.
+fn rounded(fees: Vec<Fee>, rounding: FeeRounding) -> Result<Vec<Fee>, AccountingError> {
+    match rounding {
+        FeeRounding::DailyTotal => Ok(fees),
+        FeeRounding::PerFeePerFill => fees
+            .into_iter()
+            .map(|fee| {
+                Ok(Fee {
+                    usd: fee.usd.round(CHARGE_SCALE, Rounding::Ceiling)?,
+                    ..fee
+                })
+            })
+            .collect(),
+    }
 }
 
 /// Whether `basis` is on the side of zero that `qty` is, with zero allowed on either side and
@@ -419,6 +438,7 @@ impl Account {
                 ])
             }
         }
+        .and_then(|fees| rounded(fees, schedule.fee_rounding))
     }
 
     fn accrue(&mut self, family: FeeFamily, day: Date, fees: &[Fee]) -> Result<(), NumError> {

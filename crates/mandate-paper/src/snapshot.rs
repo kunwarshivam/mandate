@@ -22,13 +22,17 @@ pub struct LapseSnapshot {
 
 impl LapseSnapshot {
     /// The snapshot, when at `now` it is at most `max_age` old counted from `sent`, the bound
-    /// included; [`None`] when it is older, or when the clock ran backwards and its age cannot be
-    /// judged (rule 3), so the preflight reads the account again.
+    /// included, and it names no instrument: no position record and no working order, as the
+    /// lapse already required, so nothing in it depends on the tickers the preflight registers
+    /// after it was read (DEC-956 item 1). [`None`] when it is older, when the clock ran backwards
+    /// and its age cannot be judged (rule 3), or when it lists any position or order, so the
+    /// preflight reads the account again.
     pub fn fresh(&self, now: UtcNanos, max_age: Duration) -> Option<&AccountSnapshot> {
         let age = nanos(now)
             .zip(nanos(self.sent))
             .and_then(|(now, sent)| now.checked_sub(sent))
             .and_then(|age| u64::try_from(age).ok())?;
-        (Duration::from_nanos(age) <= max_age).then_some(&self.account)
+        let flat = self.account.positions.is_empty() && self.account.open_orders.is_empty();
+        (flat && Duration::from_nanos(age) <= max_age).then_some(&self.account)
     }
 }

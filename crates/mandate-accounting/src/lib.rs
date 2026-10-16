@@ -182,6 +182,16 @@ pub enum TafCapBasis {
     PerOrder,
 }
 
+/// How a fill's US equities regulatory fees round to the cent (spec §6.2, DEC-960).
+/// `DailyTotal` accrues each fee at full precision and the day's charge rounds the total up once.
+/// `PerFeePerFill` accrues each fee of each fill rounded up to the cent, after the TAF cap, so the
+/// platform never books less than a broker that rounds each fee of a trade separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeeRounding {
+    DailyTotal,
+    PerFeePerFill,
+}
+
 /// US equities regulatory fees (spec §6.2). Commission is zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EquityFees {
@@ -190,6 +200,7 @@ pub struct EquityFees {
     pub taf_cap: FeeCap,
     pub taf_cap_basis: TafCapBasis,
     pub cat_per_share: FeePerShare,
+    pub fee_rounding: FeeRounding,
 }
 
 /// Alpaca crypto fees for the account's volume tier (spec §6.3).

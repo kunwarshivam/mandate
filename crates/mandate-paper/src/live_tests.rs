@@ -19,7 +19,7 @@ use mandate_executor::BrokerPosition;
 use mandate_journal::{ArtifactStore, StreamId};
 use mandate_mcp::{CallClass, McpError, Tools};
 use mandate_num::{Price, SignedQty, Usd};
-use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
+use mandate_robinhood::{AccountSnapshot, RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
     Build as BuiltWith, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal,
@@ -506,7 +506,10 @@ fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripte
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("the runtime builds");
-    let bridge = RobinhoodBridge::new(runtime, RobinhoodConnector::new(tools, NUMBER.to_owned()));
+    let bridge = RobinhoodBridge::new(
+        runtime,
+        RobinhoodConnector::new(tools, NUMBER.to_owned(), Tickers::default()),
+    );
     (Linked::new(bridge, None::<AlpacaPaperHttp>), calls)
 }
 
@@ -732,7 +735,8 @@ fn at(secs: i64, nanos: u32) -> UtcNanos {
 }
 
 /// A lapse snapshot stands for the account at most its bound after it was sent, the bound
-/// included; one nanosecond older, or across a clock that ran backwards, it does not.
+/// included; one nanosecond older, across a clock that ran backwards, or listing any position
+/// record (whose instrument it may name by a ticker registered only later, DEC-956), it does not.
 #[test]
 fn a_lapse_snapshot_is_fresh_within_its_bound_only() {
     let kept = LapseSnapshot {
@@ -751,6 +755,23 @@ fn a_lapse_snapshot_is_fresh_within_its_bound_only() {
     assert_eq!(
         kept.fresh(at(1_000, 500), std::time::Duration::ZERO),
         Some(&flat())
+    );
+    let position = BrokerPosition {
+        instrument: InstrumentId::new("SPY").expect("a symbol"),
+        qty: SignedQty::parse("0").expect("a quantity"),
+        avg_entry_price: Price::parse("1").expect("a price"),
+    };
+    let holding = LapseSnapshot {
+        account: AccountSnapshot {
+            positions: vec![position],
+            ..flat()
+        },
+        sent: at(1_000, 500),
+    };
+    assert_eq!(
+        holding.fresh(at(1_000, 500), bound),
+        None,
+        "a position record"
     );
 }
 
@@ -784,8 +805,10 @@ fn preflight_bridge() -> (Rc<RobinhoodBridge<Scripted>>, Calls) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("the runtime builds");
-    let bridge = RobinhoodBridge::new(runtime, RobinhoodConnector::new(tools, NUMBER.to_owned()));
-    (bridge, calls)
+    let asset = InstrumentId::new("b28f4066-5c6d-479b-a2af-85dc1a8f16fb").expect("an asset id");
+    let tickers = Tickers::registered([(asset, "SPY".to_owned())]).expect("one ticker");
+    let connector = RobinhoodConnector::new(tools, NUMBER.to_owned(), tickers);
+    (RobinhoodBridge::new(runtime, connector), calls)
 }
 
 /// R11 (DEC-959 item 1): the preflight stands on a fresh lapse snapshot and reads only the
