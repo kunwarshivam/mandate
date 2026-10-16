@@ -72,12 +72,12 @@ pub use connection::{
 };
 pub use door::{account_stream, chosen, unspent};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
-pub use grant::{Asked, GrantRefusal, grant};
+pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
 pub use wiring::{
-    CollarMembers, answers, asked, collar_x, cross_check_the_opening, reported, session_cap,
-    wait_for_the_grant, watch_may_end, watched,
+    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
+    session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
