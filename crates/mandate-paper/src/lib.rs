@@ -107,7 +107,9 @@ pub trait Ports {
     /// only after every check that needs no credential.
     fn connect(&mut self) -> Result<Self::Transport, PaperError>;
 
-    /// The clock and the timer; its `now` is the run's one clock read and the binding gate's.
+    /// The clock and the timer: its `now` dates the run's configuration, stamps the asset record
+    /// and judges the quote at their reads, gives the run clock after the last broker read
+    /// (DEC-935), and is the binding gate's.
     fn pause(&self) -> Self::Pause;
 }
 
@@ -265,6 +267,11 @@ impl<P: Pause> PaperClock for PortClock<P> {
 
 /// One run, in the crate documentation's order; `vars` is the process environment.
 ///
+/// The run clock everything after the preflight is judged and recorded at is read once, after the
+/// preflight's last broker read, so every fact the broker answered is stamped at or before it and
+/// each age bound is measured from it (DEC-935, #1355); the date the configuration is chosen for
+/// is read before the control stream.
+///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing further is sent.
 pub fn run<P: Ports>(
@@ -275,8 +282,7 @@ pub fn run<P: Ports>(
     refuse_configured_host(vars.iter().map(|(name, value)| (name, value)))
         .map_err(PaperError::Shell)?;
     let clock = ports.pause();
-    let now = clock.now();
-    let day = now.date();
+    let day = clock.now().date();
     let records = ports.control_stream(&args.workspace)?;
     let mut store = FsArtifactStore::open(&args.store).map_err(|_| PaperError::Store)?;
     let facts = RunFacts {
@@ -323,6 +329,7 @@ pub fn run<P: Ports>(
         clock.clone(),
     )
     .map_err(refused(Stage::Reconcile))?;
+    let now = clock.now();
     let input = confirmed
         .with_equity(broker.account.equity)
         .map_err(PaperError::Deployment)?;
