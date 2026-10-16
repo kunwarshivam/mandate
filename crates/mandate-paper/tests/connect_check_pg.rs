@@ -5,10 +5,6 @@
 //! number, and the journal is a local test schema (`AGENTS.md` rules 7 and 8).
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
-#[allow(
-    dead_code,
-    reason = "only the journal's test database is used here; the fixtures serve other suites"
-)]
 mod common;
 #[path = "../../mandate-journal/tests/conformance/mod.rs"]
 #[allow(
@@ -151,4 +147,16 @@ fn the_connect_checks_ports_harden_the_process() {
     };
     ports.harden().unwrap();
     assert_eq!(dumpable_behavior().unwrap(), DumpableBehavior::NotDumpable);
+}
+
+/// The binary's ports never print the journal's DSN, which may hold a password (rule 7).
+#[test]
+fn the_connect_checks_ports_never_print_the_dsn() {
+    let ports = ProductionCheck {
+        journal: "postgres://paper:hunter2-sentinel@db-sentinel.invalid:1/journal".to_owned(),
+    };
+    let printed = format!("{ports:?}");
+    assert!(printed.starts_with("ProductionCheck"), "{printed}");
+    assert!(!printed.contains("hunter2"), "{printed}");
+    assert!(!printed.contains("db-sentinel"), "{printed}");
 }

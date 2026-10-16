@@ -51,7 +51,7 @@ covers `scripts/`). The whole run takes under a minute after the builds.
 - **Simulator script:** one agentic account with 100 USD cash and buying power, the regular
   session, `RHETF` quoted at 85, and one scripted buy fill at 85.
 
-## The step table (`claude/r0-connection-checked`, `d2bf0db`)
+## The step table (`claude/r0-connection-checked`, run at `d2bf0db`)
 
 `ws_r0`, `founder`, `agent_r0`, the account ref and the check id are the rehearsal's opaque ids.
 A row may group several of the script's step ids: 2c is `2c`, `2c-fee`, `2c-cal` and `2c-rules`;

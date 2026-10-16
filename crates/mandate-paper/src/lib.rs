@@ -886,9 +886,18 @@ pub const CONNECT_CHECK: &str = "--connect-check";
 /// endpoint this build pins and the reads over its session ([`robinhood::connect`],
 /// [`Linked::observe`]), the system clock, and the account stream in the Postgres journal at
 /// `journal`. No error names the DSN, the token or the account number (rule 7).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ProductionCheck {
     pub journal: String,
+}
+
+/// The DSN may hold a password, so `Debug` never prints it (rule 7).
+impl std::fmt::Debug for ProductionCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProductionCheck")
+            .field("journal", &"<redacted>")
+            .finish()
+    }
 }
 
 impl ProductionCheck {
