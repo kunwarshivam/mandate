@@ -16,6 +16,7 @@ mandate-domain.workspace = true
 mandate-executor.workspace = true
 mandate-mcp.workspace = true
 mandate-num.workspace = true
+mandate-time.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

@@ -15,6 +15,7 @@ use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 use super::{absent, usd};
+use crate::approvers::Members;
 use crate::control::{Configuration, ConfirmedVersion, SnapshotExchange};
 use crate::error::Cause;
 
@@ -35,6 +36,7 @@ pub struct Artifacts {
     pub(super) instrument: ReviewedInstrument,
     pub(super) quote_max_age: Duration,
     pub(super) config_refs: BindingGateConfigRefs,
+    pub(super) members: Members,
     gate_config: GateConfig,
     executor_config: ExecutorConfig,
 }
@@ -184,6 +186,7 @@ impl Artifacts {
             instrument,
             quote_max_age,
             config_refs,
+            members: confirmed.members().clone(),
             gate_config,
             executor_config,
         })

@@ -14,12 +14,14 @@ use std::path::PathBuf;
 use mandate_alpaca::AlpacaPaperHttp;
 use mandate_domain::Environment;
 use mandate_paper::{
-    Args, Broker, Build, Connection, EndpointRefusal, PaperError, Ports, Production,
-    REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, SystemClock, acknowledge, disable_core_dumps,
-    endpoint, parse,
+    ACCOUNT_NUMBER_VAR, Args, Broker, Build, Connection, Dial, EndpointRefusal, PaperError, Ports,
+    Production, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST, RobinhoodEndpoint, SystemClock,
+    acknowledge, dial, disable_core_dumps, endpoint, parse, pinned_host,
 };
 use mandate_shell::control::ControlRecord;
-use rustix::process::{DumpableBehavior, Resource, Rlimit, dumpable_behavior, getrlimit};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use rustix::process::{DumpableBehavior, dumpable_behavior};
+use rustix::process::{Resource, Rlimit, getrlimit};
 
 const IDS: &str = "--workspace w --agent a --account-ref r --store s --bars b";
 
@@ -53,7 +55,11 @@ impl Ports for Counting {
         Err(PaperError::Control)
     }
 
-    fn connect(&mut self, _connection: &Connection) -> Result<AlpacaPaperHttp, PaperError> {
+    fn connect(
+        &mut self,
+        _connection: &Connection,
+        _dial: Option<&Dial>,
+    ) -> Result<AlpacaPaperHttp, PaperError> {
         self.connects.set(self.connects.get() + 1);
         Err(PaperError::Credentials)
     }
@@ -191,7 +197,8 @@ fn the_binarys_ports_harden_the_process() {
     assert_no_core_dumps();
 }
 
-/// The process's core-file limit is zero, soft and hard, and it is not dumpable.
+/// The process's core-file limit is zero, soft and hard, on every unix target, and on Linux it
+/// is not dumpable either (DEC-954): macOS has no dumpable flag, and CI runs this there too.
 fn assert_no_core_dumps() {
     let limit = getrlimit(Resource::Core);
     let expected = Rlimit {
@@ -202,8 +209,11 @@ fn assert_no_core_dumps() {
         (limit.current, limit.maximum),
         (expected.current, expected.maximum)
     );
-    let behavior = dumpable_behavior().expect("the kernel answers");
-    assert_eq!(behavior, DumpableBehavior::NotDumpable);
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    assert_eq!(
+        dumpable_behavior().expect("the kernel answers"),
+        DumpableBehavior::NotDumpable
+    );
 }
 
 /// LT-1 (DEC-937 item 2): the default build holds no Robinhood host, so it has no endpoint to
@@ -219,7 +229,7 @@ fn only_a_live_build_holds_the_robinhood_endpoint() {
         );
     }
     let pinned = endpoint(Build::Live, None);
-    if cfg!(feature = "live") {
+    if cfg!(all(feature = "live", not(feature = "rh-sim"))) {
         let expected = RobinhoodEndpoint {
             host: "agent.robinhood.com".to_owned(),
             url: "https://agent.robinhood.com/mcp/trading".to_owned(),
@@ -314,6 +324,11 @@ fn every_endpoint_refusal_names_itself_and_its_code() {
             "the rehearsal endpoint is not plain http on a loopback address",
             "rehearsal_off_loopback",
         ),
+        (
+            EndpointRefusal::AccountUnset,
+            "MANDATE_RH_ACCOUNT_NUMBER is not set",
+            "robinhood_account_unset",
+        ),
     ];
     for (refusal, message, code) in cases {
         assert_eq!(
@@ -338,5 +353,77 @@ fn the_default_binary_holds_no_robinhood_host() {
     let holds = binary
         .windows(b"robinhood.com".len())
         .any(|window| window == b"robinhood.com");
-    assert_eq!(holds, cfg!(feature = "live"));
+    assert_eq!(holds, cfg!(all(feature = "live", not(feature = "rh-sim"))));
+}
+
+/// DEC-947 item 3 (DEC-922 items 1 and 2, DEC-924 item 3): each build pins one host at most.
+/// The default build pins none; the rehearsal build pins the simulator's loopback host, the
+/// address the simulator listens on; and only a `live` build without `rh-sim` pins Robinhood's
+/// published host, so the rehearsal build holds no production constant at all.
+#[test]
+fn each_build_pins_its_own_host_and_the_rehearsal_pins_loopback() {
+    assert_eq!(REHEARSAL_HOST, "127.0.0.1");
+    assert_eq!(pinned_host(Build::Default), None);
+    assert_eq!(pinned_host(Build::Rehearsal), Some(REHEARSAL_HOST));
+    let live = pinned_host(Build::Live);
+    if cfg!(all(feature = "live", not(feature = "rh-sim"))) {
+        assert_eq!(live, Some("agent.robinhood.com"));
+    } else {
+        assert_eq!(live, None);
+    }
+}
+
+fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+/// DEC-947 item 5: a Robinhood run dials the build's endpoint and scopes every request to the
+/// account number the founder typed, both read from the process environment the run was handed;
+/// an endpoint refusal is the dial's, a missing or empty number refuses before anything is sent,
+/// and the dial never prints the number.
+#[test]
+fn a_dial_is_the_builds_endpoint_and_the_founders_account_number() {
+    const SIM: &str = "http://127.0.0.1:8080/mcp";
+    let given = vars(&[
+        ("PATH", "/bin"),
+        (REHEARSAL_ENDPOINT_VAR, SIM),
+        (ACCOUNT_NUMBER_VAR, "RHSIM00000001"),
+    ]);
+    let dialed = dial(Build::Rehearsal, &given).expect("the rehearsal dials the simulator");
+    let expected = RobinhoodEndpoint {
+        host: "127.0.0.1".to_owned(),
+        url: SIM.to_owned(),
+    };
+    assert_eq!(dialed.endpoint, expected);
+    assert_eq!(dialed.account_number(), "RHSIM00000001");
+    assert_eq!(
+        format!("{dialed:?}"),
+        "Dial { .. }",
+        "the number is never printed"
+    );
+    let number = vars(&[(ACCOUNT_NUMBER_VAR, "RHSIM00000001")]);
+    assert_eq!(
+        dial(Build::Rehearsal, &number).err(),
+        Some(EndpointRefusal::RehearsalUnset)
+    );
+    assert_eq!(
+        dial(Build::Default, &given).err(),
+        Some(EndpointRefusal::NotBuilt)
+    );
+    assert_eq!(
+        dial(Build::Live, &given).err(),
+        Some(EndpointRefusal::RehearsalInLive)
+    );
+    for account in [vec![], vec![(ACCOUNT_NUMBER_VAR, "")]] {
+        let mut pairs = vec![(REHEARSAL_ENDPOINT_VAR, SIM)];
+        pairs.extend(account);
+        assert_eq!(
+            dial(Build::Rehearsal, &vars(&pairs)).err(),
+            Some(EndpointRefusal::AccountUnset),
+            "{pairs:?}"
+        );
+    }
 }

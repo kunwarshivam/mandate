@@ -102,6 +102,12 @@ pub struct ExecutorState {
     pub(crate) account_state: AccountState,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
+    /// The account-stream `seq` of the report `observed` holds: the base the model's cash moves
+    /// from, so a reconciliation can tell its snapshot's own report from an earlier one (§11).
+    pub(crate) observed_at: Option<Seq>,
+    /// The report `observed` replaced, with the fills folded since it until then: what a
+    /// reconciliation whose own report is the base compares the broker's cash against (§11).
+    pub(crate) prior_base: Option<PriorBase>,
     pub(crate) cash_flow: Usd,
     pub(crate) fill_notional: Usd,
     pub(crate) cash_out_of_band: u32,
@@ -257,6 +263,15 @@ pub struct ObservedAccount {
     pub(crate) complete: bool,
 }
 
+/// A broker cash snapshot an account report replaced, and the fills folded after it until the
+/// report: the base §11's cash row measures the next snapshot from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PriorBase {
+    pub(crate) cash: Usd,
+    pub(crate) cash_flow: Usd,
+    pub(crate) fill_notional: Usd,
+}
+
 impl ExecutorState {
     /// An empty state for one broker account, before any event is folded. Reads nothing: there is
     /// no constructor that touches a clock, a file, or a random number.
@@ -293,6 +308,8 @@ impl ExecutorState {
             account_state: AccountState::Active,
             consecutive_403s: 0,
             observed: None,
+            observed_at: None,
+            prior_base: None,
             cash_flow: Usd::ZERO,
             fill_notional: Usd::ZERO,
             cash_out_of_band: 0,

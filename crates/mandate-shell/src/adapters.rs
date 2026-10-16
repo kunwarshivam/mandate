@@ -69,6 +69,7 @@ use mandate_risk::{
     ProposedKind, ProposedOrder, RiskSnapshot, TimeInForce as GateTimeInForce,
     ValidatedMandate as GateMandate, WorkingUniverse, agent_flatten,
 };
+use mandate_robinhood::Tools;
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, DecisionClip, ExitOrigin, FlattenLeg,
     FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, MandateView, ModelDirection,
@@ -78,9 +79,11 @@ use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 
+use crate::approvers::{Members, resolve};
 use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
+use crate::robinhood::{RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector};
 use crate::stages::{
     Admitted, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
     MandateSource, Protection, Reconciler, Sink, Sizing, Stages,
@@ -850,6 +853,9 @@ pub struct RunContext {
     pub validation: ValidationContext,
     pub policies: Vec<PolicyLevel>,
     pub author: String,
+    /// The workspace's members, which [`runtime_view`] resolves the mandate's approver
+    /// references against (DEC-953).
+    pub members: Members,
     pub restricted_instruments: BTreeSet<InstrumentId>,
     pub decision: Option<DecisionContext>,
     /// The effective policy set and model registry (DEC-484, D4b). `Some` makes the run write
@@ -910,13 +916,7 @@ fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<Ma
         mandate_domain::Environment::Paper => mandate_journal::Environment::Paper,
         mandate_domain::Environment::Live => mandate_journal::Environment::Live,
     };
-    let approvers = document
-        .autonomy
-        .approval
-        .approvers
-        .iter()
-        .map(|approver| approver.as_str().to_owned())
-        .collect();
+    let approvers = resolve(&document.autonomy.approval.approvers, &context.members);
     Ok(MandateView {
         version: format!(
             "sha256:{}",
@@ -2114,8 +2114,54 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
     })
 }
 
+/// The production stages over one Robinhood session (DEC-928 item 2, DEC-947 item 4): the
+/// run's connector is [`RobinhoodShellConnector`] and its startup reconciliation
+/// [`RobinhoodReconciler`] around the run's own executor reconciler, both over `sources`'
+/// bridge, so every read and every order goes through the one MCP session the login opened.
+pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<T>>>) -> Stages {
+    let Sources {
+        mandate,
+        journal,
+        recorded_at,
+        agent,
+        workspace,
+        account_ref,
+        executor,
+        run,
+        artifacts,
+        symbols,
+        transport: bridge,
+    } = sources;
+    let connector: Box<dyn Connector> = Box::new(RobinhoodShellConnector::new(Rc::clone(&bridge)));
+    assembled(
+        Sources {
+            mandate,
+            journal,
+            recorded_at,
+            agent,
+            workspace,
+            account_ref,
+            executor,
+            run,
+            artifacts,
+            symbols,
+            transport: connector,
+        },
+        |reconciler| Box::new(RobinhoodReconciler::new(bridge, reconciler)),
+    )
+}
+
 /// The production stages over a caller-supplied connector.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
+    assembled(sources, |reconciler| Box::new(reconciler))
+}
+
+/// The production stages over `sources`' connector, with the run's executor reconciler handed
+/// to `reconciled` for the reconciler stage.
+fn assembled(
+    sources: Sources<Box<dyn Connector>>,
+    reconciled: impl FnOnce(ExecutorReconciler) -> Box<dyn Reconciler>,
+) -> Stages {
     let run = sources.run.map(Rc::new);
     let protection_config = sources
         .executor
@@ -2141,7 +2187,7 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             path: sources.mandate.clone(),
             context: run.clone(),
         }),
-        reconciler: Box::new(reconciler),
+        reconciler: reconciled(reconciler),
         sizing: Box::new(BuilderPlan {
             mandate: sources.mandate.clone(),
             context: run.clone(),
@@ -3576,6 +3622,7 @@ mod tests {
             },
             policies: Vec::new(),
             author: String::new(),
+            members: crate::approvers::Members::Unread,
             restricted_instruments: BTreeSet::new(),
             decision: Some(DecisionContext {
                 builder: None,

@@ -194,7 +194,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   the dependency registry, gitleaks), the spec guard, the Postgres journal tests (skipped unless
   `MANDATE_PG_URL` is set), mutants on the diff of safety-critical crates, and the workspace API
   schemas' mutation sweep (`schema-mutants`). CI runs them as two required checks:
-  `cargo xtask ci fast` (lint, test, pending tests, spec guard) and `full`, an aggregate over
+  `cargo xtask ci fast` (lint, test, pending tests, spec guard, and `portable`, which CI runs on
+  macOS so the runner keeps building where the founder runs it; DEC-954) and `full`, an aggregate over
   `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres), every
   deterministic `cargo xtask ci mutants` shard, and every `cargo xtask ci schema-mutants` shard (DEC-688). Every
   required check and aggregated job must finish in under ten minutes; add parallel shards rather

@@ -5,6 +5,7 @@ mod answers;
 mod auth;
 mod bounds;
 mod budget;
+mod check;
 mod contract;
 mod drift;
 mod endpoint;

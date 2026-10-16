@@ -1,17 +1,19 @@
 //! `mandate config register` and `mandate model register` (first paper trade brief, D1; DEC-526).
 //! Each stores the configuration object it names in the artifact store, then commits exactly one
 //! `ConfigSnapshotRegistered` naming it on the workspace control stream (journal spec §9.2,
-//! DEC-155 item 5). Both are paper only.
+//! DEC-155 item 5). Both register in a paper or a live workspace, each in its own environment
+//! (DEC-952).
 
 use mandate_canon::{Digest, Object, Value, parse, to_canonical};
-use mandate_journal::{ArtifactStore, Environment};
+use mandate_journal::ArtifactStore;
 use mandate_modelhost::Refusal;
 use mandate_time::UtcNanos;
 
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Now, Owner, Repeat, Shape, Submitted,
-    commit_choice, decide, text,
+    commit_choice, control_stream, decide, same_environment, text,
 };
+use crate::version::paper_or_live;
 
 /// The kinds `config register` registers: §9.2's version-1 kinds the paper run reads, and
 /// version 2's `policy_set` and `model_registry` (DEC-484 item 4). `mandate_version` and
@@ -81,14 +83,6 @@ fn refused(reason: &'static str) -> ControlError {
     ControlError::Refused { reason }
 }
 
-fn paper_only(owner: &Owner) -> Result<(), ControlError> {
-    if owner.environment == Environment::Paper {
-        Ok(())
-    } else {
-        Err(refused("paper_only"))
-    }
-}
-
 /// Stores `canonical`, whose reference is `hash`, and commits the registration `key` names with
 /// `hash` as its content hash, unless a re-run finds it committed (DEC-290). The object is stored
 /// first, so no committed event names a missing one.
@@ -108,6 +102,7 @@ fn registration(
         Decision::Committed(earlier) => return Ok(earlier),
         Decision::Fresh(decided) => decided,
     };
+    same_environment(journal, &control_stream(owner)?, owner)?;
     store
         .put_artifact(canonical)
         .map_err(|e| ControlError::Journal(format!("the artifact store: {e}")))?;
@@ -125,7 +120,8 @@ fn registration(
 /// `kind` must be `kind`. A re-run of a committed registration commits nothing (DEC-290).
 ///
 /// # Errors
-/// [`ControlError::Refused`] with `paper_only` for an owner not in paper,
+/// [`ControlError::Refused`] with `paper_only` for an owner neither in paper nor in live (a live
+/// owner registers only in a live workspace, DEC-952),
 /// `config_object_invalid` for bytes that are not a JSON object, `instrument_snapshot_invalid`
 /// for a snapshot outside DEC-523, or `config_kind_mismatch`, each before anything is stored or
 /// committed; [`ControlError::Journal`] as `commit` reports.
@@ -137,7 +133,7 @@ pub fn register(
     object: &[u8],
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     let value = parse(object)
         .ok()
         .filter(|v| v.as_object().is_some())
@@ -185,7 +181,7 @@ pub fn register_model(
     model_version: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     let content = mandate_modelhost::content(model_id, model_version).map_err(|refusal| {
         if refusal == Refusal::UnknownModel {
             refused("model_unknown")
