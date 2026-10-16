@@ -4883,3 +4883,24 @@ From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.
   an `AnchorComputed` as its `causation_id` and carries a timestamp token for its root. It backfills
   the token of an anchor appended during a timestamping outage, which until then is not a trusted
   start (§9.14), and re-stamps an anchor before its token expires.
+
+From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956.md), #1394):
+
+- **An adopted order stays adopted (DEC-956 item 2, Proposed for the founder).** A Robinhood
+  record never carries our key (U-R2), so the startup reconciliation after a restart's listing
+  adoption marks the order `Unknown` again and drafts `ExternalActivityIngested`, which the journal
+  refuses: the restart stops, fail closed. The proposed fix matches a record naming no key by the
+  one broker id the order's version-2 `OrderStateChanged` carried, for its instrument and side; it
+  changes journal spec §9.16's "no order state depends on it", so it needs the founder's decision
+  and a spec PR first. The tested implementation is in #1394's history (reverted there).
+- **The binding gate is not handed the account's working orders (DEC-956 item 4).** The shell's
+  `gate_template` (`crates/mandate-shell/src/paper/gate.rs`) gives the gate empty
+  `working_orders`, so trading spec §5.3 rule 6 (`working_order_limit`) and §9.3's open opening
+  orders in gross exposure go unchecked in the run path. A run that reconciled a working order
+  and opened a new cycle would place a second opening; today the preflight's refusal of an
+  account with any open order (DEC-470 item 1) keeps the live run from reaching it. Feed the
+  gate the executor's working orders, with a pending test of a working order beside a new cycle.
+- **Wire `Tickers` from the registered instrument snapshot (DEC-956 item 1).** The connector
+  refuses every order of an instrument with no registered ticker, exits included; the live wiring
+  that builds `RobinhoodConnector` must pass the run's `(asset_id, symbol)` pairs, with a startup
+  check that the pinned instrument has one.
