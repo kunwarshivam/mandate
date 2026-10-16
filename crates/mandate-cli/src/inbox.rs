@@ -1,7 +1,8 @@
 //! `mandate approvals list`, `show`, `approve` and `skip` (M7's CLI control surface; the first live
 //! trade brief's K1a; DEC-533): [`crate::approvals`] over P0's `--journal` and `--store`, run as
-//! D1b's owner, always in paper. `approve`'s `cli_confirm` step-up is paper only (mandate spec §6.1,
-//! DEC-155 item 4); a live grant is DEC-529 item 3's, not this module's.
+//! D1b's owner. `approve`'s `cli_confirm` step-up is admitted on paper (mandate spec §6.1, DEC-155
+//! item 4) and, on a `live` agent stream, only within DEC-923's scope, which
+//! [`crate::approvals::approve`] reads from the journal and the store (DEC-927).
 //!
 //! What each prints is its output contract: opaque ids, states and seconds in `list`; the request's
 //! content object as its exact canonical JSON, its hash and the code in `show`, so the grant shows
@@ -12,6 +13,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use clap::{Args, Subcommand};
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, to_canonical};
 use mandate_time::UtcNanos;
 
@@ -26,7 +28,8 @@ pub enum ApprovalsCommand {
     List(ListArgs),
     /// Show one pending approval's request and the code that approves it.
     Show(ShowArgs),
-    /// Grant one pending approval with the code `show` printed (`cli_confirm`, paper only).
+    /// Grant one pending approval with the code `show` printed (`cli_confirm`; live only within
+    /// DEC-923's scope).
     Approve(ApproveArgs),
     /// Skip one pending approval. Doing nothing skips it too, at its deadline.
     Skip(SkipArgs),
@@ -252,11 +255,14 @@ pub fn run_approve(
 ) -> anyhow::Result<Submitted> {
     let owner = args.owner.owner()?;
     let mut journal = PgControlJournal::open(&args.target)?;
+    let store = FsArtifactStore::open(&args.target.store)
+        .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;
     let (agent, approval) = (args.agent.as_str(), args.approval.as_str());
     let shown = approvals::show(&journal, &owner, agent, approval)?;
     let mut ids = InstantIds::new(&owner, now);
     let submitted = approvals::approve(
         &mut journal,
+        &store,
         &mut ids,
         &owner,
         agent,

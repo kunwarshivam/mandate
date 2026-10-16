@@ -24,7 +24,7 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
-use crate::endpoint::{Build, PinnedEndpoint, scheme_allowed};
+use crate::endpoint::{Build, PinnedEndpoint, host_allowed, scheme_allowed};
 use crate::error::McpError;
 use crate::frame;
 use crate::transport::{
@@ -304,9 +304,10 @@ impl AuthServer {
     /// Bearer challenge's `resource_metadata` URL, or without one the endpoint's RFC 9728 well-known
     /// URL, read from the pinned MCP host only; then the first of its `authorization_servers`,
     /// which must be on `auth_hosts`, read at its RFC 8414 well-known URL. Every endpoint named must
-    /// be `https` (loopback `http` in this crate's test build) on `auth_hosts`, with no credentials
-    /// or fragment; `S256` and response type `code` must be offered, and a registration endpoint
-    /// must exist. No redirect is followed, and no server text reaches an error.
+    /// be `https` (loopback `http` in this crate's test build and the rehearsal build, which takes
+    /// loopback only) on `auth_hosts`, with no credentials or fragment; `S256` and response type
+    /// `code` must be offered, and a registration endpoint must exist. No redirect is followed, and
+    /// no server text reaches an error.
     pub async fn discover(
         endpoint: &PinnedEndpoint,
         auth_hosts: &[&str],
@@ -538,14 +539,26 @@ fn well_known(url: &Url, prefix: &str) -> Url {
 }
 
 /// A URL the authorization server names: no credentials or fragment, `https` (loopback `http` in
-/// this crate's test build), on one of `auth_hosts`. Nothing of the text reaches the error.
+/// this crate's test build and the rehearsal build, which dials only loopback), on one of
+/// `auth_hosts`. Nothing of the text reaches the error.
 fn on_auth_host(text: &str, auth_hosts: &[&str]) -> Result<Url, McpError> {
+    on_auth_host_for(text, auth_hosts, Build::CURRENT)
+}
+
+pub(crate) fn on_auth_host_for(
+    text: &str,
+    auth_hosts: &[&str],
+    build: Build,
+) -> Result<Url, McpError> {
     let url = Url::parse(text).map_err(|_| McpError::EndpointShape)?;
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return Err(McpError::EndpointShape);
     }
-    if !scheme_allowed(&url, Build::CURRENT) {
+    if !scheme_allowed(&url, build) {
         return Err(McpError::NotHttps);
+    }
+    if !host_allowed(&url, build) {
+        return Err(McpError::OffLoopback);
     }
     if !url
         .host_str()

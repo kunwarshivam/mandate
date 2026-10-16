@@ -314,6 +314,7 @@ fn context(context: &Json) -> Result<ApprovalSettings, String> {
         timeout_s: i64::try_from(u64_at(context, "timeout_s")?)
             .map_err(|_| "`timeout_s` does not fit an i64".to_owned())?,
         environment,
+        live_cli_confirm: None,
     })
 }
 

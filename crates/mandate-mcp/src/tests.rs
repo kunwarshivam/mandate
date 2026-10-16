@@ -14,3 +14,4 @@ mod login;
 mod register;
 mod server;
 mod token;
+mod tools;

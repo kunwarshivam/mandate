@@ -181,6 +181,11 @@ fn every_refusal_names_itself_and_its_code() {
             "the connection record is spent",
             "connection_spent",
         ),
+        (
+            LapseRefusal::NotSupplied,
+            "the lapse was handed no account-stream read and no account snapshot",
+            "lapse_evidence_not_supplied",
+        ),
     ];
     for (refusal, printed, code) in lapsed {
         assert_eq!(refusal.to_string(), printed, "{refusal:?}");
