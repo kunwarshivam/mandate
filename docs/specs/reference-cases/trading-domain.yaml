@@ -64,6 +64,8 @@
 # - GTC expiry = creation date + 90 calendar days; `advance_clock` across a `TradingDayStarted`
 #   that reaches the re-placement buffer triggers protective re-placement (spec §5.4).
 # - Fee reservations are rounded per order (spec §2.1).
+# - `fees.equities.fee_rounding` absent means `daily_total`; `per_fee_per_fill` rounds each
+#   regulatory fee of each fill up to the cent before summing (spec §6.2, DEC-960).
 # - Reason codes follow the gate evaluation order in spec §9.1; the first failing check wins.
 #
 # EXPECTATION VOCABULARY
@@ -1323,3 +1325,46 @@ cases:
       - { at: "2026-09-22T17:00:02-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: owner_exit, owner_confirmed_bid: true }, expect: { decision: { verdict: allow } } }
       - { at: "2026-09-22T17:00:03-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: owner_exit, owner_confirmed_bid: false }, expect: { decision: { verdict: defer, reason_code: owner_confirmation_required } } }
       - { at: "2026-09-23T10:00:00-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: discretionary_exit }, expect: { decision: { verdict: allow } } }
+
+  - id: RC-26
+    title: Per-fee rounding - each regulatory fee of each fill rounded up to the cent before summing (DEC-960)
+    scope: [accounting]
+    broker_profile: alpaca
+    config: test_default
+    config_overrides: { fees: { equities: { fee_rounding: per_fee_per_fill, taf_cap: "0.03" } } }   # test cap, whole cents, binds on the 300-share fill
+    calendar: us_2026
+    instruments:
+      XYZ: { asset_class: us_equity, exchange: NYSE }
+    initial:
+      account: { cash: { settled: "30000.00" } }
+    steps:
+      - at: "2026-09-21T10:00:00-04:00"
+        event: fill
+        data: { instrument: XYZ, side: buy, qty_gross: "500", price: "49.00", client_order_id: "01B-1" }
+        expect: { fees: { accrued: "0.01" } }      # CAT 0.005 -> 0.01
+      - at: "2026-09-21T11:00:00-04:00"
+        event: fill
+        data: { instrument: XYZ, side: sell, qty_gross: "100", price: "50.10", client_order_id: "01S-1" }
+        expect: { fees: { accrued: "0.20" } }      # + SEC 0.1503 -> 0.16, TAF 0.02 -> 0.02, CAT 0.001 -> 0.01
+      - at: "2026-09-21T11:00:01-04:00"
+        event: fill
+        data: { instrument: XYZ, side: sell, qty_gross: "100", price: "50.10", client_order_id: "01S-1" }
+        expect: { fees: { accrued: "0.39" } }      # + 0.16 + 0.02 + 0.01
+      - at: "2026-09-21T11:00:02-04:00"
+        event: fill
+        data: { instrument: XYZ, side: sell, qty_gross: "300", price: "50.10", client_order_id: "01S-2" }
+        expect: { fees: { accrued: "0.89" }, realized_pnl_gross: "550.00" }   # + SEC 0.4509 -> 0.46, TAF min(0.06, 0.03) -> 0.03, CAT 0.003 -> 0.01
+      - at: "2026-09-21T20:00:00-04:00"
+        event: fees_charged
+        data: { family: equities, trade_date: "2026-09-21" }
+        expect: { fees: { charged: "0.89" }, realized_pnl_net: "549.11" }
+    variants:
+      - name: daily_total_unchanged
+        overrides:
+          config_overrides: { fees: { equities: { fee_rounding: daily_total } } }
+        expect_overrides:
+          step_1: { fees: { accrued: "0.005" } }
+          step_2: { fees: { accrued: "0.1763" } }
+          step_3: { fees: { accrued: "0.3476" } }
+          step_4: { fees: { accrued: "0.8315" } }
+          step_5: { fees: { charged: "0.84" }, realized_pnl_net: "549.16" }
