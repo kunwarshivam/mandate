@@ -3584,14 +3584,12 @@ pub(crate) mod tests {
         })
     }
 
-    /// The event types a reconciliation drafted, and the state each of our orders is left in.
-    type Reconciled = (Vec<String>, Vec<(String, OrderState)>);
-
-    /// The reconciliation of `state` against a snapshot listing `open`.
+    /// The reconciliation of `state` against a snapshot listing `open`: the event types it
+    /// drafts and the state each of our orders is left in.
     fn reconciled_against(
         state: &ExecutorState,
         open: Vec<BrokerOrder>,
-    ) -> Result<Reconciled, ExecutorError> {
+    ) -> Result<(Vec<String>, Vec<(String, OrderState)>), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
