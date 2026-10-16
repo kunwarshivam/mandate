@@ -498,11 +498,28 @@ and a sell `stop` (`held`). The account stream holds the protection at stop 725.
   `21b18e71aa017e71c8888afa515770ed5e596eb6e87cd6c71bc3eaffed34e12d`.
 
 Exactly one `OrderSubmitted`. Neither stream holds a `FillApplied`, and the journal does not record
-the fill price (`OrderStateChanged` version 1 has no price member; the broker gives 763.75). The
-refused append is most likely the fill's `FillApplied`. That is UNCONFIRMED: finding it needs a
-diagnostic build on a placing run, and no second placing run was made. Whatever it is, the refused
-record is a defect on the paper path after a fill, and it is safety-critical (accounting and the
-executor's records).
+the fill price (`OrderStateChanged` version 1 has no price member; the broker gives 763.75).
+
+**Why the run stopped: the executor's `FillApplied` does not meet the journal's own contract.**
+`fill()` (`crates/mandate-executor/src/orders.rs`) writes `FillApplied` through `batch.journal`,
+which attaches empty `config_refs`, with payload members `instrument` and `fees` as text. The journal
+requires, for `FillApplied` and `LateFillApplied`, the config refs `fee_config`,
+`trading_calendar`, `settlement_calendar` and `instrument_snapshot` (journal spec §9 catalogue,
+`crates/mandate-journal/src/catalogue.rs`). Its version-1 schema has `instrument_id`, and `fees` is a
+list of `{kind, amount, asset, status}` (`FILL_APPLIED_V1`, `crates/mandate-journal/src/schema.rs`).
+A throwaway probe (never committed) ran `Draft::parse` on a draft shaped the way the executor
+builds it, with this run's envelope:
+```
+as the executor writes it:              Invalid { reason: MissingConfigRef, path: "config_refs.fee_config" }
+with the four config refs added:        Invalid { reason: Schema, path: "payload.instrument" }
+refs + instrument_id + fees as a list:  accepted
+```
+So every fill the executor records is refused, on main too (`orders.rs` is unchanged there for
+these members), and the paper path has no `settlement_calendar` to cite: nothing registers one. The
+refusal fails closed after the protection was already recorded, so the position was protected, but
+the platform's accounting never applied the fill. This is safety-critical (accounting, the executor,
+the journal contract): tests first against the journal's own draft check, mutants, and the
+different-model review.
 
 **§7a, the open-orders read after the fill** (`status=open&limit=500&direction=asc&nested=true`,
 saved unedited outside the repo). It returns one order: the take-profit leg, broker id
