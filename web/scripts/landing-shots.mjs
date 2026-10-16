@@ -32,12 +32,6 @@ async function around(locators, { x = 0, y = 0 } = {}) {
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-/** `box` cut to the left and right edges of `edges`. */
-const between = (box, edges) => ({ ...box, x: edges.x, width: edges.width });
-
-/** A gate check by its name. */
-const check = (page, name) => page.locator("[data-slot=gate-checks] > li").filter({ hasText: name });
-
 /**
  * Each picture: the links followed from Home inside the example app, the window it is taken at, and
  * the part of it kept, either the whole window or the few elements that make the part's point, so
@@ -46,21 +40,6 @@ const check = (page, name) => page.locator("[data-slot=gate-checks] > li").filte
  */
 export const LANDING_SHOTS = [
   { name: "agent", hops: [`/agents/${AGENT}`], viewport: { width: 1280, height: 800 } },
-  {
-    name: "verdict",
-    hops: [`/agents/${AGENT}/decisions/01JBWPQ5E6EYCNDY0YP57RCYBV`],
-    viewport: { width: 1024, height: 1400 },
-    crop: async (page) => {
-      const verdict = page.locator("section").filter({ has: page.locator("[data-slot=verdict]") });
-      return between(await around([verdict], { y: 20 }), await around([page.locator("[data-slot=gate-checks]")], { x: 20 }));
-    },
-  },
-  {
-    name: "check",
-    hops: [`/agents/${AGENT}/decisions/01JBWPQ5E6EYCNDY0YP57RCYBV`],
-    viewport: { width: 1024, height: 1400 },
-    crop: (page) => around([check(page, "Re-entry cooldown"), check(page, "Order size")], { x: 20 }),
-  },
   {
     name: "ask",
     hops: ["/messages", `/messages/${SWING}`],

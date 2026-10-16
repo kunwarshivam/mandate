@@ -4,18 +4,14 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { OwlheadWordmark } from "@/components/brand/Logo";
 import { LOGIN_PATH } from "@/lib/auth-routes";
 import { cn } from "@/lib/utils";
-import { artwork } from "../art";
 import { BetaForm } from "../beta-form";
 import { Ambient } from "./ambient";
 import { LockScreen } from "./lock-screen";
-import { OwlFlight } from "./owl-flight";
 import { DISPLAY, DISPLAY_MD, INTRO_ID, LEAD, LEAD_ON_TIDE, PAGE_FORM_ID, PRIMARY, SECONDARY, SIGN_UP_ID, WRAP } from "./parts";
 import { PixelSea } from "./pixel-sea";
-import { PixelThread } from "./pixel-thread";
-import { Plate } from "./plate";
 import { Reveals } from "./reveals";
 import { ScrollBar } from "./scroll-bar";
-import { Shot, perchProps } from "./shot";
+import { Shot } from "./shot";
 import { SPRING_VARS } from "./spring";
 import { Wont } from "./wont";
 import styles from "./scroll.module.css";
@@ -23,12 +19,6 @@ import styles from "./scroll.module.css";
 /** Limits are never said to cap a loss without this beside them. */
 export const GAP_CAVEAT =
   "Limits can't prevent every loss. When a market gaps or halts, prices can move past a limit before an order fills, so a loss can end up larger than the limit.";
-
-export const BROKERS: { name: string; status: string }[] = [
-  { name: "Alpaca", status: "Paper trading" },
-  { name: "Robinhood", status: "Coming" },
-  { name: "Kraken Derivatives US", status: "Coming" },
-];
 
 /** The order a piece settles in among its neighbours, as `scroll.module.css` staggers it. */
 const nth = (i: number) => ({ "--i": i }) as CSSProperties;
@@ -84,13 +74,12 @@ function Feature({
 }
 
 /**
- * The page under the desktop (DEC-907): the desktop fills the first screen, and this rises over it as
- * the visitor scrolls. It shows the app itself, in pictures of the example workspace, and sells what
- * the desktop's homepage explains (DEC-908): your rules hold, the big calls come to you, every move
- * has its reason, the stakes are in dollars, what no agent does, and the request for a place. The brand owl flies down it in three
- * dimensions, a pixel thread in tide sews the parts together behind it, and each piece settles on
- * a spring as it comes into view; tide, the page's third colour beside ink and sun, fills only the
- * part about asking you.
+ * The page under the desktop (DEC-907, DEC-932): the desktop fills the first screen, and this rises
+ * over it as the visitor scrolls. It shows the app itself, in pictures of the example workspace, and
+ * sells what the desktop's homepage explains (DEC-908): an opening over the agent's page on a pixel
+ * sea, then three parts (limits in dollars, the big calls that come to you, the reason behind every
+ * move), what no agent does, and the request for a place. Each piece settles on a spring as it comes
+ * into view; tide, the page's third colour beside ink and sun, fills only the part about asking you.
  */
 export function LongPage() {
   return (
@@ -108,58 +97,45 @@ export function LongPage() {
             </i>
           </h2>
           <p className={cn(LEAD, "mx-auto")} style={nth(2)} data-reveal="">
-            It works the market while you get on with your day. Your money never leaves your account.
+            It trades in your own brokerage account, inside limits you set. Your money never leaves it.
           </p>
           <p className="flex flex-wrap justify-center gap-3" style={nth(3)} data-reveal="">
             <a href={`#${SIGN_UP_ID}`} className={PRIMARY}>
-              Ask for a place
+              Join the beta
             </a>
             <Link href={LOGIN_PATH} className={SECONDARY}>
               Sign in
             </Link>
           </p>
           <p className="-mt-2 text-[0.9375rem] text-muted-foreground" style={nth(4)} data-reveal="" data-slot="reassure">
-            Free during the beta. It starts on paper money.
+            Free during the beta. Every agent starts on paper money.
           </p>
         </div>
         <div className="relative">
           <PixelSea className="absolute inset-x-0 top-14 bottom-0 sm:top-16" />
-          <div className={cn(WRAP, "pt-24 pb-12 sm:pt-28 sm:pb-20")} data-reveal="tilt">
+          <div className={cn(WRAP, "pt-24 pb-16 sm:pt-28 sm:pb-24")} data-reveal="tilt">
             <Shot
               name="agent"
               alt="Agent 1's page in Owlhead: equity of $10,123.45 on paper, its chart, and its limits in dollars beside it."
               sizes="(min-width: 80rem) 74rem, 100vw"
               className="mx-auto max-w-[74rem]"
-              perch={{ at: 0.86, yaw: -0.5, coat: "pale" }}
             />
           </div>
-        </div>
-        <div className={cn(WRAP, "py-16 sm:py-20")}>
-          <dl className="flex flex-wrap items-baseline justify-center gap-x-12 gap-y-6" data-slot="brokers">
-            {BROKERS.map((b, i) => (
-              <div key={b.name} className="grid justify-items-center gap-1" style={nth(i)} data-reveal="">
-                <dt className="text-[1.375rem] font-semibold tracking-[-0.02em] sm:text-[1.625rem]">{b.name}</dt>
-                <dd className="text-[0.875rem] text-muted-foreground">{b.status}</dd>
-              </div>
-            ))}
-          </dl>
         </div>
       </section>
 
       <Feature
-        id="checks"
+        id="limits"
         tone="background"
         title={
           <>
-            Your rules. <i>No exceptions.</i>
+            Set the limits. <i>In dollars.</i>
           </>
         }
-        lead="Every order is held up against what you wrote before it goes anywhere. If it doesn't fit, it doesn't go, however good the idea looked."
+        lead="Decide what it can spend and where it steps back. Every order is checked against your limits before it's sent, and if it doesn't fit, it doesn't go. You can tighten them any time; only you can loosen them."
+        after={<p className="max-w-[36rem] text-[0.9375rem] leading-[1.55] text-pretty text-muted-foreground">{GAP_CAVEAT}</p>}
       >
-        <div className="mx-auto grid w-full max-w-[38rem] gap-4">
-          <Shot name="verdict" alt="An order to buy 0.02 BTC/USD at $56,650.00, marked Not allowed." perch={{ at: 0.12, yaw: 0.6 }} />
-          <Shot name="check" alt="The checks it met: re-entry cooldown passed, and order size, at most $1,000.00, not allowed." className="justify-self-end lg:me-[-2rem]" />
-        </div>
+        <Shot name="ladder" alt="Agent 1's limits as a ladder in dollars, from $10,150.00 down to a floor of $9,000.00, with what the agent does at each." className="mx-auto" />
       </Feature>
 
       <Feature
@@ -168,14 +144,14 @@ export function LongPage() {
         tone="tide"
         title={
           <>
-            You make the big calls. <i>From anywhere.</i>
+            Big calls <i>wait for you.</i>
           </>
         }
-        lead="Past an amount you set, your agent waits for your yes. Approve it in a tap, or let it pass, and nothing happens without you."
+        lead="Above an amount you choose, it asks first. Approve it from your phone in a tap. Ignore it, and nothing happens."
       >
         <div className="flex items-center justify-center gap-4 sm:gap-8">
           <LockScreen className="max-sm:hidden" />
-          <div className={cn(styles.phone, "w-[16.5rem] shrink-0")} {...perchProps({ at: 0.5, yaw: -0.3, coat: "pale" })}>
+          <div className={cn(styles.phone, "w-[16.5rem] shrink-0")}>
             <Shot name="request" frame={false} alt="An approval request on a phone: buy 0.015 BTC/USD at a limit of $56,700.00, with Approve and Skip." sizes="17rem" />
           </div>
         </div>
@@ -186,46 +162,33 @@ export function LongPage() {
         tone="background"
         title={
           <>
-            Ask it why. <i>It wrote it down.</i>
+            Every move, <i>explained.</i>
           </>
         }
-        lead="Every move comes with its reason, kept from the moment it was made. Ask your agent about any of them in plain words, whenever you like."
+        lead="Each decision is written down with its reason the moment it's made. Ask your agent about any of them in plain words."
       >
         <Shot
           name="ask"
           alt="Agent 2 asks to buy 2 XYZ at a limit of $141.30, with why it asked, and questions to ask it next, such as Why did it ask?"
           className="mx-auto"
-          perch={{ at: 0.88, yaw: -0.6 }}
         />
-      </Feature>
-
-      <Feature
-        id="limits"
-        flip
-        title={
-          <>
-            Set the stakes. <i>In dollars.</i>
-          </>
-        }
-        lead="Decide what it can spend and where it steps back, in amounts you can picture. You can tighten them any time, and only you can loosen them."
-        after={<p className="max-w-[36rem] text-[0.9375rem] leading-[1.55] text-pretty text-muted-foreground">{GAP_CAVEAT}</p>}
-      >
-        <Shot name="ladder" alt="Agent 1's limits as a ladder in dollars, from $10,150.00 down to a floor of $9,000.00, with what the agent does at each." className="mx-auto" perch={{ at: 0.1, yaw: 0.6 }} />
       </Feature>
 
       <Wont />
 
-      <Plate id={SIGN_UP_ID} art={artwork("kanasawa-full-moon")} className={cn(WRAP, "grid justify-items-center py-28 sm:py-40")}>
-        <div className="grid w-full max-w-[38rem] gap-6 rounded-3xl bg-card p-7 sm:p-10" data-reveal="" {...perchProps({ at: 0.86, yaw: -0.4 })}>
-          <h2 id={`${SIGN_UP_ID}-title`} className={cn(styles.display, DISPLAY_MD)}>
-            Put an agent to work.
-          </h2>
-          <p className={LEAD}>We&apos;re letting people in a few at a time, and it&apos;s free while the beta runs.</p>
-          <BetaForm id={PAGE_FORM_ID} look="page" />
+      <section id={SIGN_UP_ID} aria-labelledby={`${SIGN_UP_ID}-title`} className="scroll-mt-14 bg-background" data-slot="sign-up">
+        <div className={cn(WRAP, "grid justify-items-center py-24 sm:py-32")}>
+          <div className="grid w-full max-w-[38rem] gap-6 rounded-3xl bg-card p-7 ring-1 ring-foreground/10 sm:p-10" data-reveal="">
+            <h2 id={`${SIGN_UP_ID}-title`} className={cn(styles.display, DISPLAY_MD)}>
+              Put an agent to work.
+            </h2>
+            <p className={LEAD}>We&apos;re letting people in a few at a time. It&apos;s free during the beta.</p>
+            <BetaForm id={PAGE_FORM_ID} look="page" />
+          </div>
         </div>
-      </Plate>
+      </section>
 
-      <footer className="bg-card" data-slot="long-page-footer" {...perchProps({ at: 0.1, yaw: 0.4 })}>
+      <footer className="bg-card" data-slot="long-page-footer">
         <div className={cn(WRAP, "grid gap-8 py-14 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-start sm:gap-16")}>
           <a href="#desktop" className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring" style={{ color: "var(--logo)" }}>
             <span className="sr-only">Owlhead, back to the desktop</span>
@@ -247,8 +210,6 @@ export function LongPage() {
         </div>
       </footer>
 
-      <PixelThread />
-      <OwlFlight />
       <Reveals />
       <Ambient />
     </div>
