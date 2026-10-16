@@ -2421,6 +2421,166 @@ fn a_broker_fee_is_kept_on_the_fill_as_a_charged_commission() {
     assert!(at_the_journal(fill).is_ok(), "{:?}", at_the_journal(fill));
 }
 
+/// DEC-948 item 5, trading spec §11's cash row: the model's cash is the last broker cash snapshot
+/// plus the fills since it. A fill the reconciliation ingests was made before its snapshot, so
+/// when the base is the snapshot's own account report, recorded first as the shell records it
+/// (DEC-458), the broker's cash already holds the fill and the model counts it once; when the
+/// base is an earlier report, the fill is since it and the model counts it then. Either way the
+/// broker's 18500 after a buy of 10 at 150 from 20000 is in the band, and nothing mismatches.
+#[test]
+fn a_fill_the_reconciliation_ingests_is_counted_once_in_the_models_cash() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let config = config();
+    let fixed = FixedInstruments;
+    let ports = Ports {
+        instruments: &Registered,
+        ..ports(&ids, &mandates, &fixed, &config)
+    };
+    for reported_first in [true, false] {
+        let mut shell = fresh(&ports);
+        let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                "b-1",
+                Some(&id),
+                AAPL,
+                Side::Buy,
+                "10",
+                "10",
+                "filled",
+            ))),
+            &ports,
+        );
+        let mut taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
+        taken.fills = vec![broker_fill("f-1", Some(&id), "10", "150")];
+        taken.positions = vec![broker_position(AAPL, "10")];
+        taken.account.cash = usd("18500");
+        if reported_first {
+            shell.run(
+                Input::BrokerUpdate(BrokerUpdate::Account(taken.account.clone())),
+                &ports,
+            );
+        }
+        let run = reconcile(&shell.state, &taken, &ports).expect("runs");
+        let recorded = run
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                mandate_executor::Effect::Journal(draft)
+                    if draft.event_type == "AccountSnapshotRecorded" =>
+                {
+                    Some(draft)
+                }
+                mandate_executor::Effect::Journal(_)
+                | mandate_executor::Effect::Broker(_)
+                | mandate_executor::Effect::Timer(_)
+                | mandate_executor::Effect::Notify(_) => None,
+            })
+            .expect("the cash is compared");
+        let member = |name: &str| recorded.payload.get(name).cloned();
+        assert_eq!(
+            (member("model_cash"), member("cash_in_band")),
+            (Some(text("18500")), Some(Value::Bool(true))),
+            "reported first: {reported_first}"
+        );
+        assert_ne!(
+            run.verdict,
+            mandate_executor::ReconciliationVerdict::Mismatch,
+            "reported first: {reported_first}"
+        );
+    }
+}
+
+/// DEC-948 item 4, mandate spec §5.2: a tick handed before the start only sets the risk clock, the
+/// latest tick the executor has seen. It drafts nothing, sends nothing and arms nothing, and leaves
+/// the executor unstarted; the records the start leads to then carry that clock rather than
+/// 1970's zero.
+#[test]
+fn a_tick_before_the_start_sets_the_clock_the_first_records_carry() {
+    const RUN_CLOCK: i64 = 1_790_000_000;
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    let ticked = shell.run(Input::Tick(clock(RUN_CLOCK)), &ports);
+    assert!(ticked.is_empty(), "{ticked:?}");
+    assert!(!shell.state.started(), "a tick is not the start");
+    shell.run(Input::Started(mandate_executor::WriterEpoch(1)), &ports);
+    let reported = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(broker_account())),
+        &ports,
+    );
+    let observed = reported
+        .draft("AccountStateObserved")
+        .expect("the account is journaled");
+    assert_eq!(
+        observed.payload.get("risk_clock").and_then(Value::as_str),
+        Some("2026-09-21T14:13:20.000000000Z"),
+        "the run clock's second, never 1970's zero"
+    );
+}
+
+/// DEC-948 items 2 and 3, trading spec §10, journal spec §9: a paper fill's simulated fee names the
+/// fee configuration it was computed under and carries every equity component, `null` where the
+/// side owes none, so the journal accepts it under `FeesCharged`'s registered schema; a snapshot
+/// that names no configuration leaves the fee unbound, and the journal refuses it.
+#[test]
+fn a_simulated_fee_is_journaled_in_the_registered_shape_with_its_fee_configuration() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let config = config();
+    for registered in [true, false] {
+        let fixed = FixedInstruments;
+        let ports = if registered {
+            Ports {
+                instruments: &Registered,
+                ..ports(&ids, &mandates, &fixed, &config)
+            }
+        } else {
+            ports(&ids, &mandates, &fixed, &config)
+        };
+        let mut shell = fresh(&ports);
+        let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+        let ran = shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+                "f-1",
+                Some(&id),
+                "10",
+                "150",
+            ))),
+            &ports,
+        );
+        let fee = ran
+            .draft("FeesCharged")
+            .expect("a paper equity fill books its simulated fee");
+        assert_eq!(
+            (fee.payload.get("sec"), fee.payload.get("taf")),
+            (Some(&Value::Null), Some(&Value::Null)),
+            "a buy owes no SEC or TAF, and the closed record says so"
+        );
+        let refs: Vec<(&str, &Value)> = fee
+            .config_refs
+            .iter()
+            .map(|(key, value)| (key.as_str(), value))
+            .collect();
+        if registered {
+            assert_eq!(
+                refs,
+                [("fee_config", &Value::Str(FEE_REF.to_owned()))],
+                "the one reference the catalogue requires"
+            );
+            assert!(at_the_journal(fee).is_ok(), "{:?}", at_the_journal(fee));
+        } else {
+            assert!(refs.is_empty(), "{refs:?}");
+            assert!(at_the_journal(fee).is_err(), "an unbound fee is refused");
+        }
+    }
+}
+
 /// #1355, trading spec §5.7, DEC-938 item 5: an entry that read `filled` before its fill was
 /// ingested gets that fill, found by the reconciliation it asked for, as a `LateFillApplied` the
 /// journal accepts, and the reconciliation asks for the next one only after its own
