@@ -20,6 +20,23 @@ import styles from "./scroll.module.css";
 export const GAP_CAVEAT =
   "Limits can't prevent every loss. When a market gaps or halts, prices can move past a limit before an order fills, so a loss can end up larger than the limit.";
 
+/**
+ * The brand owl standing still on a picture's top edge, blinking and following the pointer with its
+ * eyes as every owl on the site does (DEC-906, DEC-932): the page's one quiet sign of life in each
+ * part, never a flight. `side` is where along the edge it stands. Decoration, hidden from assistive
+ * technology.
+ */
+function Watcher({ side, children, className }: { side: "left" | "right"; children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("relative", className)}>
+      <span aria-hidden className={cn("absolute -top-10 z-[1] sm:-top-12", side === "left" ? "left-10" : "right-10")} style={{ color: "var(--logo)" }} data-slot="watcher">
+        <BrandOwl className="size-12 sm:size-14" />
+      </span>
+      {children}
+    </div>
+  );
+}
+
 /** The order a piece settles in among its neighbours, as `scroll.module.css` staggers it. */
 const nth = (i: number) => ({ "--i": i }) as CSSProperties;
 
@@ -135,7 +152,9 @@ export function LongPage() {
         lead="Decide what it can spend and where it steps back. Every order is checked against your limits before it's sent, and if it doesn't fit, it doesn't go. You can tighten them any time; only you can loosen them."
         after={<p className="max-w-[36rem] text-[0.9375rem] leading-[1.55] text-pretty text-muted-foreground">{GAP_CAVEAT}</p>}
       >
-        <Shot name="ladder" alt="Agent 1's limits as a ladder in dollars, from $10,150.00 down to a floor of $9,000.00, with what the agent does at each." className="mx-auto" />
+        <Watcher side="left" className="mx-auto w-full max-w-[596px]">
+          <Shot name="ladder" alt="Agent 1's limits as a ladder in dollars, from $10,150.00 down to a floor of $9,000.00, with what the agent does at each." />
+        </Watcher>
       </Feature>
 
       <Feature
@@ -167,11 +186,9 @@ export function LongPage() {
         }
         lead="Each decision is written down with its reason the moment it's made. Ask your agent about any of them in plain words."
       >
-        <Shot
-          name="ask"
-          alt="Agent 2 asks to buy 2 XYZ at a limit of $141.30, with why it asked, and questions to ask it next, such as Why did it ask?"
-          className="mx-auto"
-        />
+        <Watcher side="right" className="mx-auto w-full max-w-[607px]">
+          <Shot name="ask" alt="Agent 2 asks to buy 2 XYZ at a limit of $141.30, with why it asked, and questions to ask it next, such as Why did it ask?" />
+        </Watcher>
       </Feature>
 
       <Wont />
@@ -186,13 +203,12 @@ export function LongPage() {
               We&apos;re letting people in a few at a time. It&apos;s free during the beta, and every agent starts on paper money.
             </p>
           </div>
-          <div className="relative lg:col-span-6" style={nth(2)} data-reveal="">
-            <span aria-hidden className="absolute -top-10 right-10 sm:-top-12" style={{ color: "var(--logo)" }} data-slot="sign-up-owl">
-              <BrandOwl className="size-12 sm:size-14" />
-            </span>
-            <div className="grid gap-6 rounded-3xl bg-card p-7 text-foreground ring-1 ring-foreground sm:p-10">
-              <BetaForm id={PAGE_FORM_ID} look="page" />
-            </div>
+          <div className="lg:col-span-6" style={nth(2)} data-reveal="">
+            <Watcher side="right">
+              <div className="grid gap-6 rounded-3xl bg-card p-7 text-foreground ring-1 ring-foreground sm:p-10">
+                <BetaForm id={PAGE_FORM_ID} look="page" />
+              </div>
+            </Watcher>
           </div>
         </div>
       </section>
