@@ -10,10 +10,11 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_accounting::InstrumentId;
-use mandate_alpaca::Pause;
+use mandate_alpaca::{LatestQuote, Pause};
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ReconciliationVerdict};
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
+use mandate_num::Price;
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
     FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, Input, IntentHandoff, MandateView,
@@ -143,7 +144,7 @@ fn open_cycle<'s>(
     observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Session<'s>, ShellError> {
-    match open_asking(stages, setup, admitted, observation, output)? {
+    match open_asking(stages, setup, admitted, None, observation, output)? {
         (session, None) => Ok(session),
         (_, Some(asked)) => Err(asked),
     }
@@ -152,11 +153,14 @@ fn open_cycle<'s>(
 /// [`open_cycle`]'s cycle, handing back the session beside the classifier's refusal when the
 /// cycle asked (DEC-940 item 1): the ask's records are committed by then (the step's effects
 /// run before its refusal is reported), so the session can wait for the answer. Every other
-/// refusal stops the cycle as before.
+/// refusal stops the cycle as before. A `mark` the run read is journaled after the control
+/// stream's tail and before the observation and the output, so the request the cycle may
+/// journal records it as its reference (mandate spec §6.4; DEC-943 item 1).
 fn open_asking<'s>(
     stages: &'s mut Stages,
     setup: &'s Setup,
     admitted: &'s Admitted,
+    mark: Option<&Mark>,
     observation: Option<Observation>,
     output: mandate_runtime::ModelOutput,
 ) -> Result<(Session<'s>, Option<ShellError>), ShellError> {
@@ -167,6 +171,9 @@ fn open_asking<'s>(
         return Err(ShellError::CycleAlreadyOpen);
     }
     session.tail_the_control_stream()?;
+    if let Some(mark) = mark {
+        session.mark(mark)?;
+    }
     if let Some(observation) = observation {
         session.observe(observation)?;
     }
@@ -270,13 +277,16 @@ pub trait AskedCycle {
     /// The journal's refusal.
     fn agent_rows(&mut self) -> Result<Vec<StoredEvent>, ShellError>;
 
-    /// One wake at `now`: the control stream tailed whole and handed to the runtime as its
-    /// owner input, then the risk clock ticked to `now`, then both streams read back. An opening
-    /// the runtime releases is held, never sent, until [`AskedCycle::submit`].
+    /// One wake at `now`: `mark`, the risk mark of the IEX quote the runner read for this wake,
+    /// journaled as the account stream's `MarkUpdated` first, so the re-validation this wake may
+    /// run compares the request's reference with it (DEC-943 item 1); then the control stream
+    /// tailed whole and handed to the runtime as its owner input, then the risk clock ticked to
+    /// `now`, then both streams read back. An opening the runtime releases is held, never sent,
+    /// until [`AskedCycle::submit`].
     ///
     /// # Errors
     /// Every [`ShellError`] is a stop after which nothing is sent.
-    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError>;
+    fn wake(&mut self, now: UtcNanos, mark: &Mark) -> Result<Wake, ShellError>;
 
     /// Sends the one opening the runtime released and the wait let leave.
     ///
@@ -292,18 +302,29 @@ pub trait AskedCycle {
 pub type MayEnd<'e> =
     &'e dyn Fn(Option<&str>, bool, &[&'static str], UtcNanos, UtcNanos) -> Result<bool, ShellError>;
 
+/// One risk mark the run read (trading-domain spec §8.2; mandate spec §5.2's `MarkUpdated`):
+/// the bid of an IEX quote, a long's risk mark, and the quote's own stamp (DEC-943 item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mark {
+    /// The quote's bid.
+    pub price: Price,
+    /// The quote's own stamp, the instant the mark is of.
+    pub at: UtcNanos,
+}
+
+impl Mark {
+    /// The risk mark of an IEX quote the run read and judged: its bid, at its own stamp.
+    #[must_use]
+    pub fn of_iex(quote: &LatestQuote) -> Self {
+        Self {
+            price: quote.bid,
+            at: quote.at,
+        }
+    }
+}
+
 impl ProductionCycle {
-    /// [`ProductionCycle::run_observed_watched`] for a run that may ask (G1b, DEC-940). A cycle
-    /// that never asks is exactly that run: `wait` is never called and the watch asks the
-    /// shell's own [`watch_may_end`]. A cycle that asks keeps its session open: a dry run stops
-    /// at the ask as before, because it appends to no journal an answer could reach; a placing
-    /// run hands the session to `wait` as an [`AskedCycle`], whose every wake hands the control
-    /// stream's answers to the runtime and reads both streams back, and whose opening the
-    /// runtime releases is held until `wait` submits it — so nothing is sent before the
-    /// runner's own release, and a `wait` that stops, or returns with the opening still held,
-    /// sends nothing (`AGENTS.md` rule 3). Only a risk-adding submission is held: an exit or a
-    /// protective order is sent as it always was (rule 13). After the submit the watch ends
-    /// through `may_end`, the caller's LT-10 question (DEC-914 items 4 and 5).
+    /// [`run_observed_asked_watched`] over this cycle's own stages and setup (G1b, DEC-940).
     ///
     /// # Errors
     /// Every error is a stop after which nothing further is sent.
@@ -312,6 +333,7 @@ impl ProductionCycle {
         observation: Observation,
         output: mandate_runtime::ModelOutput,
         watch: &Watch<P>,
+        mark: &Mark,
         wait: W,
         may_end: MayEnd<'_>,
     ) -> Result<Report, E>
@@ -320,31 +342,79 @@ impl ProductionCycle {
         E: From<ShellError>,
         W: FnOnce(&mut dyn AskedCycle) -> Result<(), E>,
     {
-        let admitted = admit(&mut self.stages)?;
-        let instrument = pinned(&admitted.view)?;
-        let (mut session, asked) = open_asking(
+        run_observed_asked_watched(
             &mut self.stages,
             &self.setup,
-            &admitted,
-            Some(observation),
+            observation,
             output,
-        )?;
-        let Some(asked) = asked else {
-            session.watch(&instrument, watch, &watch_may_end)?;
-            return Ok(session.report);
-        };
-        if !self.setup.place_one_order {
-            return Err(E::from(asked));
-        }
-        session.holding = true;
-        wait(&mut session)?;
-        session.holding = false;
-        if session.held.is_some() {
-            return Err(E::from(nothing_released()));
-        }
-        session.watch(&instrument, watch, may_end)?;
-        Ok(session.report)
+            watch,
+            mark,
+            wait,
+            may_end,
+        )
     }
+}
+
+/// [`run_observed_watched`] for a run that may ask (G1b, DEC-940). `mark` is the risk mark of
+/// the preflight's IEX quote, journaled on the account stream before the observation, so a
+/// request the cycle journals records it as its reference (DEC-943 item 1). A cycle that never
+/// asks is exactly that run: `wait` is never called and the watch asks the shell's own
+/// [`watch_may_end`]. A cycle that asks keeps its session open: a dry run stops at the ask as
+/// before, because it appends to no journal an answer could reach; a placing run hands the
+/// session to `wait` as an [`AskedCycle`], whose every wake journals the runner's fresh mark,
+/// hands the control stream's answers to the runtime and reads both streams back, and whose
+/// opening the runtime releases is held until `wait` submits it — so nothing is sent before the
+/// runner's own release, and a `wait` that stops, or returns with the opening still held, sends
+/// nothing (`AGENTS.md` rule 3). Only a risk-adding submission is held: an exit or a protective
+/// order is sent as it always was (rule 13). After the submit the watch ends through `may_end`,
+/// the caller's LT-10 question (DEC-914 items 4 and 5).
+///
+/// # Errors
+/// Every error is a stop after which nothing further is sent.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the asked run's door: the cycle's inputs, its watch, its mark, and the runner's two frames"
+)]
+pub fn run_observed_asked_watched<P, E, W>(
+    stages: &mut Stages,
+    setup: &Setup,
+    observation: Observation,
+    output: mandate_runtime::ModelOutput,
+    watch: &Watch<P>,
+    mark: &Mark,
+    wait: W,
+    may_end: MayEnd<'_>,
+) -> Result<Report, E>
+where
+    P: Pause,
+    E: From<ShellError>,
+    W: FnOnce(&mut dyn AskedCycle) -> Result<(), E>,
+{
+    let admitted = admit(stages)?;
+    let instrument = pinned(&admitted.view)?;
+    let (mut session, asked) = open_asking(
+        stages,
+        setup,
+        &admitted,
+        Some(mark),
+        Some(observation),
+        output,
+    )?;
+    let Some(asked) = asked else {
+        session.watch(&instrument, watch, &watch_may_end)?;
+        return Ok(session.report);
+    };
+    if !setup.place_one_order {
+        return Err(E::from(asked));
+    }
+    session.holding = true;
+    wait(&mut session)?;
+    session.holding = false;
+    if session.held.is_some() {
+        return Err(E::from(nothing_released()));
+    }
+    session.watch(&instrument, watch, may_end)?;
+    Ok(session.report)
 }
 
 /// What the broker door does with a submission while an asked cycle's wait may hold one
@@ -396,8 +466,9 @@ impl AskedCycle for Session<'_> {
             .map_err(refused(Stage::Journal))
     }
 
-    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
+    fn wake(&mut self, now: UtcNanos, mark: &Mark) -> Result<Wake, ShellError> {
         self.event_time = now;
+        self.mark(mark)?;
         let stream = control_stream(&self.setup.deployment.workspace.0);
         let control = self
             .stages
@@ -565,6 +636,58 @@ impl<'s> Session<'s> {
             self.feed(Input::Journal(event))?;
         }
         Ok(())
+    }
+
+    /// Journals `mark` as the account stream's `MarkUpdated` for the pinned instrument (journal
+    /// spec §9's registered version 1: `instrument_id`, `price`, `source`, `feed` and
+    /// `risk_clock`), and folds it into both cores, so the runtime's latest mark is the one the
+    /// run read (mandate spec §6.4's reference and drift; DEC-943 item 1). The envelope's
+    /// `event_time` is the quote's own stamp; the `risk_clock` is the session's second, the tick
+    /// the record is folded at (mandate spec §5.2: `event_time` is never used for risk timing).
+    /// The executor is the account stream's writer, so the record is written as its own, with an
+    /// id derived from the stream's head as the executor derives its own.
+    fn mark(&mut self, mark: &Mark) -> Result<(), ShellError> {
+        let instrument = pinned(self.view)?;
+        let stream = self.account_stream.clone();
+        let tick =
+            UtcNanos::from_parts(self.event_time.secs(), 0).map_err(|_| ShellError::Envelope {
+                field: "risk_clock",
+            })?;
+        let mut object = Object::new();
+        for (name, value) in [
+            ("instrument_id", instrument.as_str().to_owned()),
+            ("price", mark.price.to_string()),
+            ("source", MARK_SOURCE.to_owned()),
+            ("feed", MARK_FEED.to_owned()),
+            ("risk_clock", tick.to_string()),
+        ] {
+            object.insert(
+                Key::new(name).map_err(|_| ShellError::Envelope { field: name })?,
+                Value::Str(value),
+            );
+        }
+        let event_id = Ids {
+            space: IdSpace::Account,
+        }
+        .derive(self.epoch(&stream), self.head(&stream), 0);
+        let config_refs = Object::new();
+        let bytes = draft_bytes(
+            &Envelope {
+                stream: &stream,
+                writer: Writer::Executor,
+                actor_id: "executor",
+                event_time: mark.at,
+            },
+            &DraftFields {
+                event_id: &event_id,
+                event_type: "MarkUpdated",
+                schema_version: 1,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &Value::Object(object),
+            },
+        )?;
+        self.append(&stream, vec![bytes])
     }
 
     /// Hands the runtime `observation` once its data is in the run's store under its `data_ref`
@@ -1319,6 +1442,12 @@ mod tests {
 /// [`crate::tail::tailed`], whose fold maps the envelope's own `actor.kind` (M7 brief, Decisions
 /// needed 5).
 const TRACER_ACTOR: ActorKind = ActorKind::System;
+
+/// A [`Mark`]'s `source`: a quote, as the journal's own vectors name one.
+const MARK_SOURCE: &str = "quote";
+
+/// A [`Mark`]'s `feed`: the IEX feed the run's quotes are read from (trading-domain spec §4).
+const MARK_FEED: &str = "iex";
 
 /// The most reconciliations one [`Session::settle`] runs: the one asked for, and the one a late
 /// fill it ingested asks for (DEC-938 item 5).

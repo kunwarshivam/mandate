@@ -123,11 +123,6 @@ impl Ledger {
             .map(str::to_owned)
     }
 
-    /// Drops every committed event of `stream`, as if it had never been written.
-    pub fn clear(&mut self, stream: &str) {
-        self.streams.remove(stream);
-    }
-
     /// How many events `stream` holds.
     pub fn len(&self, stream: &str) -> usize {
         match self.streams.get(stream) {

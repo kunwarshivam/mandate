@@ -4,11 +4,13 @@
 //! classification facts are the builder's [`buy_action`] and its protection is the executor's
 //! [`equity_bracket_prices`], so no money or quantity is computed here (DEC-138 item 3).
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_alpaca::LatestQuote;
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
     RiskContext as BuilderRiskContext, buy_action,
@@ -22,6 +24,7 @@ use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
     Unit, Usd,
 };
+use mandate_risk::SaneQuote;
 use mandate_runtime::{AgentId, OrderExecution, ProtectionPrices, TimeInForce};
 use mandate_spec::ValidationContext;
 use mandate_spec::document::{Protection, ProvenanceMap};
@@ -40,6 +43,43 @@ use crate::error::Cause;
 pub struct Contexts {
     pub executor: ExecutorContext,
     pub run: RunContext,
+    /// The IEX quote the executor's binding gate judges, the preflight's until the run hands it
+    /// a fresher read (DEC-943 item 2).
+    pub quote: GateQuote,
+}
+
+/// The IEX quote the binding gate judges at each request, shared between the run that reads
+/// quotes and the gate that judges them (DEC-943 item 2). It starts as the preflight's quote; an
+/// asked opening's runner hands it the fresh quote each wake read, so a grant answered after
+/// the preflight quote's bound is judged on a quote read at its own wake, never on the
+/// preflight's. The gate's recheck is unchanged: the quote's age at the gate's own clock,
+/// `iex_quote_max_age_s` (DEC-935 item 2), and a stamp after that clock refuses.
+#[derive(Debug, Clone)]
+pub struct GateQuote(Rc<Cell<SaneQuote>>);
+
+impl GateQuote {
+    pub(super) fn of(quote: &LatestQuote) -> Self {
+        Self(Rc::new(Cell::new(sane(quote))))
+    }
+
+    /// Hands the binding gate `quote`, a fresh IEX read the run judged at its read: every
+    /// binding request from now on judges it in place of the one held before.
+    pub fn hand(&self, quote: &LatestQuote) {
+        self.0.set(sane(quote));
+    }
+
+    fn current(&self) -> SaneQuote {
+        self.0.get()
+    }
+}
+
+/// The gate's view of an IEX quote: its bid, its ask, and its own stamp.
+fn sane(quote: &LatestQuote) -> SaneQuote {
+    SaneQuote {
+        bid: quote.bid,
+        ask: quote.ask,
+        at: quote.at,
+    }
 }
 
 /// The submission clock, injected so the binding gate rechecks freshness without reading a wall
@@ -92,12 +132,13 @@ pub fn load_contexts_with_clock(
     let config = configuration.gate.clone();
     let today = judge(artifacts, &facts.broker, now, &config)?;
     let template = gate_template(artifacts, facts, now, config)?;
+    let quote = GateQuote::of(&facts.broker.quote);
     let source = Rc::new(TrustedPaperContext {
         template: template.clone(),
         agent: agent.0.clone(),
         increment: artifacts.instrument.increment,
         fees: artifacts.fees.clone(),
-        quote_at: facts.broker.quote.at,
+        quote: quote.clone(),
         quote_max_age: artifacts.quote_max_age,
         clock,
     });
@@ -114,6 +155,7 @@ pub fn load_contexts_with_clock(
     Ok(Contexts {
         executor,
         run: run_context(artifacts, &facts.broker, today, template)?,
+        quote,
     })
 }
 
@@ -250,7 +292,7 @@ pub(super) struct TrustedPaperContext {
     pub(super) agent: String,
     pub(super) increment: ShareIncrement,
     pub(super) fees: mandate_accounting::Config,
-    pub(super) quote_at: UtcNanos,
+    pub(super) quote: GateQuote,
     pub(super) quote_max_age: Duration,
     pub(super) clock: Rc<dyn PaperClock>,
 }
@@ -313,22 +355,23 @@ impl InstrumentSnapshot for TrustedPaperContext {
 }
 
 impl BindingGateSource for TrustedPaperContext {
-    /// The template, with `mandate-accounting`'s fee reservation of the very order the executor
-    /// asks about. An order it cannot price gets no input, so the gate refuses it.
+    /// The template, with the quote the run last handed the gate ([`GateQuote`], DEC-943 item 2)
+    /// and `mandate-accounting`'s fee reservation of the very order the executor asks about. An
+    /// order it cannot price gets no input, so the gate refuses it.
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         if !self.reviewed(request.agent, request.instrument) {
             return None;
         }
         let now = self.clock.now()?;
-        if let Err(error) = judge_submission_time(
-            self.quote_at,
-            self.quote_max_age,
-            now,
-            &self.template.config,
-        ) {
+        let quote = self.quote.current();
+        if let Err(error) =
+            judge_submission_time(quote.at, self.quote_max_age, now, &self.template.config)
+        {
             let _ = error;
             return None;
         }
+        let mut market = self.template.market.clone();
+        market.quote = Some(quote);
         match reservation(
             &self.fees,
             request.instrument,
@@ -340,6 +383,7 @@ impl BindingGateSource for TrustedPaperContext {
             Ok(fee_reservation) => Some(BindingGateInput {
                 now,
                 fee_reservation,
+                market,
                 ..self.template.clone()
             }),
             Err(_) => None,

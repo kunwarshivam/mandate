@@ -1108,10 +1108,12 @@ fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
 
 /// DEC-940, rule 3: a placing run whose cycle asks waits for the grant at the watch's interval,
 /// and an ask no answer reaches denies at its own deadline with nothing sent: the scratch
-/// journal no founder can answer on holds only the run's own ask.
+/// journal no founder can answer on holds only the run's own ask. Each wake's fresh quote is
+/// stamped half a second before its read, so every one is current (DEC-943 item 2).
 #[test]
 fn an_asked_opening_no_answer_reaches_denies_at_its_deadline() {
     let mut scene = Scene::asking("asked", 231..256);
+    scene.advancing(0, -NANOS_PER_S / 2);
     let outcome = scene.run();
     assert!(
         matches!(
@@ -1125,6 +1127,27 @@ fn an_asked_opening_no_answer_reaches_denies_at_its_deadline() {
         scene.ports.clock.waited.get(),
         600,
         "the wait ran to the ask's own deadline, the mandate's 600 s timeout"
+    );
+}
+
+/// DEC-943 item 2, rule 3: the wait reads a fresh IEX quote at every wake, through the
+/// preflight's own check, and never relaxes its ten-second bound. A broker whose quote stays
+/// stamped at its recorded instant, half a second before the run, answers current wakes until
+/// the clock is more than ten seconds past that stamp; the first wake after it refuses there,
+/// before the runtime is handed anything, with nothing sent.
+#[test]
+fn an_asked_openings_stale_fresh_quote_refuses_at_its_wake() {
+    let mut scene = Scene::asking("asked-stale", 231..256);
+    let outcome = scene.run();
+    assert_eq!(
+        refused_at(&outcome),
+        "MarketData: a current, uncrossed IEX quote at the wake"
+    );
+    assert!(scene.posts().is_empty(), "nothing is sent");
+    assert_eq!(
+        scene.ports.clock.waited.get(),
+        10,
+        "the wakes at 0 and 5 s read a current quote; the one at 10 s reads it 10.5 s old"
     );
 }
 
