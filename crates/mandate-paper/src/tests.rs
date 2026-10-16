@@ -21,11 +21,12 @@ use std::fs;
 use mandate_alpaca::AlpacaPaperHttp;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_journal::ArtifactStore;
 use mandate_shell::control::{ControlRecord, DeploymentRefusal};
 use mandate_shell::{Cause, ShellError, Stage};
 
-use crate::{Args, ConnectionRefusal, PaperError, Ports, SystemClock, run};
+use crate::{Args, Connection, ConnectionRefusal, PaperError, Ports, SystemClock, run};
 
 /// The paper mandate fixture the suite derives its deployed document from
 /// (`tests/common/mod.rs`'s `spy_mandate` over this file's bytes, after its AAPL-to-SPY and
@@ -48,10 +49,11 @@ struct Probe {
     workspace: &'static str,
     records: Vec<ControlRecord>,
     connects: Cell<usize>,
+    hardens: Cell<usize>,
 }
 
 impl Ports for Probe {
-    type Transport = AlpacaPaperHttp;
+    type Session = AlpacaPaperHttp;
     type Pause = SystemClock;
 
     fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError> {
@@ -60,9 +62,14 @@ impl Ports for Probe {
             .ok_or(PaperError::Control)
     }
 
-    fn connect(&mut self) -> Result<AlpacaPaperHttp, PaperError> {
+    fn connect(&mut self, _connection: &Connection) -> Result<AlpacaPaperHttp, PaperError> {
         self.connects.set(self.connects.get().saturating_add(1));
         Err(PaperError::Credentials)
+    }
+
+    fn harden(&mut self) -> Result<(), PaperError> {
+        self.hardens.set(self.hardens.get().saturating_add(1));
+        Ok(())
     }
 
     fn pause(&self) -> SystemClock {
@@ -120,6 +127,7 @@ fn scene(
         bars: std::env::temp_dir()
             .join(format!("g1a-door-probe-{name}-bars-{}", std::process::id())),
         place_one_order: false,
+        acknowledged: Environment::Paper,
     };
     Ok((
         args,
@@ -127,6 +135,7 @@ fn scene(
             workspace,
             records,
             connects: Cell::new(0),
+            hardens: Cell::new(0),
         },
     ))
 }
