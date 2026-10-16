@@ -4341,6 +4341,160 @@
      }
     }
    ]
+  },
+  {
+   "id": "RC-26",
+   "title": "Per-fee rounding - each regulatory fee of each fill rounded up to the cent before summing (DEC-960)",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "config_overrides": {
+    "fees": {
+     "equities": {
+      "fee_rounding": "per_fee_per_fill",
+      "taf_cap": "0.03"
+     }
+    }
+   },
+   "calendar": "us_2026",
+   "instruments": {
+    "XYZ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "30000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "buy",
+      "qty_gross": "500",
+      "price": "49.00",
+      "client_order_id": "01B-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.01"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "100",
+      "price": "50.10",
+      "client_order_id": "01S-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.20"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:01-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "100",
+      "price": "50.10",
+      "client_order_id": "01S-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.39"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:02-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "300",
+      "price": "50.10",
+      "client_order_id": "01S-2"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.89"
+      },
+      "realized_pnl_gross": "550.00"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "fees_charged",
+     "data": {
+      "family": "equities",
+      "trade_date": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "charged": "0.89"
+      },
+      "realized_pnl_net": "549.11"
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "daily_total_unchanged",
+     "overrides": {
+      "config_overrides": {
+       "fees": {
+        "equities": {
+         "fee_rounding": "daily_total"
+        }
+       }
+      }
+     },
+     "expect_overrides": {
+      "step_1": {
+       "fees": {
+        "accrued": "0.005"
+       }
+      },
+      "step_2": {
+       "fees": {
+        "accrued": "0.1763"
+       }
+      },
+      "step_3": {
+       "fees": {
+        "accrued": "0.3476"
+       }
+      },
+      "step_4": {
+       "fees": {
+        "accrued": "0.8315"
+       }
+      },
+      "step_5": {
+       "fees": {
+        "charged": "0.84"
+       },
+       "realized_pnl_net": "549.16"
+      }
+     }
+    }
+   ]
   }
  ]
 }
