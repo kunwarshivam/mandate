@@ -27,6 +27,8 @@
 //! - **Allowlisted tools, pinned contract** ([`McpClient`]): only the nine tools of [`ALLOWLIST`]
 //!   are ever called; the hash of their names and schemas is pinned, a drift halts openings, and
 //!   a server that lists a fund-movement tool is refused (CN-2, CN-9, DEC-441 item 8).
+//! - **The tool seam** ([`Tools`]): one `tools/call` as a broker connector makes it, which
+//!   [`McpClient`] implements and a connector's tests double (DEC-860 item 2, DEC-928 item 1).
 //!
 //! - **The founder's OAuth login** ([`AuthServer`], E7-24): discovery of the authorization server
 //!   from the MCP server's published metadata, on pinned hosts only, and registration of a public
@@ -38,6 +40,7 @@ mod client;
 mod endpoint;
 mod error;
 mod frame;
+mod tools;
 mod transport;
 
 pub use auth::{AccessToken, CallbackListener, LOGIN_LIFETIME};
@@ -46,6 +49,7 @@ pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use client::{ALLOWLIST, ContractHash, McpClient};
 pub use endpoint::PinnedEndpoint;
 pub use error::{McpError, ServerText};
+pub use tools::Tools;
 pub use transport::{McpTransport, Monotonic, PROTOCOL_VERSION, SystemMonotonic, TransportConfig};
 
 #[cfg(test)]

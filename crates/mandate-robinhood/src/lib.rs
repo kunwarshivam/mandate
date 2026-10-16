@@ -9,7 +9,8 @@
     clippy::as_conversions
 )]
 //! The Robinhood equity connector (E7-6, the first live trade brief's C1): connections spec
-//! §6.2's `BrokerConnector` over the [`Tools`] seam, as DEC-860 reads it. `Submit` is review then
+//! §6.2's `BrokerConnector` over the [`Tools`] seam, as DEC-860 reads it; the seam is
+//! `mandate-mcp`'s, which its `McpClient` implements (DEC-928 item 1). `Submit` is review then
 //! place with the [`ref_id`]; an alert refuses only an opening or an increase (`AGENTS.md` rule
 //! 13); a place answer that is not exactly an order record is `Unknown` and never re-sent (LT-6);
 //! `Cancel` goes by the broker's `order_id`. Numbers are decimal text read by `mandate-num`.
@@ -19,7 +20,8 @@ mod preflight;
 mod profile;
 mod scope;
 
-pub use connector::{RobinhoodConnector, Tools};
+pub use connector::RobinhoodConnector;
+pub use mandate_mcp::Tools;
 pub use preflight::{AccountSnapshot, PreflightFacts, Quote};
 pub use profile::robinhood as robinhood_profile;
 pub use scope::AccountRead;
