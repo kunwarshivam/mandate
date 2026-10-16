@@ -2422,13 +2422,19 @@ fn a_broker_fee_is_kept_on_the_fill_as_a_charged_commission() {
 }
 
 /// DEC-948 item 5, trading spec §11's cash row: the model's cash is the last broker cash snapshot
-/// plus the fills since it. A fill the reconciliation ingests was made before its snapshot, so
-/// when the base is the snapshot's own account report, recorded first as the shell records it
-/// (DEC-458), the broker's cash already holds the fill and the model counts it once; when the
-/// base is an earlier report, the fill is since it and the model counts it then. Either way the
-/// broker's 18500 after a buy of 10 at 150 from 20000 is in the band, and nothing mismatches.
+/// before this one plus the fills since it, counted once. When the snapshot's own account report
+/// was recorded first, as the shell records it (DEC-458), the comparison is against the report it
+/// replaced, never against itself. Either way the broker's 18500 after a buy of 10 at 150 from
+/// 20000 is in the band and nothing mismatches, and 18000, 500 off, is out of it and mismatches:
+/// the oracle that a self-comparison could never fail.
 #[test]
 fn a_fill_the_reconciliation_ingests_is_counted_once_in_the_models_cash() {
+    for (cash, in_band) in [("18500", true), ("18000", false)] {
+        reconciled_cash(cash, in_band);
+    }
+}
+
+fn reconciled_cash(cash: &str, in_band: bool) {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let config = config();
@@ -2455,7 +2461,7 @@ fn a_fill_the_reconciliation_ingests_is_counted_once_in_the_models_cash() {
         let mut taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
         taken.fills = vec![broker_fill("f-1", Some(&id), "10", "150")];
         taken.positions = vec![broker_position(AAPL, "10")];
-        taken.account.cash = usd("18500");
+        taken.account.cash = usd(cash);
         if reported_first {
             shell.run(
                 Input::BrokerUpdate(BrokerUpdate::Account(taken.account.clone())),
@@ -2481,13 +2487,13 @@ fn a_fill_the_reconciliation_ingests_is_counted_once_in_the_models_cash() {
         let member = |name: &str| recorded.payload.get(name).cloned();
         assert_eq!(
             (member("model_cash"), member("cash_in_band")),
-            (Some(text("18500")), Some(Value::Bool(true))),
-            "reported first: {reported_first}"
+            (Some(text("18500")), Some(Value::Bool(in_band))),
+            "broker cash {cash}, reported first: {reported_first}"
         );
-        assert_ne!(
-            run.verdict,
-            mandate_executor::ReconciliationVerdict::Mismatch,
-            "reported first: {reported_first}"
+        assert_eq!(
+            run.verdict == mandate_executor::ReconciliationVerdict::Mismatch,
+            !in_band,
+            "broker cash {cash}, reported first: {reported_first}"
         );
     }
 }
