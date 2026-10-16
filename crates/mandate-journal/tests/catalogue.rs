@@ -125,7 +125,7 @@ const REGISTERED: &[&str] = &[
     "UniverseChanged",
 ];
 
-/// DEC-948 item 2: `FeesCharged` version 1 is the simulated equity fee the paper executor books
+/// DEC-948 item 3: `FeesCharged` version 1 is the simulated equity fee the paper executor books
 /// (trading spec §10): a record with exactly its members, refusing a family it does not book and
 /// a component that is not a decimal.
 #[test]

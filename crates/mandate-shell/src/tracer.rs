@@ -1239,7 +1239,7 @@ impl<'s> Session<'s> {
                     event_id: mandate_executor::EventId(row.event_id.clone()),
                     event_type: row.event_type.clone(),
                     causation_id: causation.map(mandate_executor::EventId),
-                    payload,
+                    payload: with_environment(row, payload)?,
                 })
                 .map_err(refused(Stage::Executor))?;
         }
@@ -1332,6 +1332,23 @@ const RECONCILIATION_ROUNDS: usize = 2;
 
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from
 /// anything the shell remembers, so what is folded is what was committed.
+/// The executor reads its stream's environment from `StreamOpened`'s `environment` member, which
+/// journal spec §9's registered schema carries in the envelope instead (ADR-0001 ES-23). The
+/// shell hands the executor the environment the journal stored with the record, so a paper
+/// stream books paper's simulated fees (trading spec §10, DEC-948 item 2); every other record,
+/// and a payload that names its own, is handed on as stored.
+fn with_environment(row: &StoredEvent, payload: Value) -> Result<Value, ShellError> {
+    const MEMBER: &str = "environment";
+    let Value::Object(mut members) = payload else {
+        return Ok(payload);
+    };
+    if row.event_type == "StreamOpened" && !members.contains_key(MEMBER) {
+        let key = Key::new(MEMBER).map_err(|_| ShellError::Envelope { field: MEMBER })?;
+        members.insert(key, Value::Str(row.environment.clone()));
+    }
+    Ok(Value::Object(members))
+}
+
 fn body_of(row: &StoredEvent) -> Result<(Value, Option<String>), ShellError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| ShellError::Envelope {
         field: "stored body",
