@@ -1,4 +1,4 @@
-//! LT-9's process half (DEC-932 item 4): a live run turns its core dumps off before it reads any
+//! LT-9's process half (DEC-937 item 4): a live run turns its core dumps off before it reads any
 //! credential, so the OAuth token, which exists only in the process's memory, cannot reach a
 //! core file.
 

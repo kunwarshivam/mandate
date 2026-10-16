@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_approval::{ActorKind, Notification};
+use mandate_approval::{ActorKind, LiveScope, Notification};
 use mandate_canon::{Digest, Value};
 use mandate_journal::Environment;
 use mandate_num::{Conviction, Price, Qty, Unit};
@@ -491,9 +491,13 @@ pub struct ApprovalSettings {
     pub author: String,
     /// `autonomy.approval.timeout_s`: the deadline is the request's risk clock plus this.
     pub timeout_s: i64,
-    /// The connection's environment: `cli_confirm` step-up is admitted on `paper` only (DEC-155
-    /// item 4).
+    /// The connection's environment: `cli_confirm` step-up is admitted on `paper` (DEC-155
+    /// item 4), and on `live` only within [`ApprovalSettings::live_cli_confirm`].
     pub environment: Environment,
+    /// The one live deployment DEC-923 admits `cli_confirm` for: its connection's broker, the
+    /// confirmed mandate's `max_order_usd` and pinned instruments, and the workspace owner, from
+    /// the trusted run context. `None` keeps refusing `cli_confirm` on `live`.
+    pub live_cli_confirm: Option<LiveScope>,
 }
 
 /// The signal inputs a decision reads: the outputs the fold holds, by model then instrument.

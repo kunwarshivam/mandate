@@ -15,7 +15,7 @@
 //! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
 //! refusal, the control stream, the live door the connection record and the confirmed mandate
 //! choose (E7-26, [`chosen`](crate::chosen), [`account_stream`](crate::account_stream),
-//! [`unspent`](crate::unspent), DEC-918) and E19-11's phase 1 and the artifacts (DEC-505),
+//! [`unsupplied`](crate::unsupplied), DEC-918, DEC-919) and E19-11's phase 1 and the artifacts (DEC-505),
 //! before any credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
@@ -75,9 +75,9 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
-pub use door::{account_stream, chosen, unspent};
+pub use door::{account_stream, chosen, unspent, unsupplied};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
-pub use grant::{Asked, GrantRefusal, grant};
+pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
@@ -85,8 +85,8 @@ pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
-    CollarMembers, answers, asked, collar_x, cross_check_the_opening, reported, session_cap,
-    wait_for_the_grant, watch_may_end, watched,
+    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
+    session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -103,12 +103,12 @@ pub struct Args {
     pub bars: PathBuf,
     pub place_one_order: bool,
     /// The environment the founder acknowledged: `--confirm-paper` or `--confirm-live`, exactly
-    /// one. The run refuses unless it is the confirmed mandate's own (LT-9, DEC-932 item 3).
+    /// one. The run refuses unless it is the confirmed mandate's own (LT-9, DEC-937 item 3).
     pub acknowledged: Environment,
 }
 
 /// The process's effects, the only things the binary supplies (ADR-0001 ES-05, ES-19).
-/// Broker-neutral (G1a, DEC-932 item 1): the session [`Ports::connect`] answers is whichever
+/// Broker-neutral (G1a, DEC-937 item 1): the session [`Ports::connect`] answers is whichever
 /// broker the connection record chose, and the run reads and trades only through [`Session`].
 pub trait Ports {
     type Session: Session;
@@ -126,11 +126,13 @@ pub trait Ports {
     /// live run only, after its acknowledgement and before [`Ports::connect`].
     fn harden(&mut self) -> Result<(), PaperError>;
 
-    /// The clock and the timer; its `now` is the run's one clock read and the binding gate's.
+    /// The clock and the timer: its `now` dates the run's configuration, stamps the asset record
+    /// and judges the quote at their reads, gives the run clock after the last broker read
+    /// (DEC-935), and is the binding gate's.
     fn pause(&self) -> Self::Pause;
 }
 
-/// One connected broker, as the run reads and trades through it (G1a, DEC-932 item 1): the
+/// One connected broker, as the run reads and trades through it (G1a, DEC-937 item 1): the
 /// GET-only preflight, and the production cycle over the broker's own connector. Every
 /// [`TradingTransport`] and [`DataTransport`] is the Alpaca paper session it always was.
 pub trait Session {
@@ -230,7 +232,7 @@ pub enum PaperError {
     Control,
     #[error("the paper credentials or client are unavailable")]
     Credentials,
-    /// A live run without `--confirm-live` (DEC-932 item 3), before any credential is read.
+    /// A live run without `--confirm-live` (DEC-937 item 3), before any credential is read.
     #[error("the confirmed mandate is live; a live run needs --confirm-live")]
     LiveUnconfirmed,
     /// A paper run acknowledged as live: each environment needs its own acknowledgement.
@@ -276,7 +278,7 @@ pub enum PaperError {
 
 /// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
 /// `--journal`, `--store` and `--bars`, each with a value; exactly one acknowledgement,
-/// `--confirm-paper` or `--confirm-live` (DEC-932 item 3); and `--place-one-order`, which needs
+/// `--confirm-paper` or `--confirm-live` (DEC-937 item 3); and `--place-one-order`, which needs
 /// `--journal`. Any other argument is unknown, so none names a mandate, a configuration, a model
 /// output or a host.
 ///
@@ -371,6 +373,11 @@ impl<P: Pause> PaperClock for PortClock<P> {
 
 /// One run, in the crate documentation's order; `vars` is the process environment.
 ///
+/// The run clock everything after the preflight is judged and recorded at is read once, after the
+/// preflight's last broker read, so every fact the broker answered is stamped at or before it and
+/// each age bound is measured from it (DEC-935, #1355); the date the configuration is chosen for
+/// is read before the control stream.
+///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing further is sent.
 pub fn run<P: Ports>(
@@ -381,8 +388,7 @@ pub fn run<P: Ports>(
     refuse_configured_host(vars.iter().map(|(name, value)| (name, value)))
         .map_err(PaperError::Shell)?;
     let clock = ports.pause();
-    let now = clock.now();
-    let day = now.date();
+    let day = clock.now().date();
     let records = ports.control_stream(&args.workspace)?;
     let mut store = FsArtifactStore::open(&args.store).map_err(|_| PaperError::Store)?;
     let facts = RunFacts {
@@ -430,6 +436,7 @@ pub fn run<P: Ports>(
     let broker = session
         .preflight(&artifacts, clock.clone())
         .map_err(refused(Stage::Reconcile))?;
+    let now = clock.now();
     let input = confirmed
         .with_equity(broker.account.equity)
         .map_err(PaperError::Deployment)?;
@@ -516,7 +523,7 @@ pub fn run<P: Ports>(
 /// item 2: "These checks refuse before anything runs, ahead of the shell's own
 /// `DeploymentRefusal::Live`, which stays for the shell's fold"): the connection choice
 /// [`chosen`], the account stream's naming [`account_stream`] and DEC-529 item 3's
-/// flat-and-unspent check [`unspent`], in that order, over the records the run's own single
+/// flat-and-unspent lapse, in that order, over the records the run's own single
 /// control-stream read holds and the deployment's own document, all before the shell's phase-1
 /// fold and so before every credential read too (FT-3: [`Ports::connect`], the only one, comes
 /// later, behind the fold). The door engages where the run holds the deployment's own document
@@ -531,13 +538,15 @@ pub fn run<P: Ports>(
 /// snapshot counts the check reads are the live arm's to hand — its journal read of the named
 /// stream and its preflight, neither of which any build runs yet (the `live` feature stays
 /// compile-only; the default build's `connector_not_built` stands in front of the live arm's
-/// read, DEC-910 item 3) — so the call carries the empty rows and counts of no live arm, and
-/// they decide nothing in any build that runs today: the default build's only surviving choice is
-/// a paper connection, and DEC-529 item 3's lapse makes no check on one (LT-14).
+/// read, DEC-910 item 3) — so the door holds no evidence and calls [`unsupplied`] (DEC-919),
+/// which refuses a live connection `lapse_evidence_not_supplied` rather than pass it on an empty
+/// read and zero counts. The live arm clears that refusal only by calling [`unspent`] with the
+/// rows its journal read returned and the counts its snapshot listed. In the default build the
+/// only connection to survive [`chosen`] is a paper one, and the lapse makes no check on it
+/// (LT-14), so today's paper path is unchanged.
 ///
 /// # Errors
-/// Any [`PaperError`] of the door's three frames, before the shell's fold and before anything
-/// runs.
+/// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
 fn the_live_door(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,
@@ -549,19 +558,12 @@ fn the_live_door(
     };
     let connection = chosen(records, &document, &args.account_ref)?;
     account_stream(&args.workspace, &args.account_ref)?;
-    unspent(
-        &connection,
-        &[],
-        &Held {
-            positions: 0,
-            open_orders: 0,
-        },
-    )?;
+    unsupplied(&connection)?;
     Ok(Some(connection))
 }
 
 /// The founder's acknowledgement of the run's environment, checked as soon as the door has
-/// chosen the connection and before any credential is read (DEC-932 item 3): a live connection
+/// chosen the connection and before any credential is read (DEC-937 item 3): a live connection
 /// needs `--confirm-live`, then turns the process's core dumps off through [`Ports::harden`]
 /// (LT-9); a paper connection needs `--confirm-paper` and is otherwise untouched.
 ///
@@ -649,7 +651,7 @@ fn closes_object(closes: &[(Date, Price)], asset_id: &str) -> Result<Vec<u8>, Pa
     Ok(to_canonical(&Value::Object(object)))
 }
 
-/// The binary's ports (DEC-846 item 1, DEC-932 item 1): the control stream read from the
+/// The binary's ports (DEC-846 item 1, DEC-937 item 1): the control stream read from the
 /// Postgres journal at `journal`, the session of the broker the connection chose — the paper
 /// credentials from the environment with the Alpaca paper client, or the Robinhood login only a
 /// `live` build can make — and the system clock. Without a journal there is no control stream to

@@ -1,6 +1,6 @@
 //! The runner's live entry (E7-26, the [first live trade
 //! brief](../../../docs/project/tasks/first-live-trade.md)'s G1a, LT-1 and LT-9 rows,
-//! [DEC-932](../../../docs/project/decisions/DEC-932.md)): the acknowledgement a live run needs,
+//! [DEC-937](../../../docs/project/decisions/DEC-937.md)): the acknowledgement a live run needs,
 //! the core dumps it turns off before any credential, and the one Robinhood endpoint each build
 //! may dial. No test here logs in, holds a credential or reaches a host (ES-19, LT-1,
 //! `AGENTS.md` rule 8): the endpoint is judged as text, and the login itself runs only against
@@ -93,7 +93,7 @@ fn args(acknowledged: Environment) -> Args {
     }
 }
 
-/// DEC-932 item 3: `--confirm-live` is the live acknowledgement and `--confirm-paper` the paper
+/// DEC-937 item 3: `--confirm-live` is the live acknowledgement and `--confirm-paper` the paper
 /// one, each parsed to the environment it names; exactly one is required, so a run giving both
 /// or neither is a usage error before anything runs.
 #[test]
@@ -115,7 +115,7 @@ fn each_acknowledgement_names_its_environment_and_exactly_one_is_required() {
     }
 }
 
-/// DEC-932 item 3 and LT-9: a live connection without `--confirm-live` refuses before any
+/// DEC-937 item 3 and LT-9: a live connection without `--confirm-live` refuses before any
 /// credential is read and leaves the process as it was; with it, the process's core dumps are
 /// turned off, once, and still nothing is connected; a paper connection keeps today's run
 /// under `--confirm-paper` and refuses under `--confirm-live`, hardening nothing either way.
@@ -206,7 +206,7 @@ fn assert_no_core_dumps() {
     assert_eq!(behavior, DumpableBehavior::NotDumpable);
 }
 
-/// LT-1 (DEC-932 item 2): the default build holds no Robinhood host, so it has no endpoint to
+/// LT-1 (DEC-937 item 2): the default build holds no Robinhood host, so it has no endpoint to
 /// dial whatever the environment says; a `live` build dials exactly Robinhood's published
 /// endpoint, and refuses a rehearsal endpoint set beside it rather than ever reading it.
 #[test]

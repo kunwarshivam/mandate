@@ -178,6 +178,7 @@ fn an_answer_prints_its_event_and_the_runtimes_outcome() {
     let code = code_of(&asked.content);
     let submitted = approve(
         &mut fx.journal,
+        &fx.store,
         &mut FixedIds { assertions: 0 },
         &owner(),
         AGENT,

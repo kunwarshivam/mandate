@@ -11,7 +11,7 @@ workspace = true
 
 [features]
 live = []
-# The rehearsal against the simulator (DEC-922, DEC-932 item 2): the Robinhood login dials only
+# The rehearsal against the simulator (DEC-922, DEC-937 item 2): the Robinhood login dials only
 # the loopback endpoint `MANDATE_RH_SIM_ENDPOINT` names. Nothing turns it on but an explicit flag.
 rh-sim = []
 

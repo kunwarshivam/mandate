@@ -4,7 +4,7 @@
   connection record"; "the `live` feature"; "LT-1's build test"), LT-1 and LT-9 (with the risk
   table's "the runner disables core dumps at start"); `docs/project/decisions/DEC-922.md`
   items 1 to 3; `docs/project/decisions/DEC-924.md` item 3; `docs/project/decisions/DEC-928.md`
-  item 2; `docs/project/decisions/DEC-932.md` (this row's choices).
+  item 2; `docs/project/decisions/DEC-937.md` (this row's choices).
 - **Code:** `mandate-paper`, `crates/mandate-paper/` (layer 9, safety-critical):
   `src/lib.rs` — `Ports` (`Session`, `connect` given the door's `Connection`, and `harden`),
   `Session` (the preflight and the production cycle over one broker; every Alpaca transport

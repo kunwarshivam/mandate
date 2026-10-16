@@ -9,6 +9,12 @@ description = "The Model Context Protocol client a broker connector uses inside 
 [lints]
 workspace = true
 
+# The rehearsal build (DEC-922 items 1 and 2): the only build in which an endpoint may be plain
+# `http`, and then only to a loopback address; every endpoint it dials is on loopback. Only
+# `mandate-rh-sim`'s own `rh-sim` feature turns it on; the `live` build never does.
+[features]
+rh-sim = []
+
 [dependencies]
 getrandom.workspace = true
 mandate-canon.workspace = true

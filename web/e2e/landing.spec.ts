@@ -331,7 +331,7 @@ test("the page barely shifts while it and its fonts load", async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { __cls: number }).__cls)).toBeLessThan(0.1);
 });
 
-test("the keyboard goes skip link, the app's address, then the guide links, with a visible outline", async ({ page }) => {
+test("the keyboard goes skip link, the app's address, then the tab in front, with a visible outline", async ({ page }) => {
   await open(page, 1440, 900, { app: true });
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => (document.activeElement as HTMLElement).innerText.trim())).toBe("Skip to content");
@@ -342,7 +342,8 @@ test("the keyboard goes skip link, the app's address, then the guide links, with
     const el = document.activeElement as HTMLElement;
     return { text: el.innerText.trim(), outline: getComputedStyle(el).outlineStyle, width: parseFloat(getComputedStyle(el).outlineWidth) };
   });
-  expect(first.text).toBe("What's New?");
+  expect(first.text, "no row of guides stands between the address and the tabs").toBe("Inside the app");
+  await expect(page.getByRole("tab", { name: "Inside the app" })).toBeFocused();
   expect(first.outline).not.toBe("none");
   expect(first.width).toBeGreaterThan(0);
 });

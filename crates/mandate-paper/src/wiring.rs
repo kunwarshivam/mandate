@@ -33,7 +33,7 @@ use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 use crate::PaperError;
 use crate::connection::member;
 use crate::evidence::{Evidence, EvidenceRefusal, evidence};
-use crate::grant::{Asked, GrantRefusal, grant};
+use crate::grant::{Asked, GrantRefusal, Journaled, grant};
 use crate::lt10::{Lt10Refusal, Watched, lt10};
 use crate::quote::{QuoteRefusal, cross_check};
 
@@ -73,25 +73,52 @@ pub fn asked(rows: &[StoredEvent], now: UtcNanos) -> Result<Asked, GrantRefusal>
     Ok(wait)
 }
 
-/// The wait's fold over the answers (DEC-914 item 2; #1308's review note: the journal read's
-/// records reach [`grant`] verbatim): `rows` are the journal's own read (`ORDER BY seq`) of the
-/// workspace control stream, each mapped one-to-one to its record — its `seq`, its `event_type`
-/// and its body's `payload` member, the same mapping the run's own control-stream read performs
-/// — and the records are handed to `grant` **verbatim, in journal order**: never re-sorted by
-/// another key, never filtered to the answers alone, no row's members re-read from anywhere but
-/// the row's own payload. The first `ApprovalResponseSubmitted` naming the ask's approval
-/// decides the wait wherever it sits in the read (#1308: an answer committed at any `seq` while
-/// the run waited is folded when the journal hands it), and every refusal is `grant`'s own
-/// (DEC-912 item 1), because the release the cycle takes is the one this fold returns and no
-/// other.
+/// The wait's fold over the answers and the runtime's records of them (DEC-914 item 2;
+/// [DEC-920](../../../docs/project/decisions/DEC-920.md) items 1 and 4; #1308's review note: the
+/// journal read's records reach [`grant`] verbatim): `control_rows` are the journal's own read
+/// (`ORDER BY seq`) of the workspace control stream and `agent_rows` its read of the agent stream
+/// the run appends to — where the runtime journals its `ApprovalResponded` and
+/// `ApprovalRevalidated` — each row mapped one-to-one to its [`Journaled`]: its event id, its
+/// envelope's `causation_id`, and its record — its `seq`, its `event_type` and its body's
+/// `payload` member, the same mapping the run's own control-stream read performs. The rows are
+/// handed to `grant` **verbatim, in journal order**: never re-sorted by another key, never
+/// filtered to the answers alone, no row's members re-read from anywhere but the row's own body.
+/// The release is `grant`'s own (DEC-912 item 1): the runtime's admitted, re-validated grant of
+/// the ask's first deciding answer, never a raw answer, because the release the cycle takes is
+/// the one this fold returns and no other.
+///
+/// A row whose body cannot be read is never a guess (`AGENTS.md` rule 3), and the refusal is
+/// scoped by the row's own `event_type` column (DEC-920 item 4): a row of a type the fold reads —
+/// `ApprovalResponseSubmitted` on the control stream, `ApprovalResponded` and
+/// `ApprovalRevalidated` on the agent stream — could be this ask's, so it refuses as a difference
+/// with nothing sent; a row of any other type decides nothing in the fold whatever its body
+/// holds, so it is handed in its place with a `null` payload and no `causation_id`, and one
+/// unreadable unrelated row never refuses every ask behind it.
 ///
 /// # Errors
-/// Any [`GrantRefusal`] `grant` returns, and a row whose envelope cannot be read, which is a
-/// difference with nothing sent (`AGENTS.md` rule 3): every one of them is a stop with nothing
-/// sent.
-pub fn answers(rows: &[StoredEvent], ask: &Asked, now: UtcNanos) -> Result<(), GrantRefusal> {
-    let records: Vec<ControlRecord> = rows.iter().map(record_of).collect::<Result<_, _>>()?;
-    grant(&records, ask, now)
+/// Any [`GrantRefusal`] `grant` returns, and a row of a folded type whose body cannot be read,
+/// which is a difference with nothing sent: every one of them is a stop with nothing sent.
+pub fn answers(
+    control_rows: &[StoredEvent],
+    agent_rows: &[StoredEvent],
+    ask: &Asked,
+    now: UtcNanos,
+) -> Result<(), GrantRefusal> {
+    let control = journaled(control_rows, &["ApprovalResponseSubmitted"])?;
+    let agent = journaled(agent_rows, &["ApprovalResponded", "ApprovalRevalidated"])?;
+    grant(&control, &agent, ask, now)
+}
+
+/// One wake's read of the two streams the grant wait folds (DEC-914 item 2;
+/// [DEC-920](../../../docs/project/decisions/DEC-920.md) item 1): the journal's own
+/// `ORDER BY seq` read of the agent stream the run appends to, where the runtime's admission
+/// records land, and of the workspace control stream, where the answers land.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WakeRead {
+    /// The agent stream's rows.
+    pub agent: Vec<StoredEvent>,
+    /// The workspace control stream's rows.
+    pub control: Vec<StoredEvent>,
 }
 
 /// The collar's own `x` for the opening's cross-check (DEC-914 item 3; DEC-529 item 12;
@@ -243,11 +270,12 @@ pub fn reported(
 /// checks) still stand in front. The ask is bound once, verbatim off the agent-stream rows
 /// [`asked`] reads — the youngest own ask, journaled by this run after its gate passed, and
 /// nothing after it can exist while the run holds its one-order door (DEC-914 item 1). The
-/// answers are then re-read **per wake**: `control_rows` is the journal's own `ORDER BY seq`
-/// read of the workspace control stream, taken again on every wake (#1311's review note: an
-/// answer committed after the run began waiting is folded when the journal hands it), and each
-/// read's rows reach [`answers`] — and behind it [`grant`] — verbatim, in journal order, over
-/// the control stream's records the run's own control-stream read maps (DEC-914 item 2). Each
+/// answers and the runtime's records of them are then re-read **per wake**: `reads` returns the
+/// journal's own `ORDER BY seq` read of both streams ([`WakeRead`]), taken again on every wake
+/// (#1311's review note: an answer committed, or admitted, after the run began waiting is folded
+/// when the journal hands it), and each read's rows reach [`answers`] — and behind it [`grant`]
+/// — verbatim, in journal order (DEC-914 item 2), so the wait releases only once the runtime has
+/// admitted and re-validated the grant (DEC-920 item 1) and a raw answer alone holds it. Each
 /// wake pauses `interval` — the watch's own registered poll interval, DEC-853 item 6's "the
 /// least of `exit_step_s`; `unknown_absent_window_s` divided by `unknown_absent_lookups`
 /// (whole seconds, rounded down, at least 1); `bracket_partial_fill_timeout_s`; and
@@ -256,25 +284,25 @@ pub fn reported(
 /// never come denies at it and nothing is sent (rule 3), and an answer already committed before
 /// the first wake decides it without waiting.
 ///
-/// `agent_rows` are the agent stream's own rows as the journal read them when the wait began;
-/// `pause` is the run's clock, read per fold and advanced per wake.
+/// `agent_rows` are the agent stream's own rows as the journal read them when the wait began,
+/// which bind the ask; `pause` is the run's clock, read per fold and advanced per wake.
 ///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing is sent: any [`GrantRefusal`] of the ask
 /// or its answers (through [`PaperError::Grant`]), a row source the journal could not answer
-/// (through `control_rows`'s own error), and the wait's own stop when the clock the pause keeps
+/// (through `reads`'s own error), and the wait's own stop when the clock the pause keeps
 /// cannot run.
-pub fn wait_for_the_grant<Rows>(
+pub fn wait_for_the_grant<Reads>(
     agent_rows: &[StoredEvent],
-    control_rows: Rows,
+    reads: Reads,
     pause: &(impl Pause + ?Sized),
     interval: Duration,
 ) -> Result<(), PaperError>
 where
-    Rows: FnMut() -> Result<Vec<StoredEvent>, PaperError>,
+    Reads: FnMut() -> Result<WakeRead, PaperError>,
 {
     let ask = asked(agent_rows, pause.now()).map_err(PaperError::Grant)?;
-    let mut control_rows = control_rows;
+    let mut reads = reads;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
@@ -287,8 +315,8 @@ where
             })
         })?;
     loop {
-        let rows = control_rows()?;
-        match answers(&rows, &ask, pause.now()) {
+        let read = reads()?;
+        match answers(&read.control, &read.agent, &ask, pause.now()) {
             Ok(()) => return Ok(()),
             Err(GrantRefusal::Unanswered) => {}
             Err(refusal) => return Err(PaperError::Grant(refusal)),
@@ -404,6 +432,45 @@ fn record_of(row: &StoredEvent) -> Result<ControlRecord, GrantRefusal> {
         seq: row.seq,
         event_type: row.event_type.clone(),
         payload: payload.clone(),
+    })
+}
+
+/// `rows` mapped one-to-one, in their own order, to the [`Journaled`] the grant fold reads
+/// ([DEC-920](../../../docs/project/decisions/DEC-920.md) items 1 and 4): each row's event id,
+/// its envelope's `causation_id` when the body carries one as text, and its record
+/// ([`record_of`]). A row of a `folded` type whose body cannot be read refuses as a difference
+/// (`AGENTS.md` rule 3); a row of any other type is handed in its place, its body unread, with a
+/// `null` payload and no `causation_id`, because the fold reads nothing of it.
+fn journaled(rows: &[StoredEvent], folded: &[&str]) -> Result<Vec<Journaled>, GrantRefusal> {
+    rows.iter()
+        .map(|row| match journaled_row(row) {
+            Ok(journaled) => Ok(journaled),
+            Err(refusal) if folded.contains(&row.event_type.as_str()) => Err(refusal),
+            Err(_) => Ok(Journaled {
+                event_id: row.event_id.clone(),
+                causation_id: None,
+                record: ControlRecord {
+                    seq: row.seq,
+                    event_type: row.event_type.clone(),
+                    payload: Value::Null,
+                },
+            }),
+        })
+        .collect()
+}
+
+/// One row's [`Journaled`]: its event id, its envelope's `causation_id` as text or [`None`], and
+/// its record ([`record_of`]'s refusals).
+fn journaled_row(row: &StoredEvent) -> Result<Journaled, GrantRefusal> {
+    let body = mandate_canon::parse(&row.body).map_err(|_| GrantRefusal::Mismatched)?;
+    let record = record_of(row)?;
+    Ok(Journaled {
+        event_id: row.event_id.clone(),
+        causation_id: body
+            .get("causation_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        record,
     })
 }
 

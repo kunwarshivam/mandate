@@ -109,7 +109,6 @@ fn placed(ports: &Ports<'_>) -> (Shell, String, Ran) {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_place_answer_and_a_pushed_update_carry_the_id_and_a_fill_none() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -129,7 +128,6 @@ fn a_place_answer_and_a_pushed_update_carry_the_id_and_a_fill_none() {
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_timeout_an_absence_and_an_empty_id_carry_none_and_the_query_answer_the_id() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -149,7 +147,6 @@ fn a_timeout_an_absence_and_an_empty_id_carry_none_and_the_query_answer_the_id()
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_cancel_request_carries_none_its_order_answer_the_id_and_its_confirmation_none() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -170,7 +167,6 @@ fn a_cancel_request_carries_none_its_order_answer_the_id_and_its_confirmation_no
 }
 
 #[test]
-#[ignore = "pending E7-6"]
 fn a_reconciliation_adopts_with_the_open_orders_id_and_a_missing_order_with_none() {
     let fixture = Fixture::new();
     let ports = fixture.ports();
@@ -188,7 +184,6 @@ fn a_reconciliation_adopts_with_the_open_orders_id_and_a_missing_order_with_none
 /// replaced order's record carries its own id, and the successor's, written from the same record,
 /// carries the new id that record gives it (`replaced_by_broker_order_id`), or `null` without one.
 #[test]
-#[ignore = "pending E7-6"]
 fn each_order_of_a_replacement_carries_its_own_broker_id() {
     let fixture = Fixture::new();
     let ports = fixture.ports();

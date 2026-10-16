@@ -1,5 +1,5 @@
 //! The Robinhood session the runner's production ports log in to (G1a, LT-1, DEC-922, DEC-924
-//! item 3, DEC-932 item 2): the founder's OAuth login (O1b's [`AuthServer`] and
+//! item 3, DEC-937 item 2): the founder's OAuth login (O1b's [`AuthServer`] and
 //! [`CallbackListener`]) at the one endpoint this build pins, and nothing past it until the MCP
 //! session carries the token (O2).
 //!
@@ -45,7 +45,7 @@ const PINNED_HOST: Option<&str> = None;
 pub const REHEARSAL_ENDPOINT_VAR: &str = "MANDATE_RH_SIM_ENDPOINT";
 
 /// What a run waits for once the login has a token: the MCP session that carries it (O2), which
-/// no build holds yet, so a Robinhood run stops before any read (DEC-932 item 2).
+/// no build holds yet, so a Robinhood run stops before any read (DEC-937 item 2).
 pub const SESSION_UNBUILT: &str = "the Robinhood MCP session over the login's token (O2)";
 
 /// Which build is running, as [`endpoint`] reads it.
@@ -108,7 +108,7 @@ impl EndpointRefusal {
     }
 }
 
-/// The endpoint `build` dials, given the rehearsal variable's value `rehearsal` (DEC-932 item
+/// The endpoint `build` dials, given the rehearsal variable's value `rehearsal` (DEC-937 item
 /// 2): none in the default build; in the `live` build the pinned host's [`MCP_PATH`], and a
 /// rehearsal variable set beside it is refused; in the rehearsal build the variable's endpoint,
 /// which must be `http://` on an IPv4 loopback address with a port, and no credentials, query or
@@ -207,12 +207,12 @@ async fn login(
 pub struct Linked {
     #[allow(
         dead_code,
-        reason = "the MCP session (O2) is connected on this runtime; DEC-932 item 2"
+        reason = "the MCP session (O2) is connected on this runtime; DEC-937 item 2"
     )]
     runtime: Runtime,
     #[allow(
         dead_code,
-        reason = "the MCP session (O2) carries this token; DEC-932 item 2"
+        reason = "the MCP session (O2) carries this token; DEC-937 item 2"
     )]
     token: AccessToken,
 }

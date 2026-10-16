@@ -11,7 +11,7 @@ use mandate_canon::{Digest, Value};
 use mandate_journal::{StreamId, StreamType};
 use mandate_num::{Fraction, Price};
 use mandate_paper::{
-    Asked, Evidence, EvidenceRefusal, GrantRefusal, Lt10Refusal, QuoteRefusal, Watched,
+    Asked, Evidence, EvidenceRefusal, GrantRefusal, Journaled, Lt10Refusal, QuoteRefusal, Watched,
     cross_check, evidence, grant, lt10,
 };
 use mandate_shell::control::ControlRecord;
@@ -48,22 +48,114 @@ fn ask() -> Asked {
     }
 }
 
-/// One control-stream record at `seq`.
-fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
-    ControlRecord {
-        seq,
-        event_type: event_type.to_owned(),
-        payload: json(payload),
+/// One journaled row at `seq`: its own event id, its envelope's `causation_id`, and its record.
+fn journaled(
+    seq: u64,
+    event_id: &str,
+    causation_id: Option<&str>,
+    event_type: &str,
+    payload: &str,
+) -> Journaled {
+    Journaled {
+        event_id: event_id.to_owned(),
+        causation_id: causation_id.map(str::to_owned),
+        record: ControlRecord {
+            seq,
+            event_type: event_type.to_owned(),
+            payload: json(payload),
+        },
     }
 }
 
-/// One `ApprovalResponseSubmitted` the CLI committed (journal spec §9.6, DEC-533): the members
-/// the run reads are the approval it names, its verdict and the content hash it repeats.
-fn answer(seq: u64, approval: &str, verdict: &str, content_hash: &str) -> ControlRecord {
+/// One control-stream record at `seq` with an event id of its own and no cause.
+fn record(seq: u64, event_type: &str, payload: &str) -> Journaled {
+    journaled(
+        seq,
+        &format!("01JZWCTL{seq:018}"),
+        None,
+        event_type,
+        payload,
+    )
+}
+
+/// The event id of the answer at control-stream `seq`.
+fn answer_id(seq: u64) -> String {
+    format!("01JZWANS{seq:018}")
+}
+
+/// One `ApprovalResponseSubmitted` the CLI committed (journal spec §9.7, DEC-533): the members
+/// the run reads are the approval it names, its verdict and the content hash it repeats; its
+/// event id is [`answer_id`].
+fn answer(seq: u64, approval: &str, verdict: &str, content_hash: &str) -> Journaled {
     let payload = format!(
         r#"{{"agent":"agent_01","approval":"{approval}","content_hash":"{content_hash}","responder":"user_founder","role":"approver","verdict":"{verdict}"}}"#
     );
-    record(seq, "ApprovalResponseSubmitted", &payload)
+    journaled(
+        seq,
+        &answer_id(seq),
+        None,
+        "ApprovalResponseSubmitted",
+        &payload,
+    )
+}
+
+/// The event id of the runtime's record at agent-stream `seq`.
+fn agent_id(seq: u64) -> String {
+    format!("01JZWAGT{seq:018}")
+}
+
+/// The runtime's copy of the answer `answer` at agent-stream `seq` (journal spec §9.7, rule 50:
+/// its `causation_id` is the answer): the approval and verdict it copies, and the result
+/// admission gave it — `admitted`, `counted`, or `refused` with the first failing check's reason.
+fn copy(seq: u64, answer: &str, approval: &str, verdict: &str, result: &str) -> Journaled {
+    let reason = match result {
+        "refused" => r#""not_an_approver""#,
+        _ => "null",
+    };
+    let payload = format!(
+        r#"{{"approval":"{approval}","delegation":null,"effective_at":1000,"quorum":null,"reason":{reason},"responder":"user_founder","result":"{result}","role":"approver","separation_of_duties":null,"step_up":null,"verdict":"{verdict}"}}"#
+    );
+    journaled(
+        seq,
+        &agent_id(seq),
+        Some(answer),
+        "ApprovalResponded",
+        &payload,
+    )
+}
+
+/// The runtime's re-validation of the admitted copy `copy` at agent-stream `seq` (journal spec
+/// §9.7: its `causation_id` is the `ApprovalResponded` it re-validates), with its result.
+fn revalidation(seq: u64, copy: &str, approval: &str, result: &str) -> Journaled {
+    let reason = match result {
+        "skip" => r#""drift""#,
+        _ => "null",
+    };
+    let payload = format!(
+        r#"{{"approval":"{approval}","band_bp":100,"result":"{result}","reason":{reason}}}"#
+    );
+    journaled(
+        seq,
+        &agent_id(seq),
+        Some(copy),
+        "ApprovalRevalidated",
+        &payload,
+    )
+}
+
+/// The runtime's records of a grant it admitted and re-validated to `act`: the copy of the
+/// answer at control-stream `answer_seq` at agent-stream `seq`, and its re-validation behind it.
+fn admitted(seq: u64, answer_seq: u64) -> Vec<Journaled> {
+    vec![
+        copy(
+            seq,
+            &answer_id(answer_seq),
+            APPROVAL,
+            "approved",
+            "admitted",
+        ),
+        revalidation(seq + 1, &agent_id(seq), APPROVAL, "act"),
+    ]
 }
 
 fn json(text: &str) -> Value {
@@ -75,7 +167,7 @@ fn json(text: &str) -> Value {
 /// ahead — so the submit stays blocked and nothing is sent.
 #[test]
 fn an_unanswered_ask_holds_the_submit_before_its_deadline() {
-    let held = grant(&[], &ask(), at(NOW_S));
+    let held = grant(&[], &[], &ask(), at(NOW_S));
     assert_eq!(
         held,
         Err(GrantRefusal::Unanswered),
@@ -83,15 +175,16 @@ fn an_unanswered_ask_holds_the_submit_before_its_deadline() {
     );
 }
 
-/// LT-4 (DEC-912 item 1): the grant releases the submit exactly when its content hash equals
-/// the hash of the request the run journaled — the one order the approver was shown — and the
-/// run's clock is before the ask's deadline. Once released, the cycle's own one-order door
-/// (FT-1) still governs what is submitted, once.
+/// LT-4 (DEC-912 item 1, DEC-920 item 1): the grant releases the submit exactly when its content
+/// hash equals the hash of the request the run journaled — the one order the approver was shown
+/// — the runtime admitted it and re-validated it to `act`, and the run's clock is before the
+/// ask's deadline. Once released, the cycle's own one-order door (FT-1) still governs what is
+/// submitted, once.
 #[test]
 fn a_grant_repeating_the_requests_hash_releases_the_submit() {
     let ask = ask();
     let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
-    let released = grant(&answers, &ask, at(NOW_S));
+    let released = grant(&answers, &admitted(1, 1), &ask, at(NOW_S));
     assert_eq!(released, Ok(()));
 }
 
@@ -104,7 +197,7 @@ fn an_answer_repeating_another_hash_refuses_with_nothing_sent() {
     let differing = hash_of(b"another order's content");
     for verdict in ["approved", "skipped"] {
         let answers = vec![answer(1, APPROVAL, verdict, &differing)];
-        let refused = grant(&answers, &ask, at(NOW_S));
+        let refused = grant(&answers, &admitted(1, 1), &ask, at(NOW_S));
         assert_eq!(
             refused,
             Err(GrantRefusal::Mismatched),
@@ -113,13 +206,14 @@ fn an_answer_repeating_another_hash_refuses_with_nothing_sent() {
     }
 }
 
-/// LT-4, mandate spec §6.4's lifecycle (DEC-912 item 1): an admitted skip denies the ask, so
-/// nothing is sent; the deny is the owner's answer, never a guess.
+/// LT-4, mandate spec §6.4's lifecycle (DEC-912 item 1, DEC-920 item 2): a skip of the ask
+/// repeating its hash denies it whenever it is read, so nothing is sent; a deny never adds risk,
+/// so it waits on no admission.
 #[test]
 fn a_skip_of_the_ask_denies_it() {
     let ask = ask();
     let answers = vec![answer(1, APPROVAL, "skipped", &ask.content_hash)];
-    let denied = grant(&answers, &ask, at(NOW_S));
+    let denied = grant(&answers, &[], &ask, at(NOW_S));
     assert_eq!(denied, Err(GrantRefusal::Denied));
 }
 
@@ -130,8 +224,13 @@ fn a_skip_of_the_ask_denies_it() {
 fn a_silent_or_late_ask_denies_at_its_deadline() {
     let ask = ask();
     let on_time_answer_too_late = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
-    let silent = grant(&[], &ask, at(DEADLINE_S));
-    let late = grant(&on_time_answer_too_late, &ask, at(DEADLINE_S));
+    let silent = grant(&[], &[], &ask, at(DEADLINE_S));
+    let late = grant(
+        &on_time_answer_too_late,
+        &admitted(1, 1),
+        &ask,
+        at(DEADLINE_S),
+    );
     assert_eq!(
         (silent, late),
         (Err(GrantRefusal::TimedOut), Err(GrantRefusal::TimedOut))
@@ -150,7 +249,7 @@ fn an_answer_of_another_ask_never_releases_this_one() {
         "approved",
         &ask.content_hash,
     )];
-    let held = grant(&answers, &ask, at(NOW_S));
+    let held = grant(&answers, &admitted(1, 1), &ask, at(NOW_S));
     assert_eq!(
         held,
         Err(GrantRefusal::Unanswered),
@@ -177,7 +276,7 @@ fn an_answer_the_run_cannot_read_refuses_as_a_difference() {
     );
     for payload in [no_verdict, not_text, no_hash] {
         let answers = vec![record(1, "ApprovalResponseSubmitted", &payload)];
-        let refused = grant(&answers, &ask, at(NOW_S));
+        let refused = grant(&answers, &admitted(1, 1), &ask, at(NOW_S));
         assert_eq!(refused, Err(GrantRefusal::Mismatched), "{payload}");
     }
 }
@@ -208,12 +307,232 @@ fn the_first_answer_of_the_ask_decides_whatever_rows_follow() {
     );
     let matching_last = answer(3, APPROVAL, "approved", &ask.content_hash);
     let answers = vec![differing_first, not_an_answer, matching_last];
-    let refused = grant(&answers, &ask, at(NOW_S));
+    let refused = grant(&answers, &admitted(1, 3), &ask, at(NOW_S));
     assert_eq!(
         refused,
         Err(GrantRefusal::Mismatched),
         "the first answer decides, and a command row never asks for the submit"
     );
+}
+
+/// DEC-920 item 1, DEC-912 item 1 ("Admission ... stays the runtime's"), mandate spec §6.4:
+/// an answer reaches the runtime only as an `ApprovalResponseSubmitted`, and only the runtime's
+/// admission says whether it is a grant — so the raw answer, its approval, hash and verdict all
+/// agreeing, never releases the submit by itself: before the runtime has copied it the wait
+/// holds, and at the deadline it denies, with nothing sent.
+#[test]
+fn a_raw_answer_the_runtime_has_not_admitted_never_releases_the_submit() {
+    let ask = ask();
+    let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
+    let held = grant(&answers, &[], &ask, at(NOW_S));
+    let denied = grant(&answers, &[], &ask, at(DEADLINE_S));
+    assert_eq!(
+        (held, denied),
+        (Err(GrantRefusal::Unanswered), Err(GrantRefusal::TimedOut)),
+        "a raw answer is not a grant until the runtime admits it"
+    );
+}
+
+/// DEC-920 item 1, mandate spec §6.4 check 3 ("The response's actor is a `user` in
+/// `autonomy.approval.approvers` ... no agent, system, broker, or platform operator can
+/// approve") and its lifecycle ("A refused response and a grant short of the quorum (`counted`)
+/// are not terminal"): an answer the runtime refused — a non-approver's, or any actor's that is
+/// not a user — and one it only counted toward the quorum never release the submit; the wait
+/// holds, and the timeout denies at the deadline.
+#[test]
+fn a_refused_or_counted_answer_never_releases_the_submit() {
+    let ask = ask();
+    let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
+    for result in ["refused", "counted"] {
+        let judged = vec![copy(1, &answer_id(1), APPROVAL, "approved", result)];
+        let held = grant(&answers, &judged, &ask, at(NOW_S));
+        let denied = grant(&answers, &judged, &ask, at(DEADLINE_S));
+        assert_eq!(
+            (held, denied),
+            (Err(GrantRefusal::Unanswered), Err(GrantRefusal::TimedOut)),
+            "a {result} answer is not a grant"
+        );
+    }
+}
+
+/// DEC-920 item 1, mandate spec §6.4's lifecycle: a refused answer is not terminal, so the fold
+/// reads on to the ask's next answer — the founder's admitted grant behind a non-approver's
+/// refused one releases the submit, and a differing hash behind it still refuses as a
+/// difference (LT-4: any difference is a refusal with nothing sent).
+#[test]
+fn the_fold_reads_past_a_refused_answer_to_the_next() {
+    let ask = ask();
+    let refused_then_admitted = vec![
+        copy(1, &answer_id(1), APPROVAL, "approved", "refused"),
+        copy(2, &answer_id(2), APPROVAL, "approved", "admitted"),
+        revalidation(3, &agent_id(2), APPROVAL, "act"),
+    ];
+    let both_match = vec![
+        answer(1, APPROVAL, "approved", &ask.content_hash),
+        answer(2, APPROVAL, "approved", &ask.content_hash),
+    ];
+    assert_eq!(
+        grant(&both_match, &refused_then_admitted, &ask, at(NOW_S)),
+        Ok(()),
+        "the admitted grant behind a refused answer releases the submit"
+    );
+    let differing_behind = vec![
+        answer(1, APPROVAL, "approved", &ask.content_hash),
+        answer(
+            2,
+            APPROVAL,
+            "approved",
+            &hash_of(b"another order's content"),
+        ),
+    ];
+    assert_eq!(
+        grant(&differing_behind, &refused_then_admitted, &ask, at(NOW_S)),
+        Err(GrantRefusal::Mismatched),
+        "a differing hash behind a refused answer still refuses"
+    );
+}
+
+/// DEC-920 item 1, journal spec §9.7 rule 50 (`ApprovalResponded`'s `causation_id` is "the
+/// `ApprovalResponseSubmitted` it copies"): the runtime's record releases only the answer it
+/// copies — an admitted copy of another answer, with its own `act`, never releases this one, so
+/// the wait holds — and the copy is found by its cause, wherever another answer's copy sits
+/// before it in the agent stream's order.
+#[test]
+fn only_the_runtimes_copy_of_this_answer_decides_it() {
+    let ask = ask();
+    let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
+    let another_answers = vec![
+        copy(1, &answer_id(9), APPROVAL, "approved", "admitted"),
+        revalidation(2, &agent_id(1), APPROVAL, "act"),
+    ];
+    assert_eq!(
+        grant(&answers, &another_answers, &ask, at(NOW_S)),
+        Err(GrantRefusal::Unanswered),
+        "another answer's admission is not this answer's"
+    );
+    let behind_another = vec![
+        copy(1, &answer_id(9), APPROVAL, "approved", "refused"),
+        copy(2, &answer_id(1), APPROVAL, "approved", "admitted"),
+        revalidation(3, &agent_id(2), APPROVAL, "act"),
+    ];
+    assert_eq!(
+        grant(&answers, &behind_another, &ask, at(NOW_S)),
+        Ok(()),
+        "this answer's own copy decides, wherever it sits"
+    );
+}
+
+/// DEC-920 item 1, mandate spec §6.4 (re-validation, checks 8 to 12: "Re-validation only
+/// skips"; the lifecycle's terminal `ApprovalRevalidated` with result `act` or `skip`) and the
+/// workspace API spec's API-12 ("never reports a grant as acting: only the runtime's
+/// `ApprovalResponded` and `ApprovalRevalidated` say what happened"): an admitted grant releases
+/// only once its re-validation acts — with none yet the wait holds, a `skip` denies, and a
+/// re-validation of another copy decides nothing.
+#[test]
+fn an_admitted_grant_releases_only_once_its_revalidation_acts() {
+    let ask = ask();
+    let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
+    let admitted_only = vec![copy(1, &answer_id(1), APPROVAL, "approved", "admitted")];
+    let skipped = vec![
+        copy(1, &answer_id(1), APPROVAL, "approved", "admitted"),
+        revalidation(2, &agent_id(1), APPROVAL, "skip"),
+    ];
+    let another_copies_revalidation = vec![
+        copy(1, &answer_id(1), APPROVAL, "approved", "admitted"),
+        revalidation(2, &agent_id(7), APPROVAL, "act"),
+    ];
+    assert_eq!(
+        (
+            grant(&answers, &admitted_only, &ask, at(NOW_S)),
+            grant(&answers, &skipped, &ask, at(NOW_S)),
+            grant(&answers, &another_copies_revalidation, &ask, at(NOW_S)),
+            grant(&answers, &admitted(1, 1), &ask, at(NOW_S)),
+        ),
+        (
+            Err(GrantRefusal::Unanswered),
+            Err(GrantRefusal::Denied),
+            Err(GrantRefusal::Unanswered),
+            Ok(()),
+        ),
+        "only the re-validation's act releases the admitted grant"
+    );
+}
+
+/// DEC-920 item 2, LT-4, mandate spec §6.4's lifecycle ("an admitted skip"): a deny stays a
+/// deny — a skip of the ask denies whatever the runtime made of it, admitted or refused, and
+/// whatever an admitted grant behind it says, because the first answer decides and a deny never
+/// adds risk.
+#[test]
+fn a_skip_denies_whatever_the_runtime_made_of_it() {
+    let ask = ask();
+    let skipped_then_granted = vec![
+        answer(1, APPROVAL, "skipped", &ask.content_hash),
+        answer(2, APPROVAL, "approved", &ask.content_hash),
+    ];
+    for result in ["admitted", "refused"] {
+        let mut judged = vec![copy(1, &answer_id(1), APPROVAL, "skipped", result)];
+        judged.extend(admitted(2, 2));
+        assert_eq!(
+            grant(&skipped_then_granted, &judged, &ask, at(NOW_S)),
+            Err(GrantRefusal::Denied),
+            "a {result} skip denies, whatever grant follows it"
+        );
+    }
+}
+
+/// `AGENTS.md` rule 3, DEC-920 item 3: a record of the runtime's the wait cannot read is never a
+/// guess — a copy of this answer naming another approval or another verdict, a copy whose result
+/// is none of `admitted`, `counted` and `refused`, a re-validation naming another approval, and
+/// one whose result is neither `act` nor `skip` each refuse as a difference, with nothing sent.
+#[test]
+fn a_runtime_record_the_run_cannot_read_refuses_as_a_difference() {
+    let ask = ask();
+    let answers = vec![answer(1, APPROVAL, "approved", &ask.content_hash)];
+    let acted = |copy_row: Journaled| {
+        let revalidated = revalidation(2, &copy_row.event_id, APPROVAL, "act");
+        vec![copy_row, revalidated]
+    };
+    let unread = [
+        (
+            "a copy of another approval",
+            acted(copy(
+                1,
+                &answer_id(1),
+                "approval_other_01",
+                "approved",
+                "admitted",
+            )),
+        ),
+        (
+            "a copy of another verdict",
+            acted(copy(1, &answer_id(1), APPROVAL, "skipped", "admitted")),
+        ),
+        (
+            "a copy with no result the spec names",
+            acted(copy(1, &answer_id(1), APPROVAL, "approved", "recorded")),
+        ),
+        (
+            "a re-validation of another approval",
+            vec![
+                copy(1, &answer_id(1), APPROVAL, "approved", "admitted"),
+                revalidation(2, &agent_id(1), "approval_other_01", "act"),
+            ],
+        ),
+        (
+            "a re-validation with no result the spec names",
+            vec![
+                copy(1, &answer_id(1), APPROVAL, "approved", "admitted"),
+                revalidation(2, &agent_id(1), APPROVAL, "acted"),
+            ],
+        ),
+    ];
+    for (what, judged) in unread {
+        assert_eq!(
+            grant(&answers, &judged, &ask, at(NOW_S)),
+            Err(GrantRefusal::Mismatched),
+            "{what} is never a guess"
+        );
+    }
 }
 
 /// DEC-529 item 12 (DEC-912 item 2): the tolerance is the collar's own aggressiveness, the

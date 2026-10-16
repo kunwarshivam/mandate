@@ -933,6 +933,7 @@ fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<Ma
             author: context.author.clone(),
             timeout_s: i64::from(document.autonomy.approval.timeout_s),
             environment,
+            live_cli_confirm: None,
         },
     })
 }
