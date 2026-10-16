@@ -106,7 +106,14 @@ impl LiveAdmission {
     /// the door's checks passed, and a dialed host equal, byte for byte, to a non-empty pinned
     /// constant. Any one missing refuses (item 2).
     pub fn admits(&self) -> bool {
-        false
+        let pinned_host = match (&self.host.dialed, self.host.pinned) {
+            (Some(dialed), Some(pinned)) => !pinned.is_empty() && dialed.as_str() == pinned,
+            (None, Some(_)) | (Some(_), None) | (None, None) => false,
+        };
+        self.build == Build::Live
+            && self.confirmation == Confirmation::ConfirmLive
+            && self.door == DoorChecks::Passed
+            && pinned_host
     }
 }
 
