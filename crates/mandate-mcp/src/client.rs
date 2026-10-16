@@ -82,18 +82,7 @@ impl McpClient {
         transport: McpTransport,
         pinned: Option<ContractHash>,
     ) -> Result<Self, McpError> {
-        let initialize = json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "mandate-mcp", "version": env!("CARGO_PKG_VERSION")},
-        });
-        transport
-            .request(CallClass::Ordinary, "initialize", &initialize)
-            .await?;
-        transport
-            .notify(CallClass::Ordinary, "notifications/initialized", &json!({}))
-            .await?;
-        let listing = list_tools(&transport).await?;
+        let listing = handshake(&transport).await?;
         let (pinned, halted) = match pinned {
             Some(pinned) => {
                 let halted = listing.fault(&pinned).is_some();
@@ -121,8 +110,19 @@ impl McpClient {
     /// # Errors
     /// Every [`McpError`] of the exchanges, a listing that cannot be read among them.
     pub async fn connect_to_check(transport: McpTransport) -> Result<(Self, Listed), McpError> {
-        let _ = transport;
-        Err(McpError::Malformed)
+        let listing = handshake(&transport).await?;
+        let halted = listing.fault(&listing.hash).is_some();
+        let listed = Listed {
+            names: listing.names,
+            allowlisted_present: !listing.missing_tool,
+        };
+        let client = Self {
+            transport,
+            pinned: listing.hash.clone(),
+            observed: listing.hash,
+            halted,
+        };
+        Ok((client, listed))
     }
 
     /// The hash of the contract the server listed at connect or at the last check.
@@ -207,6 +207,7 @@ const FUND_TOKENS: [&str; 15] = [
 /// What one read of the whole tool list found.
 struct Listing {
     hash: ContractHash,
+    names: BTreeSet<String>,
     fund_tool: bool,
     missing_tool: bool,
 }
@@ -225,6 +226,22 @@ impl Listing {
             None
         }
     }
+}
+
+/// `initialize`, `notifications/initialized`, then the whole tool list, as [`CallClass::Ordinary`].
+async fn handshake(transport: &McpTransport) -> Result<Listing, McpError> {
+    let initialize = json!({
+        "protocolVersion": PROTOCOL_VERSION,
+        "capabilities": {},
+        "clientInfo": {"name": "mandate-mcp", "version": env!("CARGO_PKG_VERSION")},
+    });
+    transport
+        .request(CallClass::Ordinary, "initialize", &initialize)
+        .await?;
+    transport
+        .notify(CallClass::Ordinary, "notifications/initialized", &json!({}))
+        .await?;
+    list_tools(transport).await
 }
 
 /// `tools/list` followed through every `nextCursor`, so no tool hides on a later page (DEC-839
@@ -291,6 +308,7 @@ fn read_contract(tools: &[Value]) -> Result<Listing, McpError> {
         hash: ContractHash(*Digest::of(form.as_bytes()).as_bytes()),
         fund_tool: names.iter().any(|name| moves_funds(name)),
         missing_tool: ALLOWLIST.iter().any(|name| !names.contains(name)),
+        names: names.into_iter().map(str::to_owned).collect(),
     })
 }
 

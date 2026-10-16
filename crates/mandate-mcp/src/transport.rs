@@ -6,7 +6,8 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use secrecy::ExposeSecret;
 use serde_json::Value;
 
 use crate::auth::AccessToken;
@@ -87,6 +88,9 @@ pub struct McpTransport {
     clock: Box<dyn Monotonic>,
     session: Mutex<Option<HeaderValue>>,
     next_id: AtomicU64,
+    /// The login's token, sent as `authorization: Bearer` on every request when set; a
+    /// [`SecretString`](secrecy::SecretString) only, never printed (LT-9).
+    bearer: Option<AccessToken>,
 }
 
 impl McpTransport {
@@ -105,14 +109,17 @@ impl McpTransport {
             clock,
             session: Mutex::new(None),
             next_id: AtomicU64::new(1),
+            bearer: None,
         })
     }
 
     /// This transport with the login's `token` as the bearer of every request it sends (O2,
     /// DEC-946).
     pub fn with_bearer(self, token: AccessToken) -> Self {
-        let _ = token;
-        self
+        Self {
+            bearer: Some(token),
+            ..self
+        }
     }
 
     /// Sends request `method` and returns its result, or the server's JSON-RPC error as
@@ -185,6 +192,13 @@ impl McpTransport {
         let session = self.session().clone();
         if let Some(session) = &session {
             headers.insert(SESSION_HEADER, session.clone());
+        }
+        if let Some(token) = &self.bearer {
+            let mut bearer =
+                HeaderValue::from_str(&format!("Bearer {}", token.secret.expose_secret()))
+                    .map_err(|_| McpError::Malformed)?;
+            bearer.set_sensitive(true);
+            headers.insert(AUTHORIZATION, bearer);
         }
         let response = self
             .client

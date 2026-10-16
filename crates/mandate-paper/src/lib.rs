@@ -49,7 +49,7 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
 use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
-    ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
+    AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
@@ -855,7 +855,8 @@ where
     A: IntoIterator<Item = String>,
     V: IntoIterator<Item = (OsString, OsString)>,
 {
-    let args = parse(args)?;
+    let mut args = args.into_iter().peekable();
+    let check = args.next_if(|first| first == CONNECT_CHECK).is_some();
     let vars: Vec<(String, String)> = vars
         .into_iter()
         .map(|(name, value)| {
@@ -863,10 +864,94 @@ where
             (name, value.to_string_lossy().into_owned())
         })
         .collect();
+    if check {
+        let args = parse_check(args)?;
+        let mut ports = ProductionCheck {
+            journal: args.journal.clone(),
+        };
+        let checked = connect_check(&args, &vars, &mut ports)?;
+        return Ok(vec![format!("checked {}", checked.event_id)]);
+    }
+    let args = parse(args)?;
     let mut ports = Production {
         journal: args.journal.clone(),
     };
     lines(&run(&args, &vars, &mut ports)?)
+}
+
+/// The first argument that selects the connect check (DEC-946) instead of a run.
+pub const CONNECT_CHECK: &str = "--connect-check";
+
+/// The connect check's ports in the binary (DEC-946): core dumps off, the founder's login at the
+/// endpoint this build pins and the reads over its session ([`robinhood::connect`],
+/// [`Linked::observe`]), the system clock, and the account stream in the Postgres journal at
+/// `journal`. No error names the DSN, the token or the account number (rule 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductionCheck {
+    pub journal: String,
+}
+
+impl ProductionCheck {
+    /// `work` against the journal on a runtime of its own, any failure [`PaperError::Journal`].
+    fn journal<T, F>(&self, work: impl FnOnce(PgJournal) -> F) -> Result<T, PaperError>
+    where
+        F: Future<Output = Result<T, PaperError>>,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| PaperError::Journal)?;
+        runtime.block_on(async {
+            let journal = PgJournal::from_dsn(&self.journal).map_err(|_| PaperError::Journal)?;
+            work(journal).await
+        })
+    }
+}
+
+impl CheckPorts for ProductionCheck {
+    /// [`disable_core_dumps`].
+    fn harden(&mut self) -> Result<(), PaperError> {
+        disable_core_dumps()
+    }
+
+    fn observe(&mut self, account_number: &str) -> Result<Observed, PaperError> {
+        Ok(robinhood::connect()?.observe(account_number))
+    }
+
+    fn now(&self) -> UtcNanos {
+        SystemClock.now()
+    }
+
+    fn own(&mut self, stream: &StreamId) -> Result<(u64, u64), PaperError> {
+        self.journal(|journal| async move {
+            let epoch = journal
+                .take_ownership(stream)
+                .await
+                .map_err(|_| PaperError::Journal)?;
+            let head = journal
+                .head(stream)
+                .await
+                .map_err(|_| PaperError::Journal)?;
+            Ok((epoch, head.seq))
+        })
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        head: u64,
+        epoch: u64,
+        at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> Result<AppendOutcome, PaperError> {
+        let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        self.journal(|journal| async move {
+            journal
+                .append(stream, head, epoch, at, &drafts)
+                .await
+                .map_err(|_| PaperError::Journal)
+        })
+    }
 }
 
 /// What a run that refused nothing prints, one line each: the order a dry run would place

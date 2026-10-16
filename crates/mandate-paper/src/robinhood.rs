@@ -15,15 +15,17 @@ use std::net::Ipv4Addr;
 
 use mandate_alpaca::Pause;
 use mandate_mcp::{
-    AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpError, PinnedEndpoint,
-    SystemMonotonic, TransportConfig,
+    AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
+    PinnedEndpoint, SystemMonotonic, TransportConfig,
 };
 use mandate_num::Price;
+use mandate_robinhood::RobinhoodConnector;
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts};
 use mandate_shell::{Cause, ProductionCycle, Setup};
 use tokio::runtime::Runtime;
 
+use crate::connect_check::{Observed, SeenContract, observe};
 use crate::{PaperError, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
@@ -178,7 +180,11 @@ pub(crate) fn connect() -> Result<Linked, PaperError> {
     let token = runtime
         .block_on(login(&endpoint, &mut show))
         .map_err(|_| PaperError::Credentials)?;
-    Ok(Linked { runtime, token })
+    Ok(Linked {
+        runtime,
+        token,
+        endpoint,
+    })
 }
 
 /// O1b's login at `endpoint`, its host the one authorization host: discovery, registration of
@@ -206,16 +212,52 @@ async fn login(
 /// session will be connected on (DEC-928 item 2). Until that session exists (O2) it reads and
 /// sends nothing, so a Robinhood run stops at its preflight with [`SESSION_UNBUILT`].
 pub struct Linked {
-    #[allow(
-        dead_code,
-        reason = "the MCP session (O2) is connected on this runtime; DEC-937 item 2"
-    )]
     runtime: Runtime,
-    #[allow(
-        dead_code,
-        reason = "the MCP session (O2) carries this token; DEC-937 item 2"
-    )]
     token: AccessToken,
+    endpoint: RobinhoodEndpoint,
+}
+
+impl Linked {
+    /// The connect check's reads (DEC-946): the first connect over an MCP session carrying the
+    /// login's token, which reports the listed contract rather than refusing it
+    /// ([`McpClient::connect_to_check`]), and, when it listed, the recorded account through the
+    /// connector's own account check. A session that cannot be made or listed reads nothing, so
+    /// every check fails closed. The token leaves memory with the session (LT-9).
+    pub(crate) fn observe(self, account_number: &str) -> Observed {
+        let Self {
+            runtime,
+            token,
+            endpoint,
+        } = self;
+        runtime.block_on(async {
+            let unread = Observed {
+                contract: None,
+                agentic_account_read: false,
+            };
+            let Ok(pinned) = PinnedEndpoint::new(&endpoint.host, &endpoint.url) else {
+                return unread;
+            };
+            let clock = Box::new(SystemMonotonic::start());
+            let Ok(transport) = McpTransport::new(pinned, TransportConfig::CONSERVATIVE, clock)
+            else {
+                return unread;
+            };
+            let transport = transport.with_bearer(token);
+            let Ok((client, listed)) = McpClient::connect_to_check(transport).await else {
+                return unread;
+            };
+            let Ok(hash) = client.contract().map(|hash| hex(hash.as_bytes())) else {
+                return unread;
+            };
+            let connector = RobinhoodConnector::new(client, account_number.to_owned());
+            observe(Some(SeenContract { listed, hash }), &connector).await
+        })
+    }
+}
+
+/// `bytes` as lower-case hex.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 impl Session for Linked {
