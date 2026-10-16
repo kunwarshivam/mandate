@@ -26,6 +26,7 @@ mandate-journal-pg.workspace = true
 mandate-mcp.workspace = true
 mandate-modelhost.workspace = true
 mandate-num.workspace = true
+mandate-robinhood.workspace = true
 mandate-runtime.workspace = true
 mandate-shell.workspace = true
 mandate-spec.workspace = true
