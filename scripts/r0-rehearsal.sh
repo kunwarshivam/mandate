@@ -159,8 +159,10 @@ AS_OWNER=(--workspace "$WORKSPACE" --user "$OWNER")
 LIVE_OWNER=(--workspace "$WORKSPACE" --user "$OWNER" --environment live)
 
 # --- R0 step 2: the rehearsal ----------------------------------------------------------------
+# The simulator's one agentic account; the runner scopes every request to it (CN-8, DEC-947).
+RH_ACCOUNT=RHSIM00000001
 cat >"$WORK/sim.json" <<JSON
-{"accounts":[{"number":"RHSIM00000001","agentic_allowed":true,"cash":"100","buying_power":"100","pattern_day_trader":false}],
+{"accounts":[{"number":"$RH_ACCOUNT","agentic_allowed":true,"cash":"100","buying_power":"100","pattern_day_trader":false}],
  "session":"regular","quotes":{"$SYMBOL":"85"},"fills":[{"symbol":"$SYMBOL","side":"buy","price":"85"}]}
 JSON
 "$BIN/mandate-rh-sim" --script "$WORK/sim.json" >"$WORK/sim.out" 2>"$WORK/sim.err" &
@@ -220,7 +222,7 @@ step 2j '^code ' cli agent deploy "$AGENT" "$VERSION" "${LIVE_OWNER[@]}" "${JOUR
 CODE=$(sed -n 's/^code //p' "$WORK/out/2j.out" | head -n 1)
 step 2k '^deployed' cli agent deploy "$AGENT" "$VERSION" --code "${CODE:-none}" "${LIVE_OWNER[@]}" "${JOURNAL[@]}" || true
 
-RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
+RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
   --account-ref "$ACCOUNT_REF" --journal "$DSN" --store "$STORE" --bars "$BARS" --confirm-live)
 
 # login ERR: the founder's two clicks on the simulator's login page, once the run prints its URL.
