@@ -285,12 +285,13 @@ pub enum PaperError {
 /// unknown argument.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError> {
     let mut values: [Option<String>; 6] = Default::default();
-    let (mut paper, live, mut place_one_order) = (false, false, false);
+    let (mut paper, mut live, mut place_one_order) = (false, false, false);
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         let Some(at) = FLAGS.iter().position(|flag| *flag == arg) else {
             match arg.as_str() {
                 "--confirm-paper" => paper = true,
+                "--confirm-live" => live = true,
                 "--place-one-order" => place_one_order = true,
                 _ => return Err(usage("an argument is unknown".to_owned())),
             }
@@ -572,8 +573,12 @@ pub fn acknowledge<P: Ports>(
     args: &Args,
     ports: &mut P,
 ) -> Result<(), PaperError> {
-    let _ = (connection, args, ports);
-    Ok(())
+    match (connection.environment, args.acknowledged) {
+        (Environment::Paper, Environment::Paper) => Ok(()),
+        (Environment::Paper, Environment::Live) => Err(PaperError::PaperUnconfirmed),
+        (Environment::Live, Environment::Paper) => Err(PaperError::LiveUnconfirmed),
+        (Environment::Live, Environment::Live) => ports.harden(),
+    }
 }
 
 /// The deployment's own mandate document, read from the same records and artifact store the

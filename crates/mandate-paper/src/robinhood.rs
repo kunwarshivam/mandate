@@ -83,9 +83,6 @@ pub struct RobinhoodEndpoint {
 /// Why a build has no Robinhood endpoint to dial; each refuses before anything is sent.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EndpointRefusal {
-    /// The body of every stub before the implementation commit (DEC-921).
-    #[error("{story} has not been implemented yet")]
-    Unimplemented { story: &'static str },
     /// The default build holds no Robinhood host (LT-1).
     #[error("this build holds no Robinhood host")]
     NotBuilt,
@@ -104,7 +101,6 @@ impl EndpointRefusal {
     /// The stable reason code of each refusal (ADR-0001 ES-09).
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Unimplemented { .. } => "unimplemented",
             Self::NotBuilt => "robinhood_not_built",
             Self::RehearsalInLive => "rehearsal_endpoint_in_live",
             Self::RehearsalUnset => "rehearsal_endpoint_unset",
@@ -125,8 +121,42 @@ pub fn endpoint(
     build: Build,
     rehearsal: Option<&str>,
 ) -> Result<RobinhoodEndpoint, EndpointRefusal> {
-    let _ = (build, rehearsal, PINNED_HOST, Ipv4Addr::LOCALHOST);
-    Err(EndpointRefusal::Unimplemented { story: "G1a" })
+    match (build, rehearsal) {
+        (Build::Default, _) => Err(EndpointRefusal::NotBuilt),
+        (Build::Live, Some(_)) => Err(EndpointRefusal::RehearsalInLive),
+        (Build::Live, None) => {
+            let host = PINNED_HOST.ok_or(EndpointRefusal::NotBuilt)?;
+            Ok(RobinhoodEndpoint {
+                host: host.to_owned(),
+                url: format!("https://{host}{MCP_PATH}"),
+            })
+        }
+        (Build::Rehearsal, None) => Err(EndpointRefusal::RehearsalUnset),
+        (Build::Rehearsal, Some(text)) => loopback(text).ok_or(EndpointRefusal::OffLoopback),
+    }
+}
+
+/// `text` as the rehearsal's endpoint when it is exactly `http://<IPv4 loopback>:<port><path>`:
+/// a port from 1 to 65535 in decimal, a path starting with `/`, and nothing that could carry
+/// credentials, a query or a fragment.
+fn loopback(text: &str) -> Option<RobinhoodEndpoint> {
+    let rest = text.strip_prefix("http://")?;
+    let at = rest.find('/')?;
+    let (authority, path) = rest.split_at(at);
+    if path.contains(['?', '#']) {
+        return None;
+    }
+    let (host, port) = authority.split_once(':')?;
+    let address: Ipv4Addr = host.parse().ok()?;
+    let port: u16 = port.parse().ok()?;
+    let digits = port.to_string();
+    if !address.is_loopback() || port == 0 || !authority.ends_with(&format!(":{digits}")) {
+        return None;
+    }
+    Some(RobinhoodEndpoint {
+        host: host.to_owned(),
+        url: text.to_owned(),
+    })
 }
 
 /// The Robinhood session of a `live` or rehearsal build: the founder's login at the build's
