@@ -684,14 +684,21 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Executor))?;
         let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
         let (verdict, more) = self.reconcile_once(&reconciliation_requests)?;
-        let later = self.settle(more)?;
-        if verdict == ReconciliationVerdict::Mismatch
-            || later.contains(&ReconciliationVerdict::Mismatch)
-        {
-            self.report.alerts.push("reconciliation_mismatch");
-            return Err(ShellError::ReconciliationMismatch);
+        self.stop_on(verdict)?;
+        self.settle(more)
+    }
+
+    /// A mismatch stops the run fail-safe, wherever the reconciliation ran (trading spec §11,
+    /// `AGENTS.md` rule 3): its alert key goes into the report, opaque as rule 6 requires, and
+    /// the run answers [`ShellError::ReconciliationMismatch`], after which nothing is sent.
+    fn stop_on(&mut self, verdict: ReconciliationVerdict) -> Result<(), ShellError> {
+        match verdict {
+            ReconciliationVerdict::Clean | ReconciliationVerdict::Adopted => Ok(()),
+            ReconciliationVerdict::Mismatch => {
+                self.report.alerts.push("reconciliation_mismatch");
+                Err(ShellError::ReconciliationMismatch)
+            }
         }
-        Ok(())
     }
 
     /// One reconciliation over `requests` (trading spec §11): the snapshot gathered through the
@@ -729,23 +736,22 @@ impl<'s> Session<'s> {
     /// as the first was (DEC-858 item 3, DEC-938 item 5), never stepped answer by answer. A fill
     /// is ingested once, so the reconciliation after a late fill asks for none; one still asking
     /// after [`RECONCILIATION_ROUNDS`] rounds stops the run at Reconcile, so a broker that keeps
-    /// reporting new fills can never hold the run in a loop. Answers each round's verdict.
-    fn settle(
-        &mut self,
-        mut requests: Vec<BrokerRequest>,
-    ) -> Result<Vec<ReconciliationVerdict>, ShellError> {
-        let mut verdicts = Vec::new();
+    /// reporting new fills can never hold the run in a loop. A round that mismatches stops the
+    /// run there ([`Session::stop_on`]), so a round it asked for never runs.
+    fn settle(&mut self, mut requests: Vec<BrokerRequest>) -> Result<(), ShellError> {
+        let mut rounds = 0_usize;
         while !requests.is_empty() {
-            if verdicts.len() >= RECONCILIATION_ROUNDS {
+            if rounds >= RECONCILIATION_ROUNDS {
                 return Err(refused(Stage::Reconcile)(Cause::Absent {
                     what: "a reconciliation that settles",
                 }));
             }
             let (verdict, next) = self.reconcile_once(&requests)?;
-            verdicts.push(verdict);
+            rounds = rounds.saturating_add(1);
+            self.stop_on(verdict)?;
             requests = next;
         }
-        Ok(verdicts)
+        Ok(())
     }
 
     /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
@@ -853,7 +859,7 @@ impl<'s> Session<'s> {
 
     /// One executor step during the watch and everything it asks for. A reconciliation it asks
     /// for is gathered and run through the reconciler, as at the start, never stepped answer by
-    /// answer (DEC-858 item 3).
+    /// answer (DEC-858 item 3). A mismatch there stops the run as the startup's does.
     fn step_watched(&mut self, input: mandate_executor::Input) -> Result<(), ShellError> {
         let effects = self
             .stages
@@ -861,7 +867,7 @@ impl<'s> Session<'s> {
             .step(input)
             .map_err(refused(Stage::Executor))?;
         let requests = self.prepare_reconciliation(effects)?;
-        self.settle(requests).map(|_| ())
+        self.settle(requests)
     }
 
     /// Runs `effects` and everything they lead to, gathering the reconciliation reads they ask
