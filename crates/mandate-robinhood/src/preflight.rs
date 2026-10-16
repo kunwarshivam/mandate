@@ -255,7 +255,7 @@ fn quote_record(record: &Map<String, Value>, symbol: &InstrumentId) -> Option<Qu
 /// Our `client_order_id` never appears in it (U-R2), so the executor never assumes the record
 /// is ours. Anything the contract does not list refuses, rather than leaving an order
 /// uncounted.
-fn order_record(record: &Map<String, Value>) -> Option<BrokerOrder> {
+pub(crate) fn order_record(record: &Map<String, Value>) -> Option<BrokerOrder> {
     if !order_keys(record) {
         return None;
     }

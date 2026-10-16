@@ -22,12 +22,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use mandate_time::UtcNanos;
 use serde_json::{Map, Value, json};
 
 use crate::oauth::{OAuth, Routed};
 use crate::{
-    Alert, MarketHours, Order, OrderRequest, OrderType, Position, Script, ScriptedFill, Side, Sim,
-    SimError, State, TimeInForce,
+    Alert, MarketHours, Order, OrderFilter, OrderRequest, OrderType, Position, Script,
+    ScriptedFill, Side, Sim, SimError, State, TimeInForce,
 };
 
 /// The pinned contract: the allowlisted tools' names, descriptions and input schemas. Where the
@@ -419,7 +420,8 @@ impl Shared {
     /// The four order tools drive the core, and the five account reads serve what the core holds
     /// (DEC-875 item 4): the accounts, the portfolio's two scripted figures, the positions with
     /// their fills' average, the one symbol's tradability, and the locked quotes at the prices
-    /// the market scripted. `get_equity_orders` takes no filter yet. Anything a tool's assumed
+    /// the market scripted. `get_equity_orders` takes the three filters the core models
+    /// ([`ORDER_FILTERS`], DEC-941 item 2) and refuses the others. Anything a tool's assumed
     /// input does not name is refused, never answered with a guess.
     fn run(&mut self, name: &str, args: &Map<String, Value>) -> Result<Value, Refusal> {
         let account = text(args, "account_number")?.unwrap_or_default();
@@ -469,8 +471,8 @@ impl Shared {
                 Ok(json!({"positions": positions.iter().map(position_json)
                         .collect::<Vec<_>>()}))
             }
-            "get_equity_orders" if args.keys().all(|key| key == "account_number") => {
-                let orders = self.sim.orders(&account)?;
+            "get_equity_orders" if args.keys().all(|key| ORDER_FILTERS.contains(&key.as_str())) => {
+                let orders = self.sim.listed(&account, &order_filter(args)?)?;
                 Ok(json!({"orders": orders.iter().map(order_json).collect::<Vec<_>>()}))
             }
             "get_equity_tradability"
@@ -523,6 +525,30 @@ impl Shared {
 }
 
 /// A parameter as text: absent is `None`, and anything but a string is unreadable.
+/// The arguments `get_equity_orders` takes: the account, and the filters the core models
+/// (DEC-941 item 2). `order_id`, `state` and `cursor` are refused, never ignored.
+const ORDER_FILTERS: [&str; 4] = ["account_number", "symbol", "created_at_gte", "placed_agent"];
+
+/// `get_equity_orders`'s filters: `created_at_gte` is RFC 3339 text and `placed_agent` one of the
+/// contract's four values, or the call is refused.
+fn order_filter(args: &Map<String, Value>) -> Result<OrderFilter, SimError> {
+    let created_at_gte = text(args, "created_at_gte")?
+        .map(|since| UtcNanos::parse_rfc3339(&since))
+        .transpose()
+        .map_err(|_| SimError::Unreadable("created_at_gte"))?;
+    let agentic = match text(args, "placed_agent")?.as_deref() {
+        None => None,
+        Some("agentic") => Some(true),
+        Some("user" | "recurring" | "drip") => Some(false),
+        Some(_) => return Err(SimError::Unreadable("placed_agent")),
+    };
+    Ok(OrderFilter {
+        symbol: text(args, "symbol")?,
+        created_at_gte,
+        agentic,
+    })
+}
+
 fn text(args: &Map<String, Value>, key: &'static str) -> Result<Option<String>, SimError> {
     match args.get(key) {
         None => Ok(None),

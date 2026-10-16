@@ -1953,6 +1953,7 @@ dependencies = [
  "mandate-executor",
  "mandate-mcp",
  "mandate-num",
+ "mandate-time",
  "proptest",
  "serde_json",
  "sha2 0.11.0",

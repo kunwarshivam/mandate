@@ -13,9 +13,11 @@
 //! `mandate-mcp`'s, which its `McpClient` implements (DEC-928 item 1). `Submit` is review then
 //! place with the [`ref_id`]; an alert refuses only an opening or an increase (`AGENTS.md` rule
 //! 13); a place answer that is not exactly an order record is `Unknown` and never re-sent (LT-6);
-//! `Cancel` goes by the broker's `order_id`. Numbers are decimal text read by `mandate-num`.
+//! `Cancel` goes by the broker's `order_id`; an `Unknown` order is listed by `get_equity_orders`
+//! and adopted only by the executor's one match (DEC-529 item 4, DEC-941). Numbers are decimal text read by `mandate-num`.
 
 mod connector;
+mod listing;
 mod preflight;
 mod profile;
 mod scope;

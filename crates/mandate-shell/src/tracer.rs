@@ -482,7 +482,16 @@ impl<'s> Session<'s> {
         self.perform_executor(reconciled.effects)?;
         match reconciled.verdict {
             mandate_executor::ReconciliationVerdict::Clean
-            | mandate_executor::ReconciliationVerdict::Adopted => Ok(()),
+            | mandate_executor::ReconciliationVerdict::Adopted => {
+                let ticked = self
+                    .stages
+                    .executor
+                    .step(mandate_executor::Input::Tick(
+                        mandate_executor::RiskClock::from_secs(self.setup.now.secs()),
+                    ))
+                    .map_err(refused(Stage::Executor))?;
+                self.perform_executor(ticked)
+            }
             mandate_executor::ReconciliationVerdict::Mismatch => {
                 self.report.alerts.push("reconciliation_mismatch");
                 Err(ShellError::ReconciliationMismatch)
