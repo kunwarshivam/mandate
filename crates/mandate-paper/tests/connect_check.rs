@@ -33,7 +33,8 @@ const ACCOUNT_REF: &str = "01J0R1CHECK0ACC0VNT000000A";
 const CONNECTION: &str = "conn_rh_r1";
 const STREAM: &str = "acct:ws_r1:01J0R1CHECK0ACC0VNT000000A";
 const NUMBER: &str = "5QRSENTINEL77";
-const NOW: &str = "2026-10-16T14:00:00.000000000Z";
+const NOW: &str = "2026-10-16T14:00:00.123456789Z";
+const RISK_CLOCK: &str = "2026-10-16T14:00:00.000000000Z";
 const HASH: &str = "ab";
 
 fn args() -> CheckArgs {
@@ -219,7 +220,7 @@ fn a_passing_check_opens_the_account_stream_and_journals_connection_checked() {
     }
     assert_eq!(text(check, &["payload", "connection_id"]), Some(CONNECTION));
     assert_eq!(text(check, &["payload", "occasion"]), Some("connect"));
-    assert_eq!(text(check, &["payload", "risk_clock"]), Some(NOW));
+    assert_eq!(text(check, &["payload", "risk_clock"]), Some(RISK_CLOCK));
     assert_eq!(
         results(check),
         [
