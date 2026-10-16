@@ -2,11 +2,13 @@
 //! fees, transcribed in `config/fees/robinhood-live-2026-10-16.toml`, priced by
 //! `robinhood_live_fee_config` for a `live` stream on a `robinhood` connection only. Each expected
 //! fee is worked out by hand in its doc comment from §6.2's formulas and the file's rates, or by
-//! an integer oracle of this file's own, never by running the code under test.
+//! an integer oracle of this file's own, never by running the code under test. Robinhood rounds
+//! each fee of a trade separately, so the schedule rounds each fee of each fill up to the cent
+//! (`per_fee_per_fill`, DEC-960, the R0 rehearsal's R10b).
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Config, Execution, FeeFamily, FeeKind, Input, InstrumentId,
-    Position, Record, Side, TafCapBasis,
+    Account, AccountType, AssetClass, Config, Execution, FeeFamily, FeeKind, FeeRounding, Input,
+    InstrumentId, Position, Record, Side, TafCapBasis,
 };
 use mandate_executor::{
     ExecutorError, ROBINHOOD_LIVE_SCHEDULE, paper_only_fee_config, robinhood_live_fee_config,
@@ -146,6 +148,24 @@ fn the_live_schedule_is_the_transcription_figure_for_figure() {
     assert_eq!(config.calendar, calendar());
 }
 
+/// The file quotes Robinhood rounding each fee separately (SEC "rounded up to the nearest penny",
+/// CAT "rounded to the nearest penny"), so the schedule rounds each fee of each fill up to the cent
+/// (DEC-960), and never the day's total alone.
+#[test]
+fn the_live_schedule_rounds_each_fee_as_robinhood_quotes() {
+    let file = include_str!("../../../config/fees/robinhood-live-2026-10-16.toml");
+    assert!(file.contains("sale, rounded up to the\n# nearest penny"));
+    assert!(file.contains("buys and sells (no side is named), \"rounded to the\n# nearest penny"));
+    assert_eq!(live().equities.fee_rounding, FeeRounding::PerFeePerFill);
+    assert_eq!(
+        paper_only_fee_config("paper", calendar(), DAY)
+            .unwrap()
+            .equities
+            .fee_rounding,
+        FeeRounding::DailyTotal
+    );
+}
+
 /// The published rates, read from their sources (DEC-958): SEC $20.60 per million is 0.0000206,
 /// TAF $0.000195 a share capped at $9.79, CAT $0.000003 a share. Each configured figure is exactly
 /// that, never rounded down to the types' precision.
@@ -167,17 +187,17 @@ fn the_live_rates_are_the_published_rates_exactly() {
     );
 }
 
-/// A live sell books SEC, TAF and CAT, and nothing for commission. One share at 85: SEC
-/// 85 × 0.0000206 = 0.001751, TAF 1 × 0.000195 = 0.000195, CAT 1 × 0.000003 = 0.000003; the day's
-/// charge is ceil(0.001949, 2) = 0.01. A hundred at 85: SEC 8500 × 0.0000206 = 0.1751, TAF
-/// 0.0195, CAT 0.0003; charge ceil(0.1949, 2) = 0.20. Sixty thousand at 10: SEC
-/// 600000 × 0.0000206 = 12.36, TAF 60000 × 0.000195 = 11.70 capped at 9.79, CAT 0.18; charge
-/// 22.33.
+/// A live sell books SEC, TAF and CAT, each rounded up to the cent, and nothing for commission.
+/// One share at 85: SEC 85 × 0.0000206 = 0.001751 → 0.01, TAF 1 × 0.000195 = 0.000195 → 0.01, CAT
+/// 1 × 0.000003 = 0.000003 → 0.01; the day's charge is 0.03. A hundred at 85: SEC
+/// 8500 × 0.0000206 = 0.1751 → 0.18, TAF 0.0195 → 0.02, CAT 0.0003 → 0.01; charge 0.21. Sixty
+/// thousand at 10: SEC 600000 × 0.0000206 = 12.36, TAF 60000 × 0.000195 = 11.70 capped at 9.79,
+/// CAT 0.18, each already whole cents; charge 22.33.
 #[test]
-fn a_live_sell_books_exactly_the_regulatory_fees() {
+fn a_live_sell_books_each_regulatory_fee_rounded_up() {
     let cases = [
-        ("1", "85", ["0.001751", "0.000195", "0.000003"], "0.01"),
-        ("100", "85", ["0.1751", "0.0195", "0.0003"], "0.2"),
+        ("1", "85", ["0.01", "0.01", "0.01"], "0.03"),
+        ("100", "85", ["0.18", "0.02", "0.01"], "0.21"),
         ("60000", "10", ["12.36", "9.79", "0.18"], "22.33"),
     ];
     for (qty, price, [sec, taf, cat], charge) in cases {
@@ -197,14 +217,12 @@ fn a_live_sell_books_exactly_the_regulatory_fees() {
 
 /// A live buy books no SEC fee, no TAF and no commission: its one line is CAT, which Robinhood
 /// posts on listed equities without naming a side, so the conservative reading books it on buys
-/// too. R0's one share at 85 accrues 0.000003 and is charged ceil(0.000003, 2) = 0.01, a cent
-/// above Robinhood's own figure, which rounds a sub-cent CAT down to 0.
+/// too. R0's one share at 85 accrues CAT 0.000003 → 0.01 and is charged 0.01, a cent above
+/// Robinhood's own figure, which rounds a sub-cent CAT down to 0.
 #[test]
 fn a_live_buy_books_only_cat() {
-    for (qty, price, cat, charge) in [
-        ("1", "85", "0.000003", "0.01"),
-        ("60000", "10", "0.18", "0.18"),
-    ] {
+    for (qty, price, cat, charge) in [("1", "85", "0.01", "0.01"), ("60000", "10", "0.18", "0.18")]
+    {
         let (lines, charged) = booked(Side::Buy, qty, price);
         assert_eq!(lines, [(FeeKind::Cat, usd(cat))], "{qty} at {price}");
         assert_eq!(charged, usd(charge), "{qty} at {price}");
@@ -308,13 +326,11 @@ fn robinhood_cents(side: Side, shares: u128, price_cents: u128) -> u128 {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
-    /// Rounding never understates the exact cost: one live fill's day charge is the exact
-    /// regulatory cost rounded up to the cent, `round(total, 2, ceiling)` (§6.2), so it is never
-    /// below it and never a cent or more above it. A buy's charge is also never below
-    /// Robinhood's own cents (its one fee, CAT, rounds to the nearest cent at most up), which is
-    /// R0's one order.
+    /// One live fill's day charge is each exact regulatory fee rounded up to the cent, summed
+    /// (§6.2 `per_fee_per_fill`, DEC-960): never below the exact cost, and under three cents above
+    /// it.
     #[test]
-    fn a_live_charge_is_the_exact_cost_rounded_up(
+    fn a_live_charge_is_each_exact_fee_rounded_up(
         sell in any::<bool>(),
         shares in prop_oneof![1u128..2_000, 1u128..200_000],
         price_cents in 500u128..100_000,
@@ -323,27 +339,23 @@ proptest! {
         let price = price_text(price_cents);
         let (_, charged) = booked(side, &shares.to_string(), &price);
         let (sec, taf, cat) = exact(side, shares, price_cents);
-        prop_assert_eq!(charged, dollars(cents_up(sec + taf + cat)));
-        if !sell {
-            let robinhood = dollars(robinhood_cents(side, shares, price_cents));
-            prop_assert!(charged >= robinhood, "{charged:?} below {robinhood:?}");
-        }
+        prop_assert_eq!(charged, dollars(cents_up(sec) + cents_up(taf) + cents_up(cat)));
+        prop_assert!(charged >= dollars(cents_up(sec + taf + cat)));
     }
 
-    /// The one gap DEC-958 records: Robinhood rounds each fee of a sell separately, so its total
-    /// can exceed the platform's one rounded day total, by under two cents a fill (SEC's ceiling
-    /// adds under a cent, TAF's and CAT's nearest-cent rounding under half a cent each, and the
-    /// day's ceiling never takes anything away). The bound is pinned so a change that widens it
-    /// fails here.
+    /// R10b closed: Robinhood rounds each fee of a trade separately (SEC up, TAF and CAT to the
+    /// nearest cent), and the platform's charge for a live fill, buy or sell, is never below
+    /// Robinhood's own figure.
     #[test]
-    fn a_live_sell_understates_robinhoods_rounding_by_under_two_cents(
+    fn a_live_charge_is_never_below_robinhoods_own_rounding(
+        sell in any::<bool>(),
         shares in 1u128..200_000,
         price_cents in 500u128..100_000,
     ) {
+        let side = if sell { Side::Sell } else { Side::Buy };
         let price = price_text(price_cents);
-        let (_, charged) = booked(Side::Sell, &shares.to_string(), &price);
-        let robinhood = dollars(robinhood_cents(Side::Sell, shares, price_cents));
-        let bound = charged.checked_add(usd("0.02")).unwrap();
-        prop_assert!(robinhood < bound, "{robinhood:?} not below {bound:?}");
+        let (_, charged) = booked(side, &shares.to_string(), &price);
+        let robinhood = dollars(robinhood_cents(side, shares, price_cents));
+        prop_assert!(charged >= robinhood, "{charged:?} below {robinhood:?}");
     }
 }

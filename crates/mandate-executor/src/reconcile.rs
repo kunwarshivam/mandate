@@ -703,7 +703,7 @@ fn restrict(
 #[cfg(test)]
 pub(crate) mod tests {
     use mandate_accounting::{
-        AssetClass, Config, CryptoFees, EquityFees, InstrumentId, Side, TafCapBasis,
+        AssetClass, Config, CryptoFees, EquityFees, FeeRounding, InstrumentId, Side, TafCapBasis,
     };
     use mandate_canon::{Value, to_canonical};
     use mandate_journal::Draft;
@@ -828,6 +828,7 @@ pub(crate) mod tests {
                 sec_rate: FeeRate::parse("0.00003")?,
                 taf_per_share: FeePerShare::parse("0.0002")?,
                 taf_cap: FeeCap::parse("9.79")?,
+                fee_rounding: FeeRounding::DailyTotal,
                 taf_cap_basis: TafCapBasis::PerExecution,
                 cat_per_share: FeePerShare::parse("0.00001")?,
             },

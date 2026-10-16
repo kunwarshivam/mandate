@@ -2068,7 +2068,7 @@ mod tests {
 #[cfg(test)]
 mod buying_power_tests {
     use mandate_accounting::{
-        Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution,
+        Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeRounding,
         Input as AccountingInput, InstrumentId, Record, Reservations, Side, TafCapBasis,
     };
     use mandate_canon::Value;
@@ -2462,6 +2462,7 @@ mod buying_power_tests {
                 sec_rate: FeeRate::parse("0.00003")?,
                 taf_per_share: FeePerShare::parse("0.0002")?,
                 taf_cap: FeeCap::parse("9.79")?,
+                fee_rounding: FeeRounding::DailyTotal,
                 taf_cap_basis: TafCapBasis::PerExecution,
                 cat_per_share: FeePerShare::parse("0.00001")?,
             },
