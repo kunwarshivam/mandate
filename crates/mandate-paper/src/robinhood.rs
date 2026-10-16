@@ -16,6 +16,7 @@ use std::net::Ipv4Addr;
 
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
     AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TradingTransport,
 };
@@ -23,7 +24,7 @@ use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, Tools, TransportConfig,
 };
-use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
+use mandate_robinhood::{AccountSnapshot, RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts, fresh_quote, market_facts, robinhood_facts};
 use mandate_shell::robinhood::RobinhoodBridge;
@@ -349,7 +350,8 @@ impl LoggedIn {
             else {
                 return unread;
             };
-            let connector = RobinhoodConnector::new(client, account_number.to_owned());
+            let connector =
+                RobinhoodConnector::new(client, account_number.to_owned(), Tickers::default());
             observe(Some(SeenContract { listed, hash }), &connector).await
         })
     }
@@ -380,7 +382,8 @@ impl LoggedIn {
         let client = runtime
             .block_on(McpClient::connect(transport, None))
             .map_err(|_| PaperError::Credentials)?;
-        let connector = RobinhoodConnector::new(client, account_number.to_owned());
+        let connector =
+            RobinhoodConnector::new(client, account_number.to_owned(), Tickers::default());
         let market = Credentials::from_env()
             .ok()
             .and_then(|keys| AlpacaPaperHttp::new(keys).ok());
@@ -403,8 +406,9 @@ impl<T: Tools, M> Linked<T, M> {
 pub const MARKET_UNREAD: &str = "the Alpaca market reads a Robinhood preflight takes (DEC-933)";
 
 impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session for Linked<T, M> {
-    /// DEC-933 item 2: the agentic account and the instrument's Robinhood quote through the
-    /// bridge, then Alpaca's asset record, IEX quote and minute bars, joined by
+    /// DEC-933 item 2: the pinned instrument's `(asset id, symbol)` registered with the
+    /// connector (DEC-956 item 1), the agentic account and the instrument's Robinhood quote
+    /// through the bridge, then Alpaca's asset record, IEX quote and minute bars, joined by
     /// `robinhood_facts`. No Alpaca client, no read at all.
     fn preflight<P: Pause + Clone>(
         &self,
@@ -414,9 +418,18 @@ impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session fo
         let market = self.market.as_ref().ok_or(Cause::Absent {
             what: MARKET_UNREAD,
         })?;
-        let robinhood = self
-            .bridge
-            .preflight_facts(artifacts.production_identity().symbol)?;
+        let identity = artifacts.production_identity();
+        let asset = InstrumentId::new(identity.asset_id.as_str()).map_err(|_| Cause::Absent {
+            what: "the pinned asset id",
+        })?;
+        let tickers =
+            Tickers::registered([(asset, identity.symbol.as_str().to_owned())]).map_err(|_| {
+                Cause::Absent {
+                    what: "the pinned instrument's Robinhood symbol",
+                }
+            })?;
+        self.bridge.register(tickers)?;
+        let robinhood = self.bridge.preflight_facts(identity.symbol)?;
         let market = market_facts(artifacts, market.clone(), market.clone(), pause)?;
         robinhood_facts(market, &robinhood)
     }

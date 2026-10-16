@@ -18,7 +18,7 @@ use mandate_executor::BrokerPosition;
 use mandate_journal::{ArtifactStore, StreamId};
 use mandate_mcp::{CallClass, McpError, Tools};
 use mandate_num::{Price, SignedQty, Usd};
-use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
+use mandate_robinhood::{AccountSnapshot, RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
     Build as BuiltWith, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal,
@@ -503,7 +503,10 @@ fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripte
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("the runtime builds");
-    let bridge = RobinhoodBridge::new(runtime, RobinhoodConnector::new(tools, NUMBER.to_owned()));
+    let bridge = RobinhoodBridge::new(
+        runtime,
+        RobinhoodConnector::new(tools, NUMBER.to_owned(), Tickers::default()),
+    );
     (Linked::new(bridge, None::<AlpacaPaperHttp>), calls)
 }
 

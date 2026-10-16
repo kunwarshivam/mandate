@@ -420,8 +420,9 @@ impl Shared {
     /// The four order tools drive the core, and the five account reads serve what the core holds
     /// (DEC-875 item 4): the accounts, the portfolio's two scripted figures, the positions with
     /// their fills' average, the one symbol's tradability, and the locked quotes at the prices
-    /// the market scripted. `get_equity_orders` takes the three filters the core models
-    /// ([`ORDER_FILTERS`], DEC-941 item 2) and refuses the others. Anything a tool's assumed
+    /// the market scripted. `get_equity_orders` takes the three filters the core models and the
+    /// cursor of its own pages ([`ORDER_FILTERS`], DEC-941 item 2, DEC-956 item 3) and refuses
+    /// the others. Anything a tool's assumed
     /// input does not name is refused, never answered with a guess.
     fn run(&mut self, name: &str, args: &Map<String, Value>) -> Result<Value, Refusal> {
         let account = text(args, "account_number")?.unwrap_or_default();
@@ -472,8 +473,15 @@ impl Shared {
                         .collect::<Vec<_>>()}))
             }
             "get_equity_orders" if args.keys().all(|key| ORDER_FILTERS.contains(&key.as_str())) => {
-                let orders = self.sim.listed(&account, &order_filter(args)?)?;
-                Ok(json!({"orders": orders.iter().map(order_json).collect::<Vec<_>>()}))
+                let cursor = text(args, "cursor")?;
+                let (orders, next) =
+                    self.sim
+                        .page(&account, &order_filter(args)?, cursor.as_deref())?;
+                let mut page = json!({"orders": orders.iter().map(order_json).collect::<Vec<_>>()});
+                if let (Some(next), Some(fields)) = (next, page.as_object_mut()) {
+                    fields.insert("next_cursor".to_owned(), json!(next));
+                }
+                Ok(page)
             }
             "get_equity_tradability"
                 if args
@@ -524,9 +532,16 @@ impl Shared {
     }
 }
 
-/// The arguments `get_equity_orders` takes: the account, and the filters the core models
-/// (DEC-941 item 2). `order_id`, `state` and `cursor` are refused, never ignored.
-const ORDER_FILTERS: [&str; 4] = ["account_number", "symbol", "created_at_gte", "placed_agent"];
+/// The arguments `get_equity_orders` takes: the account, the filters the core models (DEC-941
+/// item 2), and the page `cursor` it issued (DEC-956 item 3). `order_id` and `state` are
+/// refused, never ignored.
+const ORDER_FILTERS: [&str; 5] = [
+    "account_number",
+    "symbol",
+    "created_at_gte",
+    "placed_agent",
+    "cursor",
+];
 
 /// `get_equity_orders`'s filters: `created_at_gte` is RFC 3339 text and `placed_agent` one of the
 /// contract's four values, or the call is refused.

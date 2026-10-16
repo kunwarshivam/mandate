@@ -2,6 +2,7 @@
 //! `ref_id` of an idempotency key, and connections spec §6.2's ten states. Oracles: the profile by
 //! hand, `sha2` and a Python `hashlib` vector, and the spec's state table typed here.
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_domain::{AssetClass, MarketSession, ProtectionForm};
 use mandate_executor::{
@@ -11,7 +12,7 @@ use mandate_executor::{
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Fraction, Price, Qty};
 use mandate_robinhood::{
-    RobinhoodConnector, RobinhoodError, Tools, executor_status, ref_id, robinhood_profile,
+    RobinhoodConnector, RobinhoodError, Tickers, Tools, executor_status, ref_id, robinhood_profile,
 };
 use proptest::test_runner::{Config, TestRunner};
 use serde_json::Value;
@@ -74,7 +75,7 @@ fn robinhoods_profile_is_trading_spec_5_2s_table() {
         !profile.idempotency().retry.may_resend_blindly(),
         "DEC-529 item 4: never re-sent"
     );
-    let connector = RobinhoodConnector::new(Silent, "5QR00001".to_owned());
+    let connector = RobinhoodConnector::new(Silent, "5QR00001".to_owned(), tickers());
     assert_eq!(BrokerConnector::profile(&connector).unwrap(), profile);
 }
 
@@ -173,6 +174,12 @@ fn the_errors_read_stably_and_the_connector_hands_over_the_profile() {
     );
     let unknown = RobinhoodError::UnknownState.to_string();
     assert_eq!(unknown, "the order state is none of the contract's ten");
-    let connector = RobinhoodConnector::new(Silent, "5QR00001".to_owned());
+    let connector = RobinhoodConnector::new(Silent, "5QR00001".to_owned(), tickers());
     assert_eq!(BrokerConnector::profile(&connector), robinhood_profile());
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }
