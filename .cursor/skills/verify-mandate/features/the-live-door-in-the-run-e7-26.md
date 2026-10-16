@@ -46,7 +46,7 @@
   frames' call sites stay stream L / M7's remainder's, the shell watch's loop the shell row's,
   and the live arm's connector, preflight and account-stream journal read the live arm's under
   these signatures.
-- **Tests:** `crates/mandate-paper/tests/door.rs`, every pin live since
+- **Tests:** `crates/mandate-paper/tests/lapse_pg.rs` (DEC-933 item 3, Postgres class: a fill on the run's own account stream spends the record, none or another account's does not), and `crates/mandate-paper/tests/door.rs`, every pin live since
   [PR #1328](https://github.com/kunwarshivam/mandate/pull/1328) un-ignored them (the pin
   bodies byte-identical to the tests PR's):
   `a_paper_run_through_the_door_keeps_todays_connection`,

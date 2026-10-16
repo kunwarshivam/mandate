@@ -150,7 +150,9 @@ pub fn robinhood_account_rules() -> AccountRules {
 /// - every figure Robinhood does not publish reads as the value that adds no buying power and
 ///   lifts no limit: `crypto_status` `INACTIVE` (no crypto opening), `multiplier` 1 (DEC-529
 ///   item 11), `equity` the cash alone (never more than a long-only account's equity),
-///   `last_equity` zero (§9.2's `legacy_pdt` day-trade budget always applies),
+///   `last_equity` zero (below every equity threshold, so §9.2's `legacy_pdt` budget would apply
+///   if the account were ever declared a margin account; as a cash account the gate's settled-cash
+///   rule binds instead),
 ///   `maintenance_margin` the whole equity (no maintenance excess), and `accrued_fees` zero,
 ///   which the gate's buying power, the lower of cash and the broker's figure, never adds to.
 #[must_use]
