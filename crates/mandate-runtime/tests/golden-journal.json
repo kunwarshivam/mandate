@@ -4,7 +4,7 @@
   "events": [
     { "stream": "acct:ws1:acct-1", "seq": 1, "event_type": "StreamOpened", "payload": { "environment": "paper", "stream_type": "account" } },
     { "stream": "acct:ws1:acct-1", "seq": 2, "event_type": "ReconciliationRun", "payload": { "result": "clean", "risk_clock": 100 } },
-    { "stream": "acct:ws1:acct-1", "seq": 3, "event_type": "MarkUpdated", "payload": { "instrument": "AAPL", "price": "150", "risk_clock": 200 } },
+    { "stream": "acct:ws1:acct-1", "seq": 3, "event_type": "MarkUpdated", "payload": { "instrument_id": "AAPL", "price": "150", "risk_clock": 200 } },
     { "stream": "acct:ws1:acct-1", "seq": 4, "event_type": "AgentModeApplied", "payload": { "restriction": "daily_loss", "risk_clock": 300, "to": "exits_only" } },
     { "stream": "acct:ws1:acct-1", "seq": 5, "event_type": "OrderSubmitted", "payload": { "attempt": 1, "client_order_id": "o1" } },
     { "stream": "acct:ws1:acct-1", "seq": 6, "event_type": "AgentModeApplied", "payload": { "restriction": "daily_loss", "risk_clock": 400, "to": "normal" } }

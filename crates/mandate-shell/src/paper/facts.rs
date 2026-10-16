@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AccountRules, AssetSnapshot, DataClient, DataTransport, LatestQuote, MinuteBars, Pause,
+    AccountRules, AssetSnapshot, DataClient, DataTransport, Feed, LatestQuote, MinuteBars, Pause,
     RetryPolicy, TradingClient, TradingTransport, alpaca_account_rules,
 };
 use mandate_executor::{BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest};
@@ -158,6 +158,35 @@ where
     let data = DataClient::new(data, pause);
     runtime.block_on(market_reads(artifacts, &trading, &data))
 }
+
+/// The fresh IEX quote an asked opening's wake reads before it hands the owner's answers to the
+/// runtime (DEC-943 item 2): one GET through [`DataClient::latest_quote`], the preflight's own
+/// read, so its age bound is the rule set's `iex_quote_max_age_s` and its skew tolerance at the
+/// read DEC-936's 250 ms; then the shell judge's own checks of a quote: the reviewed symbol, the
+/// IEX feed, and a bid not above the ask. Nothing else is read.
+///
+/// # Errors
+/// [`Cause::Absent`] when the read fails, is stale or stamped past the tolerance, or the quote
+/// is of another symbol, off the IEX feed, or crossed.
+pub fn fresh_quote<D, P>(artifacts: &Artifacts, data: D, pause: P) -> Result<LatestQuote, Cause>
+where
+    D: DataTransport,
+    P: Pause,
+{
+    let runtime = preflight_runtime()?;
+    let data = DataClient::new(data, pause);
+    let symbol = &artifacts.instrument.symbol;
+    let quote = runtime
+        .block_on(data.latest_quote(symbol, artifacts.quote_max_age))
+        .map_err(|_| absent(FRESH_QUOTE))?;
+    if quote.instrument != *symbol || quote.feed != Feed::Iex || quote.bid > quote.ask {
+        return Err(absent(FRESH_QUOTE));
+    }
+    Ok(quote)
+}
+
+/// What a failed [`fresh_quote`] names.
+const FRESH_QUOTE: &str = "a current, uncrossed IEX quote at the wake";
 
 /// The facts of a Robinhood connection (DEC-933 item 2): the agentic account, its positions and
 /// its working orders as `mandate-robinhood`'s preflight read them, the account read by

@@ -13,7 +13,7 @@
 
 use std::net::Ipv4Addr;
 
-use mandate_alpaca::Pause;
+use mandate_alpaca::{LatestQuote, Pause};
 use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpError, PinnedEndpoint,
     SystemMonotonic, TransportConfig,
@@ -229,7 +229,19 @@ impl Session for Linked {
         })
     }
 
-    fn cycle(self, _sources: Sources<()>, _setup: Setup) -> Result<ProductionCycle, Cause> {
+    fn cycle(&self, _sources: Sources<()>, _setup: Setup) -> Result<ProductionCycle, Cause> {
+        Err(Cause::Absent {
+            what: SESSION_UNBUILT,
+        })
+    }
+
+    /// The independent IEX quote is Alpaca's data client's, which a Robinhood session does not
+    /// hold until the MCP session is built (O2), so a fresh read refuses as its preflight does.
+    fn fresh_quote<P: Pause>(
+        &self,
+        _artifacts: &Artifacts,
+        _pause: P,
+    ) -> Result<LatestQuote, Cause> {
         Err(Cause::Absent {
             what: SESSION_UNBUILT,
         })

@@ -42,7 +42,7 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AlpacaPaperHttp, Credentials, DataTransport, Pause, TokioPause, TradingTransport,
+    AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TokioPause, TradingTransport,
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
@@ -62,11 +62,11 @@ use mandate_shell::control::{
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
-    Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
+    Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, fresh_quote, liquidity_facts,
     load_contexts_with_clock, preflight,
 };
 use mandate_shell::{
-    Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
+    Cause, Mark, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
@@ -152,7 +152,15 @@ pub trait Session {
     ///
     /// # Errors
     /// [`Cause::Absent`] when the session cannot carry a cycle.
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+
+    /// A fresh IEX quote for the pinned instrument, read at an asked opening's wake so the grant
+    /// is judged on a quote of its own wake, never on the preflight's (DEC-943 item 2): the
+    /// preflight's own read, its age bound and its skew tolerance unchanged.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when no current, uncrossed IEX quote of the instrument is read.
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause>;
 
     /// The broker's own ask for the pinned instrument, the quote an asked opening's cross-check
     /// compares with the independent IEX ask before it leaves (DEC-529 item 12; DEC-940 item 4),
@@ -170,8 +178,15 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
         preflight(artifacts, self.clone(), self.clone(), pause)
     }
 
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
-        Ok(production_cycle(with_transport(sources, self), setup))
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+        Ok(production_cycle(
+            with_transport(sources, self.clone()),
+            setup,
+        ))
+    }
+
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        fresh_quote(artifacts, self.clone(), pause)
     }
 
     /// Alpaca's own quote is the IEX quote its data client read at the preflight.
@@ -509,6 +524,7 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let at_preflight = Mark::of_iex(&broker.quote);
     let opening = Opening {
         asset_class: instrument.asset_class,
         median_dollar_volume_20d: liquidity.median_dollar_volume_20d,
@@ -519,6 +535,7 @@ pub fn run<P: Ports>(
     let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
         .map_err(refused(Stage::Validate))?;
+    let contexts_quote = contexts.quote.clone();
     let registered = artifacts
         .production_configuration()
         .map_err(refused(Stage::Validate))?;
@@ -552,6 +569,14 @@ pub fn run<P: Ports>(
         artifacts: Some(Arc::new(store)),
         transport: (),
     };
+    let gate_quote = contexts_quote;
+    let fresh = || {
+        let quote = session
+            .fresh_quote(&artifacts, watch.pause.clone())
+            .map_err(refused(Stage::MarketData))?;
+        gate_quote.hand(&quote);
+        Ok(Mark::of_iex(&quote))
+    };
     let report = session
         .cycle(sources, setup)
         .map_err(refused(Stage::Reconcile))?
@@ -559,8 +584,9 @@ pub fn run<P: Ports>(
             observation,
             output,
             &watch,
+            &at_preflight,
             |asked| {
-                granted_opening(asked, &watch.pause, watch.interval, || {
+                granted_opening(asked, &watch.pause, watch.interval, fresh, || {
                     opening.cross_check(&collar)
                 })
             },
@@ -781,10 +807,17 @@ impl Session for Connected {
         }
     }
 
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
         match self {
             Self::Alpaca(transport) => transport.cycle(sources, setup),
             Self::Robinhood(linked) => linked.cycle(sources, setup),
+        }
+    }
+
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.fresh_quote(artifacts, pause),
+            Self::Robinhood(linked) => linked.fresh_quote(artifacts, pause),
         }
     }
 

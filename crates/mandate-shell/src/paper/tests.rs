@@ -31,7 +31,7 @@ use mandate_spec::context::Membership;
 use std::collections::BTreeMap;
 
 use super::artifacts::reference;
-use super::context::{PaperClock, TrustedPaperContext, protection_prices};
+use super::context::{GateQuote, PaperClock, TrustedPaperContext, protection_prices};
 use super::gate::{gate_mandate, gate_template};
 use super::{
     Artifacts, BrokerFacts, LiquidityFacts, MarketFacts, PaperFacts, load_contexts, robinhood_facts,
@@ -505,7 +505,7 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         agent: AGENT.to_owned(),
         increment: loaded.instrument.increment,
         fees: loaded.fees.clone(),
-        quote_at: snapshot.broker.quote.at,
+        quote: GateQuote::of(&snapshot.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
@@ -1156,7 +1156,7 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
-        quote_at: facts()?.broker.quote.at,
+        quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
@@ -1222,7 +1222,11 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
-        quote_at: at("2026-09-28T16:59:59.5Z")?,
+        quote: GateQuote::of(
+            &facts_at("2026-09-28T16:59:59Z", "2026-09-28T16:59:59.5Z")?
+                .broker
+                .quote,
+        ),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
     };
@@ -1253,13 +1257,92 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
 
     let close_clock = Rc::new(Cell::new(at("2026-09-28T19:50:00Z")?));
     let close_window = TrustedPaperContext {
-        quote_at: at("2026-09-28T19:49:59.5Z")?,
+        quote: GateQuote::of(
+            &facts_at("2026-09-28T19:49:59Z", "2026-09-28T19:49:59.5Z")?
+                .broker
+                .quote,
+        ),
         clock: Rc::new(TestClock(close_clock)),
         ..trusted
     };
     assert!(
         close_window.input(&request).is_none(),
         "the first instant of the close window refuses before submission"
+    );
+    Ok(())
+}
+
+/// DEC-943 item 2 (DEC-940 item 6, gap 3): the binding gate judges the IEX quote the run last
+/// handed it, at its own clock and under the unchanged ten-second bound. Thirty seconds after
+/// the preflight its quote is stale and refuses; a fresh read handed to the gate reaches it,
+/// bid, ask and stamp, as the market quote the gate judges; a handed read ten seconds and a
+/// nanosecond old refuses again; and a quote stamped after the gate's clock refuses, as the
+/// gate's recheck always did (DEC-936 item 4).
+#[test]
+fn the_binding_gate_judges_the_quote_the_run_last_handed_it() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let preflight = facts()?;
+    let template =
+        gate_template(&loaded, &preflight, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
+    let quote = GateQuote::of(&preflight.broker.quote);
+    let current = Rc::new(Cell::new(at("2026-09-28T17:00:30Z")?));
+    let trusted = TrustedPaperContext {
+        template,
+        agent: AGENT.to_owned(),
+        increment: mandate_num::ShareIncrement::Whole,
+        fees: loaded.fees.clone(),
+        quote: quote.clone(),
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::clone(&current))),
+    };
+    let reviewed = ExecutorAgentId(AGENT.to_owned());
+    let instrument = symbol(INSTRUMENT_ID)?;
+    let request = BindingGateRequest {
+        agent: &reviewed,
+        instrument: &instrument,
+        side: Side::Buy,
+        qty: qty("1")?,
+        limit: price("255.2")?,
+        purpose: Purpose::Open,
+        tif: mandate_executor::TimeInForce::Day,
+        protection: None,
+    };
+    assert!(
+        trusted.input(&request).is_none(),
+        "thirty seconds on, the preflight's quote is past its bound"
+    );
+    let read = |stamp: &str, bid: &str, ask: &str| -> Result<LatestQuote, String> {
+        Ok(LatestQuote {
+            at: at(stamp)?,
+            bid: price(bid)?,
+            ask: price(ask)?,
+            ..preflight.broker.quote.clone()
+        })
+    };
+    quote.hand(&read("2026-09-28T17:00:29.5Z", "254.9", "255.3")?);
+    assert_eq!(
+        trusted.input(&request).and_then(|input| input.market.quote),
+        Some(SaneQuote {
+            bid: price("254.9")?,
+            ask: price("255.3")?,
+            at: at("2026-09-28T17:00:29.5Z")?,
+        }),
+        "the gate judges the read the run handed it"
+    );
+    quote.hand(&read("2026-09-28T17:00:20Z", "254.9", "255.3")?);
+    assert!(
+        trusted.input(&request).is_some(),
+        "a handed read exactly at the bound is current"
+    );
+    quote.hand(&read("2026-09-28T17:00:19.999999999Z", "254.9", "255.3")?);
+    assert!(
+        trusted.input(&request).is_none(),
+        "a handed read a nanosecond past the bound refuses: the bound is never relaxed"
+    );
+    quote.hand(&read("2026-09-28T17:00:30.000000001Z", "254.9", "255.3")?);
+    assert!(
+        trusted.input(&request).is_none(),
+        "a handed read stamped after the gate's clock refuses"
     );
     Ok(())
 }
@@ -1274,7 +1357,7 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
-        quote_at: facts()?.broker.quote.at,
+        quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
