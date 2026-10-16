@@ -61,6 +61,7 @@ use mandate_shell::paper::{
     Artifacts, PaperClock, PaperFacts, daily_closes, liquidity_facts, load_contexts_with_clock,
     preflight,
 };
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Cause, Report, Setup, ShellError, Stage, Watch, production_cycle};
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
@@ -365,6 +366,10 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let ticker = InstrumentId::new(&instrument.symbol)
+        .map_err(|_| absent(Stage::Validate, "the pinned ticker"))?;
+    let asset_id = InstrumentId::new(instrument.asset_id.as_str())
+        .map_err(|_| absent(Stage::Validate, "the pinned asset id"))?;
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
@@ -394,6 +399,7 @@ pub fn run<P: Ports>(
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store)),
+        symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport,
     };
     let report = production_cycle(sources, setup)

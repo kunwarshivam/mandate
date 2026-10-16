@@ -11,7 +11,8 @@ use mandate_canon::Digest;
 use mandate_domain::AssetId;
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerAccount, BrokerOrder, BrokerPosition, InstrumentSnapshot, MandateView, Purpose,
+    BrokerAccount, BrokerOrder, BrokerPosition, FillConfigRefs, InstrumentSnapshot, MandateView,
+    Purpose,
 };
 use mandate_num::{Fraction, Price, Qty, SignedQty, Unit, Usd};
 use mandate_risk::{Exchange as GateExchange, GateConfig, SaneQuote};
@@ -522,6 +523,31 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         protection: None,
     };
     assert!(trusted.input(&request).is_some());
+    let refs = loaded.config_refs();
+    let registered = (
+        refs.fee_config.clone(),
+        refs.trading_calendar.clone(),
+        refs.instrument_snapshot.clone(),
+    );
+    let (Some(fee), Some(calendar), Some(snapshot)) = registered else {
+        return Err("the registered references".to_owned());
+    };
+    assert_eq!(
+        trusted.fill_refs(&reviewed),
+        Some(FillConfigRefs {
+            fee_config: fee,
+            settlement_calendar: calendar.clone(),
+            trading_calendar: calendar,
+            instrument_snapshot: snapshot,
+        }),
+        "the reviewed instrument's fill names the registered objects, settling on its trading \
+         calendar (DEC-938 item 2)"
+    );
+    assert_eq!(
+        trusted.fill_refs(&symbol("SPY")?),
+        None,
+        "another instrument's fill names none"
+    );
     Ok(())
 }
 

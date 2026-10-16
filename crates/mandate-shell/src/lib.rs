@@ -50,6 +50,7 @@ pub mod map;
 pub mod paper;
 pub mod robinhood;
 pub mod stages;
+pub mod symbols;
 pub mod tail;
 pub mod tracer;
 pub mod watch;

@@ -2,19 +2,20 @@
 //! status updates, fills, and silence.
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Execution, FeeKind, Input as AccountingInput, Record,
+    Account, AccountType, AssetClass, Execution, FeeKind, Input as AccountingInput, InstrumentId,
+    Record,
 };
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_num::{Qty, Usd};
 use mandate_time::{NewYorkTime, new_york_instant};
 
-use crate::batch::Batch;
+use crate::batch::{Batch, config_refs};
 use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::listing::{lookup_target, query_unknown, queryable};
-use crate::payload::{int, text};
+use crate::payload::{int, object, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
@@ -478,14 +479,17 @@ fn replaced(
 ///
 /// `before` is the state a reconciliation began from, when the fill is one it found missing: an
 /// order the same reconciliation adopted as terminal was not terminal when the fill happened, so
-/// the fill is an ordinary one, not a late one.
+/// the fill is an ordinary one, not a late one. A late fill outside a reconciliation asks for one
+/// here; one a reconciliation found leaves that to the reconciliation, which asks once its own
+/// `ReconciliationRun` has moved the activity checkpoint past the fill (DEC-938 item 5), so the
+/// next one reads on from there. Answers whether the fill was late.
 pub(crate) fn fill(
     batch: &mut Batch<'_, '_>,
     fill: &BrokerFill,
     before: Option<&ExecutorState>,
-) -> Result<(), ExecutorError> {
+) -> Result<bool, ExecutorError> {
     if batch.view.fills.contains(&fill.fill_id) {
-        return Ok(());
+        return Ok(false);
     }
     let ours = known(batch, fill.client_order_id.as_deref()).filter(|id| {
         batch.view.orders.get(id).is_some_and(|order| {
@@ -501,13 +505,14 @@ pub(crate) fn fill(
         .as_ref()
         .and_then(|id| before.unwrap_or(&batch.view).orders.get(id))
         .is_some_and(|order| order.state.is_terminal());
+    let refs = fill_config(batch, &fill.instrument)?;
     let mut pairs = vec![
         ("fill_id", text(fill.fill_id.0.clone())),
-        ("instrument", text(fill.instrument.as_str())),
+        ("instrument_id", text(fill.instrument.as_str())),
         ("side", text(side_name(fill.side))),
         ("qty_gross", text(fill.qty.to_string())),
         ("price", text(fill.price.to_string())),
-        ("fees", text(fill.fees.to_string())),
+        ("fees", broker_fees(fill.fees)?),
         ("trade_date", text(fill.trade_date.to_string())),
     ];
     let prior = ours
@@ -520,7 +525,7 @@ pub(crate) fn fill(
             None,
             vec![("fill_id", text(fill.fill_id.0.clone()))],
         )?;
-        batch.journal("FillApplied", None, pairs)?;
+        batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
             batch,
             Mode::ExitsOnly,
@@ -528,7 +533,7 @@ pub(crate) fn fill(
             ingested,
             "external_activity",
         )?;
-        return Ok(());
+        return Ok(false);
     };
     pairs.push(("client_order_id", text(id.as_str())));
     let kind = if terminal {
@@ -536,11 +541,13 @@ pub(crate) fn fill(
     } else {
         "FillApplied"
     };
-    batch.journal(kind, None, pairs)?;
+    batch.journal_with_refs(kind, None, refs, pairs)?;
     simulated_fee(batch, fill, &id, prior)?;
     if terminal {
-        batch.request_reconciliation();
-        return Ok(());
+        if before.is_none() {
+            batch.request_reconciliation();
+        }
+        return Ok(true);
     }
     if let Some(order) = batch.view.orders.get(&id) {
         let pending = matches!(
@@ -558,7 +565,7 @@ pub(crate) fn fill(
             transition(batch, &id, to, StateEvidence::default())?;
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Every agent of the account to `mode` under `restriction`, and the owner alerted about
@@ -589,6 +596,43 @@ pub(crate) fn every_agent_alerted(
 
 /// The subject external activity is recorded and acknowledged under (§7.1).
 pub(crate) const EXTERNAL: &str = "external_activity";
+
+/// The `config_refs` a fill of `instrument` is journaled with (journal spec §9: `fee`, `cal`,
+/// `set`, `ins`), from the instrument snapshot's port; none when the port knows none, which the
+/// journal refuses (DEC-938 item 2).
+fn fill_config(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Result<Object, ExecutorError> {
+    let Some(refs) = batch.ports.instruments.fill_refs(instrument) else {
+        return Ok(Object::new());
+    };
+    config_refs(&[
+        ("fee_config", Some(refs.fee_config.as_str())),
+        (
+            "instrument_snapshot",
+            Some(refs.instrument_snapshot.as_str()),
+        ),
+        (
+            "settlement_calendar",
+            Some(refs.settlement_calendar.as_str()),
+        ),
+        ("trading_calendar", Some(refs.trading_calendar.as_str())),
+    ])
+}
+
+/// The fee a broker reported on its fill, as the `fees` list a `FillApplied` carries (journal
+/// spec §9, trading spec §6.1): none when it reported none, as Alpaca's `FILL` never does, and
+/// otherwise its one USD commission (trading spec §6.2's only per-fill broker charge), charged
+/// (DEC-938 item 2).
+fn broker_fees(fees: Usd) -> Result<Value, ExecutorError> {
+    if fees.is_zero() {
+        return Ok(Value::Array(Vec::new()));
+    }
+    Ok(Value::Array(vec![object(vec![
+        ("kind", text("commission")),
+        ("amount", text(fees.to_string())),
+        ("asset", text("USD")),
+        ("status", text("charged")),
+    ])?]))
+}
 
 /// Paper's regulatory fees (trading-domain spec §10, R-22). Alpaca paper charges no SEC, TAF, or
 /// CAT fee, so on a paper stream the fee live would charge is computed with `mandate-accounting`'s

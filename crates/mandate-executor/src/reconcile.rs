@@ -34,8 +34,9 @@ use crate::types::{
 ///    we do not know counts only toward the 403 threshold and is not external activity unless it
 ///    carries a fill.
 /// 2. **Fills since the checkpoint, by fill id.** Every missing one is ingested, as `FillApplied`
-///    or, where its order is already terminal, `LateFillApplied`, which itself schedules another
-///    reconciliation. Fills are always applied to accounting (§5.7).
+///    or, where its order is already terminal, `LateFillApplied`, which schedules another
+///    reconciliation, asked for after this one's `ReconciliationRun` so it reads on from the
+///    checkpoint this one recorded (DEC-938 item 5). Fills are always applied to accounting (§5.7).
 /// 3. **Positions**, compared only *after* step 2 — a difference a missing fill explains is not a
 ///    mismatch, and pausing on it would pause a healthy agent at every restart.
 /// 4. **Cash**, within 0.01 × fills since the last broker cash snapshot plus accrued unposted
@@ -78,9 +79,10 @@ pub(crate) fn run(
     owed(batch, &mut differences)?;
     let before = batch.view.clone();
     orders(batch, snapshot, &mut differences)?;
+    let mut late = false;
     for missing in &snapshot.fills {
         if !batch.view.fills.contains(&missing.fill_id) {
-            fill(batch, missing, Some(&before))?;
+            late |= fill(batch, missing, Some(&before))?;
             differences.push(Difference::adopting(
                 Adopted::MissingFill,
                 missing.fill_id.0.clone(),
@@ -124,6 +126,9 @@ pub(crate) fn run(
             ),
         ],
     )?;
+    if late {
+        batch.request_reconciliation();
+    }
     Ok((verdict, differences))
 }
 
