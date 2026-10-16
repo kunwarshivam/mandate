@@ -405,8 +405,8 @@ The clock fix worked: the run passed Reconcile, Validate, the data and the model
 branch with temporary `eprintln!` lines (never committed; the branch is unchanged) showed two
 defects, one masking the other:
 
-1. **The classification facts are stated for one share** (blocks every run that sizes more than
-   one increment). `run_context` (`crates/mandate-shell/src/paper/context.rs`) builds the builder
+1. **The classification facts are stated for one share.** This blocks every run that sizes more
+   than one increment, and it is deliberate (DEC-877 item 3; see the corrections below). `run_context` (`crates/mandate-shell/src/paper/context.rs`) builds the builder
    context's `action` with `buy_action(..., artifacts.instrument.increment_qty)`, which is one share.
    The builder then sized the proposal at the $5,000 cap: 6 SPY at limit 766.84. `BuilderPlan::classify`
    (`crates/mandate-shell/src/adapters.rs`) requires `action.order_usd == qty × limit`
@@ -440,6 +440,79 @@ are `export_stream_empty` (the dry run journals nothing durable).
 - §0 clock on macOS: `sntp time.apple.com` gives the offset. This laptop trailed NTP by 154 ms with
   "Set time automatically" on; `sudo sntp -sS time.apple.com` (in a real terminal, since it asks for
   a password) stepped it to under 3 ms.
-- §3: until defect 1 is fixed, a `max_order_usd` above one share (the runbook's $5,000) cannot pass
-  the paper run's classification. A one-share cap (above one ask, below two) would match the
-  facts. That is the founder's envelope decision; it was not taken here.
+- §3: a `max_order_usd` above one share (the runbook's $5,000) cannot pass the paper run's
+  classification. This is by design, not a defect: DEC-877 item 3 sizes the paper run at one whole
+  share, and item 4 keeps lifting that for the founder, because a partly filled multi-share entry
+  would have its protective order refused by the one-order guard (rule 13). Set `max_order_usd`
+  above one ask and below two.
+
+### The one-share run, same host (17:00 to 17:20 UTC): the order filled with its bracket, then the run stopped at Journal
+
+**Founder decisions (typed in the session).** (1) A new mandate version with `max_order_usd` 1000
+(SPY ask about 766, so the builder sizes exactly one share), with allocation and the other caps
+still 10000: an envelope decision (rule 11). (2) The version was refused in `ws_paper01`
+(`refused (version_invalid)`; a diagnostic build showed `{V002, V006}`: `agent_spy` on the first
+version already claims SPY, and the CLI has no `agent stop`). The founder chose a fresh workspace
+`ws_paper02`. `ws_paper01`'s agent holds nothing and never runs again, and the run's preflight still
+requires a flat account.
+
+**Clock.** macOS `timed` pulled the clock back to 162 ms behind NTP within 25 minutes of the step,
+then it drifted about 0.5 ms a minute. For the run the founder turned network time off and ran
+`sntp -sS time.apple.com` every 20 s as root, so the clock was set from NTP throughout:
+```
+17:13:48 UTC, before the dry run: -0.000283 (apple)  +0.000389 (google)  +0.000788 (cloudflare)
+17:13:59 UTC, before the placing run: +0.001948 (google)  +0.002343 (cloudflare)
+```
+
+**ws_paper02 control stream** (seq 1 to 9): workspace, the same four configuration objects and
+model, version `sha256:90a0d73dbd83e46bea093fb70818943d964a618a068b25929efa392d07a06c41` created
+at seq 7, `code 4385ce3b / warnings W-002`, confirmed at seq 8, `code 8775704d / warnings W-002`,
+`agent_spy` deployed at seq 9.
+
+**Dry run, 17:13:52 UTC**, exit 0:
+```
+would place md-00000100000000000005000001 (nothing sent; pass --place-one-order)
+```
+
+**The one placing run, 17:13:59 to 17:14:08 UTC**, exit 1, nothing on stdout:
+```
+the tracer stopped at Journal: the journal answered Invalid
+```
+The order had gone out and filled. The broker's record: `md-00000100000000000005000001`, broker id
+`68099755-c7e6-40ea-8ba2-5dc644393428`, buy 1 SPY limit 763.76, `order_class: bracket`, created
+17:14:02.217Z, **filled 1 at 763.75** at 17:14:02.621Z. Its two nested legs: a sell `limit` (`new`)
+and a sell `stop` (`held`). The account stream holds the protection at stop 725.58 and take-profit
+840.14. Position: 1 SPY at 763.75.
+
+**The journal** (all three `result: verified`):
+- `agent:ws_paper02:agent_spy` seq 1 to 7: StreamOpened, AgentModeChanged x2, ObservationRecorded,
+  ModelOutputRecorded, DecisionMade (buy 1), IntentProposed. Last hash
+  `5412689680d5c3999a0dd70176651f709f0dfe42f53baf164fc9745f88f64e7b`.
+- `acct:ws_paper02:01J8Z2ACCT00000000000000A1` seq 1 to 13: StreamOpened, AccountStateObserved,
+  AccountSnapshotRecorded, ReconciliationRun, IntentReceived, ProtectionChanged, GateDecided,
+  OrderRequestRecorded, **OrderSubmitted** (`md-00000100000000000005000001`, qty 1, limit 763.76,
+  tif gtc), OrderStateChanged `accepted`, OrderStateChanged `filled` (filled_qty 1),
+  ProtectionChanged `placed` (qty 1, stop 725.58, take-profit 840.14), AccountStateObserved. Last
+  hash `62c61a5a0829e1d97ddd66d6edd729f7032a30164cd942069941c9b86f44e5a5`.
+- `ctl:ws_paper02` seq 1 to 9. Last hash
+  `21b18e71aa017e71c8888afa515770ed5e596eb6e87cd6c71bc3eaffed34e12d`.
+
+Exactly one `OrderSubmitted`. Neither stream holds a `FillApplied`, and the journal does not record
+the fill price (`OrderStateChanged` version 1 has no price member; the broker gives 763.75). The
+refused append is most likely the fill's `FillApplied`. That is UNCONFIRMED: finding it needs a
+diagnostic build on a placing run, and no second placing run was made. Whatever it is, the refused
+record is a defect on the paper path after a fill, and it is safety-critical (accounting and the
+executor's records).
+
+**§7a, the open-orders read after the fill** (`status=open&limit=500&direction=asc&nested=true`,
+saved unedited outside the repo). It returns one order: the take-profit leg, broker id
+`58a1eef5-7397-48ea-b0c0-bb1154cb1bda`, sell limit qty 1, `new`, `order_class: bracket`, at **top
+level** with `legs: []`. The filled entry is not listed (it is not open), and the `held` stop is not
+listed at all. So for DEC-878 item 4: with `status=open`, a filled bracket's legs are not nested
+under the entry. Only the working take-profit appears, at top level, and the held stop is absent.
+(`status=all&nested=true` does show the filled entry with both legs nested.)
+
+**§8, the second run, was not made.** The placing run exited non-zero, and the brief says to
+record a refusal and stop, so no second `--place-one-order` was sent. The position and its bracket
+stay at the broker. The second-run refusal is still to be shown, on the next run day, once the
+founder decides.
