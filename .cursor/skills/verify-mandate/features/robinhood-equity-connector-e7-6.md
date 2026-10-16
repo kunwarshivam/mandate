@@ -10,7 +10,12 @@
   `preflight_facts`, DEC-470 item 1's facts from the scoped reads, quotes and tradability,
   DEC-902; the brief's C3 listing implemented: `ListOrders` as one whole `get_equity_orders`
   read by `symbol`, `placed_agent` and `created_at_gte`,
-  `crates/mandate-robinhood/src/listing.rs`, DEC-529 item 4, DEC-941). The tool seam `Tools` is `mandate-mcp`'s, implemented for `McpClient`
+  `crates/mandate-robinhood/src/listing.rs`, DEC-529 item 4, DEC-941, followed page by page by
+  its `next_cursor` up to ten pages, DEC-956 item 3; every call names the instrument by its
+  registered ticker and reads answers back as the asset id, `Tickers`,
+  `crates/mandate-robinhood/src/tickers.rs`, DEC-956 item 1). The executor's reconciliation
+  matches a record naming no key by the one broker id the order's journal carries
+  (`crates/mandate-executor/src/reconcile.rs`, DEC-956 item 2). The tool seam `Tools` is `mandate-mcp`'s, implemented for `McpClient`
   (`crates/mandate-mcp/src/tools.rs`, DEC-928 item 1). In the shell,
   `crates/mandate-shell/src/robinhood.rs` (DEC-928 item 2, DEC-933): `RobinhoodBridge`, one
   runtime and one connector, with `preflight_facts`; `RobinhoodShellConnector`, the shell's
@@ -46,12 +51,18 @@
   then place, a deduplicated re-send, LT-6's lost and garbled answers, LT-5's alerts, `Cancel`
   by `order_id`, what the profile does not offer, a cancel after a restart by
   the id the journal holds, and DEC-941's listing: the three filters sent, a record naming our
-  key only by our `ref_id`, and a paged, untyped, lost or refused listing leaving the order
-  `Unknown`), `crates/mandate-rh-sim/tests/server.rs`'s
-  `get_equity_orders_keeps_only_what_its_three_filters_name` (DEC-941 item 2),
+  key only by our `ref_id`, and an untyped, lost or refused listing, a cursor that cannot be
+  read, or a record of another ticker leaving the order `Unknown`; DEC-956: the ticker sent and
+  read back, no ticker sending nothing, a place or cancel answered for another ticker, a paged
+  listing followed to its last page, one past ten pages and one with a garbled later page
+  leaving the order `Unknown`), `crates/mandate-rh-sim/tests/server.rs`'s
+  `get_equity_orders_keeps_only_what_its_three_filters_name` (DEC-941 item 2) and
+  `get_equity_orders_pages_by_its_own_cursor` (DEC-956 item 3),
+  `crates/mandate-executor/src/reconcile.rs`'s broker-id match tests (DEC-956 item 2),
   `crates/mandate-shell-rh-sim/tests/restart.rs` (LT-6 end to end through the shell's run path:
   place, lose the answer, restart, adoption journaled as `OrderStateChanged` version 2 with the
-  broker's `order_id` before the reconciliation, no second place; with no match the order stays
+  broker's `order_id` before the reconciliation, kept by the reconciliation, no second place;
+  with no match the order stays
   `Unknown` and the restart's opening is denied `unknown_order_in_flight`), and
   `crates/mandate-rh-sim/tests/preflight.rs` (C4, DEC-875 item 6 and DEC-902: the whole preflight
   against `SimServer` over loopback, a halted symbol `NotTradable` before the quote, the served
