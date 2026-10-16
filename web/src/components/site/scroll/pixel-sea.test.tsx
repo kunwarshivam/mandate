@@ -3,16 +3,11 @@ import { join } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
-  FLOCK,
   FOAM_TILE,
   GLINT,
-  GULL_DOWN,
-  GULL_UP,
-  LEFT_ISLAND,
   MOON_RADIUS,
   PixelSea,
   REFLECTION,
-  RIGHT_ISLAND,
   SEA_DEPTH,
   WAVES,
   moonShape,
@@ -24,7 +19,7 @@ import {
 /**
  * The opening's pixel sea (DEC-908): flat token colours on the thread's grid, rows of waves that
  * grow toward the viewer and glide and heave only with motion allowed, a round moon that rises to
- * where it rests, gulls with two frames, and the thread's band so its knot goes pale.
+ * where it rests, no gulls or islands over it, and the thread's band so its knot goes pale.
  */
 
 const CSS = readFileSync(join(__dirname, "scroll.module.css"), "utf8");
@@ -54,7 +49,7 @@ describe("the pixel sea", () => {
     const fills = [...container.querySelectorAll("rect")].map((r) => r.getAttribute("fill")!);
     for (const fill of fills) expect(fill).toMatch(/^(var\(--[a-z-]+\)|url\(#sea-(wave-\d+|foam)-(6|8)\))$/);
     expect(new Set(fills.filter((f) => f.startsWith("var")))).toEqual(
-      new Set(["var(--tide)", "var(--tide-muted)", "var(--tide-foreground)", "var(--highlight)", "var(--sea-land)"]),
+      new Set(["var(--tide)", "var(--tide-muted)", "var(--tide-foreground)", "var(--highlight)"]),
     );
     for (const svg of container.querySelectorAll("svg")) expect(svg).toHaveAttribute("shape-rendering", "crispEdges");
     const ids = [...container.querySelectorAll("pattern")].map((p) => p.id);
@@ -145,16 +140,16 @@ describe("the pixel sea", () => {
   });
 
   it("moves only with motion allowed, a whole pixel or frame at a time, never between pixels", () => {
-    for (const name of ["wave", "foam", "glintA", "glintB", "wingsUp", "wingsDown", "moon"]) {
+    for (const name of ["wave", "foam", "glintA", "glintB", "moon"]) {
       for (const one of animationOf(name).match(/animation: (.*?);/)![1]!.split(/,(?![^(]*\))/)) expect(one, `.${name} steps`).toMatch(/steps\(/);
       expect(AT_REST, `.${name} has no animation at rest`).not.toMatch(new RegExp(`\\.${name} \\{[^}]*animation`));
     }
-    for (const name of ["glintA", "glintB", "wingsUp", "wingsDown"]) expect(animationOf(name), `.${name} swaps frames`).toMatch(/steps\(1\)/);
+    for (const name of ["glintA", "glintB"]) expect(animationOf(name), `.${name} swaps frames`).toMatch(/steps\(1\)/);
   });
 
-  it("rests with motion reduced as the scene is drawn: the moon half risen, the light still, wings up", () => {
+  it("rests with motion reduced as the scene is drawn: the moon half risen, the light still", () => {
     expect(AT_REST).toMatch(/\.moon \{\s*translate: 0 50%;/);
-    expect(AT_REST).toMatch(/\.wingsDown,\s*\.glintB \{\s*opacity: 0;/);
+    expect(AT_REST).toMatch(/\.glintB \{\s*opacity: 0;/);
     expect(CSS, "the rise ends where the moon rests").toMatch(/@keyframes rise \{\s*from \{\s*translate: 0 100%;\s*\}\s*to \{\s*translate: 0 50%;/);
     const rise = animationOf("moon");
     expect(rise, "from under the water to half risen, a pixel a step").toContain("rise steps(var(--rise-steps)) both");
@@ -171,7 +166,7 @@ describe("the pixel sea", () => {
   });
 
   it("draws every shape as whole runs inside its own rows", () => {
-    for (const shape of [...WAVES.map(waveTile), FOAM_TILE, LEFT_ISLAND, RIGHT_ISLAND, GULL_UP, GULL_DOWN, REFLECTION, GLINT, moonShape()]) {
+    for (const shape of [...WAVES.map(waveTile), FOAM_TILE, REFLECTION, GLINT, moonShape()]) {
       const width = shape[0]!.length;
       for (const row of shape) expect(row).toHaveLength(width);
       const cells = runs(shape, 1).reduce((n, r) => n + r.w, 0);
@@ -199,18 +194,10 @@ describe("the pixel sea", () => {
     expect(GLINT).not.toEqual(REFLECTION);
   });
 
-  it("gives each gull two frames of the same size, and flies the flock apart so no two gulls touch", () => {
-    expect(GULL_DOWN).toHaveLength(GULL_UP.length);
-    expect(GULL_DOWN[0]).toHaveLength(GULL_UP[0]!.length);
-    expect(GULL_DOWN).not.toEqual(GULL_UP);
-    for (let a = 0; a < FLOCK.length; a++)
-      for (let b = a + 1; b < FLOCK.length; b++) expect(Math.abs(FLOCK[a]!.x - FLOCK[b]!.x), `gulls ${a} and ${b}`).toBeGreaterThan(GULL_UP[0]!.length);
+  it("draws no gulls and no islands over the water, and keeps no colour or motion for them", () => {
     const { container } = render(<PixelSea />);
-    expect(container.querySelectorAll("[data-slot=gull-down]")).toHaveLength(FLOCK.length * 2);
-  });
-
-  it("keeps the land and gulls visible in either theme: ink by day, a muted grey by night", () => {
-    expect(CSS).toMatch(/\.sea \{[^}]*--sea-land: var\(--foreground\);/);
-    expect(CSS).toMatch(/html\[data-mode="dark"\]\) \.sea \{\s*--sea-land: var\(--muted-foreground\);/);
+    expect(container.querySelectorAll("[data-slot^=gull]")).toHaveLength(0);
+    expect(container.innerHTML).not.toContain("--sea-land");
+    expect(CSS).not.toMatch(/--sea-land|\.wings(Up|Down)|@keyframes wings-/);
   });
 });

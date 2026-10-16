@@ -5,7 +5,7 @@ import styles from "./scroll.module.css";
  * The opening's sea (DEC-908): the long page starts on Hiroshige's bay in pixels, as the request for
  * a place ends on his full moon over it. A tide sea runs behind the agent's page from just above it
  * to below it; a moon in sun rises out of it as the opening comes into view, its light glinting on
- * the water, gulls flap and glide over it, and two pine islands stand on the horizon. The water is
+ * the water. The water is
  * rows of curling crests, small and close by the horizon and wider and taller nearer, as a sea
  * recedes; each row glides along, the nearer ones faster, and rises and falls on a swell that rolls
  * down the rows, and foam laps along the horizon. Every pixel is a flat token colour on the thread's
@@ -91,35 +91,6 @@ export function swell(depth = SEA_DEPTH): { wave: Wave; from: number; shift: num
 
 /** Spray along the horizon, which laps a cell back and forth. */
 export const FOAM_TILE: Shape = ["ccccc..c.c.."];
-
-export const LEFT_ISLAND: Shape = [
-  "............x.......",
-  "...........xxx......",
-  "..........xxxxx.....",
-  ".........xxxxxxx....",
-  "............x.......",
-  ".......xxxxxxxxxx...",
-  "...xxxxxxxxxxxxxxxx.",
-  "xxxxxxxxxxxxxxxxxxxx",
-];
-
-export const RIGHT_ISLAND: Shape = [
-  "....xx......",
-  "..xxxxxx....",
-  ".xxxxxxxxx..",
-  "xxxxxxxxxxxx",
-];
-
-/** A gull with its wings up, and with them down: the two frames of a beat. */
-export const GULL_UP: Shape = ["xx...xx", "..x.x..", "...x..."];
-export const GULL_DOWN: Shape = ["...x...", "..x.x..", "xx...xx"];
-
-/** Where each gull flies in the flock, in cells, as the geese cross the moon in the print. */
-export const FLOCK = [
-  { x: 0, y: 0 },
-  { x: 10, y: 2 },
-  { x: 19, y: 4 },
-] as const;
 
 export const MOON_RADIUS = 7;
 
@@ -226,30 +197,12 @@ function Row({ row, index, cell }: { row: ReturnType<typeof swell>[number]; inde
 /** Where the moon and its reflection stand across the sea. */
 const MOON_AT = "left-[26%] sm:left-[12%]";
 
-const flockWidth = Math.max(...FLOCK.map((g) => g.x)) + GULL_UP[0]!.length;
-const flockHeight = Math.max(...FLOCK.map((g) => g.y)) + GULL_UP.length;
-const FLOCK_BOX: Shape = Array.from({ length: flockHeight }, () => ".".repeat(flockWidth));
-
 /** The sea at one size of cell; `className` shows it only at the widths that use that size. */
 function Sea({ cell, className }: { cell: 6 | 8; className: string }) {
   const foam = `sea-foam-${cell}`;
   return (
     <div className={className} style={{ "--cell": `${cell}px`, "--cell-px": cell, "--cell-dpx": cell * 2, "--rise-px": MOON_RADIUS * cell, "--rise-dpx": MOON_RADIUS * cell * 2 } as CSSProperties}>
       <Sprite shape={MOON} cell={cell} fill="var(--highlight)" className={`absolute bottom-full ${MOON_AT} ${styles.moon}`} slot="sea-moon" />
-      <Sprite shape={FLOCK_BOX} cell={cell} fill="var(--sea-land)" className="absolute bottom-full left-[15%] mb-24 max-lg:hidden">
-        {FLOCK.map((g, i) => (
-          <g key={i} style={{ "--i": i } as CSSProperties}>
-            <g className={styles.wingsUp}>
-              <Cells shape={GULL_UP} cell={cell} fill="var(--sea-land)" x={g.x * cell} y={g.y * cell} />
-            </g>
-            <g className={styles.wingsDown} data-slot="gull-down">
-              <Cells shape={GULL_DOWN} cell={cell} fill="var(--sea-land)" x={g.x * cell} y={g.y * cell} />
-            </g>
-          </g>
-        ))}
-      </Sprite>
-      <Sprite shape={LEFT_ISLAND} cell={cell} fill="var(--sea-land)" className="absolute bottom-full left-[2%]" />
-      <Sprite shape={RIGHT_ISLAND} cell={cell} fill="var(--sea-land)" className="absolute right-[2%] bottom-full" />
       <div className="absolute inset-0 overflow-hidden">
         <svg width="100%" height="100%" shapeRendering="crispEdges" className="absolute inset-0">
           <rect width="100%" height="100%" fill="var(--tide)" />

@@ -7,8 +7,7 @@ import { BrandOwl } from "@/components/brand/brand-owl";
 import { cn } from "@/lib/utils";
 import { APP_ORIGIN, AppFrame, useAppTab } from "./app-tab";
 import { BrowserNav, type Guide, LocationField, MenuBar, Toolbar } from "./browser-chrome";
-import { PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
-import { OpenApp } from "./open-app";
+import { PIXEL, RAISED, SUNKEN } from "./letter";
 import { StatusText } from "./status-text";
 
 type Tab = "site" | "app";
@@ -108,23 +107,7 @@ export function Browser({ address, bookmarks, children }: { address: string; boo
               <LocationField address={shown} onGo={tab === "app" ? app.go : undefined} />
             </div>
 
-            <nav aria-label="Guides" className="mt-1.5">
-              <ul className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap">
-                {DIRECTORY.map((d) => (
-                  <li key={d.label} className="grid">
-                    {"href" in d ? (
-                      <a href={d.href} className={PLAIN_BUTTON}>
-                        {d.label}
-                      </a>
-                    ) : (
-                      <OpenApp app={d.app} className={PLAIN_BUTTON}>
-                        {d.label}
-                      </OpenApp>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </nav>
+
           </div>
         </BrowserNav>
 

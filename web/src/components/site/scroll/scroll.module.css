@@ -120,18 +120,12 @@
   --thread: var(--tide);
 }
 
-/* The opening's pixel sea (`pixel-sea.tsx`): the thread's knot on it is pale, as on tide. Its islands
-   and geese are ink by day and a muted grey by night, so they never vanish into a dark page. */
+/* The opening's pixel sea (`pixel-sea.tsx`): the thread's knot on it is pale, as on tide. */
 .sea {
   --thread: var(--tide-muted);
-  --sea-land: var(--foreground);
 }
 
-:global(html[data-mode="dark"]) .sea {
-  --sea-land: var(--muted-foreground);
-}
-
-/* At rest the moon is half risen, the light lies still and each gull holds its wings up. */
+/* At rest the moon is half risen and the light lies still. */
 .moon {
   translate: 0 50%;
 }
@@ -141,7 +135,6 @@
   width: calc(100% + 2 * var(--cell));
 }
 
-.wingsDown,
 .glintB {
   opacity: 0;
 }
@@ -243,13 +236,7 @@
     animation: glint-b 1.4s steps(1) infinite;
   }
 
-  .wingsUp {
-    animation: wings-up 2.6s steps(1) calc(var(--i) * -0.9s) infinite;
-  }
 
-  .wingsDown {
-    animation: wings-down 2.6s steps(1) calc(var(--i) * -0.9s) infinite;
-  }
 
   /* The flying owl bobs on the air as it flies and stands, here rather than in its script, so a
      standing owl asks for no frame. Peeking over the cue, it sways and bobs in its script. */
@@ -264,7 +251,7 @@
 
   /* Out of view, the loops hold still (`ambient.tsx`). The moon's rise follows the scroll, so it is
      never held. */
-  [data-ambient="paused"] :is(.wave, .foam, .glintA, .glintB, .wingsUp, .wingsDown, .twinkle) {
+  [data-ambient="paused"] :is(.wave, .foam, .glintA, .glintB, .twinkle) {
     animation-play-state: paused;
   }
 
@@ -445,28 +432,6 @@
 @keyframes glint-b {
   50% {
     opacity: 1;
-  }
-}
-
-@keyframes wings-up {
-  0%,
-  20% {
-    opacity: 0;
-  }
-  10%,
-  30% {
-    opacity: 1;
-  }
-}
-
-@keyframes wings-down {
-  0%,
-  20% {
-    opacity: 1;
-  }
-  10%,
-  30% {
-    opacity: 0;
   }
 }
 

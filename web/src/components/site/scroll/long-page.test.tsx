@@ -342,7 +342,7 @@ describe("the motion", () => {
     const rule = motion.match(/\[data-ambient="paused"\] :is\(([^)]*)\) \{\s*animation-play-state: paused;/);
     expect(rule, "a paused picture's loops hold still, with motion allowed").not.toBeNull();
     const held = rule![1]!.split(",").map((s) => s.trim());
-    expect(held).toEqual(expect.arrayContaining([".wave", ".foam", ".glintA", ".glintB", ".wingsUp", ".wingsDown", ".twinkle"]));
+    expect(held).toEqual(expect.arrayContaining([".wave", ".foam", ".glintA", ".glintB", ".twinkle"]));
     expect(held).not.toContain(".moon");
   });
 
