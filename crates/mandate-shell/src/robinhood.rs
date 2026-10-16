@@ -8,17 +8,24 @@
 //! connections belong to the runtime they were opened on, so the client must be connected on it
 //! and every later call made on it (DEC-928 item 2). The connector and its reconciler share one
 //! [`RobinhoodBridge`], so the reconciler reads the same agentic account through the same session.
+//!
+//! [`robinhood_account`] reads the agentic account's snapshot into the executor's
+//! [`BrokerAccount`] (DEC-933 item 1): what Robinhood reports is taken as reported, the status
+//! flags are the agentic check every read passes, and every figure Robinhood does not publish
+//! reads as the value that adds no buying power and lifts no limit.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     BrokerConnector, BrokerOutcome, BrokerRequest, BrokerSnapshot, ConnectorError, Reconciliation,
 };
-use mandate_robinhood::{RobinhoodConnector, Tools, robinhood_profile};
+use mandate_robinhood::{PreflightFacts, RobinhoodConnector, Tools, robinhood_profile};
 use tokio::runtime::Runtime;
 
+use crate::adapters::ExecutorReconciler;
 use crate::error::Cause;
 use crate::stages::{Connector, Reconciler};
 
@@ -37,6 +44,18 @@ impl<T: Tools> RobinhoodBridge<T> {
             runtime,
             connector: RefCell::new(connector),
         })
+    }
+
+    /// The preflight's read of the agentic account and of `symbol`'s quote
+    /// (`RobinhoodConnector::preflight_facts`), driven on the bridge's runtime (DEC-933 item 2).
+    /// Every read is the connector's own, scoped to the recorded account; nothing is sent.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] naming [`ACCOUNT_UNREAD`] when any read is refused or unreadable, the
+    /// symbol is not tradable, or the connector is held by another stage.
+    pub fn preflight_facts(&self, symbol: &InstrumentId) -> Result<PreflightFacts, Cause> {
+        let _ = (symbol, &self.runtime);
+        Err(Cause::Unimplemented { story: "E7-6" })
     }
 }
 
@@ -76,21 +95,21 @@ impl<T: Tools> Connector for RobinhoodShellConnector<T> {
     }
 }
 
-/// The startup reconciliation's broker read for a Robinhood account (DEC-928 item 3). It reads
-/// the agentic account's orders, positions and portfolio through `account_snapshot`, so every
-/// read is scoped to the recorded account (CN-8), and then refuses: trading spec §7.2 and §7.3
-/// take the account's status flags, equity and last equity from the broker, and Robinhood
-/// publishes none of them (connections spec U-R6, U-R7). No figure is invented in their place
-/// (`AGENTS.md` rule 3); the founder decides how they are read before a Robinhood account is
-/// reconciled, and until then the run stops at [`crate::Stage::Reconcile`] before it opens
-/// anything.
+/// The startup reconciliation's broker read for a Robinhood account (DEC-928 item 3, DEC-933
+/// item 1). It reads the agentic account's portfolio, positions and orders through
+/// `account_snapshot`, so every read is scoped to the recorded account (CN-8), maps the account
+/// by [`robinhood_account`], and hands the snapshot to the executor's own reconciliation, which
+/// reconciles it exactly as it reconciles Alpaca's.
 pub struct RobinhoodReconciler<T> {
     bridge: Rc<RobinhoodBridge<T>>,
+    executor: ExecutorReconciler,
 }
 
 impl<T: Tools> RobinhoodReconciler<T> {
-    pub fn new(bridge: Rc<RobinhoodBridge<T>>) -> Self {
-        Self { bridge }
+    /// `executor` is the run's own reconciler, the one `CoreExecutor::pair` made beside the
+    /// run's executor, so the snapshot is taken at that executor's head and cursor.
+    pub fn new(bridge: Rc<RobinhoodBridge<T>>, executor: ExecutorReconciler) -> Self {
+        Self { bridge, executor }
     }
 }
 
@@ -98,19 +117,18 @@ impl<T: Tools> RobinhoodReconciler<T> {
 /// account in its place.
 pub const ACCOUNT_UNREAD: &str = "the agentic account's snapshot";
 
-/// Why an account that was read is not reconciled (DEC-928 item 3).
-pub const STATUS_UNPUBLISHED: &str =
-    "the broker's account status, which Robinhood does not publish (DEC-928)";
-
 impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
     /// The run's connector and the executor's requests are not used: the Robinhood connector
     /// offers none of the four reads they name, and the bridge's connector is the run's own.
+    /// Robinhood publishes no account activity, so the snapshot carries no fill and leaves the
+    /// executor's cursor where it was; the live run starts only on a flat, unspent account
+    /// (DEC-529 item 3), so no fill is outstanding when it does.
     fn snapshot(
         &mut self,
         connector: &mut dyn Connector,
         requests: &[BrokerRequest],
     ) -> Result<BrokerSnapshot, Cause> {
-        let _ = (connector, requests);
+        let _ = (connector, requests, &self.executor);
         let busy = Cause::Absent {
             what: "the Robinhood connector, held by another stage",
         };
@@ -119,16 +137,12 @@ impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
         read.map_err(|_| Cause::Absent {
             what: ACCOUNT_UNREAD,
         })?;
-        Err(Cause::Absent {
-            what: STATUS_UNPUBLISHED,
-        })
+        Err(Cause::Unimplemented { story: "E7-6" })
     }
 
-    /// No Robinhood snapshot is ever handed out, so none is reconciled (DEC-928 item 3).
+    /// The executor's own reconciliation of the snapshot, as for every broker.
     fn reconcile(&mut self, snapshot: &BrokerSnapshot) -> Result<Reconciliation, Cause> {
         let _ = snapshot;
-        Err(Cause::Absent {
-            what: STATUS_UNPUBLISHED,
-        })
+        Err(Cause::Unimplemented { story: "E7-6" })
     }
 }

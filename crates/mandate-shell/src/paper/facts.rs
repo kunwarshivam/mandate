@@ -19,6 +19,8 @@ use mandate_liquidity::{
 use mandate_num::{Price, Qty, Usd};
 use mandate_time::{Date, UtcNanos};
 
+use mandate_robinhood::PreflightFacts;
+
 use super::absent;
 use super::artifacts::Artifacts;
 use crate::adapters::{trusted_daily_bars, trusted_daily_closes, untrusted};
@@ -61,13 +63,21 @@ pub struct PaperFacts {
     pub liquidity: LiquidityFacts,
 }
 
+/// The market reads every run needs from Alpaca, whichever broker holds the account: the asset
+/// record, the latest IEX quote, and the trailing window's IEX minute bars (DEC-529 item 12: the
+/// bars and the independent quote stay Alpaca's on the live path too).
+#[derive(Debug, Clone)]
+pub struct MarketFacts {
+    pub asset: AssetSnapshot,
+    pub quote: LatestQuote,
+    /// The complete IEX minute bars of the trailing window before the preflight's clock.
+    pub minute_bars: MinuteBars,
+}
+
 /// The broker reads the run needs, as GETs only: `GetAccount`, `ListPositions`, and
-/// `ListOpenOrders` through [`TradingClient::call_one`], the asset record through
-/// [`TradingClient::asset`], the latest IEX quote through [`DataClient::latest_quote`], whose age
-/// bound is the rule-set artifact's, and the trailing window's IEX minute bars through
-/// [`DataClient::recent_minute_bars`]. The account rules are the connector's declaration,
-/// [`alpaca_account_rules`], which no broker call answers. Nothing here can submit, cancel, or
-/// close.
+/// `ListOpenOrders` through [`TradingClient::call_one`], then [`market_facts`]'s reads. The
+/// account rules are the connector's declaration, [`alpaca_account_rules`], which no broker call
+/// answers. Nothing here can submit, cancel, or close.
 ///
 /// # Errors
 /// [`Cause::Absent`] when a read is not answered with the fact it asked for.
@@ -82,17 +92,9 @@ where
     D: DataTransport,
     P: Pause + Clone,
 {
-    let trailing_window = Duration::from_secs(
-        u64::try_from(TRAILING_WINDOW_S).map_err(|_| absent("the trailing volume window"))?,
-    );
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-        .map_err(|_| absent("a runtime for the paper preflight"))?;
+    let runtime = preflight_runtime()?;
     let trading = TradingClient::new(trading, pause.clone(), RetryPolicy::default());
     let data = DataClient::new(data, pause);
-    let symbol = &artifacts.instrument.symbol;
     runtime.block_on(async {
         let BrokerOutcome::Account(account) = trading
             .call_one(&BrokerRequest::GetAccount)
@@ -115,18 +117,11 @@ where
         else {
             return Err(absent("the broker's open orders"));
         };
-        let asset = trading
-            .asset(symbol)
-            .await
-            .map_err(|_| absent("the broker's asset record"))?;
-        let quote = data
-            .latest_quote(symbol, artifacts.quote_max_age)
-            .await
-            .map_err(|_| absent("a current IEX quote"))?;
-        let minute_bars = data
-            .recent_minute_bars(symbol, trailing_window)
-            .await
-            .map_err(|_| absent("the trailing window's IEX minute bars"))?;
+        let MarketFacts {
+            asset,
+            quote,
+            minute_bars,
+        } = market_reads(artifacts, &trading, &data).await?;
         Ok(BrokerFacts {
             account,
             account_rules: alpaca_account_rules(),
@@ -136,6 +131,88 @@ where
             quote,
             minute_bars,
         })
+    })
+}
+
+/// [`MarketFacts`] as GETs only: the asset record through [`TradingClient::asset`], the latest
+/// IEX quote through [`DataClient::latest_quote`], whose age bound is the rule-set artifact's,
+/// and the trailing window's IEX minute bars through [`DataClient::recent_minute_bars`]. No
+/// account is read.
+///
+/// # Errors
+/// [`Cause::Absent`] when a read is not answered with the fact it asked for.
+pub fn market_facts<T, D, P>(
+    artifacts: &Artifacts,
+    trading: T,
+    data: D,
+    pause: P,
+) -> Result<MarketFacts, Cause>
+where
+    T: TradingTransport,
+    D: DataTransport,
+    P: Pause + Clone,
+{
+    let runtime = preflight_runtime()?;
+    let trading = TradingClient::new(trading, pause.clone(), RetryPolicy::default());
+    let data = DataClient::new(data, pause);
+    runtime.block_on(market_reads(artifacts, &trading, &data))
+}
+
+/// The facts of a Robinhood connection (DEC-933 item 2): the agentic account, its positions and
+/// its working orders as `mandate-robinhood`'s preflight read them, the account read by
+/// [`robinhood_account`] under [`robinhood_account_rules`], beside Alpaca's market reads. The
+/// Robinhood quote must be of the instrument the IEX quote is; whether the two agree is the
+/// runner's cross-check (DEC-529 item 12), and the gate's quote stays the IEX one, the quote
+/// whose age the run can judge (DEC-902 item 7: Robinhood's carries no time).
+///
+/// # Errors
+/// [`Cause::Absent`] when the Robinhood quote names another instrument than the IEX quote.
+pub fn robinhood_facts(
+    market: MarketFacts,
+    robinhood: &PreflightFacts,
+) -> Result<BrokerFacts, Cause> {
+    let _ = (market, robinhood);
+    Err(Cause::Unimplemented { story: "E7-6" })
+}
+
+fn preflight_runtime() -> Result<tokio::runtime::Runtime, Cause> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|_| absent("a runtime for the paper preflight"))
+}
+
+async fn market_reads<T, D, P>(
+    artifacts: &Artifacts,
+    trading: &TradingClient<T, P>,
+    data: &DataClient<D, P>,
+) -> Result<MarketFacts, Cause>
+where
+    T: TradingTransport,
+    D: DataTransport,
+    P: Pause,
+{
+    let trailing_window = Duration::from_secs(
+        u64::try_from(TRAILING_WINDOW_S).map_err(|_| absent("the trailing volume window"))?,
+    );
+    let symbol = &artifacts.instrument.symbol;
+    let asset = trading
+        .asset(symbol)
+        .await
+        .map_err(|_| absent("the broker's asset record"))?;
+    let quote = data
+        .latest_quote(symbol, artifacts.quote_max_age)
+        .await
+        .map_err(|_| absent("a current IEX quote"))?;
+    let minute_bars = data
+        .recent_minute_bars(symbol, trailing_window)
+        .await
+        .map_err(|_| absent("the trailing window's IEX minute bars"))?;
+    Ok(MarketFacts {
+        asset,
+        quote,
+        minute_bars,
     })
 }
 

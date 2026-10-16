@@ -1840,6 +1840,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-robinhood",
  "mandate-runtime",
  "mandate-shell",
  "mandate-spec",

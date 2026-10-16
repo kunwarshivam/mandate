@@ -70,14 +70,14 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
-pub use door::{account_stream, chosen, unspent};
+pub use door::{account_stream, chosen, lapse_read, unspent};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, grant};
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
 pub use wiring::{
-    CollarMembers, answers, asked, collar_x, cross_check_the_opening, reported, session_cap,
-    wait_for_the_grant, watch_may_end, watched,
+    CollarMembers, answers, asked, collar_x, cross_check_the_opening, reported,
+    robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or

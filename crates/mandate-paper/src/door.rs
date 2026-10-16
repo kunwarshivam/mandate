@@ -15,6 +15,7 @@
 //! identifiers.
 
 use mandate_journal::{StoredEvent, StreamId};
+use mandate_robinhood::AccountSnapshot;
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
@@ -91,4 +92,27 @@ pub fn unspent(
     held: &Held,
 ) -> Result<(), PaperError> {
     lapse(connection, rows, held).map_err(PaperError::Lapse)
+}
+
+/// The lapse over its real inputs (DEC-933 item 3; DEC-529 item 3; DEC-918 item 1): a live
+/// connection's `held` is counted from the agentic account's own snapshot (DEC-470 item 1: every
+/// position record, a zero quantity included, and every working order), and its `rows` are the
+/// journal's own read of `stream`, the account stream [`account_stream`] named, through the run's
+/// own journal (`journal`, ungated by `--place-one-order`, DEC-918 item 2); a run that kept no
+/// journal has no account stream and reads no rows. A live connection with no snapshot refuses,
+/// since a lapse with nothing to count cannot be passed (`AGENTS.md` rule 3). A paper connection
+/// makes no check and reads nothing (LT-14).
+///
+/// # Errors
+/// [`PaperError::Lapse`] as [`unspent`] answers; [`PaperError::Shell`] with `Cause::Absent` at
+/// the reconcile stage when a live connection has no snapshot or its account stream cannot be
+/// read.
+pub fn lapse_read(
+    connection: &Connection,
+    journal: Option<&str>,
+    stream: &StreamId,
+    snapshot: Option<&AccountSnapshot>,
+) -> Result<(), PaperError> {
+    let _ = (connection, journal, stream, snapshot);
+    Err(PaperError::Unimplemented { story: "E7-6" })
 }

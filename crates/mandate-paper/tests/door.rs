@@ -15,12 +15,17 @@
 mod common;
 
 use common::{json, model, spy_mandate};
+use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Digest;
 use mandate_domain::Environment;
+use mandate_executor::{BrokerOrder, BrokerPosition};
+use mandate_journal::StreamId;
 use mandate_journal::{StoredEvent, StreamType};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_paper::{
-    Broker, Connection, Held, LapseRefusal, PaperError, account_stream, chosen, unspent,
+    Broker, Connection, Held, LapseRefusal, PaperError, account_stream, chosen, lapse_read, unspent,
 };
+use mandate_robinhood::AccountSnapshot;
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
@@ -310,4 +315,151 @@ fn a_paper_connection_makes_no_lapse_check_through_the_door() {
         (Ok(()), Ok(())),
         "a paper run makes no check, whatever it holds"
     );
+}
+
+/// The agentic account's snapshot holding `positions` and `open_orders`.
+fn snapshot(positions: Vec<BrokerPosition>, open_orders: Vec<BrokerOrder>) -> AccountSnapshot {
+    AccountSnapshot {
+        cash: Usd::parse("1000").expect("cash parses"),
+        buying_power: Usd::parse("1000").expect("buying power parses"),
+        positions,
+        open_orders,
+    }
+}
+
+fn position(quantity: &str) -> BrokerPosition {
+    BrokerPosition {
+        instrument: InstrumentId::new("SPY").expect("the symbol parses"),
+        qty: SignedQty::parse(quantity).expect("the quantity parses"),
+        avg_entry_price: Price::parse("80").expect("the price parses"),
+    }
+}
+
+fn working() -> BrokerOrder {
+    BrokerOrder {
+        broker_order_id: "rh-1".to_owned(),
+        client_order_id: None,
+        instrument: InstrumentId::new("SPY").expect("the symbol parses"),
+        side: Side::Buy,
+        qty: Qty::parse("1").expect("the quantity parses"),
+        filled_qty: Qty::parse("0").expect("the filled quantity parses"),
+        limit_price: Some(Price::parse("80").expect("the limit parses")),
+        stop_price: None,
+        status: "accepted".to_owned(),
+        reject_code: None,
+        replaced_by_broker_order_id: None,
+        legs: Vec::new(),
+        created_on: None,
+    }
+}
+
+fn the_stream() -> StreamId {
+    account_stream(WORKSPACE, ACCOUNT).expect("the run's own names form a stream")
+}
+
+/// A DSN the journal cannot parse: its read refuses before any connection, so the test reaches
+/// no host.
+const UNREADABLE_JOURNAL: &str = "not a postgres dsn";
+
+fn reconcile_absent(result: &Result<(), PaperError>) -> Option<&'static str> {
+    match result {
+        Err(PaperError::Shell(ShellError::Refused {
+            stage: Stage::Reconcile,
+            cause: Cause::Absent { what },
+        })) => Some(what),
+        _ => None,
+    }
+}
+
+/// DEC-933 item 3: the lapse counts the agentic account's own snapshot — every position record,
+/// a zero quantity included, and every working order — so an account that is not flat refuses
+/// with those counts, before the journal is read.
+#[test]
+#[ignore = "pending E7-6"]
+fn the_lapse_counts_the_agentic_accounts_own_snapshot() {
+    let held = snapshot(vec![position("1"), position("0")], vec![working()]);
+    let refused = lapse_read(&live_connection(), None, &the_stream(), Some(&held));
+    assert!(
+        matches!(
+            refused,
+            Err(PaperError::Lapse(LapseRefusal::NotFlat {
+                positions: 2,
+                open_orders: 1
+            }))
+        ),
+        "{refused:?}"
+    );
+    let ordered = snapshot(Vec::new(), vec![working()]);
+    let refused = lapse_read(&live_connection(), None, &the_stream(), Some(&ordered));
+    assert!(
+        matches!(
+            refused,
+            Err(PaperError::Lapse(LapseRefusal::NotFlat {
+                positions: 0,
+                open_orders: 1
+            }))
+        ),
+        "{refused:?}"
+    );
+}
+
+/// DEC-933 item 3 and DEC-918 item 2: a flat account of a run that kept no journal has no account
+/// stream to spend it, and starts.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_flat_snapshot_of_a_journalless_run_starts() {
+    let flat = snapshot(Vec::new(), Vec::new());
+    let started = lapse_read(&live_connection(), None, &the_stream(), Some(&flat));
+    assert!(matches!(started, Ok(())), "{started:?}");
+}
+
+/// DEC-933 item 3: the rows are the run's own journal's read of its account stream, so a journal
+/// that cannot be read refuses the live run rather than reading as an unspent record (rule 3).
+#[test]
+#[ignore = "pending E7-6"]
+fn an_unreadable_account_stream_refuses_the_live_run() {
+    let flat = snapshot(Vec::new(), Vec::new());
+    let refused = lapse_read(
+        &live_connection(),
+        Some(UNREADABLE_JOURNAL),
+        &the_stream(),
+        Some(&flat),
+    );
+    assert_eq!(
+        reconcile_absent(&refused),
+        Some("the account stream's rows"),
+        "{refused:?}"
+    );
+}
+
+/// DEC-933 item 3: a live connection the run has no snapshot for cannot pass a lapse with
+/// nothing to count, whatever its journal.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_live_connection_with_no_snapshot_refuses() {
+    for journal in [None, Some(UNREADABLE_JOURNAL)] {
+        let refused = lapse_read(&live_connection(), journal, &the_stream(), None);
+        assert_eq!(
+            reconcile_absent(&refused),
+            Some("the agentic account's snapshot"),
+            "{refused:?}"
+        );
+    }
+}
+
+/// LT-14: a paper connection makes no lapse check and reads nothing, so neither a missing
+/// snapshot, a held account nor an unreadable journal changes a paper run.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_paper_connection_reads_nothing_for_the_lapse() {
+    let paper = Connection {
+        broker: Broker::Alpaca,
+        environment: Environment::Paper,
+        account_ref: ACCOUNT.to_owned(),
+    };
+    let held = snapshot(vec![position("1")], vec![working()]);
+    for snapshot in [None, Some(&held)] {
+        let started = lapse_read(&paper, Some(UNREADABLE_JOURNAL), &the_stream(), snapshot);
+        assert!(matches!(started, Ok(())), "{started:?}");
+    }
 }
