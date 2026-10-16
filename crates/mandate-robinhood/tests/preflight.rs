@@ -549,9 +549,14 @@ fn the_preflight_on_a_snapshot_reads_no_account_figure_again() {
     refusing.tradability = json!({"account_number": OURS, "symbol": SYMBOL, "tradable": false});
     let (connector, _) = refusing.connector();
     assert_eq!(
-        ready(connector.preflight_facts_on(handed, &id(SYMBOL))),
+        ready(connector.preflight_facts_on(handed.clone(), &id(SYMBOL))),
         Err(RobinhoodError::NotTradable)
     );
+    let (connector, calls) = Answers::flat().connector();
+    let unregistered = id("IWM");
+    let refused = ready(connector.preflight_facts_on(handed, &unregistered));
+    assert_eq!(refused, Err(RobinhoodError::NoSymbol));
+    assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
 }
 
 #[test]

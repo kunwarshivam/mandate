@@ -9,16 +9,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_alpaca::AlpacaPaperHttp;
 use mandate_alpaca::Pause;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_executor::BrokerPosition;
+use mandate_executor::{BrokerOrder, BrokerPosition};
 use mandate_journal::{ArtifactStore, StreamId};
 use mandate_mcp::{CallClass, McpError, Tools};
-use mandate_num::{Price, SignedQty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_robinhood::{AccountSnapshot, RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
@@ -736,7 +736,8 @@ fn at(secs: i64, nanos: u32) -> UtcNanos {
 
 /// A lapse snapshot stands for the account at most its bound after it was sent, the bound
 /// included; one nanosecond older, across a clock that ran backwards, or listing any position
-/// record (whose instrument it may name by a ticker registered only later, DEC-956), it does not.
+/// record or working order (whose instrument it may name by a ticker registered only later,
+/// DEC-956), it does not.
 #[test]
 fn a_lapse_snapshot_is_fresh_within_its_bound_only() {
     let kept = LapseSnapshot {
@@ -772,6 +773,33 @@ fn a_lapse_snapshot_is_fresh_within_its_bound_only() {
         holding.fresh(at(1_000, 500), bound),
         None,
         "a position record"
+    );
+    let order = BrokerOrder {
+        broker_order_id: "o1".to_owned(),
+        client_order_id: None,
+        instrument: InstrumentId::new("SPY").expect("a symbol"),
+        side: Side::Buy,
+        qty: Qty::parse("1").expect("a quantity"),
+        filled_qty: Qty::parse("0").expect("a quantity"),
+        limit_price: None,
+        stop_price: None,
+        status: "accepted".to_owned(),
+        reject_code: None,
+        replaced_by_broker_order_id: None,
+        legs: Vec::new(),
+        created_on: None,
+    };
+    let ordering = LapseSnapshot {
+        account: AccountSnapshot {
+            open_orders: vec![order],
+            ..flat()
+        },
+        sent: at(1_000, 500),
+    };
+    assert_eq!(
+        ordering.fresh(at(1_000, 500), bound),
+        None,
+        "a working order"
     );
 }
 
