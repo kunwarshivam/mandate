@@ -46,6 +46,16 @@ impl Tickers {
         self.by_asset.get(asset).ok_or(RobinhoodError::NoSymbol)
     }
 
+    /// `ticker` itself when the run registered it for an instrument, or
+    /// [`RobinhoodError::NoSymbol`]: the preflight and the quote name an instrument by the
+    /// ticker the broker and the market data name it by, and read only a registered one.
+    pub(crate) fn named(&self, ticker: &InstrumentId) -> Result<&InstrumentId, RobinhoodError> {
+        self.by_ticker
+            .get_key_value(ticker)
+            .map(|(registered, _)| registered)
+            .ok_or(RobinhoodError::NoSymbol)
+    }
+
     /// The asset id of a registered `ticker`; a ticker the run did not register stays as the
     /// broker spelled it, so an instrument the run does not trade is never read as one it does.
     pub(crate) fn platform(&self, ticker: InstrumentId) -> InstrumentId {

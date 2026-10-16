@@ -23,12 +23,42 @@ use mandate_time::{Date, UtcNanos};
 use crate::approvers::{Members, members};
 
 /// One record of the workspace control stream as the run read it: its sequence number, type and
-/// payload (journal spec §9.2). The journal has already verified the chain it came from.
+/// payload (journal spec §9.2), and the stream it was journaled on. The journal has already
+/// verified the chain it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlRecord {
     pub seq: u64,
     pub event_type: String,
     pub payload: Value,
+    pub origin: Origin,
+}
+
+/// The stream a record was journaled on and the environment that stream was opened in: the
+/// journal fixes a stream's environment at its first event, and paper and live never share a
+/// stream (DEC-952 item 1). A run's artifacts bind only registrations from the stream its
+/// deployment was journaled on, in the deployed mandate's environment (DEC-957).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub stream_id: String,
+    pub environment: Environment,
+}
+
+impl Origin {
+    /// The origin a stored row names: its stream id and its envelope's environment, `paper` or
+    /// `live`. Any other environment text is no origin, and the caller refuses the row.
+    pub fn of(stream_id: &str, environment: &str) -> Option<Self> {
+        let environment = if environment == "paper" {
+            Environment::Paper
+        } else if environment == "live" {
+            Environment::Live
+        } else {
+            return None;
+        };
+        Some(Self {
+            stream_id: stream_id.to_owned(),
+            environment,
+        })
+    }
 }
 
 /// What the run supplies beside the stream (DEC-505 item 3).
@@ -108,19 +138,26 @@ impl LiveAdmission {
     /// the door's checks passed, and a dialed host equal, byte for byte, to a non-empty pinned
     /// constant. Any one missing refuses (item 2).
     pub fn admits(&self) -> bool {
+        self.door == DoorChecks::Passed && self.admits_before_credentials()
+    }
+
+    /// Whether the three conditions a run holds before it reads any credential hold: the `live`
+    /// build, `--confirm-live`, and the dialed host equal, byte for byte, to a non-empty pinned
+    /// constant (DEC-947 item 2). The door's condition is [`Self::admits`]'s alone.
+    pub fn admits_before_credentials(&self) -> bool {
         let pinned_host = match (&self.host.dialed, self.host.pinned) {
             (Some(dialed), Some(pinned)) => !pinned.is_empty() && dialed.as_str() == pinned,
             (None, Some(_)) | (Some(_), None) | (None, None) => false,
         };
-        self.build == Build::Live
-            && self.confirmation == Confirmation::ConfirmLive
-            && self.door == DoorChecks::Passed
-            && pinned_host
+        self.build == Build::Live && self.confirmation == Confirmation::ConfirmLive && pinned_host
     }
 }
 
-/// Phase 1's answer: the version a paper run deploys, the stored document that re-hashes to it,
-/// and what the fold found. Every V-rule but V-002 passed. It holds no usable context: only
+/// Phase 1's answer: the version a run deploys, the stored document that re-hashes to it, what the
+/// fold found, and the stream its `AgentDeployed` was journaled on. Every V-rule but V-002 passed.
+/// A live mandate's answer exists only when the run held all four of DEC-924 item 1's conditions:
+/// [`confirmed_version`] is the one function that answers one, and it admits a live deployment
+/// on [`LiveAdmission::admits`] alone (DEC-957). It holds no usable context: only
 /// [`Self::with_equity`] gives one. Both phases' fields are private, so nothing outside this module
 /// can build, alter or recombine either phase's answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +167,7 @@ pub struct ConfirmedVersion {
     context: Folded,
     unpriced: ValidationContext,
     members: Members,
+    deployed_on: Origin,
 }
 
 /// What phase 1's fold found, to show before any credential is read.
@@ -215,12 +253,47 @@ impl DeploymentRefusal {
     }
 }
 
+/// Phase 1's checks a live run makes before it reads any credential (DEC-947 item 2, FT-3): the
+/// same walk, document read and fold as [`confirmed_version`], every V-rule but V-002 included,
+/// with a live deployment admitted on the three of DEC-924 item 1's conditions a run holds
+/// before its first credential read ([`LiveAdmission::admits_before_credentials`]). The door's
+/// condition needs the snapshot only the credential reads, so it is left to
+/// [`confirmed_version`], which the run calls after it. It answers no version, so nothing can
+/// run on it.
+///
+/// # Errors
+/// Every [`DeploymentRefusal`] [`confirmed_version`] makes, `Live` when one of those three
+/// conditions is missing.
+pub fn checked_before_credentials(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    run: &RunFacts,
+) -> Result<(), DeploymentRefusal> {
+    folded(
+        records,
+        store,
+        run,
+        LiveAdmission::admits_before_credentials,
+    )
+    .map(drop)
+}
+
 /// Phase 1: the confirmed version `run.agent` is deployed with, from `records` and the documents
 /// in `store`, or why there is none. It needs no credential.
 pub fn confirmed_version(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,
     run: &RunFacts,
+) -> Result<ConfirmedVersion, DeploymentRefusal> {
+    folded(records, store, run, LiveAdmission::admits)
+}
+
+/// Phase 1 with a live deployment admitted when `admitted` holds of the run's admission.
+fn folded(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    run: &RunFacts,
+    admitted: fn(&LiveAdmission) -> bool,
 ) -> Result<ConfirmedVersion, DeploymentRefusal> {
     let mut ordered: Vec<&ControlRecord> = records.iter().collect();
     ordered.sort_by_key(|record| record.seq);
@@ -236,15 +309,15 @@ pub fn confirmed_version(
                 .and_then(Value::as_str)
                 .and_then(ArtifactRef::parse)
                 .ok_or(DeploymentRefusal::Fold)?;
-            deployed = Some(Some(version));
+            deployed = Some(Some((version, &record.origin)));
         } else if ours(record) && record.event_type == "AgentStopped" {
             deployed = deployed.map(|_| None);
         }
     }
-    let version = match deployed {
+    let (version, deployed_on) = match deployed {
         None => return Err(DeploymentRefusal::NotDeployed),
         Some(None) => return Err(DeploymentRefusal::Stopped),
-        Some(Some(version)) => version,
+        Some(Some((version, origin))) => (version, origin.clone()),
     };
     let bytes = get_artifact(store, &version).map_err(|error| match error {
         ArtifactError::Missing => DeploymentRefusal::DocumentMissing,
@@ -253,9 +326,10 @@ pub fn confirmed_version(
     })?;
     let value = mandate_canon::parse(&bytes).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
     let mandate = Mandate::parse(&value).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
-    if mandate.environment == Environment::Live && !run.live.admits() {
+    if mandate.environment == Environment::Live && !admitted(&run.live) {
         return Err(DeploymentRefusal::Live);
     }
+
     let documents = |digest: &Digest| {
         get_artifact(store, &ArtifactRef::from_digest(*digest))
             .into_iter()
@@ -315,6 +389,7 @@ pub fn confirmed_version(
         context: folded,
         unpriced: context,
         members,
+        deployed_on,
     })
 }
 
@@ -338,6 +413,11 @@ impl ConfirmedVersion {
     /// resolve against (DEC-953).
     pub fn members(&self) -> &Members {
         &self.members
+    }
+
+    /// The control stream the deploying `AgentDeployed` was journaled on, and its environment.
+    pub fn deployed_on(&self) -> &Origin {
+        &self.deployed_on
     }
 
     /// Phase 2: V-002 on the account equity the run's GET-only preflight read from the broker,
@@ -377,12 +457,14 @@ pub struct Pinned {
     pub content_hash: Digest,
 }
 
-/// One effective `ConfigSnapshotRegistered`: its `seq`, content hash, and re-hashed object bytes.
+/// One effective `ConfigSnapshotRegistered`: its `seq`, content hash, re-hashed object bytes, and
+/// the stream it was registered on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Registered {
     pub seq: u64,
     pub content_hash: Digest,
     pub bytes: Vec<u8>,
+    pub origin: Origin,
 }
 
 /// The listing exchanges DEC-523 item 3 admits.
@@ -514,6 +596,7 @@ pub fn configuration(
             seq: record.seq,
             content_hash: reference.digest(),
             bytes,
+            origin: record.origin.clone(),
         };
         latest.insert(kind, registered);
     }
@@ -718,6 +801,7 @@ fn effective(
         seq: record.seq,
         content_hash: reference.digest(),
         bytes,
+        origin: record.origin.clone(),
     };
     Ok((registered, object))
 }

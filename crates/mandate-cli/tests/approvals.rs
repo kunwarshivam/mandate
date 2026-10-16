@@ -28,7 +28,7 @@ use mandate_cli::approvals::{
     Ended, Outcome, Revalidated, State, approve, list, message, outcome, show, skip,
 };
 use mandate_cli::control::{ControlError, ControlJournal, Submitted, backoff};
-use mandate_journal::AppendOutcome;
+use mandate_journal::{AppendOutcome, Draft};
 
 fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
     result.unwrap_or_else(|e| panic!("{what} answers, not: {e}"))
@@ -106,6 +106,18 @@ fn the_fixture_journal_holds_a_delivered_request() {
     );
     assert_eq!(code_of(&asked.content).len(), 8);
     assert!(control(&fx).is_empty());
+}
+
+/// DEC-949, journal spec v0.41 §9.7: the fixture's `ApprovalTimedOut` is the record the runtime
+/// journals — `{approval, on_timeout: skip}`, caused by the ask (rule 135) — so the journal's own
+/// draft check admits it, and the CLI is read against a timeout the journal can hold.
+#[test]
+fn the_fixtures_timeout_passes_the_journals_own_check() {
+    let mut fx = Fixture::new();
+    let asked = fx.ask(AGENT, "2", ASKED_AT);
+    let draft = common::ended_draft(&asked, "ApprovalTimedOut", &common::runtime_id(950));
+    let parsed = Draft::parse(&draft).map(|d| d.event_type().to_owned());
+    assert_eq!(parsed.as_deref(), Ok("ApprovalTimedOut"), "{parsed:?}");
 }
 
 /// D5: pending approvals by deadline, then resolved ones with how they ended; each with its

@@ -220,7 +220,7 @@ fn the_preflight_reads_the_whole_account_through_the_wire() {
         client_order_id: key("01JMORE"),
     };
     run(&mut connector, &cancel).unwrap();
-    let facts = ready(connector.preflight_facts(&id(SPY_ASSET))).unwrap();
+    let facts = ready(connector.preflight_facts(&id("SPY"))).unwrap();
     let expected = AccountSnapshot {
         cash: Usd::parse("750.25").unwrap(),
         buying_power: Usd::parse("10000").unwrap(),
@@ -249,7 +249,7 @@ fn the_preflight_reads_the_whole_account_through_the_wire() {
     assert_eq!(
         facts.quote,
         Quote {
-            symbol: id(SPY_ASSET),
+            symbol: id("SPY"),
             bid: price("500"),
             ask: price("500"),
         },
@@ -313,7 +313,7 @@ fn a_halted_symbol_is_not_tradable_through_the_wire() {
     let server = SimServer::start(core, Variant::Honest).unwrap();
     let (connector, calls) = connector(&server);
     assert_eq!(
-        ready(connector.preflight_facts(&id(SPY_ASSET))),
+        ready(connector.preflight_facts(&id("SPY"))),
         Err(RobinhoodError::NotTradable)
     );
     let mut expected = preflight_calls();
@@ -454,21 +454,25 @@ fn a_rebought_average_rounds_to_the_grids_nine_places() {
     );
 }
 
-/// DEC-956 item 1: the preflight of an instrument whose snapshot gave no ticker, and its quote,
-/// refuse `NoSymbol` before anything is read or asked for.
+/// DEC-956 item 1: the preflight and the quote name the instrument by its ticker, and of a
+/// ticker the run did not register, or of an asset id, they refuse `NoSymbol` before anything
+/// is read or asked for.
 #[test]
 fn a_preflight_of_an_instrument_with_no_ticker_reads_nothing() {
     let server = SimServer::start(read_sim().unwrap(), Variant::Honest).unwrap();
     let (connector, calls) = connector(&server);
-    assert_eq!(
-        ready(connector.preflight_facts(&id("SPY"))),
-        Err(RobinhoodError::NoSymbol),
-        "SPY's ticker is registered for its asset id, not for the ticker itself"
-    );
-    assert_eq!(
-        ready(connector.equity_quote(&id("SPY"))),
-        Err(RobinhoodError::NoSymbol)
-    );
+    for unregistered in ["QQQ", SPY_ASSET] {
+        assert_eq!(
+            ready(connector.preflight_facts(&id(unregistered))),
+            Err(RobinhoodError::NoSymbol),
+            "{unregistered}"
+        );
+        assert_eq!(
+            ready(connector.equity_quote(&id(unregistered))),
+            Err(RobinhoodError::NoSymbol),
+            "{unregistered}"
+        );
+    }
     assert!(calls.borrow().is_empty());
     assert!(server.calls().unwrap().is_empty());
 }

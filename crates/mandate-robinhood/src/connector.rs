@@ -64,6 +64,13 @@ impl<T: Tools> RobinhoodConnector<T> {
         }
     }
 
+    /// Replaces the registered tickers with `tickers` (DEC-956 item 1): a session opened before
+    /// the run read its confirmed mandate registers the pinned instrument's ticker here, before
+    /// its preflight, and every call from then on names instruments by it.
+    pub fn register(&mut self, tickers: Tickers) {
+        self.tickers = tickers;
+    }
+
     /// The connector after a restart: [`Self::new`] with its `ClientOrderId` → `order_id` map
     /// rebuilt from the account stream's `records`, in journal order (journal spec §9.16,
     /// DEC-860 item 7, DEC-870, DEC-872). A key maps to the one distinct `broker_order_id` its

@@ -12,9 +12,10 @@ use std::sync::OnceLock;
 
 use mandate_alpaca::{Exchange, HttpRequest, Response, TradingTransport, TransportError};
 use mandate_canon::to_canonical;
+use mandate_domain::Environment;
 use mandate_shell::adapters::{Sources, production};
 use mandate_shell::approvers::{Members, members, resolve};
-use mandate_shell::control::ControlRecord;
+use mandate_shell::control::{ControlRecord, Origin};
 use mandate_shell::paper::load_contexts;
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_spec::document::ApproverRef;
@@ -35,6 +36,10 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
         seq,
         event_type: event_type.to_owned(),
         payload: json(payload),
+        origin: Origin {
+            stream_id: "ctl:ws_spy".to_owned(),
+            environment: Environment::Paper,
+        },
     }
 }
 
