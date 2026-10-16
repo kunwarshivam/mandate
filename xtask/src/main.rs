@@ -5296,11 +5296,19 @@ fn mutants_scheduled(
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    external_oracles(&mut test_packages, &workspace_closure(&meta));
+    let closure = workspace_closure(&meta);
+    external_oracles(&mut test_packages, &closure);
     simulator_oracles(&mut test_packages, &harnesses);
-    live_tests_judge_every_mutant(root, &listed, &test_packages)?;
+    let unoptimised = unoptimised_config(&unoptimised_packages(&listed, &closure));
+    live_tests_judge_every_mutant(root, &listed, &test_packages, &unoptimised)?;
     let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, &listed)?)?;
-    let args = mutants_args(diff.path()?, shard, &test_packages, first.as_ref())?;
+    let args = mutants_args(
+        diff.path()?,
+        shard,
+        &test_packages,
+        first.as_ref(),
+        &unoptimised,
+    )?;
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff.file)
@@ -5762,11 +5770,14 @@ impl Drop for TestOrder {
     }
 }
 
+/// The `cargo mutants` command line. `unoptimised` is [`unoptimised_config`]'s, handed to every
+/// cargo invocation of the run, the baseline's and each mutant's, build and test alike.
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
     test_packages: &[&str],
     first: Option<&TestOrder>,
+    unoptimised: &[String],
 ) -> Result<Vec<String>> {
     let mut args = [
         "mutants",
@@ -5801,7 +5812,44 @@ fn mutants_args(
     if let Some(first) = first {
         args.extend(first.args()?);
     }
+    args.extend(
+        unoptimised
+            .iter()
+            .map(|config| format!("--cargo-arg={config}")),
+    );
     Ok(args)
+}
+
+/// Every workspace package a mutant of the run can make cargo rebuild: each package with a mutant,
+/// and each workspace package built on one of them, through any kind of dependency (DEC-931).
+///
+/// [`MUTANT_BUILD_PROFILE`] optimises the job's builds, which a mutant's build pays for in every
+/// crate its edit invalidates. These packages are left unoptimised by [`unoptimised_config`], so
+/// a mutant rebuilds exactly what it rebuilt before, at the cost it had, under
+/// [`MUTANT_BUILD_TIMEOUT`]; every other crate, the dependencies and the workspace layers under the
+/// mutated ones, is built once, optimised, by the pre-flight and never again in the run.
+fn unoptimised_packages(
+    mutants: &BTreeMap<String, usize>,
+    closure: &BTreeMap<String, BTreeSet<String>>,
+) -> BTreeSet<String> {
+    closure
+        .iter()
+        .filter(|(_, built_on)| mutants.keys().any(|mutated| built_on.contains(mutated)))
+        .map(|(package, _)| package.clone())
+        .collect()
+}
+
+/// The `--config` arguments that set `opt-level = 0` for each of `packages`, in the `dev` profile
+/// and in the `test` profile that inherits it: a package override outranks the profile-wide
+/// `opt-level` [`MUTANT_BUILD_PROFILE`] sets, and cargo has no environment form for one.
+fn unoptimised_config(packages: &BTreeSet<String>) -> Vec<String> {
+    packages
+        .iter()
+        .flat_map(|package| {
+            ["dev", "test"]
+                .map(|profile| format!("--config=profile.{profile}.package.{package}.opt-level=0"))
+        })
+        .collect()
 }
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
@@ -5818,7 +5866,9 @@ fn mutants_args(
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
 /// The profile every build of the mutants job runs under: no debuginfo (DEC-519), and optimised at
-/// `opt-level = 1` (DEC-931), for the `dev` profile and for the `test` profile that inherits it.
+/// `opt-level = 1` (DEC-931), for the `dev` profile and for the `test` profile that inherits it,
+/// except in the packages a mutant can make cargo rebuild, which [`unoptimised_config`] keeps at
+/// `opt-level = 0` so that no mutant's build costs more than it did.
 ///
 /// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. Before DEC-850 the baseline built
 /// only the mutated packages, so a low-layer mutant's first build compiled the rest of its tested
@@ -5835,7 +5885,11 @@ const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 /// unmutated baseline's. Unoptimised, `mandate-executor`'s own suite needs more than that on CI's
 /// two-core runner: #1337's baselines ran 648 of its 709 tests in 179.6 seconds, every one passing,
 /// with 346 seconds of test time spent mostly in its property tests, and were cut off, so no
-/// mutant of that crate could be judged at all (DEC-931). An optimised build changes how fast a
+/// mutant of that crate could be judged at all. Its hot code is mostly in the layers under it and
+/// in dependencies (hashing, wide integers, decimals), so optimising those alone runs the same
+/// 709 tests about four times faster, and the mutated packages' rebuild is what it was: optimising
+/// everything ran them faster still but put every `mandate-executor` mutant's build past
+/// [`MUTANT_BUILD_TIMEOUT`] on CI (DEC-931). An optimised build changes how fast a
 /// test runs, not what it checks: cargo's `dev` profile turns debug assertions and overflow checks
 /// on whatever its `opt-level`, and `the_mutants_job_keeps_assertions_and_overflow_checks` holds
 /// that the workspace's `Cargo.toml` turns neither off for `dev` or `test`, so an optimisation
@@ -5907,8 +5961,9 @@ fn live_tests_judge_every_mutant(
     root: &Path,
     mutants: &BTreeMap<String, usize>,
     test_packages: &[&str],
+    unoptimised: &[String],
 ) -> Result<()> {
-    let args = preflight_args(mutants, test_packages);
+    let args = preflight_args(mutants, test_packages, unoptimised);
     eprintln!("    $ cargo {}", args.join(" "));
     let listing =
         mutants_job_cargo_output(root, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
@@ -5917,7 +5972,8 @@ fn live_tests_judge_every_mutant(
 }
 
 /// The pre-flight's `cargo nextest list`: every package with a mutant, whose live tests it counts,
-/// and every package the run tests, whose test binaries it builds (DEC-850).
+/// and every package the run tests, whose test binaries it builds (DEC-850), under the run's own
+/// [`unoptimised_config`], so the run reuses what it built (DEC-931).
 ///
 /// cargo-mutants 27.1.0 builds its unmutated baseline over the packages the run's own mutants are
 /// in, not over `--test-package`, so on its own it leaves the rest of the tested packages' graph to
@@ -5926,7 +5982,11 @@ fn live_tests_judge_every_mutant(
 /// sixty seconds on two attempts. Building them here, with the same profile and the same package
 /// set the mutant's build selects, in the tree [`MUTANTS_IN_PLACE`] builds in, leaves the baseline
 /// and each mutant only what their own edit changes.
-fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> Vec<String> {
+fn preflight_args(
+    mutants: &BTreeMap<String, usize>,
+    test_packages: &[&str],
+    unoptimised: &[String],
+) -> Vec<String> {
     let mut args: Vec<String> = ["nextest", "list", "--locked", "--message-format", "json"]
         .into_iter()
         .map(str::to_owned)
@@ -5942,6 +6002,7 @@ fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> 
             .into_iter()
             .map(|package| format!("--package={package}")),
     );
+    args.extend(unoptimised.iter().cloned());
     args
 }
 
@@ -6064,8 +6125,8 @@ const REFCASES: &str = "mandate-refcases";
 /// seconds and was cut off, so the shard judged no mutant. The cap is not raised to fit it,
 /// because the baseline's tests and a mutant's are each priced at this number in DEC-498's
 /// budget, and an unoptimised executor phase at twice its size leaves no room in ten minutes.
-/// [`MUTANT_BUILD_PROFILE`] builds the job at `opt-level = 1` instead, which shortens the phase
-/// this caps without changing what any test checks (DEC-931).
+/// [`MUTANT_BUILD_PROFILE`] builds what no mutant rebuilds at `opt-level = 1` instead, which
+/// shortens the phase this caps without changing what any test checks (DEC-931).
 ///
 /// Unlike [`MUTANT_BUILD_TIMEOUT`], this one also caps the unmutated baseline's test phase, which
 /// matters because a shard whose mutants are in [`REFCASES`] runs the whole reference harness as
@@ -7654,6 +7715,7 @@ mod tests {
         workspace_closure, workspace_packages,
     };
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
+    use super::{unoptimised_config, unoptimised_packages};
 
     #[test]
     fn finds_plain_comments_but_not_docs_or_literals() {
@@ -8393,6 +8455,68 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only
+    /// what it rebuilt before at the cost it had; the layers under it and every package beside it
+    /// are optimised. Shown on a fixture graph and on the repository's own: a `mandate-executor`
+    /// mutant leaves the reference harness and the shell unoptimised and optimises the journal it
+    /// is built on.
+    #[test]
+    fn only_what_a_mutant_rebuilds_stays_unoptimised() -> Result<()> {
+        let set = |names: &[&str]| -> BTreeSet<String> {
+            names.iter().map(|name| (*name).to_owned()).collect()
+        };
+        let closure = BTreeMap::from([
+            ("a".to_owned(), set(&["a"])),
+            ("b".to_owned(), set(&["a", "b"])),
+            ("c".to_owned(), set(&["a", "b", "c"])),
+            ("d".to_owned(), set(&["a", "d"])),
+        ]);
+        let mutants = BTreeMap::from([("b".to_owned(), 2)]);
+        assert_eq!(
+            unoptimised_packages(&mutants, &closure),
+            set(&["b", "c"]),
+            "the mutated package and the one built on it, not the one under it or beside it"
+        );
+        let config = unoptimised_config(&set(&["b", "c"]));
+        assert_eq!(
+            config,
+            [
+                "--config=profile.dev.package.b.opt-level=0",
+                "--config=profile.test.package.b.opt-level=0",
+                "--config=profile.dev.package.c.opt-level=0",
+                "--config=profile.test.package.c.opt-level=0",
+            ]
+        );
+        let preflight = preflight_args(&mutants, &["c"], &config);
+        assert!(
+            config.iter().all(|arg| preflight.contains(arg)),
+            "the pre-flight builds under the run's configuration, so the run reuses it"
+        );
+        let run = mutants_args("change.diff", None, &["c"], None, &config)?;
+        for arg in &config {
+            assert!(
+                run.contains(&format!("--cargo-arg={arg}")),
+                "every cargo invocation of the run, baseline and mutants, gets {arg}"
+            );
+        }
+        let real = workspace_closure(&metadata_in(&repo_root()?)?);
+        let executor =
+            unoptimised_packages(&BTreeMap::from([("mandate-executor".to_owned(), 1)]), &real);
+        for kept in ["mandate-executor", REFCASES, "mandate-shell"] {
+            assert!(
+                executor.contains(kept),
+                "{kept} is rebuilt by an executor mutant"
+            );
+        }
+        for optimised in ["mandate-journal", "mandate-canon", "mandate-num"] {
+            assert!(
+                !executor.contains(optimised),
+                "{optimised} is under the executor and optimised"
+            );
+        }
+        Ok(())
+    }
+
     /// DEC-850: the pre-flight builds every package the run tests, not only the ones its mutants
     /// are in, so no mutant's build under the sixty-second cap compiles the rest of that graph, as
     /// a `mandate-executor` mutant on #931 did; and it still lists every mutated package, whose
@@ -8409,7 +8533,7 @@ mod tests {
             "mandate-shell",
             "mandate-refcases",
         ];
-        let args = preflight_args(&mutants, &tested);
+        let args = preflight_args(&mutants, &tested, &[]);
         assert_eq!(
             args.get(..2),
             Some(&["nextest".to_owned(), "list".to_owned()][..]),
@@ -8429,7 +8553,11 @@ mod tests {
             ],
             "every mutated package once, then every other tested package once"
         );
-        let lone = preflight_args(&BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]), &[]);
+        let lone = preflight_args(
+            &BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]),
+            &[],
+            &[],
+        );
         assert!(
             lone.contains(&"--package=mandate-journal-pg".to_owned()),
             "a mutated package is listed even if the tested set omits it, so its live tests are \
@@ -8521,7 +8649,7 @@ mod tests {
             fs::read_to_string(&order.0)?,
             test_order_config(&["mandate-shell".to_owned()])
         );
-        let args = mutants_args("change.diff", None, &["mandate-shell"], Some(&order))?;
+        let args = mutants_args("change.diff", None, &["mandate-shell"], Some(&order), &[])?;
         assert_eq!(
             args.windows(2)
                 .filter(|pair| {
@@ -8616,7 +8744,7 @@ mod tests {
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() -> Result<()> {
         let packages = ["mandate-journal", "mandate-refcases"];
-        let unsharded = mutants_args("change.diff", None, &packages, None)?;
+        let unsharded = mutants_args("change.diff", None, &packages, None, &[])?;
         assert!(
             !unsharded
                 .iter()
@@ -8675,6 +8803,7 @@ mod tests {
             }),
             &packages,
             None,
+            &[],
         )?;
         assert_eq!(
             sharded
