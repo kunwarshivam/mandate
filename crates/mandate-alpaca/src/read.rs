@@ -402,6 +402,37 @@ pub(crate) fn judge_age(at: UtcNanos, now: UtcNanos, max_age: Duration) -> Resul
     Ok(())
 }
 
+/// How far ahead of the host clock an IEX quote's own stamp may be at its read (DEC-936): #1355's
+/// paper runs read quotes 2 to 24 ms ahead of a host whose NTP was unreachable.
+pub const IEX_QUOTE_CLOCK_SKEW: Duration = Duration::from_millis(250);
+
+/// Whether `quote` is current at `now` under `max_age`, and how far its stamp was ahead of `now`
+/// (DEC-936). An IEX quote may be stamped up to [`IEX_QUOTE_CLOCK_SKEW`] after `now`, a crypto
+/// quote not at all; further ahead is [`ReadError::AheadOfClock`]. The age is measured from the
+/// later of the stamp and `now`, so a stamp ahead of the clock is aged zero, and older than
+/// `max_age` is [`ReadError::Stale`] as [`judge_age`] says.
+pub(crate) fn judge_quote_age(
+    quote: &LatestQuote,
+    now: UtcNanos,
+    max_age: Duration,
+) -> Result<Duration, ReadError> {
+    let tolerance = match quote.feed {
+        Feed::Iex => IEX_QUOTE_CLOCK_SKEW,
+        Feed::Crypto => Duration::ZERO,
+    };
+    let ahead = nanos(quote.at)
+        .zip(nanos(now))
+        .and_then(|(at, now)| at.checked_sub(now))
+        .ok_or(ReadError::AheadOfClock)?;
+    let skew = u64::try_from(ahead.max(0)).map_err(|_| ReadError::AheadOfClock)?;
+    let skew = Duration::from_nanos(skew);
+    if skew > tolerance {
+        return Err(ReadError::AheadOfClock);
+    }
+    judge_age(quote.at, now.max(quote.at), max_age)?;
+    Ok(skew)
+}
+
 /// Whole nanoseconds since the epoch.
 fn nanos(at: UtcNanos) -> Option<i128> {
     i128::from(at.secs())
