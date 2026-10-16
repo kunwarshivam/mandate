@@ -93,8 +93,20 @@ pub fn int(n: i64) -> Value {
     Value::Int(Int::new(u64::try_from(n).unwrap()).unwrap())
 }
 
-/// One draft of the runtime's on `stream`.
+/// One draft of the runtime's on `stream`, in paper.
 fn draft(
+    stream: &str,
+    event_id: &str,
+    event_type: &str,
+    causation: Option<&str>,
+    payload: Value,
+) -> Vec<u8> {
+    draft_in("paper", stream, event_id, event_type, causation, payload)
+}
+
+/// One draft of the runtime's on `stream`, in `environment`.
+fn draft_in(
+    environment: &str,
     stream: &str,
     event_id: &str,
     event_type: &str,
@@ -103,7 +115,7 @@ fn draft(
 ) -> Vec<u8> {
     let envelope = object(&[
         ("envelope_version", int(1)),
-        ("environment", text("paper")),
+        ("environment", text(environment)),
         ("event_id", text(event_id)),
         ("stream_id", text(stream)),
         ("event_type", text(event_type)),
@@ -380,6 +392,8 @@ impl Journal {
 /// A journal and the approvals the fixture asked, by agent.
 pub struct Fixture {
     pub journal: Journal,
+    /// The artifact store the journal's records name: the mandate documents a live grant reads.
+    pub store: BTreeMap<Digest, Vec<u8>>,
     epochs: BTreeMap<String, u64>,
     pub asked: Vec<Asked>,
     next: u64,
@@ -397,6 +411,7 @@ impl Fixture {
     pub fn new() -> Self {
         Self {
             journal: Journal::default(),
+            store: BTreeMap::new(),
             epochs: BTreeMap::new(),
             asked: Vec::new(),
             next: 0,
@@ -405,6 +420,19 @@ impl Fixture {
 
     fn append(
         &mut self,
+        stream_text: &str,
+        event_type: &str,
+        causation: Option<&str>,
+        payload: Value,
+    ) -> String {
+        self.append_in("paper", stream_text, event_type, causation, payload)
+    }
+
+    /// Appends one event of the runtime's or the control services' to `stream_text` in
+    /// `environment`, and returns its id.
+    pub fn append_in(
+        &mut self,
+        environment: &str,
         stream_text: &str,
         event_type: &str,
         causation: Option<&str>,
@@ -422,7 +450,14 @@ impl Fixture {
             }
         };
         let head = self.journal.head(&s).unwrap().seq;
-        let bytes = draft(stream_text, &id, event_type, causation, payload);
+        let bytes = draft_in(
+            environment,
+            stream_text,
+            &id,
+            event_type,
+            causation,
+            payload,
+        );
         let outcome = self
             .journal
             .append(&s, head, epoch, at(ASKED_AT).at, &[&bytes])
@@ -437,15 +472,22 @@ impl Fixture {
     /// The runtime asks `agent` for `qty` shares at `asked_at`, as DEC-257 item 9 records it.
     pub fn ask(&mut self, agent: &str, qty: &str, asked_at: i64) -> Asked {
         let deadline = asked_at + TIMEOUT_S;
-        let content = content_object(&content(qty, deadline)).unwrap();
+        self.ask_in("paper", agent, &content(qty, deadline))
+    }
+
+    /// The runtime asks `agent` for `request`'s bound order on an `environment` stream.
+    pub fn ask_in(&mut self, environment: &str, agent: &str, request: &RequestContent) -> Asked {
+        let deadline = request.deadline.0;
+        let content = content_object(request).unwrap();
+        let bound = &request.bound;
         let payload = object(&[
-            ("instrument", text("AAPL")),
+            ("instrument", text(&bound.instrument)),
             ("asset_class", text("us_equity")),
             ("side", text("buy")),
-            ("qty", text(qty)),
-            ("limit", text("155")),
+            ("qty", text(&bound.qty.to_string())),
+            ("limit", text(&bound.limit.to_string())),
             ("purpose", text("open")),
-            ("mandate_version", text("v1")),
+            ("mandate_version", text(&bound.mandate_version)),
             ("decided_by", text("rule:big-order")),
             ("deadline", int(deadline)),
             ("timeout_s", int(TIMEOUT_S)),
@@ -453,8 +495,15 @@ impl Fixture {
             ("content", content.clone()),
             ("content_hash", text(&hash_of(&content))),
         ]);
-        let approval = self.append(&agent_stream(agent), "ApprovalRequested", None, payload);
-        self.append(
+        let approval = self.append_in(
+            environment,
+            &agent_stream(agent),
+            "ApprovalRequested",
+            None,
+            payload,
+        );
+        self.append_in(
+            environment,
             &agent_stream(agent),
             "ApprovalDelivered",
             None,

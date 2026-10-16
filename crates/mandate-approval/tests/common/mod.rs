@@ -121,6 +121,7 @@ pub fn ctx() -> AdmissionContext {
         environment: Environment::Paper,
         used_assertions: BTreeSet::new(),
         policy: PolicyOverlay::NONE,
+        live_cli_confirm: None,
     }
 }
 

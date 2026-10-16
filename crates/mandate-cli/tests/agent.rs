@@ -1238,6 +1238,7 @@ fn the_event_id_matches_its_definition() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,

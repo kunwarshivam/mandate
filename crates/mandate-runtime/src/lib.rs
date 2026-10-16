@@ -53,7 +53,7 @@ mod step;
 mod types;
 
 pub use error::{JsonError, RuntimeError};
-pub use mandate_approval::ActorKind;
+pub use mandate_approval::{ActorKind, LiveBroker, LiveScope};
 pub use ports::{
     FlattenPlanner, GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource,
 };

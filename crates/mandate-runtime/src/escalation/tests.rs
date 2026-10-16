@@ -182,6 +182,7 @@ fn view() -> Result<MandateView, String> {
             author: "author".to_owned(),
             timeout_s: 300,
             environment: Environment::Paper,
+            live_cli_confirm: None,
         },
     })
 }

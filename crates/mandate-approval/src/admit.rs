@@ -7,6 +7,7 @@ use std::num::NonZeroU8;
 use mandate_num::Usd;
 
 use crate::content::{BoundAction, ContentHash, RequestContent};
+use crate::live::LiveScope;
 use crate::notify::ApprovalRef;
 use crate::stepup::{AssertionId, Environment, StepUp, StepUpRefusal, judge_step_up};
 use crate::{ApprovalError, RiskClock};
@@ -72,6 +73,9 @@ pub struct AdmissionContext {
     /// The workspace policy overlay current at the response's effective time, which check 7 reads
     /// beside the bound requirement (DEC-173 item 13).
     pub policy: PolicyOverlay,
+    /// The live deployment DEC-923 admits `cli_confirm` for, or `None`, which keeps refusing it on
+    /// `live` (DEC-155 item 4). Read only when `environment` is [`Environment::Live`].
+    pub live_cli_confirm: Option<LiveScope>,
 }
 
 /// The two workspace policy keys check 7 reads (mandate spec §4.3, §6.4), as every

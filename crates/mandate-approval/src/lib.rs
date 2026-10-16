@@ -35,6 +35,7 @@ mod admit;
 mod budget;
 mod content;
 mod drift;
+mod live;
 mod notify;
 mod quiet;
 mod revalidate;
@@ -53,6 +54,10 @@ pub use content::{
     content_hash, content_object,
 };
 pub use drift::{band_bp, within_band};
+pub use live::{
+    LIVE_CLI_CONFIRM_MAX_ORDER_USD, LiveAdmission, LiveBroker, LiveGrant, LiveRefusal, LiveScope,
+    live_cli_confirm,
+};
 pub use notify::{ApprovalRef, GenericText, Notification, notification_for, notification_payload};
 pub use quiet::{Channel, Delivery, QuietHours, deliver_now};
 pub use revalidate::{

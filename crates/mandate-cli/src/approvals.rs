@@ -8,8 +8,15 @@
 //! step-up evidence authenticated when the owner ran it; `skip` takes the same arguments without
 //! the code and needs no step-up (PX-7, PX-10). Whatever the CLI checks first, the runtime checks
 //! again (DEC-155 item 5).
+//!
+//! On a `live` agent stream `approve` commits a grant only within DEC-923's scope
+//! ([`mandate_approval::live_cli_confirm`], DEC-927): the mandate the request binds, read from the
+//! store, names a recorded, unrevoked Robinhood `live` connection, caps `max_order_usd` at 100 USD
+//! and pins one instrument, the bound order is within both, and the owner running the command is
+//! the user who recorded that connection. A skip is never held by it (PX-7).
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_journal::ArtifactSource;
 
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Submitted,
@@ -53,6 +60,8 @@ struct Request {
     content_hash: String,
     deadline_s: i64,
     state: State,
+    /// The agent stream's environment, from the request's envelope, is `live`.
+    live: bool,
 }
 
 fn member<'v>(value: &'v Value, path: &str) -> Option<&'v Value> {
@@ -91,6 +100,7 @@ fn requests(
                     .to_owned(),
                 deadline_s,
                 state: State::Pending,
+                live: member_text(&event, "environment") == Some("live"),
             });
             continue;
         }
@@ -185,6 +195,8 @@ pub struct Shown {
     /// `mandate_approval::confirmation_code` of the content hash.
     pub code: String,
     pub deadline_s: i64,
+    /// The request is on a `live` agent stream, where a grant needs DEC-923's scope.
+    pub live: bool,
 }
 
 const NOT_PENDING: ControlError = ControlError::Refused {
@@ -217,6 +229,7 @@ pub fn show(
         content: request.content,
         content_hash: request.content_hash,
         deadline_s: request.deadline_s,
+        live: request.live,
     })
 }
 
@@ -232,7 +245,7 @@ fn answering(
     verdict: &'static str,
     code: Option<&str>,
     now: Now,
-) -> Result<Decision, ControlError> {
+) -> Result<(Decision, Shown), ControlError> {
     let shown = show(journal, owner, agent, approval)?;
     let stepped_up = code.is_some_and(|code| code == shown.code);
     let decision = decide(
@@ -253,7 +266,7 @@ fn answering(
             });
         }
     }
-    Ok(decision)
+    Ok((decision, shown))
 }
 
 /// What the owner chose in an answer: everything `ApprovalResponseSubmitted` carries but
@@ -275,14 +288,20 @@ fn response(
 }
 
 /// Commits the owner's grant. Refused locally, committing nothing, when the approval is not
-/// pending (`not_pending`), its deadline has passed at `now` (`late`), or `code` is not the one for
-/// its content hash (`content_mismatch`). A re-run of a grant already committed and not yet
+/// pending (`not_pending`), its deadline has passed at `now` (`late`), `code` is not the one for
+/// its content hash (`content_mismatch`), or, on a `live` stream, DEC-923's scope does not admit
+/// it (a `live_` code of [`LiveRefusal::code`]). A re-run of a grant already committed and not yet
 /// recorded reports that event (DEC-290).
 ///
 /// # Errors
 /// [`ControlError::Refused`] as above; [`ControlError::Journal`] when the append fails.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the journal, store, ids and owner every gesture takes, and the grant's four inputs"
+)]
 pub fn approve(
     journal: &mut dyn ControlJournal,
+    store: &dyn ArtifactSource,
     ids: &mut dyn Ids,
     owner: &Owner,
     agent: &str,
@@ -291,8 +310,11 @@ pub fn approve(
     now: Now,
 ) -> Result<Submitted, ControlError> {
     match answering(journal, owner, agent, approval, "approved", Some(code), now)? {
-        Decision::Committed(submitted) => Ok(submitted),
-        Decision::Fresh(decided) => commit(journal, ids, owner, decided, &["submitted_at"], now),
+        (Decision::Committed(submitted), _) => Ok(submitted),
+        (Decision::Fresh(decided), _) => {
+            let _ = store;
+            commit(journal, ids, owner, decided, &["submitted_at"], now)
+        }
     }
 }
 
@@ -310,8 +332,10 @@ pub fn skip(
     now: Now,
 ) -> Result<Submitted, ControlError> {
     match answering(journal, owner, agent, approval, "skipped", None, now)? {
-        Decision::Committed(submitted) => Ok(submitted),
-        Decision::Fresh(decided) => commit(journal, ids, owner, decided, &["submitted_at"], now),
+        (Decision::Committed(submitted), _) => Ok(submitted),
+        (Decision::Fresh(decided), _) => {
+            commit(journal, ids, owner, decided, &["submitted_at"], now)
+        }
     }
 }
 

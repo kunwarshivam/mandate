@@ -238,6 +238,7 @@ fn an_intent_reads_the_version_its_request_bound() -> Result<(), String> {
             author: "u0".to_owned(),
             timeout_s: 300,
             environment: Environment::Paper,
+            live_cli_confirm: None,
         },
         0,
     )?;
@@ -284,6 +285,7 @@ fn settings() -> ApprovalSettings {
         author: "u0".to_owned(),
         timeout_s: 300,
         environment: Environment::Paper,
+        live_cli_confirm: None,
     }
 }
 
