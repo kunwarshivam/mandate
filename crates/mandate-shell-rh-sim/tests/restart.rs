@@ -293,14 +293,17 @@ fn stages(now: &str, bridge: &Rc<RobinhoodBridge<Loopback>>, store: Vec<u8>) -> 
     (stages, setup)
 }
 
-/// One run at `now` over `bridge`, on `journal` when it is a restart.
+/// One run at `now` over `bridge`, on `journal` when it is a restart, and allowed to open a new
+/// cycle on an agent stream that already carries an intent only when `new_cycle` (TI-12).
 fn run(
     now: &str,
     bridge: &Rc<RobinhoodBridge<Loopback>>,
     journal: Option<Box<dyn mandate_shell::stages::JournalWriter>>,
+    new_cycle: bool,
 ) -> (Result<Report, ShellError>, Stages) {
     let (observation, output, bytes) = observed(now);
-    let (mut stages, setup) = stages(now, bridge, bytes);
+    let (mut stages, mut setup) = stages(now, bridge, bytes);
+    setup.new_cycle = new_cycle;
     if let Some(journal) = journal {
         stages.journal = journal;
     }
@@ -382,7 +385,7 @@ fn count(calls: &[String], tool: &str) -> usize {
 /// `Unknown` on the account stream, and the stages holding the journal the restart folds.
 fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
     let first = bridge(server, line, &[]);
-    let (outcome, stages) = run(FIRST, &first, None);
+    let (outcome, stages) = run(FIRST, &first, None, true);
     let rows = account_rows(&stages);
     let [order] = submitted(&rows)
         .try_into()
@@ -414,7 +417,10 @@ fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
 /// `order_id`. The broker holds one order and saw one place: nothing was sent again. The
 /// reconciliation that follows reads the broker's working order, whose record carries no key of
 /// ours (U-R2), and matches it by that journaled `order_id` (DEC-956 item 2): the adopted order
-/// stays adopted, is never marked `Unknown` again, and is never taken for external activity.
+/// stays adopted, is never marked `Unknown` again, and is never taken for external activity. The
+/// restart opens no new cycle: a production run on an account with a working order is refused at
+/// its preflight (DEC-470 item 1), which this harness does not run, and the binding gate is not
+/// yet handed the working order (DEC-956 item 4).
 #[test]
 fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
     let server = broker(true);
@@ -432,7 +438,7 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
 
     let records = folded(&account_rows(&first));
     let restart = bridge(&server, Line::Up, &records);
-    let (outcome, stages) = run(RESTART, &restart, Some(first.journal));
+    let (outcome, stages) = run(RESTART, &restart, Some(first.journal), false);
 
     let rows = account_rows(&stages);
     let adopted = states(&rows);
@@ -496,7 +502,7 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
 
     let records = folded(&account_rows(&first));
     let restart = bridge(&server, Line::Up, &records);
-    let (outcome, stages) = run(RESTART, &restart, Some(first.journal));
+    let (outcome, stages) = run(RESTART, &restart, Some(first.journal), true);
 
     let rows = account_rows(&stages);
     assert!(
