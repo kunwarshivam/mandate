@@ -51,7 +51,7 @@ pub struct PreflightFacts {
 impl<T: Tools> RobinhoodConnector<T> {
     /// The agentic account's snapshot: `get_portfolio`, `get_equity_positions` and
     /// `get_equity_orders`, each through [`Self::read_sole_member`] with no filter but the
-    /// recorded account, on the `Ordinary` budget. A refusal of any read is the snapshot's
+    /// recorded account, each a `Read` on the ordinary budget (DEC-959 item 2). A refusal of any read is the snapshot's
     /// refusal, unchanged; a record that is not exactly its assumed shape is
     /// [`RobinhoodError::Unreadable`] with the read's code (DEC-902). No order, cancel or exit
     /// waits on it (`AGENTS.md` rule 13).
@@ -93,6 +93,19 @@ impl<T: Tools> RobinhoodConnector<T> {
         symbol: &InstrumentId,
     ) -> Result<PreflightFacts, RobinhoodError> {
         let account = self.account_snapshot().await?;
+        self.preflight_facts_on(account, symbol).await
+    }
+
+    /// The preflight's reads on the account snapshot `account` the same run's lapse already read
+    /// (DEC-959 item 1): `get_equity_tradability` for `symbol` through
+    /// [`Self::read_sole_member`], behind its own account check, then `get_equity_quotes`, as
+    /// [`Self::preflight_facts`] reads them, and no account figure again. Whether `account` is
+    /// fresh enough to stand for the account now is the caller's judgment, never this read's.
+    pub async fn preflight_facts_on(
+        &self,
+        account: AccountSnapshot,
+        symbol: &InstrumentId,
+    ) -> Result<PreflightFacts, RobinhoodError> {
         let mut filters = Map::new();
         filters.insert(
             "symbol".to_owned(),
@@ -113,26 +126,13 @@ impl<T: Tools> RobinhoodConnector<T> {
         Ok(PreflightFacts { account, quote })
     }
 
-    /// The preflight's reads on the account snapshot `account` the same run's lapse already read
-    /// (DEC-959 item 1): `get_equity_tradability` for `symbol` through
-    /// [`Self::read_sole_member`], behind its own account check, then `get_equity_quotes`, as
-    /// [`Self::preflight_facts`] reads them, and no account figure again. Whether `account` is
-    /// fresh enough to stand for the account now is the caller's judgment, never this read's.
-    pub async fn preflight_facts_on(
-        &self,
-        account: AccountSnapshot,
-        symbol: &InstrumentId,
-    ) -> Result<PreflightFacts, RobinhoodError> {
-        let _ = account;
-        self.preflight_facts(symbol).await
-    }
-
     /// `get_equity_quotes` for the one symbol (DEC-902 item 7): no account read, because the
     /// contract names no account for it and its answer is about none, so the account check does
-    /// not run before it. Called on the `Ordinary` budget with exactly `{"symbols": [symbol]}`,
-    /// and answered by one uncrossed record for the symbol; the answer's `structuredContent`
-    /// holds its `quotes` member and nothing else. The runner reads it again at the opening's
-    /// cross-check (DEC-945), so the ask it compares is the broker's latest, not the preflight's.
+    /// not run before it. Called as a `Read` on the ordinary budget with exactly
+    /// `{"symbols": [symbol]}`, and answered by one uncrossed record for the symbol; the answer's
+    /// `structuredContent` holds its `quotes` member and nothing else. The runner reads it again
+    /// at the opening's cross-check (DEC-945), so the ask it compares is the broker's latest, not
+    /// the preflight's.
     ///
     /// # Errors
     /// [`RobinhoodError::Unreadable`] (`quotes`) for a failed call, a refused one, and any
@@ -145,7 +145,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         );
         let answer = self
             .tools
-            .call_tool(CallClass::Ordinary, QUOTES, &Value::Object(arguments))
+            .call_tool(CallClass::Read, QUOTES, &Value::Object(arguments))
             .await;
         let unreadable = || RobinhoodError::Unreadable { code: "quotes" };
         let content = structured(answer).ok_or_else(unreadable)?;

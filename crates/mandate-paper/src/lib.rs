@@ -923,7 +923,9 @@ pub fn live_admission(
 /// 1. the shell's fold before credentials ([`checked_before_credentials`]): the walk, the
 ///    document, every V-rule but V-002, and the admission's build, `--confirm-live` and host;
 /// 2. the one [`Ports::connect`], with the run's `dial`: the login and the MCP session;
-/// 3. the agentic account's snapshot ([`Session::account_snapshot`]), the account reads alone;
+/// 3. the agentic account's snapshot ([`Session::account_snapshot`]), the account reads alone,
+///    with the run clock read just before it is sent, kept for the run's preflight (DEC-959
+///    item 1);
 /// 4. the door's lapse on that snapshot and the account stream's rows ([`lapse_read`]);
 /// 5. the shell's full fold, with the door's condition now held (`DoorChecks::Passed`).
 ///
@@ -950,6 +952,7 @@ fn live_start<P: Ports>(
 ) -> Result<Started<P::Session>, PaperError> {
     checked_before_credentials(records, store, facts).map_err(PaperError::Deployment)?;
     let session = ports.connect(connection, Some(dial))?;
+    let sent = ports.pause().now();
     let snapshot = session
         .account_snapshot()
         .map_err(refused(Stage::Reconcile))?;
@@ -965,7 +968,7 @@ fn live_start<P: Ports>(
     Ok(Started {
         confirmed,
         session,
-        lapse: None,
+        lapse: snapshot.map(|account| LapseSnapshot { account, sent }),
     })
 }
 

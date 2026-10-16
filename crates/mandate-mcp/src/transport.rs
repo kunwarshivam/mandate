@@ -97,6 +97,7 @@ pub struct McpTransport {
     endpoint: PinnedEndpoint,
     max_answer_bytes: usize,
     budget: Mutex<RateBudget>,
+    read_wait: Duration,
     clock: Box<dyn Monotonic>,
     session: Mutex<Option<HeaderValue>>,
     next_id: AtomicU64,
@@ -118,6 +119,7 @@ impl McpTransport {
             endpoint,
             max_answer_bytes: config.max_answer_bytes,
             budget: Mutex::new(budget),
+            read_wait: config.read_wait,
             clock,
             session: Mutex::new(None),
             next_id: AtomicU64::new(1),
@@ -143,7 +145,7 @@ impl McpTransport {
         method: &str,
         params: &Value,
     ) -> Result<ServerText, McpError> {
-        self.admit(class)?;
+        self.admit(class).await?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let response = self
             .post(frame::request_body(Some(id), method, params))
@@ -173,7 +175,7 @@ impl McpTransport {
         method: &str,
         params: &Value,
     ) -> Result<(), McpError> {
-        self.admit(class)?;
+        self.admit(class).await?;
         let response = self.post(frame::request_body(None, method, params)).await?;
         match response.status() {
             StatusCode::ACCEPTED => Ok(()),
@@ -183,12 +185,33 @@ impl McpTransport {
         }
     }
 
-    fn admit(&self, class: CallClass) -> Result<(), McpError> {
-        let now = self.clock.elapsed();
-        self.budget
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .try_acquire(class, now)
+    /// Takes one token for a call of `class`. A [`CallClass::Read`] the ordinary bucket refuses
+    /// waits for that bucket's next token when it is due within [`TransportConfig::read_wait`]
+    /// of the call, and asks again; one due later is refused at once, so no read is ever
+    /// refused after waiting longer than the bound (DEC-959 item 2). Every other class is
+    /// admitted or refused at once, so no opening, exit or protective order ever waits, and the
+    /// budget is never held across a wait.
+    async fn admit(&self, class: CallClass) -> Result<(), McpError> {
+        let deadline = self.clock.elapsed().checked_add(self.read_wait);
+        loop {
+            let now = self.clock.elapsed();
+            let wait = {
+                let mut budget = self.budget.lock().unwrap_or_else(PoisonError::into_inner);
+                let refused = match budget.try_acquire(class, now) {
+                    Ok(()) => return Ok(()),
+                    Err(refused) => refused,
+                };
+                if class != CallClass::Read {
+                    return Err(refused);
+                }
+                let wait = budget.read_token_in(now);
+                if !due_by(now, wait, deadline) {
+                    return Err(refused);
+                }
+                wait
+            };
+            self.clock.pause(wait).await;
+        }
     }
 
     /// One `POST`, carrying the session the server assigned, if any, and keeping the one its
@@ -244,6 +267,14 @@ impl McpTransport {
     fn session(&self) -> std::sync::MutexGuard<'_, Option<HeaderValue>> {
         self.session.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// Whether a token due `wait` after `now` comes by `deadline`, the deadline included; a time
+/// past the clock's range never does.
+fn due_by(now: Duration, wait: Duration, deadline: Option<Duration>) -> bool {
+    now.checked_add(wait)
+        .zip(deadline)
+        .is_some_and(|(due, deadline)| due <= deadline)
 }
 
 /// The HTTP client every exchange of this crate uses: no redirect followed, no proxy, `https`

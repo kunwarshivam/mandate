@@ -8,6 +8,8 @@ use std::time::Duration;
 use mandate_robinhood::AccountSnapshot;
 use mandate_time::UtcNanos;
 
+use crate::quote::nanos;
+
 /// The agentic account's snapshot the live start's lapse counted, and the run clock read just
 /// before its first read was sent. Only the run that read it holds it: `live_start` returns it
 /// beside the session it was read through, and the run hands it to that session's preflight
@@ -23,7 +25,10 @@ impl LapseSnapshot {
     /// included; [`None`] when it is older, or when the clock ran backwards and its age cannot be
     /// judged (rule 3), so the preflight reads the account again.
     pub fn fresh(&self, now: UtcNanos, max_age: Duration) -> Option<&AccountSnapshot> {
-        let _ = (now, max_age);
-        None
+        let age = nanos(now)
+            .zip(nanos(self.sent))
+            .and_then(|(now, sent)| now.checked_sub(sent))
+            .and_then(|age| u64::try_from(age).ok())?;
+        (Duration::from_nanos(age) <= max_age).then_some(&self.account)
     }
 }

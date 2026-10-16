@@ -27,8 +27,8 @@ pub enum AccountRead {
 }
 
 impl<T: Tools> RobinhoodConnector<T> {
-    /// The agentic account's own record from `get_accounts` (DEC-875 item 1), on the `Ordinary`
-    /// budget. Every record must carry a text `account_number` and a boolean `agentic_allowed`,
+    /// The agentic account's own record from `get_accounts` (DEC-875 item 1), a `Read` on the
+    /// ordinary budget (DEC-959 item 2). Every record must carry a text `account_number` and a boolean `agentic_allowed`,
     /// or the list is [`RobinhoodError::Unreadable`]. Exactly one record may be agentic, and it
     /// must be the only one under the recorded number: more than one agentic record, or the
     /// number listed twice, is [`RobinhoodError::AmbiguousAgenticAccount`]; otherwise a recorded
@@ -40,7 +40,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         let arguments = Value::Object(Map::new());
         let answer = self
             .tools
-            .call_tool(CallClass::Ordinary, ACCOUNTS, &arguments)
+            .call_tool(CallClass::Read, ACCOUNTS, &arguments)
             .await;
         let mut content = structured(answer).ok_or(unreadable.clone())?;
         let Some(Value::Array(list)) = content.remove("accounts") else {
@@ -71,7 +71,8 @@ impl<T: Tools> RobinhoodConnector<T> {
             .ok_or(RobinhoodError::NoAgenticAccount)
     }
 
-    /// One read of the agentic account, on the `Ordinary` budget (DEC-875 items 2 and 3).
+    /// One read of the agentic account, a `Read` on the ordinary budget (DEC-875 items 2 and 3,
+    /// DEC-959 item 2).
     /// `filters` are the tool's other arguments; an `account_number` among them that is not the
     /// recorded number as text is [`RobinhoodError::OtherAccount`], with nothing called. Any other
     /// key the tool does not list is [`RobinhoodError::UnlistedFilter`], with nothing called
@@ -133,7 +134,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         arguments.insert(NUMBER.to_owned(), Value::String(recorded.to_owned()));
         let answer = self
             .tools
-            .call_tool(CallClass::Ordinary, tool, &Value::Object(arguments))
+            .call_tool(CallClass::Read, tool, &Value::Object(arguments))
             .await;
         let mut content = structured(answer).ok_or(unreadable.clone())?;
         if sole_member && member.is_some() && content.len() != 1 {

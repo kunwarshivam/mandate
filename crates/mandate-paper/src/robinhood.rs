@@ -473,8 +473,10 @@ pub fn robinhood_reads<T: Tools>(
     now: UtcNanos,
     max_age: Duration,
 ) -> Result<PreflightFacts, Cause> {
-    let _ = (earlier, now, max_age);
-    bridge.preflight_facts(symbol)
+    match earlier.and_then(|kept| kept.fresh(now, max_age)) {
+        Some(account) => bridge.preflight_facts_on(account.clone(), symbol),
+        None => bridge.preflight_facts(symbol),
+    }
 }
 
 /// `sources` carrying `bridge`.

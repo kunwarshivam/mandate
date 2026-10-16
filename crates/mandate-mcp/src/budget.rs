@@ -66,6 +66,18 @@ impl TokenBucket {
         }
     }
 
+    /// How long from `now` until this bucket holds a token: zero when it holds one, otherwise the
+    /// end of the refill period that began at the anchor.
+    fn token_in(&mut self, now: Duration) -> Duration {
+        self.refill(now);
+        if self.tokens > 0 {
+            return Duration::ZERO;
+        }
+        self.anchor
+            .saturating_add(self.config.refill_every)
+            .saturating_sub(now)
+    }
+
     /// Adds the whole refill periods since the anchor, and restarts the period once full. A
     /// clock that went backwards adds nothing.
     fn refill(&mut self, now: Duration) {
@@ -130,7 +142,6 @@ impl RateBudget {
     /// it holds one now. A read the bucket refused waits this long before it asks again (DEC-959
     /// item 2). A clock that went backwards past the bucket's anchor counts the whole way back.
     pub fn read_token_in(&mut self, now: Duration) -> Duration {
-        let _ = now;
-        Duration::MAX
+        self.ordinary.token_in(now)
     }
 }
