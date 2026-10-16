@@ -61,7 +61,9 @@ impl<T: Tools> Connector for RobinhoodShellConnector<T> {
 
     /// One request, answered as `RobinhoodConnector::call` answers it. A request made while the
     /// reconciler holds the connector is `NotSent` (`connector_busy`) with nothing called; the
-    /// stages run one at a time, so it marks a wiring fault, never a broker answer.
+    /// stages run one at a time, so it marks a wiring fault, never a broker answer. It blocks on
+    /// the bridge's runtime, so it is called from synchronous code only, never from inside another
+    /// tokio runtime, as `AlpacaConnector::call` is.
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let mut connector =
             self.bridge
