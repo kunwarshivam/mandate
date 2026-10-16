@@ -162,8 +162,9 @@ where
 /// The fresh IEX quote an asked opening's wake reads before it hands the owner's answers to the
 /// runtime (DEC-943 item 2): one GET through [`DataClient::latest_quote`], the preflight's own
 /// read, so its age bound is the rule set's `iex_quote_max_age_s` and its skew tolerance at the
-/// read DEC-936's 250 ms; then the shell judge's own checks of a quote: the reviewed symbol, the
-/// IEX feed, and a bid not above the ask. Nothing else is read.
+/// read DEC-936's 250 ms, and a quote of another symbol is the client's own refusal; then the
+/// shell judge's own checks of a quote: the IEX feed, and a bid not above the ask. Nothing else
+/// is read.
 ///
 /// # Errors
 /// [`Cause::Absent`] when the read fails, is stale or stamped past the tolerance, or the quote
@@ -179,7 +180,7 @@ where
     let quote = runtime
         .block_on(data.latest_quote(symbol, artifacts.quote_max_age))
         .map_err(|_| absent(FRESH_QUOTE))?;
-    if quote.instrument != *symbol || quote.feed != Feed::Iex || quote.bid > quote.ask {
+    if quote.feed != Feed::Iex || quote.bid > quote.ask {
         return Err(absent(FRESH_QUOTE));
     }
     Ok(quote)
