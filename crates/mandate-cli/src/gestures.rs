@@ -38,12 +38,38 @@ pub enum AgentCommand {
     Deploy(DeployArgs),
 }
 
+/// Who runs a gesture: DEC-527's owner flags and the environment the owner acts in (DEC-925).
+#[derive(Debug, Clone, Args)]
+pub struct GestureOwnerArgs {
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    /// `paper`, the default, or `live`: the environment the owner acts in. A `live` gesture is
+    /// admitted only for a `live` mandate on a Robinhood connection the owner recorded through
+    /// `connection record` and has not spent (DEC-529 item 3).
+    #[arg(long, value_name = "ENV", default_value = "paper")]
+    pub environment: String,
+}
+
+impl GestureOwnerArgs {
+    /// The owner these flags name, in the environment `--environment` names.
+    ///
+    /// # Errors
+    /// [`ControlError::Refused`] with `environment_invalid` for any environment but `paper` or
+    /// `live`, then [`OwnerArgs::owner`]'s.
+    pub fn owner(&self) -> Result<Owner, ControlError> {
+        if self.environment == "paper" {
+            return self.owner.owner();
+        }
+        Err(ControlError::Unimplemented { story: "K1b" })
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct CreateArgs {
     /// The mandate document, a JSON file the owner wrote.
     pub file: PathBuf,
     #[command(flatten)]
-    pub owner: OwnerArgs,
+    pub owner: GestureOwnerArgs,
     #[command(flatten)]
     pub target: JournalArgs,
 }
@@ -56,7 +82,7 @@ pub struct ConfirmArgs {
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
     #[command(flatten)]
-    pub owner: OwnerArgs,
+    pub owner: GestureOwnerArgs,
     #[command(flatten)]
     pub target: JournalArgs,
 }
@@ -72,7 +98,7 @@ pub struct DeployArgs {
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
     #[command(flatten)]
-    pub owner: OwnerArgs,
+    pub owner: GestureOwnerArgs,
     #[command(flatten)]
     pub target: JournalArgs,
 }

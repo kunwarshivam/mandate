@@ -46,6 +46,28 @@ pub(crate) fn paper_only(owner: &Owner) -> Result<(), ControlError> {
     }
 }
 
+/// Whether `owner` may commit a gesture on `document`, a mandate (DEC-925; DEC-529 item 3; mandate
+/// spec V-001). A `paper` owner takes only a `paper` document. A `live` owner takes only a `live`
+/// document whose `connection_id` the control stream last records as established, not revoked
+/// since, by `owner.user` through the CLI: broker `robinhood`, environment `live`, a margin
+/// attestation, and `cli_confirm` step-up; and only while the record is unspent, with no
+/// `FillApplied` or `LateFillApplied` on the account stream it binds (DEC-910 item 3). It reads
+/// and writes nothing for a `paper` owner.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `mandate_not_paper` for a `paper` owner and any other document;
+/// `paper_only` for an owner neither `paper` nor `live`, and for a `live` owner and any other
+/// document or connection; `connection_spent` for a spent record. [`ControlError::Journal`] when
+/// a stream cannot be read.
+pub fn admitted(
+    journal: &dyn ControlJournal,
+    owner: &Owner,
+    document: &Value,
+) -> Result<(), ControlError> {
+    let _ = (journal, owner, document);
+    Err(ControlError::Unimplemented { story: "K1b" })
+}
+
 /// One control-stream event as a command reads it.
 pub(crate) struct Row {
     pub(crate) seq: u64,
