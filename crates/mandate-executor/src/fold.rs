@@ -815,9 +815,6 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
-    if let Some(broker_order_id) = optional_text(payload, "broker_order_id") {
-        detail.broker_order_ids.insert(broker_order_id.to_owned());
-    }
     if let Some(reported) = optional_qty(payload, "filled_qty")? {
         detail.reported_filled = detail.reported_filled.max(Some(reported));
     }

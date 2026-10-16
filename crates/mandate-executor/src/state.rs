@@ -194,10 +194,6 @@ pub(crate) struct OrderDetail {
     /// left to cover, from the `ProtectionChanged placed` or `unprotected_end` that names it as
     /// `bracket`. Each entry is protected once (§5.4, DEC-346 item 4).
     pub(crate) bracket_placed: bool,
-    /// Every broker order id the order's version-2 `OrderStateChanged` records carried (journal
-    /// spec §9.16, DEC-869). Exactly one is what a broker record naming no key of ours is matched
-    /// by (DEC-956 item 2); none or two match nothing.
-    pub(crate) broker_order_ids: BTreeSet<String>,
 }
 
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
