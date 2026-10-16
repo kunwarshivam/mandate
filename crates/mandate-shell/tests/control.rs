@@ -7,14 +7,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_num::Usd;
 use mandate_shell::control::{
-    ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, RunFacts, confirmed_version,
+    Build, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, DoorChecks,
+    LiveAdmission, McpHost, RunFacts, confirmed_version,
 };
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::{Mandate, Violation};
 use mandate_time::Date;
+use proptest::prelude::*;
 
 const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
 const AGENT: &str = "agent_spy";
@@ -116,6 +119,12 @@ impl Stream {
         confirmed_version(&self.records, &self.store, &run())
     }
 
+    /// Phase 1 for a run that supplies `live` as DEC-924 item 1's admission.
+    fn read_admitting(&self, live: LiveAdmission) -> Result<ConfirmedVersion, Refusal> {
+        let run = RunFacts { live, ..run() };
+        confirmed_version(&self.records, &self.store, &run)
+    }
+
     fn refused(&self) -> Option<Refusal> {
         self.read().err()
     }
@@ -129,6 +138,7 @@ fn run() -> RunFacts {
             workspace_users: 1,
             approver_users: 1,
         },
+        live: LiveAdmission::refusing(),
     }
 }
 
@@ -301,5 +311,184 @@ fn every_deployment_refusal_has_its_own_code() {
     ];
     for (refusal, code) in rows {
         assert_eq!(refusal.code(), code, "{refusal:?}");
+    }
+}
+
+/// A stand-in for the pinned Robinhood host constant the runner hands the shell (DEC-924 item 3):
+/// a fixture name that reaches nothing, never Robinhood's own host.
+const PINNED: &str = "mcp.pinned.example";
+
+/// Every one of DEC-924 item 1's four conditions holding.
+fn admitted() -> LiveAdmission {
+    LiveAdmission {
+        build: Build::Live,
+        confirmation: Confirmation::ConfirmLive,
+        door: DoorChecks::Passed,
+        host: McpHost {
+            dialed: Some(PINNED.to_owned()),
+            pinned: Some(PINNED),
+        },
+    }
+}
+
+/// The E7-7 mandate deployed as `live`, its connection established as a live Robinhood one, so
+/// V-001 agrees and the live refusal is the only one the stream can draw.
+fn live_deployment() -> Stream {
+    let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
+    let established = format!(
+        r#"{{"broker":"robinhood","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#
+    );
+    Stream::of(&live, &envelope()).then("ConnectionEstablished", &established)
+}
+
+/// DEC-924 item 1: a live deployment whose run holds all four conditions is admitted to the fold,
+/// which confirms it on its live connection; the default every caller passes still refuses `Live`.
+#[test]
+fn a_live_deployment_holding_all_four_conditions_is_admitted() {
+    let stream = live_deployment();
+    assert_eq!(
+        stream.refused(),
+        Some(Refusal::Live),
+        "the refusing default"
+    );
+    let input = stream.read_admitting(admitted());
+    let input = input.expect("all four conditions admit");
+    assert_eq!(input.version(), stream.version);
+    assert_eq!(input.mandate().environment, Environment::Live);
+    assert_eq!(
+        input.context().connection_environment,
+        Some(Environment::Live)
+    );
+}
+
+/// DEC-924 item 2: any one condition missing refuses `Live`, each in turn, the host by absence,
+/// by a different or empty name, by case and by a build that pins none.
+#[test]
+fn any_one_condition_missing_refuses_live() {
+    let stream = live_deployment();
+    let host = |dialed: Option<&str>, pinned: Option<&'static str>| McpHost {
+        dialed: dialed.map(str::to_owned),
+        pinned,
+    };
+    let missing = [
+        (
+            "the default build",
+            LiveAdmission {
+                build: Build::Default,
+                ..admitted()
+            },
+        ),
+        (
+            "no --confirm-live",
+            LiveAdmission {
+                confirmation: Confirmation::Absent,
+                ..admitted()
+            },
+        ),
+        (
+            "the door not passed",
+            LiveAdmission {
+                door: DoorChecks::NotPassed,
+                ..admitted()
+            },
+        ),
+        (
+            "no host dialed",
+            LiveAdmission {
+                host: host(None, Some(PINNED)),
+                ..admitted()
+            },
+        ),
+        (
+            "another host",
+            LiveAdmission {
+                host: host(Some("mcp.other.example"), Some(PINNED)),
+                ..admitted()
+            },
+        ),
+        (
+            "the host in capitals",
+            LiveAdmission {
+                host: host(Some("MCP.PINNED.EXAMPLE"), Some(PINNED)),
+                ..admitted()
+            },
+        ),
+        (
+            "no host pinned",
+            LiveAdmission {
+                host: host(Some(PINNED), None),
+                ..admitted()
+            },
+        ),
+        (
+            "an empty pin",
+            LiveAdmission {
+                host: host(Some(""), Some("")),
+                ..admitted()
+            },
+        ),
+        ("every one", LiveAdmission::refusing()),
+    ];
+    for (case, live) in missing {
+        assert!(!live.admits(), "{case}");
+        assert_eq!(
+            stream.read_admitting(live).err(),
+            Some(Refusal::Live),
+            "{case}"
+        );
+    }
+    assert!(admitted().admits());
+}
+
+/// The dialed hosts the property draws: index 1 is the pinned name itself, the others differ from
+/// every non-empty pin.
+const DIALED: [Option<&str>; 6] = [
+    None,
+    Some(PINNED),
+    Some(""),
+    Some("MCP.PINNED.EXAMPLE"),
+    Some("mcp.pinned.example."),
+    Some("mcp.other.example"),
+];
+/// The pins the property draws: index 1 is the only usable one.
+const PINS: [Option<&'static str>; 3] = [None, Some(PINNED), Some("")];
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 1024,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    })]
+
+    /// DEC-924 items 1 and 2 over the 144 combinations, drawn 1024 times so the one admitted
+    /// combination is all but certain to be drawn: a live deployment is admitted exactly when the
+    /// independent oracle — the drawn indices alone, never `admits` or a string comparison — finds
+    /// no condition missing, and refused `Live` otherwise; a paper deployment's answer is the
+    /// same whatever the run supplies.
+    #[test]
+    fn no_combination_missing_a_condition_is_admitted(
+        live_build in any::<bool>(),
+        confirmed in any::<bool>(),
+        passed in any::<bool>(),
+        dialed in 0..DIALED.len(),
+        pinned in 0..PINS.len(),
+    ) {
+        let live = LiveAdmission {
+            build: if live_build { Build::Live } else { Build::Default },
+            confirmation: if confirmed { Confirmation::ConfirmLive } else { Confirmation::Absent },
+            door: if passed { DoorChecks::Passed } else { DoorChecks::NotPassed },
+            host: McpHost { dialed: DIALED[dialed].map(str::to_owned), pinned: PINS[pinned] },
+        };
+        let missing = [!live_build, !confirmed, !passed, dialed != 1 || pinned != 1];
+        let expected_admitted = missing.iter().all(|m| !m);
+        prop_assert_eq!(live.admits(), expected_admitted);
+        let answer = live_deployment().read_admitting(live.clone());
+        if expected_admitted {
+            prop_assert!(answer.is_ok(), "{:?}", answer.err());
+        } else {
+            prop_assert_eq!(answer.err(), Some(Refusal::Live));
+        }
+        let paper = Stream::deployed();
+        prop_assert_eq!(paper.read_admitting(live), paper.read());
     }
 }
