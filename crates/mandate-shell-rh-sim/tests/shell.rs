@@ -29,13 +29,13 @@ use mandate_mcp::{ALLOWLIST, CallClass, McpError};
 use mandate_num::{SignedQty, Usd};
 use mandate_rh_sim::{Event, Fault, Garble, Session, Sim, SimServer, State, Variant};
 use mandate_robinhood::{Quote, RobinhoodConnector, Tools, ref_id, robinhood_profile};
+use mandate_runtime::AgentId as RuntimeAgentId;
 use mandate_shell::Cause;
 use mandate_shell::adapters::{CoreExecutor, Sources, robinhood_stages};
 use mandate_shell::robinhood::{
     ACCOUNT_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
 };
 use mandate_shell::stages::{Connector, Reconciler};
-use mandate_runtime::AgentId as RuntimeAgentId;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 use tokio::runtime::{Builder, Runtime};
@@ -620,7 +620,10 @@ fn the_bridges_snapshot_reads_the_agentic_account_alone() {
         .unwrap()
         .unwrap();
     let snapshot = shell.bridge.account_snapshot().unwrap();
-    assert_eq!((snapshot.positions.len(), snapshot.open_orders.len()), (1, 1));
+    assert_eq!(
+        (snapshot.positions.len(), snapshot.open_orders.len()),
+        (1, 1)
+    );
 }
 
 /// A snapshot of an account that is not agentic refuses as every unread account does, after the

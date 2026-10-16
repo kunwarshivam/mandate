@@ -40,7 +40,6 @@ use std::sync::Arc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
-use mandate_robinhood::Tools;
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
     BuilderMandate, Clip as BuilderClip, Direction, Market as BuilderMarket,
@@ -70,6 +69,7 @@ use mandate_risk::{
     ProposedKind, ProposedOrder, RiskSnapshot, TimeInForce as GateTimeInForce,
     ValidatedMandate as GateMandate, WorkingUniverse, agent_flatten,
 };
+use mandate_robinhood::Tools;
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, DecisionClip, ExitOrigin, FlattenLeg,
     FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, MandateView, ModelDirection,
@@ -82,7 +82,7 @@ use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
-use crate::robinhood::RobinhoodBridge;
+use crate::robinhood::{RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector};
 use crate::stages::{
     Admitted, Classifier, Connector, Executor, ExitPath, Gate, GovernedRefs, JournalWriter,
     MandateSource, Protection, Reconciler, Sink, Sizing, Stages,
@@ -2110,14 +2110,52 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
     })
 }
 
-/// The production stages over one Robinhood session (DEC-947 item 4). Stub.
+/// The production stages over one Robinhood session (DEC-928 item 2, DEC-947 item 4): the
+/// run's connector is [`RobinhoodShellConnector`] and its startup reconciliation
+/// [`RobinhoodReconciler`] around the run's own executor reconciler, both over `sources`'
+/// bridge, so every read and every order goes through the one MCP session the login opened.
 pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<T>>>) -> Stages {
-    let _ = sources;
-    unimplemented!("E7-26")
+    let Sources {
+        mandate,
+        journal,
+        recorded_at,
+        agent,
+        workspace,
+        account_ref,
+        executor,
+        run,
+        artifacts,
+        transport: bridge,
+    } = sources;
+    let connector: Box<dyn Connector> = Box::new(RobinhoodShellConnector::new(Rc::clone(&bridge)));
+    assembled(
+        Sources {
+            mandate,
+            journal,
+            recorded_at,
+            agent,
+            workspace,
+            account_ref,
+            executor,
+            run,
+            artifacts,
+            transport: connector,
+        },
+        |reconciler| Box::new(RobinhoodReconciler::new(bridge, reconciler)),
+    )
 }
 
 /// The production stages over a caller-supplied connector.
 pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
+    assembled(sources, |reconciler| Box::new(reconciler))
+}
+
+/// The production stages over `sources`' connector, with the run's executor reconciler handed
+/// to `reconciled` for the reconciler stage.
+fn assembled(
+    sources: Sources<Box<dyn Connector>>,
+    reconciled: impl FnOnce(ExecutorReconciler) -> Box<dyn Reconciler>,
+) -> Stages {
     let run = sources.run.map(Rc::new);
     let protection_config = sources
         .executor
@@ -2143,7 +2181,7 @@ pub fn over(sources: Sources<Box<dyn Connector>>) -> Stages {
             path: sources.mandate.clone(),
             context: run.clone(),
         }),
-        reconciler: Box::new(reconciler),
+        reconciler: reconciled(reconciler),
         sizing: Box::new(BuilderPlan {
             mandate: sources.mandate.clone(),
             context: run.clone(),

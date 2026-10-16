@@ -589,25 +589,36 @@ fn before_credentials_the_fold_refuses_every_v_rule_and_the_walk() {
         door: DoorChecks::NotPassed,
         ..admitted()
     };
-    let revoked = format!(r#"{{"connection_id":"{CONNECTION}"}}"#);
-    let revoked = live_deployment().then("ConnectionRevoked", &revoked);
+    let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
+    let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
+    let established = format!(
+        r#"{{"broker":"robinhood","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#
+    );
+    let unconfirmed = Stream::of(&live, &but_name).then("ConnectionEstablished", &established);
     assert_eq!(
-        revoked.checked(before.clone()).err(),
+        unconfirmed.checked(before.clone()).err(),
+        violations(&[Violation::V020])
+    );
+    let paper_live = format!(
+        r#"{{"broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["trading"]}}"#
+    );
+    let mismatched = Stream::of(&live, &envelope()).then("ConnectionEstablished", &paper_live);
+    assert_eq!(
+        mismatched.checked(before.clone()).err(),
         violations(&[Violation::V001])
     );
     let stopped = live_deployment().then("AgentStopped", &stop(AGENT));
     assert_eq!(stopped.checked(before.clone()), Err(Refusal::Stopped));
     let mut undeployed = live_deployment();
-    undeployed.records.retain(|r| r.event_type != "AgentDeployed");
-    assert_eq!(undeployed.checked(before.clone()), Err(Refusal::NotDeployed));
+    undeployed
+        .records
+        .retain(|r| r.event_type != "AgentDeployed");
+    assert_eq!(
+        undeployed.checked(before.clone()),
+        Err(Refusal::NotDeployed)
+    );
     let refused = checked_before_credentials(&live_deployment().records, &Unavailable, &run());
     assert_eq!(refused, Err(Refusal::StoreUnavailable));
-    let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
-    let unconfirmed = Stream::of(&json(MANDATE), &but_name);
-    assert_eq!(
-        unconfirmed.checked(before.clone()).err(),
-        violations(&[Violation::V020])
-    );
     let paper = Stream::deployed();
     assert_eq!(paper.checked(before), Ok(()));
     assert_eq!(paper.checked(LiveAdmission::refusing()), Ok(()));

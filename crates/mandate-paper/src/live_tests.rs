@@ -281,7 +281,8 @@ fn a_flat_live_account_starts_after_one_connect_with_the_door_passed() {
 }
 
 /// FT-3 as DEC-947 item 2 keeps it: every check the fold makes without a credential refuses
-/// before the one connect — a condition of the admission missing, a V-rule, a stopped agent.
+/// before the one connect — a condition of the admission missing, a V-rule (the connection
+/// re-established as paper under the live mandate, V-001), a stopped agent.
 #[test]
 fn every_check_without_a_credential_refuses_before_the_connect() {
     let unconfirmed = RunFacts {
@@ -313,11 +314,13 @@ fn every_check_without_a_credential_refuses_before_the_connect() {
         );
         assert_eq!(ports.connects.get(), 0, "{name}");
     }
-    let revoked = format!(r#"{{"connection_id":"{CONNECTION}"}}"#);
+    let paper = format!(
+        r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["trading"]}}"#
+    );
     let mut ports = LivePorts::answering(Ok(Some(flat())));
     let refused = start(
-        "revoked",
-        &[("ConnectionRevoked", &revoked)],
+        "paper-connection",
+        &[("ConnectionEstablished", &paper)],
         &before(),
         &mut ports,
     )
@@ -386,7 +389,9 @@ fn the_lapse_refuses_on_the_snapshot_the_session_read() {
             refused,
             Some(PaperError::Shell(ShellError::Refused {
                 stage: Stage::Reconcile,
-                cause: Cause::Absent { what: ACCOUNT_UNREAD }
+                cause: Cause::Absent {
+                    what: ACCOUNT_UNREAD
+                }
             }))
         ),
         "{refused:?}"

@@ -57,9 +57,9 @@ use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
-    Build as BuiltWith, Confirmation, ConfigRefusal, ConfirmedVersion, ControlRecord,
-    DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Pinned, RunFacts, configuration,
-    confirmed_version,
+    Build as BuiltWith, ConfigRefusal, Confirmation, ConfirmedVersion, ControlRecord,
+    DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Pinned, RunFacts,
+    checked_before_credentials, configuration, confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
@@ -446,7 +446,7 @@ pub fn run<P: Ports>(
     let day = clock.now().date();
     let records = ports.control_stream(&args.workspace)?;
     let mut store = FsArtifactStore::open(&args.store).map_err(|_| PaperError::Store)?;
-    let facts = RunFacts {
+    let mut facts = RunFacts {
         agent: AgentId::new(&args.agent),
         validation_date: day,
         membership: Membership {
@@ -455,11 +455,38 @@ pub fn run<P: Ports>(
         },
         live: LiveAdmission::refusing(),
     };
-    let connection = the_live_door(&records, &store, &facts.agent, args, None)?;
-    if let Some(connection) = &connection {
+    let door = the_live_door(&records, &store, &facts.agent, args)?;
+    if let Some((connection, _)) = &door {
         acknowledge(connection, args, ports)?;
     }
-    let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
+    let (confirmed, early) = match &door {
+        Some((connection, stream)) if connection.environment == Environment::Live => {
+            let dial = dial(Build::CURRENT, vars).map_err(PaperError::Endpoint)?;
+            facts.live = live_admission(
+                BUILT_WITH,
+                args.acknowledged,
+                DoorChecks::NotPassed,
+                Some(&dial.endpoint),
+                pinned_host(Build::CURRENT),
+            );
+            let journal = args.journal.as_deref();
+            let (confirmed, session) = live_start(
+                &records, &store, &facts, connection, stream, journal, &dial, ports,
+            )?;
+            (confirmed, Some(session))
+        }
+        Some((connection, stream)) => {
+            lapse_read(connection, args.journal.as_deref(), stream, None)?;
+            let confirmed =
+                confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
+            (confirmed, None)
+        }
+        None => {
+            let confirmed =
+                confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
+            (confirmed, None)
+        }
+    };
     let mandate = confirmed.mandate();
     let ([instrument], [model]) = (
         mandate.universe.pinned_instruments.as_slice(),
@@ -486,9 +513,14 @@ pub fn run<P: Ports>(
             args.account_ref.clone(),
         )
         .map_err(refused(Stage::Validate))?;
-    let connection =
-        connection.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
-    let session = ports.connect(&connection, None)?;
+    let session = match early {
+        Some(session) => session,
+        None => {
+            let (connection, _) =
+                door.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
+            ports.connect(&connection, None)?
+        }
+    };
     let broker = session
         .preflight(&artifacts, clock.clone())
         .map_err(refused(Stage::Reconcile))?;
@@ -604,7 +636,10 @@ pub const BUILT_WITH: BuiltWith = if cfg!(feature = "live") {
     BuiltWith::Default
 };
 
-/// DEC-924 item 1's admission from the run's own facts (DEC-947 item 3). Stub.
+/// DEC-924 item 1's admission from the run's own facts, one each (DEC-934, DEC-947 item 3): the
+/// build `built`, the acknowledgement `acknowledged` (only `--confirm-live` confirms), the door's
+/// answer `door`, and the host of the endpoint the run dials, `dialed`, beside the host its build
+/// pins, `pinned` ([`pinned_host`]). The shell's `admits` judges them; nothing here does.
 pub fn live_admission(
     built: BuiltWith,
     acknowledged: Environment,
@@ -612,15 +647,42 @@ pub fn live_admission(
     dialed: Option<&RobinhoodEndpoint>,
     pinned: Option<&'static str>,
 ) -> LiveAdmission {
-    let _ = (built, acknowledged, door, dialed, pinned);
-    LiveAdmission::refusing()
+    LiveAdmission {
+        build: built,
+        confirmation: match acknowledged {
+            Environment::Live => Confirmation::ConfirmLive,
+            Environment::Paper => Confirmation::Absent,
+        },
+        door,
+        host: McpHost {
+            dialed: dialed.map(|endpoint| endpoint.host.clone()),
+            pinned,
+        },
+    }
 }
 
-/// A live run's start (DEC-947 items 1 and 2). Stub.
+/// A live run's start (DEC-947 items 1 and 2, the R0 rehearsal's R2 and R3), in the order no
+/// credential is read before a check that needs none has passed, and nothing that can place is
+/// built before the door has passed on real evidence:
+///
+/// 1. the shell's fold before credentials ([`checked_before_credentials`]): the walk, the
+///    document, every V-rule but V-002, and the admission's build, `--confirm-live` and host;
+/// 2. the one [`Ports::connect`], with the run's `dial`: the login and the MCP session;
+/// 3. the agentic account's snapshot ([`Session::account_snapshot`]), the account reads alone;
+/// 4. the door's lapse on that snapshot and the account stream's rows ([`lapse_read`]);
+/// 5. the shell's full fold, with the door's condition now held (`DoorChecks::Passed`).
+///
+/// `facts` carry the admission as the run holds it before credentials, the door not passed.
+/// Any refusal after the connect leaves the session unused: it read, and it sent nothing.
 ///
 /// # Errors
-/// Every [`PaperError`] of the steps.
-#[allow(clippy::too_many_arguments, reason = "stub; DEC-947")]
+/// [`PaperError::Deployment`] from either fold; [`PaperError::Credentials`] or
+/// [`PaperError::Endpoint`] from the connect; [`PaperError::Shell`] at `Stage::Reconcile` for an
+/// unread snapshot; any [`PaperError::Lapse`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the run's own inputs, each read once; DEC-947 item 2"
+)]
 fn live_start<P: Ports>(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,
@@ -631,33 +693,42 @@ fn live_start<P: Ports>(
     dial: &Dial,
     ports: &mut P,
 ) -> Result<(ConfirmedVersion, P::Session), PaperError> {
-    let _ = (records, store, facts, connection, stream, journal, dial, ports);
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    checked_before_credentials(records, store, facts).map_err(PaperError::Deployment)?;
+    let session = ports.connect(connection, Some(dial))?;
+    let snapshot = session
+        .account_snapshot()
+        .map_err(refused(Stage::Reconcile))?;
+    lapse_read(connection, journal, stream, snapshot.as_ref())?;
+    let admitted = RunFacts {
+        live: LiveAdmission {
+            door: DoorChecks::Passed,
+            ..facts.live.clone()
+        },
+        ..facts.clone()
+    };
+    let confirmed = confirmed_version(records, store, &admitted).map_err(PaperError::Deployment)?;
+    Ok((confirmed, session))
 }
 
 /// The live door the run calls ahead of its own answers (E7-26, DEC-918 items 1 to 4; DEC-910
 /// item 2: "These checks refuse before anything runs, ahead of the shell's own
 /// `DeploymentRefusal::Live`, which stays for the shell's fold"): the connection choice
-/// [`chosen`], the account stream's naming [`account_stream`] and DEC-529 item 3's
-/// flat-and-unspent lapse, in that order, over the records the run's own single
-/// control-stream read holds and the deployment's own document, all before the shell's phase-1
-/// fold and so before every credential read too (FT-3: [`Ports::connect`], the only one, comes
-/// later, behind the fold). The door engages where the run holds the deployment's own document
-/// ([`deployed_document`]); where it holds none — no deployment, a stopped agent, or a document
-/// the fold itself would refuse — the door answers nothing, the shell's fold answers behind it
-/// with its own refusal unchanged, so the door never answers where the shell refuses and
-/// performs no validation of its own (DEC-918 item 3's bounds: only ever a refusal in front of
-/// the shell's).
+/// [`chosen`] and the account stream's naming [`account_stream`], in that order, over the records
+/// the run's own single control-stream read holds and the deployment's own document, all before
+/// the shell's phase-1 fold and every credential read (FT-3). The door engages where the run
+/// holds the deployment's own document ([`deployed_document`]); where it holds none — no
+/// deployment, a stopped agent, or a document the fold itself would refuse — the door answers
+/// nothing, the shell's fold answers behind it with its own refusal unchanged, so the door never
+/// answers where the shell refuses and performs no validation of its own (DEC-918 item 3's
+/// bounds: only ever a refusal in front of the shell's).
 ///
-/// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
-/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The lapse reads its
-/// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
-/// the named account stream, and the counts are the agentic account's own `snapshot`, which only
-/// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
-/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses
-/// `lapse_evidence_not_supplied` through [`unsupplied`] (DEC-919) rather than pass on an empty
-/// read; a paper connection makes no check and reads nothing, so the paper run is unchanged
-/// (LT-14).
+/// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2).
+/// DEC-529 item 3's lapse is the door's third check, made through [`lapse_read`] on the stream
+/// named here: for a paper connection at once, where it makes no check and reads nothing (LT-14);
+/// for a live one in [`live_start`], on the agentic account's own snapshot, which only the
+/// Robinhood session reads, so after the fold's credential-free checks and the one connect
+/// (DEC-933 item 3, DEC-947 items 1 and 2). A live connection whose session reads no snapshot
+/// still refuses `lapse_evidence_not_supplied` (DEC-919).
 ///
 /// # Errors
 /// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
@@ -666,15 +737,13 @@ fn the_live_door(
     store: &dyn ArtifactSource,
     agent: &AgentId,
     args: &Args,
-    snapshot: Option<&AccountSnapshot>,
-) -> Result<Option<Connection>, PaperError> {
+) -> Result<Option<(Connection, StreamId)>, PaperError> {
     let Some(document) = deployed_document(records, store, agent) else {
         return Ok(None);
     };
     let connection = chosen(records, &document, &args.account_ref)?;
     let stream = account_stream(&args.workspace, &args.account_ref)?;
-    lapse_read(&connection, args.journal.as_deref(), &stream, snapshot)?;
-    Ok(Some(connection))
+    Ok(Some((connection, stream)))
 }
 
 /// The founder's acknowledgement of the run's environment, checked as soon as the door has
@@ -967,4 +1036,8 @@ pub fn stderr_line(error: &PaperError) -> String {
 mod tests;
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "test fixtures: a fixture that does not build fails the test"
+)]
 mod live_tests;

@@ -34,8 +34,8 @@ use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
 use mandate_paper::{
-    Args, Broker as Chosen, Connection, Dial, ConnectionRefusal, Evidence, Outcome, PaperError, Ports,
-    run,
+    Args, Broker as Chosen, Connection, ConnectionRefusal, Dial, Evidence, Outcome, PaperError,
+    Ports, run,
 };
 use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;

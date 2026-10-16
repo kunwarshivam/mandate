@@ -63,6 +63,19 @@ pub use tracer::{
 };
 pub use watch::{Watch, close_window_bound, poll_interval};
 
+/// Assembles one production cycle over a Robinhood session (DEC-928 item 2, DEC-947 item 4):
+/// [`adapters::robinhood_stages`], so the cycle's connector and its startup reconciliation are
+/// the bridge's, and the rest of its stages are the paper cycle's own.
+pub fn robinhood_production_cycle<T>(
+    sources: adapters::Sources<std::rc::Rc<robinhood::RobinhoodBridge<T>>>,
+    setup: Setup,
+) -> ProductionCycle
+where
+    T: mandate_robinhood::Tools + 'static,
+{
+    ProductionCycle::new(adapters::robinhood_stages(sources), setup)
+}
+
 /// Assembles one production paper cycle. Callers provide deployment inputs and the paper transport;
 /// the returned cycle accepts model outputs but exposes none of its safety-critical stages.
 pub fn production_cycle<T>(sources: adapters::Sources<T>, setup: Setup) -> ProductionCycle

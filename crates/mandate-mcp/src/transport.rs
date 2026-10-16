@@ -6,7 +6,8 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use secrecy::ExposeSecret;
 use serde_json::Value;
 
 use crate::auth::AccessToken;
@@ -86,6 +87,8 @@ pub struct McpTransport {
     budget: Mutex<RateBudget>,
     clock: Box<dyn Monotonic>,
     session: Mutex<Option<HeaderValue>>,
+    /// `Bearer` and the login's token, marked sensitive, once [`McpTransport::authorized`].
+    bearer: Option<HeaderValue>,
     next_id: AtomicU64,
 }
 
@@ -104,18 +107,25 @@ impl McpTransport {
             budget: Mutex::new(budget),
             clock,
             session: Mutex::new(None),
+            bearer: None,
             next_id: AtomicU64::new(1),
         })
     }
 
-    /// This transport carrying the login's `token` as every request's bearer (DEC-947 item 4).
-    /// Stub.
+    /// This transport carrying the login's `token` as every request's `authorization: Bearer`
+    /// (O2, DEC-947 item 4). The header is marked sensitive, so no printout of a request shows
+    /// it, and the token is never logged or in an error (LT-9).
     ///
     /// # Errors
-    /// [`McpError::Unimplemented`] until implemented.
+    /// [`McpError::Malformed`] for a token no header value can carry; nothing is sent.
     pub fn authorized(self, token: AccessToken) -> Result<Self, McpError> {
-        let _ = (self, token);
-        Err(McpError::Unimplemented { story: "E7-26" })
+        let text = format!("Bearer {}", token.secret.expose_secret());
+        let mut bearer = HeaderValue::from_str(&text).map_err(|_| McpError::Malformed)?;
+        bearer.set_sensitive(true);
+        Ok(Self {
+            bearer: Some(bearer),
+            ..self
+        })
     }
 
     /// Sends request `method` and returns its result, or the server's JSON-RPC error as
@@ -188,6 +198,9 @@ impl McpTransport {
         let session = self.session().clone();
         if let Some(session) = &session {
             headers.insert(SESSION_HEADER, session.clone());
+        }
+        if let Some(bearer) = &self.bearer {
+            headers.insert(AUTHORIZATION, bearer.clone());
         }
         let response = self
             .client

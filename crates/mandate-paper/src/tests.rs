@@ -31,8 +31,7 @@ use mandate_num::{Fraction, Price, Usd};
 
 use crate::{
     Args, CollarMembers, Connection, ConnectionRefusal, Dial, Opening, PaperError, Ports,
-    QuoteRefusal,
-    SystemClock, run,
+    QuoteRefusal, SystemClock, run,
 };
 
 /// The paper mandate fixture the suite derives its deployed document from

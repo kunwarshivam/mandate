@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use mandate_alpaca::AlpacaPaperHttp;
 use mandate_domain::Environment;
 use mandate_paper::{
-    Args, Broker, Build, Connection, Dial, EndpointRefusal, PaperError, Ports, Production,
-    ACCOUNT_NUMBER_VAR, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST, RobinhoodEndpoint, SystemClock,
+    ACCOUNT_NUMBER_VAR, Args, Broker, Build, Connection, Dial, EndpointRefusal, PaperError, Ports,
+    Production, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST, RobinhoodEndpoint, SystemClock,
     acknowledge, dial, disable_core_dumps, endpoint, parse, pinned_host,
 };
 use mandate_shell::control::ControlRecord;

@@ -1,11 +1,12 @@
 //! The login's token on the MCP session (O2, DEC-947 item 4): once a transport is authorized with
 //! the [`AccessToken`] the code exchange returned, every request it sends carries that token as
 //! `authorization: Bearer`, and nothing else does; the token stays out of every printout (LT-9).
+//! The loopback server records each request in lower case.
 
 use secrecy::SecretString;
 use serde_json::json;
 
-use super::server::{json, serve};
+use super::server::{json, reply, serve};
 use crate::{AccessToken, CallClass, McpError, TransportConfig};
 
 const ANSWER: &str = r#"{"jsonrpc":"2.0","id":1,"result":{}}"#;
@@ -19,7 +20,7 @@ fn token(secret: &str) -> AccessToken {
 /// Every request an authorized transport sends names the token as its bearer, once.
 #[tokio::test]
 async fn an_authorized_transport_sends_the_token_as_its_bearer() {
-    let server = serve(vec![json(ANSWER), json(ANSWER)]).await;
+    let server = serve(vec![reply(r#""result":{}"#), reply(r#""result":{}"#)]).await;
     let transport = server
         .transport(TransportConfig::CONSERVATIVE)
         .authorized(token("canary-token"))
@@ -38,7 +39,7 @@ async fn an_authorized_transport_sends_the_token_as_its_bearer() {
             .lines()
             .filter(|line| line.starts_with("authorization:"))
             .collect();
-        assert_eq!(bearers, ["authorization: Bearer canary-token"], "{head}");
+        assert_eq!(bearers, ["authorization: bearer canary-token"], "{head}");
     }
 }
 
@@ -51,7 +52,11 @@ async fn an_unauthorized_transport_sends_no_bearer() {
         .request(CallClass::Ordinary, "tools/list", &json!({}))
         .await
         .unwrap();
-    assert!(!server.seen()[0].contains("authorization"), "{:?}", server.seen());
+    assert!(
+        !server.seen()[0].contains("authorization"),
+        "{:?}",
+        server.seen()
+    );
 }
 
 /// A token no header can carry is refused, never sent mangled.

@@ -1,7 +1,7 @@
 //! The Robinhood session the runner's production ports log in to (G1a, LT-1, DEC-922, DEC-924
 //! item 3, DEC-937 item 2): the founder's OAuth login (O1b's [`AuthServer`] and
-//! [`CallbackListener`]) at the one endpoint this build pins, and nothing past it until the MCP
-//! session carries the token (O2).
+//! [`CallbackListener`]) at the one endpoint this build pins, then the MCP session that carries
+//! the token as its bearer (O2) and the one Robinhood connector over it ([`Linked`], DEC-947).
 //!
 //! - **The default build holds no Robinhood host** (LT-1): [`endpoint`] refuses
 //!   [`EndpointRefusal::NotBuilt`], so no default, CI or release build can log in anywhere.
@@ -9,40 +9,42 @@
 //!   [`MCP_HOST`], and never another; a rehearsal endpoint set in it is refused.
 //! - **The `rh-sim` build holds none**: it takes the simulator's endpoint from
 //!   [`REHEARSAL_ENDPOINT_VAR`] and refuses any that is not plain `http` on a loopback address,
-//!   so it can never reach a broker (DEC-922 items 1 and 2).
+//!   so it can never reach a broker (DEC-922 items 1 and 2), and it pins the simulator's
+//!   [`REHEARSAL_HOST`], never [`MCP_HOST`], which it does not compile (DEC-947 item 3).
 
 use std::net::Ipv4Addr;
 
 use std::rc::Rc;
 
-use mandate_alpaca::{AlpacaPaperHttp, DataTransport, Pause, TradingTransport};
+use mandate_alpaca::{AlpacaPaperHttp, Credentials, DataTransport, Pause, TradingTransport};
 use mandate_mcp::{
-    AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError,
+    AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, Tools, TransportConfig,
 };
 use mandate_num::Price;
-use mandate_robinhood::AccountSnapshot;
+use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
 use mandate_shell::adapters::Sources;
-use mandate_shell::paper::{Artifacts, BrokerFacts};
+use mandate_shell::paper::{Artifacts, BrokerFacts, market_facts, robinhood_facts};
 use mandate_shell::robinhood::RobinhoodBridge;
-use mandate_shell::{Cause, ProductionCycle, Setup};
+use mandate_shell::{Cause, ProductionCycle, Setup, robinhood_production_cycle};
 
 use crate::{PaperError, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
-/// a Robinhood host is written, and only the runner's `live` feature compiles it (LT-1).
-#[cfg(feature = "live")]
+/// a Robinhood host is written, and only the runner's `live` feature without `rh-sim` compiles
+/// it (LT-1, DEC-947 item 3), so the rehearsal build holds no production host at all.
+#[cfg(all(feature = "live", not(feature = "rh-sim")))]
 pub const MCP_HOST: &str = "agent.robinhood.com";
 
 /// The path of Robinhood's published MCP endpoint on [`MCP_HOST`].
 pub const MCP_PATH: &str = "/mcp/trading";
 
-/// The host this build pins, if any: [`MCP_HOST`] in a `live` build, none otherwise.
-#[cfg(feature = "live")]
+/// The Robinhood host a `live` build pins: [`MCP_HOST`] in a `live` build without `rh-sim`.
+#[cfg(all(feature = "live", not(feature = "rh-sim")))]
 const PINNED_HOST: Option<&str> = Some(MCP_HOST);
 
-/// The host this build pins, if any: none, since the default build holds no Robinhood host.
-#[cfg(not(feature = "live"))]
+/// The Robinhood host a `live` build pins: none, since this build holds no Robinhood host.
+#[cfg(not(all(feature = "live", not(feature = "rh-sim"))))]
 const PINNED_HOST: Option<&str> = None;
 
 /// The variable the rehearsal build reads the simulator's endpoint from (DEC-922 item 2).
@@ -51,16 +53,26 @@ pub const REHEARSAL_ENDPOINT_VAR: &str = "MANDATE_RH_SIM_ENDPOINT";
 /// The variable a Robinhood run reads the agentic account's number from (CN-8, DEC-947 item 5).
 pub const ACCOUNT_NUMBER_VAR: &str = "MANDATE_RH_ACCOUNT_NUMBER";
 
-/// The simulator's host, the one the rehearsal pins (DEC-947 item 3). Stub.
-pub const REHEARSAL_HOST: &str = "";
+/// The simulator's host, the one the rehearsal build pins (DEC-922 items 1 and 2, DEC-947 item
+/// 3): the loopback address `mandate-rh-sim` listens on. It reaches no broker, so every build may
+/// hold it; only [`Build::Rehearsal`] pins it.
+pub const REHEARSAL_HOST: &str = "127.0.0.1";
 
-/// The host `build` pins (DEC-947 item 3). Stub.
+/// The host `build` pins, the one DEC-924 item 1's admission compares the dialed host with
+/// (DEC-934 item 3, DEC-947 item 3): none in the default build; Robinhood's [`MCP_HOST`] in the
+/// `live` build, and only there; [`REHEARSAL_HOST`] in the rehearsal build, whose
+/// [`endpoint`] dials loopback alone.
 pub fn pinned_host(build: Build) -> Option<&'static str> {
-    let _ = build;
-    None
+    match build {
+        Build::Default => None,
+        Build::Live => PINNED_HOST,
+        Build::Rehearsal => Some(REHEARSAL_HOST),
+    }
 }
 
-/// What a Robinhood run dials (DEC-947 item 5). Stub.
+/// What a Robinhood run dials (DEC-947 item 5): the build's [`endpoint`] and the agentic
+/// account's number every request names (CN-8). The number is personal data, so the printout
+/// leaves it out (journal spec §6.4).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Dial {
     pub endpoint: RobinhoodEndpoint,
@@ -80,18 +92,28 @@ impl std::fmt::Debug for Dial {
     }
 }
 
-/// The dial `build` makes over the process environment `vars` (DEC-947 item 5). Stub.
+/// The dial `build` makes, read from the process environment `vars` the run was handed
+/// (DEC-947 item 5): [`endpoint`] over [`REHEARSAL_ENDPOINT_VAR`], then the founder's account
+/// number from [`ACCOUNT_NUMBER_VAR`]. Nothing is sent.
 ///
 /// # Errors
-/// Any [`EndpointRefusal`] that applies.
+/// Any [`EndpointRefusal`] of [`endpoint`], then [`EndpointRefusal::AccountUnset`] for a number
+/// that is missing or empty.
 pub fn dial(build: Build, vars: &[(String, String)]) -> Result<Dial, EndpointRefusal> {
-    let _ = (build, vars);
-    Err(EndpointRefusal::NotBuilt)
+    let read = |name: &str| {
+        vars.iter()
+            .find(|(given, _)| given == name)
+            .map(|(_, value)| value.as_str())
+    };
+    let endpoint = endpoint(build, read(REHEARSAL_ENDPOINT_VAR))?;
+    let account_number = read(ACCOUNT_NUMBER_VAR)
+        .filter(|number| !number.is_empty())
+        .ok_or(EndpointRefusal::AccountUnset)?;
+    Ok(Dial {
+        endpoint,
+        account_number: account_number.to_owned(),
+    })
 }
-
-/// What a run waits for once the login has a token: the MCP session that carries it (O2), which
-/// no build holds yet, so a Robinhood run stops before any read (DEC-937 item 2).
-pub const SESSION_UNBUILT: &str = "the Robinhood MCP session over the login's token (O2)";
 
 /// Which build is running, as [`endpoint`] reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,13 +229,18 @@ fn loopback(text: &str) -> Option<RobinhoodEndpoint> {
     })
 }
 
-/// The Robinhood session of a `live` or rehearsal build: the founder's login at the build's
-/// [`endpoint`], on the runtime its MCP session will run on (DEC-928 item 2). The URL to open is
-/// shown on stderr; nothing else is.
+/// The Robinhood session of a `live` or rehearsal build (DEC-937 item 2, DEC-947 item 4): the
+/// founder's login at `dial`'s endpoint, then the MCP session over the login's token on the
+/// runtime the session keeps (DEC-928 item 2): the transport pinned to the endpoint carrying the
+/// token as its bearer, the client whose tool contract is checked at connect, and the one
+/// Robinhood connector scoped to `dial`'s account number. The Alpaca paper client for the market
+/// reads is built from the environment's paper keys when they are there; without them the
+/// session's preflight refuses (DEC-933 item 2). The URL to open is shown on stderr; nothing
+/// else is, and nothing is sent but the login, the handshake and the tool listing.
 ///
 /// # Errors
-/// [`PaperError::Endpoint`] before anything is sent, or [`PaperError::Credentials`] when the
-/// login fails; neither names a token.
+/// [`PaperError::Credentials`] when the login, the transport or the session's handshake fails;
+/// no error names a token.
 pub(crate) fn connect(dial: &Dial) -> Result<Linked, PaperError> {
     let endpoint = &dial.endpoint;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -221,11 +248,32 @@ pub(crate) fn connect(dial: &Dial) -> Result<Linked, PaperError> {
         .build()
         .map_err(|_| PaperError::Credentials)?;
     let mut show = |url: &str| eprintln!("open this address in a browser to log in: {url}");
-    let token = runtime
-        .block_on(login(endpoint, &mut show))
+    let client = runtime
+        .block_on(session(endpoint, &mut show))
         .map_err(|_| PaperError::Credentials)?;
-    let _ = token;
-    Err(PaperError::Unimplemented { story: "E7-26" })
+    let connector = RobinhoodConnector::new(client, dial.account_number.clone());
+    let market = Credentials::from_env()
+        .ok()
+        .and_then(|keys| AlpacaPaperHttp::new(keys).ok());
+    Ok(Linked::new(
+        RobinhoodBridge::new(runtime, connector),
+        market,
+    ))
+}
+
+/// The login at `endpoint`, then the MCP client over its token (O2): the first connection's
+/// contract check, so a server listing a fund-movement tool or missing an allowlisted one gives
+/// no client at all (connections spec §8.1, DEC-839).
+async fn session(
+    endpoint: &RobinhoodEndpoint,
+    show: &mut dyn FnMut(&str),
+) -> Result<McpClient, McpError> {
+    let token = login(endpoint, show).await?;
+    let pinned = PinnedEndpoint::new(&endpoint.host, &endpoint.url)?;
+    let clock = Box::new(SystemMonotonic::start());
+    let transport =
+        McpTransport::new(pinned, TransportConfig::CONSERVATIVE, clock)?.authorized(token)?;
+    McpClient::connect(transport, None).await
 }
 
 /// O1b's login at `endpoint`, its host the one authorization host: discovery, registration of
@@ -249,40 +297,92 @@ async fn login(
     server.exchange(code, &config).await
 }
 
-/// A logged-in Robinhood session (DEC-947 item 4). Stub.
+/// A logged-in Robinhood session (DEC-947 item 4): the bridge over the one Robinhood connector,
+/// its MCP client connected with the login's token on the bridge's runtime (DEC-928 item 2),
+/// and the Alpaca client for the market reads, if the environment held its paper keys. The
+/// token lives inside the client's transport, in memory only (LT-9).
 pub struct Linked<T = McpClient, M = AlpacaPaperHttp> {
     bridge: Rc<RobinhoodBridge<T>>,
     market: Option<M>,
 }
 
 impl<T: Tools, M> Linked<T, M> {
-    /// The session over `bridge` and the Alpaca market reads `market`. Stub.
+    /// The session over `bridge`, with `market` for the Alpaca market reads.
     pub fn new(bridge: Rc<RobinhoodBridge<T>>, market: Option<M>) -> Self {
         Self { bridge, market }
     }
 }
 
+/// What a Robinhood preflight waits for when the environment held no Alpaca paper keys: the
+/// market reads DEC-933 item 2 takes from Alpaca's data API (the rehearsal's R5).
+pub const MARKET_UNREAD: &str = "the Alpaca market reads a Robinhood preflight takes (DEC-933)";
+
 impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session for Linked<T, M> {
+    /// DEC-933 item 2: the agentic account and the instrument's Robinhood quote through the
+    /// bridge, then Alpaca's asset record, IEX quote and minute bars, joined by
+    /// `robinhood_facts`. No Alpaca client, no read at all.
     fn preflight<P: Pause + Clone>(
         &self,
-        _artifacts: &Artifacts,
-        _pause: P,
+        artifacts: &Artifacts,
+        pause: P,
     ) -> Result<BrokerFacts, Cause> {
-        let _ = (&self.bridge, &self.market);
-        Err(Cause::Unimplemented { story: "E7-26" })
+        let market = self.market.as_ref().ok_or(Cause::Absent {
+            what: MARKET_UNREAD,
+        })?;
+        let robinhood = self
+            .bridge
+            .preflight_facts(artifacts.production_identity().symbol)?;
+        let market = market_facts(artifacts, market.clone(), market.clone(), pause)?;
+        robinhood_facts(market, &robinhood)
     }
 
-    fn cycle(self, _sources: Sources<()>, _setup: Setup) -> Result<ProductionCycle, Cause> {
-        Err(Cause::Unimplemented { story: "E7-26" })
+    /// The shell's Robinhood cycle over this session's bridge (DEC-947 item 4).
+    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+        Ok(robinhood_production_cycle(
+            with_bridge(sources, self.bridge),
+            setup,
+        ))
     }
 
     /// No Robinhood quote is read here, so an asked opening's cross-check has no broker ask and
-    /// refuses (DEC-940 item 4).
+    /// refuses (DEC-940 item 4); the broker's ask is #1373's (DEC-945).
     fn broker_ask(&self, _facts: &BrokerFacts) -> Option<Price> {
         None
     }
 
+    /// The bridge's read of the agentic account (DEC-947 item 1).
     fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
-        Err(Cause::Unimplemented { story: "E7-26" })
+        self.bridge.account_snapshot().map(Some)
+    }
+}
+
+/// `sources` carrying `bridge`.
+fn with_bridge<T>(
+    sources: Sources<()>,
+    bridge: Rc<RobinhoodBridge<T>>,
+) -> Sources<Rc<RobinhoodBridge<T>>> {
+    let Sources {
+        mandate,
+        journal,
+        recorded_at,
+        agent,
+        workspace,
+        account_ref,
+        executor,
+        run,
+        artifacts,
+        transport: (),
+    } = sources;
+    Sources {
+        mandate,
+        journal,
+        recorded_at,
+        agent,
+        workspace,
+        account_ref,
+        executor,
+        run,
+        artifacts,
+        transport: bridge,
     }
 }
