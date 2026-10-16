@@ -23,6 +23,8 @@
 //! registered rule set's interval (E1b, DEC-853 items 5 and 6, DEC-858). No product value is a
 //! constant here (FT-2).
 
+mod ask;
+mod connect_check;
 mod connection;
 mod door;
 mod evidence;
@@ -42,13 +44,13 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AlpacaPaperHttp, Credentials, DataTransport, Pause, TokioPause, TradingTransport,
+    AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TokioPause, TradingTransport,
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
 use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
-    ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
+    AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
@@ -62,18 +64,23 @@ use mandate_shell::control::{
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
-    Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
-    load_contexts_with_clock, preflight,
+    Artifacts, BrokerFacts, GateQuote, PaperClock, PaperFacts, daily_closes, fresh_quote,
+    liquidity_facts, load_contexts_with_clock, preflight,
 };
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{
-    Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
+    Cause, Mark, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
+pub use ask::{BrokerAsk, QuoteRead};
+pub use connect_check::{
+    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Checked, Observed, SeenContract, connect_check,
+    observe, parse_check,
+};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
@@ -82,14 +89,14 @@ pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
-pub use quote::{QuoteRefusal, cross_check};
+pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
-    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, granted_opening,
-    lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end,
-    watched,
+    CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
+    granted_opening, lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant,
+    watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -153,13 +160,22 @@ pub trait Session {
     ///
     /// # Errors
     /// [`Cause::Absent`] when the session cannot carry a cycle.
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
 
-    /// The broker's own ask for the pinned instrument, the quote an asked opening's cross-check
-    /// compares with the independent IEX ask before it leaves (DEC-529 item 12; DEC-940 item 4),
-    /// or [`None`] when this session holds none — and then the cross-check refuses the opening
-    /// and nothing is sent (rule 3).
-    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price>;
+    /// A fresh IEX quote for the pinned instrument, read at an asked opening's wake so the grant
+    /// is judged on a quote of its own wake, never on the preflight's (DEC-943 item 2): the
+    /// preflight's own read, its age bound and its skew tolerance unchanged.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when no current, uncrossed IEX quote of the instrument is read.
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause>;
+
+    /// Where the broker's own ask for the pinned instrument comes from: the quote an asked
+    /// opening's cross-check compares with the independent IEX ask before it leaves (DEC-529
+    /// item 12; DEC-940 item 4; DEC-945), taken before the cycle takes the session and asked at
+    /// the check. [`BrokerAsk::Absent`] when this session reads none — and then the cross-check
+    /// refuses the opening and nothing is sent (rule 3).
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk;
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
@@ -171,13 +187,20 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
         preflight(artifacts, self.clone(), self.clone(), pause)
     }
 
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
-        Ok(production_cycle(with_transport(sources, self), setup))
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+        Ok(production_cycle(
+            with_transport(sources, self.clone()),
+            setup,
+        ))
+    }
+
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        fresh_quote(artifacts, self.clone(), pause)
     }
 
     /// Alpaca's own quote is the IEX quote its data client read at the preflight.
-    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
-        Some(facts.quote.ask)
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
+        BrokerAsk::Quoted(facts.quote.ask)
     }
 }
 
@@ -288,6 +311,17 @@ pub enum PaperError {
     /// The run's exportable evidence fails closed (G1b, the founder's run's step 6).
     #[error(transparent)]
     Evidence(#[from] EvidenceRefusal),
+    /// The connect check ran and a check failed; the failure is journaled as `event_id`
+    /// (DEC-946). It names the check and its reason, never the account.
+    #[error("the connection check failed: {check} {reason} (journaled as {event_id})")]
+    ConnectCheck {
+        event_id: String,
+        check: &'static str,
+        reason: &'static str,
+    },
+    /// The account stream could not be read or written; nothing further was sent.
+    #[error("the journal could not be written")]
+    Journal,
     #[error(transparent)]
     Shell(#[from] ShellError),
 }
@@ -378,27 +412,55 @@ fn absent(stage: Stage, what: &'static str) -> PaperError {
     refused(stage)(Cause::Absent { what })
 }
 
-/// What an asked opening's cross-check reads, taken at the preflight (DEC-940 item 4): the
-/// pinned instrument's asset class and 20-day median dollar volume, which choose the collar's
-/// own `x`, the broker's own ask, and the independent IEX ask.
+/// What an asked opening's cross-check reads (DEC-940 item 4; DEC-945 item 3): the pinned
+/// instrument's asset class and 20-day median dollar volume, which choose the collar's own `x`,
+/// where the broker's own ask is read at the check, the independent IEX quote the preflight
+/// read, and the age bound the broker's read is held to.
 struct Opening {
     asset_class: AssetClass,
     median_dollar_volume_20d: Usd,
-    broker_ask: Option<Price>,
-    independent_ask: Price,
+    broker_ask: BrokerAsk,
+    independent: LatestQuote,
+    quote_max_age: Duration,
 }
 
 impl Opening {
-    /// [`cross_check_the_opening`] over the registered collar's own members.
-    fn cross_check(&self, collar: &CollarMembers) -> Result<(), PaperError> {
-        cross_check_the_opening(
+    /// [`broker_cross_check`] over the registered collar's own members, at `pause`'s clock.
+    fn cross_check<P: Pause + ?Sized>(
+        &self,
+        collar: &CollarMembers,
+        pause: &P,
+    ) -> Result<(), PaperError> {
+        broker_cross_check(
             collar,
             self.asset_class,
             Some(self.median_dollar_volume_20d),
-            self.broker_ask,
-            Some(self.independent_ask),
+            &self.broker_ask,
+            &self.independent,
+            pause,
+            self.quote_max_age,
         )
     }
+}
+
+/// One wake's fresh quote (DEC-943 item 2): `session`'s own IEX read through
+/// [`Session::fresh_quote`], handed to the binding gate's `gate` so every binding request from
+/// now on judges it, and returned as the wake's risk mark. A read that fails refuses as
+/// untrusted market data, and the wait it stops sends nothing.
+///
+/// # Errors
+/// [`PaperError::Shell`] at [`Stage::MarketData`] when no current, uncrossed IEX quote is read.
+pub fn fresh_mark<S: Session, P: Pause>(
+    session: &S,
+    artifacts: &Artifacts,
+    pause: P,
+    gate: &GateQuote,
+) -> Result<Mark, PaperError> {
+    let quote = session
+        .fresh_quote(artifacts, pause)
+        .map_err(refused(Stage::MarketData))?;
+    gate.hand(&quote);
+    Ok(Mark::of_iex(&quote))
 }
 
 /// The run's clock as the binding gate reads it, immediately before submission.
@@ -512,6 +574,7 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let at_preflight = Mark::of_iex(&broker.quote);
     let ticker = InstrumentId::new(&instrument.symbol)
         .map_err(|_| absent(Stage::Validate, "the pinned ticker"))?;
     let asset_id = InstrumentId::new(instrument.asset_id.as_str())
@@ -520,12 +583,14 @@ pub fn run<P: Ports>(
         asset_class: instrument.asset_class,
         median_dollar_volume_20d: liquidity.median_dollar_volume_20d,
         broker_ask: session.broker_ask(&broker),
-        independent_ask: broker.quote.ask,
+        independent: broker.quote.clone(),
+        quote_max_age: artifacts.quote_max_age(),
     };
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
         .map_err(refused(Stage::Validate))?;
+    let contexts_quote = contexts.quote.clone();
     let registered = artifacts
         .production_configuration()
         .map_err(refused(Stage::Validate))?;
@@ -560,6 +625,7 @@ pub fn run<P: Ports>(
         symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport: (),
     };
+    let fresh = || fresh_mark(&session, &artifacts, watch.pause.clone(), &contexts_quote);
     let report = session
         .cycle(sources, setup)
         .map_err(refused(Stage::Reconcile))?
@@ -567,9 +633,10 @@ pub fn run<P: Ports>(
             observation,
             output,
             &watch,
+            &at_preflight,
             |asked| {
-                granted_opening(asked, &watch.pause, watch.interval, || {
-                    opening.cross_check(&collar)
+                granted_opening(asked, &watch.pause, watch.interval, fresh, || {
+                    opening.cross_check(&collar, &watch.pause)
                 })
             },
             &lt10_end,
@@ -789,14 +856,21 @@ impl Session for Connected {
         }
     }
 
-    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+    fn cycle(&self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
         match self {
             Self::Alpaca(transport) => transport.cycle(sources, setup),
             Self::Robinhood(linked) => linked.cycle(sources, setup),
         }
     }
 
-    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
+    fn fresh_quote<P: Pause>(&self, artifacts: &Artifacts, pause: P) -> Result<LatestQuote, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.fresh_quote(artifacts, pause),
+            Self::Robinhood(linked) => linked.fresh_quote(artifacts, pause),
+        }
+    }
+
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
         match self {
             Self::Alpaca(transport) => transport.broker_ask(facts),
             Self::Robinhood(linked) => linked.broker_ask(facts),
@@ -847,7 +921,8 @@ where
     A: IntoIterator<Item = String>,
     V: IntoIterator<Item = (OsString, OsString)>,
 {
-    let args = parse(args)?;
+    let mut args = args.into_iter().peekable();
+    let check = args.next_if(|first| first == CONNECT_CHECK).is_some();
     let vars: Vec<(String, String)> = vars
         .into_iter()
         .map(|(name, value)| {
@@ -855,10 +930,103 @@ where
             (name, value.to_string_lossy().into_owned())
         })
         .collect();
+    if check {
+        let args = parse_check(args)?;
+        let mut ports = ProductionCheck {
+            journal: args.journal.clone(),
+        };
+        let checked = connect_check(&args, &vars, &mut ports)?;
+        return Ok(vec![format!("checked {}", checked.event_id)]);
+    }
+    let args = parse(args)?;
     let mut ports = Production {
         journal: args.journal.clone(),
     };
     lines(&run(&args, &vars, &mut ports)?)
+}
+
+/// The first argument that selects the connect check (DEC-946) instead of a run.
+pub const CONNECT_CHECK: &str = "--connect-check";
+
+/// The connect check's ports in the binary (DEC-946): core dumps off, the founder's login at the
+/// endpoint this build pins and the reads over its session ([`robinhood::connect`],
+/// [`Linked::observe`]), the system clock, and the account stream in the Postgres journal at
+/// `journal`. No error names the DSN, the token or the account number (rule 7).
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProductionCheck {
+    pub journal: String,
+}
+
+/// The DSN may hold a password, so `Debug` never prints it (rule 7).
+impl std::fmt::Debug for ProductionCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProductionCheck")
+            .field("journal", &"<redacted>")
+            .finish()
+    }
+}
+
+impl ProductionCheck {
+    /// `work` against the journal on a runtime of its own, any failure [`PaperError::Journal`].
+    fn journal<T, F>(&self, work: impl FnOnce(PgJournal) -> F) -> Result<T, PaperError>
+    where
+        F: Future<Output = Result<T, PaperError>>,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| PaperError::Journal)?;
+        runtime.block_on(async {
+            let journal = PgJournal::from_dsn(&self.journal).map_err(|_| PaperError::Journal)?;
+            work(journal).await
+        })
+    }
+}
+
+impl CheckPorts for ProductionCheck {
+    /// [`disable_core_dumps`].
+    fn harden(&mut self) -> Result<(), PaperError> {
+        disable_core_dumps()
+    }
+
+    fn observe(&mut self, account_number: &str) -> Result<Observed, PaperError> {
+        Ok(robinhood::connect()?.observe(account_number))
+    }
+
+    fn now(&self) -> UtcNanos {
+        SystemClock.now()
+    }
+
+    fn own(&mut self, stream: &StreamId) -> Result<(u64, u64), PaperError> {
+        self.journal(|journal| async move {
+            let epoch = journal
+                .take_ownership(stream)
+                .await
+                .map_err(|_| PaperError::Journal)?;
+            let head = journal
+                .head(stream)
+                .await
+                .map_err(|_| PaperError::Journal)?;
+            Ok((epoch, head.seq))
+        })
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        head: u64,
+        epoch: u64,
+        at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> Result<AppendOutcome, PaperError> {
+        let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        self.journal(|journal| async move {
+            journal
+                .append(stream, head, epoch, at, &drafts)
+                .await
+                .map_err(|_| PaperError::Journal)
+        })
+    }
 }
 
 /// What a run that refused nothing prints, one line each: the order a dry run would place

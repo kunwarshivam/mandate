@@ -109,7 +109,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         if !tradable {
             return Err(RobinhoodError::NotTradable);
         }
-        let quote = self.quote(symbol).await?;
+        let quote = self.equity_quote(symbol).await?;
         Ok(PreflightFacts { account, quote })
     }
 
@@ -117,8 +117,13 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// contract names no account for it and its answer is about none, so the account check does
     /// not run before it. Called on the `Ordinary` budget with exactly `{"symbols": [symbol]}`,
     /// and answered by one uncrossed record for the symbol; the answer's `structuredContent`
-    /// holds its `quotes` member and nothing else.
-    async fn quote(&self, symbol: &InstrumentId) -> Result<Quote, RobinhoodError> {
+    /// holds its `quotes` member and nothing else. The runner reads it again at the opening's
+    /// cross-check (DEC-945), so the ask it compares is the broker's latest, not the preflight's.
+    ///
+    /// # Errors
+    /// [`RobinhoodError::Unreadable`] (`quotes`) for a failed call, a refused one, and any
+    /// answer that is not that one record.
+    pub async fn equity_quote(&self, symbol: &InstrumentId) -> Result<Quote, RobinhoodError> {
         let mut arguments = Map::new();
         arguments.insert(
             "symbols".to_owned(),

@@ -46,7 +46,7 @@ mod transport;
 pub use auth::{AccessToken, CallbackListener, LOGIN_LIFETIME};
 pub use auth::{AuthServer, AuthorizationCode, ClientRegistration, LoopbackRedirect, PendingLogin};
 pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
-pub use client::{ALLOWLIST, ContractHash, McpClient};
+pub use client::{ALLOWLIST, ContractHash, Listed, McpClient};
 pub use endpoint::PinnedEndpoint;
 pub use error::{McpError, ServerText};
 pub use tools::Tools;

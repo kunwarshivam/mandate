@@ -602,8 +602,8 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 .insert(output.instrument_id.clone(), output);
         }
         "MarkUpdated" => {
-            let instrument = payload::str_of(&event.payload, "instrument")
-                .ok_or_else(|| payload::non_canonical("instrument"))?;
+            let instrument = payload::str_of(&event.payload, "instrument_id")
+                .ok_or_else(|| payload::non_canonical("instrument_id"))?;
             let price = payload::str_of(&event.payload, "price")
                 .ok_or_else(|| payload::non_canonical("price"))?;
             state.marks.insert(
