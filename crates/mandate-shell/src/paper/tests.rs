@@ -406,6 +406,11 @@ fn the_registered_artifacts_bind_the_bytes_they_checked() -> Result<(), String> 
         "the registered rule set's quote bound"
     );
     assert_eq!(
+        loaded.quote_max_age(),
+        std::time::Duration::from_secs(10),
+        "the runner's cross-check reads the same bound (DEC-945 item 2)"
+    );
+    assert_eq!(
         loaded.instrument.etp_classified_at,
         at("2026-09-25T00:00:00Z")?
     );
