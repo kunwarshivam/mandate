@@ -16,8 +16,8 @@
   `crates/mandate-shell/src/robinhood.rs` (DEC-928 items 2 and 3): `RobinhoodBridge`, one
   runtime and one connector; `RobinhoodShellConnector`, the shell's `Connector` with Robinhood's
   profile; and `RobinhoodReconciler`, which reads the agentic account and refuses until
-  Robinhood's account fields have a source. The shell's start ticks the executor at the run's
-  clock once reconciled (`crates/mandate-shell/src/tracer.rs`, DEC-941 item 5).
+  Robinhood's account fields have a source. The shell ticks the executor at the run's clock
+  before the cycle's output (`crates/mandate-shell/src/tracer.rs`, DEC-941 item 5).
   `mandate-shell-rh-sim`, `crates/mandate-shell-rh-sim/` (layer 11, tests only, DEC-928 item 4),
   is the shell's simulator harness.
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),

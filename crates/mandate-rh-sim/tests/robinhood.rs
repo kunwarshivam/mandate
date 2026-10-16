@@ -1041,7 +1041,7 @@ fn a_record_names_our_key_only_by_our_ref_id() {
         .iter()
         .map(|record| record.order.client_order_id.clone())
         .collect();
-    let theirs = uuid_v8(key("01JOTHER").as_str());
+    let theirs = format!("ref_id {}", uuid_v8(key("01JOTHER").as_str()));
     assert_eq!(
         named,
         [Some(theirs), Some(key("01JLOST").as_str().to_owned())],
@@ -1129,4 +1129,44 @@ fn a_listing_on_an_account_that_is_not_agentic_reads_no_orders() {
         "{outcome:?}"
     );
     assert_eq!(calls(&server), ["get_accounts"]);
+}
+
+/// The listed record retyped as a `market` order, which carries no limit price.
+fn as_market(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["type"] = json!("market");
+    result["structuredContent"]["orders"][0]["limit_price"] = Value::Null;
+    Ok(result.to_string())
+}
+
+/// The listed record retyped as a `stop_limit` order, stop 480, its time in force `gtc`.
+fn as_stop_limit(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["type"] = json!("stop_limit");
+    result["structuredContent"]["orders"][0]["stop_price"] = json!("480");
+    result["structuredContent"]["orders"][0]["time_in_force"] = json!("gtc");
+    Ok(result.to_string())
+}
+
+/// Connections spec §6.2's three order types the executor sends read as their own types, and
+/// `gtc` as `Gtc`, so the executor matches each record on the type the broker gave.
+#[test]
+fn each_listed_type_and_time_in_force_reads_as_the_executors_own() {
+    let rows: [(&str, Bend, Kind, Tif); 2] = [
+        ("market", as_market, Kind::Market, Tif::Day),
+        ("stop_limit", as_stop_limit, Kind::StopLimit, Tif::Gtc),
+    ];
+    for (name, bend, kind, tif) in rows {
+        let server = clocked(false);
+        let (mut c, probe) = probed(&server);
+        let lost = run(&mut c, &submit(buy("01JLOST")));
+        assert!(
+            matches!(lost, Err(ConnectorError::Unknown(_))),
+            "{name}: {lost:?}"
+        );
+        probe.bend.set(Some(("get_equity_orders", bend)));
+        let (_, records) = listed(run(&mut c, &listing("01JLOST")));
+        let [record] = records.as_slice() else {
+            panic!("{name}: {records:?}")
+        };
+        assert_eq!((record.order_type, record.tif), (kind, tif), "{name}");
+    }
 }

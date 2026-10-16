@@ -524,7 +524,6 @@ impl Shared {
     }
 }
 
-/// A parameter as text: absent is `None`, and anything but a string is unreadable.
 /// The arguments `get_equity_orders` takes: the account, and the filters the core models
 /// (DEC-941 item 2). `order_id`, `state` and `cursor` are refused, never ignored.
 const ORDER_FILTERS: [&str; 4] = ["account_number", "symbol", "created_at_gte", "placed_agent"];
@@ -549,6 +548,7 @@ fn order_filter(args: &Map<String, Value>) -> Result<OrderFilter, SimError> {
     })
 }
 
+/// A parameter as text: absent is `None`, and anything but a string is unreadable.
 fn text(args: &Map<String, Value>, key: &'static str) -> Result<Option<String>, SimError> {
     match args.get(key) {
         None => Ok(None),

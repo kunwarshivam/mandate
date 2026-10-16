@@ -21,6 +21,10 @@ use crate::{RobinhoodConnector, Tools, ref_id};
 /// absence.
 const UNREAD: ConnectorError = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
 
+/// What a record's `ref_id` that is not ours is named behind: a space, which no
+/// `ClientOrderId` holds, so another order's `ref_id` can never read as one of our keys.
+const FOREIGN_REF_ID: &str = "ref_id ";
+
 impl<T: Tools> RobinhoodConnector<T> {
     /// One read of the agentic account's orders for `listing` (DEC-941 items 1 and 3), through
     /// [`Self::read_sole_member`]: an answer holding anything beside `orders`, a next-page cursor
@@ -57,8 +61,8 @@ impl<T: Tools> RobinhoodConnector<T> {
 }
 
 /// One `orders[]` record as the executor matches it (DEC-941 item 4). A record carrying our
-/// `ref_id` names our key; one carrying another `ref_id` names that text, which is never a key
-/// of ours, so it is never adopted; one carrying none names nothing, and the executor's
+/// `ref_id` names our key; one carrying another `ref_id` names that text behind
+/// [`FOREIGN_REF_ID`], which no key of ours can equal, so it is never adopted; one carrying none names nothing, and the executor's
 /// look-alike rule decides (DEC-863).
 fn listed(record: &Map<String, Value>, key: &ClientOrderId, ours: &str) -> Option<ListedOrder> {
     let mut order = order_record(record)?;
@@ -75,7 +79,7 @@ fn listed(record: &Map<String, Value>, key: &ClientOrderId, ours: &str) -> Optio
     };
     order.client_order_id = match record.get("ref_id").and_then(Value::as_str) {
         Some(theirs) if theirs == ours => Some(key.as_str().to_owned()),
-        Some(theirs) => Some(theirs.to_owned()),
+        Some(theirs) => Some(format!("{FOREIGN_REF_ID}{theirs}")),
         None => None,
     };
     Some(ListedOrder {

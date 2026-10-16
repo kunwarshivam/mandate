@@ -153,6 +153,7 @@ fn open_cycle<'s>(
     if let Some(observation) = observation {
         session.observe(observation)?;
     }
+    session.tick_executor()?;
     session.feed(Input::ModelOutput(output))?;
     session.feed(Input::Tick(clock))?;
     Ok(session)
@@ -437,6 +438,22 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
+    /// The executor learns the run's injected clock (ES-21) before the cycle's output reaches
+    /// the runtime, so the intent's `OrderSubmitted` carries the run's time and a restart's
+    /// listing of it starts five minutes before that (DEC-941 item 5). It follows the startup
+    /// reconciliation and the control stream's tail, so a held release, an overdue opening or a
+    /// ladder step it starts runs only after a pause or kill the control stream holds.
+    fn tick_executor(&mut self) -> Result<(), ShellError> {
+        let ticked = self
+            .stages
+            .executor
+            .step(mandate_executor::Input::Tick(
+                mandate_executor::RiskClock::from_secs(self.setup.now.secs()),
+            ))
+            .map_err(refused(Stage::Executor))?;
+        self.perform_executor(ticked)
+    }
+
     /// Recovery, then the startup account report and reconciliation. The account report commits
     /// first; the runtime holds every opening until it and a clean `ReconciliationRun` have both
     /// folded (DEC-458), and a mismatch keeps it held.
@@ -482,16 +499,7 @@ impl<'s> Session<'s> {
         self.perform_executor(reconciled.effects)?;
         match reconciled.verdict {
             mandate_executor::ReconciliationVerdict::Clean
-            | mandate_executor::ReconciliationVerdict::Adopted => {
-                let ticked = self
-                    .stages
-                    .executor
-                    .step(mandate_executor::Input::Tick(
-                        mandate_executor::RiskClock::from_secs(self.setup.now.secs()),
-                    ))
-                    .map_err(refused(Stage::Executor))?;
-                self.perform_executor(ticked)
-            }
+            | mandate_executor::ReconciliationVerdict::Adopted => Ok(()),
             mandate_executor::ReconciliationVerdict::Mismatch => {
                 self.report.alerts.push("reconciliation_mismatch");
                 Err(ShellError::ReconciliationMismatch)
