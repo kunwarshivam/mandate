@@ -90,12 +90,12 @@ unimplemented = "deny"
 # Every exception states why, so agents cannot copy a silent one (AGENTS.md, trust ladder).
 allow_attributes_without_reason = "deny"
 
-# ADR-0001 ES-09: overflow is a bug, and a crash recovers from the journal rather than unwinding.
 # Line tables keep file and line numbers in backtraces while cutting the test binaries' size, so
 # the CI runners' disk holds the workspace's test build.
 [profile.dev]
 debug = "line-tables-only"
 
+# ADR-0001 ES-09: overflow is a bug, and a crash recovers from the journal rather than unwinding.
 [profile.release]
 overflow-checks = true
 panic = "abort"
