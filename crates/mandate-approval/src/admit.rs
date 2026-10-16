@@ -7,7 +7,7 @@ use std::num::NonZeroU8;
 use mandate_num::Usd;
 
 use crate::content::{BoundAction, ContentHash, RequestContent};
-use crate::live::LiveScope;
+use crate::live::{LiveAdmission, LiveGrant, LiveScope, live_cli_confirm};
 use crate::notify::ApprovalRef;
 use crate::stepup::{AssertionId, Environment, StepUp, StepUpRefusal, judge_step_up};
 use crate::{ApprovalError, RiskClock};
@@ -204,7 +204,8 @@ pub fn admit(
         Verdict::Skip => return Ok(Admission::Admitted),
         Verdict::Approve(evidence) => evidence.as_ref(),
     };
-    if let Some(why) = judge_step_up(evidence, effective, ctx.environment, &ctx.used_assertions) {
+    let judged = judge_step_up(evidence, effective, ctx.environment, &ctx.used_assertions);
+    if let Some(why) = judged.filter(|why| !admitted_live(*why, request, response, ctx)) {
         return Ok(Admission::Refused(match why {
             StepUpRefusal::Missing => Refusal::StepUpMissing,
             StepUpRefusal::Stale => Refusal::StepUpStale,
@@ -213,6 +214,31 @@ pub fn admit(
         }));
     }
     check_7(request, response, ctx)
+}
+
+/// DEC-923: a grant whose `cli_confirm` evidence fails only for its method on `live` counts when
+/// the context's scope admits the bound order and the responder. Every other refusal stands, and an
+/// order value that cannot be computed is not admitted.
+fn admitted_live(
+    why: StepUpRefusal,
+    request: &Request,
+    response: &Response,
+    ctx: &AdmissionContext,
+) -> bool {
+    if why != StepUpRefusal::Method || ctx.environment != Environment::Live {
+        return false;
+    }
+    let bound = &request.content.bound;
+    let Ok(order_usd) = bound.qty.notional(bound.limit) else {
+        return false;
+    };
+    let grant = LiveGrant {
+        instrument: &bound.instrument,
+        asset_class: bound.asset_class,
+        order_usd,
+        approver: &response.responder,
+    };
+    live_cli_confirm(ctx.live_cli_confirm.as_ref(), &grant) == Ok(LiveAdmission::Admitted)
 }
 
 /// Check 7: the responder joins the grant set, once, and not as the author of a version that

@@ -105,6 +105,34 @@ pub fn live_cli_confirm(
     scope: Option<&LiveScope>,
     grant: &LiveGrant<'_>,
 ) -> Result<LiveAdmission, ApprovalError> {
-    let _ = (scope, grant);
-    Err(ApprovalError::Unimplemented { story: "DEC-923" })
+    let refused = |why| Ok(LiveAdmission::Refused(why));
+    let Some(scope) = scope else {
+        return refused(LiveRefusal::NoScope);
+    };
+    let Ok(cap) = Usd::parse(LIVE_CLI_CONFIRM_MAX_ORDER_USD) else {
+        return refused(LiveRefusal::NoScope);
+    };
+    if scope.broker != LiveBroker::Robinhood {
+        return refused(LiveRefusal::NotRobinhood);
+    }
+    if scope.max_order_usd > cap {
+        return refused(LiveRefusal::MandateCapAboveLimit);
+    }
+    let mut pinned = scope.pinned_instruments.iter();
+    let (Some(only), None) = (pinned.next(), pinned.next()) else {
+        return refused(LiveRefusal::NotOneInstrument);
+    };
+    if only != grant.instrument {
+        return refused(LiveRefusal::OtherInstrument);
+    }
+    if grant.asset_class != AssetClass::UsEquity {
+        return refused(LiveRefusal::NotEquity);
+    }
+    if grant.order_usd > cap {
+        return refused(LiveRefusal::OrderAboveLimit);
+    }
+    if *grant.approver != scope.workspace_owner {
+        return refused(LiveRefusal::NotOwner);
+    }
+    Ok(LiveAdmission::Admitted)
 }

@@ -411,7 +411,7 @@ fn answered(
                 environment: environment(settings.environment),
                 used_assertions: state.used_assertions(&event.event_id),
                 policy: PolicyOverlay::NONE,
-                live_cli_confirm: None,
+                live_cli_confirm: settings.live_cli_confirm.clone(),
             };
             let admission = admit(pending, &response, &context)?;
             let applied = quorum_applied(

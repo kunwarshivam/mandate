@@ -15,13 +15,19 @@
 //! and pins one instrument, the bound order is within both, and the owner running the command is
 //! the user who recorded that connection. A skip is never held by it (PX-7).
 
+use mandate_approval::{
+    AssetClass, LiveAdmission, LiveBroker, LiveGrant, LiveRefusal, LiveScope, OpaqueUser,
+    live_cli_confirm,
+};
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_journal::ArtifactSource;
+use mandate_num::Usd;
 
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Submitted,
     agent_stream, code_of, commit, decide, envelopes, text,
 };
+use crate::version::{rows, stored};
 
 /// One approval as `list` shows it: opaque ids and times, never the content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +66,7 @@ struct Request {
     content_hash: String,
     deadline_s: i64,
     state: State,
-    /// The agent stream's environment, from the request's envelope, is `live`.
+    /// The request's envelope does not say `paper`: judged as `live`, which only narrows.
     live: bool,
 }
 
@@ -100,7 +106,7 @@ fn requests(
                     .to_owned(),
                 deadline_s,
                 state: State::Pending,
-                live: member_text(&event, "environment") == Some("live"),
+                live: member_text(&event, "environment") != Some("paper"),
             });
             continue;
         }
@@ -269,6 +275,76 @@ fn answering(
     Ok((decision, shown))
 }
 
+/// DEC-923 for a grant on a `live` stream: refused, with the [`LiveRefusal`] code, unless the scope
+/// the journal and the store show admits the bound order and this owner.
+fn live_grant(
+    journal: &dyn ControlJournal,
+    store: &dyn ArtifactSource,
+    owner: &Owner,
+    content: &Value,
+) -> Result<(), ControlError> {
+    let refused = |why: LiveRefusal| ControlError::Refused { reason: why.code() };
+    let scope = live_scope(journal, store, owner, content);
+    if member_text(content, "action.asset_class") != Some("us_equity") {
+        return Err(refused(LiveRefusal::NotEquity));
+    }
+    let order_usd = member_text(content, "action.order_usd")
+        .and_then(|v| Usd::parse(v).ok())
+        .ok_or_else(|| refused(LiveRefusal::OrderAboveLimit))?;
+    let approver = OpaqueUser(owner.user.clone());
+    let grant = LiveGrant {
+        instrument: member_text(content, "action.instrument").unwrap_or_default(),
+        asset_class: AssetClass::UsEquity,
+        order_usd,
+        approver: &approver,
+    };
+    match live_cli_confirm(scope.as_ref(), &grant) {
+        Ok(LiveAdmission::Admitted) => Ok(()),
+        Ok(LiveAdmission::Refused(why)) => Err(refused(why)),
+        Err(_) => Err(refused(LiveRefusal::NoScope)),
+    }
+}
+
+/// The scope of the deployment `content` binds, or `None` when any part cannot be read: the bound
+/// mandate version from the store, and its connection's latest record on the control stream, which
+/// must be a `live` `ConnectionEstablished`. The workspace owner is the user who recorded it.
+fn live_scope(
+    journal: &dyn ControlJournal,
+    store: &dyn ArtifactSource,
+    owner: &Owner,
+    content: &Value,
+) -> Option<LiveScope> {
+    let version = member_text(content, "trigger.mandate_version")?;
+    let (_, mandate) = stored(store, version).ok()?;
+    let connection = mandate.connection_id.as_str();
+    let control = rows(journal, owner).ok()?;
+    let record = control.iter().rev().find(|r| {
+        matches!(
+            r.event_type.as_str(),
+            "ConnectionEstablished" | "ConnectionRevoked"
+        ) && r.member("connection_id") == Some(connection)
+    })?;
+    if record.event_type != "ConnectionEstablished" || record.member("environment") != Some("live")
+    {
+        return None;
+    }
+    let broker = match record.member("broker") {
+        Some("robinhood") => LiveBroker::Robinhood,
+        _ => LiveBroker::Other,
+    };
+    Some(LiveScope {
+        broker,
+        max_order_usd: Usd::parse(mandate.risk.max_order_usd.as_str()).ok()?,
+        pinned_instruments: mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .map(|i| i.asset_id.as_str().to_owned())
+            .collect(),
+        workspace_owner: OpaqueUser(record.member("user")?.to_owned()),
+    })
+}
+
 /// What the owner chose in an answer: everything `ApprovalResponseSubmitted` carries but
 /// `submitted_at` and the step-up evidence, which [`commit`] adds.
 fn response(
@@ -311,8 +387,10 @@ pub fn approve(
 ) -> Result<Submitted, ControlError> {
     match answering(journal, owner, agent, approval, "approved", Some(code), now)? {
         (Decision::Committed(submitted), _) => Ok(submitted),
-        (Decision::Fresh(decided), _) => {
-            let _ = store;
+        (Decision::Fresh(decided), shown) => {
+            if shown.live {
+                live_grant(journal, store, owner, &shown.content)?;
+            }
             commit(journal, ids, owner, decided, &["submitted_at"], now)
         }
     }
