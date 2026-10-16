@@ -1,12 +1,15 @@
 //! The runnable simulator (DEC-922 item 4): `mandate-rh-sim --script <file> [--port <n>]` serves
 //! the script over loopback with the OAuth login required, prints the one endpoint it serves,
-//! and takes no other argument, so no option can point it anywhere but loopback.
+//! and takes no other argument, so no option can point it anywhere but loopback. It keeps serving
+//! until it is stopped.
 
 mod common;
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use common::AGENTIC;
 use common::wire::Wire;
@@ -58,6 +61,11 @@ fn the_binary_serves_the_script_on_loopback_behind_the_login() {
     let reply = Wire::new(url).request("initialize", json!({}));
     assert_eq!(reply.status, 401, "the login is required");
     assert!(reply.header("www-authenticate").is_some());
+    thread::sleep(Duration::from_millis(500));
+    let exited = running.0.try_wait().unwrap();
+    assert_eq!(exited, None, "the binary keeps serving until it is stopped");
+    let again = Wire::new(url).request("initialize", json!({}));
+    assert_eq!(again.status, 401, "still serving");
 }
 
 #[test]
