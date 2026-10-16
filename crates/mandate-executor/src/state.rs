@@ -102,6 +102,9 @@ pub struct ExecutorState {
     pub(crate) account_state: AccountState,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
+    /// The account-stream `seq` of the report `observed` holds: the base the model's cash moves
+    /// from, so a reconciliation can tell its snapshot's own report from an earlier one (§11).
+    pub(crate) observed_at: Option<Seq>,
     pub(crate) cash_flow: Usd,
     pub(crate) fill_notional: Usd,
     pub(crate) cash_out_of_band: u32,
@@ -293,6 +296,7 @@ impl ExecutorState {
             account_state: AccountState::Active,
             consecutive_403s: 0,
             observed: None,
+            observed_at: None,
             cash_flow: Usd::ZERO,
             fill_notional: Usd::ZERO,
             cash_out_of_band: 0,

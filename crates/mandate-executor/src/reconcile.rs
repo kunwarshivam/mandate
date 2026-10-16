@@ -40,7 +40,8 @@ use crate::types::{
 /// 3. **Positions**, compared only *after* step 2 — a difference a missing fill explains is not a
 ///    mismatch, and pausing on it would pause a healthy agent at every restart.
 /// 4. **Cash**, within 0.01 × fills since the last broker cash snapshot plus accrued unposted
-///    fees. Paper's simulated fees and dividends are excluded from this comparison while staying
+///    fees. A fill step 2 ingested is since that snapshot only when the snapshot is an earlier
+///    report: one recorded from this snapshot already holds it (DEC-948 item 5). Paper's simulated fees and dividends are excluded from this comparison while staying
 ///    in P&L and buying power (§10, interpretation 25).
 /// 5. **Fees**, exact once posted: a difference alerts and is never silently adjusted.
 /// 6. **`ReconciliationRun` last**, appended with `expected_head` equal to
@@ -90,7 +91,7 @@ pub(crate) fn run(
         }
     }
     positions(batch, snapshot, &mut differences)?;
-    let recorded = cash(batch, snapshot, &mut differences)?;
+    let recorded = cash(batch, snapshot, &before, &mut differences)?;
     if snapshot.reason == ReconcileReason::FeePosting {
         fees(batch, snapshot, recorded, &mut differences)?;
     }
@@ -483,6 +484,13 @@ fn positions(
 /// base the next comparison is measured from. Before any account was reported there is no base to
 /// compare with, and nothing is recorded.
 ///
+/// The fills step 2 ingested were made before this snapshot was taken. When the base is an
+/// account report folded after the snapshot's head, it is the snapshot's own account, which the
+/// shell records before the run (DEC-458), so the broker's cash in the base already holds them and
+/// the model moves only by the fills folded before the run began (`before`); counting them again
+/// would put the model a whole fill off the broker and mismatch on every late fill (DEC-948
+/// item 5). An earlier base did not see them, so they are fills since it and count.
+///
 /// §11's cash row is two tiers, "alert above threshold; pause if persistent": a run out of the
 /// band alerts the owner and pauses nobody, and the [`CASH_PERSISTENT_RUNS`]th consecutive one
 /// pauses every agent until the owner acknowledges `cash`. The count is folded from the recorded
@@ -490,14 +498,19 @@ fn positions(
 fn cash(
     batch: &mut Batch<'_, '_>,
     snapshot: &BrokerSnapshot,
+    before: &ExecutorState,
     differences: &mut Vec<Difference>,
 ) -> Result<Option<EventId>, ExecutorError> {
     let Some(base) = batch.view.observed.clone() else {
         return Ok(None);
     };
-    let model = base.cash.checked_add(batch.view.cash_flow)?;
-    let band = batch
+    let snapshots_own = batch
         .view
+        .observed_at
+        .is_some_and(|at| at > snapshot.taken_at_head);
+    let since = if snapshots_own { before } else { &batch.view };
+    let model = base.cash.checked_add(since.cash_flow)?;
+    let band = since
         .fill_notional
         .times_fraction(Fraction::parse(CASH_BAND)?)?
         .checked_add(batch.view.unposted_fees.abs())?;

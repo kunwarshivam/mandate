@@ -161,9 +161,9 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "ProtectionChanged" => protection_changed(state, payload, at),
-        "AccountStateObserved" => account_observed(state, payload),
+        "AccountStateObserved" => account_observed(state, payload, event.seq),
         "AccountSnapshotRecorded" => {
-            account_observed(state, payload)?;
+            account_observed(state, payload, event.seq)?;
             cash_compared(state, payload);
             Ok(())
         }
@@ -1100,8 +1100,13 @@ fn replacement(
 /// start from (§11). Its state reads §7.3's first row: any blocking flag, or a status other than
 /// `ACTIVE`, is `blocked`. `crypto_status` is journaled and not folded until the crypto row of §7.3
 /// is (the backlog carries it). An account missing `non_marginable_buying_power` or
-/// `accrued_fees` is incomplete, and buying power is `None` for it rather than guessed.
-fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+/// `accrued_fees` is incomplete, and buying power is `None` for it rather than guessed. The base's
+/// `seq` is kept, so a reconciliation knows whether its snapshot's own report is the base.
+fn account_observed(
+    state: &mut ExecutorState,
+    payload: &Value,
+    seq: Seq,
+) -> Result<(), ExecutorError> {
     let buying_power = usd(payload, "buying_power")?;
     let non_marginable = optional_usd(payload, "non_marginable_buying_power")?;
     let accrued = optional_usd(payload, "accrued_fees")?;
@@ -1125,6 +1130,7 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
         accrued_fees: accrued.unwrap_or(Usd::ZERO),
         complete: non_marginable.is_some() && accrued.is_some(),
     });
+    state.observed_at = Some(seq);
     state.cash_flow = Usd::ZERO;
     state.fill_notional = Usd::ZERO;
     Ok(())
