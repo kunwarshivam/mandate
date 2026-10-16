@@ -18,7 +18,7 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail, PendingRequest, Replacement, Switch,
+    ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -1101,7 +1101,8 @@ fn replacement(
 /// `ACTIVE`, is `blocked`. `crypto_status` is journaled and not folded until the crypto row of §7.3
 /// is (the backlog carries it). An account missing `non_marginable_buying_power` or
 /// `accrued_fees` is incomplete, and buying power is `None` for it rather than guessed. The base's
-/// `seq` is kept, so a reconciliation knows whether its snapshot's own report is the base.
+/// `seq` is kept, so a reconciliation knows whether its snapshot's own report is the base, and so
+/// is the report it replaced, which that reconciliation compares against instead.
 fn account_observed(
     state: &mut ExecutorState,
     payload: &Value,
@@ -1114,6 +1115,11 @@ fn account_observed(
         || flag(payload, "trading_blocked")
         || flag(payload, "account_blocked")
         || flag(payload, "trade_suspended_by_user");
+    state.prior_base = state.observed.as_ref().map(|replaced| PriorBase {
+        cash: replaced.cash,
+        cash_flow: state.cash_flow,
+        fill_notional: state.fill_notional,
+    });
     state.observed = Some(ObservedAccount {
         state: if blocked {
             AccountState::Blocked
