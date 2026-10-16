@@ -164,6 +164,7 @@ SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
 REQUIRED_REFS = {
     "ApprovalResponded": ("mandate_version",),
     "ApprovalTimedOut": ("mandate_version",),
+    "ApprovalCanceled": ("mandate_version",),
     "ApprovalRevalidated": ("mandate_version",),
     "AgentDeployed": ("mandate_version",),
     "AgentStopped": ("mandate_version",),
@@ -340,6 +341,12 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
 SCHEMAS[("agent", "ApprovalTimedOut")] = rec(
     ("approval", ULID),
     ("on_timeout", one_of("skip")),
+)
+# §9.7 v0.43 (DEC-950): the runtime's record that a tightening canceled a pending ask before any
+# terminal answer. The legacy `rebound` names no reason this version records.
+SCHEMAS[("agent", "ApprovalCanceled")] = rec(
+    ("approval", ULID),
+    ("reason", one_of("version_applied", "mode_tightened", "owner_pause", "owner_stop", "kill_switch")),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
