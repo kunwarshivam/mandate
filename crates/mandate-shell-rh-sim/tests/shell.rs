@@ -747,3 +747,31 @@ fn tickers() -> Tickers {
     let pairs = ["SPY", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
     Tickers::registered(pairs).unwrap()
 }
+
+/// DEC-956 item 1: a session opened before the run read its mandate holds no ticker, so the
+/// bridge quotes nothing until the run registers the pinned instrument's `(asset id, symbol)`;
+/// from then on the quote is read under that ticker.
+#[test]
+fn the_bridge_quotes_only_what_the_run_registered() {
+    let server = read_server();
+    let tools = Loopback {
+        server: &server,
+        wire: RefCell::new(Wire::connect(&server.url().unwrap())),
+        garble_place: Rc::default(),
+        seen: Seen::default(),
+    };
+    let robinhood = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
+    let bridge = RobinhoodBridge::new(runtime(), robinhood);
+    let spy = InstrumentId::new("SPY").unwrap();
+    assert!(
+        matches!(bridge.equity_quote(&spy), Err(Cause::Absent { what }) if what == QUOTE_UNREAD)
+    );
+    assert!(
+        calls(&server).is_empty(),
+        "nothing is asked before the registration"
+    );
+    bridge.register(tickers()).unwrap();
+    let quote = bridge.equity_quote(&spy).unwrap();
+    assert_eq!((quote.symbol, quote.ask), (spy, price("500")));
+    assert_eq!(calls(&server), ["get_equity_quotes"]);
+}

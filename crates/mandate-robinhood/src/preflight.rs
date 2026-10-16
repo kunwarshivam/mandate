@@ -131,8 +131,9 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// cross-check (DEC-945), so the ask it compares is the broker's latest, not the preflight's.
     ///
     /// # Errors
-    /// [`RobinhoodError::NoSymbol`] for a ticker the run did not register, with nothing called; [`RobinhoodError::Unreadable`] (`quotes`) for a failed call, a refused one, and
-    /// any answer that is not that one record.
+    /// [`RobinhoodError::NoSymbol`] for a ticker the run did not register, with nothing called;
+    /// [`RobinhoodError::Unreadable`] (`quotes`) for a failed call, a refused one, and any answer
+    /// that is not that one record.
     pub async fn equity_quote(&self, symbol: &InstrumentId) -> Result<Quote, RobinhoodError> {
         let ticker = self.tickers.named(symbol)?;
         let mut arguments = Map::new();

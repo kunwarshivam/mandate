@@ -1487,3 +1487,28 @@ fn a_garbled_later_page_leaves_the_order_unknown() {
         );
     }
 }
+
+/// DEC-956 item 1: a connector opened with no ticker registers the run's afterwards, and every
+/// order from then on goes out under it.
+#[test]
+fn a_ticker_registered_after_the_connector_opened_is_the_one_sent() {
+    let server = server();
+    let wire = RefCell::new(Wire::connect(&server.url().unwrap()));
+    let tools = Loopback {
+        server: &server,
+        wire,
+        probe: Rc::default(),
+    };
+    let mut c = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
+    c.register(tickers());
+    let outcome = run(&mut c, &submit(buy("01JOPEN")));
+    assert!(
+        matches!(outcome, Ok(BrokerOutcome::Submitted(_))),
+        "{outcome:?}"
+    );
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    assert!(
+        held.iter().all(|o| o.symbol == "SPY") && held.len() == 1,
+        "{held:?}"
+    );
+}
