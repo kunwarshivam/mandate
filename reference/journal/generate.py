@@ -44,6 +44,7 @@ import membership_fold
 import research
 import risk_state
 import segment_rows
+import timeouts
 import verification
 import workspace
 import yaml
@@ -3825,6 +3826,7 @@ def render(
     account_section: dict,
     shape_section: dict,
     approval_section: dict,
+    timeout_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
@@ -3852,6 +3854,7 @@ def render(
             "account_stream": account_section,
             "protection_shapes": shape_section,
             "approval_answers": approval_section,
+            "approval_timeouts": timeout_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
@@ -3910,6 +3913,7 @@ def main(argv: list[str] | None = None) -> int:
     account_section = account.build_section(v3["genesis_prev_hash"])
     shape_section = account.build_shape_section()
     approval_section = approval.build_section()
+    timeout_section = timeouts.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
@@ -3943,6 +3947,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += account.run_shape_mutants(shape_section)
     problems += approval.check_section(approval_section)
     problems += approval.run_mutants(approval_section)
+    problems += timeouts.check_section(timeout_section)
+    problems += timeouts.run_mutants(timeout_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -3987,6 +3993,7 @@ def main(argv: list[str] | None = None) -> int:
         account_section,
         shape_section,
         approval_section,
+        timeout_section,
         broker_profile,
         connections_section,
         request_section,
@@ -4013,6 +4020,7 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_section(reread["account_stream"])
         or account.check_shape_section(reread["protection_shapes"])
         or approval.check_section(reread["approval_answers"])
+        or timeouts.check_section(reread["approval_timeouts"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
         or connections.check_section(reread["connection_requests"])
@@ -4073,6 +4081,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(approval_section['drafts'])} approval-answer drafts, {len(approval_section['invalid_drafts'])} invalid and "
         f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
+        f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
+        f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
+        f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "
