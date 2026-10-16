@@ -213,6 +213,77 @@ impl ProductionCycle {
     }
 }
 
+/// One wake's read of the two streams an asked cycle's wait folds (DEC-920 item 1; DEC-940): the
+/// journal's own `ORDER BY seq` read of the agent stream the run appends to, where the runtime's
+/// `ApprovalResponded` and `ApprovalRevalidated` land, and of the workspace control stream, where
+/// the owner's answers land, both taken after the wake handed the runtime its answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Wake {
+    /// The agent stream's rows.
+    pub agent: Vec<StoredEvent>,
+    /// The workspace control stream's rows.
+    pub control: Vec<StoredEvent>,
+}
+
+/// The open session of a cycle that asked (G1b, DEC-940), as the runner's grant wait drives it:
+/// the session stays the shell's (DEC-475), and the runner reads, wakes and releases through
+/// these three calls only.
+pub trait AskedCycle {
+    /// The agent stream's rows as the journal reads them now: the ask the cycle journaled is the
+    /// youngest `ApprovalRequested` among them (DEC-914 item 1).
+    ///
+    /// # Errors
+    /// The journal's refusal.
+    fn agent_rows(&mut self) -> Result<Vec<StoredEvent>, ShellError>;
+
+    /// One wake at `now`: the control stream tailed whole and handed to the runtime as its
+    /// owner input, then the risk clock ticked to `now`, then both streams read back. An opening
+    /// the runtime releases is held, never sent, until [`AskedCycle::submit`].
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a stop after which nothing is sent.
+    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError>;
+
+    /// Sends the one opening the runtime released and the wait let leave.
+    ///
+    /// # Errors
+    /// Every [`ShellError`] is a stop; with no held opening, nothing is sent.
+    fn submit(&mut self) -> Result<(), ShellError>;
+}
+
+/// The watch's end question an asked run's caller hands in (LT-10, DEC-914 items 4 and 5,
+/// DEC-940): over the wake's broker read, the executor's uncovered answer, the report's alert
+/// keys, the wake's clock and the watch's bound, `Ok(true)` ends the run, `Ok(false)` reads on,
+/// and an error stops it, as [`watch_may_end`] answers.
+pub type MayEnd<'e> =
+    &'e dyn Fn(Option<&str>, bool, &[&'static str], UtcNanos, UtcNanos) -> Result<bool, ShellError>;
+
+impl ProductionCycle {
+    /// [`ProductionCycle::run_observed_watched`] for a run that may ask (G1b, DEC-940).
+    ///
+    /// # Errors
+    /// Every error is a stop after which nothing further is sent.
+    pub fn run_observed_asked_watched<P, E, W>(
+        &mut self,
+        observation: Observation,
+        output: mandate_runtime::ModelOutput,
+        watch: &Watch<P>,
+        wait: W,
+        may_end: MayEnd<'_>,
+    ) -> Result<Report, E>
+    where
+        P: Pause,
+        E: From<ShellError>,
+        W: FnOnce(&mut dyn AskedCycle) -> Result<(), E>,
+    {
+        let _ = (observation, output, watch, wait, may_end);
+        Err(E::from(ShellError::Refused {
+            stage: Stage::Executor,
+            cause: Cause::Unimplemented { story: "E7-26" },
+        }))
+    }
+}
+
 /// The one instrument the mandate pins. The tracer trades exactly one (DEC-138).
 fn pinned(view: &MandateView) -> Result<InstrumentId, ShellError> {
     let mut universe = view.working_universe.iter();

@@ -23,10 +23,10 @@ use mandate_num::{Fraction, Price, Usd};
 use mandate_paper::{
     Asked, CollarMembers, Evidence, EvidenceRefusal, GrantRefusal, Lt10Refusal, PaperError,
     QuoteRefusal, WakeRead, Watched, answers, asked, collar_x, cross_check,
-    cross_check_the_opening, lt10, reported, session_cap, wait_for_the_grant, watch_may_end,
-    watched,
+    cross_check_the_opening, granted_opening, lt10, lt10_end, reported, session_cap,
+    wait_for_the_grant, watch_may_end, watched,
 };
-use mandate_shell::Cause;
+use mandate_shell::{AskedCycle, Cause, ShellError, Wake};
 use mandate_time::UtcNanos;
 
 /// The ask's approval: the `ApprovalRequested`'s event id, an opaque id (TI-8).
@@ -1149,4 +1149,272 @@ fn the_opening_leaves_only_after_the_collars_own_cross_check() {
         matches!(absent, Err(PaperError::CrossCheck(QuoteRefusal::Absent))),
         "{absent:?}: a check that cannot be made is not passed"
     );
+}
+
+/// The asked cycle as the runner's frame sees it (DEC-940): the shell's session behind
+/// [`AskedCycle`], scripted here — the agent rows the ask is bound from, one [`Wake`] per wake in
+/// order (the last repeated once they run out), and every call logged with the clock it read.
+struct Cycle {
+    agent: Vec<StoredEvent>,
+    wakes: VecDeque<Result<Wake, ShellError>>,
+    last: Option<Wake>,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl Cycle {
+    fn of(wakes: Vec<Result<Wake, ShellError>>, log: &Rc<RefCell<Vec<String>>>) -> Cycle {
+        Cycle {
+            agent: vec![ask_row(1, APPROVAL, DEADLINE_S, &bound_order_hash())],
+            wakes: VecDeque::from(wakes),
+            last: None,
+            log: Rc::clone(log),
+        }
+    }
+}
+
+impl AskedCycle for Cycle {
+    fn agent_rows(&mut self) -> Result<Vec<StoredEvent>, ShellError> {
+        self.log.borrow_mut().push("agent".to_owned());
+        Ok(self.agent.clone())
+    }
+
+    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
+        self.log.borrow_mut().push(format!("wake@{}", now.secs()));
+        match self.wakes.pop_front() {
+            Some(Ok(wake)) => {
+                self.last = Some(wake.clone());
+                Ok(wake)
+            }
+            Some(Err(stop)) => Err(stop),
+            None => self.last.clone().ok_or(ShellError::ProposalInvalid),
+        }
+    }
+
+    fn submit(&mut self) -> Result<(), ShellError> {
+        self.log.borrow_mut().push("submit".to_owned());
+        Ok(())
+    }
+}
+
+/// The three reads of a granted ask: nothing answered, the raw answer, the runtime's records.
+fn wakes_to_the_grant() -> Vec<Result<Wake, ShellError>> {
+    let journal = ask_row(1, APPROVAL, DEADLINE_S, &bound_order_hash());
+    let answered = vec![answer_row(1, APPROVAL, "approved", &bound_order_hash())];
+    let mut granted = vec![journal.clone()];
+    granted.extend(admitted_rows(2, 1));
+    vec![
+        Ok(Wake {
+            agent: vec![journal.clone()],
+            control: Vec::new(),
+        }),
+        Ok(Wake {
+            agent: vec![journal],
+            control: answered.clone(),
+        }),
+        Ok(Wake {
+            agent: granted,
+            control: answered,
+        }),
+    ]
+}
+
+/// A cross-check that logs its call and answers `answer`.
+fn logged_check(
+    log: &Rc<RefCell<Vec<String>>>,
+    answer: Result<(), PaperError>,
+) -> impl FnOnce() -> Result<(), PaperError> {
+    let log = Rc::clone(log);
+    move || {
+        log.borrow_mut().push("cross_check".to_owned());
+        answer
+    }
+}
+
+/// DEC-940, DEC-920 item 1, DEC-529 item 12: the asked opening leaves only once a wake reads the
+/// runtime's admitted, re-validated grant, then the cross-check passes, then one submit — each
+/// wake at the clock the wait's pause keeps, a raw answer holding it.
+#[test]
+fn the_opening_leaves_after_the_runtimes_grant_and_the_cross_check() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_check(&log, Ok(())),
+    );
+    assert!(matches!(left, Ok(())), "{left:?}");
+    assert_eq!(
+        *log.borrow(),
+        [
+            "agent",
+            "wake@1000",
+            "wake@1100",
+            "wake@1200",
+            "cross_check",
+            "submit"
+        ],
+        "bind the ask, wake per interval, then check, then the one submit"
+    );
+}
+
+/// Rule 3: an answer the runtime never admits denies at the ask's deadline, and nothing is
+/// checked or sent.
+#[test]
+fn a_raw_answer_alone_never_submits() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let unadmitted = wakes_to_the_grant().into_iter().take(2).collect();
+    let mut cycle = Cycle::of(unadmitted, &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(left, Err(PaperError::Grant(GrantRefusal::TimedOut))),
+        "{left:?}"
+    );
+    assert!(
+        !log.borrow()
+            .iter()
+            .any(|call| call == "submit" || call == "cross_check"),
+        "{:?}",
+        log.borrow()
+    );
+}
+
+/// DEC-529 item 12: a cross-check that refuses after the grant sends nothing.
+#[test]
+fn a_refused_cross_check_sends_nothing() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_check(
+            &log,
+            Err(PaperError::CrossCheck(QuoteRefusal::Disagreement)),
+        ),
+    );
+    assert!(
+        matches!(
+            left,
+            Err(PaperError::CrossCheck(QuoteRefusal::Disagreement))
+        ),
+        "{left:?}"
+    );
+    assert_eq!(log.borrow().last().map(String::as_str), Some("cross_check"));
+}
+
+/// A skipped answer denies at once: no check, no submit.
+#[test]
+fn a_skipped_answer_denies_without_a_submit() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let skipped = vec![Ok(Wake {
+        agent: vec![ask_row(1, APPROVAL, DEADLINE_S, &bound_order_hash())],
+        control: vec![answer_row(1, APPROVAL, "skipped", &bound_order_hash())],
+    })];
+    let mut cycle = Cycle::of(skipped, &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(left, Err(PaperError::Grant(GrantRefusal::Denied))),
+        "{left:?}"
+    );
+    assert_eq!(*log.borrow(), ["agent", "wake@1000"]);
+}
+
+/// A wake the shell refuses stops the wait with the shell's own stop, and nothing is sent.
+#[test]
+fn a_refused_wake_stops_the_wait() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(vec![Err(ShellError::ReconciliationMismatch)], &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(
+            left,
+            Err(PaperError::Shell(ShellError::ReconciliationMismatch))
+        ),
+        "{left:?}"
+    );
+    assert_eq!(*log.borrow(), ["agent", "wake@1000"]);
+}
+
+/// An ask already past its deadline when the wait binds it denies before any wake.
+#[test]
+fn an_ask_past_its_deadline_never_wakes() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
+    let clock = WaitClock::at(DEADLINE_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(left, Err(PaperError::Grant(GrantRefusal::TimedOut))),
+        "{left:?}"
+    );
+    assert_eq!(*log.borrow(), ["agent"]);
+}
+
+/// LT-10 through `watched` and `lt10` in the shell's terms (DEC-914 items 4 and 5, DEC-940): a
+/// settled watch ends, an unsettled one reads on before the cap and fails closed with the
+/// shell's own `cancel_unconfirmed` at it, and a bound no session holds refuses.
+#[test]
+fn the_asked_watch_ends_through_lt10() {
+    let bound = moment("2026-09-29T19:50:00Z");
+    let before = moment("2026-09-29T19:55:00Z");
+    let cap = moment("2026-09-29T20:00:00Z");
+    assert_eq!(
+        lt10_end(Some("filled"), false, &[], before, bound).ok(),
+        Some(true)
+    );
+    assert_eq!(
+        lt10_end(
+            Some("filled"),
+            true,
+            &["unprotected_interval_limit"],
+            cap,
+            bound
+        )
+        .ok(),
+        Some(true)
+    );
+    assert_eq!(
+        lt10_end(Some("accepted"), false, &[], before, bound).ok(),
+        Some(false)
+    );
+    assert_eq!(
+        lt10_end(Some("filled"), true, &["stop_watchdog"], before, bound).ok(),
+        Some(false)
+    );
+    assert!(matches!(
+        lt10_end(Some("accepted"), false, &[], cap, bound),
+        Err(ShellError::CancelUnconfirmed)
+    ));
+    assert!(matches!(
+        lt10_end(None, false, &[], cap, moment("2026-10-03T19:50:00Z")),
+        Err(ShellError::Refused {
+            cause: Cause::Absent { .. },
+            ..
+        })
+    ));
 }

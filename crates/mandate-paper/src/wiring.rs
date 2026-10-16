@@ -27,7 +27,7 @@ use mandate_domain::AssetClass;
 use mandate_journal::StoredEvent;
 use mandate_num::{Fraction, Price, Usd};
 use mandate_shell::control::ControlRecord;
-use mandate_shell::{Cause, ShellError, Stage};
+use mandate_shell::{AskedCycle, Cause, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
 use crate::PaperError;
@@ -416,6 +416,42 @@ pub fn watch_may_end(
     })?;
     let facts = watched(read, uncovered, alerts)?;
     lt10(&facts, now, cap).map_err(PaperError::Lt10)
+}
+
+/// The asked opening's way out of the run (G1b, DEC-940).
+///
+/// # Errors
+/// Every [`PaperError`] is a stop after which nothing is sent.
+pub fn granted_opening<P, C>(
+    cycle: &mut dyn AskedCycle,
+    pause: &P,
+    interval: Duration,
+    cross_check: C,
+) -> Result<(), PaperError>
+where
+    P: Pause + ?Sized,
+    C: FnOnce() -> Result<(), PaperError>,
+{
+    let _ = (cycle, pause, interval, cross_check);
+    Err(PaperError::Unimplemented { story: "E7-26" })
+}
+
+/// The asked run's watch end, [`watch_may_end`] in the shell's terms (LT-10, DEC-940).
+///
+/// # Errors
+/// The shell's stop for the cap and for a bound no session holds.
+pub fn lt10_end(
+    read: Option<&str>,
+    uncovered: bool,
+    alerts: &[&'static str],
+    now: UtcNanos,
+    bound: UtcNanos,
+) -> Result<bool, ShellError> {
+    let _ = (read, uncovered, alerts, now, bound);
+    Err(ShellError::Refused {
+        stage: Stage::Executor,
+        cause: Cause::Unimplemented { story: "E7-26" },
+    })
 }
 
 /// One row's record, mapped one-to-one as the run's own control-stream read maps it (DEC-914

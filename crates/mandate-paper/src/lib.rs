@@ -85,8 +85,8 @@ pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
-    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
-    session_cap, wait_for_the_grant, watch_may_end, watched,
+    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, granted_opening,
+    lt10_end, reported, session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -273,7 +273,7 @@ pub enum PaperError {
     #[error(transparent)]
     Evidence(#[from] EvidenceRefusal),
     #[error(transparent)]
-    Shell(ShellError),
+    Shell(#[from] ShellError),
 }
 
 /// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
