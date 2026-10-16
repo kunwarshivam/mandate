@@ -328,6 +328,7 @@ pub fn universe(instruments: &[&str]) -> MandateView {
             author: AUTHOR.to_owned(),
             timeout_s: 300,
             environment: Environment::Paper,
+            live_cli_confirm: None,
         },
     }
 }
