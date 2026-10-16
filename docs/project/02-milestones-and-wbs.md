@@ -83,6 +83,22 @@ decisions (DEC-528).
 | E19-12 Event-triggered research | After the Phase 1 gate's research-agent evaluation (DEC-99); Phase 3 at the earliest | Agent harness spec §5.3's change; E19-3; a source evaluation for an earnings calendar and transcripts |
 | Adoption of existing holdings | Not placed: the backlog's "Later" section | Cost basis and tax lots, wash sales, trading-domain §7.1 and connections CN-7 (DEC-46) |
 
+### Enterprise harness stages ([DEC-930](decisions/DEC-930.md))
+
+The founder decided on 2026-10-16 that the harness sells first to small systematic teams and
+emerging managers, who run it themselves. Stage A makes it sellable to them and is scheduled; Stage
+B (broker-dealers) stays Proposed. Milestone order does not change, and Stage A follows the first
+paper and live trades in the work tracker's "Next, in order".
+
+| Stage | Work | Placed in | Depends on |
+|---|---|---|---|
+| A | Workspace API and MCP channel (E10-6), the channel as a policy enforcement point (E18-4) | M8 | The owner-input API (DEC-148) |
+| A | Identity and step-up (E9-1 to E9-4); AUDITOR and SUPERVISOR roles and ASK routing (E18-9, without SAML and SCIM) | M8 | L1's current queue |
+| A | Tenant policy overlay that can only tighten (E18-1) | M8 | E9-3's org limits |
+| A | Signed evidence pack and SIEM export (E18-3) | M8 | M4's cold store (E5-7, E5-9) |
+| A | Hybrid installer (M11) | M11, right after M8 | M8 |
+| B | Tenant isolation invariant (E18-8), verdict replay (E18-13), FIX or OMS connector (E18-16), more broker connectors, SOC 2, penetration test (M13) | Not scheduled | The founder's spending and counsel decisions (DEC-930 item 7) |
+
 ## Phase gates
 
 | Gate | Criteria | Sign-off |

@@ -27,6 +27,12 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-16, enterprise positioning (DEC-930).** Research on competitors, agent-governance
+  vendors, trading-software incumbents, and the SEC, FINRA and IOSCO expectations led to the
+  founder's positioning memo ("Mandate Enterprise Positioning", a Claude doc). The founder accepted
+  it: the harness sells first to small systematic teams and emerging managers; Stage A (E18-1,
+  E18-3, E18-4, E18-9's roles, M11) is scheduled in M8 after the first trades; Stage B, with the new
+  OMS connector story E18-16, stays Proposed. The web lane was told.
 - **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
   closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard
   refusing spec and code in one PR (#1323 `29d0914c`, the agent-harness line alone in #1324

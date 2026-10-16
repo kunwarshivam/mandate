@@ -30,6 +30,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
+| E18 Enterprise harness ([DEC-149](04-decision-log.md#decisions), [DEC-930](decisions/DEC-930.md)) | M8 (Stage A: E18-1, E18-3, E18-4, E18-9's roles); Stage B not scheduled | — | Should (Stage A); Proposed (Stage B) |
 | E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10); Should |
 
 ## Stories
@@ -2594,14 +2595,20 @@ fully on-prem control plane; shared data plane; strategy marketplace.
 Epic **E18**, from the [harness engineering research](../product/11-harness-engineering.md#7-recommendations)
 of 2026-09-27. [DEC-149](04-decision-log.md#decisions) makes the harness (gate, autonomy rules,
 journal, executor, connectors, conformance suite, and MCP channel) an enterprise product that the
-retail platform runs through. Every story here is **(Proposed, not scheduled)**: none is in the epic
-overview, none is assigned a milestone, and v1's milestones do not change. **SC** marks a story that
+retail platform runs through. Every story here was proposed, not scheduled, until
+[DEC-930](decisions/DEC-930.md) scheduled Stage A (below); the rest stay Proposed, and v1's milestone order does not change. **SC** marks a story that
 touches a safety-critical path (gate, autonomy, journal, executor, connectors, credentials, auth, or
 tenant isolation): the `AGENTS.md` safety-critical rules apply to it (tests written or verified
 against approved reference cases first, property tests for its invariants, an independent review by
 an agent on a different model, zero missed mutants, and green CI).
 
-- **E18-1 (Proposed, not scheduled; SC)** As a broker or fintech, I want a versioned tenant policy
+[DEC-930](decisions/DEC-930.md) (founder, 2026-10-16) splits the epic into two stages. **Stage A**
+makes the harness sellable to small systematic teams and emerging managers, who run it themselves:
+E18-1, E18-3, E18-4 and E18-9's roles and ASK routing are **scheduled in M8**, after the first paper
+and live trades, beside E9-1 to E9-4, E10-6 and M11. **Stage B** (broker-dealers) stays Proposed:
+E18-8, E18-13, E18-16, and the stories not named here. Milestone order does not change.
+
+- **E18-1 (Scheduled, M8, Stage A, DEC-930; SC)** As a broker or fintech, I want a versioned tenant policy
   overlay on my customers' mandates, with inline tests, so that my house rules apply to every agent.
   *Accepted when:* the overlay can only tighten a mandate, never loosen it (as E9-3's org limits
   do), and property tests prove that for any mandate and overlay the effective limits are at least
@@ -2611,11 +2618,11 @@ an agent on a different model, zero missed mutants, and green CI).
   derived from journaled events only, content attributes are off by default (no order details,
   positions, or mandate content leave the deployment unless the customer turns them on, rule 6 and
   "Do not"), and the semantic-conventions version is pinned.
-- **E18-3 (Proposed, not scheduled; SC)** As a compliance officer, I want SIEM export and a signed
+- **E18-3 (Scheduled, M8, Stage A, DEC-930; SC)** As a compliance officer, I want SIEM export and a signed
   per-period evidence pack so that I can file the period's record. *Accepted when:* the pack holds
   the chain segment, anchor proofs, mandate versions, gate verdicts, and reconciliation results,
   verifies offline with `journal verify`, and exports in at least one documented SIEM format.
-- **E18-4 (Proposed, not scheduled; SC)** As an agent builder, I want the MCP channel to be a policy
+- **E18-4 (Scheduled, M8, Stage A, DEC-930; SC)** As an agent builder, I want the MCP channel to be a policy
   enforcement point so that my agent can act only through Mandate's rules. *Accepted when:* it
   accepts only tokens issued to Mandate and never passes a token through to a broker or another
   service; its tools are intent-shaped (`propose_intent`, `explain_verdict`), never a raw
@@ -2638,7 +2645,7 @@ an agent on a different model, zero missed mutants, and green CI).
   checked invariant so that no tenant can read or affect another's state. *Accepted when:* each
   tenant has its own chains and anchors, type or layer rules make cross-tenant access
   unrepresentable where possible, and a cross-tenant fuzz finds no leak.
-- **E18-9 (Proposed, not scheduled; SC)** As an enterprise admin, I want OIDC and SAML SSO, SCIM,
+- **E18-9 (Scheduled, M8, Stage A, DEC-930, roles and ASK routing only; SC)** As an enterprise admin, I want OIDC and SAML SSO, SCIM,
   and AUDITOR and SUPERVISOR roles with ASK routing to supervisors so that the harness fits my
   identity and supervision model. *Accepted when:* each role's permissions are tested, and an ASK
   can route to a supervisor without letting anyone approve their own proposal. SAML and SCIM stay
@@ -2666,6 +2673,14 @@ an agent on a different model, zero missed mutants, and green CI).
   so that I can trace each control to evidence. *Accepted when:* each control maps to a test ID and a
   journal event type, and CI fails if a mapped test or event type disappears. Its legal and
   compliance wording is reserved for the founder and counsel (DEC-79).
+- **E18-16 (Proposed, not scheduled, Stage B, DEC-930; SC)** As a broker-dealer or a firm with its
+  own order management system, I want Mandate to hand approved orders to my OMS over FIX or the
+  OMS's API so that agents never bypass my existing pre-trade checks. *Accepted when:* it
+  implements the `BrokerConnector` the executor declares; every order it sends was journaled
+  first with its idempotency key; the OMS's acknowledgments, rejects and fills reconcile into the
+  account ledger; an unanswered send becomes `Unknown` and is recovered, never resent blind; and it
+  runs against a local FIX simulator only, never a live session (rule 8). Which OMS or FIX dialect
+  comes first waits on the first prospect that names its system.
 
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 

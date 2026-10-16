@@ -6,7 +6,7 @@
 | **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141, DEC-145, DEC-148, and DEC-149 and for option 16. Not a PRD change, and not legal advice |
 | **Inputs** | [Issue #177](https://github.com/kunwarshivam/mandate/issues/177), the [competitive landscape](03-competitive-landscape.md) v0.2, [vision](01-vision-and-strategy.md), [PRD](04-prd-v1.md), [pricing](07-pricing-and-packaging.md), [compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), and the [decision log](../project/04-decision-log.md) |
 | **Method** | Public web sources, read 2026-09-26 and 2026-09-27, then fact-checked against each source page. No accounts, outreach, broker tools, or orders |
-| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-148](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): that channel (E10-6) is pulled forward to M8 and stays optional, never the main path. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee. [DEC-149](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): the harness is an enterprise product, and the platform runs through it ([positioning](#positioning-harness-and-platform-dec-149)) |
+| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-148](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): that channel (E10-6) is pulled forward to M8 and stays optional, never the main path. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee. [DEC-149](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): the harness is an enterprise product, and the platform runs through it ([positioning](#positioning-harness-and-platform-dec-149)). [DEC-930](../project/decisions/DEC-930.md), Accepted (founder, 2026-10-16): the harness sells first to small systematic teams and emerging managers, in two stages, with Stage A scheduled |
 
 > **Regulatory material in this document is a summary of public guidance and commentary. It is not
 > legal advice and draws no legal conclusion.** Legal and compliance text is reserved for the founder
@@ -559,15 +559,21 @@ The founder decided on 2026-09-27 ([DEC-149](../project/04-decision-log.md#decis
   subscription. What limits pace is review and merge throughput, the plan's usage limits, and the
   founder's decisions, not build cost. A self-serve front door for agent builders (the open verifier,
   the conformance kit, and an MCP server on Alpaca paper) doubles as the demand test.
-- **Open for discovery: the first enterprise customer.** Which of brokers, fintechs, or agent
-  builders buys first is not decided. Customer outreach needs the founder's authorization
-  ([DEC-79](../project/04-decision-log.md#decisions)). Anything that costs money or needs counsel
-  (a SOC 2 audit, broker agreements, legal text) still waits for the founder.
+- **The first enterprise customer: decided by [DEC-930](../project/decisions/DEC-930.md)**
+  (founder, 2026-10-16). Small systematic and prop teams (segment E) and emerging managers and
+  small advisers (segment D) buy first and run the harness themselves; broker-dealers and API
+  brokers (segment F) come second, once Stage B (the OMS connector, SOC 2, support) exists. The
+  enterprise line is "the pre-trade gate and the record for AI agents that touch real orders", with
+  no public claim of regulatory compliance until the founder approves it with counsel. Discovery
+  still confirms segment E. Customer outreach still needs the founder's authorization
+  ([DEC-79](../project/04-decision-log.md#decisions)), and anything that costs money or needs
+  counsel (a SOC 2 audit, broker agreements, legal text) still waits for the founder.
 
 DEC-149 amends DEC-141's positioning without reversing it: the complete product, the research agent
 inside the envelope, and the optional MCP channel still hold. Milestone order does not change; the
-enterprise harness stories are proposals in the
-[backlog](../project/06-backlog-v1.md#enterprise-harness-proposed-dec-149).
+enterprise harness stories are in the
+[backlog](../project/06-backlog-v1.md#enterprise-harness-proposed-dec-149), where DEC-930 schedules
+Stage A in M8 and leaves Stage B proposed.
 
 ## 8. Differentiators mapped to existing work
 

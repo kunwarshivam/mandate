@@ -55,6 +55,14 @@ review on a different model (DEC-79), approved by the coordinator under DEC-175.
    implementation; E10-7.
 5. **L3 and L4:** the E8-9 and E8-14 implementations; the next E11-9 slices on live data.
 6. **Then** tripwires (E6-13), M7's remainder, M4's safety-critical half, as before.
+7. **Enterprise Stage A** ([DEC-930](decisions/DEC-930.md), founder 2026-10-16): after the first
+   paper and live trades, steer L1 and L2 toward what the first enterprise buyers (small
+   systematic teams and emerging managers, self-hosted) need: E18-4 on top of E10-6, E18-9's
+   AUDITOR and SUPERVISOR roles and ASK routing beside E9-1 to E9-4, E18-1's tighten-only tenant
+   overlay, E18-3's evidence pack once E5-7 and E5-9 land, then M11. The web lane builds the
+   supervisor, auditor, and evidence-export screens for them; public copy makes no compliance
+   claim (DEC-930 item 2). Stage B (broker-dealers, the OMS connector E18-16, SOC 2) stays
+   Proposed.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.
 
@@ -84,6 +92,9 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   history rewrite.
 - **Spike paper runs** (E17-0): the go-ahead.
 - **Dependabot:** six alerts on `main` (one high) to review.
+- **Enterprise (DEC-930 item 7):** authorizing discovery calls and outreach; when to start SOC 2
+  and its budget; counsel on the controls brief and the compliance mapping (E18-15); the support
+  model (design-partner terms or a first hire); any contact path on the landing page.
 
 Nothing else is blocked on you.
 
