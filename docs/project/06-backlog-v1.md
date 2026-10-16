@@ -4878,10 +4878,10 @@ simulated fee's schema and the paper risk clock that DEC-938 left here. Still op
   item 4).
 - **A fill between the snapshot's account and activity reads.** The reconciliation reads the
   account before the activities, so a fill that lands between the two is in the activities but
-  not yet in the broker's cash. With the snapshot's own report as the base (DEC-948 item 5), the
-  model leaves that fill out too, so the two agree, and the next report's cash, which holds it,
-  becomes the base: that fill's cash is never compared with its notional. Reading the activities
-  first, or bounding the activity read at the account's time, would close it.
+  not yet in the broker's cash. The model, measured from the snapshot before (DEC-948 item 5),
+  counts it, so the run stops on a cash mismatch one fill wide: fail-safe, and a false alarm.
+  Reading the activities first, or bounding the activity read at the account's time, would close
+  it.
 
 From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
 
