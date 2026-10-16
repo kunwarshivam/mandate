@@ -41,13 +41,17 @@
 //!   `cancelled`, `voided` or `failed`; `partially_filled` to `cancelled` or `voided`; and fills
 //!   alone reach `partially_filled` and `filled`.
 //!
-//! [`SimServer`] serves the core over loopback MCP (S2), honest or as a hostile [`Variant`].
+//! [`SimServer`] serves the core over loopback MCP (S2), honest or as a hostile [`Variant`]; for
+//! the founder's rehearsal ([DEC-922]) it serves a [`Script`] behind a real OAuth login, which the
+//! `mandate-rh-sim` binary runs.
 //!
 //! [DEC-124]: ../../../docs/project/04-decision-log.md
 //! [DEC-441]: ../../../docs/project/decisions/DEC-441.md
+//! [DEC-922]: ../../../docs/project/decisions/DEC-922.md
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+mod oauth;
 mod script;
 mod server;
 

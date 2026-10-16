@@ -304,9 +304,10 @@ impl AuthServer {
     /// Bearer challenge's `resource_metadata` URL, or without one the endpoint's RFC 9728 well-known
     /// URL, read from the pinned MCP host only; then the first of its `authorization_servers`,
     /// which must be on `auth_hosts`, read at its RFC 8414 well-known URL. Every endpoint named must
-    /// be `https` (loopback `http` in this crate's test build) on `auth_hosts`, with no credentials
-    /// or fragment; `S256` and response type `code` must be offered, and a registration endpoint
-    /// must exist. No redirect is followed, and no server text reaches an error.
+    /// be `https` (loopback `http` in this crate's test build and the rehearsal build, which takes
+    /// loopback only) on `auth_hosts`, with no credentials or fragment; `S256` and response type
+    /// `code` must be offered, and a registration endpoint must exist. No redirect is followed, and
+    /// no server text reaches an error.
     pub async fn discover(
         endpoint: &PinnedEndpoint,
         auth_hosts: &[&str],

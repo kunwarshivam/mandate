@@ -77,14 +77,14 @@ impl PinnedEndpoint {
 pub(crate) fn scheme_allowed(url: &Url, build: Build) -> bool {
     match url.scheme() {
         "https" => true,
-        "http" => build == Build::Test && is_loopback(url),
+        "http" => build != Build::Production && is_loopback(url),
         _ => false,
     }
 }
 
-/// Any host, except in the rehearsal build, which dials only a loopback address.
-pub(crate) fn host_allowed(_url: &Url, _build: Build) -> bool {
-    true
+/// Any host, except in the rehearsal build, which dials only a loopback address (DEC-922 item 2).
+pub(crate) fn host_allowed(url: &Url, build: Build) -> bool {
+    build != Build::Rehearsal || is_loopback(url)
 }
 
 /// An IP literal on loopback; a name such as `localhost` is not, since resolving it is a lookup.

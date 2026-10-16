@@ -13,7 +13,8 @@
 //!
 //! - **One pinned host.** A [`PinnedEndpoint`] exists only for an `https` URL on the host the
 //!   connector compiles in; plain `http` is accepted only for a loopback address in this crate's
-//!   own test build. Redirects are never followed: a `3xx` is [`McpError::Redirected`].
+//!   own test build and in the `rh-sim` rehearsal build, which dials nothing but loopback
+//!   (DEC-922). Redirects are never followed: a `3xx` is [`McpError::Redirected`].
 //! - **JSON-RPC 2.0 over streamable HTTP**, with the `Mcp-Session-Id` the server assigns carried
 //!   on every later request, and the answer read as one JSON body or as server-sent events.
 //! - **Bounded**: connect and request timeouts, a cap on the answer's size, and a [`RateBudget`]

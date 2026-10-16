@@ -213,7 +213,7 @@ impl McpTransport {
 }
 
 /// The HTTP client every exchange of this crate uses: no redirect followed, no proxy, `https`
-/// only outside this crate's test build, and the configuration's timeouts, none of them zero.
+/// only outside this crate's test build and the rehearsal build, and the configuration's timeouts, none of them zero.
 pub(crate) fn http_client(config: &TransportConfig) -> Result<reqwest::Client, McpError> {
     if config.connect_timeout.is_zero()
         || config.request_timeout.is_zero()

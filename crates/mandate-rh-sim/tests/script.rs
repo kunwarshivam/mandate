@@ -22,6 +22,9 @@ fn base() -> Value {
     })
 }
 
+/// One way to break the base script.
+type Edit = Box<dyn Fn(&mut Value)>;
+
 fn parsed(script: &Value) -> Result<Script, ScriptError> {
     Script::parse(&script.to_string())
 }
@@ -90,7 +93,7 @@ fn every_session_name_is_read_and_fills_and_quotes_may_be_absent() {
 
 #[test]
 fn anything_the_script_does_not_define_refuses_it() {
-    let edits: Vec<(&str, Box<dyn Fn(&mut Value)>)> = vec![
+    let edits: Vec<(&str, Edit)> = vec![
         ("top-level member", Box::new(|s| s["extra"] = json!(1))),
         (
             "account member",

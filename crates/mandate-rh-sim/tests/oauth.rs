@@ -9,6 +9,9 @@
 
 mod common;
 
+use std::io::{Read, Write};
+use std::net::TcpStream;
+
 use common::wire::{Reply, Wire, http};
 use common::{AGENTIC, ref_id};
 use mandate_rh_sim::{Script, ServerError, SimServer, State};
@@ -523,5 +526,30 @@ fn the_server_started_without_the_rehearsal_needs_no_token() -> Outcome {
     assert_eq!(wire.list().len(), 9);
     let url = format!("{}/oauth/register", base(&server));
     assert_eq!(http("POST", &url, Some(JSON), "{}").status, 404);
+    Ok(())
+}
+
+/// What a browser and `reqwest` send: a `GET` with no `content-length` has no body and is
+/// answered; a chunked body is never read, and the connection closes unanswered.
+#[test]
+fn a_request_without_a_length_has_no_body_and_a_chunked_one_is_refused() -> Outcome {
+    let server = rehearsal();
+    let authority = server.addr()?.to_string();
+    let send = |request: String| {
+        let mut stream = TcpStream::connect(&authority).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut answer = String::new();
+        drop(stream.read_to_string(&mut answer));
+        answer
+    };
+    let get = format!(
+        "GET /.well-known/oauth-protected-resource/mcp HTTP/1.1\r\nhost: {authority}\r\n\r\n"
+    );
+    assert!(send(get).starts_with("HTTP/1.1 200 OK\r\n"));
+    let chunked = format!(
+        "POST /oauth/register HTTP/1.1\r\nhost: {authority}\r\ntransfer-encoding: chunked\r\n\
+         content-length: 2\r\n\r\n{{}}"
+    );
+    assert_eq!(send(chunked), "");
     Ok(())
 }

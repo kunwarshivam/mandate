@@ -21,7 +21,7 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | refcases | reference | schemas | supply-chain | postgres |
                         mutants | schema-mutants; or one part of test: test-nextest |
-                        test-doc | test-python
+                        test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
@@ -46,8 +46,9 @@ commands:
 /// ci fast` still runs this whole group unsharded.
 const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
 /// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
-/// its doctests, and the Python tests. CI runs them in separate jobs (DEC-871).
-const TEST_PARTS: [&str; 3] = ["test-nextest", "test-doc", "test-python"];
+/// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
+/// them in separate jobs (DEC-871).
+const TEST_PARTS: [&str; 4] = ["test-nextest", "test-doc", "test-rh-sim", "test-python"];
 const FULL_JOB: [&str; 5] = [
     "refcases",
     "reference",
@@ -86,6 +87,9 @@ const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
 /// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
 /// `cargo xtask ci test` ignores it and runs every test.
 const TEST_PARTITION_ENV: &str = "MANDATE_TEST_PARTITION";
+/// The simulator binary `test-rh-sim` builds, for `mandate-mcp`'s rehearsal tests to run (DEC-922
+/// item 3).
+const RH_SIM_BIN_ENV: &str = "MANDATE_RH_SIM_BIN";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -202,7 +206,7 @@ fn ci(job: &str) -> Result<()> {
             let partition = env::var(TEST_PARTITION_ENV).ok().filter(|s| !s.is_empty());
             test_part(job, partition.as_deref())
         }
-        "test-doc" | "test-python" => test_part(job, None),
+        "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
         "refcases" => refcases(false),
         "reference" => {
@@ -299,9 +303,61 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
             }
             Ok(())
         }
+        "test-rh-sim" => rh_sim_tests(),
         "test-python" => uv_tools(&["pytest", "-q"]),
         other => bail!("unknown test part: {other}"),
     }
+}
+
+/// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` with the feature, which no
+/// workspace crate turns on, so the workspace's own run never builds it; its login tests run the
+/// simulator binary built here.
+fn rh_sim_tests() -> Result<()> {
+    sh(
+        "cargo",
+        &[
+            "build",
+            "--locked",
+            "--package",
+            "mandate-rh-sim",
+            "--bin",
+            "mandate-rh-sim",
+        ],
+    )?;
+    let meta: serde_json::Value = serde_json::from_str(&output_in(
+        Path::new("."),
+        "cargo",
+        &["metadata", "--format-version", "1", "--no-deps", "--locked"],
+    )?)
+    .context("parsing cargo metadata")?;
+    let target = meta["target_directory"]
+        .as_str()
+        .context("cargo metadata names no target directory")?;
+    let binary = Path::new(target).join("debug").join("mandate-rh-sim");
+    let args = [
+        "nextest",
+        "run",
+        "--locked",
+        "--no-tests=fail",
+        "--package",
+        "mandate-mcp",
+        "--features",
+        "rh-sim",
+    ];
+    eprintln!(
+        "    $ {RH_SIM_BIN_ENV}={} cargo {}",
+        binary.display(),
+        args.join(" ")
+    );
+    let status = Command::new("cargo")
+        .args(args)
+        .env(RH_SIM_BIN_ENV, &binary)
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the rh-sim rehearsal build's tests failed with {status}");
+    }
+    Ok(())
 }
 
 /// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
@@ -1697,6 +1753,27 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                 problems.push(format!(
                     "`{}` turns on `{LIVE}` in its dependency on `{}`",
                     pkg.name, dep.name
+                ));
+            }
+            if dep.features.iter().any(|f| f == REHEARSAL) {
+                problems.push(format!(
+                    "`{}` turns on `{REHEARSAL}` in its dependency on `{}`; only `cargo xtask ci \
+                     test-rh-sim`'s explicit flag may (DEC-922)",
+                    pkg.name, dep.name
+                ));
+            }
+        }
+        for (feature, enables) in &pkg.features {
+            let rehearsal = enables.iter().find(|enabled| {
+                enabled
+                    .rsplit_once('/')
+                    .is_some_and(|(_, feature)| feature == REHEARSAL)
+            });
+            if let Some(enabled) = rehearsal {
+                problems.push(format!(
+                    "`{}`'s feature `{feature}` turns on `{enabled}`; only `cargo xtask ci \
+                     test-rh-sim`'s explicit flag may (DEC-922)",
+                    pkg.name
                 ));
             }
         }
@@ -3769,6 +3846,9 @@ fn cargo_resolve(root: &Path, words: &[String]) -> Result<Resolve> {
 
 /// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
 const LIVE: &str = "live";
+/// The rehearsal build's feature (DEC-922 item 1): no crate turns it on in another, so no build
+/// but `cargo xtask ci test-rh-sim`'s, the `live` one least of all, ever links it.
+const REHEARSAL: &str = "rh-sim";
 
 /// What one line of a workflow, script or cargo configuration does with the `live` feature, worst
 /// first: a line holding several commands takes the worst of theirs.
@@ -11369,7 +11449,7 @@ mod tests {
     const FAST_CI_JOBS: [(&str, &[&str]); 4] = [
         ("fast-lint", &["lint", "spec-guard"]),
         ("fast-test", &["test-nextest"]),
-        ("fast-pending", &["pending", "test-doc"]),
+        ("fast-pending", &["pending", "test-doc", "test-rh-sim"]),
         ("fast-python", &["test-python"]),
     ];
 
@@ -12613,6 +12693,57 @@ jq -r "$filter" "$src"
             live_feature_problems(&policy, &workspace(crates), &[])?,
             Vec::<String>::new(),
             "a dependency on the runner without `live` is allowed"
+        );
+        Ok(())
+    }
+
+    /// DEC-922 item 1: no crate turns on another's `rh-sim`, by a feature naming `<crate>/rh-sim`
+    /// or `<crate>?/rh-sim` or by a dependency of any kind listing it, so only an explicit flag
+    /// builds it; a crate's own `rh-sim` feature, and a dependency without it, are allowed.
+    #[test]
+    fn nothing_turns_on_another_crates_rh_sim() -> Result<()> {
+        let policy = live_policy();
+        let lib = || with_features(member("a-lib", &[]), &[("rh-sim", &[])]);
+        assert_eq!(
+            live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), member("a-tool", &[])]),
+                &[]
+            )?,
+            Vec::<String>::new(),
+            "a crate's own `rh-sim` feature is allowed"
+        );
+        for enabled in ["a-lib/rh-sim", "a-lib?/rh-sim"] {
+            let tool = with_features(member("a-tool", &[]), &[("go", &[enabled])]);
+            let problems = live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), tool]),
+                &[],
+            )?;
+            assert_eq!(problems.len(), 1, "{enabled}: {problems:?}");
+            assert!(problems[0].contains("`a-tool`"), "{problems:?}");
+        }
+        for kind in [None, Some("dev"), Some("build")] {
+            let mut dependent = member("a-tool", &[("a-lib", kind)]);
+            dependent.dependencies[0].features = vec!["rh-sim".to_owned()];
+            let problems = live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), dependent]),
+                &[],
+            )?;
+            assert_eq!(problems.len(), 1, "a {kind:?} dependency: {problems:?}");
+            assert!(problems[0].contains("`a-tool`"), "{problems:?}");
+        }
+        let mut quiet = member("a-tool", &[("a-lib", None)]);
+        quiet.dependencies[0].features = vec!["other".to_owned()];
+        assert_eq!(
+            live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), quiet]),
+                &[]
+            )?,
+            Vec::<String>::new(),
+            "a dependency without `rh-sim` is allowed"
         );
         Ok(())
     }
