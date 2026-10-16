@@ -271,7 +271,7 @@ fn nothing_the_journal_does_not_own_is_booked() {
         ..broker_fill("f-other", None, "2", "150")
     };
 
-    let effects = book(&shell, &[resting], &[foreign.clone()], &ports)
+    let effects = book(&shell, &[resting], std::slice::from_ref(&foreign), &ports)
         .unwrap_or_else(|e| panic!("answers: {e}"));
     assert!(effects.is_empty(), "nothing filled, nothing booked");
 

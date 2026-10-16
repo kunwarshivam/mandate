@@ -27,7 +27,7 @@ mod facts;
 mod gate;
 mod judge;
 
-pub use artifacts::Artifacts;
+pub use artifacts::{Artifacts, DeploymentInput};
 pub use context::{
     Contexts, GateQuote, PaperClock, load_contexts, load_contexts_with_clock, reconcile_context,
 };

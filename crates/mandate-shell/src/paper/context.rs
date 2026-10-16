@@ -17,8 +17,8 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
 use mandate_executor::{
-    BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs, InstrumentSnapshot,
-    MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
+    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
+    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
@@ -167,8 +167,98 @@ pub fn load_contexts_with_clock(
 /// # Errors
 /// [`Cause::Absent`] when the registered configuration cannot be read.
 pub fn reconcile_context(artifacts: &Artifacts, agent: &AgentId) -> Result<ExecutorContext, Cause> {
-    let _ = (artifacts, agent);
-    Err(Cause::Unimplemented { story: "E2" })
+    let configuration = artifacts.production_configuration()?;
+    let source = Rc::new(ReconcilingPaperContext {
+        agent: agent.0.clone(),
+        asset: artifacts.instrument.asset_id.as_str().to_owned(),
+        increment: artifacts.instrument.increment,
+        config_refs: artifacts.config_refs.clone(),
+    });
+    Ok(ExecutorContext::new(
+        Rc::new(Ids {
+            space: IdSpace::Account,
+        }),
+        source.clone(),
+        source.clone(),
+        source,
+        configuration.executor,
+        artifacts.fees.clone(),
+    ))
+}
+
+/// [`reconcile_context`]'s view: the reviewed agent on the reviewed instrument, as
+/// [`TrustedPaperContext`] answers them, with no market fact and a binding gate that answers no
+/// request (DEC-955 item 5).
+struct ReconcilingPaperContext {
+    agent: String,
+    asset: String,
+    increment: ShareIncrement,
+    config_refs: BindingGateConfigRefs,
+}
+
+impl ReconcilingPaperContext {
+    fn reviewed(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {
+        agent.0 == self.agent && instrument.as_str() == self.asset
+    }
+}
+
+impl ExecutorMandateView for ReconcilingPaperContext {
+    fn version(&self, agent: &mandate_executor::AgentId) -> Option<MandateVersion> {
+        (agent.0 == self.agent)
+            .then(|| self.config_refs.mandate_version.clone())
+            .flatten()
+            .map(MandateVersion)
+    }
+
+    fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
+        None
+    }
+
+    fn covers(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {
+        self.reviewed(agent, instrument)
+    }
+}
+
+impl InstrumentSnapshot for ReconcilingPaperContext {
+    fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+        (instrument.as_str() == self.asset).then_some(AssetClass::UsEquity)
+    }
+
+    fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+        (instrument.as_str() == self.asset).then_some(self.increment)
+    }
+
+    fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
+        None
+    }
+
+    /// The registered fill configuration, as [`TrustedPaperContext`] names it (DEC-938 item 2).
+    fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
+        (instrument.as_str() == self.asset)
+            .then(|| fill_refs(&self.config_refs))
+            .flatten()
+    }
+}
+
+impl BindingGateSource for ReconcilingPaperContext {
+    /// No request is answered, so the binding gate refuses every order this context could be
+    /// asked about: the own-fill reconciliation never sends one (DEC-955 item 5).
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        None
+    }
+}
+
+/// The fill records' configuration from the registered references: the fee configuration, the
+/// trading calendar (which also settles the paper run, DEC-938 item 2) and the instrument
+/// snapshot, or none when any is missing, which the journal refuses.
+fn fill_refs(refs: &BindingGateConfigRefs) -> Option<FillConfigRefs> {
+    let calendar = refs.trading_calendar.clone()?;
+    Some(FillConfigRefs {
+        fee_config: refs.fee_config.clone()?,
+        settlement_calendar: calendar.clone(),
+        trading_calendar: calendar,
+        instrument_snapshot: refs.instrument_snapshot.clone()?,
+    })
 }
 
 /// The mandate's protection for an entry at `entry`, as the executor derives it, or none when the
@@ -355,14 +445,7 @@ impl InstrumentSnapshot for TrustedPaperContext {
         if instrument.as_str() != self.template.asset.as_str() {
             return None;
         }
-        let refs = &self.template.config_refs;
-        let calendar = refs.trading_calendar.clone()?;
-        Some(FillConfigRefs {
-            fee_config: refs.fee_config.clone()?,
-            settlement_calendar: calendar.clone(),
-            trading_calendar: calendar,
-            instrument_snapshot: refs.instrument_snapshot.clone()?,
-        })
+        fill_refs(&self.template.config_refs)
     }
 }
 

@@ -1851,6 +1851,44 @@ impl Executor for CoreExecutor {
         fold(&mut self.state.borrow_mut(), event)?;
         Ok(())
     }
+
+    fn owed(
+        &self,
+    ) -> Result<
+        (
+            Vec<mandate_executor::ClientOrderId>,
+            mandate_executor::ActivityCursor,
+        ),
+        Cause,
+    > {
+        let _ = self.context()?;
+        let state = self.state.borrow();
+        let cursor = match state.checkpoint() {
+            Some(cursor) => cursor.clone(),
+            None => mandate_executor::ActivityCursor(String::new()),
+        };
+        Ok((mandate_executor::owed_orders(&state), cursor))
+    }
+
+    fn book_own(
+        &mut self,
+        epoch: mandate_executor::WriterEpoch,
+        at: mandate_executor::RiskClock,
+        orders: &[mandate_executor::BrokerOrder],
+        fills: &[mandate_executor::BrokerFill],
+    ) -> Result<Vec<mandate_executor::Effect>, Cause> {
+        let context = self.context()?;
+        let ports = context.ports();
+        let effects = mandate_executor::book_own_fills(
+            &self.state.borrow(),
+            epoch,
+            at,
+            orders,
+            fills,
+            &ports,
+        )?;
+        Ok(effects)
+    }
 }
 
 /// `mandate_alpaca::TradingClient` over `transport`: the scripted one in CI, `AlpacaPaperHttp` for

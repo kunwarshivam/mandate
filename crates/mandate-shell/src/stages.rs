@@ -255,9 +255,18 @@ pub trait Executor {
     /// own append committed (journal spec §5.1).
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause>;
     /// The orders the folded stream owns whose fills it may not have booked
-    /// (`mandate_executor::owed_orders`, DEC-955 item 2). An executor without the own-fill
-    /// reconciliation answers that it has none, so the run stops rather than skip it.
-    fn owed(&self) -> Result<Vec<mandate_executor::ClientOrderId>, Cause> {
+    /// (`mandate_executor::owed_orders`, DEC-955 item 2), and the activity cursor its last
+    /// reconciliation recorded, from which their fills are read. An executor without the
+    /// own-fill reconciliation answers that it has none, so the run stops rather than skip it.
+    fn owed(
+        &self,
+    ) -> Result<
+        (
+            Vec<mandate_executor::ClientOrderId>,
+            mandate_executor::ActivityCursor,
+        ),
+        Cause,
+    > {
         Err(Cause::Absent {
             what: "the own-fill reconciliation",
         })

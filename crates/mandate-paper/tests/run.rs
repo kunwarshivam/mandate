@@ -90,7 +90,8 @@ struct Broker {
     rests: bool,
     /// The entry's fill, at the entry's own limit price, in the account activities once the entry
     /// was sent, and the share it bought in the positions, named by the broker's ticker as the
-    /// paper broker reported #1355's (E2, 2026-10-16).
+    /// paper broker reported #1355's (E2, 2026-10-16). A read on from a cursor (`page_token`)
+    /// finds nothing after that one fill, as Alpaca's does.
     fills: bool,
     /// The fill activity as Alpaca really sends it: the broker's `order_id` and no
     /// `client_order_id` (E2, 2026-10-16; DEC-955 item 3).
@@ -218,7 +219,11 @@ impl TradingTransport for Broker {
             }
             (_, lookup) if self.entry(lookup).is_some() => (200, self.entry(lookup).unwrap()),
             (_, list) if list.starts_with("/v2/account/activities?") && self.fills => {
-                (200, self.fill())
+                if list.contains("page_token=") {
+                    (200, b"[]".to_vec())
+                } else {
+                    (200, self.fill())
+                }
             }
             (_, list) if list.starts_with("/v2/orders?") && self.open_take_profit => {
                 (200, self.take_profit())
