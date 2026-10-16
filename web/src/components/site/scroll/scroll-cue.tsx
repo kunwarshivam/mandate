@@ -11,9 +11,6 @@ const FALLBACK_BOTTOM = 64;
 const QUIET_FRAMES = 30;
 const STATUS = "[data-slot=status-text]";
 
-/** The event the cue sends, bubbling, each time it moves, so the owl peeking over it follows. */
-export const CUE_MOVED = "cue-moved";
-
 const holdsStatus = (node: Node | EventTarget | null) => node instanceof Element && (node.matches(STATUS) || node.querySelector(STATUS) !== null);
 
 /**
@@ -54,7 +51,6 @@ export function ScrollCue() {
         cue.style.left = left;
         cue.style.top = top;
         cue.dataset.at = at;
-        cue.dispatchEvent(new Event(CUE_MOVED, { bubbles: true }));
       }
       if (quiet < QUIET_FRAMES) raf = window.requestAnimationFrame(place);
     };

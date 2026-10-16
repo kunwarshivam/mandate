@@ -4,17 +4,16 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BETA_REQUEST_PATH, LOGIN_PATH } from "@/lib/auth-routes";
 import { DISCARDED, QUESTIONS } from "../apps";
-import { artwork } from "../art";
 import { Landing } from "../landing";
-import { BROKERS, GAP_CAVEAT, LongPage } from "./long-page";
+import { GAP_CAVEAT, LongPage } from "./long-page";
 import { PUSH_TEXT } from "./lock-screen";
 import { PAGE_FORM_ID, PARTS, SIGN_UP_ID } from "./parts";
 import { SHOTS } from "./shot";
 import { WONT } from "./wont";
 
 /**
- * The long page under the desktop (DEC-907): a landing page in its own type that shows the app and
- * says what the desktop's homepage does not, with Sign in and Sign up always in its bar.
+ * The long page under the desktop (DEC-907, DEC-932): a landing page in its own type that shows the
+ * app and says what the desktop's homepage does not, with Sign in and Sign up in its one bar.
  */
 
 const WEB = join(__dirname, "..", "..", "..", "..");
@@ -82,15 +81,26 @@ describe("the bar", () => {
     expect(within(bar).getByRole("button", { name: "Sign up" })).toBeTruthy();
   });
 
-  it("sticks to the top of the sheet, so the two stay in view once the desktop is covered", () => {
+  it("stays hidden while the desktop's own bar shows, and pins itself to the top once the page covers the desktop (DEC-932)", () => {
+    const top = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ top: 900 } as DOMRect);
     render(<LongPage />);
-    expect(document.querySelector("[data-slot=page-bar]")!.className).toMatch(/\bsticky\b.*\btop-0\b/);
+    const bar = document.querySelector<HTMLElement>("[data-slot=page-bar]")!;
+    expect(bar.className).toMatch(/\bfixed\b.*\btop-0\b/);
+    expect(bar).not.toHaveAttribute("data-shown");
+    expect(bar, "nothing hidden takes the keyboard").toHaveAttribute("inert");
+    top.mockReturnValue({ top: 0 } as DOMRect);
+    act(() => void window.dispatchEvent(new Event("scroll")));
+    expect(bar).toHaveAttribute("data-shown");
+    expect(bar).not.toHaveAttribute("inert");
+    top.mockReturnValue({ top: 40 } as DOMRect);
+    act(() => void window.dispatchEvent(new Event("scroll")));
+    expect(bar, "scrolled back up, the desktop's bar shows again").not.toHaveAttribute("data-shown");
   });
 
   it("brings the request form into view on Sign up and puts the cursor in its email field", () => {
     const into = vi.spyOn(Element.prototype, "scrollIntoView");
     render(<LongPage />);
-    fireEvent.click(within(document.querySelector<HTMLElement>("[data-slot=page-bar]")!).getByRole("button", { name: "Sign up" }));
+    fireEvent.click(within(document.querySelector<HTMLElement>("[data-slot=page-bar]")!).getByRole("button", { name: "Sign up", hidden: true }));
     expect(into.mock.contexts[0]).toBe(document.getElementById(SIGN_UP_ID));
     expect(document.activeElement).toBe(document.getElementById(`${PAGE_FORM_ID}-email`));
   });
@@ -132,14 +142,7 @@ describe("what it says", () => {
   it("says under the first buttons that it is free in the beta and starts on paper money", () => {
     render(<LongPage />);
     const intro = document.querySelector<HTMLElement>("[data-slot=intro]")!;
-    expect(within(intro).getByText("Free during the beta. It starts on paper money.")).toHaveAttribute("data-slot", "reassure");
-  });
-
-  it("marks the brokers that are not connected yet as coming, and Alpaca as paper", () => {
-    render(<LongPage />);
-    const brokers = document.querySelector<HTMLElement>("[data-slot=brokers]")!;
-    expect(BROKERS.map((b) => `${b.name}: ${b.status}`)).toEqual(["Alpaca: Paper trading", "Robinhood: Coming", "Kraken Derivatives US: Coming"]);
-    for (const b of BROKERS) expect(brokers).toHaveTextContent(`${b.name}${b.status}`);
+    expect(within(intro).getByText("Free during the beta. Every agent starts on paper money.")).toHaveAttribute("data-slot", "reassure");
   });
 
   it("puts on the lock screen only the sentence a request's push carries", () => {
@@ -151,11 +154,13 @@ describe("what it says", () => {
     expect(text(lock)).not.toMatch(/\$|BTC|XYZ|Buy|Sell/);
   });
 
-  it("strikes through each thing it won't do, under It won't", () => {
+  it("lists each thing it won't do, plainly, under What it won't do (DEC-932)", () => {
     render(<LongPage />);
     const wont = document.getElementById("wont")!;
-    expect(within(wont).getByRole("heading", { level: 2 })).toHaveTextContent("It won't");
-    expect([...wont.querySelectorAll("s")].map(text)).toEqual(WONT.map((w) => w.verb));
+    expect(within(wont).getByRole("heading", { level: 2 })).toHaveTextContent("What it won't do.");
+    expect([...wont.querySelectorAll("li")].map(text)).toEqual(WONT.map((w) => `${w.verb}${w.why}`));
+    expect(wont.querySelectorAll("s")).toHaveLength(0);
+    expect(wont.className, "on the page's own paper, not a field of sun").not.toMatch(/bg-highlight/);
   });
 
   it("states no performance and makes no promise of money", () => {
@@ -208,13 +213,11 @@ describe("the pictures", () => {
     for (const img of container.querySelectorAll("[data-slot=shot] img")) expect(img.getAttribute("alt")?.length ?? 0).toBeGreaterThan(20);
   });
 
-  it("credits the painting behind the request form to the Met, linked to its page", () => {
+  it("sets the request form on the page's own paper, with no painting behind it (DEC-932)", () => {
     render(<LongPage />);
-    const art = artwork("kanasawa-full-moon");
-    const plate = document.getElementById(SIGN_UP_ID)!;
-    const credit = within(plate).getByRole("link", { name: `${art.artist}, ${art.title}` });
-    expect(credit.getAttribute("href")).toBe(art.url);
-    expect(credit.parentElement).toHaveTextContent(/, the Met$/);
+    const form = document.getElementById(SIGN_UP_ID)!;
+    expect(form.querySelector("img")).toBeNull();
+    expect(document.querySelector("[data-slot=plate]")).toBeNull();
   });
 });
 
@@ -278,7 +281,6 @@ describe("the design system", () => {
       "components/site/scroll/parts.ts",
       "components/site/scroll/pixel-night.tsx",
       "components/site/scroll/pixel-sea.tsx",
-      "components/site/scroll/scroll.module.css",
     ]);
   });
 });
@@ -336,14 +338,13 @@ describe("the motion", () => {
     }
   });
 
-  it("pauses only the looping animations of a picture out of view, never the moon's rise, which follows the scroll", () => {
+  it("pauses the looping animations of a picture out of view", () => {
     const css = readFileSync(join(__dirname, "scroll.module.css"), "utf8");
     const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
     const rule = motion.match(/\[data-ambient="paused"\] :is\(([^)]*)\) \{\s*animation-play-state: paused;/);
     expect(rule, "a paused picture's loops hold still, with motion allowed").not.toBeNull();
     const held = rule![1]!.split(",").map((s) => s.trim());
-    expect(held).toEqual(expect.arrayContaining([".wave", ".foam", ".glintA", ".glintB", ".wingsUp", ".wingsDown", ".twinkle"]));
-    expect(held).not.toContain(".moon");
+    expect(held).toEqual([".wave", ".foam", ".twinkle"]);
   });
 
   it("holds the desktop's loops and its app's still once the page has risen 200 px past covering it, and lets them go before it shows", () => {
@@ -401,10 +402,10 @@ describe("the motion", () => {
     expect(globals.match(/:root\[data-ambient="paused"\] :is\(\*, ::before, ::after\) \{([^}]*)\}/)?.[1], "the app's own document").toMatch(held);
   });
 
-  it("strikes each thing it won't do in turn, and settles every picture of the app with a tilt", () => {
+  it("settles each thing it won't do in turn, and every picture of the app with a tilt", () => {
     const { container } = render(<LongPage />);
     const lines = [...container.querySelectorAll<HTMLElement>("#wont li")];
-    expect(lines.map((li) => [li.dataset.reveal, li.style.getPropertyValue("--i")])).toEqual(WONT.map((_, i) => ["strike", String(i)]));
+    expect(lines.map((li) => [li.dataset.reveal, li.style.getPropertyValue("--i")])).toEqual(WONT.map((_, i) => ["", String(i)]));
     for (const shot of container.querySelectorAll("[data-slot=shot]")) expect(shot.closest("[data-reveal=tilt]"), shot.getAttribute("data-shot")!).not.toBeNull();
   });
 });

@@ -41,6 +41,7 @@ fn iex() -> LatestQuote {
         ask: price("100"),
         ask_size: Qty::parse("1").expect("the size parses"),
         feed: Feed::Iex,
+        clock_skew: None,
     }
 }
 

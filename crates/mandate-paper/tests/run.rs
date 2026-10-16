@@ -37,6 +37,7 @@ use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+use proptest::prelude::*;
 use shell_common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
 use std::cell::{Cell, RefCell};
 use std::fs;
@@ -72,10 +73,14 @@ type Answer = Result<Response, TransportError>;
 /// to the run's minute. It accepts a submission and keeps every `POST /v2/orders` body it is
 /// handed; `holds` makes it report one share already held, as after a first run. It reads the
 /// entry back `filled` (DEC-858 item 6), or with `rests` `accepted` until deleted and then
-/// `canceled`, and logs every request after the entry with the clock's second.
+/// `canceled`, and logs every request after the entry with the clock's second. With
+/// `quote_offset_ns` its quote is stamped that many nanoseconds after the clock's instant at the
+/// quote read, as a live feed stamps it, instead of the recorded minute, and the minute bars drop
+/// their first, which a clock past the run's whole minute no longer asks for.
 #[derive(Clone)]
 struct Broker {
     equity: Equity,
+    quote_offset_ns: Option<i128>,
     holds: bool,
     rests: bool,
     minutes: &'static str,
@@ -170,33 +175,82 @@ impl TradingTransport for Broker {
 
 impl DataTransport for Broker {
     fn send(&self, _: &QuoteRequest) -> impl Future<Output = Answer> {
-        answer(200, self.file("quote-aapl.json"))
+        let quote = String::from_utf8(self.file("quote-aapl.json")).unwrap();
+        let recorded = format!(r#""t":"{}9:59.5Z""#, self.minutes);
+        assert!(quote.contains(&recorded), "the recorded quote's stamp");
+        let quote = match self.quote_offset_ns {
+            None => quote,
+            Some(offset) => {
+                let stamp = shifted(self.clock.peek(), offset);
+                quote.replace(&recorded, &format!(r#""t":"{stamp}""#))
+            }
+        };
+        answer(200, quote.into_bytes())
     }
 
     fn send_bars(&self, _: &BarsRequest) -> impl Future<Output = Answer> {
-        answer(200, self.file("bars-aapl.json"))
+        let bars = String::from_utf8(self.file("bars-aapl.json")).unwrap();
+        let bars = match self.quote_offset_ns {
+            None => bars,
+            Some(_) => {
+                let (head, rest) = bars.split_once(r#""bars":["#).unwrap();
+                let (_, later) = rest.split_once("},").unwrap();
+                format!(r#"{head}"bars":[{later}"#)
+            }
+        };
+        answer(200, bars.into_bytes())
     }
 }
 
-/// The run's clock: it starts at a moment and moves on by each pause (DEC-858 item 6).
+/// The run's clock: it starts at a moment and moves on by each pause (DEC-858 item 6), and by
+/// `step_ns` at every read, as a real clock moves between the run's reads (#1355).
 #[derive(Clone)]
 struct Clock {
     start: &'static str,
     waited: Rc<Cell<u64>>,
+    reads: Rc<Cell<u64>>,
+    step_ns: u64,
 }
 
 impl Clock {
     fn at(start: &'static str) -> Clock {
-        let waited = Rc::default();
-        Clock { start, waited }
+        Clock::advancing(start, 0)
     }
+
+    fn advancing(start: &'static str, step_ns: u64) -> Clock {
+        let (waited, reads) = (Rc::default(), Rc::default());
+        Clock {
+            start,
+            waited,
+            reads,
+            step_ns,
+        }
+    }
+
+    /// The instant the next read answers, without reading.
+    fn peek(&self) -> UtcNanos {
+        let start = UtcNanos::parse_rfc3339(self.start).unwrap();
+        let waited = i128::from(self.waited.get()) * NANOS_PER_S;
+        let ticked = i128::from(self.reads.get()) * i128::from(self.step_ns);
+        shifted(start, waited + ticked)
+    }
+}
+
+const NANOS_PER_S: i128 = 1_000_000_000;
+
+/// `at` moved by `nanos`.
+fn shifted(at: UtcNanos, nanos: i128) -> UtcNanos {
+    let total = i128::from(at.secs()) * NANOS_PER_S + i128::from(at.nanos()) + nanos;
+    let secs = i64::try_from(total.div_euclid(NANOS_PER_S)).unwrap();
+    let nanos = u32::try_from(total.rem_euclid(NANOS_PER_S)).unwrap();
+    UtcNanos::from_parts(secs, nanos).unwrap()
 }
 
 impl Pause for Clock {
     fn now(&self) -> UtcNanos {
-        let start = UtcNanos::parse_rfc3339(self.start).unwrap();
-        let secs = start.secs() + i64::try_from(self.waited.get()).unwrap();
-        UtcNanos::from_parts(secs, start.nanos()).unwrap()
+        let read = self.peek();
+        self.reads.set(self.reads.get() + 1);
+        read
     }
 
     async fn pause(&self, duration: Duration) {
@@ -314,6 +368,7 @@ impl Scene {
             records: stream.records,
             broker: Broker {
                 equity,
+                quote_offset_ns: None,
                 holds,
                 rests: false,
                 minutes,
@@ -342,6 +397,14 @@ impl Scene {
     fn at(&mut self, (now, minutes): Moment) {
         (self.ports.clock, self.ports.broker.minutes) = (Clock::at(now), minutes);
         self.ports.broker.clock = self.ports.clock.clone();
+    }
+
+    /// Moves the run's clock on by `step_ns` at every read, from the run's moment, and stamps the
+    /// broker's quote `quote_offset_ns` after the clock's instant at the quote read.
+    fn advancing(&mut self, step_ns: u64, quote_offset_ns: i128) {
+        self.ports.clock = Clock::advancing(self.ports.clock.start, step_ns);
+        self.ports.broker.clock = self.ports.clock.clone();
+        self.ports.broker.quote_offset_ns = Some(quote_offset_ns);
     }
 
     fn posts(&self) -> Vec<Value> {
@@ -728,5 +791,143 @@ fn the_shipping_adapter_selects_no_product_value() {
             body.contains(required),
             "the shipping adapter must take its inputs from the stream: {required}"
         );
+    }
+}
+
+/// The quote's age bound the registered rule set holds (`iex_quote_max_age_s`).
+const QUOTE_MAX_AGE_NS: i128 = 10 * NANOS_PER_S;
+/// How far ahead of the host clock DEC-936 lets the preflight's IEX quote be stamped.
+const QUOTE_SKEW_NS: i128 = 250_000_000;
+
+/// The cause and stage `outcome` refused with, or what else it was.
+fn refused_at(outcome: &Result<Outcome, PaperError>) -> String {
+    match outcome {
+        Err(PaperError::Shell(ShellError::Refused { stage, cause })) => {
+            format!("{stage:?}: {cause}")
+        }
+        other => format!("not a shell refusal: {other:?}"),
+    }
+}
+
+/// Whether `outcome` is a placing run that sent exactly one order.
+fn placed_one(scene: &Scene, outcome: &Result<Outcome, PaperError>) -> bool {
+    matches!(outcome, Ok(Outcome::Cycle(cycle)) if cycle.report.submitted.len() == 1)
+        && scene.posts().len() == 1
+}
+
+/// #1355's defect, `AGENTS.md` rule 3 read with DEC-935: the clock moves between the run's
+/// reads, so the asset record (stamped at its own read) and the quote (stamped at the quote
+/// read) are both newer than the run's start. Each is judged at a clock read taken after it was
+/// read, so the run places its one order; judging them at the start refused every real run with
+/// "a current asset record".
+#[test]
+fn facts_stamped_after_the_run_start_are_judged_at_a_later_clock_read() {
+    let mut scene = Scene::new("advancing", 231..256);
+    scene.advancing(1_000_000, 0);
+    let start = UtcNanos::parse_rfc3339(TUESDAY.0).unwrap();
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    assert!(
+        scene.ports.clock.peek() > start,
+        "the clock moved during the run"
+    );
+}
+
+/// DEC-935 item 2: no bound is widened. A clock that moves four seconds a read leaves the asset
+/// record older than its ten-second bound at the judge's read, three reads after its own, so the
+/// run still refuses it with nothing sent.
+#[test]
+fn an_asset_record_older_than_its_bound_at_the_judges_read_still_refuses() {
+    let mut scene = Scene::new("stale-asset", 231..256);
+    scene.advancing(4_000_000_000, 0);
+    let outcome = scene.run();
+    assert_eq!(refused_at(&outcome), "Validate: a current asset record");
+    assert!(scene.posts().is_empty());
+}
+
+/// DEC-936 item 1 (amending DEC-935 item 2): a quote stamped more than 250 ms after the clock at
+/// its read, by even a nanosecond, or older than its bound by a nanosecond there, is refused at
+/// the preflight with nothing sent; one exactly at the bound is current.
+#[test]
+fn a_quote_past_the_skew_tolerance_or_its_bound_still_refuses() {
+    let expected = "Reconcile: a current IEX quote";
+    for (name, offset) in [
+        ("future", QUOTE_SKEW_NS + 1),
+        ("stale", -QUOTE_MAX_AGE_NS - 1),
+    ] {
+        let mut scene = Scene::new(&format!("quote-{name}"), 231..256);
+        scene.advancing(0, offset);
+        let outcome = scene.run();
+        assert_eq!(refused_at(&outcome), expected, "{name}");
+        assert!(scene.posts().is_empty(), "{name}");
+    }
+    let mut scene = Scene::new("quote-at-bound", 231..256);
+    scene.advancing(0, -QUOTE_MAX_AGE_NS);
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+}
+
+/// DEC-936 changes only the preflight's check: a quote within the tolerance passes it, and the
+/// shell's judge, unchanged (DEC-935 item 2), still refuses a quote stamped after the run clock.
+/// With a clock that does not move, #1355's 2 to 24 ms skews refuse there, with nothing sent.
+#[test]
+fn a_quote_within_the_tolerance_still_ahead_of_the_run_clock_refuses_at_the_judge() {
+    for offset in [1, 2_000_000, 24_000_000, QUOTE_SKEW_NS] {
+        let mut scene = Scene::new(&format!("quote-skew-{offset}"), 231..256);
+        scene.advancing(0, offset);
+        let outcome = scene.run();
+        assert_eq!(
+            refused_at(&outcome),
+            "Validate: a current, uncrossed IEX quote",
+            "{offset}"
+        );
+        assert!(scene.posts().is_empty(), "{offset}");
+    }
+}
+
+/// #1355's case under DEC-936: a quote 24 ms ahead of the host clock at its read passes the
+/// preflight, and once the clock has moved past its stamp by the run clock's read, the judge and
+/// the binding gate hold it current, so the run places its one order.
+#[test]
+fn a_quote_24_ms_ahead_places_once_the_clock_has_passed_its_stamp() {
+    let mut scene = Scene::new("quote-skew-placed", 231..256);
+    scene.advancing(20_000_000, 24_000_000);
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 12, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// DEC-935, over clock advances: however far the clock moves between reads, up to 20 ms a
+    /// read, a quote up to 9 s old at its read and an asset record stamped at its own read are
+    /// current at every later read, so the run places its one order.
+    #[test]
+    fn any_small_clock_advance_places_the_one_order(
+        step_ns in 0_u64..=20_000_000,
+        age_ns in 0_i128..=9 * NANOS_PER_S,
+    ) {
+        let mut scene = Scene::new(&format!("advance-{step_ns}-{age_ns}"), 231..256);
+        scene.advancing(step_ns, -age_ns);
+        let outcome = scene.run();
+        prop_assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    }
+
+    /// DEC-936 item 1, over clock advances: a quote stamped more than 250 ms after the clock at
+    /// its read, by a nanosecond to an hour, is refused whatever the clock's step, with nothing
+    /// sent.
+    #[test]
+    fn a_future_quote_refuses_at_any_clock_advance(
+        step_ns in 0_u64..=20_000_000,
+        ahead_ns in QUOTE_SKEW_NS + 1..=3_600 * NANOS_PER_S,
+    ) {
+        let mut scene = Scene::new(&format!("future-{step_ns}-{ahead_ns}"), 231..256);
+        scene.advancing(step_ns, ahead_ns);
+        let outcome = scene.run();
+        prop_assert_eq!(
+            refused_at(&outcome),
+            "Reconcile: a current IEX quote"
+        );
+        prop_assert!(scene.posts().is_empty());
     }
 }

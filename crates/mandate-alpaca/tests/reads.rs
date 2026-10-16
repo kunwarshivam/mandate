@@ -151,6 +151,7 @@ fn aapl_quote() -> LatestQuote {
         ask: price("227.46"),
         ask_size: qty("1"),
         feed: Feed::Iex,
+        clock_skew: None,
     }
 }
 
@@ -164,6 +165,15 @@ fn btc_quote() -> LatestQuote {
         ask: price("65123.4"),
         ask_size: qty("0.2791"),
         feed: Feed::Crypto,
+        clock_skew: None,
+    }
+}
+
+/// `quote` as a clock read judged it, its stamp `skew_ns` ahead of that clock (DEC-936 item 3).
+fn judged(quote: LatestQuote, skew_ns: u64) -> LatestQuote {
+    LatestQuote {
+        clock_skew: Some(Duration::from_nanos(skew_ns)),
+        ..quote
     }
 }
 
@@ -602,7 +612,7 @@ async fn an_equity_latest_quote_is_read_exactly_on_the_iex_feed() {
     let (client, transport) = data([data_reply("quote_equity"), inline(200, &moved)], now);
     assert_eq!(
         read(client.latest_quote(&instrument("AAPL"), MAX_AGE).await),
-        Ok(aapl_quote()),
+        Ok(judged(aapl_quote(), 0)),
         "both sides, exactly as the data host sent them, and the instant it stamped"
     );
     assert_eq!(
@@ -613,7 +623,7 @@ async fn an_equity_latest_quote_is_read_exactly_on_the_iex_feed() {
             bid_size: qty("7"),
             ask: price("228.1"),
             ask_size: qty("300"),
-            ..aapl_quote()
+            ..judged(aapl_quote(), 0)
         }),
         "a second quote is read from its own body, so no constant passes (#277 review, minor 1)"
     );
@@ -631,7 +641,7 @@ async fn a_crypto_latest_quote_is_read_exactly_on_the_crypto_feed() {
     let (client, transport) = data([data_reply("quote_crypto")], now);
     assert_eq!(
         read(client.latest_quote(&instrument("BTC/USD"), MAX_AGE).await),
-        Ok(btc_quote())
+        Ok(judged(btc_quote(), 0))
     );
     assert_eq!(
         sent_urls(&transport),
@@ -654,7 +664,7 @@ async fn a_missing_quote_is_absent() {
     );
     assert_eq!(
         read(client.latest_quote(&instrument("AAPL"), MAX_AGE).await),
-        Ok(aapl_quote())
+        Ok(judged(aapl_quote(), 0))
     );
     assert_eq!(
         code(client.latest_quote(&instrument("XYZQ"), MAX_AGE).await),
@@ -672,7 +682,7 @@ async fn a_missing_quote_is_absent() {
     );
     assert_eq!(
         read(client.latest_quote(&instrument("BTC/USD"), MAX_AGE).await),
-        Ok(btc_quote())
+        Ok(judged(btc_quote(), 0))
     );
     assert_eq!(
         code(client.latest_quote(&instrument("ETH/BTC"), MAX_AGE).await),
@@ -856,8 +866,8 @@ async fn a_quote_older_than_the_bound_is_refused() {
     let stamped = instant(EQUITY_QUOTE_AT);
     let bound = i128::try_from(MAX_AGE.as_nanos()).expect("fits");
     for (offset, expected) in [
-        (0, Ok(aapl_quote())),
-        (bound, Ok(aapl_quote())),
+        (0, Ok(judged(aapl_quote(), 0))),
+        (bound, Ok(judged(aapl_quote(), 0))),
         (bound + 1, Err("stale")),
         (bound * 60, Err("stale")),
     ] {
@@ -886,15 +896,129 @@ async fn a_quote_stamped_after_the_clock_is_refused() {
     let (client, _) = data([data_reply("quote_crypto")], stamped);
     assert_eq!(
         read(client.latest_quote(&instrument("BTC/USD"), MAX_AGE).await),
-        Ok(btc_quote()),
+        Ok(judged(btc_quote(), 0)),
         "a quote stamped at the clock's now is current"
     );
     let (client, _) = data([data_reply("quote_crypto")], shifted(stamped, -1));
     assert_eq!(
         code(client.latest_quote(&instrument("BTC/USD"), MAX_AGE).await),
         Err("ahead_of_clock"),
-        "one stamped a nanosecond later than now has no age anyone can judge"
+        "a crypto quote stamped a nanosecond later than now has no age anyone can judge: \
+         DEC-936's tolerance is the IEX quote's alone"
     );
+}
+
+/// DEC-936's tolerance: 250 ms, in nanoseconds, written here from the decision, not the crate.
+const SKEW_NS: i128 = 250_000_000;
+/// The registered rule set's `iex_quote_max_age_s`, the bound the paper preflight passes.
+const IEX_MAX_AGE: Duration = Duration::from_secs(10);
+const IEX_MAX_AGE_NS: i128 = 10_000_000_000;
+
+/// The IEX quote `offset_ns` ahead of the clock (behind it when negative), read through the
+/// preflight's check against [`IEX_MAX_AGE`].
+async fn iex_quote_ahead_by(
+    offset_ns: i128,
+    max_age: Duration,
+) -> Result<LatestQuote, &'static str> {
+    let stamped = instant(EQUITY_QUOTE_AT);
+    let (client, _) = data([data_reply("quote_equity")], shifted(stamped, -offset_ns));
+    code(read(
+        client.latest_quote(&instrument("AAPL"), max_age).await,
+    ))
+}
+
+/// DEC-936 items 1 and 3: an IEX quote stamped up to 250 ms ahead of the host clock is current,
+/// and the skew its read observed is recorded on it; #1355's quotes were 2 to 24 ms ahead.
+#[tokio::test]
+async fn an_iex_quote_up_to_250_ms_ahead_of_the_clock_is_current_with_its_skew_recorded() {
+    for ahead_ns in [1_000_000, 2_000_000, 24_000_000, SKEW_NS] {
+        let skew = u64::try_from(ahead_ns).expect("positive");
+        assert_eq!(
+            iex_quote_ahead_by(ahead_ns, IEX_MAX_AGE).await,
+            Ok(judged(aapl_quote(), skew)),
+            "an IEX quote {ahead_ns} ns ahead of the host clock"
+        );
+    }
+    assert_eq!(
+        iex_quote_ahead_by(0, IEX_MAX_AGE).await,
+        Ok(judged(aapl_quote(), 0)),
+        "a quote stamped at the clock's now has no skew"
+    );
+    assert_eq!(
+        iex_quote_ahead_by(-3_000_000_000, IEX_MAX_AGE).await,
+        Ok(judged(aapl_quote(), 0)),
+        "a quote behind the clock records no skew: its distance is its age"
+    );
+}
+
+/// DEC-936 item 1: more than 250 ms ahead, by a nanosecond to an hour, still refuses.
+#[tokio::test]
+async fn an_iex_quote_more_than_250_ms_ahead_of_the_clock_is_refused() {
+    for ahead_ns in [
+        SKEW_NS + 1,
+        SKEW_NS + 1_000_000,
+        1_000_000_000,
+        3_600 * 1_000_000_000,
+    ] {
+        assert_eq!(
+            iex_quote_ahead_by(ahead_ns, IEX_MAX_AGE).await,
+            Err("ahead_of_clock"),
+            "an IEX quote {ahead_ns} ns ahead of the host clock"
+        );
+    }
+}
+
+/// DEC-936 item 2: the 10 s bound is unchanged, and the age is measured from the later of the
+/// quote's stamp and the host clock, so a stamp ahead of the clock is aged zero, never negative.
+#[tokio::test]
+async fn the_iex_quote_age_bound_is_unchanged_and_measured_from_the_later_instant() {
+    assert_eq!(
+        iex_quote_ahead_by(-IEX_MAX_AGE_NS, IEX_MAX_AGE).await,
+        Ok(judged(aapl_quote(), 0)),
+        "exactly 10 s old is current"
+    );
+    assert_eq!(
+        iex_quote_ahead_by(-IEX_MAX_AGE_NS - 1, IEX_MAX_AGE).await,
+        Err("stale"),
+        "10 s and a nanosecond old is stale"
+    );
+    assert_eq!(
+        iex_quote_ahead_by(24_000_000, Duration::ZERO).await,
+        Ok(judged(aapl_quote(), 24_000_000)),
+        "a stamp 24 ms ahead is aged from itself, zero, so even a zero bound holds it"
+    );
+    assert_eq!(
+        iex_quote_ahead_by(-1, Duration::ZERO).await,
+        Err("stale"),
+        "and a stamp a nanosecond behind the clock is aged from the clock"
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// DEC-936 over skews from 20 s behind the clock to 1 s ahead of it, at nanosecond
+    /// resolution: the oracle is the decision's own arithmetic on whole nanoseconds, and an
+    /// accepted quote records exactly the part of the skew that was ahead of the clock.
+    #[test]
+    fn an_iex_quote_is_judged_by_the_250_ms_tolerance_and_the_10_s_bound(
+        ahead_ns in -20 * 1_000_000_000_i128..=1_000_000_000,
+    ) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let answer = runtime.block_on(iex_quote_ahead_by(ahead_ns, IEX_MAX_AGE));
+        let expected = if ahead_ns > SKEW_NS {
+            Err("ahead_of_clock")
+        } else if ahead_ns < -IEX_MAX_AGE_NS {
+            Err("stale")
+        } else {
+            let skew = u64::try_from(ahead_ns.max(0)).expect("at most 250 ms");
+            Ok(judged(aapl_quote(), skew))
+        };
+        prop_assert_eq!(answer, expected);
+    }
 }
 
 #[tokio::test]
@@ -931,7 +1055,7 @@ async fn an_overloaded_or_failing_data_host_leaves_the_quote_unread() {
     }
     assert_eq!(
         read(client.latest_quote(&aapl_id, MAX_AGE).await),
-        Ok(aapl_quote()),
+        Ok(judged(aapl_quote(), 0)),
         "and the next good answer is read"
     );
     assert_eq!(
@@ -966,9 +1090,9 @@ proptest! {
 
     /// Any latest-quote body with prices and sizes of up to 9 places reads back as exactly those
     /// numbers, or is refused for the one reason the oracle gives: a zero price is one-sided, and
-    /// an age past the bound or before the clock is refused. The oracle reads each number with
-    /// `mandate-num` from its own canonical text and judges the age on whole nanoseconds since
-    /// the epoch, not with anything the crate computes.
+    /// an age past the bound, or a stamp more than DEC-936's 250 ms ahead of the clock, is
+    /// refused. The oracle reads each number with `mandate-num` from its own canonical text and
+    /// judges the age on whole nanoseconds since the epoch, not with anything the crate computes.
     #[test]
     fn a_quote_reads_as_its_own_numbers_or_is_refused_for_the_oracles_reason(
         bid in number_token(),
@@ -994,7 +1118,7 @@ proptest! {
         let bound = i128::try_from(MAX_AGE.as_nanos()).expect("fits");
         let expected = match (Price::parse(&canonical(&bid)), Price::parse(&canonical(&ask))) {
             (Err(_), _) | (_, Err(_)) => Err("one_sided"),
-            (Ok(_), Ok(_)) if age < 0 => Err("ahead_of_clock"),
+            (Ok(_), Ok(_)) if age < -SKEW_NS => Err("ahead_of_clock"),
             (Ok(_), Ok(_)) if age > bound => Err("stale"),
             (Ok(bid), Ok(ask)) => Ok(LatestQuote {
                 instrument: instrument("AAPL"),
@@ -1004,6 +1128,9 @@ proptest! {
                 ask,
                 ask_size: qty(&canonical(&ask_size)),
                 feed: Feed::Iex,
+                clock_skew: Some(Duration::from_nanos(
+                    u64::try_from(age.min(0).unsigned_abs()).expect("under 2 s"),
+                )),
             }),
         };
         prop_assert_eq!(code(answer), expected);

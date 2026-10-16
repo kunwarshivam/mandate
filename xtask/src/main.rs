@@ -21,7 +21,7 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | refcases | reference | schemas | supply-chain | postgres |
                         mutants | schema-mutants; or one part of test: test-nextest |
-                        test-doc | test-python
+                        test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
@@ -46,8 +46,9 @@ commands:
 /// ci fast` still runs this whole group unsharded.
 const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
 /// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
-/// its doctests, and the Python tests. CI runs them in separate jobs (DEC-871).
-const TEST_PARTS: [&str; 3] = ["test-nextest", "test-doc", "test-python"];
+/// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
+/// them in separate jobs (DEC-871).
+const TEST_PARTS: [&str; 4] = ["test-nextest", "test-doc", "test-rh-sim", "test-python"];
 const FULL_JOB: [&str; 5] = [
     "refcases",
     "reference",
@@ -86,6 +87,9 @@ const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
 /// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
 /// `cargo xtask ci test` ignores it and runs every test.
 const TEST_PARTITION_ENV: &str = "MANDATE_TEST_PARTITION";
+/// The simulator binary `test-rh-sim` builds, for `mandate-mcp`'s rehearsal tests to run (DEC-922
+/// item 3).
+const RH_SIM_BIN_ENV: &str = "MANDATE_RH_SIM_BIN";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -202,7 +206,7 @@ fn ci(job: &str) -> Result<()> {
             let partition = env::var(TEST_PARTITION_ENV).ok().filter(|s| !s.is_empty());
             test_part(job, partition.as_deref())
         }
-        "test-doc" | "test-python" => test_part(job, None),
+        "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
         "refcases" => refcases(false),
         "reference" => {
@@ -299,9 +303,61 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
             }
             Ok(())
         }
+        "test-rh-sim" => rh_sim_tests(),
         "test-python" => uv_tools(&["pytest", "-q"]),
         other => bail!("unknown test part: {other}"),
     }
+}
+
+/// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` with the feature, which no
+/// workspace crate turns on, so the workspace's own run never builds it; its login tests run the
+/// simulator binary built here.
+fn rh_sim_tests() -> Result<()> {
+    sh(
+        "cargo",
+        &[
+            "build",
+            "--locked",
+            "--package",
+            "mandate-rh-sim",
+            "--bin",
+            "mandate-rh-sim",
+        ],
+    )?;
+    let meta: serde_json::Value = serde_json::from_str(&output_in(
+        Path::new("."),
+        "cargo",
+        &["metadata", "--format-version", "1", "--no-deps", "--locked"],
+    )?)
+    .context("parsing cargo metadata")?;
+    let target = meta["target_directory"]
+        .as_str()
+        .context("cargo metadata names no target directory")?;
+    let binary = Path::new(target).join("debug").join("mandate-rh-sim");
+    let args = [
+        "nextest",
+        "run",
+        "--locked",
+        "--no-tests=fail",
+        "--package",
+        "mandate-mcp",
+        "--features",
+        "rh-sim",
+    ];
+    eprintln!(
+        "    $ {RH_SIM_BIN_ENV}={} cargo {}",
+        binary.display(),
+        args.join(" ")
+    );
+    let status = Command::new("cargo")
+        .args(args)
+        .env(RH_SIM_BIN_ENV, &binary)
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the rh-sim rehearsal build's tests failed with {status}");
+    }
+    Ok(())
 }
 
 /// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
@@ -1699,6 +1755,28 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                     pkg.name, dep.name
                 ));
             }
+            if dep.features.iter().any(|f| f == REHEARSAL) {
+                problems.push(format!(
+                    "`{}` turns on `{REHEARSAL}` in its dependency on `{}`; only `cargo xtask ci \
+                     test-rh-sim`'s explicit flag may (DEC-922)",
+                    pkg.name, dep.name
+                ));
+            }
+        }
+        for (feature, enables) in &pkg.features {
+            let rehearsal = enables.iter().find(|enabled| {
+                *enabled == REHEARSAL
+                    || enabled
+                        .rsplit_once('/')
+                        .is_some_and(|(_, feature)| feature == REHEARSAL)
+            });
+            if let Some(enabled) = rehearsal {
+                problems.push(format!(
+                    "`{}`'s feature `{feature}` turns on `{enabled}`; only `cargo xtask ci \
+                     test-rh-sim`'s explicit flag may (DEC-922)",
+                    pkg.name
+                ));
+            }
         }
     }
     let mut compile_only_seen = false;
@@ -2349,14 +2427,17 @@ const READ_SCRIPTS: &[&str] = &[
 
 /// The `CARGO_*` names a workflow may hold, exactly, no prefixes (DEC-873 item 5):
 /// `CARGO_TERM_COLOR` (`ci.yml`, `nightly.yml`), `CARGO_MUTANTS_VERSION` and
-/// `CARGO_MUTANTS_SHA256` (the cargo-mutants download), and `CARGO_PROFILE_DEV_DEBUG` and
-/// `CARGO_PROFILE_TEST_DEBUG` (`ci.yml`'s mutants job).
+/// `CARGO_MUTANTS_SHA256` (the cargo-mutants download), and the four `CARGO_PROFILE_*` settings of
+/// [`MUTANT_BUILD_PROFILE`] (`ci.yml`'s mutants job): the `dev` and `test` profiles' debuginfo
+/// (DEC-519) and optimisation level (DEC-931), neither of which selects a feature or a dependency.
 const READ_CARGO_NAMES: &[&str] = &[
     "CARGO_TERM_COLOR",
     "CARGO_MUTANTS_VERSION",
     "CARGO_MUTANTS_SHA256",
     "CARGO_PROFILE_DEV_DEBUG",
     "CARGO_PROFILE_TEST_DEBUG",
+    "CARGO_PROFILE_DEV_OPT_LEVEL",
+    "CARGO_PROFILE_TEST_OPT_LEVEL",
 ];
 
 /// The other names a workflow's `env:` keys (workflow, job, step, service and container level)
@@ -3769,6 +3850,9 @@ fn cargo_resolve(root: &Path, words: &[String]) -> Result<Resolve> {
 
 /// The cargo feature that holds the live hosts (ES-23, DEC-529 item 3).
 const LIVE: &str = "live";
+/// The rehearsal build's feature (DEC-922 item 1): no crate turns it on in another, so no build
+/// but `cargo xtask ci test-rh-sim`'s, the `live` one least of all, ever links it.
+const REHEARSAL: &str = "rh-sim";
 
 /// What one line of a workflow, script or cargo configuration does with the `live` feature, worst
 /// first: a line holding several commands takes the worst of theirs.
@@ -5293,11 +5377,19 @@ fn mutants_scheduled(
         })
         .map(|krate| krate.package.as_str())
         .collect();
-    external_oracles(&mut test_packages, &workspace_closure(&meta));
+    let closure = workspace_closure(&meta);
+    external_oracles(&mut test_packages, &closure);
     simulator_oracles(&mut test_packages, &harnesses);
-    live_tests_judge_every_mutant(root, &listed, &test_packages)?;
+    let unoptimised = unoptimised_config(&unoptimised_packages(&listed, &closure));
+    live_tests_judge_every_mutant(root, &listed, &test_packages, &unoptimised)?;
     let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, &listed)?)?;
-    let args = mutants_args(diff.path()?, shard, &test_packages, first.as_ref())?;
+    let args = mutants_args(
+        diff.path()?,
+        shard,
+        &test_packages,
+        first.as_ref(),
+        &unoptimised,
+    )?;
     fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff.file)
@@ -5759,11 +5851,14 @@ impl Drop for TestOrder {
     }
 }
 
+/// The `cargo mutants` command line. `unoptimised` is [`unoptimised_config`]'s, handed to every
+/// cargo invocation of the run, the baseline's and each mutant's, build and test alike.
 fn mutants_args(
     diff_path: &str,
     shard: Option<MutantShard>,
     test_packages: &[&str],
     first: Option<&TestOrder>,
+    unoptimised: &[String],
 ) -> Result<Vec<String>> {
     let mut args = [
         "mutants",
@@ -5798,7 +5893,44 @@ fn mutants_args(
     if let Some(first) = first {
         args.extend(first.args()?);
     }
+    args.extend(
+        unoptimised
+            .iter()
+            .map(|config| format!("--cargo-arg={config}")),
+    );
     Ok(args)
+}
+
+/// Every workspace package a mutant of the run can make cargo rebuild: each package with a mutant,
+/// and each workspace package built on one of them, through any kind of dependency (DEC-931).
+///
+/// [`MUTANT_BUILD_PROFILE`] optimises the job's builds, which a mutant's build pays for in every
+/// crate its edit invalidates. These packages are left unoptimised by [`unoptimised_config`], so
+/// a mutant rebuilds exactly what it rebuilt before, at the cost it had, under
+/// [`MUTANT_BUILD_TIMEOUT`]; every other crate, the dependencies and the workspace layers under the
+/// mutated ones, is built once, optimised, by the pre-flight and never again in the run.
+fn unoptimised_packages(
+    mutants: &BTreeMap<String, usize>,
+    closure: &BTreeMap<String, BTreeSet<String>>,
+) -> BTreeSet<String> {
+    closure
+        .iter()
+        .filter(|(_, built_on)| mutants.keys().any(|mutated| built_on.contains(mutated)))
+        .map(|(package, _)| package.clone())
+        .collect()
+}
+
+/// The `--config` arguments that set `opt-level = 0` for each of `packages`, in the `dev` profile
+/// and in the `test` profile that inherits it: a package override outranks the profile-wide
+/// `opt-level` [`MUTANT_BUILD_PROFILE`] sets, and cargo has no environment form for one.
+fn unoptimised_config(packages: &BTreeSet<String>) -> Vec<String> {
+    packages
+        .iter()
+        .flat_map(|package| {
+            ["dev", "test"]
+                .map(|profile| format!("--config=profile.{profile}.package.{package}.opt-level=0"))
+        })
+        .collect()
 }
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
@@ -5814,8 +5946,10 @@ fn mutants_args(
 /// reverts in turn, so each build sees its own edit's newer mtime (DEC-850).
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
-/// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
-/// for the `test` profile that inherits it (DEC-519).
+/// The profile every build of the mutants job runs under: no debuginfo (DEC-519), and optimised at
+/// `opt-level = 1` (DEC-931), for the `dev` profile and for the `test` profile that inherits it,
+/// except in the packages a mutant can make cargo rebuild, which [`unoptimised_config`] keeps at
+/// `opt-level = 0` so that no mutant's build costs more than it did.
 ///
 /// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. Before DEC-850 the baseline built
 /// only the mutated packages, so a low-layer mutant's first build compiled the rest of its tested
@@ -5827,9 +5961,27 @@ const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 /// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
 /// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
 /// mutants the same way whatever the caller exported.
-const MUTANT_BUILD_PROFILE: [(&str, &str); 2] = [
+///
+/// The optimisation is for the test phase [`MUTANT_TEST_TIMEOUT`] caps, which also caps the
+/// unmutated baseline's. Unoptimised, `mandate-executor`'s own suite needs more than that on CI's
+/// two-core runner: #1337's baselines ran 648 of its 709 tests in 179.6 seconds, every one passing,
+/// with 346 seconds of test time spent mostly in its property tests, and were cut off, so no
+/// mutant of that crate could be judged at all. Its hot code is mostly in the layers under it and
+/// in dependencies (hashing, wide integers, decimals), so optimising those alone runs the same
+/// 709 tests about four times faster, and the mutated packages' rebuild is what it was: optimising
+/// everything ran them faster still but put every `mandate-executor` mutant's build past
+/// [`MUTANT_BUILD_TIMEOUT`] on CI (DEC-931). An optimised build changes how fast a
+/// test runs, not what it checks: cargo's `dev` profile turns debug assertions and overflow checks
+/// on whatever its `opt-level`, and `the_mutants_job_keeps_assertions_and_overflow_checks` holds
+/// that the workspace's `Cargo.toml` turns neither off for `dev` or `test`, so an optimisation
+/// level cannot take away an assertion or an overflow panic a test relies on to catch a mutant.
+/// Neither is set here: the closed world refuses a workflow name that could turn one off
+/// ([`READ_CARGO_NAMES`]).
+const MUTANT_BUILD_PROFILE: [(&str, &str); 4] = [
     ("CARGO_PROFILE_DEV_DEBUG", "0"),
     ("CARGO_PROFILE_TEST_DEBUG", "0"),
+    ("CARGO_PROFILE_DEV_OPT_LEVEL", "1"),
+    ("CARGO_PROFILE_TEST_OPT_LEVEL", "1"),
 ];
 
 /// A `cargo` child of the mutants job that builds, with the caller's [`CARGO_TARGET_DIR`] out of its
@@ -5890,8 +6042,9 @@ fn live_tests_judge_every_mutant(
     root: &Path,
     mutants: &BTreeMap<String, usize>,
     test_packages: &[&str],
+    unoptimised: &[String],
 ) -> Result<()> {
-    let args = preflight_args(mutants, test_packages);
+    let args = preflight_args(mutants, test_packages, unoptimised);
     eprintln!("    $ cargo {}", args.join(" "));
     let listing =
         mutants_job_cargo_output(root, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
@@ -5900,7 +6053,8 @@ fn live_tests_judge_every_mutant(
 }
 
 /// The pre-flight's `cargo nextest list`: every package with a mutant, whose live tests it counts,
-/// and every package the run tests, whose test binaries it builds (DEC-850).
+/// and every package the run tests, whose test binaries it builds (DEC-850), under the run's own
+/// [`unoptimised_config`], so the run reuses what it built (DEC-931).
 ///
 /// cargo-mutants 27.1.0 builds its unmutated baseline over the packages the run's own mutants are
 /// in, not over `--test-package`, so on its own it leaves the rest of the tested packages' graph to
@@ -5909,7 +6063,11 @@ fn live_tests_judge_every_mutant(
 /// sixty seconds on two attempts. Building them here, with the same profile and the same package
 /// set the mutant's build selects, in the tree [`MUTANTS_IN_PLACE`] builds in, leaves the baseline
 /// and each mutant only what their own edit changes.
-fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> Vec<String> {
+fn preflight_args(
+    mutants: &BTreeMap<String, usize>,
+    test_packages: &[&str],
+    unoptimised: &[String],
+) -> Vec<String> {
     let mut args: Vec<String> = ["nextest", "list", "--locked", "--message-format", "json"]
         .into_iter()
         .map(str::to_owned)
@@ -5925,6 +6083,7 @@ fn preflight_args(mutants: &BTreeMap<String, usize>, test_packages: &[&str]) -> 
             .into_iter()
             .map(|package| format!("--package={package}")),
     );
+    args.extend(unoptimised.iter().cloned());
     args
 }
 
@@ -6041,6 +6200,14 @@ const REFCASES: &str = "mandate-refcases";
 /// nine mutants reached 181 seconds, which this timeout would have cut off. A mutation slow
 /// enough to reach the cap anyway is bounded by it, which is what lets DEC-498 size a shard on
 /// this number rather than on how fast mutants have happened to run.
+///
+/// Those 83 seconds were a `mandate-canon` diff's. `mandate-executor`'s own suite, unoptimised,
+/// outgrew the cap: on #1337 every shard's baseline ran 648 of 709 tests, all passing, in 179.6
+/// seconds and was cut off, so the shard judged no mutant. The cap is not raised to fit it,
+/// because the baseline's tests and a mutant's are each priced at this number in DEC-498's
+/// budget, and an unoptimised executor phase at twice its size leaves no room in ten minutes.
+/// [`MUTANT_BUILD_PROFILE`] builds what no mutant rebuilds at `opt-level = 1` instead, which
+/// shortens the phase this caps without changing what any test checks (DEC-931).
 ///
 /// Unlike [`MUTANT_BUILD_TIMEOUT`], this one also caps the unmutated baseline's test phase, which
 /// matters because a shard whose mutants are in [`REFCASES`] runs the whole reference harness as
@@ -7609,13 +7776,14 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR, CiFile, CratePolicy,
-        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
-        MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard,
-        MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES, SCHEMA_CHECKERS,
-        SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
-        UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
-        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
-        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_PROFILE,
+        MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
+        Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
+        PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV,
+        TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, UnmutatedSource,
+        actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
+        ci, ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
+        feature_files, feature_map_problems, files_by_extension, first_panic_line,
         forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
         is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
@@ -7628,6 +7796,7 @@ mod tests {
         workspace_closure, workspace_packages,
     };
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
+    use super::{unoptimised_config, unoptimised_packages};
 
     #[test]
     fn finds_plain_comments_but_not_docs_or_literals() {
@@ -8275,24 +8444,34 @@ mod tests {
     fn the_mutants_job_builds_without_debuginfo() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         let matrix = workflow_job(&workflow, "mutants").context("ci.yml has a `mutants` job")?;
-        for setting in [
-            "CARGO_PROFILE_DEV_DEBUG: \"0\"",
-            "CARGO_PROFILE_TEST_DEBUG: \"0\"",
-        ] {
+        for (name, value) in MUTANT_BUILD_PROFILE {
+            let setting = format!("{name}: \"{value}\"");
             assert!(
                 matrix.iter().any(|line| line.trim() == setting),
                 "the mutants matrix sets `{setting}`, so the dependencies rust-cache restores \
-                 were built the way the gate builds (DEC-519)"
+                 were built the way the gate builds (DEC-519, DEC-931)"
             );
         }
         let cargo = mutants_job_cargo(Path::new("."), &["mutants"]);
         let envs: BTreeMap<&OsStr, Option<&OsStr>> = cargo.get_envs().collect();
-        for profile in ["CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_TEST_DEBUG"] {
+        for (profile, value) in [
+            ("CARGO_PROFILE_DEV_DEBUG", "0"),
+            ("CARGO_PROFILE_TEST_DEBUG", "0"),
+            ("CARGO_PROFILE_DEV_OPT_LEVEL", "1"),
+            ("CARGO_PROFILE_TEST_OPT_LEVEL", "1"),
+        ] {
             assert_eq!(
                 envs.get(OsStr::new(profile)),
-                Some(&Some(OsStr::new("0"))),
-                "the mutants job sets {profile}=0 on its building children, which shortens the \
-                 build phase `--build-timeout` caps (DEC-519)"
+                Some(&Some(OsStr::new(value))),
+                "the mutants job sets {profile}={value} on its building children: no debuginfo \
+                 shortens the build phase `--build-timeout` caps (DEC-519), and an optimised \
+                 build brings `mandate-executor`'s test phase under `--timeout` (DEC-931)"
+            );
+        }
+        for (name, _) in MUTANT_BUILD_PROFILE {
+            assert!(
+                !name.contains("ASSERTIONS") && !name.contains("OVERFLOW"),
+                "the mutants job leaves {name} to cargo's `dev` default, on (DEC-931)"
             );
         }
         assert_eq!(
@@ -8300,6 +8479,130 @@ mod tests {
             Some(&None),
             "the caller's CARGO_TARGET_DIR is still removed (#419 review, nit 3)"
         );
+        Ok(())
+    }
+
+    /// The `dev` or `test` profile settings in a workspace manifest that turn debug assertions or
+    /// overflow checks off, for the profile itself or for any package override in it.
+    fn checks_turned_off(manifest: &str) -> Result<Vec<String>> {
+        let manifest: toml::Table = toml::from_str(manifest)?;
+        let mut off = Vec::new();
+        let Some(profiles) = manifest.get("profile").and_then(toml::Value::as_table) else {
+            return Ok(off);
+        };
+        for name in ["dev", "test"] {
+            let Some(profile) = profiles.get(name).and_then(toml::Value::as_table) else {
+                continue;
+            };
+            let mut tables = vec![(name.to_owned(), profile)];
+            if let Some(packages) = profile.get("package").and_then(toml::Value::as_table) {
+                tables.extend(packages.iter().filter_map(|(package, table)| {
+                    table
+                        .as_table()
+                        .map(|table| (format!("{name}.package.{package}"), table))
+                }));
+            }
+            for (path, table) in tables {
+                for key in ["debug-assertions", "overflow-checks"] {
+                    if table
+                        .get(key)
+                        .is_some_and(|value| value.as_bool() != Some(true))
+                    {
+                        off.push(format!("profile.{path}.{key}"));
+                    }
+                }
+            }
+        }
+        Ok(off)
+    }
+
+    /// DEC-931: [`MUTANT_BUILD_PROFILE`] optimises the mutants job's builds, which is safe for the
+    /// gate's verdicts only while debug assertions and overflow checks stay on, as cargo's `dev`
+    /// profile has them whatever its `opt-level`. The workspace manifest turns neither off for
+    /// `dev` or `test`; the check is shown to catch a manifest that does.
+    #[test]
+    fn the_mutants_job_keeps_assertions_and_overflow_checks() -> Result<()> {
+        let manifest = fs::read_to_string(repo_root()?.join("Cargo.toml"))?;
+        assert_eq!(
+            checks_turned_off(&manifest)?,
+            Vec::<String>::new(),
+            "an optimised mutant build keeps every assertion and overflow panic a test catches a \
+             mutant with (DEC-931)"
+        );
+        let seeded = format!(
+            "{manifest}\n[profile.test]\ndebug-assertions = false\n\
+             [profile.dev.package.\"*\"]\noverflow-checks = false\n"
+        );
+        assert_eq!(
+            checks_turned_off(&seeded)?,
+            [
+                "profile.dev.package.*.overflow-checks",
+                "profile.test.debug-assertions"
+            ],
+            "the check names each setting a manifest turns off"
+        );
+        Ok(())
+    }
+
+    /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only
+    /// what it rebuilt before at the cost it had; the layers under it and every package beside it
+    /// are optimised. Shown on a fixture graph and on the repository's own: a `mandate-executor`
+    /// mutant leaves the reference harness and the shell unoptimised and optimises the journal it
+    /// is built on.
+    #[test]
+    fn only_what_a_mutant_rebuilds_stays_unoptimised() -> Result<()> {
+        let set = |names: &[&str]| -> BTreeSet<String> {
+            names.iter().map(|name| (*name).to_owned()).collect()
+        };
+        let closure = BTreeMap::from([
+            ("a".to_owned(), set(&["a"])),
+            ("b".to_owned(), set(&["a", "b"])),
+            ("c".to_owned(), set(&["a", "b", "c"])),
+            ("d".to_owned(), set(&["a", "d"])),
+        ]);
+        let mutants = BTreeMap::from([("b".to_owned(), 2)]);
+        assert_eq!(
+            unoptimised_packages(&mutants, &closure),
+            set(&["b", "c"]),
+            "the mutated package and the one built on it, not the one under it or beside it"
+        );
+        let config = unoptimised_config(&set(&["b", "c"]));
+        assert_eq!(
+            config,
+            [
+                "--config=profile.dev.package.b.opt-level=0",
+                "--config=profile.test.package.b.opt-level=0",
+                "--config=profile.dev.package.c.opt-level=0",
+                "--config=profile.test.package.c.opt-level=0",
+            ]
+        );
+        let preflight = preflight_args(&mutants, &["c"], &config);
+        assert!(
+            config.iter().all(|arg| preflight.contains(arg)),
+            "the pre-flight builds under the run's configuration, so the run reuses it"
+        );
+        let run = mutants_args("change.diff", None, &["c"], None, &config)?;
+        for arg in &config {
+            assert!(
+                run.contains(&format!("--cargo-arg={arg}")),
+                "every cargo invocation of the run, baseline and mutants, gets {arg}"
+            );
+        }
+        let real = workspace_closure(&metadata_in(&repo_root()?)?);
+        let executor =
+            unoptimised_packages(&BTreeMap::from([("mandate-executor".to_owned(), 1)]), &real);
+        for kept in ["mandate-executor", REFCASES, "mandate-shell"] {
+            assert!(
+                executor.contains(kept),
+                "{kept} is rebuilt by an executor mutant"
+            );
+        }
+        for optimised in ["mandate-journal", "mandate-canon", "mandate-num"] {
+            assert!(
+                !executor.contains(optimised),
+                "{optimised} is under the executor and optimised"
+            );
+        }
         Ok(())
     }
 
@@ -8319,7 +8622,7 @@ mod tests {
             "mandate-shell",
             "mandate-refcases",
         ];
-        let args = preflight_args(&mutants, &tested);
+        let args = preflight_args(&mutants, &tested, &[]);
         assert_eq!(
             args.get(..2),
             Some(&["nextest".to_owned(), "list".to_owned()][..]),
@@ -8339,7 +8642,11 @@ mod tests {
             ],
             "every mutated package once, then every other tested package once"
         );
-        let lone = preflight_args(&BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]), &[]);
+        let lone = preflight_args(
+            &BTreeMap::from([("mandate-journal-pg".to_owned(), 1)]),
+            &[],
+            &[],
+        );
         assert!(
             lone.contains(&"--package=mandate-journal-pg".to_owned()),
             "a mutated package is listed even if the tested set omits it, so its live tests are \
@@ -8431,7 +8738,7 @@ mod tests {
             fs::read_to_string(&order.0)?,
             test_order_config(&["mandate-shell".to_owned()])
         );
-        let args = mutants_args("change.diff", None, &["mandate-shell"], Some(&order))?;
+        let args = mutants_args("change.diff", None, &["mandate-shell"], Some(&order), &[])?;
         assert_eq!(
             args.windows(2)
                 .filter(|pair| {
@@ -8526,7 +8833,7 @@ mod tests {
     #[test]
     fn mutation_arguments_add_a_shard_once_and_leave_local_runs_complete() -> Result<()> {
         let packages = ["mandate-journal", "mandate-refcases"];
-        let unsharded = mutants_args("change.diff", None, &packages, None)?;
+        let unsharded = mutants_args("change.diff", None, &packages, None, &[])?;
         assert!(
             !unsharded
                 .iter()
@@ -8585,6 +8892,7 @@ mod tests {
             }),
             &packages,
             None,
+            &[],
         )?;
         assert_eq!(
             sharded
@@ -11377,7 +11685,7 @@ mod tests {
     const FAST_CI_JOBS: [(&str, &[&str]); 4] = [
         ("fast-lint", &["lint", "spec-guard"]),
         ("fast-test", &["test-nextest"]),
-        ("fast-pending", &["pending", "test-doc"]),
+        ("fast-pending", &["pending", "test-doc", "test-rh-sim"]),
         ("fast-python", &["test-python"]),
     ];
 
@@ -12625,6 +12933,65 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// DEC-922 item 1: nothing turns `rh-sim` on, neither another feature of its own crate
+    /// (`default` included) nor a feature of another naming `<crate>/rh-sim` or `<crate>?/rh-sim`,
+    /// nor a dependency of any kind listing it, so only an explicit flag builds it; a crate's own
+    /// `rh-sim` feature, and a dependency without it, are allowed.
+    #[test]
+    fn nothing_turns_on_another_crates_rh_sim() -> Result<()> {
+        let policy = live_policy();
+        let lib = || with_features(member("a-lib", &[]), &[("rh-sim", &[])]);
+        assert_eq!(
+            live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), member("a-tool", &[])]),
+                &[]
+            )?,
+            Vec::<String>::new(),
+            "a crate's own `rh-sim` feature is allowed"
+        );
+        for own in ["default", "all"] {
+            let lib = with_features(member("a-lib", &[]), &[("rh-sim", &[]), (own, &["rh-sim"])]);
+            let crates = vec![member(RUNNER, &[]), lib, member("a-tool", &[])];
+            let problems = live_feature_problems(&policy, &workspace(crates), &[])?;
+            assert_eq!(problems.len(), 1, "{own}: {problems:?}");
+            assert!(problems[0].contains("`a-lib`"), "{problems:?}");
+        }
+        for enabled in ["a-lib/rh-sim", "a-lib?/rh-sim"] {
+            let tool = with_features(member("a-tool", &[]), &[("go", &[enabled])]);
+            let problems = live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), tool]),
+                &[],
+            )?;
+            assert_eq!(problems.len(), 1, "{enabled}: {problems:?}");
+            assert!(problems[0].contains("`a-tool`"), "{problems:?}");
+        }
+        for kind in [None, Some("dev"), Some("build")] {
+            let mut dependent = member("a-tool", &[("a-lib", kind)]);
+            dependent.dependencies[0].features = vec!["rh-sim".to_owned()];
+            let problems = live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), dependent]),
+                &[],
+            )?;
+            assert_eq!(problems.len(), 1, "a {kind:?} dependency: {problems:?}");
+            assert!(problems[0].contains("`a-tool`"), "{problems:?}");
+        }
+        let mut quiet = member("a-tool", &[("a-lib", None)]);
+        quiet.dependencies[0].features = vec!["other".to_owned()];
+        assert_eq!(
+            live_feature_problems(
+                &policy,
+                &workspace(vec![member(RUNNER, &[]), lib(), quiet]),
+                &[]
+            )?,
+            Vec::<String>::new(),
+            "a dependency without `rh-sim` is allowed"
+        );
+        Ok(())
+    }
+
     /// CI may pass `live` only in one `cargo check` of the marked runner, so the feature
     /// compiles and nothing live is built, tested or run; `--all-features` is never allowed. Each
     /// refusal names the file and its line.
@@ -13845,7 +14212,7 @@ jq -r "$filter" "$src"
 
     /// The closed world's control: a workflow shaped like the repository's own (downloads checked
     /// and installed, `rustup`, cargo with `-p`, `test`, `if`/`case`/`for` blocks, `gh` and `jq`,
-    /// a here-string into `jq`, writes to `$GITHUB_OUTPUT`, the four repository scripts, the five
+    /// a here-string into `jq`, writes to `$GITHUB_OUTPUT`, the four repository scripts, the seven
     /// allowed `CARGO_*` names, and `npm`/`npx` in a `web` job beside its `package.json`) is not
     /// flagged (DEC-873).
     #[test]
@@ -13862,6 +14229,8 @@ jq -r "$filter" "$src"
             "    env:",
             "      CARGO_PROFILE_DEV_DEBUG: 0",
             "      CARGO_PROFILE_TEST_DEBUG: 0",
+            "      CARGO_PROFILE_DEV_OPT_LEVEL: 1",
+            "      CARGO_PROFILE_TEST_OPT_LEVEL: 1",
             "    steps:",
             "      - id: change",
             "        run: .github/scripts/docs-only.sh | tee -a \"$GITHUB_OUTPUT\"",
@@ -14038,7 +14407,7 @@ jq -r "$filter" "$src"
     /// Configuration written at runtime cannot be read: a `CARGO_*` name built from pieces into
     /// `$GITHUB_ENV`, a file copied or catted into `$GITHUB_ENV`, `$GITHUB_PATH`, a `.cargo`
     /// directory, `CARGO_HOME` inline or in step or job `env`, `RUSTFLAGS`, a write to a
-    /// repository script, `tar` extracting every member, and `sudo install` of a `cargo`; the five
+    /// repository script, `tar` extracting every member, and `sudo install` of a `cargo`; the seven
     /// allowed `CARGO_*` names and writes to `$GITHUB_OUTPUT` or a plain file can (#1169 round 4
     /// review, bypasses 5 and 6; DEC-873 item 5).
     #[test]
@@ -14587,7 +14956,7 @@ jq -r "$filter" "$src"
     }
 
     /// An `env:` key, at workflow, job, step or service level, and a command-prefix assignment
-    /// are read only when the name is one the repository's workflows set or one of the five
+    /// are read only when the name is one the repository's workflows set or one of the seven
     /// `CARGO_*` names: `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and
     /// `NODE_OPTIONS`, in any case, cannot be read, nor can a listed name in another case, an
     /// inline `env:` mapping, an
@@ -14699,11 +15068,13 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// Every `CARGO_*` name but the five the workflows need cannot be read, as an `env:` key or
+    /// Every `CARGO_*` name but the seven the workflows need cannot be read, as an `env:` key or
     /// as a prefix assignment, so adding any one of these to the list is caught (#1169 round 5
-    /// review, mutant M04; DEC-873 item 5).
+    /// review, mutant M04; DEC-873 item 5). The two optimisation levels DEC-931 added are the
+    /// `dev` and `test` profiles' only; the release profile's, and every name that could turn
+    /// debug assertions or overflow checks off, stay refused.
     #[test]
-    fn every_cargo_name_but_the_five_cannot_be_read() -> Result<()> {
+    fn every_cargo_name_but_the_seven_cannot_be_read() -> Result<()> {
         let names_refused = [
             "CARGO_HOME",
             "CARGO_TARGET_DIR",
@@ -14720,9 +15091,11 @@ jq -r "$filter" "$src"
             "CARGO_REGISTRIES_CRATES_IO_PROTOCOL",
             "CARGO_UNSTABLE_BUILD_STD",
             "CARGO_PROFILE_RELEASE_DEBUG",
-            "CARGO_PROFILE_DEV_OPT_LEVEL",
-            "CARGO_PROFILE_TEST_OPT_LEVEL",
+            "CARGO_PROFILE_RELEASE_OPT_LEVEL",
             "CARGO_PROFILE_DEV_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_TEST_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_DEV_OVERFLOW_CHECKS",
+            "CARGO_PROFILE_TEST_OVERFLOW_CHECKS",
             "CARGO_TERM_VERBOSE",
             "CARGO_TERM_QUIET",
             "CARGO_FEATURE_LIVE",

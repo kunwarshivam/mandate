@@ -22,8 +22,9 @@ use mandate_journal::{StoredEvent, StreamId, StreamType};
 use mandate_num::{Fraction, Price, Usd};
 use mandate_paper::{
     Asked, CollarMembers, Evidence, EvidenceRefusal, GrantRefusal, Lt10Refusal, PaperError,
-    QuoteRefusal, Watched, answers, asked, collar_x, cross_check, cross_check_the_opening, lt10,
-    reported, session_cap, wait_for_the_grant, watch_may_end, watched,
+    QuoteRefusal, WakeRead, Watched, answers, asked, collar_x, cross_check,
+    cross_check_the_opening, lt10, reported, session_cap, wait_for_the_grant, watch_may_end,
+    watched,
 };
 use mandate_shell::Cause;
 use mandate_time::UtcNanos;
@@ -84,11 +85,30 @@ const CONTROL: &str = "ctl:ws_live";
 /// One stored row of `stream` at `seq`, its body the canonical envelope the journal seals, with
 /// the event's own id, type and payload members (journal spec §3).
 fn row(stream: &str, seq: u64, event_id: &str, event_type: &str, payload: &str) -> StoredEvent {
+    caused_row(stream, seq, event_id, None, event_type, payload)
+}
+
+/// One stored row as [`row`] seals it, its envelope carrying `causation_id` — the event the row
+/// answers to (journal spec §3) — or `null`.
+fn caused_row(
+    stream: &str,
+    seq: u64,
+    event_id: &str,
+    causation_id: Option<&str>,
+    event_type: &str,
+    payload: &str,
+) -> StoredEvent {
+    let causation = causation_id.map_or_else(|| "null".to_owned(), |id| format!(r#""{id}""#));
     let body = mandate_canon::parse(
-        format!(r#"{{"event_id":"{event_id}","event_type":"{event_type}","payload":{payload}}}"#)
+        format!(r#"{{"causation_id":{causation},"event_id":"{event_id}","event_type":"{event_type}","payload":{payload}}}"#)
             .as_bytes(),
     )
     .expect("the fixture body parses");
+    sealed(stream, seq, event_id, event_type, to_canonical(&body))
+}
+
+/// One stored row of `stream` at `seq` whose body is exactly `body`, as the journal holds it.
+fn sealed(stream: &str, seq: u64, event_id: &str, event_type: &str, body: Vec<u8>) -> StoredEvent {
     StoredEvent {
         stream_id: stream.to_owned(),
         seq,
@@ -98,9 +118,64 @@ fn row(stream: &str, seq: u64, event_id: &str, event_type: &str, payload: &str) 
         environment: "live".to_owned(),
         recorded_at: "2026-10-23T14:00:00.000000000Z".to_owned(),
         prev_hash: Digest::of(&[]),
-        hash: Digest::of(payload.as_bytes()),
-        body: to_canonical(&body),
+        hash: Digest::of(&body),
+        body,
     }
+}
+
+/// The event id of the answer at control-stream `seq`, as [`answer_row`] journals it.
+fn answer_id(seq: u64) -> String {
+    format!("01JZWANS{seq:018}")
+}
+
+/// The event id of the runtime's record at agent-stream `seq`.
+fn agent_id(seq: u64) -> String {
+    format!("01JZWAGT{seq:018}")
+}
+
+/// The runtime's `ApprovalResponded` at agent-stream `seq` (journal spec §9.7): its envelope's
+/// `causation_id` is `cause` (rule 50: the answer it copies), and it copies the ask's approval
+/// and an `approved` verdict with the result admission gave it.
+fn copy_row(seq: u64, cause: Option<&str>, result: &str) -> StoredEvent {
+    let reason = match result {
+        "refused" => r#""not_an_approver""#,
+        _ => "null",
+    };
+    let payload = format!(
+        r#"{{"approval":"{APPROVAL}","delegation":null,"effective_at":1000,"quorum":null,"reason":{reason},"responder":"user_founder","result":"{result}","role":"approver","separation_of_duties":null,"step_up":null,"verdict":"approved"}}"#
+    );
+    caused_row(
+        AGENT,
+        seq,
+        &agent_id(seq),
+        cause,
+        "ApprovalResponded",
+        &payload,
+    )
+}
+
+/// The runtime's `ApprovalRevalidated` at agent-stream `seq`, its `causation_id` the
+/// `ApprovalResponded` at agent-stream `copy_seq`, with its result.
+fn revalidation_row(seq: u64, copy_seq: u64, result: &str) -> StoredEvent {
+    let payload =
+        format!(r#"{{"approval":"{APPROVAL}","band_bp":100,"reason":null,"result":"{result}"}}"#);
+    caused_row(
+        AGENT,
+        seq,
+        &agent_id(seq),
+        Some(&agent_id(copy_seq)),
+        "ApprovalRevalidated",
+        &payload,
+    )
+}
+
+/// The runtime's records of the grant it admitted and re-validated to `act`: the copy of the
+/// answer at control-stream `answer_seq` at agent-stream `seq`, and its re-validation behind it.
+fn admitted_rows(seq: u64, answer_seq: u64) -> Vec<StoredEvent> {
+    vec![
+        copy_row(seq, Some(&answer_id(answer_seq)), "admitted"),
+        revalidation_row(seq + 1, seq, "act"),
+    ]
 }
 
 /// One `ApprovalRequested` row the run's cycle journaled (journal spec §9.6, closed at version
@@ -190,9 +265,12 @@ fn a_drifted_rebuilt_order_never_releases_the_submit() {
     );
     let shown_order = vec![answer_row(1, APPROVAL, "approved", &bound_order_hash())];
     let drifted_order = vec![answer_row(1, APPROVAL, "approved", &drifted)];
-    assert_eq!(answers(&shown_order, &ask(), at(NOW_S)), Ok(()));
     assert_eq!(
-        answers(&drifted_order, &ask(), at(NOW_S)),
+        answers(&shown_order, &admitted_rows(1, 1), &ask(), at(NOW_S)),
+        Ok(())
+    );
+    assert_eq!(
+        answers(&drifted_order, &admitted_rows(1, 1), &ask(), at(NOW_S)),
         Err(GrantRefusal::Mismatched),
         "a grant must bind the order the run journaled, never the rebuilt one"
     );
@@ -288,7 +366,7 @@ fn the_wait_folds_the_control_rows_verbatim_in_journal_order() {
         ),
         answer_row(2, APPROVAL, "approved", &bound_order_hash()),
     ];
-    let refused = answers(&rows, &ask(), at(NOW_S));
+    let refused = answers(&rows, &admitted_rows(1, 2), &ask(), at(NOW_S));
     assert_eq!(
         refused,
         Err(GrantRefusal::Mismatched),
@@ -300,7 +378,8 @@ fn the_wait_folds_the_control_rows_verbatim_in_journal_order() {
 /// `ApprovalResponseSubmitted` committed to the workspace control stream" — with the row's own
 /// payload members folded exactly as the CLI committed them (#1308's review note (a)): a
 /// command row carrying the ask's approval, hash and an approving verdict between the answers
-/// decides nothing, and the committed answer releases the wait inside the ask's deadline.
+/// decides nothing, and the committed answer the runtime admitted and re-validated to `act`
+/// releases the wait inside the ask's deadline (DEC-920 item 1).
 #[test]
 fn the_committed_answer_releases_the_wait_and_a_command_row_decides_nothing() {
     let command = row(
@@ -317,7 +396,7 @@ fn the_committed_answer_releases_the_wait_and_a_command_row_decides_nothing() {
         command,
         answer_row(2, APPROVAL, "approved", &bound_order_hash()),
     ];
-    let released = answers(&rows, &ask(), at(NOW_S));
+    let released = answers(&rows, &admitted_rows(1, 2), &ask(), at(NOW_S));
     assert_eq!(
         released,
         Ok(()),
@@ -330,12 +409,143 @@ fn the_committed_answer_releases_the_wait_and_a_command_row_decides_nothing() {
 /// before the ask's deadline, and the same read at the deadline denies it.
 #[test]
 fn the_wait_holds_until_the_ask_denies_at_its_deadline() {
-    let held = answers(&[], &ask(), at(NOW_S));
-    let denied = answers(&[], &ask(), at(DEADLINE_S));
+    let held = answers(&[], &[], &ask(), at(NOW_S));
+    let denied = answers(&[], &[], &ask(), at(DEADLINE_S));
     assert_eq!(
         (held, denied),
         (Err(GrantRefusal::Unanswered), Err(GrantRefusal::TimedOut))
     );
+}
+
+/// DEC-920 item 1, journal spec §3 and §9.7 rule 50: the wiring links the runtime's records by
+/// the rows' own envelopes — the answer's event id, the copy's `causation_id` read off its body —
+/// so the runtime's admitted copy releases the wait only when its body names the answer as its
+/// cause, and a copy whose `causation_id` is `null`, or is not text, links nothing and holds it;
+/// and an answer the runtime refused (a non-approver's, mandate spec §6.4 check 3) holds it too.
+#[test]
+fn the_runtimes_records_link_by_their_own_envelopes() {
+    let control = vec![answer_row(1, APPROVAL, "approved", &bound_order_hash())];
+    let uncaused = vec![copy_row(1, None, "admitted"), revalidation_row(2, 1, "act")];
+    let mut not_text = vec![sealed(
+        AGENT,
+        1,
+        &agent_id(1),
+        "ApprovalResponded",
+        to_canonical(
+            &mandate_canon::parse(
+                format!(
+                    r#"{{"causation_id":7,"event_id":"{}","event_type":"ApprovalResponded","payload":{{"approval":"{APPROVAL}","result":"admitted","verdict":"approved"}}}}"#,
+                    agent_id(1)
+                )
+                .as_bytes(),
+            )
+            .expect("the fixture body parses"),
+        ),
+    )];
+    not_text.push(revalidation_row(2, 1, "act"));
+    let refused = vec![copy_row(1, Some(&answer_id(1)), "refused")];
+    assert_eq!(
+        (
+            answers(&control, &uncaused, &ask(), at(NOW_S)),
+            answers(&control, &not_text, &ask(), at(NOW_S)),
+            answers(&control, &refused, &ask(), at(NOW_S)),
+            answers(&control, &admitted_rows(1, 1), &ask(), at(NOW_S)),
+        ),
+        (
+            Err(GrantRefusal::Unanswered),
+            Err(GrantRefusal::Unanswered),
+            Err(GrantRefusal::Unanswered),
+            Ok(()),
+        ),
+        "only the copy whose own envelope names the answer, admitted and acted on, releases"
+    );
+}
+
+/// `AGENTS.md` rule 3, DEC-920 item 4: a row whose body the run cannot read is never a guess,
+/// and the refusal is scoped by the row's own `event_type` column — an unreadable
+/// `ApprovalResponseSubmitted`, `ApprovalResponded` or `ApprovalRevalidated` could be this ask's,
+/// so it refuses as a difference with nothing sent, while an unreadable row of any other type —
+/// an `AgentDeployed` on the control stream, a `DecisionMade` on the agent stream, or a body with
+/// no `payload` member — decides nothing in the fold and never refuses the ask's admitted grant.
+#[test]
+fn an_unreadable_row_refuses_only_where_the_fold_reads_it() {
+    let answer = answer_row(1, APPROVAL, "approved", &bound_order_hash());
+    let garbled = |stream: &str, seq: u64, event_type: &str| {
+        sealed(
+            stream,
+            seq,
+            &agent_id(seq + 40),
+            event_type,
+            b"not canonical".to_vec(),
+        )
+    };
+    let no_payload = |stream: &str, seq: u64, event_type: &str| {
+        sealed(
+            stream,
+            seq,
+            &agent_id(seq + 40),
+            event_type,
+            to_canonical(
+                &mandate_canon::parse(br#"{"event_type":"unrelated"}"#)
+                    .expect("the fixture body parses"),
+            ),
+        )
+    };
+    let mut agent_with_unrelated = vec![
+        garbled(AGENT, 1, "DecisionMade"),
+        no_payload(AGENT, 2, "PolicyChanged"),
+    ];
+    agent_with_unrelated.extend(admitted_rows(3, 1));
+    let control_with_unrelated = vec![
+        garbled(CONTROL, 0, "AgentDeployed"),
+        no_payload(CONTROL, 0, "OwnerAcknowledged"),
+        answer.clone(),
+    ];
+    assert_eq!(
+        answers(
+            &control_with_unrelated,
+            &agent_with_unrelated,
+            &ask(),
+            at(NOW_S)
+        ),
+        Ok(()),
+        "an unreadable row of a type the fold never reads blocks no ask"
+    );
+    let control_folded = vec![
+        garbled(CONTROL, 0, "ApprovalResponseSubmitted"),
+        answer.clone(),
+    ];
+    assert_eq!(
+        answers(&control_folded, &admitted_rows(1, 1), &ask(), at(NOW_S)),
+        Err(GrantRefusal::Mismatched),
+        "an unreadable answer could be this ask's"
+    );
+    for event_type in ["ApprovalResponded", "ApprovalRevalidated"] {
+        let mut agent_folded = vec![garbled(AGENT, 0, event_type)];
+        agent_folded.extend(admitted_rows(1, 1));
+        assert_eq!(
+            answers(
+                std::slice::from_ref(&answer),
+                &agent_folded,
+                &ask(),
+                at(NOW_S)
+            ),
+            Err(GrantRefusal::Mismatched),
+            "an unreadable {event_type} could be the runtime's record of this ask"
+        );
+        let mut agent_no_payload = vec![no_payload(AGENT, 0, event_type)];
+        agent_no_payload.extend(admitted_rows(1, 1));
+        assert_eq!(
+            answers(
+                std::slice::from_ref(&answer),
+                &agent_no_payload,
+                &ask(),
+                at(NOW_S)
+            ),
+            Err(GrantRefusal::Mismatched),
+            "an {event_type} with no payload could be the runtime's record of this ask"
+        );
+    }
 }
 
 /// Trading-domain spec §9.6's tier — "x = 1% for equities with 20-day median dollar volume
@@ -822,20 +1032,36 @@ impl Pause for WaitClock {
 /// after the run began waiting" (DEC-912 item 1: "the run reads the control stream for the
 /// answers", with "the run keeps the watch's registered poll interval", DEC-853 item 6: the
 /// derived interval, "the least of `exit_step_s`; `unknown_absent_window_s` divided by
-/// `unknown_absent_lookups` … and `max_unprotected_s`") — so the wiring re-reads the control
-/// stream on **every** wake: two unanswered reads hold the submit across their two pauses, the
-/// third read, holding the answer committed after the run began waiting, releases it inside the
-/// ask's deadline; and a control stream that never answers denies at the ask's own deadline,
-/// with nothing sent (rule 3), the wait bounded by the request and the clock's wakes counted.
+/// `unknown_absent_lookups` … and `max_unprotected_s`") — so the wiring re-reads both streams on
+/// **every** wake (DEC-920 item 1: the answers on the control stream, the runtime's admission
+/// records on the agent stream): an unanswered read and a read holding the answer the runtime
+/// has not admitted yet hold the submit across their two pauses, and the third read, holding
+/// the runtime's admitted, re-validated grant of that answer, releases it inside the ask's
+/// deadline; and a control stream whose answer the runtime never admits denies at the ask's own
+/// deadline, with nothing sent (rule 3), the wait bounded by the request and the clock's wakes
+/// counted.
 #[test]
 fn the_grant_wait_rereads_the_control_stream_per_wake() {
     let journal = ask_row(1, APPROVAL, DEADLINE_S, &bound_order_hash());
-    let pending = Vec::<StoredEvent>::new();
-    let granted = vec![answer_row(1, APPROVAL, "approved", &bound_order_hash())];
+    let answered = vec![answer_row(1, APPROVAL, "approved", &bound_order_hash())];
+    let mut granted_agent = vec![journal.clone()];
+    granted_agent.extend(admitted_rows(2, 1));
+    let unanswered = WakeRead {
+        agent: vec![journal.clone()],
+        control: Vec::new(),
+    };
+    let unadmitted = WakeRead {
+        agent: vec![journal.clone()],
+        control: answered.clone(),
+    };
+    let granted = WakeRead {
+        agent: granted_agent,
+        control: answered,
+    };
     let reads = Rc::new(Cell::new(0_u64));
     let remaining = Rc::new(RefCell::new(VecDeque::from(vec![
-        pending.clone(),
-        pending.clone(),
+        unanswered,
+        unadmitted.clone(),
         granted,
     ])));
     let clock = WaitClock::at(NOW_S);
@@ -843,32 +1069,35 @@ fn the_grant_wait_rereads_the_control_stream_per_wake() {
     let read_counts = Rc::clone(&reads);
     let source = move || {
         read_counts.set(read_counts.get() + 1);
-        let next = remaining.borrow_mut().pop_front().unwrap_or_default();
+        let next = remaining.borrow_mut().pop_front().unwrap_or(WakeRead {
+            agent: Vec::new(),
+            control: Vec::new(),
+        });
         Ok(next)
     };
     let interval = Duration::from_secs(100);
     let released = wait_for_the_grant(std::slice::from_ref(&journal), source, &clock, interval);
     assert!(
         matches!(released, Ok(())),
-        "{released:?}: the committed answer releases the wait"
+        "{released:?}: the runtime's admitted grant releases the wait"
     );
     assert_eq!(
         (reads.get(), pauses.get()),
         (3, 2),
-        "the hold: read, wake, read, wake, read the committed answer"
+        "the hold: read, wake, read the raw answer, wake, read the runtime's admission"
     );
     let reads = Rc::new(Cell::new(0_u64));
     let never_reads = Rc::clone(&reads);
     let never = move || {
         never_reads.set(never_reads.get() + 1);
-        Ok(Vec::new())
+        Ok(unadmitted.clone())
     };
     let clock = WaitClock::at(NOW_S);
     let waits = Rc::clone(&clock.wakes);
     let held_forever = wait_for_the_grant(&[journal], never, &clock, interval);
     assert!(
         matches!(held_forever, Err(PaperError::Grant(GrantRefusal::TimedOut))),
-        "{held_forever:?}: the timeout is a deny at the ask's own deadline"
+        "{held_forever:?}: a raw answer never admitted is a deny at the ask's own deadline"
     );
     assert_eq!(
         (reads.get(), waits.get()),

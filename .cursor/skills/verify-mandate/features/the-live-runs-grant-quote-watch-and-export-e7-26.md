@@ -2,12 +2,14 @@
 
 - **Spec:** `docs/project/tasks/first-live-trade.md` (row G1b, LT-4, LT-10, the founder's-run
   steps 4 to 6); `docs/project/decisions/DEC-529.md` items 1 and 12;
-  `docs/project/decisions/DEC-912.md`; mandate spec §6.1, §6.4; trading-domain spec §4.2, §5.4,
+  `docs/project/decisions/DEC-912.md`; `docs/project/decisions/DEC-920.md`; mandate spec §6.1, §6.4; trading-domain spec §4.2, §5.4,
   §9.6; journal spec §2, §9.13, §12.
 - **Code:** `mandate-paper`, `crates/mandate-paper/` (layer 9, safety-critical):
-  `crates/mandate-paper/src/grant.rs` (`Asked`, `GrantRefusal`, `grant` — LT-4's door: the `ask`
-  opening submits only after an answer whose content hash equals the request's, any difference a
-  refusal with nothing sent, the answers read in journal order, the timeout a deny), re-exported
+  `crates/mandate-paper/src/grant.rs` (`Asked`, `Journaled`, `GrantRefusal`, `grant` — LT-4's door:
+  the `ask` opening submits only after an answer whose content hash equals the request's and which
+  the runtime admitted and re-validated to `act` — its `ApprovalResponded` and `ApprovalRevalidated`
+  on the agent stream, linked by `causation_id`, DEC-920 — any difference a refusal with nothing
+  sent, a skip a deny, the answers read in journal order, the timeout a deny), re-exported
   by `crates/mandate-paper/src/lib.rs` as `PaperError`'s `Grant` variant;
   `crates/mandate-paper/src/quote.rs` (`QuoteRefusal`, `cross_check` — DEC-529 item 12: the
   broker's ask agrees with the independent IEX ask within the collar's own aggressiveness or the
@@ -23,7 +25,12 @@
   ([DEC-912](../../../../docs/project/decisions/DEC-912.md)): pure functions over their inputs,
   they hold no host, credential or order, and no pin of the crate is pending anymore.
 - **Tests:** `crates/mandate-paper/tests/live_run.rs`: the grant pins (an unanswered ask holding
-  the submit before its deadline; a grant repeating the request's hash releasing it; an answer
+  the submit before its deadline; an admitted, re-validated grant repeating the request's hash
+  releasing it; a raw answer the runtime has not admitted, and a refused or counted one, never
+  releasing; the fold reading past a refused answer to the next; only the runtime's copy of this
+  answer deciding it; an admitted grant releasing only once its re-validation acts, a `skip`
+  denying; a skip denying whatever the runtime made of it; a runtime record the run cannot read
+  refusing as a difference; an answer
   repeating another hash refusing with nothing sent, whatever its verdict; the first answer of
   the ask deciding it whatever rows follow — the journal order, with a command row that is not
   an answer consulting nothing; a skip denying; a silent or late ask denying at its deadline;

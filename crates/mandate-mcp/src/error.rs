@@ -92,6 +92,8 @@ pub enum McpError {
     AuthorizationDenied,
     #[error("the login's lifetime ended before its callback")]
     LoginExpired,
+    #[error("the rh-sim build dials only a loopback address")]
+    OffLoopback,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -132,6 +134,7 @@ impl McpError {
             Self::StateMismatch => "state_mismatch",
             Self::AuthorizationDenied => "authorization_denied",
             Self::LoginExpired => "login_expired",
+            Self::OffLoopback => "off_loopback",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

@@ -13,7 +13,11 @@
   the halt-driven tradability, and the locked quotes at the scripted prices), and
   `src/server.rs` (S2: `SimServer`, the core over loopback MCP, honest or as a hostile `Variant`,
   serving the pinned contract `contract/tools.json`, the four order tools and the five account
-  reads; DEC-849).
+  reads; DEC-849), and the rehearsal (DEC-922, DEC-926): `src/script.rs` (`Script`, the
+  accounts, session, quotes and `ScriptedFill`s read strictly from JSON), `src/oauth.rs` (the
+  metadata, public-client registration, the authorization page, the PKCE-checking token
+  endpoint, and the Bearer gate the real `mandate-mcp` login runs against), `SimServer::rehearse`,
+  and `src/main.rs` (the `mandate-rh-sim --script <file> [--port <n>]` binary, loopback only).
 - **Tests:** `crates/mandate-rh-sim/tests/rules.rs` (quantity forms, sessions and text against
   the contract; only an agentic account reviews or places; each pre-trade alert refuses) and
   `crates/mandate-rh-sim/tests/lifecycle.rs` (fills and positions, `ref_id` after a lost answer
@@ -33,7 +37,12 @@
   halted symbol's `NotTradable` before the quote, the served reads refusing what the core does
   not hold, and the core's own cash, buying power, position averages — weighted, kept by a
   sell, and rounded half-to-even onto the price's grid — tradability, and the served quotes),
+  `crates/mandate-rh-sim/tests/oauth.rs` (the rehearsal's OAuth endpoints, their refusals, the
+  Bearer gate, and a scripted fill following its place), `crates/mandate-rh-sim/tests/script.rs`
+  (the script read strictly), and `crates/mandate-rh-sim/tests/binary.rs` (the binary served
+  behind the login, and its refused arguments); the real login against the binary runs in
+  `mandate-mcp`'s `tests/rehearsal.rs` under `cargo xtask ci test-rh-sim`,
   with fixtures in
   `tests/common/mod.rs`, the wire client in `tests/common/wire.rs`, and its live guard against
   `mandate-mcp`'s handshake in `crates/mandate-rh-sim/tests/wire.rs`.
-- **Run:** `cargo nextest run -p mandate-rh-sim`.
+- **Run:** `cargo nextest run -p mandate-rh-sim`, and `cargo xtask ci test-rh-sim`.

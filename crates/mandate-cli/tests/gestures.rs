@@ -1,8 +1,8 @@
 //! D2c (E10-16, DEC-530 item 1): `mandate version create`, `mandate version confirm` and `mandate
-//! agent deploy` over DEC-527's owner flags, always in paper. A gesture given no `--code` shows its
-//! code and warnings and writes nothing. The binary's refusals need no database: each exits
-//! non-zero with its code on stderr and nothing on stdout, and no output names any part of the DSN
-//! (`AGENTS.md` rule 7).
+//! agent deploy` over DEC-527's owner flags, in paper unless `--environment live` (DEC-925). A
+//! gesture given no `--code` shows its code and warnings and writes nothing. The binary's refusals
+//! need no database: each exits non-zero with its code on stderr and nothing on stdout, and no
+//! output names any part of the DSN (`AGENTS.md` rule 7).
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
 mod common;
@@ -266,10 +266,11 @@ fn warnings_are_shown_sorted_by_code() {
     assert_eq!(shown, Ok(Shown { code, warnings }));
 }
 
-/// The three commands parse with DEC-527's required owner flags and P0's target, `--code` is
-/// optional, and no `--environment` exists.
+/// The three commands parse with DEC-527's required owner flags and P0's target, and `--code` is
+/// optional. `--environment` is optional too, `paper` by default (DEC-925); `tests/live.rs` pins
+/// what it admits.
 #[test]
-fn the_commands_take_the_owner_flags_and_no_environment() {
+fn the_commands_take_the_owner_flags_and_an_optional_environment() {
     let flags = "--workspace ws1 --user u1 --journal postgres://h/j --store s";
     let lines = [
         "version create mandate.json",
@@ -307,8 +308,8 @@ fn the_commands_take_the_owner_flags_and_no_environment() {
             assert_eq!(kind, missing, "{line} {flag}");
         }
         let live = [&words[..], &["--environment", "live"]].concat();
-        let kind = Cli::try_parse_from(live).err().map(|e| e.kind());
-        assert_eq!(kind, Some(ErrorKind::UnknownArgument), "{line}");
+        let parsed = Cli::try_parse_from(live).map(|_| ()).map_err(|e| e.kind());
+        assert_eq!(parsed, Ok(()), "{line}");
     }
 }
 

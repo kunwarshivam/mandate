@@ -15,7 +15,7 @@
 //! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
 //! refusal, the control stream, the live door the connection record and the confirmed mandate
 //! choose (E7-26, [`chosen`](crate::chosen), [`account_stream`](crate::account_stream),
-//! [`unspent`](crate::unspent), DEC-918) and E19-11's phase 1 and the artifacts (DEC-505),
+//! [`lapse_read`](crate::lapse_read), [`unsupplied`](crate::unsupplied), DEC-918, DEC-919, DEC-933) and E19-11's phase 1 and the artifacts (DEC-505),
 //! before any credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
@@ -54,8 +54,8 @@ use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
-    ConfigRefusal, ControlRecord, DeploymentRefusal, Pinned, RunFacts, configuration,
-    confirmed_version,
+    ConfigRefusal, ControlRecord, DeploymentRefusal, LiveAdmission, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
@@ -71,13 +71,13 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
-pub use door::{account_stream, chosen, lapse_read, unspent};
+pub use door::{account_stream, chosen, lapse_read, unspent, unsupplied};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
-pub use grant::{Asked, GrantRefusal, grant};
+pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
 pub use wiring::{
-    CollarMembers, answers, asked, collar_x, cross_check_the_opening, reported,
+    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
     robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
@@ -108,7 +108,9 @@ pub trait Ports {
     /// only after every check that needs no credential.
     fn connect(&mut self) -> Result<Self::Transport, PaperError>;
 
-    /// The clock and the timer; its `now` is the run's one clock read and the binding gate's.
+    /// The clock and the timer: its `now` dates the run's configuration, stamps the asset record
+    /// and judges the quote at their reads, gives the run clock after the last broker read
+    /// (DEC-935), and is the binding gate's.
     fn pause(&self) -> Self::Pause;
 }
 
@@ -266,6 +268,11 @@ impl<P: Pause> PaperClock for PortClock<P> {
 
 /// One run, in the crate documentation's order; `vars` is the process environment.
 ///
+/// The run clock everything after the preflight is judged and recorded at is read once, after the
+/// preflight's last broker read, so every fact the broker answered is stamped at or before it and
+/// each age bound is measured from it (DEC-935, #1355); the date the configuration is chosen for
+/// is read before the control stream.
+///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing further is sent.
 pub fn run<P: Ports>(
@@ -276,8 +283,7 @@ pub fn run<P: Ports>(
     refuse_configured_host(vars.iter().map(|(name, value)| (name, value)))
         .map_err(PaperError::Shell)?;
     let clock = ports.pause();
-    let now = clock.now();
-    let day = now.date();
+    let day = clock.now().date();
     let records = ports.control_stream(&args.workspace)?;
     let mut store = FsArtifactStore::open(&args.store).map_err(|_| PaperError::Store)?;
     let facts = RunFacts {
@@ -287,6 +293,7 @@ pub fn run<P: Ports>(
             workspace_users: 1,
             approver_users: 1,
         },
+        live: LiveAdmission::refusing(),
     };
     the_live_door(&records, &store, &facts.agent, args, None)?;
     let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
@@ -324,6 +331,7 @@ pub fn run<P: Ports>(
         clock.clone(),
     )
     .map_err(refused(Stage::Reconcile))?;
+    let now = clock.now();
     let input = confirmed
         .with_equity(broker.account.equity)
         .map_err(PaperError::Deployment)?;
@@ -408,7 +416,7 @@ pub fn run<P: Ports>(
 /// item 2: "These checks refuse before anything runs, ahead of the shell's own
 /// `DeploymentRefusal::Live`, which stays for the shell's fold"): the connection choice
 /// [`chosen`], the account stream's naming [`account_stream`] and DEC-529 item 3's
-/// flat-and-unspent check [`unspent`], in that order, over the records the run's own single
+/// flat-and-unspent lapse, in that order, over the records the run's own single
 /// control-stream read holds and the deployment's own document, all before the shell's phase-1
 /// fold and so before every credential read too (FT-3: [`Ports::connect`], the only one, comes
 /// later, behind the fold). The door engages where the run holds the deployment's own document
@@ -423,12 +431,13 @@ pub fn run<P: Ports>(
 /// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
 /// the named account stream, and the counts are the agentic account's own `snapshot`, which only
 /// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
-/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses here; a paper
-/// connection makes no check and reads nothing, so the paper run is unchanged (LT-14).
+/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses
+/// `lapse_evidence_not_supplied` through [`unsupplied`] (DEC-919) rather than pass on an empty
+/// read; a paper connection makes no check and reads nothing, so the paper run is unchanged
+/// (LT-14).
 ///
 /// # Errors
-/// Any [`PaperError`] of the door's three frames, before the shell's fold and before anything
-/// runs.
+/// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
 fn the_live_door(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,

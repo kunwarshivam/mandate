@@ -1,7 +1,7 @@
 //! `mandate agent deploy` (first paper trade brief, D2b; DEC-530 item 9). It deploys an agent with
 //! the workspace's latest confirmed mandate version: it stores the deployment record, with fresh
 //! `cli_confirm` evidence, and commits exactly one `AgentDeployed` (journal spec §9.2, DEC-155
-//! item 5). Paper only.
+//! item 5). In paper, or in live on the owner's recorded Robinhood connection (DEC-925).
 
 use mandate_journal::ArtifactStore;
 
@@ -10,8 +10,8 @@ use crate::control::{
     seconds, text,
 };
 use crate::version::{
-    CONFIRMED, CREATED, Row, check_instruments, check_rules, commit, latest, paper_only, refused,
-    rows, stored,
+    CONFIRMED, CREATED, Row, admitted, check_instruments, check_rules, commit, latest,
+    paper_or_live, refused, rows, stored,
 };
 
 const DEPLOYED: &str = "AgentDeployed";
@@ -47,13 +47,14 @@ pub fn deploy(
     code: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     agent_stream(owner, agent).map_err(|_| refused("agent_invalid"))?;
     let rows = rows(journal, owner)?;
     if latest(&rows, CREATED, version).is_none() {
         return Err(refused("version_unknown"));
     }
     let (document, mandate) = stored(store, version)?;
+    admitted(journal, owner, &document)?;
     let confirmed =
         latest(&rows, CONFIRMED, version).ok_or_else(|| refused("version_unconfirmed"))?;
     let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);

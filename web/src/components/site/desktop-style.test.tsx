@@ -85,7 +85,10 @@ describe("the style switch", () => {
     renderOn("windows");
     await press(screen.getByRole("button", { name: "Start" }));
     expect(within(screen.getByRole("menu", { name: "Start" })).queryByRole("menuitem", { name: /Mac|PC|Windows/ })).toBeNull();
-    await press(within(screen.getByRole("menu", { name: "Start" })).getByRole("menuitem", { name: "Display" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    const browserMenus = screen.getByRole("menubar", { name: "Browser menus" });
+    await press(within(browserMenus).getByRole("menuitem", { name: "View" }));
+    await press(within(screen.getByRole("menu", { name: "View" })).getByRole("menuitem", { name: "Change wallpaper…" }));
     const choice = document.querySelector<HTMLElement>("[data-slot=desktop-choice]")!;
     expect(choice.textContent, "neither computer is written").toBe("Desktop");
     expect(within(choice).getByRole("radio", { name: "Windows 98" })).toBeChecked();
@@ -110,7 +113,8 @@ describe("the Mac desktop", () => {
     const home = win("Owlhead Home Page");
     const bar = within(home).getAllByRole("button").slice(0, 3);
     expect(bar.map((b) => b.getAttribute("aria-label"))).toEqual(["Close Owlhead Home Page", "Maximize Owlhead Home Page", "Minimize Owlhead Home Page"]);
-    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "readme.txt" }));
+    await press(barTitle("Owlhead"));
+    await press(within(screen.getByRole("menu", { name: "Owlhead" })).getByRole("menuitem", { name: "About Owlhead…" }));
     expect(within(home).queryByRole("button", { name: "Close Owlhead Home Page" }), "a window behind shows no boxes").toBeNull();
     expect(within(win("readme.txt - Notepad")).getByRole("button", { name: "Close readme.txt - Notepad" })).toBeInTheDocument();
   });

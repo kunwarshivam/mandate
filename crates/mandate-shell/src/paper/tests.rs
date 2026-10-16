@@ -23,7 +23,7 @@ use mandate_time::{Date, UtcNanos};
 
 use crate::Cause;
 use crate::control::{
-    Configuration, ConfirmedVersion, ControlRecord, Pinned, RunFacts, configuration,
+    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
     confirmed_version,
 };
 use mandate_canon::to_canonical;
@@ -242,6 +242,7 @@ fn deployed_inputs(stream: &Deployed) -> Result<(ConfirmedVersion, Configuration
             workspace_users: 1,
             approver_users: 1,
         },
+        live: LiveAdmission::refusing(),
     };
     let confirmed = confirmed_version(&stream.records, &stream.store, &facts).map_err(text)?;
     let mandate = confirmed.mandate();
@@ -352,6 +353,7 @@ fn facts_at(asset_at: &str, quote_at: &str) -> Result<PaperFacts, String> {
                 ask: price("255.2")?,
                 ask_size: qty("1")?,
                 feed: Feed::Iex,
+                clock_skew: None,
             },
             minute_bars: MinuteBars {
                 instrument: symbol("AAPL")?,

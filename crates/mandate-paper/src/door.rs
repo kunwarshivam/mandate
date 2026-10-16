@@ -23,7 +23,7 @@ use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
 
 use crate::PaperError;
-use crate::connection::{Connection, Held, connection, lapse};
+use crate::connection::{Connection, Held, LapseRefusal, connection, lapse};
 
 /// The connection the run uses (DEC-918 item 1; DEC-910 item 2; the task file's row G1a:
 /// "The connector chosen from the connection record and the environment from the confirmed
@@ -101,14 +101,14 @@ pub fn unspent(
 /// position record, a zero quantity included, and every working order), and its `rows` are the
 /// journal's own read of `stream`, the account stream [`account_stream`] named, through the run's
 /// own journal (`journal`, ungated by `--place-one-order`, DEC-918 item 2); a run that kept no
-/// journal has no account stream and reads no rows. A live connection with no snapshot refuses,
-/// since a lapse with nothing to count cannot be passed (`AGENTS.md` rule 3). A paper connection
-/// makes no check and reads nothing (LT-14).
+/// journal has no account stream and reads no rows. A live connection with no snapshot is
+/// [`unsupplied`]'s refusal, since a lapse with nothing to count cannot be passed (`AGENTS.md`
+/// rule 3). A paper connection makes no check and reads nothing (LT-14).
 ///
 /// # Errors
-/// [`PaperError::Lapse`] as [`unspent`] answers; [`PaperError::Shell`] with `Cause::Absent` at
-/// the reconcile stage when a live connection has no snapshot or its account stream cannot be
-/// read.
+/// [`PaperError::Lapse`] as [`unspent`] answers, and `NotSupplied` as [`unsupplied`] answers
+/// for a live connection with no snapshot; [`PaperError::Shell`] with `Cause::Absent` at the
+/// reconcile stage when its account stream cannot be read.
 pub fn lapse_read(
     connection: &Connection,
     journal: Option<&str>,
@@ -118,7 +118,9 @@ pub fn lapse_read(
     if connection.environment != Environment::Live {
         return Ok(());
     }
-    let snapshot = snapshot.ok_or_else(|| reconcile_absent("the agentic account's snapshot"))?;
+    let Some(snapshot) = snapshot else {
+        return unsupplied(connection);
+    };
     let rows = account_rows(journal, stream)?;
     unspent(connection, &rows, &held(snapshot))
 }
@@ -154,4 +156,24 @@ fn reconcile_absent(what: &'static str) -> PaperError {
         stage: Stage::Reconcile,
         cause: Cause::Absent { what },
     })
+}
+
+/// The lapse where the run holds no evidence for it (DEC-919; DEC-529 item 3; DEC-910 item 3):
+/// the door's call until the live arm hands [`unspent`] the journal's own read of the account
+/// stream and the connector snapshot's own counts. A live connection refuses to start with
+/// [`LapseRefusal::NotSupplied`](crate::LapseRefusal::NotSupplied): no read and no snapshot, so
+/// nothing shows the account flat or the record unspent, where an empty read with zero counts
+/// would pass a spent or non-flat account silently (`AGENTS.md` rule 3). A paper connection
+/// makes no check, exactly as [`unspent`] makes none on one (LT-14), so today's paper path is
+/// unchanged. The only way past the refusal is the live arm's own call of [`unspent`] with the
+/// inputs its reads produced.
+///
+/// # Errors
+/// [`PaperError::Lapse`] with [`LapseRefusal::NotSupplied`](crate::LapseRefusal::NotSupplied)
+/// for a live connection, before anything runs.
+pub fn unsupplied(connection: &Connection) -> Result<(), PaperError> {
+    if connection.environment == Environment::Live {
+        return Err(PaperError::Lapse(LapseRefusal::NotSupplied));
+    }
+    Ok(())
 }

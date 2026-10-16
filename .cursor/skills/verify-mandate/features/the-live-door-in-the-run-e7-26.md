@@ -36,7 +36,8 @@
   the lapse before anything runs through `lapse_read` (DEC-933 item 3: for a live connection,
   `Held` counted from the agentic account's own `mandate_robinhood::AccountSnapshot` and the
   rows read from the run's own journal, none for a journalless run; a live connection with no
-  snapshot, or whose account stream cannot be read, refuses at the reconcile stage; a paper
+  snapshot refuses `lapse_evidence_not_supplied` through DEC-919's `unsupplied`, and one whose
+  account stream cannot be read refuses at the reconcile stage; a paper
   connection reads nothing). `run()` hands no snapshot until the runner's ports connect the
   Robinhood connector (DEC-928 item 5), so a live connection refuses at the door until then. The four run-level probes beside them live in `crates/mandate-paper/src/tests.rs`
   (the DEC-77 amendment's in-module slot): the revoked record, the live deployment, the
@@ -60,7 +61,9 @@
   `a_flat_snapshot_of_a_journalless_run_starts`,
   `an_unreadable_account_stream_refuses_the_live_run`,
   `a_live_connection_with_no_snapshot_refuses` and
-  `a_paper_connection_reads_nothing_for_the_lapse` — pinning V-001's paper default
+  `a_paper_connection_reads_nothing_for_the_lapse`, and DEC-919's
+  `a_live_connection_with_no_lapse_evidence_refuses_to_start` and
+  `a_paper_connection_with_no_lapse_evidence_starts_as_today` — pinning V-001's paper default
   and LT-14 (the run's own account stream carried, no flat or spent check on a paper
   connection, whatever it holds), the exact refusal the run's report holds where the shell
   would answer a V-rule or `live` (the revoked paper record, the record binding another

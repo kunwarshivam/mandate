@@ -3,13 +3,8 @@
 import { type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject, createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft } from "pixelarticons/react/ArrowLeft.js";
 import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
-import { Folder } from "pixelarticons/react/Folder.js";
-import { Hand } from "pixelarticons/react/Hand.js";
 import { Home } from "pixelarticons/react/Home.js";
-import { Image as ImageIcon } from "pixelarticons/react/Image.js";
-import { Printer } from "pixelarticons/react/Printer.js";
 import { Reload } from "pixelarticons/react/Reload.js";
-import { Search } from "pixelarticons/react/Search.js";
 import { cn } from "@/lib/utils";
 import { ETCHED, MENU_ITEM, MENU_PANEL, MONO, PIXEL, RAISED, SUNKEN } from "./letter";
 import { OpenAppContext } from "./open-app";
@@ -225,21 +220,14 @@ export function MenuBar({ bookmarks, directory }: { bookmarks: { id: string; tit
 const ICON = "size-6";
 
 /**
- * The toolbar. Home takes the page back to its top and Reload loads it again; the rest are greyed,
- * as they were on a page that had just finished loading, with nothing to go back or forward to,
- * nothing still loading to stop, and no dialog behind Open, Print or Find. Stop is named for what
- * it stopped, loading, so it is never read as the product's Stop.
+ * The toolbar: Back, Forward, Home and Reload, the four a visitor can use. The buttons a browser of
+ * the time also had (Images, Open, Print, Find, Stop) are left off, as they would only be greyed.
  */
 const TOOLS: { label: string; name?: string; icon: ReactNode; act?: Act; wide?: boolean }[] = [
   { label: "Back", icon: <ArrowLeft className={ICON} />, act: "back" },
   { label: "Forward", icon: <ArrowRight className={ICON} />, act: "forward" },
   { label: "Home", icon: <Home className={ICON} />, act: "home" },
   { label: "Reload", icon: <Reload className={ICON} />, act: "reload" },
-  { label: "Images", icon: <ImageIcon className={ICON} />, wide: true },
-  { label: "Open", icon: <Folder className={ICON} />, wide: true },
-  { label: "Print", icon: <Printer className={ICON} />, wide: true },
-  { label: "Find", icon: <Search className={ICON} />, wide: true },
-  { label: "Stop", name: "Stop loading", icon: <Hand className={ICON} />, wide: true },
 ];
 
 const TOOL = "grid w-[4.25rem] justify-items-center gap-0.5 bg-muted px-1 py-1 text-[0.8125rem] leading-none";

@@ -259,6 +259,7 @@ fn approve_commits_one_stepped_up_response() {
     assert_eq!(
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -276,6 +277,7 @@ fn approve_commits_one_stepped_up_response() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -368,6 +370,7 @@ fn approve_refuses_locally_and_commits_nothing() {
         assert_eq!(
             approve(
                 &mut fx.journal,
+                &fx.store,
                 &mut ids,
                 &owner(),
                 agent,
@@ -384,6 +387,7 @@ fn approve_refuses_locally_and_commits_nothing() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -455,6 +459,7 @@ fn the_outcome_is_only_what_the_runtime_recorded() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -501,6 +506,7 @@ fn a_refusal_or_a_skip_reports_its_reason() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -553,6 +559,7 @@ fn a_refusal_or_a_skip_reports_its_reason() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -588,6 +595,7 @@ fn approve_through(fault: fn(&mut common::Journal)) -> Through {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
@@ -739,6 +747,7 @@ fn two_racing_commands_back_off_differently() {
         let result = if grant {
             approve(
                 &mut fx.journal,
+                &fx.store,
                 &mut ids,
                 &owner(),
                 AGENT,
@@ -776,6 +785,7 @@ fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
     fx.journal.lost_for_good = true;
     let first = approve(
         &mut fx.journal,
+        &fx.store,
         &mut FixedIds::default(),
         &owner(),
         AGENT,
@@ -800,6 +810,7 @@ fn an_exhausted_answer_names_its_event_and_a_re_run_finds_it() {
     let mut ids = FixedIds::default();
     let again = approve(
         &mut fx.journal,
+        &fx.store,
         &mut ids,
         &owner(),
         AGENT,
@@ -833,6 +844,7 @@ fn a_re_run_finds_its_event_after_another_writer_moved_the_head() {
     fx.journal.lost_for_good = true;
     let first = approve(
         &mut fx.journal,
+        &fx.store,
         &mut FixedIds::default(),
         &owner(),
         AGENT,
@@ -860,6 +872,7 @@ fn a_re_run_finds_its_event_after_another_writer_moved_the_head() {
     let mut ids = FixedIds::default();
     let again = approve(
         &mut fx.journal,
+        &fx.store,
         &mut ids,
         &owner(),
         AGENT,
@@ -893,6 +906,7 @@ fn a_re_answer_after_the_runtime_refused_is_committed_anew() {
             "approve",
             approve(
                 &mut fx.journal,
+                &fx.store,
                 &mut ids,
                 &owner(),
                 AGENT,
@@ -936,6 +950,7 @@ fn a_refusal_says_whether_the_deadline_has_passed() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut FixedIds::default(),
             &owner(),
             AGENT,
@@ -1004,6 +1019,7 @@ fn every_response_payload_has_exactly_its_members() {
         "approve",
         approve(
             &mut fx.journal,
+            &fx.store,
             &mut ids,
             &owner(),
             AGENT,
