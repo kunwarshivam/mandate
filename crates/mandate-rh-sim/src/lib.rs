@@ -308,7 +308,12 @@ pub struct Sim {
     echo_ref_id: bool,
     refuse_changed_resend: bool,
     now: Option<UtcNanos>,
+    page_size: Option<usize>,
 }
+
+/// What a page cursor the simulator issues starts with: the offset of the page's first order in
+/// the filtered list follows it.
+const CURSOR_PREFIX: &str = "rh-sim-cursor-";
 
 impl Sim {
     /// A simulator over these accounts, in the closed session, with no quotes, halts or orders.
@@ -331,6 +336,7 @@ impl Sim {
             echo_ref_id: false,
             refuse_changed_resend: false,
             now: None,
+            page_size: None,
         })
     }
 
@@ -367,7 +373,8 @@ impl Sim {
             Event::EchoRefId(on) => self.echo_ref_id = on,
             Event::RefuseChangedResend(on) => self.refuse_changed_resend = on,
             Event::Clock(now) => self.now = Some(now),
-            Event::PageSize(_) => {}
+            Event::PageSize(0) => return Err(SimError::Unreadable("page_size")),
+            Event::PageSize(size) => self.page_size = Some(size),
         }
         Ok(())
     }
@@ -551,6 +558,39 @@ impl Sim {
             .rev()
             .map(|o| shown(o.clone(), self.echo_ref_id))
             .collect())
+    }
+
+    /// One page of [`Self::listed`] (DEC-956 item 3): with no [`Event::PageSize`] the whole list
+    /// and no next cursor; with one, at most that many orders from the page `cursor` names, the
+    /// first page when it names none, and the cursor of the next page while orders remain. A
+    /// cursor the simulator did not issue for this list, or any cursor without a page size, is
+    /// refused.
+    pub fn page(
+        &self,
+        account_number: &str,
+        filter: &OrderFilter,
+        cursor: Option<&str>,
+    ) -> Result<(Vec<Order>, Option<String>), SimError> {
+        let listed = self.listed(account_number, filter)?;
+        let refused = SimError::Unreadable("cursor");
+        let Some(size) = self.page_size else {
+            return match cursor {
+                None => Ok((listed, None)),
+                Some(_) => Err(refused),
+            };
+        };
+        let start = match cursor {
+            None => 0,
+            Some(text) => text
+                .strip_prefix(CURSOR_PREFIX)
+                .and_then(|offset| offset.parse::<usize>().ok())
+                .filter(|offset| *offset > 0 && *offset < listed.len())
+                .ok_or(refused)?,
+        };
+        let end = start.saturating_add(size).min(listed.len());
+        let next = (end < listed.len()).then(|| format!("{CURSOR_PREFIX}{end}"));
+        let page = listed.get(start..end).unwrap_or_default().to_vec();
+        Ok((page, next))
     }
 
     /// `get_accounts`'s records: every account of the customer as it was configured, agentic

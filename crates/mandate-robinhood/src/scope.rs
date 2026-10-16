@@ -11,6 +11,22 @@ use crate::{RobinhoodConnector, RobinhoodError, Tools};
 const ACCOUNTS: &str = "get_accounts";
 const NUMBER: &str = "account_number";
 
+/// The member a page of `get_equity_orders` names the next page by, which the next read sends
+/// back as `cursor` (DEC-956 item 3). The contract does not name it; any other member beside the
+/// records still refuses the read, so a broker that spells it otherwise is never read in part.
+const NEXT_CURSOR: &str = "next_cursor";
+
+/// What an answer may hold beside its records' member.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rest {
+    /// Anything, unread ([`RobinhoodConnector::read`]).
+    Unread,
+    /// Nothing ([`RobinhoodConnector::read_sole_member`]).
+    Refused,
+    /// [`NEXT_CURSOR`] alone ([`RobinhoodConnector::read_page`]).
+    Cursor,
+}
+
 /// A read of the agentic account's data, each one tool of the allowlist (connections spec §6.2).
 /// The answers' shapes are assumed (DEC-875 item 4) until the founder's run reads real ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +104,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         read: AccountRead,
         filters: &Map<String, Value>,
     ) -> Result<Vec<Map<String, Value>>, RobinhoodError> {
-        self.scoped_read(read, filters, false).await
+        Ok(self.scoped_read(read, filters, Rest::Unread).await?.0)
     }
 
     /// One read of the agentic account whose answer holds its records' member and nothing else
@@ -103,16 +119,29 @@ impl<T: Tools> RobinhoodConnector<T> {
         read: AccountRead,
         filters: &Map<String, Value>,
     ) -> Result<Vec<Map<String, Value>>, RobinhoodError> {
-        self.scoped_read(read, filters, true).await
+        Ok(self.scoped_read(read, filters, Rest::Refused).await?.0)
     }
 
-    /// [`Self::read`] and [`Self::read_sole_member`] differ only in `sole_member`.
+    /// One page of a read of the agentic account (DEC-956 item 3): [`Self::read_sole_member`],
+    /// except that the answer may also hold [`NEXT_CURSOR`], non-empty text naming the next page
+    /// or `null`, which is returned beside the records. A cursor of any other value, or any
+    /// other member, is [`RobinhoodError::Unreadable`] with the read's code.
+    pub(crate) async fn read_page(
+        &self,
+        read: AccountRead,
+        filters: &Map<String, Value>,
+    ) -> Result<(Vec<Map<String, Value>>, Option<String>), RobinhoodError> {
+        self.scoped_read(read, filters, Rest::Cursor).await
+    }
+
+    /// [`Self::read`], [`Self::read_sole_member`] and [`Self::read_page`] differ only in what
+    /// the answer may hold beside its records' member, and only a page returns a next cursor.
     async fn scoped_read(
         &self,
         read: AccountRead,
         filters: &Map<String, Value>,
-        sole_member: bool,
-    ) -> Result<Vec<Map<String, Value>>, RobinhoodError> {
+        rest: Rest,
+    ) -> Result<(Vec<Map<String, Value>>, Option<String>), RobinhoodError> {
         let recorded = self.account_number.as_str();
         match filters.get(NUMBER) {
             None => {}
@@ -136,7 +165,15 @@ impl<T: Tools> RobinhoodConnector<T> {
             .call_tool(CallClass::Ordinary, tool, &Value::Object(arguments))
             .await;
         let mut content = structured(answer).ok_or(unreadable.clone())?;
-        if sole_member && member.is_some() && content.len() != 1 {
+        let next = match (rest, member) {
+            (Rest::Cursor, Some(_)) => match content.remove(NEXT_CURSOR) {
+                None | Some(Value::Null) => None,
+                Some(Value::String(next)) if !next.is_empty() => Some(next),
+                Some(_) => return Err(unreadable),
+            },
+            _ => None,
+        };
+        if rest != Rest::Unread && member.is_some() && content.len() != 1 {
             return Err(unreadable);
         }
         let records = match member {
@@ -160,7 +197,7 @@ impl<T: Tools> RobinhoodConnector<T> {
                 _ => return Err(unreadable),
             }
         }
-        Ok(kept)
+        Ok((kept, next))
     }
 }
 

@@ -22,16 +22,23 @@ use crate::{RobinhoodConnector, Tools, ref_id};
 /// absence.
 const UNREAD: ConnectorError = ConnectorError::Unknown(BrokerUnknown::Ambiguous);
 
+/// The most pages one listing reads (DEC-956 item 3). A listing that names a page past them is
+/// never read as whole: the order stays `Unknown`, since an unread page could hide a second
+/// match. One minute's orders of one agentic account in one symbol fit many times over.
+const MAX_PAGES: usize = 10;
+
 /// What a record's `ref_id` that is not ours is named behind: a space, which no
 /// `ClientOrderId` holds, so another order's `ref_id` can never read as one of our keys.
 const FOREIGN_REF_ID: &str = "ref_id ";
 
 impl<T: Tools> RobinhoodConnector<T> {
-    /// One read of the agentic account's orders for `listing` (DEC-941 items 1 and 3), through
-    /// [`Self::read_sole_member`]: an answer holding anything beside `orders`, a next-page cursor
-    /// included, is refused, because a first page alone could hide a second match. A refused or
-    /// unreadable read, or one record that is not exactly an order record of a type and time in
-    /// force the executor models, is [`UNREAD`], so the order stays `Unknown`. The instrument is
+    /// The agentic account's orders for `listing` (DEC-941 items 1 and 3, DEC-956 item 3), page
+    /// by page through [`Self::read_page`]: each page is read with the same filters and the
+    /// `cursor` the page before named, until a page names none. An answer holding anything
+    /// beside `orders` and that cursor is refused, and a listing still naming a page after
+    /// [`MAX_PAGES`] is [`UNREAD`], because a part of the answer could hide a second match. A
+    /// refused or unreadable page, or one record that is not exactly an order record of a type
+    /// and time in force the executor models, is [`UNREAD`], so the order stays `Unknown`. The instrument is
     /// sent as its registered ticker and every record must name that ticker, which reads back as
     /// the listing's asset id; an instrument with no ticker is [`UNREAD`] with nothing called
     /// (DEC-956 item 1).
@@ -49,10 +56,7 @@ impl<T: Tools> RobinhoodConnector<T> {
         filters.insert("symbol".to_owned(), text(ticker.as_str().to_owned()));
         filters.insert("placed_agent".to_owned(), text("agentic".to_owned()));
         filters.insert("created_at_gte".to_owned(), text(since.to_string()));
-        let records = self
-            .read_sole_member(AccountRead::Orders, &filters)
-            .await
-            .map_err(|_| UNREAD)?;
+        let records = self.read_pages(&filters).await?;
         let ours = ref_id(&listing.client_order_id).map_err(|_| UNREAD)?;
         let mut orders = Vec::with_capacity(records.len());
         for record in &records {
@@ -65,6 +69,30 @@ impl<T: Tools> RobinhoodConnector<T> {
             client_order_id: listing.client_order_id.as_str().to_owned(),
             orders,
         })
+    }
+}
+
+impl<T: Tools> RobinhoodConnector<T> {
+    /// Every record of every page of `get_equity_orders` under `filters`, in the order the pages
+    /// gave them, or [`UNREAD`] for a page that cannot be read or a page past [`MAX_PAGES`].
+    async fn read_pages(
+        &self,
+        filters: &Map<String, Value>,
+    ) -> Result<Vec<Map<String, Value>>, ConnectorError> {
+        let mut records = Vec::new();
+        let mut page = filters.clone();
+        for _ in 0..MAX_PAGES {
+            let (read, next) = self
+                .read_page(AccountRead::Orders, &page)
+                .await
+                .map_err(|_| UNREAD)?;
+            records.extend(read);
+            let Some(next) = next else {
+                return Ok(records);
+            };
+            page.insert("cursor".to_owned(), Value::String(next));
+        }
+        Err(UNREAD)
     }
 }
 
