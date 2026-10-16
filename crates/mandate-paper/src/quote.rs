@@ -109,6 +109,23 @@ pub fn fresh_ask(
     answered: UtcNanos,
     max_age: Duration,
 ) -> Result<Price, QuoteRefusal> {
-    let _ = (quote, instrument, sent, answered, max_age);
-    Err(QuoteRefusal::Unimplemented { story: "E7-26 O2" })
+    let quote = quote
+        .filter(|quote| &quote.symbol == instrument)
+        .ok_or(QuoteRefusal::Absent)?;
+    let age = nanos(answered)
+        .zip(nanos(sent))
+        .and_then(|(answered, sent)| answered.checked_sub(sent))
+        .and_then(|age| u64::try_from(age).ok())
+        .ok_or(QuoteRefusal::Stale)?;
+    if Duration::from_nanos(age) > max_age {
+        return Err(QuoteRefusal::Stale);
+    }
+    Ok(quote.ask)
+}
+
+/// Whole nanoseconds since the epoch.
+fn nanos(at: UtcNanos) -> Option<i128> {
+    i128::from(at.secs())
+        .checked_mul(1_000_000_000)?
+        .checked_add(i128::from(at.nanos()))
 }

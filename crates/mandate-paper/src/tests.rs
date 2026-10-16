@@ -320,7 +320,8 @@ impl mandate_alpaca::Pause for Ticking {
     fn now(&self) -> mandate_time::UtcNanos {
         let nanos = self.0.get();
         self.0.set(nanos.saturating_add(1));
-        mandate_time::UtcNanos::from_parts(1_792_162_800, nanos).unwrap_or(mandate_time::UtcNanos::EPOCH)
+        mandate_time::UtcNanos::from_parts(1_792_162_800, nanos)
+            .unwrap_or(mandate_time::UtcNanos::EPOCH)
     }
 
     async fn pause(&self, _duration: std::time::Duration) {}

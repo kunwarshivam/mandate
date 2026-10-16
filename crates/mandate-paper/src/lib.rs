@@ -74,6 +74,7 @@ use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 
+pub use ask::{BrokerAsk, QuoteRead};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
@@ -82,16 +83,14 @@ pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
-pub use ask::{BrokerAsk, QuoteRead};
 pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
-    granted_opening,
-    lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end,
-    watched,
+    granted_opening, lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant,
+    watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or

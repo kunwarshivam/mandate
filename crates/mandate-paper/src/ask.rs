@@ -14,7 +14,7 @@ use mandate_num::Price;
 use mandate_robinhood::{Quote, Tools};
 use mandate_shell::robinhood::RobinhoodBridge;
 
-use crate::quote::QuoteRefusal;
+use crate::quote::{QuoteRefusal, fresh_ask};
 
 /// One read of the instrument's quote at the broker: the quote, or [`None`] when the read was
 /// refused, failed, or answered something that is not one uncrossed record of the instrument.
@@ -35,13 +35,12 @@ pub enum BrokerAsk {
 impl BrokerAsk {
     /// The read of `bridge`'s connector (`RobinhoodBridge::equity_quote`), on its own runtime.
     pub fn robinhood<T: Tools + 'static>(bridge: Rc<RobinhoodBridge<T>>) -> Self {
-        let _ = bridge;
-        Self::Absent
+        Self::Read(Box::new(move |symbol| bridge.equity_quote(symbol).ok()))
     }
 
     /// The ask for `instrument` at the check: [`Self::Quoted`]'s as read; [`Self::Read`]'s read
     /// now, between two readings of `pause`'s clock, and judged by
-    /// [`fresh_ask`](crate::quote::fresh_ask) against `max_age`; [`Self::Absent`] refuses.
+    /// [`fresh_ask`] against `max_age`; [`Self::Absent`] refuses.
     ///
     /// # Errors
     /// [`QuoteRefusal::Absent`] or [`QuoteRefusal::Stale`], each before anything is sent.
@@ -51,7 +50,15 @@ impl BrokerAsk {
         pause: &P,
         max_age: Duration,
     ) -> Result<Price, QuoteRefusal> {
-        let _ = (instrument, pause, max_age);
-        Err(QuoteRefusal::Unimplemented { story: "E7-26 O2" })
+        match self {
+            Self::Quoted(ask) => Ok(*ask),
+            Self::Read(read) => {
+                let sent = pause.now();
+                let quote = read(instrument);
+                let answered = pause.now();
+                fresh_ask(quote.as_ref(), instrument, sent, answered, max_age)
+            }
+            Self::Absent => Err(QuoteRefusal::Absent),
+        }
     }
 }

@@ -77,8 +77,11 @@ impl<T: Tools> RobinhoodBridge<T> {
     /// [`Cause::Absent`] naming [`QUOTE_UNREAD`] when the read is refused or unreadable, or the
     /// connector is held by another stage.
     pub fn equity_quote(&self, symbol: &InstrumentId) -> Result<Quote, Cause> {
-        let _ = symbol;
-        Err(Cause::Absent { what: QUOTE_UNREAD })
+        let unread = || Cause::Absent { what: QUOTE_UNREAD };
+        let robinhood = self.connector.try_borrow().map_err(|_| unread())?;
+        self.runtime
+            .block_on(robinhood.equity_quote(symbol))
+            .map_err(|_| unread())
     }
 }
 

@@ -437,16 +437,16 @@ pub fn broker_cross_check<P: Pause + ?Sized>(
     pause: &P,
     max_age: Duration,
 ) -> Result<(), PaperError> {
-    let _ = (
+    let ask = broker
+        .ask(&iex.instrument, pause, max_age)
+        .map_err(PaperError::CrossCheck)?;
+    cross_check_the_opening(
         collar,
         asset_class,
         median_dollar_volume_20d,
-        broker,
-        iex,
-        pause,
-        max_age,
-    );
-    Err(PaperError::Unimplemented { story: "E7-26 O2" })
+        Some(ask),
+        Some(iex.ask),
+    )
 }
 
 /// The run-level call frame of the watch's end (E7-26's G1b wiring row; LT-10; DEC-912 item 3;

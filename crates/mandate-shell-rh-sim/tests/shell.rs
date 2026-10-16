@@ -640,13 +640,17 @@ fn the_bridges_quote_is_the_brokers_latest_and_names_no_account() {
 fn the_bridges_quote_refuses_a_missing_or_garbled_answer() {
     let server = read_server();
     let shell = shell(&server);
-    let missing = shell.bridge.equity_quote(&InstrumentId::new("QQQ").unwrap());
+    let missing = shell
+        .bridge
+        .equity_quote(&InstrumentId::new("QQQ").unwrap());
     assert!(
         matches!(missing, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
         "{missing:?}"
     );
     server.garble_next(Garble::NotJson).unwrap();
-    let garbled = shell.bridge.equity_quote(&InstrumentId::new("SPY").unwrap());
+    let garbled = shell
+        .bridge
+        .equity_quote(&InstrumentId::new("SPY").unwrap());
     assert!(
         matches!(garbled, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
         "{garbled:?}"

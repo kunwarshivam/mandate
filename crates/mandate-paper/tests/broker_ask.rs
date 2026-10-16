@@ -28,11 +28,14 @@ use serde_json::{Value, json};
 const MAX_AGE: Duration = Duration::from_secs(10);
 const T0: i64 = 1_792_162_800;
 
+/// Every call the seam saw: its budget class, its tool and its arguments.
+type Seen = Rc<RefCell<Vec<(CallClass, &'static str, Value)>>>;
+
 /// The broker seam: every call it saw, and the one answer it gives each call.
 #[derive(Clone)]
 struct Fixture {
     answer: Rc<RefCell<Result<String, McpError>>>,
-    seen: Rc<RefCell<Vec<(CallClass, &'static str, Value)>>>,
+    seen: Seen,
 }
 
 impl Tools for Fixture {
@@ -181,7 +184,10 @@ fn refused(result: Result<(), PaperError>) -> Option<QuoteRefusal> {
 fn robinhoods_ask_is_read_at_the_check_and_compared_within_the_collar() {
     let broker = Fixture::answering(quoted("SPY", "90", "100.5"));
     let ask = broker.ask();
-    assert!(broker.seen.borrow().is_empty(), "nothing is read before the check");
+    assert!(
+        broker.seen.borrow().is_empty(),
+        "nothing is read before the check"
+    );
     assert!(matches!(check(&ask, "100", &[0, 1]), Ok(())));
     assert_eq!(
         *broker.seen.borrow(),
@@ -357,9 +363,16 @@ fn nanodollars(cents: i128) -> i128 {
     cents * 10_000_000
 }
 
-/// `nanos` nanodollars as decimal text.
+/// `nanos` nanodollars as canonical decimal text: no trailing zero, and no point for a whole.
 fn text(nanos: i128) -> String {
-    format!("{}.{:09}", nanos / 1_000_000_000, nanos % 1_000_000_000)
+    let places = format!("{:09}", nanos % 1_000_000_000);
+    let places = places.trim_end_matches('0');
+    let whole = nanos / 1_000_000_000;
+    if places.is_empty() {
+        whole.to_string()
+    } else {
+        format!("{whole}.{places}")
+    }
 }
 
 proptest! {
