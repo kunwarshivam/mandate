@@ -4858,6 +4858,22 @@ From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-84
   constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
   2's defensive path goes with it.
 
+From E2's first paper fill ([DEC-938](decisions/DEC-938.md), #1355):
+
+- **The paper environment on the account stream.** The executor learns the environment only from
+  a `StreamOpened` payload member that the registered schema dropped. On the paper path it
+  therefore books no simulated regulatory fee (trading spec §10). Read the envelope's
+  `environment`, and register `FeesCharged`'s schema with its writer.
+- **External fills at the journal.** `ExternalActivityIngested` has no registered schema, and an
+  unattributed `FillApplied` has no `client_order_id`, which version 1 requires. A genuinely
+  external fill is still refused.
+- **The executor's risk clock on the paper path.** Its account-stream records carry
+  `1970-01-01T00:00:00Z`, because no tick reaches the executor before its first records. Tick it
+  at the run's clock before the cycle.
+- **A labelled fail-safe deny.** If a refused classification should be on the record, add a
+  deny-only `decided_by` label to journal spec §9.1 and mandate spec §6.4 in a spec PR. Until
+  then the step stops at Classify and journals nothing (DEC-938 item 4).
+
 From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
 
 - Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its

@@ -107,7 +107,7 @@ pub use ids::{ClientOrderId, IntentId, PREFIX};
 pub use opening::equity_bracket_prices;
 pub use ports::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports,
+    BrokerConnector, ConnectorError, FillConfigRefs, IdGen, InstrumentSnapshot, MandateView, Ports,
 };
 pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;

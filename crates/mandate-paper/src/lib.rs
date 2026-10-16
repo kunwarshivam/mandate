@@ -65,6 +65,7 @@ use mandate_shell::paper::{
     Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
     load_contexts_with_clock, preflight,
 };
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{
     Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
@@ -192,6 +193,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        symbols,
         transport: (),
     } = sources;
     Sources {
@@ -204,6 +206,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        symbols,
         transport,
     }
 }
@@ -509,6 +512,10 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let ticker = InstrumentId::new(&instrument.symbol)
+        .map_err(|_| absent(Stage::Validate, "the pinned ticker"))?;
+    let asset_id = InstrumentId::new(instrument.asset_id.as_str())
+        .map_err(|_| absent(Stage::Validate, "the pinned asset id"))?;
     let opening = Opening {
         asset_class: instrument.asset_class,
         median_dollar_volume_20d: liquidity.median_dollar_volume_20d,
@@ -550,6 +557,7 @@ pub fn run<P: Ports>(
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store)),
+        symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport: (),
     };
     let report = session
