@@ -2668,7 +2668,7 @@ mod stub_tests {
 #[cfg(test)]
 mod probe_tests {
     use mandate_accounting::{
-        AssetClass, Config, CryptoFees, EquityFees, InstrumentId, TafCapBasis,
+        AssetClass, Config, CryptoFees, EquityFees, FeeRounding, InstrumentId, TafCapBasis,
     };
     use mandate_num::{
         Bps, FeeCap, FeePerShare, FeeRate, Fraction, Qty, ShareIncrement, SignedQty,
@@ -2738,6 +2738,7 @@ mod probe_tests {
                 sec_rate: FeeRate::parse("0")?,
                 taf_per_share: FeePerShare::parse("0")?,
                 taf_cap: FeeCap::parse("0")?,
+                fee_rounding: FeeRounding::DailyTotal,
                 taf_cap_basis: TafCapBasis::PerExecution,
                 cat_per_share: FeePerShare::parse("0")?,
             },

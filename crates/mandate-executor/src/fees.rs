@@ -1,15 +1,15 @@
 //! The fee configuration the fold charges with (trading-domain spec §6.2, §6.3), built from a dated
 //! schedule someone transcribed from the broker's published fee schedule, and validated here.
 //!
-//! §6.2 says "rates come from an effective-dated configuration transcribed from Alpaca's fee
-//! schedule", so a transcribed schedule is data a deployment supplies (with a content hash in
+//! §6.2 says "rates and `fee_rounding` come from an effective-dated configuration transcribed
+//! from the broker's fee schedule", so a transcribed schedule is data a deployment supplies (with a content hash in
 //! `config_refs`), never constants in the crate (the coordinator's ruling on #174, 5861849917,
 //! option (i)). The constructor only refuses a schedule it cannot read exactly. The two
 //! schedules a registered fee artifact can name are the exception, each bound to one environment:
 //! [`PAPER_ONLY`]'s deliberate overestimate for `paper`, and [`ROBINHOOD_LIVE`], Robinhood's
 //! posted fees for `live` (DEC-958), which a test pins figure for figure to its dated file.
 
-use mandate_accounting::{Config, CryptoFees, EquityFees, TafCapBasis};
+use mandate_accounting::{Config, CryptoFees, EquityFees, FeeRounding, TafCapBasis};
 use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate};
 use mandate_time::{Date, TradingCalendar};
 
@@ -29,14 +29,16 @@ pub struct FeeSchedule<'a> {
     pub taf_cap_basis: &'a str,
     /// CAT per share, buys and sells.
     pub cat_per_share: &'a str,
+    /// `daily_total` or `per_fee_per_fill` (§6.2, DEC-960): how the broker rounds the fees above.
+    pub fee_rounding: &'a str,
     /// Crypto maker and taker fees for the account's volume tier, in basis points (§6.3).
     pub crypto_maker_bps: &'a str,
     pub crypto_taker_bps: &'a str,
 }
 
 /// The accounting fee configuration for `schedule` over `calendar`. Every figure must parse exactly
-/// in its own type, which already refuses a negative amount or rate (DEC-87); the cap basis must be
-/// one §6.2 names; and the schedule must take effect on a date the calendar covers. A refusal
+/// in its own type, which already refuses a negative amount or rate (DEC-87); the cap basis and the
+/// rounding must be ones §6.2 names; and the schedule must take effect on a date the calendar covers. A refusal
 /// names the field, and nothing is defaulted (`AGENTS.md` rule 3).
 pub fn fee_config(
     schedule: &FeeSchedule<'_>,
@@ -60,6 +62,11 @@ pub fn fee_config(
             },
             cat_per_share: FeePerShare::parse(schedule.cat_per_share)
                 .map_err(|_| refused("cat_per_share"))?,
+            fee_rounding: match schedule.fee_rounding {
+                "daily_total" => FeeRounding::DailyTotal,
+                "per_fee_per_fill" => FeeRounding::PerFeePerFill,
+                _ => return Err(refused("fee_rounding")),
+            },
         },
         crypto: CryptoFees {
             maker: Bps::parse(schedule.crypto_maker_bps)
@@ -85,6 +92,7 @@ const PAPER_ONLY: FeeSchedule<'static> = FeeSchedule {
     taf_cap: "1000",
     taf_cap_basis: "per_execution",
     cat_per_share: "0.01",
+    fee_rounding: "daily_total",
     crypto_maker_bps: "250",
     crypto_taker_bps: "250",
 };
@@ -125,7 +133,9 @@ pub const ROBINHOOD_LIVE_SCHEDULE: &str = "robinhood_live_2026_10_16";
 /// never priced below what it is charged: TAF stays at its posted rate through FINRA's
 /// October to December 2026 pause, and the cap applies per execution, the basis that charges more.
 /// A live run trades US equities only, so the crypto figures are never charged; they repeat
-/// [`PAPER_ONLY`]'s overestimate. **Accepted (agent, under DEC-929)** as values; the founder may
+/// [`PAPER_ONLY`]'s overestimate. Robinhood rounds each fee of a trade to the cent separately, so
+/// each fee of each fill is rounded up to the cent before summing (`per_fee_per_fill`, DEC-960),
+/// never below Robinhood's figure. **Accepted (agent, under DEC-929)** as values; the founder may
 /// revert (DEC-958).
 const ROBINHOOD_LIVE: FeeSchedule<'static> = FeeSchedule {
     effective_from: "",
@@ -134,6 +144,7 @@ const ROBINHOOD_LIVE: FeeSchedule<'static> = FeeSchedule {
     taf_cap: "9.79",
     taf_cap_basis: "per_execution",
     cat_per_share: "0.000003",
+    fee_rounding: "per_fee_per_fill",
     crypto_maker_bps: "250",
     crypto_taker_bps: "250",
 };
@@ -174,7 +185,7 @@ fn refused(field: &str) -> ExecutorError {
 
 #[cfg(test)]
 mod tests {
-    use mandate_accounting::TafCapBasis;
+    use mandate_accounting::{FeeRounding, TafCapBasis};
     use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate};
     use mandate_time::{Date, TradingCalendar};
 
@@ -189,6 +200,7 @@ mod tests {
         taf_cap: "5",
         taf_cap_basis: "per_order",
         cat_per_share: "0.00002",
+        fee_rounding: "per_fee_per_fill",
         crypto_maker_bps: "10",
         crypto_taker_bps: "20",
     };
@@ -213,6 +225,7 @@ mod tests {
             config.equities.cat_per_share,
             FeePerShare::parse("0.00002")?
         );
+        assert_eq!(config.equities.fee_rounding, FeeRounding::PerFeePerFill);
         assert_eq!(config.crypto.maker, Bps::parse("10")?);
         assert_eq!(config.crypto.taker, Bps::parse("20")?);
         assert_eq!(config.calendar, calendar()?);
@@ -226,12 +239,20 @@ mod tests {
                 .taf_cap_basis,
             TafCapBasis::PerExecution
         );
+        let daily_total = FeeSchedule {
+            fee_rounding: "daily_total",
+            ..SCHEDULE
+        };
+        assert_eq!(
+            fee_config(&daily_total, calendar()?)?.equities.fee_rounding,
+            FeeRounding::DailyTotal
+        );
         Ok(())
     }
 
     #[test]
     fn every_unreadable_figure_is_refused_by_name() -> Result<(), ExecutorError> {
-        let cases: [(&str, FeeSchedule<'static>); 10] = [
+        let cases: [(&str, FeeSchedule<'static>); 12] = [
             (
                 "effective_from",
                 FeeSchedule {
@@ -302,6 +323,20 @@ mod tests {
                     ..SCHEDULE
                 },
             ),
+            (
+                "fee_rounding",
+                FeeSchedule {
+                    fee_rounding: "per_fill",
+                    ..SCHEDULE
+                },
+            ),
+            (
+                "fee_rounding",
+                FeeSchedule {
+                    fee_rounding: "",
+                    ..SCHEDULE
+                },
+            ),
         ];
         for (field, schedule) in cases {
             assert_eq!(
@@ -340,6 +375,10 @@ mod tests {
             })
     }
 
+    /// Alpaca charges the day's regulatory fees as one total (§6.2), so its transcription names no
+    /// rounding of its own and builds with the default.
+    const ALPACA_FEE_ROUNDING: &str = "daily_total";
+
     #[test]
     fn the_transcribed_schedule_builds() -> Result<(), ExecutorError> {
         let pairs = transcribed();
@@ -350,12 +389,14 @@ mod tests {
             taf_cap: figure(&pairs, "taf_cap")?,
             taf_cap_basis: figure(&pairs, "taf_cap_basis")?,
             cat_per_share: figure(&pairs, "cat_per_share")?,
+            fee_rounding: ALPACA_FEE_ROUNDING,
             crypto_maker_bps: figure(&pairs, "maker_bps")?,
             crypto_taker_bps: figure(&pairs, "taker_bps")?,
         };
         let config = fee_config(&schedule, calendar()?)?;
         assert_eq!(config.equities.sec_rate, FeeRate::parse("0.0000206")?);
         assert_eq!(config.crypto.taker, Bps::parse("25")?);
+        assert_eq!(config.equities.fee_rounding, FeeRounding::DailyTotal);
         Ok(())
     }
 
@@ -377,6 +418,7 @@ mod tests {
         );
         assert!(paper.crypto.maker >= Bps::parse(&ten(figure(&pairs, "maker_bps")?)?)?);
         assert!(paper.crypto.taker >= Bps::parse(&ten(figure(&pairs, "taker_bps")?)?)?);
+        assert_eq!(paper.equities.fee_rounding, FeeRounding::DailyTotal);
         Ok(())
     }
 

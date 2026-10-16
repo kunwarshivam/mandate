@@ -4,8 +4,8 @@
 
 use mandate_accounting::{
     Account, AccountType, AssetClass, CashDividend, Config, CorporateAction, CryptoFees,
-    EquityFees, Execution, FeeFamily, Input, InstrumentId, Liquidity, Position, Reservations, Side,
-    Split, TafCapBasis,
+    EquityFees, Execution, FeeFamily, FeeRounding, Input, InstrumentId, Liquidity, Position,
+    Reservations, Side, Split, TafCapBasis,
 };
 use mandate_num::{
     Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, ShareIncrement, SignedQty,
@@ -51,6 +51,7 @@ pub fn test_default() -> Config {
             sec_rate: FeeRate::parse("0.00003").unwrap(),
             taf_per_share: FeePerShare::parse("0.0002").unwrap(),
             taf_cap: fee_cap("9.79"),
+            fee_rounding: FeeRounding::DailyTotal,
             taf_cap_basis: TafCapBasis::PerExecution,
             cat_per_share: FeePerShare::parse("0.00001").unwrap(),
         },

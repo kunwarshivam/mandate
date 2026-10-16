@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use mandate_accounting::{Side, TafCapBasis};
+use mandate_accounting::{FeeRounding, Side, TafCapBasis};
 use mandate_backtest::{
     AbsentStatistics, BacktestError, Metrics, MetricsConfig, Observation, Sign, Strategy,
     StrategyConfig, Totals,
@@ -1629,6 +1629,24 @@ fn a_changed_bar_changes_the_bars_digest() {
         first.report.inputs.config, other.report.inputs.config,
         "the configuration did not change"
     );
+}
+
+/// The fee rounding is part of the configuration digest (spec §6.2, DEC-960): a run under
+/// `per_fee_per_fill` reports a different `inputs.config` from the same run under the default,
+/// whose digest the golden report below still pins.
+#[test]
+fn a_changed_fee_rounding_changes_the_config_digest() {
+    let config = run_config(equity(), buy_and_hold(), "100000");
+    let mut per_fee = config.clone();
+    per_fee.fees.equities.fee_rounding = FeeRounding::PerFeePerFill;
+    let bars = seven_days();
+    let first = run(&config, &bars).unwrap();
+    let other = run(&per_fee, &bars).unwrap();
+    assert_ne!(
+        first.report.inputs.config, other.report.inputs.config,
+        "the fee rounding is digested"
+    );
+    assert_eq!(first.report.inputs.bars, other.report.inputs.bars);
 }
 
 /// A bar's **session** is part of the input digest, not only its prices: two runs whose bars differ in

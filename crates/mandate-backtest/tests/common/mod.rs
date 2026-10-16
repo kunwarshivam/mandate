@@ -3,7 +3,7 @@
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
 use mandate_accounting::{
-    AccountType, AssetClass, Config, CryptoFees, EquityFees, InstrumentId, TafCapBasis,
+    AccountType, AssetClass, Config, CryptoFees, EquityFees, FeeRounding, InstrumentId, TafCapBasis,
 };
 use mandate_backtest::{
     BacktestInput, BacktestRun, MetricsConfig, Observation, RunConfig, Strategy, StrategyConfig,
@@ -247,6 +247,7 @@ pub fn test_default_fees() -> Config {
             sec_rate: FeeRate::parse("0.00003").unwrap(),
             taf_per_share: FeePerShare::parse("0.0002").unwrap(),
             taf_cap: FeeCap::parse("9.79").unwrap(),
+            fee_rounding: FeeRounding::DailyTotal,
             taf_cap_basis: TafCapBasis::PerExecution,
             cat_per_share: FeePerShare::parse("0.00001").unwrap(),
         },
