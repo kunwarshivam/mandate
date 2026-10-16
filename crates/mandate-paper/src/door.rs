@@ -16,6 +16,8 @@
 
 use mandate_domain::Environment;
 use mandate_journal::{StoredEvent, StreamId};
+use mandate_journal_pg::PgJournal;
+use mandate_robinhood::AccountSnapshot;
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
@@ -92,6 +94,68 @@ pub fn unspent(
     held: &Held,
 ) -> Result<(), PaperError> {
     lapse(connection, rows, held).map_err(PaperError::Lapse)
+}
+
+/// The lapse over its real inputs (DEC-933 item 3; DEC-529 item 3; DEC-918 item 1): a live
+/// connection's `held` is counted from the agentic account's own snapshot (DEC-470 item 1: every
+/// position record, a zero quantity included, and every working order), and its `rows` are the
+/// journal's own read of `stream`, the account stream [`account_stream`] named, through the run's
+/// own journal (`journal`, ungated by `--place-one-order`, DEC-918 item 2); a run that kept no
+/// journal has no account stream and reads no rows. A live connection with no snapshot is
+/// [`unsupplied`]'s refusal, since a lapse with nothing to count cannot be passed (`AGENTS.md`
+/// rule 3). A paper connection makes no check and reads nothing (LT-14).
+///
+/// # Errors
+/// [`PaperError::Lapse`] as [`unspent`] answers, and `NotSupplied` as [`unsupplied`] answers
+/// for a live connection with no snapshot; [`PaperError::Shell`] with `Cause::Absent` at the
+/// reconcile stage when its account stream cannot be read.
+pub fn lapse_read(
+    connection: &Connection,
+    journal: Option<&str>,
+    stream: &StreamId,
+    snapshot: Option<&AccountSnapshot>,
+) -> Result<(), PaperError> {
+    if connection.environment != Environment::Live {
+        return Ok(());
+    }
+    let Some(snapshot) = snapshot else {
+        return unsupplied(connection);
+    };
+    let rows = account_rows(journal, stream)?;
+    unspent(connection, &rows, &held(snapshot))
+}
+
+/// What the snapshot lists, counted (DEC-470 item 1): every position record and every working
+/// order, re-derived by nothing else (DEC-918 item 1).
+fn held(snapshot: &AccountSnapshot) -> Held {
+    Held {
+        positions: snapshot.positions.len(),
+        open_orders: snapshot.open_orders.len(),
+    }
+}
+
+/// `stream`'s rows from the journal at `journal`, in `seq` order, or none for a run that kept no
+/// journal. The error names no DSN (`AGENTS.md` rule 7).
+fn account_rows(journal: Option<&str>, stream: &StreamId) -> Result<Vec<StoredEvent>, PaperError> {
+    let Some(dsn) = journal else {
+        return Ok(Vec::new());
+    };
+    let unread = || reconcile_absent("the account stream's rows");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| unread())?;
+    runtime.block_on(async {
+        let journal = PgJournal::from_dsn(dsn).map_err(|_| unread())?;
+        journal.rows(stream).await.map_err(|_| unread())
+    })
+}
+
+fn reconcile_absent(what: &'static str) -> PaperError {
+    PaperError::Shell(ShellError::Refused {
+        stage: Stage::Reconcile,
+        cause: Cause::Absent { what },
+    })
 }
 
 /// The lapse where the run holds no evidence for it (DEC-919; DEC-529 item 3; DEC-910 item 3):

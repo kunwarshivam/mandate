@@ -15,7 +15,7 @@
 //! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
 //! refusal, the control stream, the live door the connection record and the confirmed mandate
 //! choose (E7-26, [`chosen`](crate::chosen), [`account_stream`](crate::account_stream),
-//! [`unsupplied`](crate::unsupplied), DEC-918, DEC-919) and E19-11's phase 1 and the artifacts (DEC-505),
+//! [`lapse_read`](crate::lapse_read), [`unsupplied`](crate::unsupplied), DEC-918, DEC-919, DEC-933) and E19-11's phase 1 and the artifacts (DEC-505),
 //! before any credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
@@ -53,6 +53,7 @@ use mandate_journal::{
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::Price;
+use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
@@ -75,7 +76,7 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
-pub use door::{account_stream, chosen, unspent, unsupplied};
+pub use door::{account_stream, chosen, lapse_read, unspent, unsupplied};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use harden::disable_core_dumps;
@@ -86,7 +87,7 @@ pub use robinhood::{
 };
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
-    session_cap, wait_for_the_grant, watch_may_end, watched,
+    robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -400,7 +401,7 @@ pub fn run<P: Ports>(
         },
         live: LiveAdmission::refusing(),
     };
-    let connection = the_live_door(&records, &store, &facts.agent, args)?;
+    let connection = the_live_door(&records, &store, &facts.agent, args, None)?;
     if let Some(connection) = &connection {
         acknowledge(connection, args, ports)?;
     }
@@ -535,16 +536,14 @@ pub fn run<P: Ports>(
 /// the shell's).
 ///
 /// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
-/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The rows and the
-/// snapshot counts the check reads are the live arm's to hand — its journal read of the named
-/// stream and its preflight, neither of which any build runs yet (the `live` feature stays
-/// compile-only; the default build's `connector_not_built` stands in front of the live arm's
-/// read, DEC-910 item 3) — so the door holds no evidence and calls [`unsupplied`] (DEC-919),
-/// which refuses a live connection `lapse_evidence_not_supplied` rather than pass it on an empty
-/// read and zero counts. The live arm clears that refusal only by calling [`unspent`] with the
-/// rows its journal read returned and the counts its snapshot listed. In the default build the
-/// only connection to survive [`chosen`] is a paper one, and the lapse makes no check on it
-/// (LT-14), so today's paper path is unchanged.
+/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The lapse reads its
+/// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
+/// the named account stream, and the counts are the agentic account's own `snapshot`, which only
+/// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
+/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses
+/// `lapse_evidence_not_supplied` through [`unsupplied`] (DEC-919) rather than pass on an empty
+/// read; a paper connection makes no check and reads nothing, so the paper run is unchanged
+/// (LT-14).
 ///
 /// # Errors
 /// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
@@ -553,13 +552,14 @@ fn the_live_door(
     store: &dyn ArtifactSource,
     agent: &AgentId,
     args: &Args,
+    snapshot: Option<&AccountSnapshot>,
 ) -> Result<Option<Connection>, PaperError> {
     let Some(document) = deployed_document(records, store, agent) else {
         return Ok(None);
     };
     let connection = chosen(records, &document, &args.account_ref)?;
-    account_stream(&args.workspace, &args.account_ref)?;
-    unsupplied(&connection)?;
+    let stream = account_stream(&args.workspace, &args.account_ref)?;
+    lapse_read(&connection, args.journal.as_deref(), &stream, snapshot)?;
     Ok(Some(connection))
 }
 
