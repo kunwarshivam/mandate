@@ -30,7 +30,8 @@ mod judge;
 pub use artifacts::Artifacts;
 pub use context::{Contexts, PaperClock, load_contexts, load_contexts_with_clock};
 pub use facts::{
-    BrokerFacts, LiquidityFacts, PaperFacts, daily_closes, liquidity_facts, preflight,
+    BrokerFacts, LiquidityFacts, MarketFacts, PaperFacts, daily_closes, liquidity_facts,
+    market_facts, preflight, robinhood_facts,
 };
 
 use mandate_num::Usd;

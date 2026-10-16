@@ -388,4 +388,4 @@ layer = 9
 safety_critical = true
 pure = false
 live_feature = true
-allowed_external = ["thiserror", "tokio"]
+allowed_external = ["rustix", "thiserror", "tokio"]

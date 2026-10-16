@@ -15,7 +15,7 @@
 //! The only crate that sees both the model host and the shell (DEC-503 item 2). A run: the host
 //! refusal, the control stream, the live door the connection record and the confirmed mandate
 //! choose (E7-26, [`chosen`](crate::chosen), [`account_stream`](crate::account_stream),
-//! [`unsupplied`](crate::unsupplied), DEC-918, DEC-919) and E19-11's phase 1 and the artifacts (DEC-505),
+//! [`lapse_read`](crate::lapse_read), [`unsupplied`](crate::unsupplied), DEC-918, DEC-919, DEC-933) and E19-11's phase 1 and the artifacts (DEC-505),
 //! before any credential; the credentials, the GET-only preflight and phase 2 (V-002); the trusted closes and
 //! the host, where `Flat` or `Undecided` ends it; the closes stored, and only then the observation
 //! and output handed to [`mandate_shell::ProductionCycle::run_observed_watched`], the one door
@@ -27,8 +27,10 @@ mod connection;
 mod door;
 mod evidence;
 mod grant;
+mod harden;
 mod lt10;
 mod quote;
+mod robinhood;
 mod wiring;
 
 use std::ffi::OsString;
@@ -44,25 +46,29 @@ use mandate_alpaca::{
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_journal::{
     ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
 use mandate_num::Price;
+use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
-    ConfigRefusal, ControlRecord, DeploymentRefusal, Pinned, RunFacts, configuration,
-    confirmed_version,
+    ConfigRefusal, ControlRecord, DeploymentRefusal, LiveAdmission, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_shell::host::refuse_configured_host;
 use mandate_shell::paper::{
-    Artifacts, PaperClock, PaperFacts, daily_closes, liquidity_facts, load_contexts_with_clock,
-    preflight,
+    Artifacts, BrokerFacts, PaperClock, PaperFacts, daily_closes, liquidity_facts,
+    load_contexts_with_clock, preflight,
+};
+use mandate_shell::{
+    Cause, ProductionCycle, Report, Setup, ShellError, Stage, Watch, production_cycle,
 };
 use mandate_shell::symbols::BrokerSymbols;
-use mandate_shell::{Cause, Report, Setup, ShellError, Stage, Watch, production_cycle};
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
@@ -71,14 +77,18 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 pub use connection::{
     Broker, Connection, ConnectionRefusal, Held, LapseRefusal, connection, lapse,
 };
-pub use door::{account_stream, chosen, unspent, unsupplied};
+pub use door::{account_stream, chosen, lapse_read, unspent, unsupplied};
 pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, Journaled, grant};
+pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check};
+pub use robinhood::{
+    Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
+};
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
-    session_cap, wait_for_the_grant, watch_may_end, watched,
+    robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end, watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -94,24 +104,99 @@ pub struct Args {
     pub store: PathBuf,
     pub bars: PathBuf,
     pub place_one_order: bool,
+    /// The environment the founder acknowledged: `--confirm-paper` or `--confirm-live`, exactly
+    /// one. The run refuses unless it is the confirmed mandate's own (LT-9, DEC-937 item 3).
+    pub acknowledged: Environment,
 }
 
 /// The process's effects, the only things the binary supplies (ADR-0001 ES-05, ES-19).
+/// Broker-neutral (G1a, DEC-937 item 1): the session [`Ports::connect`] answers is whichever
+/// broker the connection record chose, and the run reads and trades only through [`Session`].
 pub trait Ports {
-    type Transport: TradingTransport + DataTransport + Clone + 'static;
+    type Session: Session;
     type Pause: Pause + Clone + 'static;
 
     /// The workspace control stream's records, read once per run, or [`PaperError::Control`].
     fn control_stream(&mut self, workspace: &str) -> Result<Vec<ControlRecord>, PaperError>;
 
-    /// The credentials and transport, or [`PaperError::Credentials`]; called at most once, and
-    /// only after every check that needs no credential.
-    fn connect(&mut self) -> Result<Self::Transport, PaperError>;
+    /// The credentials and the session of the broker `connection` chose, or
+    /// [`PaperError::Credentials`]; called at most once, only after every check that needs no
+    /// credential, and for a live run only after [`Ports::harden`].
+    fn connect(&mut self, connection: &Connection) -> Result<Self::Session, PaperError>;
+
+    /// Turns the process's core dumps off (LT-9), or [`PaperError::Harden`]; called once, for a
+    /// live run only, after its acknowledgement and before [`Ports::connect`].
+    fn harden(&mut self) -> Result<(), PaperError>;
 
     /// The clock and the timer: its `now` dates the run's configuration, stamps the asset record
     /// and judges the quote at their reads, gives the run clock after the last broker read
     /// (DEC-935), and is the binding gate's.
     fn pause(&self) -> Self::Pause;
+}
+
+/// One connected broker, as the run reads and trades through it (G1a, DEC-937 item 1): the
+/// GET-only preflight, and the production cycle over the broker's own connector. Every
+/// [`TradingTransport`] and [`DataTransport`] is the Alpaca paper session it always was.
+pub trait Session {
+    /// The broker facts the run reads before any cycle, or the [`Cause`] it stopped at.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when a read is not answered with the fact it asked for.
+    fn preflight<P: Pause + Clone>(
+        &self,
+        artifacts: &Artifacts,
+        pause: P,
+    ) -> Result<BrokerFacts, Cause>;
+
+    /// The production cycle over `sources` with this session's connector.
+    ///
+    /// # Errors
+    /// [`Cause::Absent`] when the session cannot carry a cycle.
+    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+}
+
+impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
+    fn preflight<P: Pause + Clone>(
+        &self,
+        artifacts: &Artifacts,
+        pause: P,
+    ) -> Result<BrokerFacts, Cause> {
+        preflight(artifacts, self.clone(), self.clone(), pause)
+    }
+
+    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+        Ok(production_cycle(with_transport(sources, self), setup))
+    }
+}
+
+/// `sources` carrying `transport`.
+fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
+    let Sources {
+        mandate,
+        journal,
+        recorded_at,
+        agent,
+        workspace,
+        account_ref,
+        executor,
+        run,
+        artifacts,
+        symbols,
+        transport: (),
+    } = sources;
+    Sources {
+        mandate,
+        journal,
+        recorded_at,
+        agent,
+        workspace,
+        account_ref,
+        executor,
+        run,
+        artifacts,
+        symbols,
+        transport,
+    }
 }
 
 /// How a run that refused nothing ended.
@@ -151,6 +236,19 @@ pub enum PaperError {
     Control,
     #[error("the paper credentials or client are unavailable")]
     Credentials,
+    /// A live run without `--confirm-live` (DEC-937 item 3), before any credential is read.
+    #[error("the confirmed mandate is live; a live run needs --confirm-live")]
+    LiveUnconfirmed,
+    /// A paper run acknowledged as live: each environment needs its own acknowledgement.
+    #[error("the confirmed mandate is paper; a paper run needs --confirm-paper")]
+    PaperUnconfirmed,
+    /// The process's core dumps could not be turned off, so a live run reads no credential
+    /// (LT-9).
+    #[error("core dumps could not be turned off")]
+    Harden,
+    /// The build has no Robinhood endpoint to dial (LT-1, DEC-922), before anything is sent.
+    #[error(transparent)]
+    Endpoint(EndpointRefusal),
     #[error("the artifact store could not be opened or written")]
     Store,
     #[error("no confirmed deployment: {0}")]
@@ -183,20 +281,23 @@ pub enum PaperError {
 }
 
 /// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
-/// `--journal`, `--store` and `--bars`, each with a value; the required `--confirm-paper`; and
-/// `--place-one-order`, which needs `--journal`. Any other argument is unknown, so none names a
-/// mandate, a configuration, a model output or a host.
+/// `--journal`, `--store` and `--bars`, each with a value; exactly one acknowledgement,
+/// `--confirm-paper` or `--confirm-live` (DEC-937 item 3); and `--place-one-order`, which needs
+/// `--journal`. Any other argument is unknown, so none names a mandate, a configuration, a model
+/// output or a host.
 ///
 /// # Errors
-/// [`PaperError::Usage`] for a missing acknowledgement, flag or value, or an unknown argument.
+/// [`PaperError::Usage`] for a missing or doubled acknowledgement, a missing flag or value, or an
+/// unknown argument.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError> {
     let mut values: [Option<String>; 6] = Default::default();
-    let (mut confirmed, mut place_one_order) = (false, false);
+    let (mut paper, mut live, mut place_one_order) = (false, false, false);
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         let Some(at) = FLAGS.iter().position(|flag| *flag == arg) else {
             match arg.as_str() {
-                "--confirm-paper" => confirmed = true,
+                "--confirm-paper" => paper = true,
+                "--confirm-live" => live = true,
                 "--place-one-order" => place_one_order = true,
                 _ => return Err(usage("an argument is unknown".to_owned())),
             }
@@ -211,9 +312,16 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError
             return Err(usage(format!("{arg} is given twice")));
         }
     }
-    if !confirmed {
-        return Err(usage("--confirm-paper is required".to_owned()));
-    }
+    let acknowledged = match (paper, live) {
+        (true, false) => Environment::Paper,
+        (false, true) => Environment::Live,
+        (false, false) => return Err(usage("--confirm-paper is required".to_owned())),
+        (true, true) => {
+            return Err(usage(
+                "--confirm-paper and --confirm-live are exclusive".to_owned(),
+            ));
+        }
+    };
     let [workspace, agent, account_ref, journal, store, bars] = values;
     if place_one_order && journal.is_none() {
         return Err(usage("--place-one-order needs --journal".to_owned()));
@@ -229,6 +337,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError
         store: required(store, "--store")?.into(),
         bars: required(bars, "--bars")?.into(),
         place_one_order,
+        acknowledged,
     })
 }
 
@@ -293,8 +402,12 @@ pub fn run<P: Ports>(
             workspace_users: 1,
             approver_users: 1,
         },
+        live: LiveAdmission::refusing(),
     };
-    the_live_door(&records, &store, &facts.agent, args)?;
+    let connection = the_live_door(&records, &store, &facts.agent, args, None)?;
+    if let Some(connection) = &connection {
+        acknowledge(connection, args, ports)?;
+    }
     let confirmed = confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
     let mandate = confirmed.mandate();
     let ([instrument], [model]) = (
@@ -322,14 +435,12 @@ pub fn run<P: Ports>(
             args.account_ref.clone(),
         )
         .map_err(refused(Stage::Validate))?;
-    let transport = ports.connect()?;
-    let broker = preflight(
-        &artifacts,
-        transport.clone(),
-        transport.clone(),
-        clock.clone(),
-    )
-    .map_err(refused(Stage::Reconcile))?;
+    let connection =
+        connection.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
+    let session = ports.connect(&connection)?;
+    let broker = session
+        .preflight(&artifacts, clock.clone())
+        .map_err(refused(Stage::Reconcile))?;
     let now = clock.now();
     let input = confirmed
         .with_equity(broker.account.equity)
@@ -400,9 +511,11 @@ pub fn run<P: Ports>(
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store)),
         symbols: BrokerSymbols::registered([(ticker, asset_id)]),
-        transport,
+        transport: (),
     };
-    let report = production_cycle(sources, setup)
+    let report = session
+        .cycle(sources, setup)
+        .map_err(refused(Stage::Reconcile))?
         .run_observed_watched(observation, output, &watch)
         .map_err(PaperError::Shell)?;
     let evidence = wiring::reported(
@@ -431,16 +544,14 @@ pub fn run<P: Ports>(
 /// the shell's).
 ///
 /// The naming comes from the run's own names, ungated by `--place-one-order` (DEC-918 item 2:
-/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The rows and the
-/// snapshot counts the check reads are the live arm's to hand — its journal read of the named
-/// stream and its preflight, neither of which any build runs yet (the `live` feature stays
-/// compile-only; the default build's `connector_not_built` stands in front of the live arm's
-/// read, DEC-910 item 3) — so the door holds no evidence and calls [`unsupplied`] (DEC-919),
-/// which refuses a live connection `lapse_evidence_not_supplied` rather than pass it on an empty
-/// read and zero counts. The live arm clears that refusal only by calling [`unspent`] with the
-/// rows its journal read returned and the counts its snapshot listed. In the default build the
-/// only connection to survive [`chosen`] is a paper one, and the lapse makes no check on it
-/// (LT-14), so today's paper path is unchanged.
+/// DEC-529 item 3's lapse refuses "to start", R0 step 4's dry run included). The lapse reads its
+/// real inputs through [`lapse_read`] (DEC-933 item 3): the rows are the journal's own read of
+/// the named account stream, and the counts are the agentic account's own `snapshot`, which only
+/// the live arm's Robinhood connector reads. The runner's ports do not connect that connector
+/// yet (DEC-928 item 5), so `run()` hands no snapshot and a live connection refuses
+/// `lapse_evidence_not_supplied` through [`unsupplied`] (DEC-919) rather than pass on an empty
+/// read; a paper connection makes no check and reads nothing, so the paper run is unchanged
+/// (LT-14).
 ///
 /// # Errors
 /// Any [`PaperError`] of the door's frames, before the shell's fold and before anything runs.
@@ -449,13 +560,36 @@ fn the_live_door(
     store: &dyn ArtifactSource,
     agent: &AgentId,
     args: &Args,
-) -> Result<(), PaperError> {
+    snapshot: Option<&AccountSnapshot>,
+) -> Result<Option<Connection>, PaperError> {
     let Some(document) = deployed_document(records, store, agent) else {
-        return Ok(());
+        return Ok(None);
     };
     let connection = chosen(records, &document, &args.account_ref)?;
-    account_stream(&args.workspace, &args.account_ref)?;
-    unsupplied(&connection)
+    let stream = account_stream(&args.workspace, &args.account_ref)?;
+    lapse_read(&connection, args.journal.as_deref(), &stream, snapshot)?;
+    Ok(Some(connection))
+}
+
+/// The founder's acknowledgement of the run's environment, checked as soon as the door has
+/// chosen the connection and before any credential is read (DEC-937 item 3): a live connection
+/// needs `--confirm-live`, then turns the process's core dumps off through [`Ports::harden`]
+/// (LT-9); a paper connection needs `--confirm-paper` and is otherwise untouched.
+///
+/// # Errors
+/// [`PaperError::LiveUnconfirmed`], [`PaperError::PaperUnconfirmed`], or the
+/// [`PaperError::Harden`] of [`Ports::harden`].
+pub fn acknowledge<P: Ports>(
+    connection: &Connection,
+    args: &Args,
+    ports: &mut P,
+) -> Result<(), PaperError> {
+    match (connection.environment, args.acknowledged) {
+        (Environment::Paper, Environment::Paper) => Ok(()),
+        (Environment::Paper, Environment::Live) => Err(PaperError::PaperUnconfirmed),
+        (Environment::Live, Environment::Paper) => Err(PaperError::LiveUnconfirmed),
+        (Environment::Live, Environment::Live) => ports.harden(),
+    }
 }
 
 /// The deployment's own mandate document, read from the same records and artifact store the
@@ -526,16 +660,18 @@ fn closes_object(closes: &[(Date, Price)], asset_id: &str) -> Result<Vec<u8>, Pa
     Ok(to_canonical(&Value::Object(object)))
 }
 
-/// The binary's ports (DEC-846 item 1): the control stream read from the Postgres journal at
-/// `journal`, the paper credentials from the environment with the Alpaca paper client, and the
-/// system clock. Without a journal there is no control stream to read.
+/// The binary's ports (DEC-846 item 1, DEC-937 item 1): the control stream read from the
+/// Postgres journal at `journal`, the session of the broker the connection chose — the paper
+/// credentials from the environment with the Alpaca paper client, or the Robinhood login only a
+/// `live` build can make — and the system clock. Without a journal there is no control stream to
+/// read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Production {
     pub journal: Option<String>,
 }
 
 impl Ports for Production {
-    type Transport = AlpacaPaperHttp;
+    type Session = Connected;
     type Pause = SystemClock;
 
     /// `ctl:{workspace}`'s records from the journal, read once, or [`PaperError::Control`] when
@@ -554,15 +690,54 @@ impl Ports for Production {
         rows.iter().map(control_record).collect()
     }
 
-    /// `Credentials::from_env` and one [`AlpacaPaperHttp`], or [`PaperError::Credentials`]; the
-    /// error never names a key.
-    fn connect(&mut self) -> Result<AlpacaPaperHttp, PaperError> {
-        let credentials = Credentials::from_env().map_err(|_| PaperError::Credentials)?;
-        AlpacaPaperHttp::new(credentials).map_err(|_| PaperError::Credentials)
+    /// For Alpaca, `Credentials::from_env` and one [`AlpacaPaperHttp`]; for Robinhood, the
+    /// founder's login at the endpoint this build pins ([`robinhood::connect`]). Either fails as
+    /// [`PaperError::Credentials`], and no error names a key or a token.
+    fn connect(&mut self, connection: &Connection) -> Result<Connected, PaperError> {
+        match connection.broker {
+            Broker::Alpaca => {
+                let credentials = Credentials::from_env().map_err(|_| PaperError::Credentials)?;
+                AlpacaPaperHttp::new(credentials)
+                    .map(Connected::Alpaca)
+                    .map_err(|_| PaperError::Credentials)
+            }
+            Broker::Robinhood => robinhood::connect().map(Connected::Robinhood),
+        }
+    }
+
+    /// [`disable_core_dumps`].
+    fn harden(&mut self) -> Result<(), PaperError> {
+        disable_core_dumps()
     }
 
     fn pause(&self) -> SystemClock {
         SystemClock
+    }
+}
+
+/// The session [`Production::connect`] answers: the broker the connection record chose.
+pub enum Connected {
+    Alpaca(AlpacaPaperHttp),
+    Robinhood(Linked),
+}
+
+impl Session for Connected {
+    fn preflight<P: Pause + Clone>(
+        &self,
+        artifacts: &Artifacts,
+        pause: P,
+    ) -> Result<BrokerFacts, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.preflight(artifacts, pause),
+            Self::Robinhood(linked) => linked.preflight(artifacts, pause),
+        }
+    }
+
+    fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
+        match self {
+            Self::Alpaca(transport) => transport.cycle(sources, setup),
+            Self::Robinhood(linked) => linked.cycle(sources, setup),
+        }
     }
 }
 

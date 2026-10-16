@@ -21,11 +21,12 @@
 
 use std::time::Duration;
 
-use mandate_alpaca::Pause;
+use mandate_alpaca::{LatestQuote, Pause};
 use mandate_canon::Value;
 use mandate_domain::AssetClass;
 use mandate_journal::StoredEvent;
 use mandate_num::{Fraction, Price, Usd};
+use mandate_robinhood::Quote;
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
@@ -385,6 +386,34 @@ pub fn cross_check_the_opening(
         .x(asset_class, median_dollar_volume_20d)
         .map_err(PaperError::CrossCheck)?;
     cross_check(broker_ask, independent_ask, x).map_err(PaperError::CrossCheck)
+}
+
+/// The live opening's quote cross-check over the preflight's own two quotes (DEC-933 item 2;
+/// DEC-529 item 12): `robinhood` is the quote `mandate-robinhood`'s preflight read, the broker's
+/// own, and `iex` the latest IEX quote Alpaca's data client read, the independent one. Both must
+/// be of one instrument, or there is nothing to compare and the opening refuses as a missing
+/// quote; then the two asks go to [`cross_check_the_opening`] as a US equity, within the
+/// registered collar's own `x` for the instrument's 20-day median dollar volume.
+///
+/// # Errors
+/// [`PaperError::CrossCheck`]: `quote_absent` for quotes of two instruments, and every refusal of
+/// [`cross_check_the_opening`].
+pub fn robinhood_cross_check(
+    collar: &CollarMembers,
+    robinhood: &Quote,
+    iex: &LatestQuote,
+    median_dollar_volume_20d: Option<Usd>,
+) -> Result<(), PaperError> {
+    if robinhood.symbol != iex.instrument {
+        return Err(PaperError::CrossCheck(QuoteRefusal::Absent));
+    }
+    cross_check_the_opening(
+        collar,
+        AssetClass::UsEquity,
+        median_dollar_volume_20d,
+        Some(robinhood.ask),
+        Some(iex.ask),
+    )
 }
 
 /// The run-level call frame of the watch's end (E7-26's G1b wiring row; LT-10; DEC-912 item 3;
