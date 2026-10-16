@@ -298,3 +298,25 @@ After stopping: `GET /v2/orders?status=open&nested=true` returned `[]` and `/v2/
 `[]`. Exports: `ctl:ws_paper01` seq 1 to 9 `verified` (last hash
 `7f290a55ccfa4c7c640bff1cc7068bc797e113f6e2c07a2e19d635a6a109cc58`); the agent and account
 streams are `export_stream_empty` (no cycle was journaled).
+
+### Retry after DEC-935 (#1358), 16:01 to 16:05 UTC: stopped at Reconcile
+
+The branch merged main at `13b57ce` (#1358, the run clock read after the preflight) and rebuilt.
+Clock check before the run (`date -u` against the `Date` header of `curl -sI
+https://paper-api.alpaca.markets/v2/clock`, three samples): within the header's 1 s resolution,
+the server's second turned over 0.04 to 0.22 s before the local one. NTP (UDP 123) is not reachable
+from the session, so the host clock could not be checked or corrected.
+
+Dry run at 16:03:15 UTC:
+```
+the tracer stopped at Reconcile: a current IEX quote
+exit=1
+```
+The cause, measured with the same read the preflight makes (`/v2/stocks/SPY/quotes/latest?feed=iex`,
+20 samples, local clock read after the response): in 14 of 20 the quote's `t` was 2 to 24 ms
+**after** the local clock at receipt, so `judge_age` refuses it `AheadOfClock`; none was older than
+the 10 s bound. The judge is right to refuse a quote stamped after its clock; the host clock trails
+the exchange's stamps by tens of milliseconds. Not worked around (no clock adjustment, no retry
+loop); nothing placed. The next run needs an NTP-disciplined host (for example chrony, with its
+offset recorded before the run) or a founder decision on a clock tolerance, which would loosen a
+check (DEC-79).
