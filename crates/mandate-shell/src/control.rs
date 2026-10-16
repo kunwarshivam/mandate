@@ -108,14 +108,18 @@ impl LiveAdmission {
     /// the door's checks passed, and a dialed host equal, byte for byte, to a non-empty pinned
     /// constant. Any one missing refuses (item 2).
     pub fn admits(&self) -> bool {
+        self.door == DoorChecks::Passed && self.admits_before_credentials()
+    }
+
+    /// Whether the three conditions a run holds before it reads any credential hold: the `live`
+    /// build, `--confirm-live`, and the dialed host equal, byte for byte, to a non-empty pinned
+    /// constant (DEC-947 item 2). The door's condition is [`Self::admits`]'s alone.
+    pub fn admits_before_credentials(&self) -> bool {
         let pinned_host = match (&self.host.dialed, self.host.pinned) {
             (Some(dialed), Some(pinned)) => !pinned.is_empty() && dialed.as_str() == pinned,
             (None, Some(_)) | (Some(_), None) | (None, None) => false,
         };
-        self.build == Build::Live
-            && self.confirmation == Confirmation::ConfirmLive
-            && self.door == DoorChecks::Passed
-            && pinned_host
+        self.build == Build::Live && self.confirmation == Confirmation::ConfirmLive && pinned_host
     }
 }
 
@@ -215,12 +219,47 @@ impl DeploymentRefusal {
     }
 }
 
+/// Phase 1's checks a live run makes before it reads any credential (DEC-947 item 2, FT-3): the
+/// same walk, document read and fold as [`confirmed_version`], every V-rule but V-002 included,
+/// with a live deployment admitted on the three of DEC-924 item 1's conditions a run holds
+/// before its first credential read ([`LiveAdmission::admits_before_credentials`]). The door's
+/// condition needs the snapshot only the credential reads, so it is left to
+/// [`confirmed_version`], which the run calls after it. It answers no version, so nothing can
+/// run on it.
+///
+/// # Errors
+/// Every [`DeploymentRefusal`] [`confirmed_version`] makes, `Live` when one of those three
+/// conditions is missing.
+pub fn checked_before_credentials(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    run: &RunFacts,
+) -> Result<(), DeploymentRefusal> {
+    folded(
+        records,
+        store,
+        run,
+        LiveAdmission::admits_before_credentials,
+    )
+    .map(drop)
+}
+
 /// Phase 1: the confirmed version `run.agent` is deployed with, from `records` and the documents
 /// in `store`, or why there is none. It needs no credential.
 pub fn confirmed_version(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,
     run: &RunFacts,
+) -> Result<ConfirmedVersion, DeploymentRefusal> {
+    folded(records, store, run, LiveAdmission::admits)
+}
+
+/// Phase 1 with a live deployment admitted when `admitted` holds of the run's admission.
+fn folded(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    run: &RunFacts,
+    admitted: fn(&LiveAdmission) -> bool,
 ) -> Result<ConfirmedVersion, DeploymentRefusal> {
     let mut ordered: Vec<&ControlRecord> = records.iter().collect();
     ordered.sort_by_key(|record| record.seq);
@@ -253,7 +292,7 @@ pub fn confirmed_version(
     })?;
     let value = mandate_canon::parse(&bytes).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
     let mandate = Mandate::parse(&value).map_err(|_| DeploymentRefusal::DocumentUnreadable)?;
-    if mandate.environment == Environment::Live && !run.live.admits() {
+    if mandate.environment == Environment::Live && !admitted(&run.live) {
         return Err(DeploymentRefusal::Live);
     }
     let documents = |digest: &Digest| {

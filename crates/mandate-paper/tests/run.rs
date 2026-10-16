@@ -35,8 +35,8 @@ use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
 use mandate_paper::{
-    Args, Broker as Chosen, Connection, ConnectionRefusal, Evidence, Outcome, PaperError, Ports,
-    run,
+    Args, Broker as Chosen, Connection, ConnectionRefusal, Dial, Evidence, Outcome, PaperError,
+    Ports, run,
 };
 use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
 use mandate_shell::paper::daily_closes;
@@ -334,7 +334,12 @@ impl Ports for Fake {
         Ok(self.records.clone())
     }
 
-    fn connect(&mut self, connection: &Connection) -> Result<Broker, PaperError> {
+    fn connect(
+        &mut self,
+        connection: &Connection,
+        dial: Option<&Dial>,
+    ) -> Result<Broker, PaperError> {
+        assert!(dial.is_none(), "a paper run dials no Robinhood endpoint");
         self.connects += 1;
         self.connections.push(connection.clone());
         Ok(self.broker.clone())
@@ -1332,7 +1337,7 @@ fn an_alpaca_session_answers_its_own_iex_ask() {
     ));
     let credentials =
         mandate_alpaca::Credentials::from_lookup(|_| Some("placeholder".to_owned())).unwrap();
-    let connected = mandate_paper::Connected::Alpaca(
+    let connected: mandate_paper::Connected = mandate_paper::Connected::Alpaca(
         mandate_alpaca::AlpacaPaperHttp::new(credentials).unwrap(),
     );
     assert!(matches!(
