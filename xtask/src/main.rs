@@ -5814,8 +5814,9 @@ fn mutants_args(
 /// reverts in turn, so each build sees its own edit's newer mtime (DEC-850).
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 
-/// The profile every build of the mutants job runs under: no debuginfo, for the `dev` profile and
-/// for the `test` profile that inherits it (DEC-519).
+/// The profile every build of the mutants job runs under: no debuginfo (DEC-519), and optimised at
+/// `opt-level = 1` with debug assertions and overflow checks pinned on (DEC-931), for the `dev`
+/// profile and for the `test` profile that inherits it.
 ///
 /// A mutant's build is the phase [`MUTANT_BUILD_TIMEOUT`] caps. Before DEC-850 the baseline built
 /// only the mutated packages, so a low-layer mutant's first build compiled the rest of its tested
@@ -5827,9 +5828,24 @@ const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 /// changes no test's verdict, only what a backtrace can name, and the gate reads verdicts. It is set
 /// on the job's children rather than left to the caller, so CI and `cargo xtask check` build
 /// mutants the same way whatever the caller exported.
-const MUTANT_BUILD_PROFILE: [(&str, &str); 2] = [
+///
+/// The optimisation is for the test phase [`MUTANT_TEST_TIMEOUT`] caps, which also caps the
+/// unmutated baseline's. Unoptimised, `mandate-executor`'s own suite needs more than that on CI's
+/// two-core runner: #1337's baselines ran 648 of its 709 tests in 179.6 seconds, every one passing,
+/// with 346 seconds of test time spent mostly in its property tests, and were cut off, so no
+/// mutant of that crate could be judged at all (DEC-931). An optimised build changes how fast a
+/// test runs, not what it checks: cargo's `dev` profile turns debug assertions and overflow checks
+/// on whatever its `opt-level`, and this profile pins both on as well, so an optimisation level
+/// cannot take away an assertion or an overflow panic a test relies on to catch a mutant.
+const MUTANT_BUILD_PROFILE: [(&str, &str); 8] = [
     ("CARGO_PROFILE_DEV_DEBUG", "0"),
     ("CARGO_PROFILE_TEST_DEBUG", "0"),
+    ("CARGO_PROFILE_DEV_OPT_LEVEL", "1"),
+    ("CARGO_PROFILE_TEST_OPT_LEVEL", "1"),
+    ("CARGO_PROFILE_DEV_DEBUG_ASSERTIONS", "true"),
+    ("CARGO_PROFILE_TEST_DEBUG_ASSERTIONS", "true"),
+    ("CARGO_PROFILE_DEV_OVERFLOW_CHECKS", "true"),
+    ("CARGO_PROFILE_TEST_OVERFLOW_CHECKS", "true"),
 ];
 
 /// A `cargo` child of the mutants job that builds, with the caller's [`CARGO_TARGET_DIR`] out of its
@@ -8267,24 +8283,41 @@ mod tests {
     fn the_mutants_job_builds_without_debuginfo() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         let matrix = workflow_job(&workflow, "mutants").context("ci.yml has a `mutants` job")?;
-        for setting in [
-            "CARGO_PROFILE_DEV_DEBUG: \"0\"",
-            "CARGO_PROFILE_TEST_DEBUG: \"0\"",
-        ] {
+        for (name, value) in MUTANT_BUILD_PROFILE {
+            let setting = format!("{name}: \"{value}\"");
             assert!(
                 matrix.iter().any(|line| line.trim() == setting),
                 "the mutants matrix sets `{setting}`, so the dependencies rust-cache restores \
-                 were built the way the gate builds (DEC-519)"
+                 were built the way the gate builds (DEC-519, DEC-931)"
             );
         }
         let cargo = mutants_job_cargo(Path::new("."), &["mutants"]);
         let envs: BTreeMap<&OsStr, Option<&OsStr>> = cargo.get_envs().collect();
-        for profile in ["CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_TEST_DEBUG"] {
+        for (profile, value) in [
+            ("CARGO_PROFILE_DEV_DEBUG", "0"),
+            ("CARGO_PROFILE_TEST_DEBUG", "0"),
+            ("CARGO_PROFILE_DEV_OPT_LEVEL", "1"),
+            ("CARGO_PROFILE_TEST_OPT_LEVEL", "1"),
+        ] {
             assert_eq!(
                 envs.get(OsStr::new(profile)),
-                Some(&Some(OsStr::new("0"))),
-                "the mutants job sets {profile}=0 on its building children, which shortens the \
-                 build phase `--build-timeout` caps (DEC-519)"
+                Some(&Some(OsStr::new(value))),
+                "the mutants job sets {profile}={value} on its building children: no debuginfo \
+                 shortens the build phase `--build-timeout` caps (DEC-519), and an optimised \
+                 build brings `mandate-executor`'s test phase under `--timeout` (DEC-931)"
+            );
+        }
+        for check in [
+            "CARGO_PROFILE_DEV_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_TEST_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_DEV_OVERFLOW_CHECKS",
+            "CARGO_PROFILE_TEST_OVERFLOW_CHECKS",
+        ] {
+            assert_eq!(
+                envs.get(OsStr::new(check)),
+                Some(&Some(OsStr::new("true"))),
+                "the mutants job pins {check} on, so optimising the build cannot take away an \
+                 assertion or an overflow panic a test catches a mutant with (DEC-931)"
             );
         }
         assert_eq!(
