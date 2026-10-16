@@ -53,8 +53,13 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn open_args(workspace: &str, journal: &str, store: &Path) -> OpenArgs {
+    open_in(workspace, "paper", journal, store)
+}
+
+fn open_in(workspace: &str, environment: &str, journal: &str, store: &Path) -> OpenArgs {
     OpenArgs {
         workspace: workspace.to_owned(),
+        environment: environment.to_owned(),
         target: JournalArgs {
             journal: journal.into(),
             store: store.to_owned(),
@@ -78,7 +83,8 @@ fn refuses(code: &str, command: impl FnOnce(&mut Vec<u8>) -> anyhow::Result<Subm
     );
 }
 
-/// The command takes a workspace and the journal, and no owner or environment.
+/// The command takes a workspace, the journal and the environment (`paper` by default, DEC-952),
+/// and no owner.
 #[test]
 fn workspace_open_takes_a_workspace_and_no_owner() {
     let line = "mandate workspace open --workspace ws1 --journal postgres://h/j --store s";
@@ -95,11 +101,10 @@ fn workspace_open_takes_a_workspace_and_no_owner() {
         Some(ErrorKind::MissingRequiredArgument),
         "no --workspace"
     );
-    for extra in [["--user", "u1"], ["--environment", "live"]] {
-        let given: Vec<&str> = full.iter().copied().chain(extra).collect();
-        let kind = Cli::try_parse_from(given).err().map(|e| e.kind());
-        assert_eq!(kind, Some(ErrorKind::UnknownArgument), "{extra:?}");
-    }
+    assert_eq!(args.environment, "paper");
+    let given: Vec<&str> = full.iter().copied().chain(["--user", "u1"]).collect();
+    let kind = Cli::try_parse_from(given).err().map(|e| e.kind());
+    assert_eq!(kind, Some(ErrorKind::UnknownArgument), "--user");
 }
 
 /// With no database: a bad workspace is refused before the journal is opened or the store created,
@@ -345,4 +350,47 @@ fn the_binary_opens_the_control_stream_once() {
     for made in [store, elsewhere] {
         std::fs::remove_dir_all(made).ok();
     }
+}
+
+/// R1b (DEC-952), over Postgres: a live workspace's control stream is live from its first event,
+/// and an id whose stream holds any event is refused in either environment, so a live and a paper
+/// workspace never share a control stream.
+#[test]
+fn a_live_workspace_is_opened_live_and_never_shares_its_id() {
+    let Some(db) = TestDb::new() else {
+        return;
+    };
+    let journal = dsn_of(&db);
+    let store = scratch("live-store");
+    for (workspace, first, second) in [("ws_live", "live", "paper"), ("ws_paper", "paper", "live")]
+    {
+        open(
+            &open_in(workspace, first, &journal, &store),
+            now(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let stream = StreamId::parse(&format!("ctl:{workspace}")).unwrap();
+        let rows = read_stream(&journal.as_str().into(), &stream).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].event_type, "StreamOpened");
+        assert_eq!(rows[0].environment, first);
+        let body = parse(&rows[0].body).unwrap();
+        assert_eq!(body.get("environment").and_then(Value::as_str), Some(first));
+        for again in [first, second] {
+            let args = open_in(workspace, again, &journal, &store);
+            refuses("workspace_already_open", |out| open(&args, now(), out));
+        }
+    }
+    std::fs::remove_dir_all(store).ok();
+}
+
+/// An environment that is neither paper nor live is refused before the journal is opened or the
+/// store created.
+#[test]
+fn a_workspace_opens_only_in_paper_or_live() {
+    let store = scratch("backtest-store");
+    let args = open_in("ws1", "backtest", "postgres://h.invalid:1/j", &store);
+    refuses("environment_invalid", |out| open(&args, now(), out));
+    assert!(!store.exists());
 }
