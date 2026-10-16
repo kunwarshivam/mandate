@@ -1342,41 +1342,37 @@ mod tests {
         }
     }
 
-    fn payload(members: &[(&str, &str)]) -> Value {
-        Value::Object(
-            members
-                .iter()
-                .filter_map(|(name, value)| {
-                    Some((Key::new(name).ok()?, Value::Str((*value).to_owned())))
-                })
-                .collect::<Object>(),
-        )
+    fn payload(members: &[(&str, &str)]) -> Result<Value, String> {
+        let mut object = Object::new();
+        for (name, value) in members {
+            let key = Key::new(name).map_err(|_| format!("the member name {name}"))?;
+            object.insert(key, Value::Str((*value).to_owned()));
+        }
+        Ok(Value::Object(object))
+    }
+
+    fn handed(event_type: &str, payload: Value) -> Result<Value, String> {
+        with_environment(&stored(event_type), payload).map_err(|error| error.to_string())
     }
 
     /// DEC-948 item 2: the executor is handed the envelope's environment on a `StreamOpened`
     /// whose payload names none; a payload's own environment, and every other record, are handed
     /// on exactly as stored.
     #[test]
-    fn only_a_stream_opened_without_one_takes_the_envelopes_environment() {
-        let bare = payload(&[("stream_type", "account")]);
+    fn only_a_stream_opened_without_one_takes_the_envelopes_environment() -> Result<(), String> {
         assert_eq!(
-            with_environment(&stored("StreamOpened"), bare).ok(),
-            Some(payload(&[
-                ("environment", "paper"),
-                ("stream_type", "account")
-            ]))
+            handed("StreamOpened", payload(&[("stream_type", "account")])?)?,
+            payload(&[("environment", "paper"), ("stream_type", "account")])?
         );
-        let named = payload(&[("environment", "live"), ("stream_type", "account")]);
+        let named = payload(&[("environment", "live"), ("stream_type", "account")])?;
         assert_eq!(
-            with_environment(&stored("StreamOpened"), named.clone()).ok(),
-            Some(named),
+            handed("StreamOpened", named.clone())?,
+            named,
             "a payload's own environment is never replaced, so the fold still refuses a mismatch"
         );
-        let other = payload(&[("result", "clean")]);
-        assert_eq!(
-            with_environment(&stored("ReconciliationRun"), other.clone()).ok(),
-            Some(other)
-        );
+        let other = payload(&[("result", "clean")])?;
+        assert_eq!(handed("ReconciliationRun", other.clone())?, other);
+        Ok(())
     }
 }
 
