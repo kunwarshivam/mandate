@@ -198,9 +198,10 @@ pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'
         ("IntentReceived", 1) => Some(&INTENT_RECEIVED_V1),
         ("GateDecided", 1) => Some(&GATE_DECIDED_V1),
         ("OrderSubmitted", 1) => Some(&ORDER_SUBMITTED_V1),
-        ("FillApplied" | "LateFillApplied", 1) => Some(&FILL_APPLIED_V1),
+        ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
         ("ReconciliationRun", 1) => Some(&RECONCILIATION_RUN_V1),
+        ("LateFillApplied", 1) => Some(&FILL_APPLIED_V1),
         _ => None,
     }
 }
