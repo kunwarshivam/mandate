@@ -3,7 +3,8 @@
 - **Spec:** `docs/specs/connections.md` §6.2 rules 1 to 4 (M2: `client.rs`, DEC-839), §6.5 (the reserved exit budget), CN-9;
   DEC-441 item 8; slice M1 of the first-live-trade brief (#706).
 - **Code:** `mandate-mcp`: `crates/mandate-mcp/src/endpoint.rs` (`PinnedEndpoint`: `https` on the
-  pinned host only, plain `http` only to a loopback literal in the crate's own test build),
+  pinned host only, plain `http` only to a loopback literal in the crate's own test build and the
+  `rh-sim` rehearsal build, which dials loopback only, DEC-922),
   `crates/mandate-mcp/src/budget.rs` (`RateBudget`: the ordinary bucket and the reserved one only
   risk-reducing calls draw on), `crates/mandate-mcp/src/transport.rs` (`McpTransport`: one `POST`
   per message, the `Mcp-Session-Id` carried, no redirect followed, bounded timeouts and answer size,
@@ -14,8 +15,9 @@
 - **Tests:** in-crate where a loopback server is needed, since loopback is accepted only in the
   crate's own test build: `crates/mandate-mcp/src/tests/endpoint.rs`,
   `crates/mandate-mcp/tests/production.rs` (the production build, which refuses plain `http` even to
-  loopback), `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a
-  time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
+  loopback), `crates/mandate-mcp/tests/rehearsal.rs` (the `rh-sim` build: loopback only, and the
+  real login against the simulator binary, under `cargo xtask ci test-rh-sim`),
+  `crates/mandate-mcp/src/tests/budget.rs` (an oracle that steps one refill period at a time), `crates/mandate-mcp/src/tests/server.rs` (the scripted loopback server),
   `crates/mandate-mcp/src/tests/answers.rs`, `crates/mandate-mcp/src/tests/bounds.rs` (sessions,
   redirects, timeouts, the exit budget, and a canary in server text),
   `crates/mandate-mcp/src/tests/errors.rs`, and `crates/mandate-mcp/src/tests/contract.rs` (M2: the
@@ -24,4 +26,4 @@
   `crates/mandate-mcp/src/tests/register.rs` (O1a: the public client and its loopback redirect), and
   `crates/mandate-mcp/src/tests/login.rs` (O1b: RFC 7636's vector, the request, and the callback),
   `listener.rs` (the listener and lifetime) and `token.rs` (the exchange and LT-9's canary scan).
-- **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`.
+- **Run:** `cargo nextest run -p mandate-mcp --run-ignored all`, and `cargo xtask ci test-rh-sim`.
