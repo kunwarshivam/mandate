@@ -46,13 +46,13 @@ use mandate_alpaca::{
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
-use mandate_domain::Environment;
+use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
     ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
-use mandate_num::Price;
+use mandate_num::{Price, Usd};
 use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
@@ -86,8 +86,9 @@ pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
-    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, reported,
-    robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end, watched,
+    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, granted_opening,
+    lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end,
+    watched,
 };
 
 /// What the founder asked for: opaque ids (TI-8), and no mandate, configuration, model output or
@@ -152,6 +153,12 @@ pub trait Session {
     /// # Errors
     /// [`Cause::Absent`] when the session cannot carry a cycle.
     fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
+
+    /// The broker's own ask for the pinned instrument, the quote an asked opening's cross-check
+    /// compares with the independent IEX ask before it leaves (DEC-529 item 12; DEC-940 item 4),
+    /// or [`None`] when this session holds none — and then the cross-check refuses the opening
+    /// and nothing is sent (rule 3).
+    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price>;
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
@@ -165,6 +172,11 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
 
     fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause> {
         Ok(production_cycle(with_transport(sources, self), setup))
+    }
+
+    /// Alpaca's own quote is the IEX quote its data client read at the preflight.
+    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
+        Some(facts.quote.ask)
     }
 }
 
@@ -274,7 +286,7 @@ pub enum PaperError {
     #[error(transparent)]
     Evidence(#[from] EvidenceRefusal),
     #[error(transparent)]
-    Shell(ShellError),
+    Shell(#[from] ShellError),
 }
 
 /// Parses the arguments after the program name: `--workspace`, `--agent`, `--account-ref`,
@@ -361,6 +373,29 @@ fn refused(stage: Stage) -> impl FnOnce(Cause) -> PaperError {
 
 fn absent(stage: Stage, what: &'static str) -> PaperError {
     refused(stage)(Cause::Absent { what })
+}
+
+/// What an asked opening's cross-check reads, taken at the preflight (DEC-940 item 4): the
+/// pinned instrument's asset class and 20-day median dollar volume, which choose the collar's
+/// own `x`, the broker's own ask, and the independent IEX ask.
+struct Opening {
+    asset_class: AssetClass,
+    median_dollar_volume_20d: Usd,
+    broker_ask: Option<Price>,
+    independent_ask: Price,
+}
+
+impl Opening {
+    /// [`cross_check_the_opening`] over the registered collar's own members.
+    fn cross_check(&self, collar: &CollarMembers) -> Result<(), PaperError> {
+        cross_check_the_opening(
+            collar,
+            self.asset_class,
+            Some(self.median_dollar_volume_20d),
+            self.broker_ask,
+            Some(self.independent_ask),
+        )
+    }
 }
 
 /// The run's clock as the binding gate reads it, immediately before submission.
@@ -474,6 +509,12 @@ pub fn run<P: Ports>(
         data_ref: data_ref.digest(),
     };
     let agent = deployed.deployment().agent.clone();
+    let opening = Opening {
+        asset_class: instrument.asset_class,
+        median_dollar_volume_20d: liquidity.median_dollar_volume_20d,
+        broker_ask: session.broker_ask(&broker),
+        independent_ask: broker.quote.ask,
+    };
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
     let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
@@ -481,6 +522,12 @@ pub fn run<P: Ports>(
     let registered = artifacts
         .production_configuration()
         .map_err(refused(Stage::Validate))?;
+    let collar = CollarMembers {
+        liquid_x: registered.gate.collar_liquid_x,
+        other_x: registered.gate.collar_other_x,
+        crypto_x: registered.gate.collar_crypto_x,
+        liquid_threshold_usd: registered.gate.collar_liquid_threshold_usd,
+    };
     let watch = Watch {
         pause: clock,
         bound: close_window_bound(now, registered.gate).map_err(refused(Stage::Validate))?,
@@ -508,8 +555,17 @@ pub fn run<P: Ports>(
     let report = session
         .cycle(sources, setup)
         .map_err(refused(Stage::Reconcile))?
-        .run_observed_watched(observation, output, &watch)
-        .map_err(PaperError::Shell)?;
+        .run_observed_asked_watched(
+            observation,
+            output,
+            &watch,
+            |asked| {
+                granted_opening(asked, &watch.pause, watch.interval, || {
+                    opening.cross_check(&collar)
+                })
+            },
+            &lt10_end,
+        )?;
     let evidence = wiring::reported(
         args.journal.as_deref(),
         args.place_one_order,
@@ -729,6 +785,13 @@ impl Session for Connected {
         match self {
             Self::Alpaca(transport) => transport.cycle(sources, setup),
             Self::Robinhood(linked) => linked.cycle(sources, setup),
+        }
+    }
+
+    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
+        match self {
+            Self::Alpaca(transport) => transport.broker_ask(facts),
+            Self::Robinhood(linked) => linked.broker_ask(facts),
         }
     }
 }

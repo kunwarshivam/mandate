@@ -92,8 +92,8 @@ fn answered_control_stream(world: &World, seq: u64, event_id: &str) -> Result<()
 /// The fixture's mandate with one approver named: the stock fixture's empty approver set is
 /// TI-9's no-person shape, which refuses every grant, and the probes ask what an admitted grant
 /// does, so the view changes only its `approvers` (admission check 3's list).
-struct ApprovableMandate {
-    world: World,
+pub(super) struct ApprovableMandate {
+    pub(super) world: World,
 }
 
 impl MandateSource for ApprovableMandate {

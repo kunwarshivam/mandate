@@ -26,7 +26,13 @@ use mandate_journal::ArtifactStore;
 use mandate_shell::control::{ControlRecord, DeploymentRefusal};
 use mandate_shell::{Cause, ShellError, Stage};
 
-use crate::{Args, Connection, ConnectionRefusal, PaperError, Ports, SystemClock, run};
+use mandate_domain::AssetClass;
+use mandate_num::{Fraction, Price, Usd};
+
+use crate::{
+    Args, CollarMembers, Connection, ConnectionRefusal, Opening, PaperError, Ports, QuoteRefusal,
+    SystemClock, run,
+};
 
 /// The paper mandate fixture the suite derives its deployed document from
 /// (`tests/common/mod.rs`'s `spy_mandate` over this file's bytes, after its AAPL-to-SPY and
@@ -299,5 +305,40 @@ fn an_unformable_workspace_refuses_a_dry_run_before_anything_runs() -> Result<()
         0,
         "no credential read before the door"
     );
+    Ok(())
+}
+
+/// DEC-940 item 4: the asked opening's cross-check is the collar's own over the preflight's two
+/// asks — agreeing asks pass, asks beyond the collar refuse, and a session with no broker ask
+/// refuses as a missing quote, so nothing leaves on a check that was not made (rule 3).
+#[test]
+fn the_asked_openings_cross_check_reads_both_asks_within_the_collar() -> Result<(), String> {
+    let parse = |text: &str| Price::parse(text).map_err(|error| error.to_string());
+    let collar = CollarMembers {
+        liquid_x: Fraction::parse("0.01").map_err(|error| error.to_string())?,
+        other_x: Fraction::parse("0.02").map_err(|error| error.to_string())?,
+        crypto_x: Fraction::parse("0.02").map_err(|error| error.to_string())?,
+        liquid_threshold_usd: Usd::parse("50000000").map_err(|error| error.to_string())?,
+    };
+    let opening = |broker_ask: Option<Price>| -> Result<Opening, String> {
+        Ok(Opening {
+            asset_class: AssetClass::UsEquity,
+            median_dollar_volume_20d: Usd::parse("60000000").map_err(|error| error.to_string())?,
+            broker_ask,
+            independent_ask: parse("100")?,
+        })
+    };
+    assert!(matches!(
+        opening(Some(parse("100.5")?))?.cross_check(&collar),
+        Ok(())
+    ));
+    assert!(matches!(
+        opening(Some(parse("101.5")?))?.cross_check(&collar),
+        Err(PaperError::CrossCheck(QuoteRefusal::Disagreement))
+    ));
+    assert!(matches!(
+        opening(None)?.cross_check(&collar),
+        Err(PaperError::CrossCheck(QuoteRefusal::Absent))
+    ));
     Ok(())
 }
