@@ -41,6 +41,7 @@ import control
 import holds
 import membership
 import membership_fold
+import requests
 import research
 import risk_state
 import segment_rows
@@ -3827,6 +3828,7 @@ def render(
     shape_section: dict,
     approval_section: dict,
     timeout_section: dict,
+    requests_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
@@ -3855,6 +3857,7 @@ def render(
             "protection_shapes": shape_section,
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
+            "approval_requests": requests_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
@@ -3914,6 +3917,7 @@ def main(argv: list[str] | None = None) -> int:
     shape_section = account.build_shape_section()
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
+    requests_section = requests.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
@@ -3949,6 +3953,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += timeouts.check_section(timeout_section)
     problems += timeouts.run_mutants(timeout_section)
+    problems += requests.check_section(requests_section)
+    problems += requests.run_mutants(requests_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -3994,6 +4000,7 @@ def main(argv: list[str] | None = None) -> int:
         shape_section,
         approval_section,
         timeout_section,
+        requests_section,
         broker_profile,
         connections_section,
         request_section,
@@ -4084,6 +4091,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
         f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
         f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
+        f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
+        f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "
+        f"{len(requests.vector_mutants(requests_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "

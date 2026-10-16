@@ -11049,6 +11049,698 @@ approval_timeouts:
       value: 01J8Z3P2A000000000000000Q3
     expect:
       outcome: Valid
+approval_requests:
+  spec: docs/specs/journal.md v0.42 §9.6 (DEC-942)
+  drafts:
+    requested_v1:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3P0A000000000000000Q1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ApprovalRequested
+      schema_version: 1
+      event_time: '2026-09-21T14:10:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3N9A000000000000000Q0
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        instrument: AAPL
+        asset_class: us_equity
+        side: buy
+        qty: '10'
+        limit: '155'
+        purpose: open
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+        decided_by: rule:large_order
+        combined_score: '0.5'
+        reference_mark:
+          price: '155'
+          seq: 41
+        approvers_required: 1
+        independent_required: false
+        deadline: 1790000100
+        timeout_s: 300
+        on_timeout: skip
+        content:
+          action:
+            instrument: AAPL
+            asset_class: us_equity
+            side: buy
+            qty: '10'
+            limit: '155'
+            order_usd: '1550'
+            purpose: open
+          trigger:
+            mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+            decided_by: rule:large_order
+          evidence:
+            combined_score:
+              label: combined model score, not a probability of profit
+              value: '0.5'
+            outputs:
+            - event_id: 01J8Z3N8A000000000000000Q9
+              artifact: null
+              label: Output of software you selected
+          risk_impact: []
+          reference_mark:
+            price: '155'
+            seq: 41
+          deadline: '2026-09-21T14:15:00.000000000Z'
+          default: If you do nothing, this action is skipped
+          choices:
+          - approve
+          - skip
+          approvers:
+            required: 1
+            independent: false
+        content_hash: sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702
+      artifact_refs:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702
+      pii_refs: []
+    requested_v2:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3P0A000000000000000Q1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ApprovalRequested
+      schema_version: 2
+      event_time: '2026-09-21T14:10:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3N9A000000000000000Q0
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        instrument: AAPL
+        asset_class: us_equity
+        side: buy
+        qty: '10'
+        limit: '155'
+        purpose: open
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+        decided_by: rule:large_order
+        combined_score: '0.5'
+        reference_mark:
+          price: '155'
+          seq: 41
+        approvers_required: 1
+        independent_required: false
+        deadline: 1790000100
+        timeout_s: 300
+        on_timeout: skip
+        content:
+          action:
+            instrument: AAPL
+            asset_class: us_equity
+            side: buy
+            qty: '10'
+            limit: '155'
+            order_usd: '1550'
+            purpose: open
+          trigger:
+            mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+            decided_by: rule:large_order
+          evidence:
+            combined_score:
+              label: combined model score, not a probability of profit
+              value: '0.5'
+            outputs:
+            - event_id: 01J8Z3N8A000000000000000Q9
+              artifact: null
+              label: Output of software you selected
+          risk_impact: []
+          reference_mark:
+            price: '155'
+            seq: 41
+          deadline: '2026-09-21T14:15:00.000000000Z'
+          default: If you do nothing, this action is skipped
+          choices:
+          - approve
+          - skip
+          approvers:
+            required: 1
+            independent: false
+          execution:
+            asset_class: us_equity
+            tif: gtc
+            protection_required: true
+            protection:
+              stop: '147.25'
+              take_profit: '170.5'
+        content_hash: sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+      artifact_refs:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+      pii_refs: []
+  invalid_drafts:
+  - name: plan.asset_class.kind
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.asset_class
+      value: 7
+    - path: payload.content_hash
+      value: sha256:566b3e5c9012a70bd96cae9e4202e750b81f0eeab35d292933e04ceb97fa203d
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:566b3e5c9012a70bd96cae9e4202e750b81f0eeab35d292933e04ceb97fa203d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.asset_class
+  - name: plan.asset_class.form
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.asset_class
+      value: equity
+    - path: payload.content_hash
+      value: sha256:336c04e14a8c306c138ae9abae445f24cbedbc6650c42c783501e74d684c633a
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:336c04e14a8c306c138ae9abae445f24cbedbc6650c42c783501e74d684c633a
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.execution.asset_class
+  - name: plan.tif.kind
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.tif
+      value: 7
+    - path: payload.content_hash
+      value: sha256:f913f95f7446b4863e6eabd39fe325b7ba776463ef9a974a73263ff32a281fd9
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:f913f95f7446b4863e6eabd39fe325b7ba776463ef9a974a73263ff32a281fd9
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.tif
+  - name: plan.tif.form
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.tif
+      value: fok
+    - path: payload.content_hash
+      value: sha256:56fe0077b4c4bc4a11aecbbbdd54a759dba944efbb854201762cfaad270297c0
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:56fe0077b4c4bc4a11aecbbbdd54a759dba944efbb854201762cfaad270297c0
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.execution.tif
+  - name: plan.protection_required.kind
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection_required
+      value: 'true'
+    - path: payload.content_hash
+      value: sha256:c338c189408e8e93ade204e6f47235d9f72d86f69bba7877af26420ef679a521
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:c338c189408e8e93ade204e6f47235d9f72d86f69bba7877af26420ef679a521
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection_required
+  - name: plan.protection.kind
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection
+      value: '147.25'
+    - path: payload.content_hash
+      value: sha256:b9cf33aa6ad74b2c2d466e8bfbc4aa55721fa74b3101502602a0201590f34529
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:b9cf33aa6ad74b2c2d466e8bfbc4aa55721fa74b3101502602a0201590f34529
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection
+  - name: plan.stop.kind
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.stop
+      value: 147
+    - path: payload.content_hash
+      value: sha256:d8f55e15b4f84ec195d62c8bc9ffaf00bac08d54709657c349da2a80f4cbe71b
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:d8f55e15b4f84ec195d62c8bc9ffaf00bac08d54709657c349da2a80f4cbe71b
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection.stop
+  - name: plan.stop.form
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.stop
+      value: 147.25.0
+    - path: payload.content_hash
+      value: sha256:297a8302f564f66eba6a541b4dbb8c049169c9a7b4e7c5036d9396c16c512a94
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:297a8302f564f66eba6a541b4dbb8c049169c9a7b4e7c5036d9396c16c512a94
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.execution.protection.stop
+  - name: plan.take_profit.kind
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.take_profit
+      value: 170
+    - path: payload.content_hash
+      value: sha256:9fe6bc1d0b5ad357cb1a710b831651c0da7afb4d4b3cbecd75cc4565e0b5abb7
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:9fe6bc1d0b5ad357cb1a710b831651c0da7afb4d4b3cbecd75cc4565e0b5abb7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection.take_profit
+  - name: plan.take_profit.form
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.take_profit
+      value: x
+    - path: payload.content_hash
+      value: sha256:cd8b33d3c03c074e4e3ad14a437d8f18e1ce0872ba102c66c64e0728e3014564
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:cd8b33d3c03c074e4e3ad14a437d8f18e1ce0872ba102c66c64e0728e3014564
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.execution.protection.take_profit
+  - name: plan.asset_class.null
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.asset_class
+      value: null
+    - path: payload.content_hash
+      value: sha256:d0c011189188602c9bfa12e71b8986feef3a436754704265a6fc72b7e97becb7
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:d0c011189188602c9bfa12e71b8986feef3a436754704265a6fc72b7e97becb7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.asset_class
+  - name: plan.tif.null
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.tif
+      value: null
+    - path: payload.content_hash
+      value: sha256:59e6bf6fe02de4d1107d222cd6e2344adbc073b9475a30ce73fe5602bd8d8e41
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:59e6bf6fe02de4d1107d222cd6e2344adbc073b9475a30ce73fe5602bd8d8e41
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.tif
+  - name: plan.protection_required.null
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection_required
+      value: null
+    - path: payload.content_hash
+      value: sha256:6fb03400eca712168458b09176d19f08268ca337c432d0026e7de80d5870fa65
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:6fb03400eca712168458b09176d19f08268ca337c432d0026e7de80d5870fa65
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection_required
+  - name: plan.stop.null
+    clause: §9.6 v2 types
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.stop
+      value: null
+    - path: payload.content_hash
+      value: sha256:f8bbb40c18b745ec2ebbe14aa8ef9b21f157b774d6393662c2cda5011ea56efd
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:f8bbb40c18b745ec2ebbe14aa8ef9b21f157b774d6393662c2cda5011ea56efd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection.stop
+  - name: plan.missing_member
+    clause: §9.6 v2 closed
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection_required
+      delete: true
+    - path: payload.content_hash
+      value: sha256:1f39528f6a1a61c93fe77f810b9a65c5a3f9927c046f5369807dd756619e2056
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:1f39528f6a1a61c93fe77f810b9a65c5a3f9927c046f5369807dd756619e2056
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection_required
+  - name: plan.extra_member
+    clause: §9.6 v2 closed
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.quantity
+      value: '10'
+    - path: payload.content_hash
+      value: sha256:f61eace0a9e2583f4cc1274e0524cd5fc4bf1f65135a7656e909de299558765c
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:f61eace0a9e2583f4cc1274e0524cd5fc4bf1f65135a7656e909de299558765c
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.quantity
+  - name: plan.protection_missing_take_profit
+    clause: §9.6 v2 closed
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.take_profit
+      delete: true
+    - path: payload.content_hash
+      value: sha256:0ed97799bc7eb6b90d8540ca9faecd44b326668ba2ae86aeff1623a387264e21
+    - path: artifact_refs
+      value:
+      - sha256:0ed97799bc7eb6b90d8540ca9faecd44b326668ba2ae86aeff1623a387264e21
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.protection.take_profit
+  - name: v2_without_a_plan
+    clause: '§9.6 v2: the plan is required'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution
+      delete: true
+    - path: payload.content_hash
+      value: sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution
+  - name: v2_with_a_null_plan
+    clause: '§9.6 v2: the plan is not nullable'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution
+      value: null
+    - path: payload.content_hash
+      value: sha256:d716bfa27271199b37195df5b6fdc9c54c365a591f32762c239eef463a31d8e4
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:d716bfa27271199b37195df5b6fdc9c54c365a591f32762c239eef463a31d8e4
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution
+  - name: v1_with_a_plan
+    clause: '§9.6 v1 closed: version 1 binds no plan'
+    base_draft: requested_v1
+    changes:
+    - path: payload.content.execution
+      value:
+        asset_class: us_equity
+        tif: gtc
+        protection_required: true
+        protection:
+          stop: '147.25'
+          take_profit: '170.5'
+    - path: payload.content_hash
+      value: sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution
+  - name: plan_for_another_asset_class
+    clause: 'rule 136: the plan names the order''s asset class'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.asset_class
+      value: crypto
+    - path: payload.content_hash
+      value: sha256:7d58c482ed7a81c6321ecdb9c5ef844f0af910cd5f38b9f954e308ed7e4230f0
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:7d58c482ed7a81c6321ecdb9c5ef844f0af910cd5f38b9f954e308ed7e4230f0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution.asset_class
+  - name: plan_changed_under_its_old_hash
+    clause: '§9.6: the content hash covers the plan'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.stop
+      value: '140'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content_hash
+  - name: hash_of_the_content_without_its_plan
+    clause: '§9.6: the content hash is the hash of the whole content'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content_hash
+      value: sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content_hash
+  - name: mirror_differs
+    clause: '§9.6: every top-level member equals its content counterpart'
+    base_draft: requested_v2
+    changes:
+    - path: payload.qty
+      value: '11'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: deadline_differs
+    clause: '§9.6: the top-level and content deadlines name one instant'
+    base_draft: requested_v1
+    changes:
+    - path: payload.deadline
+      value: 1790000101
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deadline
+  - name: another_score_label
+    clause: '§9.6: the score label is exact'
+    base_draft: requested_v1
+    changes:
+    - path: payload.content.evidence.combined_score.label
+      value: score
+    - path: payload.content_hash
+      value: sha256:305ddc3a1d4ffc5988704b34f9cd05070b3be43e040196b56d151dbea1ad435b
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:305ddc3a1d4ffc5988704b34f9cd05070b3be43e040196b56d151dbea1ad435b
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.evidence.combined_score.label
+  - name: another_default
+    clause: '§9.6: the default sentence is exact'
+    base_draft: requested_v1
+    changes:
+    - path: payload.content.default
+      value: Skipped if unanswered
+    - path: payload.content_hash
+      value: sha256:c6e2cd74c8bf5abed433a3db1894c8a4d1f40a3fdd83e630b9ddae1a783de9d8
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:c6e2cd74c8bf5abed433a3db1894c8a4d1f40a3fdd83e630b9ddae1a783de9d8
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.default
+  - name: choices_reordered
+    clause: '§9.6: the choices are exactly approve then skip'
+    base_draft: requested_v1
+    changes:
+    - path: payload.content.choices
+      value:
+      - skip
+      - approve
+    - path: payload.content_hash
+      value: sha256:726a569ed0999619c6d626305737eaf2b92f0840b4d6df9d977242f2130bb2a4
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:726a569ed0999619c6d626305737eaf2b92f0840b4d6df9d977242f2130bb2a4
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.choices
+  - name: without_its_mandate
+    clause: '§9 row: `ApprovalRequested` names `mandate_version`'
+    base_draft: requested_v2
+    changes:
+    - path: config_refs
+      value: {}
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+  - name: on_the_control_stream
+    clause: '§9 row: `ApprovalRequested` is an agent-stream record'
+    base_draft: requested_v2
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: at_version_3
+    clause: '§9.6: versions 1 and 2 only'
+    base_draft: requested_v2
+    changes:
+    - path: schema_version
+      value: 3
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: plan_without_protection
+    clause: '§9.6 v2: protection is nullable when the mandate disables it'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection_required
+      value: false
+    - path: payload.content.execution.protection
+      value: null
+    - path: payload.content_hash
+      value: sha256:9678e2fe7193af37176b2285bd704863ebe87e30a18f3554cbaa5e6fc062c1b4
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:9678e2fe7193af37176b2285bd704863ebe87e30a18f3554cbaa5e6fc062c1b4
+    expect:
+      outcome: Valid
+  - name: plan_without_a_take_profit
+    clause: '§9.6 v2: the take-profit is nullable'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.execution.protection.take_profit
+      value: null
+    - path: payload.content.execution.tif
+      value: day
+    - path: payload.content_hash
+      value: sha256:3ae98e2bd3fd4d95010f40f758bbd8ec538919754424aa9c965eaee371e0c3e3
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:3ae98e2bd3fd4d95010f40f758bbd8ec538919754424aa9c965eaee371e0c3e3
+    expect:
+      outcome: Valid
+  - name: crypto_order_and_plan
+    clause: 'rule 136: any asset class, so long as the plan and the order agree'
+    base_draft: requested_v2
+    changes:
+    - path: payload.asset_class
+      value: crypto
+    - path: payload.content.action.asset_class
+      value: crypto
+    - path: payload.content.execution.asset_class
+      value: crypto
+    - path: payload.content.execution.tif
+      value: ioc
+    - path: payload.content_hash
+      value: sha256:87a02a57f228d745926e045fe7bc1c390a05fd1cef3921f3d0502d141482c609
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:87a02a57f228d745926e045fe7bc1c390a05fd1cef3921f3d0502d141482c609
+    expect:
+      outcome: Valid
+  - name: v1_without_a_mark
+    clause: '§9.6: the reference mark is nullable at either version'
+    base_draft: requested_v1
+    changes:
+    - path: payload.reference_mark
+      value: null
+    - path: payload.content.reference_mark
+      value: null
+    - path: payload.content_hash
+      value: sha256:1c1643348e3d8d4a891e418ee36d9f42ada9144b898f76e67b563def8db6a4b2
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:1c1643348e3d8d4a891e418ee36d9f42ada9144b898f76e67b563def8db6a4b2
+    expect:
+      outcome: Valid
 broker_profile:
   spec: docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)
   artifacts:

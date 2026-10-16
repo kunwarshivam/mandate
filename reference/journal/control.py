@@ -45,6 +45,7 @@ from common import (
     delete,
     digest_strings,
     draft_of,
+    epoch_seconds,
     hash_chain,
     is_timestamp,
     is_ulid,
@@ -162,6 +163,7 @@ SCHEMAS[("acct", "OwnerCommandRefused")] = REFUSAL
 SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
 
 REQUIRED_REFS = {
+    "ApprovalRequested": ("mandate_version",),
     "ApprovalResponded": ("mandate_version",),
     "ApprovalTimedOut": ("mandate_version",),
     "ApprovalRevalidated": ("mandate_version",),
@@ -858,6 +860,113 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
 }
 
+# §9.6 (DEC-460) and v0.42 (DEC-942): the runtime's approval request. Version 2 is version 1 with
+# the order builder's plan as one more content member, `execution`, which the content hash covers.
+REQUEST_MARK = rec(("price", DEC), ("seq", INT))
+REQUEST_CONTENT_V1 = rec(
+    (
+        "action",
+        rec(
+            ("instrument", STR),
+            ("asset_class", one_of("us_equity", "crypto")),
+            ("side", one_of("buy")),
+            ("qty", DEC),
+            ("limit", DEC),
+            ("order_usd", DEC),
+            ("purpose", one_of("open", "increase")),
+        ),
+    ),
+    ("trigger", rec(("mandate_version", REF), ("decided_by", STR))),
+    (
+        "evidence",
+        rec(
+            ("combined_score", rec(("label", STR), ("value", DEC))),
+            (
+                "outputs",
+                list_of(
+                    rec(
+                        ("event_id", ULID),
+                        ("artifact", opt(REF)),
+                        ("label", one_of("Output of software you selected", "platform-authored")),
+                    )
+                ),
+            ),
+        ),
+    ),
+    (
+        "risk_impact",
+        list_of(
+            rec(
+                (
+                    "field",
+                    one_of(
+                        "order_usd",
+                        "position_usd_after",
+                        "gross_usd_after",
+                        "bought_today_usd",
+                        "drawdown",
+                        "daily_pnl_fraction",
+                    ),
+                ),
+                ("value", DEC),
+                ("cap", opt(DEC)),
+            )
+        ),
+    ),
+    ("reference_mark", opt(REQUEST_MARK)),
+    ("deadline", RISK_CLOCK),
+    ("default", STR),
+    ("choices", list_of(one_of("approve", "skip"))),
+    ("approvers", rec(("required", INT), ("independent", BOOL))),
+)
+REQUEST_EXECUTION = rec(
+    ("asset_class", one_of("us_equity", "crypto")),
+    ("tif", one_of("day", "gtc", "ioc")),
+    ("protection_required", BOOL),
+    ("protection", opt(rec(("stop", DEC), ("take_profit", opt(DEC))))),
+)
+REQUEST_TOP = (
+    ("instrument", STR),
+    ("asset_class", one_of("us_equity", "crypto")),
+    ("side", one_of("buy")),
+    ("qty", DEC),
+    ("limit", DEC),
+    ("purpose", one_of("open", "increase")),
+    ("mandate_version", REF),
+    ("decided_by", STR),
+    ("combined_score", DEC),
+    ("reference_mark", opt(REQUEST_MARK)),
+    ("approvers_required", INT),
+    ("independent_required", BOOL),
+    ("deadline", INT),
+    ("timeout_s", INT),
+    ("on_timeout", one_of("skip")),
+)
+VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2)
+VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
+    *REQUEST_TOP, ("content", REQUEST_CONTENT_V1), ("content_hash", REF)
+)
+VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 2)] = rec(
+    *REQUEST_TOP,
+    ("content", rec(*REQUEST_CONTENT_V1.fields, ("execution", REQUEST_EXECUTION))),
+    ("content_hash", REF),
+)
+# §9.6's mirrors: each top-level member and the content member it repeats.
+REQUEST_MIRRORS = (
+    ("instrument", ("action", "instrument")),
+    ("asset_class", ("action", "asset_class")),
+    ("side", ("action", "side")),
+    ("qty", ("action", "qty")),
+    ("limit", ("action", "limit")),
+    ("purpose", ("action", "purpose")),
+    ("mandate_version", ("trigger", "mandate_version")),
+    ("decided_by", ("trigger", "decided_by")),
+    ("combined_score", ("evidence", "combined_score", "value")),
+    ("reference_mark", ("reference_mark",)),
+    ("approvers_required", ("approvers", "required")),
+    ("independent_required", ("approvers", "independent")),
+)
+
 
 def is_pointer(text: str) -> bool:
     """A non-empty RFC 6901 pointer: `/`-prefixed tokens, `~` only as `~0` or `~1`."""
@@ -1191,6 +1300,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("44.uncovered", False, "schema", "payload.uncovered")
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
+    out += request_violations(event_type, draft, skip)
     out += answer_violations(event_type, draft, skip)
     out += connection_violations(event_type, draft, skip)
     out += workspace_violations(event_type, draft, skip)
@@ -1260,6 +1370,37 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     if event_type == "ConnectionEstablished" and draft["schema_version"] == 2:
         attested = p["margin_attestation"] is not None
         rule("64", attested == (p["environment"] == "live"), "payload.margin_attestation")
+    return out
+
+
+def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.6's `ApprovalRequested` rules, on a well-typed payload, in the journal's order: each mirror,
+    then rule 136 (version 2's plan names the order's asset class), the deadline, the label, the
+    default, the choices, and last the content hash over the whole content, the plan included."""
+    if event_type != "ApprovalRequested":
+        return []
+    p = draft["payload"]
+    content = p["content"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    for top, nested in REQUEST_MIRRORS:
+        value = content
+        for name in nested:
+            value = value.get(name) if isinstance(value, dict) else None
+        rule(f"9.6.mirror.{top}", p[top] == value, f"payload.{top}")
+    if "execution" in content:
+        same = content["execution"]["asset_class"] == p["asset_class"]
+        rule("136", same, "payload.content.execution.asset_class")
+    rule("9.6.deadline", p["deadline"] == epoch_seconds(content["deadline"]), "payload.deadline")
+    label = content["evidence"]["combined_score"]["label"]
+    rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")
+    rule("9.6.default", content["default"] == "If you do nothing, this action is skipped", "payload.content.default")
+    rule("9.6.choices", content["choices"] == ["approve", "skip"], "payload.content.choices")
+    rule("9.6.content_hash", p["content_hash"] == artifact_ref(content), "payload.content_hash")
     return out
 
 
