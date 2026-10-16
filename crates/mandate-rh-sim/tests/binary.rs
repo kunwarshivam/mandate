@@ -65,7 +65,7 @@ fn the_binary_refuses_any_other_argument_and_a_bad_script() {
     let script = script_file("refuse");
     let script = script.to_str().unwrap();
     let bad = script_file("bad");
-    std::fs::write(&bad, "{\"accounts\": [], \"extra\": 1}").unwrap();
+    std::fs::write(&bad, "{\"accounts\": [").unwrap();
     for args in [
         vec![],
         vec!["--script"],

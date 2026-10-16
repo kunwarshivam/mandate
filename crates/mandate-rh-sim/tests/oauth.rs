@@ -25,7 +25,8 @@ const JSON: &str = "application/json";
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 
 /// The script every test serves: one agentic account, SPY quoted at 500 in the regular session,
-/// and one scripted fill of a SPY buy at 499.5.
+/// and two scripted fills, a SPY sell at 501 listed before a SPY buy at 499.5, so a buy can only
+/// take the buy's.
 fn script() -> Script {
     Script::parse(
         &json!({
@@ -33,7 +34,8 @@ fn script() -> Script {
                 "buying_power": "10000", "pattern_day_trader": false}],
             "session": "regular",
             "quotes": {"SPY": "500"},
-            "fills": [{"symbol": "SPY", "side": "buy", "price": "499.5"}],
+            "fills": [{"symbol": "SPY", "side": "sell", "price": "501"},
+                {"symbol": "SPY", "side": "buy", "price": "499.5"}],
         })
         .to_string(),
     )
@@ -139,12 +141,23 @@ fn client_id(server: &SimServer, redirect: &str) -> String {
 
 /// The authorization request's members, `resource` the server's own MCP endpoint.
 fn authorize_query(server: &SimServer, client: &str, redirect: &str, state: &str) -> String {
+    authorize_for(server, client, redirect, state, VERIFIER)
+}
+
+/// [`authorize_query`] with the challenge of `verifier`.
+fn authorize_for(
+    server: &SimServer,
+    client: &str,
+    redirect: &str,
+    state: &str,
+    verifier: &str,
+) -> String {
     let resource = server.url().unwrap();
     form(&[
         ("response_type", "code"),
         ("client_id", client),
         ("redirect_uri", redirect),
-        ("code_challenge", &challenge(VERIFIER)),
+        ("code_challenge", &challenge(verifier)),
         ("code_challenge_method", "S256"),
         ("state", state),
         ("resource", &resource),
@@ -197,10 +210,17 @@ struct Granted {
 }
 
 fn granted(server: &SimServer) -> Granted {
+    granted_for(server, VERIFIER)
+}
+
+/// A code granted for the challenge of `verifier`. Its redirect writes the unreserved `state`
+/// as it is, unescaped.
+fn granted_for(server: &SimServer, verifier: &str) -> Granted {
     let redirect = "http://127.0.0.1:49152/callback".to_owned();
     let client = client_id(server, &redirect);
-    let query = authorize_query(server, &client, &redirect, "state-1");
+    let query = authorize_for(server, &client, &redirect, "state-1", verifier);
     let answer = redirected_query(&decide(server, &query, "approve"), &redirect);
+    assert!(answer.contains("state=state-1"), "{answer}");
     assert_eq!(members(&answer, "state"), ["state-1"]);
     let code = members(&answer, "code").pop().unwrap();
     Granted {
@@ -551,5 +571,99 @@ fn a_request_without_a_length_has_no_body_and_a_chunked_one_is_refused() -> Outc
          content-length: 2\r\n\r\n{{}}"
     );
     assert_eq!(send(chunked), "");
+    Ok(())
+}
+
+/// Every answer's status line carries the reason phrase of its code.
+#[test]
+fn every_answer_carries_its_reason_phrase() -> Outcome {
+    let server = rehearsal();
+    let base = base(&server);
+    let redirect = "http://127.0.0.1:49152/callback";
+    assert_eq!(register(&server, redirect).line, "HTTP/1.1 201 Created");
+    assert_eq!(register(&server, "bad").line, "HTTP/1.1 400 Bad Request");
+    let metadata = format!("{base}/.well-known/oauth-protected-resource/mcp");
+    assert_eq!(http("GET", &metadata, None, "").line, "HTTP/1.1 200 OK");
+    let unknown = format!("{base}/other");
+    assert_eq!(
+        http("GET", &unknown, None, "").line,
+        "HTTP/1.1 404 Not Found"
+    );
+    let mut wire = Wire::new(&server.url()?);
+    let challenge = wire.request("initialize", json!({}));
+    assert_eq!(challenge.line, "HTTP/1.1 401 Unauthorized");
+    let client = client_id(&server, redirect);
+    let query = authorize_query(&server, &client, redirect, "s");
+    assert_eq!(
+        decide(&server, &query, "approve").line,
+        "HTTP/1.1 302 Found"
+    );
+    Ok(())
+}
+
+/// Each client id, code and token is the server's own: two of a kind are never equal, so one
+/// client's code or token cannot be another's.
+#[test]
+fn every_client_code_and_token_is_distinct() -> Outcome {
+    let server = rehearsal();
+    let redirect = "http://127.0.0.1:49152/callback";
+    assert_ne!(client_id(&server, redirect), client_id(&server, redirect));
+    let (first, second) = (granted(&server), granted(&server));
+    assert_ne!(first.code, second.code);
+    assert_ne!(first.client, second.client);
+    let tokens: Vec<String> = [first, second]
+        .iter()
+        .map(|grant| json_of(&redeem(&server, grant, VERIFIER))["access_token"].to_string())
+        .collect();
+    assert_ne!(tokens[0], tokens[1]);
+    Ok(())
+}
+
+/// Registration refuses grant types or response types other than the login's, each alone.
+#[test]
+fn registration_refuses_other_grant_or_response_types_each_alone() -> Outcome {
+    let server = rehearsal();
+    let url = format!("{}/oauth/register", base(&server));
+    let redirect = "http://127.0.0.1:49152/callback";
+    for (grants, types) in [
+        (json!(["implicit"]), json!(["code"])),
+        (json!(["authorization_code"]), json!(["token"])),
+        (
+            json!(["authorization_code", "refresh_token"]),
+            json!(["code"]),
+        ),
+    ] {
+        let asked = json!({"redirect_uris": [redirect], "token_endpoint_auth_method": "none",
+            "grant_types": grants, "response_types": types});
+        let reply = http("POST", &url, Some(JSON), &asked.to_string());
+        assert_eq!(reply.status, 400, "{asked}");
+    }
+    let bare = json!({"redirect_uris": [redirect], "token_endpoint_auth_method": "none"});
+    assert_eq!(
+        http("POST", &url, Some(JSON), &bare.to_string()).status,
+        201
+    );
+    Ok(())
+}
+
+/// RFC 7636 §4.1: a verifier shorter than 43 or longer than 128 characters, or with a character
+/// outside the unreserved set, is refused even when its challenge matches.
+#[test]
+fn a_verifier_of_the_wrong_length_or_alphabet_is_refused_though_its_challenge_matches() -> Outcome {
+    let server = rehearsal();
+    for verifier in [
+        "a".repeat(42),
+        "a".repeat(129),
+        format!("{}+", "a".repeat(42)),
+    ] {
+        let grant = granted_for(&server, &verifier);
+        let reply = redeem(&server, &grant, &verifier);
+        assert_eq!(reply.status, 400, "{verifier}");
+        assert_eq!(json_of(&reply)["error"], "invalid_grant");
+    }
+    for verifier in ["a".repeat(43), "a".repeat(128), "aA0-._~".repeat(7)] {
+        let grant = granted_for(&server, &verifier);
+        assert_eq!(redeem(&server, &grant, &verifier).status, 200, "{verifier}");
+    }
     Ok(())
 }

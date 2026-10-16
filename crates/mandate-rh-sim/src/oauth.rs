@@ -455,7 +455,6 @@ pub(crate) fn respond(
     let reason = match status {
         200 => "OK",
         201 => "Created",
-        202 => "Accepted",
         302 => "Found",
         400 => "Bad Request",
         401 => "Unauthorized",

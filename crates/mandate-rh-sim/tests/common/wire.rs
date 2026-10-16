@@ -12,6 +12,8 @@ use mandate_mcp::PROTOCOL_VERSION;
 use serde_json::{Value, json};
 
 pub struct Reply {
+    /// The status line as it arrived, its reason phrase included.
+    pub line: String,
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: String,
@@ -188,12 +190,14 @@ fn exchange(authority: &str, request: &str) -> Option<Reply> {
     }
     let (head, body) = answer.split_once("\r\n\r\n").unwrap();
     let mut lines = head.lines();
-    let status = lines.next().unwrap().split(' ').nth(1).unwrap();
+    let line = lines.next().unwrap().to_owned();
+    let status = line.split(' ').nth(1).unwrap().to_owned();
     let headers = lines
         .filter_map(|l| l.split_once(':'))
         .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_owned()))
         .collect();
     Some(Reply {
+        line,
         status: status.parse().unwrap(),
         headers,
         body: body.to_owned(),
