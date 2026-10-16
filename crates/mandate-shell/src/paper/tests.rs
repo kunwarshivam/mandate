@@ -1347,6 +1347,108 @@ fn the_binding_gate_judges_the_quote_the_run_last_handed_it() -> Result<(), Stri
     Ok(())
 }
 
+/// A scripted IEX data feed: every quote read answers `body`, and the clock reads `now`.
+#[derive(Clone)]
+struct QuoteFeed {
+    body: String,
+    now: UtcNanos,
+}
+
+impl mandate_alpaca::DataTransport for QuoteFeed {
+    async fn send(
+        &self,
+        _: &mandate_alpaca::QuoteRequest,
+    ) -> Result<mandate_alpaca::Response, mandate_alpaca::TransportError> {
+        Ok(mandate_alpaca::Response {
+            status: 200,
+            body: self.body.clone().into_bytes(),
+        })
+    }
+
+    async fn send_bars(
+        &self,
+        _: &mandate_alpaca::BarsRequest,
+    ) -> Result<mandate_alpaca::Response, mandate_alpaca::TransportError> {
+        Err(mandate_alpaca::TransportError::Timeout)
+    }
+}
+
+impl mandate_alpaca::Pause for QuoteFeed {
+    fn now(&self) -> UtcNanos {
+        self.now
+    }
+
+    async fn pause(&self, _: std::time::Duration) {}
+}
+
+/// DEC-943 item 2: a wake's fresh read is the preflight's own IEX read and the judge's checks
+/// of it. A current quote of the reviewed symbol, a locked one among them, is the quote; a
+/// crossed quote, another symbol's, and one past the ten-second bound or DEC-936's 250 ms skew
+/// tolerance each refuse, naming the wake's quote.
+#[test]
+fn a_fresh_read_is_the_reviewed_symbols_current_uncrossed_iex_quote() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let now = at("2026-09-28T17:00:30Z")?;
+    let feed = |symbol: &str, bid: &str, ask: &str, stamp: &str| QuoteFeed {
+        body: format!(
+            r#"{{"quote":{{"ap":{ask},"as":1,"ax":"V","bp":{bid},"bs":2,"bx":"V","c":["R"],"t":"{stamp}","z":"C"}},"symbol":"{symbol}"}}"#
+        ),
+        now,
+    };
+    let read = |feed: QuoteFeed| super::fresh_quote(&loaded, feed.clone(), feed);
+    let current = read(feed("AAPL", "255.1", "255.2", "2026-09-28T17:00:29.5Z")).map_err(text)?;
+    assert_eq!(
+        (
+            current.instrument.as_str(),
+            current.bid,
+            current.ask,
+            current.at,
+            current.feed
+        ),
+        (
+            "AAPL",
+            price("255.1")?,
+            price("255.2")?,
+            at("2026-09-28T17:00:29.5Z")?,
+            Feed::Iex
+        )
+    );
+    assert!(
+        read(feed("AAPL", "255.2", "255.2", "2026-09-28T17:00:20Z")).is_ok(),
+        "a locked quote exactly at the bound is current"
+    );
+    let refused = Cause::Absent {
+        what: "a current, uncrossed IEX quote at the wake",
+    };
+    for (name, quoted) in [
+        (
+            "crossed",
+            feed("AAPL", "255.3", "255.2", "2026-09-28T17:00:29.5Z"),
+        ),
+        (
+            "another symbol",
+            feed("MSFT", "255.1", "255.2", "2026-09-28T17:00:29.5Z"),
+        ),
+        (
+            "stale",
+            feed("AAPL", "255.1", "255.2", "2026-09-28T17:00:19.999999999Z"),
+        ),
+        (
+            "ahead",
+            feed("AAPL", "255.1", "255.2", "2026-09-28T17:00:30.250000001Z"),
+        ),
+    ] {
+        assert_eq!(
+            read(quoted)
+                .map(|quote| quote.bid)
+                .map_err(|cause| cause.to_string()),
+            Err(refused.to_string()),
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
     let loaded = artifacts()?;
