@@ -62,8 +62,8 @@ impl<T: Tools> RobinhoodConnector<T> {
 
 /// One `orders[]` record as the executor matches it (DEC-941 item 4). A record carrying our
 /// `ref_id` names our key; one carrying another `ref_id` names that text behind
-/// [`FOREIGN_REF_ID`], which no key of ours can equal, so it is never adopted; one carrying none names nothing, and the executor's
-/// look-alike rule decides (DEC-863).
+/// [`FOREIGN_REF_ID`], which no key of ours can equal, so it is never adopted; one carrying none
+/// names nothing, and the executor's look-alike rule decides (DEC-863).
 fn listed(record: &Map<String, Value>, key: &ClientOrderId, ours: &str) -> Option<ListedOrder> {
     let mut order = order_record(record)?;
     let order_type = match record.get("type").and_then(Value::as_str)? {
