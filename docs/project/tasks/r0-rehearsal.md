@@ -47,6 +47,8 @@ covers `scripts/`). The whole run takes under a minute after the builds.
 ## The step table (`main`, `bf150da`)
 
 `ws_r0`, `founder`, `agent_r0`, the account ref and the check id are the rehearsal's opaque ids.
+A row may group several of the script's step ids: 2c is `2c`, `2c-fee`, `2c-cal` and `2c-rules`;
+2q and 2r are `2q-ctl`, `2r-ctl`, `2q-agent`, `2r-agent`, `2q-acct` and `2r-acct`.
 `$J` is `--journal $DSN --store $WORK/store`.
 
 | Step | R0 | Command | Result | Output (last line) |

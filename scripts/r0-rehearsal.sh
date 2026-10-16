@@ -63,7 +63,10 @@ FAILED=0
 # shellcheck disable=SC2329 # invoked by the EXIT trap below
 cleanup() {
   if [ -n "$SIM_PID" ]; then kill "$SIM_PID" 2>/dev/null || true; fi
-  if [ -n "$PG_DATA" ]; then as_pg "$PG_BIN/pg_ctl" -D "$PG_DATA" -m fast stop >/dev/null 2>&1 || true; fi
+  if [ -n "$PG_DATA" ]; then
+    as_pg "$PG_BIN/pg_ctl" -D "$PG_DATA" -m fast stop >/dev/null 2>&1 || true
+    rm -rf "$(dirname "$PG_DATA")"
+  fi
   if [ -n "$ADMIN_URL" ] && [ -n "${MANDATE_PG_URL:-}" ]; then
     psql "$ADMIN_URL" -qc "DROP SCHEMA IF EXISTS $SCHEMA CASCADE" >/dev/null 2>&1 || true
   fi
@@ -95,13 +98,13 @@ step() {
 }
 
 report() {
-  local id=$1 result=$2 status=$3 command=${4//$DSN/\$DSN} last
+  local id=$1 result=$2 status=$3 command=${4//"$DSN"/\$DSN} last
   last=$(cat "$WORK/out/$id.out" "$WORK/out/$id.err" | grep -v '^$' | tail -n 1 | cut -c1-160)
   printf '%-4s %-4s exit %-3s %s\n     -> %s\n' "$id" "$result" "$status" "${command//$WORK/\$WORK}" "$last"
   {
     printf '## %s: %s (exit %s)\n\n```text\n$ %s\n' "$id" "$result" "$status" "${command//$WORK/\$WORK}"
     cat "$WORK/out/$id.out" "$WORK/out/$id.err"
-    printf '```\n\n'
+    printf '\n```\n\n'
   } | sed "s|$WORK|\$WORK|g" >>"$RECORD"
 }
 
