@@ -67,6 +67,27 @@ pub trait InstrumentSnapshot {
     fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement>;
     /// Which of trading-domain spec §5.6's three tiers the instrument prices its exits from.
     fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier>;
+    /// The registered configuration a fill of the instrument is accounted under, which its
+    /// `FillApplied` or `LateFillApplied` and the simulated `FeesCharged` name as `config_refs`
+    /// (journal spec §9's catalogue, DEC-938 item 2). `None`, the default, names none, and the
+    /// journal then refuses the fill's append (its required references are missing), so a source
+    /// that knows no configuration stops the run there rather than journaling an unbound fill.
+    fn fill_refs(&self, _instrument: &InstrumentId) -> Option<FillConfigRefs> {
+        None
+    }
+}
+
+/// The content references of the configuration a fill is accounted under (journal spec §9:
+/// `fee`, `cal`, `set`, `ins`), each `sha256:` and 64 lowercase hexadecimal digits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FillConfigRefs {
+    pub fee_config: String,
+    pub trading_calendar: String,
+    /// The settlement calendar the fill's settlement date is computed on. The paper run's
+    /// accounting settles on its registered trading calendar, so it names that object
+    /// (DEC-938 item 2).
+    pub settlement_calendar: String,
+    pub instrument_snapshot: String,
 }
 
 /// The trusted values outside the account-stream fold that complete one §9.1 [`mandate_risk::GateInput`].

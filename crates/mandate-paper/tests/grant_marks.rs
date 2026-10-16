@@ -44,6 +44,7 @@ use mandate_runtime::{
 use mandate_shell::adapters::{Sources, StoreJournal, production};
 use mandate_shell::paper::{PaperClock, load_contexts_with_clock};
 use mandate_shell::stages::{Admitted, Classifier, JournalWriter, MandateSource, Sink, Sizing};
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Cause, Mark, Report, Setup, ShellError, Watch, run_observed_asked_watched};
 use mandate_spec::validate::RegisteredModel;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
@@ -565,6 +566,10 @@ fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(store),
+        symbols: BrokerSymbols::registered([(
+            mandate_accounting::InstrumentId::new("SPY").unwrap(),
+            mandate_accounting::InstrumentId::new(SPY).unwrap(),
+        )]),
         transport: broker.clone(),
     });
     stages.journal = Box::new(journal.clone());

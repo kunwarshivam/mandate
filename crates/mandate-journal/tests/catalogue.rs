@@ -117,6 +117,7 @@ const REGISTERED: &[&str] = &[
     "GateDecided",
     "OrderSubmitted",
     "FillApplied",
+    "LateFillApplied",
     "MarkUpdated",
     "ReconciliationRun",
     "MandateVersionApplied",
@@ -155,14 +156,15 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
     ("OwnerCommandRefused", AGENT),
 ];
 
-/// The records journal spec v0.17 §9.7 closes (DEC-533), each on its one stream with the
-/// configuration it names. Until J2's implementation catalogues and closes them, the journal refuses
-/// them as not catalogued or not registered; `the_approval_answers_are_catalogued_and_closed_on_their_streams`
-/// asserts what they become, so the table above leaves their schema reason alone.
+/// The records journal spec v0.17 §9.7 closes (DEC-533), and `ApprovalTimedOut`, which v0.41
+/// closes there (DEC-944), each on its one stream with the configuration it names.
+/// `the_approval_answers_are_catalogued_and_closed_on_their_streams` asserts what they are, so the
+/// table above leaves their schema reason alone.
 const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
     ("ApprovalResponseSubmitted", CTL, &[]),
     ("ApprovalResponded", AGENT, &[MAN]),
     ("ApprovalRevalidated", AGENT, &[MAN]),
+    ("ApprovalTimedOut", AGENT, &[MAN]),
 ];
 
 /// The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800), with the stream types
@@ -1031,6 +1033,12 @@ const RISK_INPUT_PAYLOADS: &[(&str, &[&str], &str)] = &[
     ),
     (
         "FillApplied",
+        &[FEE, CAL, SET, INS],
+        r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
+        "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,
+    ),
+    (
+        "LateFillApplied",
         &[FEE, CAL, SET, INS],
         r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
         "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,

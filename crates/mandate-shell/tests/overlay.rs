@@ -34,6 +34,7 @@ use mandate_shell::adapters::{BuilderPlan, RunContext, Sources, production};
 use mandate_shell::control::{ControlRecord, Governance, Pinned, governance};
 use mandate_shell::paper::load_contexts;
 use mandate_shell::stages::{Classifier, Sizing, Stages};
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Cause, Report, Setup, ShellError, Stage, run_observed};
 use mandate_spec::Mandate;
 use mandate_spec::validate::RegisteredModel;
@@ -369,6 +370,7 @@ fn run(mandate: &str, governed: Option<&Governed>, proposing: Proposing) -> Ran 
         executor: Some(contexts.executor),
         run: Some(context.clone()),
         artifacts: Some(Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        symbols: BrokerSymbols::default(),
         transport: broker,
     };
     let setup = Setup {

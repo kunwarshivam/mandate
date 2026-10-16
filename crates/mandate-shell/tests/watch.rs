@@ -24,6 +24,7 @@ use mandate_runtime::{ModelOutput, Observation};
 use mandate_shell::adapters::{Sources, production};
 use mandate_shell::paper::load_contexts;
 use mandate_shell::stages::Stages;
+use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Cause, Report, Setup, ShellError, Watch, close_window_bound};
 use mandate_shell::{poll_interval, production_cycle, run_observed_watched};
 use mandate_spec::validate::RegisteredModel;
@@ -330,6 +331,7 @@ fn watched_to(now: &str, bound: &str, place: bool, door: Door, fill: Fill) -> Wa
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        symbols: BrokerSymbols::default(),
         transport: broker.clone(),
     };
     let setup = Setup {

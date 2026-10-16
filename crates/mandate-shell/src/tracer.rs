@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{LatestQuote, Pause};
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_executor::{BrokerOutcome, BrokerRequest};
+use mandate_executor::{BrokerOutcome, BrokerRequest, ReconciliationVerdict};
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
 use mandate_num::Price;
 use mandate_runtime::{
@@ -806,10 +806,29 @@ impl<'s> Session<'s> {
             ))
             .map_err(refused(Stage::Executor))?;
         let reconciliation_requests = self.prepare_reconciliation(executor_effects)?;
+        let (verdict, more) = self.reconcile_once(&reconciliation_requests)?;
+        let later = self.settle(more)?;
+        if verdict == ReconciliationVerdict::Mismatch
+            || later.contains(&ReconciliationVerdict::Mismatch)
+        {
+            self.report.alerts.push("reconciliation_mismatch");
+            return Err(ShellError::ReconciliationMismatch);
+        }
+        Ok(())
+    }
+
+    /// One reconciliation over `requests` (trading spec §11): the snapshot gathered through the
+    /// run's connector, its account report stepped and performed first, then the reconciler's
+    /// effects performed, gathering any reconciliation they ask for rather than sending its reads
+    /// one by one. Answers the verdict and the requests of the reconciliation asked for next.
+    fn reconcile_once(
+        &mut self,
+        requests: &[BrokerRequest],
+    ) -> Result<(ReconciliationVerdict, Vec<BrokerRequest>), ShellError> {
         let snapshot = self
             .stages
             .reconciler
-            .snapshot(&mut *self.stages.connector, &reconciliation_requests)
+            .snapshot(&mut *self.stages.connector, requests)
             .map_err(refused(Stage::Reconcile))?;
         let account_effects = self
             .stages
@@ -824,15 +843,32 @@ impl<'s> Session<'s> {
             .reconciler
             .reconcile(&snapshot)
             .map_err(refused(Stage::Reconcile))?;
-        self.perform_executor(reconciled.effects)?;
-        match reconciled.verdict {
-            mandate_executor::ReconciliationVerdict::Clean
-            | mandate_executor::ReconciliationVerdict::Adopted => Ok(()),
-            mandate_executor::ReconciliationVerdict::Mismatch => {
-                self.report.alerts.push("reconciliation_mismatch");
-                Err(ShellError::ReconciliationMismatch)
+        let next = self.prepare_reconciliation(reconciled.effects)?;
+        Ok((reconciled.verdict, next))
+    }
+
+    /// Reconciles while a reconciliation asks for another, as a `LateFillApplied` it ingested
+    /// does (trading spec §5.7, the executor's reconciliation step 2): each is gathered and run
+    /// as the first was (DEC-858 item 3, DEC-938 item 5), never stepped answer by answer. A fill
+    /// is ingested once, so the reconciliation after a late fill asks for none; one still asking
+    /// after [`RECONCILIATION_ROUNDS`] rounds stops the run at Reconcile, so a broker that keeps
+    /// reporting new fills can never hold the run in a loop. Answers each round's verdict.
+    fn settle(
+        &mut self,
+        mut requests: Vec<BrokerRequest>,
+    ) -> Result<Vec<ReconciliationVerdict>, ShellError> {
+        let mut verdicts = Vec::new();
+        while !requests.is_empty() {
+            if verdicts.len() >= RECONCILIATION_ROUNDS {
+                return Err(refused(Stage::Reconcile)(Cause::Absent {
+                    what: "a reconciliation that settles",
+                }));
             }
+            let (verdict, next) = self.reconcile_once(&requests)?;
+            verdicts.push(verdict);
+            requests = next;
         }
+        Ok(verdicts)
     }
 
     /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
@@ -948,28 +984,7 @@ impl<'s> Session<'s> {
             .step(input)
             .map_err(refused(Stage::Executor))?;
         let requests = self.prepare_reconciliation(effects)?;
-        if requests.is_empty() {
-            return Ok(());
-        }
-        let snapshot = self
-            .stages
-            .reconciler
-            .snapshot(&mut *self.stages.connector, &requests)
-            .map_err(refused(Stage::Reconcile))?;
-        let account = self
-            .stages
-            .executor
-            .step(mandate_executor::Input::BrokerUpdate(
-                mandate_executor::BrokerUpdate::Account(snapshot.account.clone()),
-            ))
-            .map_err(refused(Stage::Executor))?;
-        self.perform_executor(account)?;
-        let reconciled = self
-            .stages
-            .reconciler
-            .reconcile(&snapshot)
-            .map_err(refused(Stage::Reconcile))?;
-        self.perform_executor(reconciled.effects)
+        self.settle(requests).map(|_| ())
     }
 
     /// Runs `effects` and everything they lead to, gathering the reconciliation reads they ask
@@ -1434,6 +1449,10 @@ const MARK_SOURCE: &str = "quote";
 /// A [`Mark`]'s `feed`: the IEX feed the run's quotes are read from (trading-domain spec §4).
 const MARK_FEED: &str = "iex";
 
+/// The most reconciliations one [`Session::settle`] runs: the one asked for, and the one a late
+/// fill it ingested asks for (DEC-938 item 5).
+const RECONCILIATION_ROUNDS: usize = 2;
+
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from
 /// anything the shell remembers, so what is folded is what was committed.
 fn body_of(row: &StoredEvent) -> Result<(Value, Option<String>), ShellError> {
@@ -1486,16 +1505,26 @@ impl OrderPlan for Bridge<'_> {
         proposal
     }
 
+    /// Mandate spec §6.2's classification of a proposal the classifier answered. A classifier that
+    /// cannot answer leaves no classification and so no decider, and a `DecisionMade` that the dry
+    /// run allowed names its decider (journal spec §9.1 rule 5) from a closed set with no label
+    /// for that: like [`FlattenPlanner::plan`]'s, the refusal poisons the step, which
+    /// [`Session::step`] reads before it performs a single effect, so nothing of the step is
+    /// journaled or sent and the run stops at Classify (DEC-938 item 4). The fail-safe `deny`
+    /// handed back is never acted on.
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
         let answer = self.classifier.classify(view, proposal);
         let (classified, cause) = match answer {
-            Err(cause) => (
-                Classified {
+            Err(cause) => {
+                self.findings.borrow_mut().poison = Some(ShellError::Refused {
+                    stage: Stage::Classify,
+                    cause,
+                });
+                return Classified {
                     autonomy: Autonomy::Deny,
                     decided_by: None,
-                },
-                Some(cause),
-            ),
+                };
+            }
             Ok(classified) if classified.autonomy == Autonomy::Auto => (classified, None),
             Ok(classified) => {
                 let cause = Cause::NotAuto {

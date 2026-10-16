@@ -315,6 +315,44 @@ fn the_timeout_never_acts_and_a_grant_read_after_it_is_not_pending() {
     acted(&tail(&mut shell, &grant, &ports), &asked, &grant.event_id);
 }
 
+/// Journal spec v0.41 §9.7 rule 135 (DEC-944): the timeout is caused by the ask it ends and
+/// records exactly the approval and its safe default, so the journal admits it; a second tick past
+/// the deadline writes no second timeout.
+#[test]
+fn the_timeout_names_its_ask_as_its_cause() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        FixedPlan::opening(Autonomy::Ask),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, asked) = asking_shell(&ports, Some(BOUND_LIMIT));
+    let ran = shell.run(Input::Tick(clock(DEADLINE)), &ports);
+    let timeout = only(&ran, "ApprovalTimedOut");
+    assert_eq!(
+        timeout.causation_id.as_ref(),
+        Some(&asked.approval),
+        "rule 135: the cause is the ask"
+    );
+    let members: Vec<&str> = timeout
+        .payload
+        .as_object()
+        .map(|o| o.keys().map(|k| k.as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(members, ["approval", "on_timeout"]);
+    assert_eq!(
+        timeout.payload.get("approval").and_then(Value::as_str),
+        Some(asked.approval.0.as_str())
+    );
+    assert_eq!(
+        timeout.payload.get("on_timeout").and_then(Value::as_str),
+        Some("skip")
+    );
+    let again = shell.run(Input::Tick(clock(DEADLINE + 1)), &ports);
+    assert!(drafts_of(&again, "ApprovalTimedOut").is_empty());
+}
+
 /// PB-2, PB-3, EI-15: the effective time is the later of `submitted_at` and the folded clock, so a
 /// response submitted in time and read once the clock has reached the deadline is late, and so is
 /// one submitted exactly at it. A refusal is not terminal: the deadline still times it out.

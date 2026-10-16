@@ -17,8 +17,8 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
 use mandate_executor::{
-    BindingGateInput, BindingGateRequest, BindingGateSource, InstrumentSnapshot, MandateVersion,
-    MandateView as ExecutorMandateView, equity_bracket_prices,
+    BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs, InstrumentSnapshot,
+    MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
@@ -333,6 +333,24 @@ impl InstrumentSnapshot for TrustedPaperContext {
 
     fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
         None
+    }
+
+    /// The reviewed instrument's fills are accounted under the registered fee configuration,
+    /// trading calendar and instrument snapshot the binding gate names, and settle on that same
+    /// trading calendar, which is the one `mandate-accounting` computes settlement on here
+    /// (DEC-938 item 2); any other instrument's fill names none, so the journal refuses it.
+    fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
+        if instrument.as_str() != self.template.asset.as_str() {
+            return None;
+        }
+        let refs = &self.template.config_refs;
+        let calendar = refs.trading_calendar.clone()?;
+        Some(FillConfigRefs {
+            fee_config: refs.fee_config.clone()?,
+            settlement_calendar: calendar.clone(),
+            trading_calendar: calendar,
+            instrument_snapshot: refs.instrument_snapshot.clone()?,
+        })
     }
 }
 
