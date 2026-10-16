@@ -533,6 +533,7 @@ pub fn broker_fill(
     BrokerFill {
         fill_id: FillId(id.to_owned()),
         client_order_id: client_order_id.map(str::to_owned),
+        broker_order_id: None,
         instrument: instrument(FixedInstruments::LIQUID_EQUITY),
         side: Side::Buy,
         qty: qty(quantity),

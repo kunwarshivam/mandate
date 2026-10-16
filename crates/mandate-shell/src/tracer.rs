@@ -36,6 +36,10 @@ use crate::stages::{
 use crate::tail::tailed;
 use crate::watch::Watch;
 
+mod own_fills;
+
+pub use own_fills::Booked;
+
 /// What a run is for, besides its stages. Nothing here is secret: every id is opaque (TI-8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Setup {

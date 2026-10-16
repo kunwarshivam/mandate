@@ -89,6 +89,7 @@ fn args(acknowledged: Environment) -> Args {
         store: PathBuf::from("s"),
         bars: PathBuf::from("b"),
         place_one_order: false,
+        reconcile_only: false,
         acknowledged,
     }
 }

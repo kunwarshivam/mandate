@@ -138,6 +138,7 @@ fn scene(
         bars: std::env::temp_dir()
             .join(format!("g1a-door-probe-{name}-bars-{}", std::process::id())),
         place_one_order: false,
+        reconcile_only: false,
         acknowledged: Environment::Paper,
     };
     Ok((

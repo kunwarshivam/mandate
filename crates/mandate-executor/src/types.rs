@@ -572,6 +572,10 @@ pub struct BrokerOrder {
 pub struct BrokerFill {
     pub fill_id: FillId,
     pub client_order_id: Option<String>,
+    /// The broker's own id for the order the fill executed, when the broker names it: Alpaca's
+    /// `FILL` activity carries this `order_id` and no `client_order_id`, so an own-fill
+    /// reconciliation finds the order through the broker's answer for our id (DEC-955 item 3).
+    pub broker_order_id: Option<String>,
     pub instrument: InstrumentId,
     pub side: Side,
     pub qty: Qty,

@@ -538,6 +538,7 @@ fn fill_from(value: &Value) -> Result<BrokerFill, WireError> {
     Ok(BrokerFill {
         fill_id: FillId(activity_id(text(fields, "id")?)?),
         client_order_id: optional_text(fields, "client_order_id")?.map(str::to_owned),
+        broker_order_id: None,
         instrument: instrument(fields)?,
         side: side(fields)?,
         qty: qty(fields, "qty")?,

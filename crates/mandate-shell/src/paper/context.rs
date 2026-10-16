@@ -159,6 +159,18 @@ pub fn load_contexts_with_clock(
     })
 }
 
+/// The executor context of the own-fill reconciliation a run performs before its preflight is
+/// judged (DEC-955 item 5): the reviewed agent's mandate version, the reviewed instrument's class,
+/// increment and fill configuration, the registered fee configuration, and a binding gate that
+/// answers no request, so nothing this context carries can ever let an order through.
+///
+/// # Errors
+/// [`Cause::Absent`] when the registered configuration cannot be read.
+pub fn reconcile_context(artifacts: &Artifacts, agent: &AgentId) -> Result<ExecutorContext, Cause> {
+    let _ = (artifacts, agent);
+    Err(Cause::Unimplemented { story: "E2" })
+}
+
 /// The mandate's protection for an entry at `entry`, as the executor derives it, or none when the
 /// mandate disables protection. Enabled protection without a stop distance is refused rather than
 /// sent unprotected.

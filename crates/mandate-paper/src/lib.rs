@@ -112,6 +112,9 @@ pub struct Args {
     pub store: PathBuf,
     pub bars: PathBuf,
     pub place_one_order: bool,
+    /// `--reconcile-only` (DEC-955 item 6): book the deployment's own unbooked fills to the
+    /// journal and exit, before any market read, model or cycle. It never places.
+    pub reconcile_only: bool,
     /// The environment the founder acknowledged: `--confirm-paper` or `--confirm-live`, exactly
     /// one. The run refuses unless it is the confirmed mandate's own (LT-9, DEC-937 item 3).
     pub acknowledged: Environment,
@@ -242,6 +245,17 @@ pub enum Outcome {
     /// The cycle ran: what it submitted, or the order it would have placed (boxed: it is large),
     /// beside the exportable evidence its report names (DEC-914 item 6).
     Cycle(Box<Cycle>),
+    /// `--reconcile-only` ran: the deployment's own unbooked fills were booked and nothing was
+    /// sent (DEC-955 item 6).
+    Reconciled(Reconciled),
+}
+
+/// What a `--reconcile-only` run booked: how many fill records it journaled, and that a second
+/// pass over the journal it wrote found nothing more owed (DEC-955 item 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reconciled {
+    /// The fill records journaled, `FillApplied` and `LateFillApplied` together.
+    pub fills: usize,
 }
 
 /// One finished cycle's report (DEC-914 item 6: the shell's `Report` cannot hold a
@@ -383,6 +397,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, PaperError
         store: required(store, "--store")?.into(),
         bars: required(bars, "--bars")?.into(),
         place_one_order,
+        reconcile_only: false,
         acknowledged,
     })
 }
@@ -1053,6 +1068,7 @@ pub fn lines(outcome: &Outcome) -> Result<Vec<String>, PaperError> {
                 .map(|id| format!("submitted {id}"));
             would_place.chain(submitted).collect()
         }
+        Outcome::Reconciled(_) => Vec::new(),
     })
 }
 
