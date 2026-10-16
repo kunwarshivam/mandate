@@ -42,7 +42,7 @@ use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
 use proptest::prelude::*;
-use shell_common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_mandate};
+use shell_common::{AAPL, FEE, RULES, SNAPSHOT, SPY, Stream, json, model, spy_facts, spy_mandate};
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
@@ -1031,4 +1031,32 @@ fn a_dry_run_that_asks_stops_at_the_ask() {
     );
     assert!(scene.posts().is_empty());
     assert_eq!(scene.ports.clock.waited.get(), 0, "no wait");
+}
+
+/// DEC-940 item 4: an Alpaca session's own ask, the quote an asked opening's cross-check compares,
+/// is the IEX ask its preflight read — through the test transport and through the binary's own
+/// `Connected` session alike (its placeholder credentials build a client and send nothing).
+#[test]
+fn an_alpaca_session_answers_its_own_iex_ask() {
+    let scene = Scene::new("broker-ask", 231..256);
+    let facts = spy_facts(
+        SPY,
+        "SPY",
+        mandate_alpaca::Exchange::Arca,
+        UtcNanos::parse_rfc3339(TUESDAY.0).unwrap(),
+    );
+    let ask = Some(facts.broker.quote.ask);
+    assert_eq!(
+        mandate_paper::Session::broker_ask(&scene.ports.broker, &facts.broker),
+        ask
+    );
+    let credentials =
+        mandate_alpaca::Credentials::from_lookup(|_| Some("placeholder".to_owned())).unwrap();
+    let connected = mandate_paper::Connected::Alpaca(
+        mandate_alpaca::AlpacaPaperHttp::new(credentials).unwrap(),
+    );
+    assert_eq!(
+        mandate_paper::Session::broker_ask(&connected, &facts.broker),
+        ask
+    );
 }

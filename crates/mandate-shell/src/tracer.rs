@@ -347,6 +347,36 @@ impl ProductionCycle {
     }
 }
 
+/// What the broker door does with a submission while an asked cycle's wait may hold one
+/// (DEC-940 item 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Door {
+    /// Not held: the door's own one-order rule decides as it always did.
+    Pass,
+    /// A risk-adding submission while the wait holds: kept until [`AskedCycle::submit`].
+    Hold,
+    /// A second risk-adding submission while the wait holds, after one already held or sent:
+    /// refused, nothing sent (FT-1).
+    Second,
+}
+
+/// The broker door's hold (DEC-940 item 2): only while `holding`, and only a `purpose` that adds
+/// risk. An exit, a protective order or a flatten always passes (`AGENTS.md` rule 13).
+pub(crate) fn door(
+    holding: bool,
+    held: bool,
+    submitted: bool,
+    purpose: mandate_executor::Purpose,
+) -> Door {
+    if !(holding && purpose.adds_risk()) {
+        return Door::Pass;
+    }
+    if held || submitted {
+        return Door::Second;
+    }
+    Door::Hold
+}
+
 /// The stop of a held opening the wait never released, and of a submit with none held
 /// (DEC-940 item 2): nothing is sent.
 fn nothing_released() -> ShellError {
@@ -1015,12 +1045,18 @@ impl<'s> Session<'s> {
                 self.report.would_place = Some(order.clone());
                 return Ok(None);
             }
-            if self.holding && order.purpose.adds_risk() {
-                if self.held.is_some() || !self.report.submitted.is_empty() {
-                    return Err(ShellError::SecondSubmission);
+            match door(
+                self.holding,
+                self.held.is_some(),
+                !self.report.submitted.is_empty(),
+                order.purpose,
+            ) {
+                Door::Second => return Err(ShellError::SecondSubmission),
+                Door::Hold => {
+                    self.held = Some(order.clone());
+                    return Ok(None);
                 }
-                self.held = Some(order.clone());
-                return Ok(None);
+                Door::Pass => {}
             }
             if !self.report.submitted.is_empty() {
                 return Err(ShellError::SecondSubmission);

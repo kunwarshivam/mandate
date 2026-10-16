@@ -17,6 +17,7 @@ use std::time::Duration;
 use mandate_accounting::AssetClass;
 use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Value};
+use mandate_executor::Purpose;
 use mandate_runtime::{
     Autonomy, IntentHandoff, Observation, OrderExecution, RiskClock,
     TimeInForce as RuntimeTimeInForce,
@@ -31,7 +32,7 @@ use super::tail_install::ApprovableMandate;
 use crate::error::{Cause, ShellError};
 use crate::lt10::watch_may_end;
 use crate::stages::{Executor, Sink, Stage};
-use crate::tracer::{AskedCycle, ProductionCycle, Report, Wake};
+use crate::tracer::{AskedCycle, Door, ProductionCycle, Report, Wake, door};
 use crate::watch::Watch;
 
 /// The closes the fixture observation carries, stored under their own digest.
@@ -642,4 +643,42 @@ fn a_grant_with_no_mark_is_skipped_and_never_released() -> Result<(), String> {
     assert!(report.is_err(), "{report:?}");
     assert_eq!(submissions(&world), 0, "nothing is sent");
     Ok(())
+}
+
+/// Rule 13 and FT-1 at the broker door (DEC-940 item 2), over every purpose and every state:
+/// only while the wait holds, and only a risk-adding purpose, is a submission held; a second
+/// one then refuses; an exit, a protective order or a flatten always passes, held or not.
+#[test]
+fn the_door_holds_only_a_risk_adding_submission_while_the_wait_holds() {
+    let all = [
+        Purpose::Open,
+        Purpose::Increase,
+        Purpose::RiskExit,
+        Purpose::OwnerExit,
+        Purpose::DiscretionaryExit,
+        Purpose::Protective,
+        Purpose::Flatten,
+    ];
+    for purpose in all {
+        let adds = matches!(purpose, Purpose::Open | Purpose::Increase);
+        for held in [false, true] {
+            for submitted in [false, true] {
+                assert_eq!(
+                    door(false, held, submitted, purpose),
+                    Door::Pass,
+                    "{purpose:?}: nothing is held outside a wait"
+                );
+                let expected = match (adds, held || submitted) {
+                    (false, false) | (false, true) => Door::Pass,
+                    (true, false) => Door::Hold,
+                    (true, true) => Door::Second,
+                };
+                assert_eq!(
+                    door(true, held, submitted, purpose),
+                    expected,
+                    "{purpose:?} held={held} submitted={submitted}"
+                );
+            }
+        }
+    }
 }
