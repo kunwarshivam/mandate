@@ -38,7 +38,7 @@ use mandate_paper::{
     Args, Broker as Chosen, Connection, ConnectionRefusal, Dial, Evidence, Outcome, PaperError,
     Ports, run,
 };
-use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
+use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal, Origin};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
@@ -664,6 +664,10 @@ fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
         seq,
         event_type,
         payload,
+        origin: Origin {
+            stream_id: "ctl:ws_paper".to_owned(),
+            environment: Environment::Paper,
+        },
     });
 }
 

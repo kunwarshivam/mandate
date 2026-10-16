@@ -36,6 +36,15 @@ shell's artifacts accept a paper mandate only. 2m and 2s stop there too, so noth
 and the agent stream's export find nothing, and the control and account streams export and
 verify. The runner's step needs `MANDATE_RH_ACCOUNT_NUMBER`, which the script sets.
 
+**Re-run on `claude/r0-live-artifacts` (R9 fixed, [DEC-957](../decisions/DEC-957.md), claim
+[#1398](https://github.com/kunwarshivam/mandate/issues/1398)):** 1a to 2k pass as before. 2l
+passes R9: the live version, confirmed on all four conditions, binds the model, fee schedule,
+calendar, rule set and instrument snapshot the live workspace `ws_r0` registered on its own
+`ctl:ws_r0`, and stops at `the tracer stopped at Validate: a fee schedule for the mandate's
+environment` ([R10](#the-blocker-chain-beyond-step-2e)): the fee schedule the script registers
+names `paper`. 2m and 2s stop there too, so nothing is sent; 2n and the agent stream's export
+find nothing; the control and account streams export and verify.
+
 ## How to run it
 
 ```bash
@@ -119,9 +128,10 @@ once the one before is fixed.
 | R7 | the restart (R0 step 7) | the startup reconciliation | A restart after a lost place answer must adopt exactly one matching order or keep it `Unknown` (DEC-529 item 4) | **Item 10** (`claude/unknown-adoption-run-path`) | — |
 
 | R8 | the opening refused by the broker, or read as external activity | the Robinhood cycle's instrument names | The executor sends the asset id as the order's symbol, which Robinhood does not accept, and `RobinhoodReconciler` reads its snapshot past `BrokerSymbols` (DEC-938), so the account's positions name tickers | None named (DEC-947's "Not decided here") | Map the asset id to the registered ticker in `RobinhoodShellConnector`'s requests, and the snapshot's tickers back to asset ids in `RobinhoodReconciler`, as `Platform` does for Alpaca's answers |
-| R9 | `the tracer stopped at Validate: a paper mandate`, **observed at 2l** | `crates/mandate-shell/src/paper/artifacts.rs:119` (`Artifacts::from_registered`) | The shell's run artifacts refuse every mandate whose environment is not `paper`: a lock from the paper adapter's first slice, which the live admission (DEC-924, DEC-947) now reaches | None named | Accept a `live` mandate in `from_registered` only when the `ConfirmedVersion` it is handed was admitted live (it can only exist for a live mandate after DEC-924's four conditions held), so the paper-only lock stays for every caller that has no live admission; a shell change with its own decision and tests |
+| R9 | `the tracer stopped at Validate: a paper mandate`, **observed at 2l** before the fix | `crates/mandate-shell/src/paper/artifacts.rs` (`Artifacts::from_registered`) | The shell's run artifacts refused every mandate whose environment is not `paper`: a lock from the paper adapter's first slice, which the live admission (DEC-924, DEC-947) now reaches | **Fixed** in `claude/r0-live-artifacts` ([DEC-957](../decisions/DEC-957.md), claim #1398): 2l passes it | The fix as built: a live mandate is accepted only inside a `ConfirmedVersion`, which exists for one only after all four of DEC-924's conditions; each control record carries its stream and environment (`Origin`), and the deployment and every binding (model, fee schedule, calendar, rule set, instrument snapshot) must come from one stream in the mandate's environment, so a paper object in a live run, a live object in a paper run, or any object from another workspace refuses before anything is sent. A live run's fee schedule must name `live` |
+| R10 | `the tracer stopped at Validate: a fee schedule for the mandate's environment`, **observed at 2l** | `crates/mandate-shell/src/paper/artifacts.rs` (`from_registered`'s fee check) and `crates/mandate-executor/src/fees.rs` (`paper_only_fee_config`) | The only fee configuration is `PAPER_ONLY`, whose overestimated figures are "Proposed (founder)" and which refuses any environment but `paper` (DEC-526 item 4): a schedule naming `paper` is refused for a live run (DEC-957 item 3), and one naming `live` by `paper_only_fee_config` itself (`environment_mismatch`) | None named | A live fee schedule: Robinhood's posted fees (commission-free; SEC, TAF and CAT pass-throughs) transcribed as a reviewed `fee_config` object and a live reader in `mandate-executor`, the figures the founder's to confirm (DEC-79), with the conservative reading under DEC-929 meanwhile; then the script registers a `live` schedule. Safety-critical (accounting): its own row, tests first |
 
-So the rehearsal can pass only after R8 and R9 land, with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
+So the rehearsal can pass only after R8 and R10 land (R9 by DEC-957), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
 9 and 10, and only on the founder's machine (R5). Without the founder's Alpaca paper keys, a run
 past R1 now stops at the Robinhood preflight with `MARKET_UNREAD`, after the login, the snapshot,
 the lapse and the full fold (DEC-947 item 5).

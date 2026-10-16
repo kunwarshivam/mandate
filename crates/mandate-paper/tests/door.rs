@@ -27,7 +27,7 @@ use mandate_paper::{
     unspent, unsupplied,
 };
 use mandate_robinhood::AccountSnapshot;
-use mandate_shell::control::ControlRecord;
+use mandate_shell::control::{ControlRecord, Origin};
 use mandate_shell::{Cause, ShellError, Stage};
 use mandate_spec::Mandate;
 
@@ -71,6 +71,10 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
         seq,
         event_type: event_type.to_owned(),
         payload: json(payload),
+        origin: Origin {
+            stream_id: "ctl:ws".to_owned(),
+            environment: Environment::Live,
+        },
     }
 }
 

@@ -27,7 +27,7 @@ use mandate_domain::AssetClass;
 use mandate_journal::StoredEvent;
 use mandate_num::{Fraction, Price, Usd};
 use mandate_robinhood::Quote;
-use mandate_shell::control::ControlRecord;
+use mandate_shell::control::{ControlRecord, Origin};
 use mandate_shell::{AskedCycle, Cause, Mark, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
@@ -574,10 +574,12 @@ fn record_of(row: &StoredEvent) -> Result<ControlRecord, GrantRefusal> {
     let Some(payload) = body.get("payload") else {
         return Err(GrantRefusal::Mismatched);
     };
+    let origin = Origin::of(&row.stream_id, &row.environment).ok_or(GrantRefusal::Mismatched)?;
     Ok(ControlRecord {
         seq: row.seq,
         event_type: row.event_type.clone(),
         payload: payload.clone(),
+        origin,
     })
 }
 
@@ -592,13 +594,14 @@ fn journaled(rows: &[StoredEvent], folded: &[&str]) -> Result<Vec<Journaled>, Gr
         .map(|row| match journaled_row(row) {
             Ok(journaled) => Ok(journaled),
             Err(refusal) if folded.contains(&row.event_type.as_str()) => Err(refusal),
-            Err(_) => Ok(Journaled {
+            Err(refusal) => Ok(Journaled {
                 event_id: row.event_id.clone(),
                 causation_id: None,
                 record: ControlRecord {
                     seq: row.seq,
                     event_type: row.event_type.clone(),
                     payload: Value::Null,
+                    origin: Origin::of(&row.stream_id, &row.environment).ok_or(refusal)?,
                 },
             }),
         })
@@ -644,4 +647,58 @@ fn deadline_of(record: &ControlRecord) -> Result<UtcNanos, GrantRefusal> {
         .and_then(|seconds| i64::try_from(seconds).ok())
         .ok_or(GrantRefusal::Mismatched)?;
     UtcNanos::from_parts(seconds, 0).map_err(|_| GrantRefusal::Mismatched)
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::Digest;
+    use mandate_domain::Environment;
+    use mandate_journal::StoredEvent;
+    use mandate_shell::control::Origin;
+
+    use super::{GrantRefusal, journaled, record_of};
+
+    fn row(event_type: &str, environment: &str, body: &[u8]) -> StoredEvent {
+        StoredEvent {
+            stream_id: "ctl:ws_live".to_owned(),
+            seq: 2,
+            event_id: format!("{:0>26}", 2),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: environment.to_owned(),
+            recorded_at: "2026-10-10T15:05:00Z".to_owned(),
+            prev_hash: Digest::of(&[]),
+            hash: Digest::of(&[]),
+            body: body.to_vec(),
+        }
+    }
+
+    /// DEC-957 item 4: the grant fold's records carry their row's stream and environment, as the
+    /// run's own control read does, and a row naming neither environment refuses as a difference,
+    /// whether the fold reads it or hands it in unread.
+    #[test]
+    fn the_grant_folds_records_carry_their_rows_origin() {
+        let live = Origin {
+            stream_id: "ctl:ws_live".to_owned(),
+            environment: Environment::Live,
+        };
+        let read = record_of(&row(
+            "ApprovalResponseSubmitted",
+            "live",
+            br#"{"payload":{}}"#,
+        ));
+        assert_eq!(read.map(|record| record.origin), Ok(live.clone()));
+        let unread = journaled(&[row("Other", "live", b"not canonical")], &[]);
+        let origins: Result<Vec<Origin>, _> =
+            unread.map(|rows| rows.into_iter().map(|row| row.record.origin).collect());
+        assert_eq!(origins, Ok(vec![live]));
+        let refused = record_of(&row(
+            "ApprovalResponseSubmitted",
+            "demo",
+            br#"{"payload":{}}"#,
+        ));
+        assert_eq!(refused.err(), Some(GrantRefusal::Mismatched));
+        let unread = journaled(&[row("Other", "demo", b"not canonical")], &[]);
+        assert_eq!(unread.err(), Some(GrantRefusal::Mismatched));
+    }
 }

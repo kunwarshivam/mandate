@@ -8,9 +8,11 @@
 use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Key, Value, to_canonical};
+use mandate_domain::Environment;
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_shell::control::{
-    ConfigRefusal as Refusal, Configuration, ControlRecord, Pinned, SnapshotExchange, configuration,
+    ConfigRefusal as Refusal, Configuration, ControlRecord, Origin, Pinned, SnapshotExchange,
+    configuration,
 };
 use mandate_time::{Date, UtcNanos};
 
@@ -96,6 +98,10 @@ impl Stream {
             seq,
             event_type: event_type.to_owned(),
             payload: json(payload),
+            origin: Origin {
+                stream_id: "ctl:ws_spy".to_owned(),
+                environment: Environment::Paper,
+            },
         });
         self
     }
