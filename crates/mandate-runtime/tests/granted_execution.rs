@@ -447,22 +447,25 @@ fn plan_strategy() -> impl Strategy<Value = (String, String, OrderExecution)> {
         ],
         any::<bool>(),
         proptest::option::of((cents(), proptest::option::of(cents()))),
+        prop_oneof![Just(AssetClass::UsEquity), Just(AssetClass::Crypto)],
     )
-        .prop_map(|(q, limit, tif, protection_required, protection)| {
-            (
-                q,
-                limit,
-                OrderExecution {
-                    asset_class: AssetClass::UsEquity,
-                    tif,
-                    protection_required,
-                    protection: protection.map(|(stop, take_profit)| ProtectionPrices {
-                        stop: price(&stop),
-                        take_profit: take_profit.as_deref().map(price),
-                    }),
-                },
-            )
-        })
+        .prop_map(
+            |(q, limit, tif, protection_required, protection, asset_class)| {
+                (
+                    q,
+                    limit,
+                    OrderExecution {
+                        asset_class,
+                        tif,
+                        protection_required,
+                        protection: protection.map(|(stop, take_profit)| ProtectionPrices {
+                            stop: price(&stop),
+                            take_profit: take_profit.as_deref().map(price),
+                        }),
+                    },
+                )
+            },
+        )
 }
 
 proptest! {
@@ -472,7 +475,7 @@ proptest! {
         ..ProptestConfig::default()
     })]
 
-    /// Over proposals of every size, limit, time in force and protection: the request binds the
+    /// Over proposals of every size, limit, asset class, time in force and protection: the request binds the
     /// builder's plan as the oracle writes it under the hash of its own content, and the grant hands
     /// that plan with the bound size and limit, its `IntentProposed` naming the plan's time in force.
     #[test]
@@ -481,6 +484,7 @@ proptest! {
         if let Some(proposal) = plan.proposal.as_mut() {
             proposal.qty = qty(&q);
             proposal.limit = price(&limit);
+            proposal.asset_class = execution.asset_class;
         }
         let (ids, gate, view) = (TestIds, AllowGate, universe(&["AAPL"]));
         let ports = ports(&ids, &gate, &plan, &view);

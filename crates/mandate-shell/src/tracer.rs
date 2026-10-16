@@ -1257,6 +1257,18 @@ fn consecutive_executor_journals(
     drafts
 }
 
+/// `ApprovalRequested`'s schema version for the content it carries: 2 when the content binds the
+/// order builder's plan, which version 1's closed content refuses, and 1 otherwise (DEC-942
+/// item 2). Every other agent-stream draft starts at version 1.
+fn planned_request_version(draft: &EventDraft) -> u64 {
+    let planned = draft.event_type == "ApprovalRequested"
+        && draft
+            .payload
+            .get("content")
+            .is_some_and(|content| content.get("execution").is_some());
+    if planned { 2 } else { 1 }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1264,7 +1276,7 @@ mod tests {
     use mandate_canon::{Object, Value};
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
 
-    use super::consecutive_executor_journals;
+    use super::{consecutive_executor_journals, planned_request_version};
 
     fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
         EventDraft {
@@ -1297,18 +1309,38 @@ mod tests {
         assert!(matches!(effects.front(), Some(Effect::Notify(_))));
         assert_eq!(effects.len(), 1);
     }
-}
 
-/// `ApprovalRequested`'s schema version for the content it carries: 2 when the content binds the
-/// order builder's plan, which version 1's closed content refuses, and 1 otherwise (DEC-942
-/// item 2). Every other agent-stream draft starts at version 1.
-fn planned_request_version(draft: &EventDraft) -> u64 {
-    let planned = draft.event_type == "ApprovalRequested"
-        && draft
-            .payload
-            .get("content")
-            .is_some_and(|content| content.get("execution").is_some());
-    if planned { 2 } else { 1 }
+    /// DEC-942 item 2: only an `ApprovalRequested` whose content binds a plan is version 2; a
+    /// request without one, and any other record carrying the same member, stay at version 1.
+    #[test]
+    fn only_a_request_that_binds_a_plan_is_version_two() -> Result<(), String> {
+        let with_plan = mandate_canon::parse(br#"{"content":{"execution":null}}"#)
+            .map_err(|e| format!("{e:?}"))?;
+        let without = mandate_canon::parse(br#"{"content":{}}"#).map_err(|e| format!("{e:?}"))?;
+        let agent = |event_type: &str, payload: &Value| mandate_runtime::EventDraft {
+            event_id: mandate_runtime::EventId("00000100000000000000000001".to_owned()),
+            event_type: event_type.to_owned(),
+            causation_id: None,
+            payload: payload.clone(),
+        };
+        assert_eq!(
+            planned_request_version(&agent("ApprovalRequested", &with_plan)),
+            2
+        );
+        assert_eq!(
+            planned_request_version(&agent("ApprovalRequested", &without)),
+            1
+        );
+        assert_eq!(
+            planned_request_version(&agent("ApprovalDelivered", &with_plan)),
+            1
+        );
+        assert_eq!(
+            planned_request_version(&agent("ApprovalRequested", &Value::Null)),
+            1
+        );
+        Ok(())
+    }
 }
 
 /// The actor every event the tracer's own fold replays is read as: the agent and account streams
