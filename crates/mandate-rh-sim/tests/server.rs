@@ -1119,7 +1119,8 @@ fn get_equity_orders_keeps_only_what_its_three_filters_name() -> Outcome {
 
 /// DEC-956 item 3: with a page size, `get_equity_orders` answers at most that many orders a page,
 /// newest first, and names the next page by a text `next_cursor` it takes back as `cursor`; the
-/// last page names none. A cursor it never issued is refused, never read as the first page, and
+/// last page names none. A cursor it never issued is refused, never read as the first page: one
+/// naming the first page's own offset, the list's end, or past it included; and
 /// without a page size the answer is whole, with no cursor.
 #[test]
 fn get_equity_orders_pages_by_its_own_cursor() -> Outcome {
@@ -1145,7 +1146,15 @@ fn get_equity_orders_pages_by_its_own_cursor() -> Outcome {
     );
     assert_eq!(ids(&second), ["rh-sim-000001"]);
     assert_eq!(second["structuredContent"].get("next_cursor"), None);
-    for forged in [json!("next"), json!("page-2"), json!(2)] {
+    let forged = [
+        json!("next"),
+        json!("page-2"),
+        json!(2),
+        json!("rh-sim-cursor-0"),
+        json!("rh-sim-cursor-3"),
+        json!("rh-sim-cursor-99"),
+    ];
+    for forged in forged {
         let answer = wire.call(
             "get_equity_orders",
             json!({"account_number": AGENTIC, "cursor": forged}),
