@@ -1,8 +1,8 @@
 //! D2c (E10-16, DEC-530 item 1): `mandate version create`, `mandate version confirm` and `mandate
-//! agent deploy` over DEC-527's owner flags, in paper unless `--environment live` (DEC-925). A gesture given no `--code` shows its
-//! code and warnings and writes nothing. The binary's refusals need no database: each exits
-//! non-zero with its code on stderr and nothing on stdout, and no output names any part of the DSN
-//! (`AGENTS.md` rule 7).
+//! agent deploy` over DEC-527's owner flags, in paper unless `--environment live` (DEC-925). A
+//! gesture given no `--code` shows its code and warnings and writes nothing. The binary's refusals
+//! need no database: each exits non-zero with its code on stderr and nothing on stdout, and no
+//! output names any part of the DSN (`AGENTS.md` rule 7).
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
 mod common;

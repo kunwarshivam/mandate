@@ -2,8 +2,9 @@
 //! Each stores the mandate document and its mandate spec §10 record in the artifact store, then
 //! commits exactly one control-stream event naming them (journal spec §9.2, DEC-155 item 5). Both
 //! are paper only, but for a live mandate on the owner's own recorded Robinhood live connection
-//! ([`admitted`]; DEC-529 item 3, DEC-925), and a confirmation takes a `cli_confirm` code bound to the version shown. What
-//! `version confirm` prints before the code is typed comes with the commands, D2c.
+//! ([`admitted`]; DEC-529 item 3, DEC-925), and a confirmation takes a `cli_confirm` code bound to
+//! the version shown. What `version confirm` prints before the code is typed comes with the
+//! commands, D2c.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,9 +54,10 @@ pub(crate) fn paper_or_live(owner: &Owner) -> Result<(), ControlError> {
 /// spec V-001). A `paper` owner takes only a `paper` document. A `live` owner takes only a `live`
 /// document whose `connection_id` the control stream last records as established, not revoked
 /// since, by `owner.user` through the CLI: broker `robinhood`, environment `live`, a margin
-/// attestation, and `cli_confirm` step-up; and only while the record is unspent, with no
-/// `FillApplied` or `LateFillApplied` on the account stream it binds (DEC-910 item 3). It reads
-/// and writes nothing for a `paper` owner.
+/// attestation, and `cli_confirm` step-up; and only while the record is unspent: no
+/// `FillApplied` or `LateFillApplied` on the account stream it binds (DEC-910 item 3), and no
+/// order there whose latest `OrderStateChanged` is `unknown` (V-001). It reads and writes nothing
+/// for a `paper` owner.
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `mandate_not_paper` for a `paper` owner and any other document;
@@ -74,12 +76,14 @@ pub fn admitted(
         (Environment::Live, Some("live")) => {}
         _ => return Err(refused("paper_only")),
     }
-    let connection = document.get("connection_id").and_then(Value::as_str);
+    let connection = document
+        .get("connection_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| refused("paper_only"))?;
     let rows = rows(journal, owner)?;
     let latest = rows.iter().rev().find(|r| {
         matches!(r.event_type.as_str(), ESTABLISHED | REVOKED)
-            && connection.is_some()
-            && r.member("connection_id") == connection
+            && r.member("connection_id") == Some(connection)
     });
     let record = latest
         .filter(|r| recorded_live_robinhood(r, owner))
@@ -88,22 +92,39 @@ pub fn admitted(
         .member("account_ref")
         .ok_or_else(|| refused("paper_only"))?;
     let stream = account_stream(owner, account).map_err(|_| refused("paper_only"))?;
-    let spent = journal
+    let account_rows = journal
         .rows(&stream)?
-        .iter()
-        .any(|r| matches!(r.event_type.as_str(), "FillApplied" | "LateFillApplied"));
-    if spent {
+        .into_iter()
+        .map(row)
+        .collect::<Result<Vec<_>, _>>()?;
+    if spent(&account_rows) {
         return Err(refused("connection_spent"));
     }
     Ok(())
+}
+
+/// Whether the account stream's `rows` spend the record (mandate spec V-001; DEC-529 item 1): a
+/// `FillApplied` or `LateFillApplied` (DEC-910 item 3), or an order whose latest
+/// `OrderStateChanged` is `unknown`, its answer lost, until reconciliation moves it on.
+fn spent(rows: &[Row]) -> bool {
+    let filled = rows
+        .iter()
+        .any(|r| matches!(r.event_type.as_str(), "FillApplied" | "LateFillApplied"));
+    let mut states: BTreeMap<&str, &str> = BTreeMap::new();
+    for r in rows.iter().filter(|r| r.event_type == "OrderStateChanged") {
+        if let (Some(order), Some(state)) = (r.member("client_order_id"), r.member("state")) {
+            states.insert(order, state);
+        }
+    }
+    filled || states.values().any(|state| *state == "unknown")
 }
 
 const ESTABLISHED: &str = "ConnectionEstablished";
 const REVOKED: &str = "ConnectionRevoked";
 
 /// Whether `row` establishes a connection `owner.user` recorded through `connection record`: broker
-/// `robinhood`, environment `live`, a margin attestation, and `cli_confirm` step-up (DEC-529 items 3
-/// and 11, journal spec §9.8 rule 64).
+/// `robinhood`, environment `live`, a margin attestation, and `cli_confirm` step-up (DEC-529 items
+/// 3 and 11, journal spec §9.8 rule 64).
 fn recorded_live_robinhood(row: &Row, owner: &Owner) -> bool {
     let method = row
         .payload

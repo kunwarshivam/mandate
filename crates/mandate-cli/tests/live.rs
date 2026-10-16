@@ -1,9 +1,10 @@
 //! K1b's second half (E7-11; DEC-529 item 3; mandate spec V-001; DEC-925): `version create`,
-//! `version confirm` and `agent deploy`, and the two gestures that show a code, admit a `live` owner
-//! only for a `live` mandate on a Robinhood `live` connection the owner recorded through the CLI
-//! and has not spent. Every other live combination keeps its refusal. The control stream and the
-//! account stream are seeded here, record by record, in journal spec §9.2's and §9.8's shapes, so
-//! these tests read no other command's output; the property's oracle walks the seeded events itself.
+//! `version confirm` and `agent deploy`, and the two gestures that show a code, admit a `live`
+//! owner only for a `live` mandate on a Robinhood `live` connection the owner recorded through the
+//! CLI and has not spent. Every other live combination keeps its refusal. The control stream and
+//! the account stream are seeded here, record by record, in journal spec §9.2's and §9.8's shapes,
+//! so these tests read no other command's output; the property's oracle walks the seeded events
+//! itself.
 
 mod common;
 
@@ -124,6 +125,8 @@ enum Event {
     Revoke(&'static str),
     /// An event of this type on the account stream of this `account_ref`.
     Account(&'static str, &'static str),
+    /// An `OrderStateChanged` for this client order id, to this state, on this account stream.
+    Order(&'static str, &'static str, &'static str),
 }
 
 /// A workspace whose control stream registers the fixture's model and SPY's snapshot.
@@ -184,6 +187,11 @@ impl World {
             Event::Account(event_type, account) => {
                 let on = format!("acct:ws1:{account}");
                 self.seed(&on, "live", event_type, r#"{"agent":"agent-a"}"#);
+            }
+            Event::Order(order, state, account) => {
+                let on = format!("acct:ws1:{account}");
+                let payload = format!(r#"{{"client_order_id":"{order}","state":"{state}"}}"#);
+                self.seed(&on, "live", "OrderStateChanged", &payload);
             }
         }
     }
@@ -270,6 +278,9 @@ fn a_live_mandate_on_the_owners_recorded_robinhood_connection_is_created_confirm
         Event::Establish(GOOD),
         Event::Account("OrderSubmitted", ACCOUNT),
         Event::Account("FillApplied", OTHER_ACCOUNT),
+        Event::Order("mdt-1", "unknown", ACCOUNT),
+        Event::Order("mdt-1", "canceled", ACCOUNT),
+        Event::Order("mdt-2", "unknown", OTHER_ACCOUNT),
     ]);
     let live = in_env(Environment::Live);
     let steps: [Gesture; 3] = [World::create, World::confirm, World::deploy];
@@ -327,8 +338,9 @@ enum Stage {
 
 /// Every live combination but the admitted one keeps refusing, with `paper_only` as before (DEC-530
 /// item 2), `mandate_not_paper` for a paper owner and a live document, or `connection_spent` once
-/// the record is spent (DEC-910 item 3); the show-code gestures refuse alike, and nothing is
-/// written. A record revoked or spent after an earlier gesture passed refuses the next one.
+/// the record is spent (a fill, DEC-910 item 3, or an order left `unknown`, V-001); the show-code
+/// gestures refuse alike, and nothing is written. A record revoked or spent after an earlier
+/// gesture passed refuses the next one.
 #[test]
 fn every_other_live_combination_is_refused_with_its_code_and_writes_nothing() {
     let paper_record = Record {
@@ -364,10 +376,13 @@ fn every_other_live_combination_is_refused_with_its_code_and_writes_nothing() {
     let revoke = Event::Revoke(CONN);
     let fill = Event::Account("FillApplied", ACCOUNT);
     let late = Event::Account("LateFillApplied", ACCOUNT);
+    let lost = Event::Order("mdt-1", "unknown", ACCOUNT);
     let (paper, live) = (Environment::Paper, Environment::Live);
     let backtest = Environment::Backtest;
-    let cases: [(&str, &[Event], Stage, Environment, bool); 21] = [
+    let cases: [(&str, &[Event], Stage, Environment, bool); 23] = [
         ("paper_only", &[], Stage::Create, live, true),
+        ("connection_spent", &[good, lost], Stage::Create, live, true),
+        ("connection_spent", &[good, lost], Stage::Deploy, live, true),
         ("paper_only", &[good], Stage::Create, live, false),
         ("paper_only", &[good], Stage::Create, backtest, true),
         (
@@ -532,8 +547,20 @@ fn expected(owner: Environment, live_document: bool, events: &[Event]) -> Result
     }) else {
         return Err("paper_only");
     };
-    let spends = |e: &&Event| matches!(e, Event::Account("FillApplied" | "LateFillApplied", a) if *a == record.account);
-    if events.iter().any(|e| spends(&e)) {
+    let fills = ["FillApplied", "LateFillApplied"];
+    let spends =
+        |e: &&Event| matches!(e, Event::Account(t, a) if fills.contains(t) && *a == record.account);
+    let mut latest: Vec<(&str, &str)> = Vec::new();
+    for event in events {
+        if let Event::Order(order, state, account) = event
+            && *account == record.account
+        {
+            latest.retain(|(o, _)| o != order);
+            latest.push((order, state));
+        }
+    }
+    let lost = latest.iter().any(|(_, state)| *state == "unknown");
+    if events.iter().any(|e| spends(&e)) || lost {
         return Err("connection_spent");
     }
     Ok(())
@@ -571,6 +598,12 @@ fn event() -> impl Strategy<Value = Event> {
             prop::sample::select(vec![ACCOUNT, OTHER_ACCOUNT]),
         )
             .prop_map(|(t, a)| Event::Account(t, a)),
+        1 => (
+            prop::sample::select(vec!["mdt-1", "mdt-2"]),
+            prop::sample::select(vec!["unknown", "accepted", "canceled", "filled"]),
+            prop::sample::select(vec![ACCOUNT, OTHER_ACCOUNT]),
+        )
+            .prop_map(|(o, s, a)| Event::Order(o, s, a)),
     ]
 }
 

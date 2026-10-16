@@ -34,8 +34,8 @@
   `paper` owner takes only a `paper` document, `mandate_not_paper` otherwise; a `live` owner only a
   `live` document on a connection the control stream last records as the owner's own Robinhood
   `live` establishment with a margin attestation and `cli_confirm`, `paper_only` otherwise, and
-  only while no `FillApplied` or `LateFillApplied` is on the account stream it binds,
-  `connection_spent` otherwise) and `gestures.rs` (`--environment`, `paper` by default);
+  only while no `FillApplied` or `LateFillApplied`, and no order whose latest `OrderStateChanged`
+  is `unknown`, is on the account stream it binds, `connection_spent` otherwise) and `gestures.rs` (`--environment`, `paper` by default);
   `crates/mandate-cli/tests/live.rs`: the one admitted path committed in `live`, every other live
   combination refused with its code and writing nothing, the flag, and a property with an
   independent oracle that no other live mandate is ever admitted.

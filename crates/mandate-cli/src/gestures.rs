@@ -1,8 +1,8 @@
 //! The `mandate version create`, `mandate version confirm` and `mandate agent deploy` commands
 //! (first paper trade brief, D2c; DEC-530 item 1): [`crate::version`]'s and [`crate::deploy`]'s
 //! functions over P0's `--journal` and `--store`, run as the owner DEC-527's `--workspace` and
-//! `--user` name, in paper unless `--environment live` (DEC-925). A gesture given no `--code` shows its code and the warnings it
-//! acknowledges and commits nothing; given one, it commits.
+//! `--user` name, in paper unless `--environment live` (DEC-925). A gesture given no `--code` shows
+//! its code and the warnings it acknowledges and commits nothing; given one, it commits.
 
 use std::io::Write;
 use std::path::PathBuf;
