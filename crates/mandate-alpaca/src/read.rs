@@ -100,6 +100,9 @@ pub struct LatestQuote {
     pub ask: Price,
     pub ask_size: Qty,
     pub feed: Feed,
+    /// How far `at` was ahead of the host clock at the read that judged it, zero for a stamp at
+    /// or before that clock (DEC-936 item 3). `None` for a quote parsed without a clock read.
+    pub clock_skew: Option<Duration>,
 }
 
 /// One complete one-minute bar's start and volume, the two fields the trailing volume reads. The
@@ -326,6 +329,7 @@ pub fn latest_quote(instrument: &InstrumentId, body: &[u8]) -> Result<LatestQuot
         ask: side_price(&fields, "ap")?,
         ask_size: Qty::parse(&token(&fields, "as")?).map_err(WireError::from)?,
         feed,
+        clock_skew: None,
     })
 }
 

@@ -254,6 +254,7 @@ pub fn spy_facts(
         ask: price("655.2"),
         ask_size: qty("1"),
         feed: QuoteFeed::Iex,
+        clock_skew: None,
     };
     let broker = BrokerFacts {
         account: wire::account(account).unwrap(),

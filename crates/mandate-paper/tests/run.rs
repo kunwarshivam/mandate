@@ -796,6 +796,8 @@ fn the_shipping_adapter_selects_no_product_value() {
 
 /// The quote's age bound the registered rule set holds (`iex_quote_max_age_s`).
 const QUOTE_MAX_AGE_NS: i128 = 10 * NANOS_PER_S;
+/// How far ahead of the host clock DEC-936 lets the preflight's IEX quote be stamped.
+const QUOTE_SKEW_NS: i128 = 250_000_000;
 
 /// The cause and stage `outcome` refused with, or what else it was.
 fn refused_at(outcome: &Result<Outcome, PaperError>) -> String {
@@ -843,13 +845,16 @@ fn an_asset_record_older_than_its_bound_at_the_judges_read_still_refuses() {
     assert!(scene.posts().is_empty());
 }
 
-/// DEC-935 item 2: a quote stamped after the latest clock read, by even a nanosecond, or older
-/// than its bound by a nanosecond at that read, is refused with nothing sent; one exactly at the
-/// bound is current.
+/// DEC-936 item 1 (amending DEC-935 item 2): a quote stamped more than 250 ms after the clock at
+/// its read, by even a nanosecond, or older than its bound by a nanosecond there, is refused at
+/// the preflight with nothing sent; one exactly at the bound is current.
 #[test]
-fn a_quote_past_the_latest_read_or_its_bound_still_refuses() {
+fn a_quote_past_the_skew_tolerance_or_its_bound_still_refuses() {
     let expected = "Reconcile: a current IEX quote";
-    for (name, offset) in [("future", 1), ("stale", -QUOTE_MAX_AGE_NS - 1)] {
+    for (name, offset) in [
+        ("future", QUOTE_SKEW_NS + 1),
+        ("stale", -QUOTE_MAX_AGE_NS - 1),
+    ] {
         let mut scene = Scene::new(&format!("quote-{name}"), 231..256);
         scene.advancing(0, offset);
         let outcome = scene.run();
@@ -858,6 +863,35 @@ fn a_quote_past_the_latest_read_or_its_bound_still_refuses() {
     }
     let mut scene = Scene::new("quote-at-bound", 231..256);
     scene.advancing(0, -QUOTE_MAX_AGE_NS);
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+}
+
+/// DEC-936 changes only the preflight's check: a quote within the tolerance passes it, and the
+/// shell's judge, unchanged (DEC-935 item 2), still refuses a quote stamped after the run clock.
+/// With a clock that does not move, #1355's 2 to 24 ms skews refuse there, with nothing sent.
+#[test]
+fn a_quote_within_the_tolerance_still_ahead_of_the_run_clock_refuses_at_the_judge() {
+    for offset in [1, 2_000_000, 24_000_000, QUOTE_SKEW_NS] {
+        let mut scene = Scene::new(&format!("quote-skew-{offset}"), 231..256);
+        scene.advancing(0, offset);
+        let outcome = scene.run();
+        assert_eq!(
+            refused_at(&outcome),
+            "Validate: a current, uncrossed IEX quote",
+            "{offset}"
+        );
+        assert!(scene.posts().is_empty(), "{offset}");
+    }
+}
+
+/// #1355's case under DEC-936: a quote 24 ms ahead of the host clock at its read passes the
+/// preflight, and once the clock has moved past its stamp by the run clock's read, the judge and
+/// the binding gate hold it current, so the run places its one order.
+#[test]
+fn a_quote_24_ms_ahead_places_once_the_clock_has_passed_its_stamp() {
+    let mut scene = Scene::new("quote-skew-placed", 231..256);
+    scene.advancing(20_000_000, 24_000_000);
     let outcome = scene.run();
     assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
 }
@@ -879,12 +913,13 @@ proptest! {
         prop_assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
     }
 
-    /// DEC-935 item 2, over clock advances: a quote stamped after the clock's latest read, by a
-    /// nanosecond to an hour, is refused whatever the clock's step, with nothing sent.
+    /// DEC-936 item 1, over clock advances: a quote stamped more than 250 ms after the clock at
+    /// its read, by a nanosecond to an hour, is refused whatever the clock's step, with nothing
+    /// sent.
     #[test]
     fn a_future_quote_refuses_at_any_clock_advance(
         step_ns in 0_u64..=20_000_000,
-        ahead_ns in 1_i128..=3_600 * NANOS_PER_S,
+        ahead_ns in QUOTE_SKEW_NS + 1..=3_600 * NANOS_PER_S,
     ) {
         let mut scene = Scene::new(&format!("future-{step_ns}-{ahead_ns}"), 231..256);
         scene.advancing(step_ns, ahead_ns);

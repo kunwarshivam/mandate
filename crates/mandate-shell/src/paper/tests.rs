@@ -347,6 +347,7 @@ fn facts_at(asset_at: &str, quote_at: &str) -> Result<PaperFacts, String> {
                 ask: price("255.2")?,
                 ask_size: qty("1")?,
                 feed: Feed::Iex,
+                clock_skew: None,
             },
             minute_bars: MinuteBars {
                 instrument: symbol("AAPL")?,
