@@ -13,8 +13,8 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::listing::query_unknown;
 use crate::orders::{
-    EXTERNAL, StateEvidence, account_fields, account_restriction, every_agent_alerted, fill,
-    record_state_change, status_mapping, transition,
+    EXTERNAL, StateEvidence, account_fields, account_restriction, broker_id, every_agent_alerted,
+    fill, record_state_change, status_mapping, transition,
 };
 use crate::payload::{int, text};
 use crate::ports::Ports;
@@ -164,7 +164,8 @@ fn orders(
             None => OrderState::Unknown,
         };
         if adopted != ours {
-            adopt(batch, &id, ours, adopted, differences)?;
+            let broker_order_id = theirs.map(|open| open.broker_order_id.as_str());
+            adopt(batch, &id, ours, adopted, broker_order_id, differences)?;
             if adopted == OrderState::Unknown {
                 query_unknown(batch, id)?;
             }
@@ -376,12 +377,15 @@ fn compensate(
 
 /// Adopts the broker's state for one of our orders: `OrderStateChanged` to the broker's state and
 /// a `CompensatingEvent` naming the difference and the event it corrected (§11). The journal
-/// keeps both, so a replay reproduces the adoption rather than the assumption.
+/// keeps both, so a replay reproduces the adoption rather than the assumption. `broker_order_id`
+/// is the open order's own id when the broker listed the order, and `None` for one it did not
+/// (journal spec §9.16, DEC-869 item 3).
 fn adopt(
     batch: &mut Batch<'_, '_>,
     id: &ClientOrderId,
     from: OrderState,
     to: OrderState,
+    broker_order_id: Option<&str>,
     differences: &mut Vec<Difference>,
 ) -> Result<(), ExecutorError> {
     let corrected = record_state_change(
@@ -390,6 +394,7 @@ fn adopt(
         to,
         StateEvidence {
             adopted: true,
+            broker_order_id: broker_id(broker_order_id),
             ..StateEvidence::default()
         },
     )?;

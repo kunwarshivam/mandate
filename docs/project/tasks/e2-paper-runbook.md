@@ -58,7 +58,7 @@ Read this first, because the brief omits it: `mandate-paper` refuses to start wi
   Alpaca PAPER dashboard only.
 - **Flat paper account**: no position, no open order, zero accrued fees, status ACTIVE, not blocked
   (`crates/mandate-shell/src/paper/judge.rs`). Check and cancel in the Alpaca paper dashboard first.
-- **Clock (DEC-936)**: an NTP-disciplined host only. Before the dry run, record `chronyc tracking`
+- **Clock (DEC-939)**: an NTP-disciplined host (since DEC-936, a quote up to 250 ms ahead of the host clock is also accepted). Before the dry run, record `chronyc tracking`
   (`Leap status : Normal`, `System time` under 5 ms) or `timedatectl show -p NTPSynchronized`
   (`yes`). The judge refuses a quote stamped after the host clock, and an unsynced clock that trails
   the exchange by even a few ms refuses most SPY quotes (#1355). Cloud agent sessions without UDP 123
@@ -328,7 +328,7 @@ check (DEC-79).
 
 ### Run on an NTP-synced host: stopped at the clock check (16:17 to 16:19 UTC)
 
-A fresh cloud session with network access set to Full, to run E2 under DEC-936. chrony 4.x was
+A fresh cloud session with network access set to Full, to run E2 under DEC-939. chrony 4.x was
 installed from apt and started with `time.google.com`, `time.cloudflare.com`, `216.239.35.0`,
 `162.159.200.1` and `pool.ntp.org` (`makestep 0.1 -1`). DNS now resolves (the pool names became
 addresses), but no NTP server answered: every source stayed at `Reach 0`, and a plain
@@ -345,15 +345,15 @@ Leap status     : Not synchronised
 162.159.200.1 Total TX : 8  Total RX : 0
 ```
 The Full network level opens outbound HTTP(S) through the session's proxy only; UDP 123 is still
-refused. Under DEC-936 item 2 this host does not run E2, so the run stopped here: nothing was
+refused. Under DEC-939 item 2 this host does not run E2, so the run stopped here: nothing was
 built into a journal, no Alpaca call was made, no dry run and no order. Setting the clock from an
-HTTP `Date` header or from Alpaca's stamps is not an NTP source (DEC-936, alternatives) and was not
+HTTP `Date` header or from Alpaca's stamps is not an NTP source (DEC-939, alternatives) and was not
 tried. E2 needs a host with UDP 123 egress (a VM or the founder's machine with chrony or
 systemd-timesyncd), or a new founder decision.
 
 ### Run on the founder's macOS laptop, NTP-synced: stopped at the dry run, classification facts for one share (16:30 to 16:45 UTC)
 
-**Clock (DEC-936).** `sntp` against three servers, before and after the founder stepped the clock
+**Clock (DEC-939).** `sntp` against three servers, before and after the founder stepped the clock
 with `sudo sntp -sS time.apple.com`:
 ```
 16:30:31 UTC, before (the host trailed NTP by about 154 ms: not run)

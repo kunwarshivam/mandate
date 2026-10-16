@@ -1,16 +1,13 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import styles from "./scroll.module.css";
 
 /**
- * The opening's sea (DEC-908): the long page starts on Hiroshige's bay in pixels, as the request for
- * a place ends on his full moon over it. A tide sea runs behind the agent's page from just above it
- * to below it; a moon in sun rises out of it as the opening comes into view, its light glinting on
- * the water, gulls flap and glide over it, and two pine islands stand on the horizon. The water is
- * rows of curling crests, small and close by the horizon and wider and taller nearer, as a sea
- * recedes; each row glides along, the nearer ones faster, and rises and falls on a swell that rolls
- * down the rows, and foam laps along the horizon. Every pixel is a flat token colour on the thread's
- * grid, so nothing blends. It is decoration, hidden from assistive technology, and still, half
- * risen, with motion reduced.
+ * The opening's sea (DEC-908, DEC-932): a tide sea in pixels runs behind the agent's page from just
+ * above it to below it. The water is rows of curling crests, small and close by the horizon and
+ * wider and taller nearer, as a sea recedes; each row glides along, the nearer ones faster, and rises
+ * and falls on a swell that rolls down the rows, and foam laps along the horizon. Every pixel is a
+ * flat token colour on one pixel grid, so nothing blends. It is decoration, hidden from assistive
+ * technology, and still with motion reduced.
  */
 
 type Shape = readonly string[];
@@ -92,79 +89,6 @@ export function swell(depth = SEA_DEPTH): { wave: Wave; from: number; shift: num
 /** Spray along the horizon, which laps a cell back and forth. */
 export const FOAM_TILE: Shape = ["ccccc..c.c.."];
 
-export const LEFT_ISLAND: Shape = [
-  "............x.......",
-  "...........xxx......",
-  "..........xxxxx.....",
-  ".........xxxxxxx....",
-  "............x.......",
-  ".......xxxxxxxxxx...",
-  "...xxxxxxxxxxxxxxxx.",
-  "xxxxxxxxxxxxxxxxxxxx",
-];
-
-export const RIGHT_ISLAND: Shape = [
-  "....xx......",
-  "..xxxxxx....",
-  ".xxxxxxxxx..",
-  "xxxxxxxxxxxx",
-];
-
-/** A gull with its wings up, and with them down: the two frames of a beat. */
-export const GULL_UP: Shape = ["xx...xx", "..x.x..", "...x..."];
-export const GULL_DOWN: Shape = ["...x...", "..x.x..", "xx...xx"];
-
-/** Where each gull flies in the flock, in cells, as the geese cross the moon in the print. */
-export const FLOCK = [
-  { x: 0, y: 0 },
-  { x: 10, y: 2 },
-  { x: 19, y: 4 },
-] as const;
-
-export const MOON_RADIUS = 7;
-
-/** The moon's cells, a disc `MOON_RADIUS` cells across each way from its centre. */
-export function moonShape(r = MOON_RADIUS): Shape {
-  const size = r * 2;
-  return Array.from({ length: size }, (_, y) =>
-    Array.from({ length: size }, (_, x) => ((x + 0.5 - r) ** 2 + (y + 0.5 - r) ** 2 <= r * r ? "x" : ".")).join(""),
-  );
-}
-
-/** The moon's light on the water under it: broken bars, every other row, narrowing as they near. */
-export const REFLECTION: Shape = [
-  "..............",
-  "..xxxxxxxxx...",
-  "..............",
-  "....xxxxxxxx..",
-  "..............",
-  "...xxxxxx.....",
-  "..............",
-  ".....xxxxx....",
-  "..............",
-  "....xxx.......",
-  "..............",
-  "......xx......",
-];
-
-/** The same light a moment later, each bar slipped a cell or broken, so it glints. */
-export const GLINT: Shape = [
-  "..............",
-  "...xxxxxxxxx..",
-  "..............",
-  "...xxxxx.xx...",
-  "..............",
-  "....xxxxxx....",
-  "..............",
-  "....xxxxx.....",
-  "..............",
-  ".....xxx......",
-  "..............",
-  ".....xx.......",
-];
-
-const MOON = moonShape();
-
 /** A shape's filled cells as runs along each row, `cell` pixels a cell. */
 export function runs(shape: Shape, cell: number): { x: number; y: number; w: number }[] {
   const out: { x: number; y: number; w: number }[] = [];
@@ -176,15 +100,6 @@ export function runs(shape: Shape, cell: number): { x: number; y: number; w: num
 
 function Cells({ shape, cell, fill, x = 0, y = 0 }: { shape: Shape; cell: number; fill: string; x?: number; y?: number }) {
   return runs(shape, cell).map((r) => <rect key={`${r.x},${r.y}`} x={x + r.x} y={y + r.y} width={r.w} height={cell} fill={fill} />);
-}
-
-/** A small picture sized to `shape`'s cells; `children` draws in it, or the shape itself. */
-function Sprite({ shape, cell, fill, className, slot, children }: { shape: Shape; cell: number; fill: string; className?: string; slot?: string; children?: ReactNode }) {
-  return (
-    <svg width={shape[0]!.length * cell} height={shape.length * cell} shapeRendering="crispEdges" className={className} overflow="visible" data-slot={slot}>
-      {children ?? <Cells shape={shape} cell={cell} fill={fill} />}
-    </svg>
-  );
 }
 
 /** One row of waves, as wide as the sea and one wave more, so its glide never shows an end. */
@@ -223,33 +138,11 @@ function Row({ row, index, cell }: { row: ReturnType<typeof swell>[number]; inde
   );
 }
 
-/** Where the moon and its reflection stand across the sea. */
-const MOON_AT = "left-[26%] sm:left-[12%]";
-
-const flockWidth = Math.max(...FLOCK.map((g) => g.x)) + GULL_UP[0]!.length;
-const flockHeight = Math.max(...FLOCK.map((g) => g.y)) + GULL_UP.length;
-const FLOCK_BOX: Shape = Array.from({ length: flockHeight }, () => ".".repeat(flockWidth));
-
 /** The sea at one size of cell; `className` shows it only at the widths that use that size. */
 function Sea({ cell, className }: { cell: 6 | 8; className: string }) {
   const foam = `sea-foam-${cell}`;
   return (
-    <div className={className} style={{ "--cell": `${cell}px`, "--cell-px": cell, "--cell-dpx": cell * 2, "--rise-px": MOON_RADIUS * cell, "--rise-dpx": MOON_RADIUS * cell * 2 } as CSSProperties}>
-      <Sprite shape={MOON} cell={cell} fill="var(--highlight)" className={`absolute bottom-full ${MOON_AT} ${styles.moon}`} slot="sea-moon" />
-      <Sprite shape={FLOCK_BOX} cell={cell} fill="var(--sea-land)" className="absolute bottom-full left-[15%] mb-24 max-lg:hidden">
-        {FLOCK.map((g, i) => (
-          <g key={i} style={{ "--i": i } as CSSProperties}>
-            <g className={styles.wingsUp}>
-              <Cells shape={GULL_UP} cell={cell} fill="var(--sea-land)" x={g.x * cell} y={g.y * cell} />
-            </g>
-            <g className={styles.wingsDown} data-slot="gull-down">
-              <Cells shape={GULL_DOWN} cell={cell} fill="var(--sea-land)" x={g.x * cell} y={g.y * cell} />
-            </g>
-          </g>
-        ))}
-      </Sprite>
-      <Sprite shape={LEFT_ISLAND} cell={cell} fill="var(--sea-land)" className="absolute bottom-full left-[2%]" />
-      <Sprite shape={RIGHT_ISLAND} cell={cell} fill="var(--sea-land)" className="absolute right-[2%] bottom-full" />
+    <div className={className} style={{ "--cell": `${cell}px`, "--cell-px": cell, "--cell-dpx": cell * 2 } as CSSProperties}>
       <div className="absolute inset-0 overflow-hidden">
         <svg width="100%" height="100%" shapeRendering="crispEdges" className="absolute inset-0">
           <rect width="100%" height="100%" fill="var(--tide)" />
@@ -266,21 +159,13 @@ function Sea({ cell, className }: { cell: 6 | 8; className: string }) {
           <rect width="100%" height={cell} fill={`url(#${foam})`} />
         </svg>
       </div>
-      <Sprite shape={REFLECTION} cell={cell} fill="var(--highlight)" className={`absolute top-0 ${MOON_AT}`}>
-        <g className={styles.glintA}>
-          <Cells shape={REFLECTION} cell={cell} fill="var(--highlight)" />
-        </g>
-        <g className={styles.glintB} data-slot="glint">
-          <Cells shape={GLINT} cell={cell} fill="var(--highlight)" />
-        </g>
-      </Sprite>
     </div>
   );
 }
 
 export function PixelSea({ className }: { className?: string }) {
   return (
-    <div aria-hidden className={`${styles.sea} pointer-events-none ${className ?? ""}`} data-slot="pixel-sea" data-thread-band="" data-ambient="">
+    <div aria-hidden className={`${styles.sea} pointer-events-none ${className ?? ""}`} data-slot="pixel-sea" data-ambient="">
       <Sea cell={6} className="absolute inset-0 sm:hidden" />
       <Sea cell={8} className="absolute inset-0 max-sm:hidden" />
     </div>

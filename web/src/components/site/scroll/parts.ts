@@ -1,13 +1,13 @@
 import styles from "./scroll.module.css";
 
 /** The long page's parts, in order; the bar lists none of them (DEC-908). */
-export const PARTS = ["checks", "asking", "threads", "limits", "wont"] as const;
+export const PARTS = ["limits", "asking", "threads", "wont"] as const;
 
 export const INTRO_ID = "intro";
 export const SIGN_UP_ID = "sign-up";
 export const PAGE_FORM_ID = "beta-page";
 
-/** A part's column; it sits over the thread, so the thread passes behind the words and under the pictures. */
+/** A part's column. */
 export const WRAP = "relative z-[2] mx-auto w-full max-w-[80rem] px-5 sm:px-8 lg:px-12";
 
 const HEADING = "font-normal text-balance tracking-[-0.022em]";

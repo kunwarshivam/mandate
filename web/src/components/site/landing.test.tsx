@@ -50,6 +50,12 @@ const zOf = (el: HTMLElement) => Number(el.style.zIndex);
 const icon = (name: string) => within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name });
 const home = () => document.querySelector<HTMLElement>("[data-slot=landing-page]")!;
 
+/** Chooses a line from one of the browser's menus, as the desktop's icons no longer open every window. */
+async function fromBrowserMenu(title: string, line: string) {
+  await press(within(screen.getByRole("menubar", { name: "Browser menus" })).getByRole("menuitem", { name: title }));
+  await press(within(screen.getByRole("menu", { name: title })).getByRole("menuitem", { name: line }));
+}
+
 const RECORD = "The record - Example decision";
 const HELP = "Questions - Owlhead Help";
 const GUESTBOOK = "guestbook.cgi";
@@ -101,16 +107,20 @@ describe("the landing page's structure", () => {
     }
   });
 
-  it("sends the browser's guides to sections that exist, or opens the window that holds the rest", async () => {
+  it("keeps no row of guides under the address, and the Directory menu sends its guides to sections that exist, or opens the window that holds the rest", async () => {
     const { container } = renderLanding();
-    const guides = () => screen.getByRole("navigation", { name: "Guides" });
-    expect(within(guides()).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["What's New?", "What's Cool?", "Handbook", "Questions"]);
-    const links = within(guides()).getAllByRole("link");
+    expect(screen.queryByRole("navigation", { name: "Guides" })).toBeNull();
+    const bar = screen.getByRole("menubar", { name: "Browser menus" });
+    const directory = () => screen.getByRole("menu", { name: "Directory" });
+    await press(within(bar).getByRole("menuitem", { name: "Directory" }));
+    expect(within(directory()).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["What's New?", "What's Cool?", "Handbook", "Questions"]);
+    const links = within(directory()).getAllByRole("menuitem").filter((m) => m.tagName === "A");
     expect(links.map((a) => a.textContent)).toEqual(["What's New?", "Handbook"]);
     for (const a of links) expect(container.querySelector(a.getAttribute("href")!)?.tagName).toBe("H2");
-    await press(within(guides()).getByRole("button", { name: "What's Cool?" }));
+    await press(within(directory()).getByRole("menuitem", { name: "What's Cool?" }));
     expect(win(RECORD)).toHaveAttribute("data-front", "true");
-    await press(within(guides()).getByRole("button", { name: "Questions" }));
+    await press(within(bar).getByRole("menuitem", { name: "Directory" }));
+    await press(within(directory()).getByRole("menuitem", { name: "Questions" }));
     expect(win(HELP)).toHaveAttribute("data-front", "true");
   });
 
@@ -138,14 +148,13 @@ describe("the landing page's structure", () => {
     expect(html.indexOf("<noscript>")).toBeLessThan(html.indexOf('data-window="guestbook"'));
   });
 
-  it("greys out the toolbar's buttons that can do nothing for this page, and Home and Reload work", async () => {
+  it("keeps only Back, Forward, Home and Reload on the toolbar, greys out Back and Forward with nowhere to go, and Home and Reload work", async () => {
     renderLanding();
     const tools = screen.getByRole("toolbar", { name: "Browser" });
     const buttons = within(tools).getAllByRole("button");
-    expect(buttons.map((b) => b.textContent)).toEqual(["Back", "Forward", "Home", "Reload", "Images", "Open", "Print", "Find", "Stop"]);
+    expect(buttons.map((b) => b.textContent)).toEqual(["Back", "Forward", "Home", "Reload"]);
     expect(buttons.filter((b) => !(b as HTMLButtonElement).disabled).map((b) => b.textContent)).toEqual(["Home", "Reload"]);
-    expect(within(tools).getByRole("button", { name: "Stop loading" })).toBeDisabled();
-    expect(within(tools).queryByRole("button", { name: "Stop" })).toBeNull();
+    for (const gone of ["Images", "Open", "Print", "Find", "Stop", "Stop loading"]) expect(within(tools).queryByRole("button", { name: gone }), gone).toBeNull();
     for (const b of buttons) expect(b, b.textContent ?? "").toHaveAttribute("tabindex", "-1");
     const root = document.querySelector<HTMLElement>("[data-scroll-root]")!;
     const scrollTo = vi.fn();
@@ -449,7 +458,7 @@ describe("the browser's tabs", () => {
     root.dataset.mode = "light";
   });
 
-  it("moves between the tabs with the arrow keys, and comes back to the home page from the hero, a guide, or the skip link", async () => {
+  it("moves between the tabs with the arrow keys, and comes back to the home page from the hero, a guide in the Directory menu, or the skip link", async () => {
     render(
       <>
         <a href="#main">Skip to content</a>
@@ -473,7 +482,7 @@ describe("the browser's tabs", () => {
     expect(site).toHaveFocus();
     fireEvent.keyDown(site, { key: "ArrowLeft" });
     expect(app).toHaveAttribute("aria-selected", "true");
-    await press(within(screen.getByRole("navigation", { name: "Guides" })).getByRole("link", { name: "Handbook" }));
+    await fromBrowserMenu("Directory", "Handbook");
     expect(site).toHaveAttribute("aria-selected", "true");
     expect(home()).toBeVisible();
   });
@@ -544,16 +553,17 @@ describe("the desktop", () => {
     expect(win("Owlhead Home Page")).toBeVisible();
   });
 
-  it("opens each icon's window in front, and a touched window comes forward", async () => {
+  it("keeps readme.txt, owl.jpg, Display and Winamp off the desktop, opens readme.txt and owl.jpg in front from the browser's menus, and a touched window comes forward", async () => {
     renderLanding();
     const icons = screen.getByRole("list", { name: "Desktop" });
-    await press(within(icons).getByRole("button", { name: "readme.txt" }));
+    for (const gone of ["readme.txt", "owl.jpg", "Display", "Winamp"]) expect(within(icons).queryByRole("button", { name: gone }), gone).toBeNull();
+    await fromBrowserMenu("Help", "About Owlhead…");
     const readme = win("readme.txt - Notepad");
     expect(readme).toHaveTextContent("Drag a window by its title bar.");
     expect(readme).toHaveAttribute("data-front", "true");
     expect(zOf(readme)).toBeGreaterThan(zOf(win("Owlhead Home Page")));
 
-    await press(within(icons).getByRole("button", { name: "owl.jpg" }));
+    await fromBrowserMenu("Window", "owl.jpg");
     const owl = win("owl.jpg - Picture Viewer");
     expect(within(owl).getByRole("img")).toHaveAccessibleName(/owl in ink, perched on a pine branch/);
     expect(owl).toHaveTextContent("Soga Nichokuan, Owl on a Pine Branch, early 17th century.");
@@ -608,7 +618,7 @@ describe("the desktop", () => {
     );
     expect(container.querySelector("[data-slot=wallpaper]")).toHaveAttribute("data-wallpaper", "kiso-snow");
     expect(container.querySelector("[data-slot=desktop-pattern]")).toBeNull();
-    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
+    await fromBrowserMenu("View", "Change wallpaper…");
     const display = win("Display Properties");
     expect(within(display).getByRole("radio", { name: "The Kiso Mountains in Snow" })).toBeChecked();
     expect(within(display).queryAllByRole("radio", { name: /pattern/i })).toHaveLength(0);
@@ -621,7 +631,7 @@ describe("the desktop", () => {
     const { container } = renderLanding();
     const wallpaper = container.querySelector("[data-slot=wallpaper]")!;
     expect(wallpaper).toHaveAttribute("data-wallpaper", "auto");
-    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
+    await fromBrowserMenu("View", "Change wallpaper…");
     const display = win("Display Properties");
     await act(async () => fireEvent.click(within(display).getByRole("radio", { name: "Two Men Contemplating the Moon" })));
     expect(wallpaper).toHaveAttribute("data-wallpaper", "two-men-moon");
@@ -633,7 +643,7 @@ describe("the desktop", () => {
     expect(screen.queryByRole("region", { name: "Display Properties" })).toBeNull();
   });
 
-  it("lists every window in Start, closes it on Escape, and shuts down to the safe-to-turn-off screen", async () => {
+  it("lists the home page, every desktop icon and the apps kept off the desktop in Start, closes it on Escape, and shuts down to the safe-to-turn-off screen", async () => {
     renderLanding();
     const startButton = screen.getByRole("button", { name: "Start" });
     await press(startButton);

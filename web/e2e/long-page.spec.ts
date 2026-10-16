@@ -1,11 +1,11 @@
 import { type Page, expect, test } from "@playwright/test";
 
 /**
- * The long page under the desktop (DEC-907) in a real browser, in light and dark (the two projects):
- * the desktop fills the first screen, the page rises over it with Sign in and Sign up in its bar, no
- * width from 320 px scrolls sideways, each picture of the app is the one for the page's theme, and
- * with motion reduced nothing on the page moves with the scroll, the owl rests on its first perch,
- * and the pixel thread is sewn whole at once.
+ * The long page under the desktop (DEC-907, DEC-932) in a real browser, in light and dark (the two
+ * projects): the desktop fills the first screen, the page rises over it, its one bar shows Sign in
+ * and Sign up once the desktop is covered, no width from 320 px scrolls sideways, each picture of the
+ * app is the one for the page's theme, and with motion reduced nothing on the page moves with the
+ * scroll.
  */
 
 const PATH = "/welcome";
@@ -31,11 +31,13 @@ for (const width of [320, 390, 1024, 1440]) {
     expect(first!.y).toBe(0);
     expect(first!.height).toBeGreaterThanOrEqual(843);
     expect((await sheet.boundingBox())!.y, "the long page starts below the first screen").toBeGreaterThanOrEqual(843);
+    await expect(page.locator("[data-slot=page-bar]"), "while the desktop's own bar shows, the page's is out of sight").toBeHidden();
 
     await toBottom(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     const bar = page.locator("[data-slot=page-bar]");
-    expect((await bar.boundingBox())!.y, "the bar sticks to the top edge").toBe(0);
+    await expect(bar).toBeVisible();
+    await expect.poll(async () => (await bar.boundingBox())!.y, "the bar is pinned to the top edge").toBe(0);
     const account = bar.locator("[data-slot=account-buttons]");
     for (const control of [account.getByRole("link", { name: "Sign in" }), account.getByRole("button", { name: "Sign up" })]) {
       await expect(control).toBeInViewport({ ratio: 1 });
@@ -54,7 +56,7 @@ test("the bar's Sign up brings the request form into view with the cursor in its
 });
 
 /** The pictures cut to one piece of a screen, which a wide window draws at the size they were taken. */
-const PIECES = ["verdict", "check", "ask", "ladder"];
+const PIECES = ["ask", "ladder"];
 
 test("each picture of the app has loaded, it is the one for the page's theme, and none is drawn larger than it was taken", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -192,6 +194,7 @@ test("the Scroll cue follows the browser window's status bar when the window is 
 
 test("every part of the desktop and the page's bar sits in a landmark", async ({ page }) => {
   await open(page, 1440);
+  await page.evaluate(() => window.scrollTo({ top: window.innerHeight * 1.5, behavior: "instant" }));
   const outside = await page.evaluate(() => {
     const LANDMARK = "main, header, footer, nav, aside, section[aria-label], section[aria-labelledby], [role=region][aria-label], form[aria-label]";
     const parts = [
@@ -210,110 +213,18 @@ test("every part of the desktop and the page's bar sits in a landmark", async ({
   await expect(page.getByRole("banner").getByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
-test("with motion allowed, the owl peeks over the Scroll cue in the middle of the screen", async ({ page }) => {
+test("with motion allowed, the pieces settle as they come into view", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
-  const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "peeking");
-  await expect.poll(async () => {
-    const box = (await owl.boundingBox())!;
-    return Math.round(box.x + box.width / 2);
-  }).toBe(720);
-});
-
-test("with motion allowed, the owl flies down the page and the pieces settle as they come into view", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await open(page, 1440);
-  const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "peeking");
-  await expect(owl).toHaveAttribute("aria-hidden", "true");
-  const where = () => owl.evaluate((el) => getComputedStyle(el).transform);
-  await page.locator("#threads").scrollIntoViewIfNeeded();
-  const at = await where();
   await page.locator("#limits").scrollIntoViewIfNeeded();
-  await expect.poll(where).not.toBe(at);
   await expect(page.locator("#limits-title")).toHaveAttribute("data-shown", "");
   expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBe("on");
 });
 
-test("with motion allowed, the owl lands, then draws nothing but a blink until the page moves again", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.addInitScript(() => {
-    const clear = CanvasRenderingContext2D.prototype.clearRect;
-    (window as unknown as { owlPaints: number }).owlPaints = 0;
-    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
-      if (this.canvas.dataset.slot === "flying-owl") (window as unknown as { owlPaints: number }).owlPaints++;
-      return clear.apply(this, args);
-    };
-  });
+test("draws no flying owl, no thread and no painting on the page (DEC-932)", async ({ page }) => {
   await open(page, 1440);
-  const owl = page.locator("[data-slot=flying-owl]");
-  const paints = () => page.evaluate(() => (window as unknown as { owlPaints: number }).owlPaints);
-  await page.locator("#threads").scrollIntoViewIfNeeded();
-  await expect
-    .poll(() => page.evaluate(() => document.getAnimations().filter((a) => a instanceof CSSTransition && a.playState === "running").length), { message: "the pieces have settled", timeout: 10_000 })
-    .toBe(0);
-  const phase = await page.evaluate(() => performance.now() % 6800);
-  if (phase < 2700 || phase > 4000) await page.waitForTimeout((2700 - phase + 6800) % 6800);
-  await expect(owl, "a glance starts every 6.8 s and ends 1.5 s in; these two seconds are clear of both").toHaveAttribute("data-owl", "perched");
-  const landed = await paints();
-  await page.waitForTimeout(2000);
-  expect((await paints()) - landed, "in two seconds, at most a blink's two paints").toBeLessThanOrEqual(2);
-  const bobs = await owl.evaluate((el) => el.getAnimations().map((a) => (a as CSSAnimation).animationName));
-  expect(bobs, "it bobs in CSS").toHaveLength(1);
-  expect(bobs[0]).toMatch(/owl-bob$/);
-  await page.mouse.wheel(0, 400);
-  await expect(owl).not.toHaveAttribute("data-owl", "perched");
-  await expect(owl).toHaveAttribute("data-owl", "perched", { timeout: 10_000 });
-});
-
-test("with motion reduced, the owl stands still on the first perch and asks for no frame", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await open(page, 1440);
-  const owl = page.locator("[data-slot=flying-owl]");
-  await expect(owl).toHaveAttribute("data-owl", "resting");
-  const at = await owl.boundingBox();
-  await page.evaluate(() => window.scrollTo({ top: window.innerHeight * 1.2, behavior: "instant" }));
-  const perch = await page.locator("[data-perch]").first().boundingBox();
-  const now = (await owl.boundingBox())!;
-  expect(now.y, "it scrolls with the page, not on its own").toBeCloseTo(at!.y - (await page.evaluate(() => window.scrollY)), 0);
-  expect(Math.abs(now.y + now.height / 2 - perch!.y), "it stands on the first perch's top edge").toBeLessThan(now.height);
-  expect(await page.locator("[data-slot=long-page]").getAttribute("data-motion")).toBeNull();
-});
-
-const painted = (page: Page) =>
-  page.locator("[data-slot=pixel-thread]").evaluate((canvas: HTMLCanvasElement) => {
-    const { data } = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
-    let n = 0;
-    for (let i = 3; i < data.length; i += 4) if (data[i]! > 0) n++;
-    return n;
-  });
-
-for (const width of [390, 1440]) {
-  test(`${width} px: with motion reduced, the thread is sewn the whole way down at once, under the words`, async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await open(page, width);
-    const thread = page.locator("[data-slot=pixel-thread]");
-    await expect(thread).toHaveAttribute("aria-hidden", "true");
-    await expect(thread).toHaveAttribute("data-thread", "whole");
-    for (const part of ["#threads", "#asking", "#limits"]) {
-      await page.locator(part).scrollIntoViewIfNeeded();
-      await expect.poll(() => painted(page), `stitches beside ${part}`).toBeGreaterThan(0);
-    }
-    const title = (await page.locator("#limits-title").boundingBox())!;
-    const onTop = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("#limits-title") !== null, [title.x + 4, title.y + title.height / 2]);
-    expect(onTop, "the words sit over the thread").toBe(true);
-  });
-}
-
-test("with motion allowed, the thread is sewn on as the visitor reads down", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await open(page, 1440);
-  const thread = page.locator("[data-slot=pixel-thread]");
-  await page.locator("#intro-title").scrollIntoViewIfNeeded();
-  await expect(thread).toHaveAttribute("data-thread", "sewing");
-  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
-  await expect.poll(() => painted(page)).toBeGreaterThan(0);
+  for (const slot of ["flying-owl", "pixel-thread", "plate", "brokers", "sea-moon"]) await expect(page.locator(`[data-slot=${slot}]`), slot).toHaveCount(0);
+  await expect(page.locator("[data-perch]")).toHaveCount(0);
 });
 
 for (const width of [390, 1440]) {
@@ -333,18 +244,10 @@ for (const width of [390, 1440]) {
     const onTop = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest("[data-shot=agent]") !== null, [shot.x + shot.width / 2, shot.y + shot.height / 2]);
     expect(onTop, "the picture sits over the sea").toBe(true);
     expect(await sea.evaluate((el) => el.getAnimations({ subtree: true }).length), "the sea rests with motion reduced").toBe(0);
-    expect(await risen(page), "the moon rests half risen").toBeCloseTo(0.5, 2);
   });
 }
 
-/** How much of the moon stands above the horizon, 0 to 1. */
-const risen = (page: Page) =>
-  page.locator("[data-slot=long-page] [data-slot=pixel-sea]").evaluate((sea) => {
-    const moon = [...sea.querySelectorAll("[data-slot=sea-moon]")].map((m) => m.getBoundingClientRect()).find((r) => r.width > 0)!;
-    return (sea.getBoundingClientRect().top - moon.top) / moon.height;
-  });
-
-test("with motion allowed, the water moves and the moon rises out of it as the opening comes into view", async ({ page }) => {
+test("with motion allowed, the water moves once the opening comes into view", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await open(page, 1440);
   const sea = page.locator("[data-slot=long-page] [data-slot=pixel-sea]");
@@ -353,9 +256,6 @@ test("with motion allowed, the water moves and the moon rises out of it as the o
   expect(await looping()).toBe(0);
   await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - window.innerHeight + 20, behavior: "instant" }));
   await expect(sea).toHaveAttribute("data-ambient", "playing");
-  await expect.poll(() => risen(page), "the moon is still under the water as the sea comes in").toBeLessThan(0.3);
-  await sea.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 200, behavior: "instant" }));
-  await expect.poll(() => risen(page), "and half risen once the opening is in view").toBeCloseTo(0.5, 2);
   expect(await sea.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === "running").length)).toBeGreaterThan(5);
 });
 

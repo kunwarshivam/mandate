@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { INTRO_ID } from "./parts";
-import { CUE_MOVED, ScrollCue } from "./scroll-cue";
+import { ScrollCue } from "./scroll-cue";
 
 /**
  * The cue on the desktop's first screen that there is more below (DEC-907): a link to the long page,
@@ -102,8 +102,6 @@ describe("the scroll cue", () => {
     await settle();
     expect(queue, "neither an icon nor the cue itself moves it").toHaveLength(0);
 
-    const moved = vi.fn();
-    document.addEventListener(CUE_MOVED, moved);
     vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
       if (this.getAttribute("data-slot") === "desktop-stage") return rect({ width: 1440, height: 900, right: 1440, bottom: 900 });
       if (this.getAttribute("data-slot") === "status-text") return rect({ left: 200, right: 1240, top: 600, width: 1040, height: 24 });
@@ -114,13 +112,10 @@ describe("the scroll cue", () => {
     expect(queue, "the window holding the status bar moved").toHaveLength(1);
     expect(run()).toBe(31);
     expect(cue.style.top).toBe("612px");
-    expect(moved, "it tells the owl it moved").toHaveBeenCalledTimes(1);
 
     document.querySelector("[data-slot=os-window]")!.dispatchEvent(new Event("animationstart", { bubbles: true }));
     expect(queue, "the window began to animate").toHaveLength(1);
     expect(run()).toBe(30);
-    expect(moved, "it stayed put, so it says nothing").toHaveBeenCalledTimes(1);
-    document.removeEventListener(CUE_MOVED, moved);
   });
 
   it("brings the long page into view when pressed, without changing the address", () => {

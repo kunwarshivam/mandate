@@ -25,7 +25,7 @@ use mandate_time::{TimeError, UtcNanos, new_york_date_and_hour};
 use crate::client::{Pause, reference_status};
 use crate::error::{ReadError, TransportError};
 use crate::http::{Response, is_pair_half, symbol_segment};
-use crate::read::{self, LatestQuote, MinuteBars, judge_age};
+use crate::read::{self, LatestQuote, MinuteBars, judge_quote_age};
 
 /// The market-data host. With [`crate::PAPER_HOST`], one of the two hosts compiled in.
 pub const DATA_HOST: &str = "https://data.alpaca.markets";
@@ -281,6 +281,8 @@ impl<D: DataTransport, P: Pause> DataClient<D, P> {
     /// The instrument's latest quote, if the broker has one, it can be read, and it is no older
     /// than `max_age` at the clock's now. `max_age` is the caller's: the data profile's staleness
     /// threshold is configuration (trading-domain spec §4.2), so this read holds none of its own.
+    /// An IEX quote may be stamped up to [`read::IEX_QUOTE_CLOCK_SKEW`] after the clock's now,
+    /// and the skew observed is recorded on it as [`LatestQuote::clock_skew`] (DEC-936).
     pub async fn latest_quote(
         &self,
         instrument: &InstrumentId,
@@ -292,8 +294,11 @@ impl<D: DataTransport, P: Pause> DataClient<D, P> {
             .await?;
         reference_status(response.status)?;
         let quote = read::latest_quote(instrument, &response.body)?;
-        judge_age(quote.at, self.pause.now(), max_age)?;
-        Ok(quote)
+        let clock_skew = judge_quote_age(&quote, self.pause.now(), max_age)?;
+        Ok(LatestQuote {
+            clock_skew: Some(clock_skew),
+            ..quote
+        })
     }
 
     /// The equity's complete one-minute IEX bars inside the `window` before the clock's now, as
