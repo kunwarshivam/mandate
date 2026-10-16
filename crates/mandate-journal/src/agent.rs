@@ -14,8 +14,8 @@ use crate::{
     Draft, Invalid, InvalidReason, StoredEvent, StreamId, StreamType, TrustedStart, VerifiedPrefix,
 };
 
-/// The event types §9.1 closes on the agent stream.
-const CLOSED: [&str; 12] = [
+/// The event types §9.1 closes on the agent stream, and the §9.7 records closed there by this module.
+const CLOSED: [&str; 13] = [
     "StreamOpened",
     "ObservationRecorded",
     "ModelOutputRecorded",
@@ -25,6 +25,7 @@ const CLOSED: [&str; 12] = [
     "ApprovalDelivered",
     "ApprovalResponded",
     "ApprovalRevalidated",
+    "ApprovalTimedOut",
     "AgentModeChanged",
     "KillSwitchActivated",
     "OwnerExitRequested",
@@ -79,7 +80,8 @@ pub(crate) fn payload(
     Ok(payload)
 }
 
-/// Subject rules 14 and 15 (`stream_mismatch`), then copy rule 16, on a payload that passed
+/// Subject rules 14 and 15 (`stream_mismatch`), then copy rule 16 and §9.7's rule 135 (an
+/// `ApprovalTimedOut` is caused by the approval it names, DEC-944), on a payload that passed
 /// [`payload`]: reported after `artifact_refs` and `pii_refs` (§9.1's order).
 pub(crate) fn subject_and_copy(
     event_type: &str,
@@ -125,6 +127,11 @@ pub(crate) fn subject_and_copy(
     };
     ensure(
         !copy || causation_id.is_some_and(|c| *c != Value::Null),
+        InvalidReason::Schema,
+        "causation_id",
+    )?;
+    ensure(
+        event_type != "ApprovalTimedOut" || causation_id == view.0.get("approval"),
         InvalidReason::Schema,
         "causation_id",
     )
@@ -754,6 +761,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         "ApprovalDelivered" => Some(&APPROVAL_DELIVERED),
         "ApprovalResponded" => Some(&APPROVAL_RESPONDED),
         "ApprovalRevalidated" => Some(&APPROVAL_REVALIDATED),
+        "ApprovalTimedOut" => Some(&APPROVAL_TIMED_OUT),
         "AgentModeChanged" => Some(&AGENT_MODE_CHANGED),
         "KillSwitchActivated" => Some(&KILL_SWITCH_ACTIVATED),
         "OwnerExitRequested" => Some(&OWNER_EXIT_REQUESTED),
@@ -1020,6 +1028,11 @@ static APPROVAL_REVALIDATED: Ty = Ty::Record(&[
     ("m_now", Ty::Nullable(&Ty::Decimal)),
     ("band_bp", Ty::Int),
 ]);
+
+/// Journal spec v0.41 §9.7 (DEC-944): an ask's deadline passed and its safe default applied. Rule
+/// 135, its cause, is checked with the copy rules in [`subject_and_copy`].
+static APPROVAL_TIMED_OUT: Ty =
+    Ty::Record(&[("approval", Ty::Ulid), ("on_timeout", Ty::OneOf(&["skip"]))]);
 
 /// Rules 47 to 49 (journal spec §9.7): a reason exactly when refused, a quorum exactly when check 7
 /// was judged, and a skip judged by checks 1 to 5 only.
