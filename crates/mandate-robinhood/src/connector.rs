@@ -12,7 +12,7 @@ use mandate_executor::{
     BrokerConnector, BrokerOrder, BrokerOutcome, BrokerReject, BrokerRequest, BrokerUnknown,
     ClientOrderId, ConnectorError, FoldedEvent, OrderType, SubmitOrder, TimeInForce,
 };
-use mandate_mcp::{CallClass, McpError};
+use mandate_mcp::{CallClass, McpError, Tools};
 use mandate_num::{Fraction, Price, Qty, ShareIncrement};
 use serde_json::{Map, Value};
 
@@ -28,17 +28,6 @@ const IN_DOUBT: ConnectorError = ConnectorError::Unknown(BrokerUnknown::Ambiguou
 const NOT_OFFERED: ConnectorError = ConnectorError::NotSent {
     code: "not_offered",
 };
-
-/// One MCP `tools/call` (DEC-860 item 2), answered with the JSON-RPC `result` as sent. An `Err`
-/// says nothing about whether the call reached the server.
-pub trait Tools {
-    fn call_tool(
-        &self,
-        class: CallClass,
-        tool: &'static str,
-        arguments: &Value,
-    ) -> impl Future<Output = Result<String, McpError>>;
-}
 
 /// The connector for one agentic account, whose number the founder typed (CN-8). It has no
 /// `Debug`: the account number is personal data (journal spec §6.4).

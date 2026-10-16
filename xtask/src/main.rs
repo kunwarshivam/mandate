@@ -8165,16 +8165,24 @@ mod tests {
             .parent()
             .context("the workspace root above xtask")?;
         let harnesses = simulator_harnesses(&metadata_in(root)?);
-        let expected: BTreeMap<String, BTreeSet<String>> = [(
-            "mandate-robinhood".to_owned(),
-            BTreeSet::from(["mandate-rh-sim".to_owned()]),
-        )]
+        let judged = |harness: &str| BTreeSet::from([harness.to_owned()]);
+        let expected: BTreeMap<String, BTreeSet<String>> = [
+            ("mandate-rh-sim".to_owned(), judged("mandate-shell-rh-sim")),
+            ("mandate-robinhood".to_owned(), judged("mandate-rh-sim")),
+            ("mandate-shell".to_owned(), judged("mandate-shell-rh-sim")),
+        ]
         .into_iter()
         .collect();
-        assert_eq!(harnesses, expected);
+        assert_eq!(
+            harnesses, expected,
+            "DEC-928 item 4 adds the shell's harness"
+        );
         let mut mutated = vec!["mandate-robinhood"];
         assert!(simulator_oracles(&mut mutated, &harnesses));
         assert_eq!(mutated, ["mandate-robinhood", "mandate-rh-sim"]);
+        let mut mutated = vec!["mandate-shell"];
+        assert!(simulator_oracles(&mut mutated, &harnesses));
+        assert_eq!(mutated, ["mandate-shell", "mandate-shell-rh-sim"]);
         Ok(())
     }
 

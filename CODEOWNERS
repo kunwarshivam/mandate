@@ -59,6 +59,7 @@
 /crates/mandate-connections/ @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
+/crates/mandate-shell-rh-sim/ @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
