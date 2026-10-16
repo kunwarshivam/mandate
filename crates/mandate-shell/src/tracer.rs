@@ -647,8 +647,47 @@ impl<'s> Session<'s> {
     /// The executor is the account stream's writer, so the record is written as its own, with an
     /// id derived from the stream's head as the executor derives its own.
     fn mark(&mut self, mark: &Mark) -> Result<(), ShellError> {
-        let _ = mark;
-        Ok(())
+        let instrument = pinned(self.view)?;
+        let stream = self.account_stream.clone();
+        let tick =
+            UtcNanos::from_parts(self.event_time.secs(), 0).map_err(|_| ShellError::Envelope {
+                field: "risk_clock",
+            })?;
+        let mut object = Object::new();
+        for (name, value) in [
+            ("instrument_id", instrument.as_str().to_owned()),
+            ("price", mark.price.to_string()),
+            ("source", MARK_SOURCE.to_owned()),
+            ("feed", MARK_FEED.to_owned()),
+            ("risk_clock", tick.to_string()),
+        ] {
+            object.insert(
+                Key::new(name).map_err(|_| ShellError::Envelope { field: name })?,
+                Value::Str(value),
+            );
+        }
+        let event_id = Ids {
+            space: IdSpace::Account,
+        }
+        .derive(self.epoch(&stream), self.head(&stream), 0);
+        let config_refs = Object::new();
+        let bytes = draft_bytes(
+            &Envelope {
+                stream: &stream,
+                writer: Writer::Executor,
+                actor_id: "executor",
+                event_time: mark.at,
+            },
+            &DraftFields {
+                event_id: &event_id,
+                event_type: "MarkUpdated",
+                schema_version: 1,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &Value::Object(object),
+            },
+        )?;
+        self.append(&stream, vec![bytes])
     }
 
     /// Hands the runtime `observation` once its data is in the run's store under its `data_ref`
@@ -1388,6 +1427,12 @@ mod tests {
 /// [`crate::tail::tailed`], whose fold maps the envelope's own `actor.kind` (M7 brief, Decisions
 /// needed 5).
 const TRACER_ACTOR: ActorKind = ActorKind::System;
+
+/// A [`Mark`]'s `source`: a quote, as the journal's own vectors name one.
+const MARK_SOURCE: &str = "quote";
+
+/// A [`Mark`]'s `feed`: the IEX feed the run's quotes are read from (trading-domain spec §4).
+const MARK_FEED: &str = "iex";
 
 /// The payload and causation a stored body carries, read from its canonical bytes rather than from
 /// anything the shell remembers, so what is folded is what was committed.

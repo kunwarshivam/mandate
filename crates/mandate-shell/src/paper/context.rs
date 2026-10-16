@@ -65,7 +65,7 @@ impl GateQuote {
     /// Hands the binding gate `quote`, a fresh IEX read the run judged at its read: every
     /// binding request from now on judges it in place of the one held before.
     pub fn hand(&self, quote: &LatestQuote) {
-        let _ = quote;
+        *self.0.borrow_mut() = sane(quote);
     }
 
     fn current(&self) -> SaneQuote {
