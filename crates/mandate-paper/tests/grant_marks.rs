@@ -96,6 +96,10 @@ impl Pause for Clock {
 
     async fn pause(&self, duration: Duration) {
         let step = i64::try_from(duration.as_nanos()).unwrap();
+        assert!(
+            step > 0,
+            "the run paused for no time: a loop that never ends"
+        );
         let next = self.nanos.get() + step;
         assert!(
             next - at(PREFLIGHT).secs() * NANOS_PER_S < 3_600 * NANOS_PER_S,

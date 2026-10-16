@@ -1023,6 +1023,10 @@ impl Pause for WaitClock {
     async fn pause(&self, duration: Duration) {
         let paused = self.waited.get() + duration.as_secs();
         assert!(paused < 3_600, "the grant wait ran past an hour");
+        assert!(
+            self.wakes.get() < 1_000,
+            "the grant wait paused without end"
+        );
         self.wakes.set(self.wakes.get() + 1);
         self.waited.set(paused);
     }

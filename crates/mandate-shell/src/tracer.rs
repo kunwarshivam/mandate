@@ -500,6 +500,7 @@ impl AskedCycle for Session<'_> {
 
     fn expire(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
         self.event_time = now;
+        self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
         let stream = control_stream(&self.setup.deployment.workspace.0);
         let control = self
             .stages
