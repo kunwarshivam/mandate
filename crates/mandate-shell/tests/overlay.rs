@@ -47,7 +47,8 @@ const SOURCE: &str = "alpaca_iex_daily_bars";
 const AGENT_STREAM: &str = "agent:ws_spy:agent_spy";
 const ACCOUNT_STREAM: &str = "acct:ws_spy:acct_spy";
 /// A workspace level the E7-7 mandate exceeds twice: its `routine` rule says `auto`, and its daily
-/// loss limit is above one percent. The `ask` and `deny` variants below exceed the second.
+/// loss limit is above one percent. The `deny` variant below exceeds both, the `ask` one only the
+/// second.
 const NONCONFORMING: &str = r#""auto_allowed":false,"max_daily_loss":"0.01""#;
 /// A workspace level every variant conforms to.
 const CONFORMING: &str = r#""max_order_usd":"1000000""#;
