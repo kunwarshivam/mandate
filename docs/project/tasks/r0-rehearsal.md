@@ -57,6 +57,19 @@ client with `Throttled`, so `RobinhoodConnector::preflight_facts` reads it as `U
 { code: "portfolio" }`. 2m and 2s stop there too, so nothing is sent; 2n and the agent stream's
 export find nothing; the control and account streams export and verify.
 
+**Re-run on `claude/r0-mcp-read-budget` (R11 fixed, [DEC-959](../decisions/DEC-959.md), claim
+[#1408](https://github.com/kunwarshivam/mandate/issues/1408)), without any Alpaca key in the
+environment:** 1a to 2k pass. 2l logs in, reads the snapshot, passes the lapse and the fold, and
+stops at `the tracer stopped at Reconcile: the Alpaca market reads a Robinhood preflight takes
+(DEC-933)` ([R5](#the-blocker-chain-beyond-step-2l), `MARKET_UNREAD`), which `Linked::preflight`
+checks before any Robinhood read. A diagnostic build, not committed, that runs the Robinhood
+reads first and then stops showed them all answering: the preflight stands on the lapse's
+snapshot and reads only the tradability and the quote, the last two waiting about a second each
+for their token, and nothing is refused `Throttled`. 2m and 2s stop at `MARKET_UNREAD` too, so
+nothing is sent; 2n and the agent stream's export find nothing; the control and account streams
+export and verify. The next blocker on an agent's machine is R5; on the founder's, with the data
+keys, the run reaches the Alpaca market reads and then the chain's R6 to R8.
+
 ## How to run it
 
 ```bash
@@ -143,9 +156,9 @@ once the one before is fixed.
 | R9 | `the tracer stopped at Validate: a paper mandate`, **observed at 2l** before the fix | `crates/mandate-shell/src/paper/artifacts.rs` (`Artifacts::from_registered`) | The shell's run artifacts refused every mandate whose environment is not `paper`: a lock from the paper adapter's first slice, which the live admission (DEC-924, DEC-947) now reaches | **Fixed** in `claude/r0-live-artifacts` ([DEC-957](../decisions/DEC-957.md), claim #1398): 2l passes it | The fix as built: a live mandate is accepted only inside a `ConfirmedVersion`, which exists for one only after all four of DEC-924's conditions; each control record carries its stream and environment (`Origin`), and the deployment and every binding (model, fee schedule, calendar, rule set, instrument snapshot) must come from one stream in the mandate's environment, so a paper object in a live run, a live object in a paper run, or any object from another workspace refuses before anything is sent. A live run's fee schedule must name `live` |
 | R10 | `the tracer stopped at Validate: a fee schedule for the mandate's environment`, **observed at 2l** before the fix | `crates/mandate-shell/src/paper/artifacts.rs` (`from_registered`'s fee check) and `crates/mandate-executor/src/fees.rs` (`paper_only_fee_config`) | The only fee configuration was `PAPER_ONLY`, which refuses any environment but `paper` (DEC-526 item 4) | **Fixed** in `claude/r0-live-fee-schedule` ([DEC-958](../decisions/DEC-958.md), claim #1405): 2l passes it | The fix as built: Robinhood's posted fees (zero commission; SEC 0.0000206 × proceeds and TAF 0.000195 a share capped at 9.79 per execution on sells; CAT 0.000003 a share on buys and sells), each cited in `config/fees/robinhood-live-2026-10-16.toml`, as `robinhood_live_fee_config` in `mandate-executor`, which refuses any environment but `live` and any broker but `robinhood`. The registered object names `schedule` `robinhood_live_2026_10_16` and `broker` `robinhood`; the script registers it. Open: R10b |
 | R10b | none at run time: a live sell's fees can be booked under two cents below Robinhood's own figure | `crates/mandate-accounting/src/account.rs` (`equity_fees`, `charge`) | Robinhood rounds each fee of a trade to cents separately (SEC up, TAF and CAT to the nearest cent), and §6.2 rounds the day's total once (DEC-958 item 4). R0's one order is a buy, which is never understated | None named | A per-fill, per-fee ceiling for the Robinhood schedule: a trading-domain spec PR first (§6.2 and a reference case, ES-22), then the fold; the same spec PR changes §6.2's "transcribed from Alpaca's fee schedule" to the broker's |
-| R11 | `the tracer stopped at Reconcile: the agentic account's snapshot`, **observed at 2l** | `crates/mandate-shell/src/robinhood.rs` (`RobinhoodBridge::preflight_facts`), reached from `crates/mandate-paper/src/robinhood.rs` (`Linked::preflight`); the refusal is `mandate-mcp`'s `Throttled` on the preflight's first `get_portfolio` | The live start reads the account snapshot (three ordinary calls) for the lapse, and the preflight then reads it again at once, together with tradability and the quote. After the connect's own calls, the ordinary bucket (`crates/mandate-mcp/src/transport.rs`: 10 tokens, one a second) has no token left, and a throttled read is a refusal, never a wait | None named | Either make the preflight reuse the lapse's snapshot rather than reading the account twice, or have the connector wait for a token on an ordinary read before refusing (a read never adds risk, rule 3). Connectors are safety-critical: its own row, tests first |
+| R11 | `the tracer stopped at Reconcile: the agentic account's snapshot`, **observed at 2l** before the fix | `crates/mandate-shell/src/robinhood.rs` (`RobinhoodBridge::preflight_facts`), reached from `crates/mandate-paper/src/robinhood.rs` (`Linked::preflight`); the refusal was `mandate-mcp`'s `Throttled` on the preflight's first `get_portfolio` | The live start read the account snapshot (three scoped reads, six calls) for the lapse, and the preflight then read it again at once, together with tradability and the quote. After the connect's own calls, the ordinary bucket (`crates/mandate-mcp/src/transport.rs`: 10 tokens, one a second) had no token left, and a throttled read was a refusal, never a wait | **Fixed** in `claude/r0-mcp-read-budget` ([DEC-959](../decisions/DEC-959.md), claim #1408): 2l's Robinhood reads all answer | The fix as built: the live start keeps the lapse's snapshot with the run clock read before it was sent, and the same session's preflight stands on it while it is at most the rule set's quote age bound old (reading only the tradability and the quote), and reads the account again otherwise; every broker read is `CallClass::Read`, which on an empty ordinary bucket waits for its next token when it is due within `read_wait` (2 s) and is refused at once otherwise. Openings and exits never wait |
 
-So the rehearsal can pass only after R8 and R11 land (R9 by DEC-957, R10 by DEC-958), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
+So the rehearsal can pass only after R8 lands (R9 by DEC-957, R10 by DEC-958, R11 by DEC-959), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
 9 and 10, and only on the founder's machine (R5). Without the founder's Alpaca paper keys, a run
 past R1 now stops at the Robinhood preflight with `MARKET_UNREAD`, after the login, the snapshot,
 the lapse and the full fold (DEC-947 item 5).
@@ -168,6 +181,11 @@ the lapse and the full fold (DEC-947 item 5).
   runner's door refuses it first (`connection_revoked`, DEC-910 item 2), so no run reaches the
   fold with one; a spec reading that refuses it in the fold too would close the gap for every
   caller.
+- **The runner reads Alpaca paper keys from its environment** (DEC-947 item 5): when
+  `MANDATE_ALPACA_PAPER_KEY_ID` and `MANDATE_ALPACA_PAPER_SECRET` are set where the script runs,
+  2l, 2m and 2s pass `MARKET_UNREAD` and make Alpaca's market reads with them. An agent's run
+  unsets both (`env -u MANDATE_ALPACA_PAPER_KEY_ID -u MANDATE_ALPACA_PAPER_SECRET
+  scripts/r0-rehearsal.sh`), so it reads no credential (rule 8, DEC-929 item 3).
 - **The private journal works on PostgreSQL 16** with the one migration applied by `psql` as the
   owner role; CI's floor is 17.
 
