@@ -177,7 +177,7 @@ fn the_live_rates_are_the_published_rates_exactly() {
 fn a_live_sell_books_exactly_the_regulatory_fees() {
     let cases = [
         ("1", "85", ["0.001751", "0.000195", "0.000003"], "0.01"),
-        ("100", "85", ["0.1751", "0.0195", "0.0003"], "0.20"),
+        ("100", "85", ["0.1751", "0.0195", "0.0003"], "0.2"),
         ("60000", "10", ["12.36", "9.79", "0.18"], "22.33"),
     ];
     for (qty, price, [sec, taf, cat], charge) in cases {
@@ -274,11 +274,17 @@ fn exact(side: Side, shares: u128, price_cents: u128) -> (u128, u128, u128) {
 
 /// `cents` as dollars.
 fn dollars(cents: u128) -> Usd {
-    usd(&format!("{}.{:02}", cents / 100, cents % 100))
+    usd(&price_text(cents))
 }
 
+/// `cents` as canonical decimal text: no trailing zero after the point, and no point for a whole
+/// amount.
 fn price_text(cents: u128) -> String {
-    format!("{}.{:02}", cents / 100, cents % 100)
+    match (cents / 100, cents % 100) {
+        (whole, 0) => whole.to_string(),
+        (whole, part) if part % 10 == 0 => format!("{whole}.{}", part / 10),
+        (whole, part) => format!("{whole}.{part:02}"),
+    }
 }
 
 fn cents_up(pico: u128) -> u128 {
@@ -310,7 +316,7 @@ proptest! {
     #[test]
     fn a_live_charge_is_the_exact_cost_rounded_up(
         sell in any::<bool>(),
-        shares in 1u128..200_000,
+        shares in prop_oneof![1u128..2_000, 1u128..200_000],
         price_cents in 500u128..100_000,
     ) {
         let side = if sell { Side::Sell } else { Side::Buy };

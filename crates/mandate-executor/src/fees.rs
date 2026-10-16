@@ -148,8 +148,22 @@ pub fn robinhood_live_fee_config(
     calendar: TradingCalendar,
     first_day: &str,
 ) -> Result<Config, ExecutorError> {
-    let _ = (environment, broker, calendar, first_day, ROBINHOOD_LIVE);
-    Err(ExecutorError::Unimplemented { story: "R10" })
+    if environment != "live" {
+        return Err(ExecutorError::EnvironmentMismatch {
+            opened: environment.to_owned(),
+            found: "live".to_owned(),
+        });
+    }
+    if broker != "robinhood" {
+        return Err(refused("broker"));
+    }
+    fee_config(
+        &FeeSchedule {
+            effective_from: first_day,
+            ..ROBINHOOD_LIVE
+        },
+        calendar,
+    )
 }
 
 fn refused(field: &str) -> ExecutorError {
