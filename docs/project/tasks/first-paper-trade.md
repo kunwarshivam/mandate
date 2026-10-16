@@ -98,7 +98,7 @@ oracle is shown to fail on a seeded bug before it is trusted.
 | The deployment input from the control stream | `mandate-shell` | 8 | Assembly of authoritative inputs; uses `mandate-spec`'s fold |
 | The `ObservationRecorded` draft | `mandate-runtime` | 6 | The agent stream's single writer |
 | The account and market snapshots (judge, liquidity facts, gate template, contexts) | `mandate-shell` | 8 | Today's `paper/*`, generalized in place so the E7-7 path stays runnable (DEC-475 item 7) |
-| The paper adapter binary | **new** `mandate-paper` (impure, safety-critical) | 9 | The only crate that sees both the host and the shell; holds the credential read and the one clock read |
+| The paper adapter binary | **new** `mandate-paper` (impure, safety-critical) | 9 | The only crate that sees both the host and the shell; holds the credential read and the run clock, read after the last broker read (DEC-935) |
 
 **Founder review.** Both new crates add an `xtask/layers.toml` entry, a `CODEOWNERS` line, and a
 workspace `Cargo.toml` member; `mandate-shell` drops its `mandate-backtest` dependency in E3. Each

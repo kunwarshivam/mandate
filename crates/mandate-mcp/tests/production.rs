@@ -1,6 +1,9 @@
 //! The crate as a connector links it: an integration test builds the library without
 //! `cfg(test)`, so this is the production build's gate on plain `http`, which no in-crate test
-//! can see.
+//! can see. The `live` build is this one: it never turns on `rh-sim` (DEC-922 item 1), whose
+//! own build `tests/rehearsal.rs` checks.
+
+#![cfg(not(feature = "rh-sim"))]
 
 use mandate_mcp::{McpError, PinnedEndpoint};
 

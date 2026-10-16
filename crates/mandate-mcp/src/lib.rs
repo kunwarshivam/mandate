@@ -13,7 +13,8 @@
 //!
 //! - **One pinned host.** A [`PinnedEndpoint`] exists only for an `https` URL on the host the
 //!   connector compiles in; plain `http` is accepted only for a loopback address in this crate's
-//!   own test build. Redirects are never followed: a `3xx` is [`McpError::Redirected`].
+//!   own test build and in the `rh-sim` rehearsal build, which dials nothing but loopback
+//!   (DEC-922). Redirects are never followed: a `3xx` is [`McpError::Redirected`].
 //! - **JSON-RPC 2.0 over streamable HTTP**, with the `Mcp-Session-Id` the server assigns carried
 //!   on every later request, and the answer read as one JSON body or as server-sent events.
 //! - **Bounded**: connect and request timeouts, a cap on the answer's size, and a [`RateBudget`]
@@ -26,6 +27,8 @@
 //! - **Allowlisted tools, pinned contract** ([`McpClient`]): only the nine tools of [`ALLOWLIST`]
 //!   are ever called; the hash of their names and schemas is pinned, a drift halts openings, and
 //!   a server that lists a fund-movement tool is refused (CN-2, CN-9, DEC-441 item 8).
+//! - **The tool seam** ([`Tools`]): one `tools/call` as a broker connector makes it, which
+//!   [`McpClient`] implements and a connector's tests double (DEC-860 item 2, DEC-928 item 1).
 //!
 //! - **The founder's OAuth login** ([`AuthServer`], E7-24): discovery of the authorization server
 //!   from the MCP server's published metadata, on pinned hosts only, and registration of a public
@@ -37,6 +40,7 @@ mod client;
 mod endpoint;
 mod error;
 mod frame;
+mod tools;
 mod transport;
 
 pub use auth::{AccessToken, CallbackListener, LOGIN_LIFETIME};
@@ -45,6 +49,7 @@ pub use budget::{BucketConfig, BudgetConfig, CallClass, RateBudget};
 pub use client::{ALLOWLIST, ContractHash, McpClient};
 pub use endpoint::PinnedEndpoint;
 pub use error::{McpError, ServerText};
+pub use tools::Tools;
 pub use transport::{McpTransport, Monotonic, PROTOCOL_VERSION, SystemMonotonic, TransportConfig};
 
 #[cfg(test)]

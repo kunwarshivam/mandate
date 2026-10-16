@@ -8,9 +8,10 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! The process shell that binds the runtime, the executor, and the Alpaca paper connector
-//! ([task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7, DEC-138, DEC-475
-//! item 6). E7-7's one-shot `mandate-tracer` binary is deleted; `mandate-paper` is the one binary
+//! The process shell that binds the runtime, the executor, and the Alpaca paper connector, and
+//! from DEC-928 the Robinhood connector in [`robinhood`]
+//! ([task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md), backlog E7-7, DEC-138,
+//! DEC-475 item 6). E7-7's one-shot `mandate-tracer` binary is deleted; `mandate-paper` is the one binary
 //! that places an order on the owner's Alpaca **paper** account.
 //!
 //! # What lives here, and what never does
@@ -47,6 +48,7 @@ pub mod host;
 pub mod lt10;
 pub mod map;
 pub mod paper;
+pub mod robinhood;
 pub mod stages;
 pub mod tail;
 pub mod tracer;

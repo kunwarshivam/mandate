@@ -493,6 +493,7 @@ impl MandateSource for FixtureMandate {
                     author: "user-author".to_owned(),
                     timeout_s: 300,
                     environment: self.environment,
+                    live_cli_confirm: None,
                 },
             },
             environment: self.environment,

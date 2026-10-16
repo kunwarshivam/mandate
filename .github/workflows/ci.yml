@@ -1,7 +1,8 @@
 # Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76, DEC-464). The required checks remain `fast` and
 # `full`, and both are quick aggregates. `fast` is over `fast-lint` (lint and the spec guard), the
-# three `fast-test` shards of the nextest run, `fast-pending` (pending tests and doctests) and
-# `fast-python` (pytest), which together run exactly `cargo xtask ci fast` (DEC-871). `full` is
+# three `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests and the
+# rh-sim build's tests) and `fast-python` (pytest), which together run exactly `cargo xtask ci
+# fast` (DEC-871). `full` is
 # over the non-mutation full checks, the mutation plan, every deterministic mutation shard the plan
 # sized to the diff (DEC-538), and the workspace API schemas' mutation sweep (DEC-688). Run
 # `cargo xtask check` locally for the same complete set, unsharded. main itself is covered by the
@@ -160,8 +161,9 @@ jobs:
         env:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
 
-  # DEC-871. The pending tests (DEC-110, DEC-137) and the doctests: both need the test profile the
-  # `fast-test` shards build, and run in seconds once it is built.
+  # DEC-871. The pending tests (DEC-110, DEC-137), the doctests, and the `rh-sim` rehearsal
+  # build's tests (DEC-922): all need the test profile the `fast-test` shards build, and run in
+  # seconds once it is built.
   fast-pending:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
@@ -213,6 +215,8 @@ jobs:
       - run: cargo xtask ci pending
         if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci test-doc
+        if: steps.change.outputs.docs_only != 'true'
+      - run: cargo xtask ci test-rh-sim
         if: steps.change.outputs.docs_only != 'true'
 
   # DEC-871. The Python tests, which took about two and a half minutes inside `test`; this job
@@ -379,9 +383,11 @@ jobs:
         shard: ${{ fromJSON(needs.mutants-plan.outputs.shards) }}
     # DEC-519. The database `full-checks` has, so a mutant in code only the Postgres tests reach is
     # judged by them rather than reported missed while they skip; required, so they fail rather than
-    # skip if it is ever missing. No debuginfo: xtask sets the same two settings on every build the
-    # gate makes, and setting them here as well puts them in rust-cache's key, so the dependencies
-    # it restores were built the way the gate builds and are not rebuilt in every shard. The plan's
+    # skip if it is ever missing. No debuginfo, and `opt-level = 1`, which keeps cargo's debug
+    # assertions and overflow checks, for everything but the packages a mutant rebuilds, which
+    # xtask keeps at 0 (DEC-931): xtask sets the same settings on every build the gate makes, and
+    # setting them here as well puts them in rust-cache's key, so the dependencies it restores
+    # were built the way the gate builds and are not rebuilt in every shard. The plan's
     # count goes with the shard, and xtask refuses a shard whose own listing disagrees (DEC-538).
     env:
       MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}
@@ -390,6 +396,8 @@ jobs:
       MANDATE_PG_REQUIRED: "1"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_OPT_LEVEL: "1"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

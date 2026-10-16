@@ -56,7 +56,12 @@ adapter's production door.
   `src/adapters.rs`'s cases for the stored-data trust rule (read oldest first, the session bound,
   the manifest-first read, and each untrusted dataset) and the purpose-flag and ownerless-exit
   mappings of the flatten adapter; `tests/flatten_probe.rs` the
-  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451). E7-7's recorded
+  flatten adapter's nine pins over a self-proving §9.5 journal (DEC-449, DEC-451);
+  `tests/overlay.rs` the policy overlay of mandate spec §6.2 step 5c over the production cycle under
+  a real governance fold (DEC-534 item 2, DEC-536, `AGENTS.md` rule 13): every exit stays `auto` by
+  the built-in risk-reducing step and is handed on under a nonconforming mandate, an opening and an
+  increase are denied `policy_overlay`, a deny the rules decided keeps its rule label, and an
+  ungoverned or conforming run decides as the rules alone. E7-7's recorded
   end-to-end suites are deleted with the binary (DEC-475 item 6): `tests/tracer.rs`'s production
   path over recorded Alpaca paper responses (whose `outlier_close` pending case went with the file
   and its `xtask/behaviour-only` row), `tests/paper.rs`'s shipping assembly, and

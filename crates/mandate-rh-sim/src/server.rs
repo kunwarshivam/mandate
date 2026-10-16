@@ -9,6 +9,9 @@
 //! - **Hostile variants** ([`Variant`]): a tool the contract does not list, or [`INJECTION`] in
 //!   every description and result. Neither changes the allowlisted tools' names or schemas, so
 //!   only a client that treats metadata as data and calls only its allowlist passes (CN-9).
+//! - **The rehearsal** ([`SimServer::rehearse`], DEC-922): a [`Script`]'s core, honest, behind the
+//!   OAuth login the real client runs (`crate::oauth`), with the script's fills following the
+//!   places they match.
 //!
 //! [DEC-849]: ../../../docs/project/decisions/DEC-849.md
 
@@ -21,9 +24,10 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+use crate::oauth::{OAuth, Routed};
 use crate::{
-    Alert, MarketHours, Order, OrderRequest, OrderType, Position, Side, Sim, SimError, State,
-    TimeInForce,
+    Alert, MarketHours, Order, OrderRequest, OrderType, Position, Script, ScriptedFill, Side, Sim,
+    SimError, State, TimeInForce,
 };
 
 /// The pinned contract: the allowlisted tools' names, descriptions and input schemas. Where the
@@ -92,6 +96,10 @@ struct Shared {
     sessions: Vec<String>,
     calls: Vec<String>,
     garble: Option<Garble>,
+    /// The login every request but the OAuth ones must pass, on a rehearsal server only.
+    oauth: Option<OAuth>,
+    /// The scripted fills not yet used, in the script's order.
+    fills: Vec<ScriptedFill>,
 }
 
 /// A running server over one [`Sim`]; it stops when dropped.
@@ -106,15 +114,37 @@ pub struct SimServer {
 impl SimServer {
     /// Binds `127.0.0.1:0` and serves `sim` as `variant` until dropped.
     pub fn start(sim: Sim, variant: Variant) -> Result<Self, ServerError> {
+        Self::launch(sim, variant, 0, None)
+    }
+
+    /// The rehearsal server (DEC-922 items 3 and 4): `script`'s core, honest, on
+    /// `127.0.0.1:port` (`0` lets the system choose), with every MCP request behind the OAuth
+    /// login and the script's fills following the places they match.
+    pub fn rehearse(script: Script, port: u16) -> Result<Self, ServerError> {
+        let sim = script
+            .sim()
+            .map_err(|e| ServerError::Listen(e.to_string()))?;
+        Self::launch(sim, Variant::Honest, port, Some(script.fills().to_vec()))
+    }
+
+    fn launch(
+        sim: Sim,
+        variant: Variant,
+        port: u16,
+        rehearsal: Option<Vec<ScriptedFill>>,
+    ) -> Result<Self, ServerError> {
         let listen = |error: std::io::Error| ServerError::Listen(error.to_string());
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(listen)?;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).map_err(listen)?;
         let addr = listener.local_addr().map_err(listen)?;
+        let oauth = rehearsal.is_some().then(|| OAuth::new(addr));
         let shared = Arc::new(Mutex::new(Shared {
             sim,
             variant,
             sessions: Vec::new(),
             calls: Vec::new(),
             garble: None,
+            oauth,
+            fills: rehearsal.unwrap_or_default(),
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (served, stopped) = (Arc::clone(&shared), Arc::clone(&stop));
@@ -128,6 +158,14 @@ impl SimServer {
             stop,
             worker: Some(worker),
         })
+    }
+
+    /// Serves until the process ends: the binary's foreground.
+    pub fn wait(mut self) -> Result<(), ServerError> {
+        match self.worker.take() {
+            Some(worker) => worker.join().map_err(|_| ServerError::Poisoned),
+            None => Ok(()),
+        }
     }
 
     /// The address the server listens on.
@@ -192,7 +230,8 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Shared>) {
     }
 }
 
-/// A request's head and body.
+/// A request's head and body: as many bytes as its `content-length` says, and none without one,
+/// as a browser's `GET` sends (RFC 9112 §6.3). A chunked body is never read.
 fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
     let mut bytes = Vec::new();
     let mut buf = [0u8; 4096];
@@ -202,7 +241,13 @@ fn read_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
         }
         if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
             let head = String::from_utf8(bytes.get(..end)?.to_vec()).ok()?;
-            let length: usize = header(&head, "content-length")?.parse().ok()?;
+            if header(&head, "transfer-encoding").is_some() {
+                return None;
+            }
+            let length: usize = match header(&head, "content-length") {
+                Some(length) => length.parse().ok()?,
+                None => 0,
+            };
             let start = end.checked_add(4)?;
             let total = start.checked_add(length)?;
             if bytes.len() >= total {
@@ -261,6 +306,13 @@ impl Shared {
     /// The session and revision rules of [DEC-849] item 3, then the method; `None` is a lost
     /// answer.
     fn handle(&mut self, head: &str, body: &[u8]) -> Option<String> {
+        if let Some(oauth) = self.oauth.as_mut() {
+            match oauth.route(head, body) {
+                Routed::Answer(answer) => return Some(answer),
+                Routed::Mcp if !oauth.admits(head) => return Some(oauth.challenge()),
+                Routed::Mcp => {}
+            }
+        }
         if !head.starts_with("POST /mcp ") {
             return refuse(404, -32600, "POST /mcp only");
         }
@@ -372,7 +424,11 @@ impl Shared {
     fn run(&mut self, name: &str, args: &Map<String, Value>) -> Result<Value, Refusal> {
         let account = text(args, "account_number")?.unwrap_or_default();
         match name {
-            "place_equity_order" => Ok(order_json(&self.sim.place(&request(args)?)?)),
+            "place_equity_order" => {
+                let order = self.sim.place(&request(args)?)?;
+                self.fill_scripted(&order);
+                Ok(order_json(&order))
+            }
             "review_equity_order" => {
                 let review = self.sim.review(&request(args)?)?;
                 let alerts: Vec<&str> = review
@@ -440,6 +496,28 @@ impl Shared {
                 Ok(json!({"quotes": quotes}))
             }
             _ => Err(Refusal::Unserved),
+        }
+    }
+}
+
+impl Shared {
+    /// The first unused scripted fill of the order's symbol and side, applied after the place
+    /// has answered, and used up only if the core takes it: a fill of a queued, terminal or
+    /// re-sent order is refused by the core and stays for the next match.
+    fn fill_scripted(&mut self, order: &Order) {
+        let matches = |fill: &ScriptedFill| fill.symbol == order.symbol && fill.side == order.side;
+        let Some(at) = self.fills.iter().position(matches) else {
+            return;
+        };
+        let Some(fill) = self.fills.get(at) else {
+            return;
+        };
+        let unfilled = order.quantity.checked_sub(order.filled_quantity).ok();
+        let Some(quantity) = fill.quantity.or(unfilled) else {
+            return;
+        };
+        if self.sim.fill(&order.id, quantity, fill.price).is_ok() {
+            self.fills.remove(at);
         }
     }
 }

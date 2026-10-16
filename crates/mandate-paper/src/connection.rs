@@ -121,16 +121,24 @@ pub enum LapseRefusal {
     /// build cannot start another live run on it.
     #[error("the connection record is spent")]
     Spent,
+    /// The run handed the lapse no evidence ([DEC-919](../../../docs/project/decisions/DEC-919.md)):
+    /// neither the journal's read of the account stream the record binds nor the connector
+    /// snapshot's counts, so nothing shows the account flat or the record unspent, and a live
+    /// run refuses to start rather than pass on inputs no read produced.
+    #[error("the lapse was handed no account-stream read and no account snapshot")]
+    NotSupplied,
 }
 
 impl LapseRefusal {
     /// The stable reason code of each refusal (ADR-0001 ES-09): `account_not_flat`,
-    /// `connection_spent`, and the stub's `unimplemented`.
+    /// `connection_spent`, `lapse_evidence_not_supplied` (DEC-919), and the stub's
+    /// `unimplemented`.
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unimplemented { .. } => "unimplemented",
             Self::NotFlat { .. } => "account_not_flat",
             Self::Spent => "connection_spent",
+            Self::NotSupplied => "lapse_evidence_not_supplied",
         }
     }
 }

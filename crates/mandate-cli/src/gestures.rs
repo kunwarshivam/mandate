@@ -1,15 +1,15 @@
 //! The `mandate version create`, `mandate version confirm` and `mandate agent deploy` commands
 //! (first paper trade brief, D2c; DEC-530 item 1): [`crate::version`]'s and [`crate::deploy`]'s
 //! functions over P0's `--journal` and `--store`, run as the owner DEC-527's `--workspace` and
-//! `--user` name, always in paper. A gesture given no `--code` shows its code and the warnings it
-//! acknowledges and commits nothing; given one, it commits.
+//! `--user` name, in paper unless `--environment live` (DEC-925). A gesture given no `--code` shows
+//! its code and the warnings it acknowledges and commits nothing; given one, it commits.
 
 use std::io::Write;
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_journal::ArtifactSource;
+use mandate_journal::{ArtifactSource, Environment};
 use mandate_spec::Mandate;
 
 use crate::control::{
@@ -20,8 +20,8 @@ use crate::inbox::InstantIds;
 use crate::postgres::JournalArgs;
 use crate::register::{OwnerArgs, open};
 use crate::version::{
-    self, CONFIRMED, CREATED, check_instruments, check_rules, envelope_paths, latest, paper_only,
-    refused, rows, stored,
+    self, CONFIRMED, CREATED, admitted, check_instruments, check_rules, envelope_paths, latest,
+    paper_or_live, refused, rows, stored,
 };
 
 #[derive(Debug, Subcommand)]
@@ -38,12 +38,43 @@ pub enum AgentCommand {
     Deploy(DeployArgs),
 }
 
+/// Who runs a gesture: DEC-527's owner flags and the environment the owner acts in (DEC-925).
+#[derive(Debug, Clone, Args)]
+pub struct GestureOwnerArgs {
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    /// `paper`, the default, or `live`: the environment the owner acts in. A `live` gesture is
+    /// admitted only for a `live` mandate on a Robinhood connection the owner recorded through
+    /// `connection record` and has not spent (DEC-529 item 3).
+    #[arg(long, value_name = "ENV", default_value = "paper")]
+    pub environment: String,
+}
+
+impl GestureOwnerArgs {
+    /// The owner these flags name, in the environment `--environment` names.
+    ///
+    /// # Errors
+    /// [`ControlError::Refused`] with `environment_invalid` for any environment but `paper` or
+    /// `live`, then [`OwnerArgs::owner`]'s.
+    pub fn owner(&self) -> Result<Owner, ControlError> {
+        let environment = match self.environment.as_str() {
+            "paper" => Environment::Paper,
+            "live" => Environment::Live,
+            _ => return Err(refused("environment_invalid")),
+        };
+        Ok(Owner {
+            environment,
+            ..self.owner.owner()?
+        })
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct CreateArgs {
     /// The mandate document, a JSON file the owner wrote.
     pub file: PathBuf,
     #[command(flatten)]
-    pub owner: OwnerArgs,
+    pub owner: GestureOwnerArgs,
     #[command(flatten)]
     pub target: JournalArgs,
 }
@@ -56,7 +87,7 @@ pub struct ConfirmArgs {
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
     #[command(flatten)]
-    pub owner: OwnerArgs,
+    pub owner: GestureOwnerArgs,
     #[command(flatten)]
     pub target: JournalArgs,
 }
@@ -72,7 +103,7 @@ pub struct DeployArgs {
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
     #[command(flatten)]
-    pub owner: OwnerArgs,
+    pub owner: GestureOwnerArgs,
     #[command(flatten)]
     pub target: JournalArgs,
 }
@@ -97,12 +128,13 @@ pub fn confirmation(
     version: &str,
     now: Now,
 ) -> Result<Shown, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     let rows = rows(journal, owner)?;
     if latest(&rows, CREATED, version).is_none() {
         return Err(refused("version_unknown"));
     }
     let (document, mandate) = stored(store, version)?;
+    admitted(journal, owner, &document)?;
     let paths = envelope_paths(&document);
     let digest = Digest::of(&to_canonical(&document));
     let warnings = check_rules(&rows, store, (&mandate, ""), Some((digest, &paths)), now)?;
@@ -126,13 +158,14 @@ pub fn deployment(
     (agent, version): (&str, &str),
     now: Now,
 ) -> Result<Shown, ControlError> {
-    paper_only(owner)?;
+    paper_or_live(owner)?;
     agent_stream(owner, agent).map_err(|_| refused("agent_invalid"))?;
     let rows = rows(journal, owner)?;
     if latest(&rows, CREATED, version).is_none() {
         return Err(refused("version_unknown"));
     }
     let (document, mandate) = stored(store, version)?;
+    admitted(journal, owner, &document)?;
     let confirmed =
         latest(&rows, CONFIRMED, version).ok_or_else(|| refused("version_unconfirmed"))?;
     let last = rows.iter().rev().find(|r| r.event_type == CONFIRMED);

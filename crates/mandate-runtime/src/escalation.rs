@@ -411,6 +411,10 @@ fn answered(
                 environment: environment(settings.environment),
                 used_assertions: state.used_assertions(&event.event_id),
                 policy: PolicyOverlay::NONE,
+                live_cli_confirm: settings
+                    .live_cli_confirm
+                    .clone()
+                    .filter(|_| settings.environment == mandate_journal::Environment::Live),
             };
             let admission = admit(pending, &response, &context)?;
             let applied = quorum_applied(
@@ -462,8 +466,8 @@ fn answered(
     Ok(())
 }
 
-/// `cli_confirm` is admitted on `paper` alone (DEC-155 item 4), so every other environment reads as
-/// `live`, which refuses it: a backtest has no owner to step up.
+/// `cli_confirm` is admitted on `paper` (DEC-155 item 4), so every other environment reads as `live`,
+/// which refuses it outside DEC-923's scope: a backtest has no owner to step up.
 fn environment(environment: mandate_journal::Environment) -> mandate_approval::Environment {
     match environment {
         mandate_journal::Environment::Paper => mandate_approval::Environment::Paper,
