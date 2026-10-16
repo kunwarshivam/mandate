@@ -45,10 +45,15 @@ fn store(fx: &mut Fixture, document: Vec<u8>) -> String {
 
 /// The control services' record of the connection: `broker`, `environment`, recorded by `user`.
 fn connection(fx: &mut Fixture, broker: &str, environment: &str, user: &str) {
+    connection_of(fx, CONNECTION, broker, environment, user);
+}
+
+/// The control services' record of connection `id`.
+fn connection_of(fx: &mut Fixture, id: &str, broker: &str, environment: &str, user: &str) {
     let payload = common::object(&[
         ("account_ref", common::text("01J0ACC0VNT000000000000000")),
         ("broker", common::text(broker)),
-        ("connection_id", common::text(CONNECTION)),
+        ("connection_id", common::text(id)),
         ("environment", common::text(environment)),
         ("margin_attestation", common::text("cash_account")),
         ("scopes", Value::Array(vec![common::text("trade")])),
@@ -163,6 +168,14 @@ fn every_other_live_deployment_is_refused_and_commits_nothing() {
     };
     let cases: Vec<(&str, Build)> = vec![
         ("live_scope_unknown", Box::new(unrecorded)),
+        (
+            "live_scope_unknown",
+            Box::new(|fx| {
+                let version = store(fx, live_mandate(&[]));
+                connection_of(fx, "conn_rh_live_02", "robinhood", "live", OWNER);
+                fx.ask_in("live", AGENT, &request(SPY, "1", &version))
+            }),
+        ),
         (
             "live_scope_unknown",
             Box::new(|fx| {
