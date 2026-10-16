@@ -60,8 +60,9 @@ const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 
 /// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
-/// `OrderStateChanged`, `OrderRequestRecorded`, and `ProtectionChanged` close at version 1;
-/// `IntentReceived`, `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1.
+/// `OrderRequestRecorded` and `ProtectionChanged` close at version 1; `IntentReceived`,
+/// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
+/// `OrderStateChanged` (journal spec §9.16, DEC-869).
 const EXECUTOR: [&str; 9] = [
     "IntentReceived",
     "GateDecided",
@@ -668,6 +669,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("OrderSubmitted", 2) => Some(&ORDER_SUBMITTED_V2),
         (COMPANION, 1) => Some(&ORDER_REQUEST_RECORDED),
         ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
+        ("OrderStateChanged", 2) => Some(&ORDER_STATE_CHANGED_V2),
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
@@ -1011,6 +1013,30 @@ static ORDER_STATE_CHANGED: Ty = Ty::Record(&[
     ("adopted", Ty::Bool),
     ("ladder_step", Ty::Bool),
     ("risk_clock", Ty::RiskClock),
+]);
+
+/// Journal spec §9.16's `OrderStateChanged` at `schema_version` 2 (DEC-869 item 2): version 1's
+/// members in their version-1 order and `broker_order_id`, the broker's own id for the order as
+/// the broker record gave it, last and nothing else moved. Version 1 stays registered (§8).
+static ORDER_STATE_CHANGED_V2: Ty = Ty::Record(&[
+    ("client_order_id", Ty::Str),
+    ("state", Ty::OneOf(ORDER_STATES)),
+    ("attempted", Ty::Nullable(&Ty::OneOf(ORDER_STATES))),
+    ("broker_status", Ty::Nullable(&Ty::Str)),
+    ("filled_qty", Ty::Nullable(&Ty::Decimal)),
+    ("reject_code", Ty::Nullable(&Ty::Str)),
+    ("replaces", Ty::Nullable(&Ty::Str)),
+    ("replaced_by", Ty::Nullable(&Ty::Str)),
+    ("replaced_by_broker_order_id", Ty::Nullable(&Ty::Str)),
+    ("lookup", Ty::Nullable(&Ty::OneOf(&["absent"]))),
+    ("ignored", Ty::Bool),
+    ("cancel_requested", Ty::Bool),
+    ("cancel_confirmed", Ty::Bool),
+    ("cancel_overdue", Ty::Bool),
+    ("adopted", Ty::Bool),
+    ("ladder_step", Ty::Bool),
+    ("risk_clock", Ty::RiskClock),
+    ("broker_order_id", Ty::Nullable(&Ty::Str)),
 ]);
 
 static BROKER_POSITION_OBSERVED: Ty = Ty::Record(&[

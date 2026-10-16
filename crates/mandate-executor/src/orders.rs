@@ -103,7 +103,9 @@ pub(crate) fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOr
     batch.view.orders.contains_key(&id).then_some(id)
 }
 
-/// The complete nullable and boolean evidence carried by `OrderStateChanged` (DEC-459).
+/// The complete nullable and boolean evidence carried by `OrderStateChanged` (DEC-459), with
+/// version 2's `broker_order_id` (journal spec §9.16, DEC-869): the broker's own id for the order,
+/// set only from a broker order record that carries it and `None` on every other record.
 #[derive(Default)]
 pub(crate) struct StateEvidence {
     pub(crate) attempted: Option<OrderState>,
@@ -120,14 +122,21 @@ pub(crate) struct StateEvidence {
     pub(crate) cancel_overdue: bool,
     pub(crate) adopted: bool,
     pub(crate) ladder_step: bool,
+    pub(crate) broker_order_id: Option<String>,
+}
+
+/// The broker's id as a broker order record gives it, for `broker_order_id` (DEC-869 item 3).
+/// Empty text is no id (§9.2's `text`), so it is written `null`, never guessed at.
+pub(crate) fn broker_id(raw: Option<&str>) -> Option<String> {
+    raw.filter(|id| !id.is_empty()).map(str::to_owned)
 }
 
 fn nullable(value: Option<Value>) -> Value {
     value.unwrap_or(Value::Null)
 }
 
-/// The one constructor for every newly journaled `OrderStateChanged`; [`Batch::journal`] appends
-/// its `risk_clock`.
+/// The one constructor for every newly journaled `OrderStateChanged`, at `schema_version` 2
+/// (journal spec §9.16); [`Batch::journal`] appends its `risk_clock`.
 fn state_change_fields(
     id: &ClientOrderId,
     state: OrderState,
@@ -172,6 +181,10 @@ fn state_change_fields(
         ("cancel_overdue", Value::Bool(evidence.cancel_overdue)),
         ("adopted", Value::Bool(evidence.adopted)),
         ("ladder_step", Value::Bool(evidence.ladder_step)),
+        (
+            "broker_order_id",
+            nullable(evidence.broker_order_id.map(text)),
+        ),
     ]
 }
 
@@ -225,6 +238,7 @@ pub(crate) fn described(
     let status = StateEvidence {
         broker_status: Some(order.status.clone()),
         filled_qty: Some(order.filled_qty),
+        broker_order_id: broker_id(Some(&order.broker_order_id)),
         ..StateEvidence::default()
     };
     let current = batch
@@ -449,6 +463,7 @@ fn replaced(
         OrderState::Accepted,
         StateEvidence {
             replaces: Some(id.clone()),
+            broker_order_id: broker_id(order.replaced_by_broker_order_id.as_deref()),
             ..StateEvidence::default()
         },
     )?;
