@@ -7,7 +7,12 @@
 //! ([DEC-912](../../../docs/project/decisions/DEC-912.md) item 2). Neither quote is read here:
 //! the runner hands both asks in, so the seam holds no host and no credential (ES-19, LT-1).
 
+use std::time::Duration;
+
+use mandate_accounting::InstrumentId;
 use mandate_num::{Adverse, Fraction, Price};
+use mandate_robinhood::Quote;
+use mandate_time::UtcNanos;
 
 /// Why the opening's cross-check refuses ([DEC-912](../../../docs/project/decisions/DEC-912.md)
 /// item 2): each refusal is a stop before any submission, each with its own reason code
@@ -25,16 +30,22 @@ pub enum QuoteRefusal {
     /// cross-check exists for (the brief's adversary row), refused before any submission.
     #[error("the broker's quote disagrees with the independent quote beyond the collar")]
     Disagreement,
+    /// The broker's quote may be older than the opening's quote age bound, or its age cannot be
+    /// judged because the run's clock ran backwards across the read
+    /// ([DEC-945](../../../docs/project/decisions/DEC-945.md) item 2).
+    #[error("the broker's quote is older than the opening's quote age bound")]
+    Stale,
 }
 
 impl QuoteRefusal {
     /// The stable reason code of each refusal (ADR-0001 ES-09): `quote_absent`,
-    /// `quote_disagreement`, and the stub's `unimplemented`.
+    /// `quote_disagreement`, `quote_stale`, and the stub's `unimplemented`.
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unimplemented { .. } => "unimplemented",
             Self::Absent => "quote_absent",
             Self::Disagreement => "quote_disagreement",
+            Self::Stale => "quote_stale",
         }
     }
 }
@@ -76,4 +87,28 @@ pub fn cross_check(
         return Err(QuoteRefusal::Disagreement);
     }
     Ok(())
+}
+
+/// The broker's own ask out of one quote read
+/// ([DEC-945](../../../docs/project/decisions/DEC-945.md) items 1 and 2): `quote` is what the read
+/// answered ([`None`] when it was refused, failed, or could not be read), `instrument` the
+/// instrument the independent quote is of, `sent` the run clock read just before the call and
+/// `answered` the run clock read just after it. Robinhood's quote carries no time (DEC-902 item
+/// 7), so its age is bounded by the run's own clock alone: the answer reflects the broker no
+/// earlier than the call was sent, so at `answered` it is at most `answered - sent` old, and that
+/// must not exceed `max_age`, with no skew tolerance (DEC-936 names the IEX quote only).
+///
+/// # Errors
+/// [`QuoteRefusal::Absent`] for no quote or a quote of another instrument;
+/// [`QuoteRefusal::Stale`] for a read older than `max_age`, or one across which the clock ran
+/// backwards, whose age cannot be judged (rule 3).
+pub fn fresh_ask(
+    quote: Option<&Quote>,
+    instrument: &InstrumentId,
+    sent: UtcNanos,
+    answered: UtcNanos,
+    max_age: Duration,
+) -> Result<Price, QuoteRefusal> {
+    let _ = (quote, instrument, sent, answered, max_age);
+    Err(QuoteRefusal::Unimplemented { story: "E7-26 O2" })
 }

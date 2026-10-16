@@ -23,6 +23,7 @@
 //! registered rule set's interval (E1b, DEC-853 items 5 and 6, DEC-858). No product value is a
 //! constant here (FT-2).
 
+mod ask;
 mod connection;
 mod door;
 mod evidence;
@@ -42,7 +43,7 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AlpacaPaperHttp, Credentials, DataTransport, Pause, TokioPause, TradingTransport,
+    AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TokioPause, TradingTransport,
 };
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Key, Object, Value, to_canonical};
@@ -81,12 +82,14 @@ pub use evidence::{Evidence, EvidenceRefusal, evidence};
 pub use grant::{Asked, GrantRefusal, Journaled, grant};
 pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
-pub use quote::{QuoteRefusal, cross_check};
+pub use ask::{BrokerAsk, QuoteRead};
+pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
     Build, EndpointRefusal, Linked, REHEARSAL_ENDPOINT_VAR, RobinhoodEndpoint, endpoint,
 };
 pub use wiring::{
-    CollarMembers, WakeRead, answers, asked, collar_x, cross_check_the_opening, granted_opening,
+    CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
+    granted_opening,
     lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant, watch_may_end,
     watched,
 };
@@ -154,11 +157,12 @@ pub trait Session {
     /// [`Cause::Absent`] when the session cannot carry a cycle.
     fn cycle(self, sources: Sources<()>, setup: Setup) -> Result<ProductionCycle, Cause>;
 
-    /// The broker's own ask for the pinned instrument, the quote an asked opening's cross-check
-    /// compares with the independent IEX ask before it leaves (DEC-529 item 12; DEC-940 item 4),
-    /// or [`None`] when this session holds none — and then the cross-check refuses the opening
-    /// and nothing is sent (rule 3).
-    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price>;
+    /// Where the broker's own ask for the pinned instrument comes from: the quote an asked
+    /// opening's cross-check compares with the independent IEX ask before it leaves (DEC-529
+    /// item 12; DEC-940 item 4; DEC-945), taken before the cycle takes the session and asked at
+    /// the check. [`BrokerAsk::Absent`] when this session reads none — and then the cross-check
+    /// refuses the opening and nothing is sent (rule 3).
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk;
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
@@ -175,8 +179,8 @@ impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
     }
 
     /// Alpaca's own quote is the IEX quote its data client read at the preflight.
-    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
-        Some(facts.quote.ask)
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
+        BrokerAsk::Quoted(facts.quote.ask)
     }
 }
 
@@ -375,25 +379,33 @@ fn absent(stage: Stage, what: &'static str) -> PaperError {
     refused(stage)(Cause::Absent { what })
 }
 
-/// What an asked opening's cross-check reads, taken at the preflight (DEC-940 item 4): the
-/// pinned instrument's asset class and 20-day median dollar volume, which choose the collar's
-/// own `x`, the broker's own ask, and the independent IEX ask.
+/// What an asked opening's cross-check reads (DEC-940 item 4; DEC-945 item 3): the pinned
+/// instrument's asset class and 20-day median dollar volume, which choose the collar's own `x`,
+/// where the broker's own ask is read at the check, the independent IEX quote the preflight
+/// read, and the age bound the broker's read is held to.
 struct Opening {
     asset_class: AssetClass,
     median_dollar_volume_20d: Usd,
-    broker_ask: Option<Price>,
-    independent_ask: Price,
+    broker_ask: BrokerAsk,
+    independent: LatestQuote,
+    quote_max_age: Duration,
 }
 
 impl Opening {
-    /// [`cross_check_the_opening`] over the registered collar's own members.
-    fn cross_check(&self, collar: &CollarMembers) -> Result<(), PaperError> {
-        cross_check_the_opening(
+    /// [`broker_cross_check`] over the registered collar's own members, at `pause`'s clock.
+    fn cross_check<P: Pause + ?Sized>(
+        &self,
+        collar: &CollarMembers,
+        pause: &P,
+    ) -> Result<(), PaperError> {
+        broker_cross_check(
             collar,
             self.asset_class,
             Some(self.median_dollar_volume_20d),
-            self.broker_ask,
-            Some(self.independent_ask),
+            &self.broker_ask,
+            &self.independent,
+            pause,
+            self.quote_max_age,
         )
     }
 }
@@ -513,7 +525,8 @@ pub fn run<P: Ports>(
         asset_class: instrument.asset_class,
         median_dollar_volume_20d: liquidity.median_dollar_volume_20d,
         broker_ask: session.broker_ask(&broker),
-        independent_ask: broker.quote.ask,
+        independent: broker.quote.clone(),
+        quote_max_age: artifacts.quote_max_age(),
     };
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
@@ -561,7 +574,7 @@ pub fn run<P: Ports>(
             &watch,
             |asked| {
                 granted_opening(asked, &watch.pause, watch.interval, || {
-                    opening.cross_check(&collar)
+                    opening.cross_check(&collar, &watch.pause)
                 })
             },
             &lt10_end,
@@ -788,7 +801,7 @@ impl Session for Connected {
         }
     }
 
-    fn broker_ask(&self, facts: &BrokerFacts) -> Option<Price> {
+    fn broker_ask(&self, facts: &BrokerFacts) -> BrokerAsk {
         match self {
             Self::Alpaca(transport) => transport.broker_ask(facts),
             Self::Robinhood(linked) => linked.broker_ask(facts),

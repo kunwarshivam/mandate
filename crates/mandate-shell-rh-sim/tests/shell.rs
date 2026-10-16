@@ -31,7 +31,7 @@ use mandate_robinhood::{Quote, RobinhoodConnector, Tools, ref_id, robinhood_prof
 use mandate_shell::Cause;
 use mandate_shell::adapters::CoreExecutor;
 use mandate_shell::robinhood::{
-    ACCOUNT_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
+    ACCOUNT_UNREAD, QUOTE_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
 };
 use mandate_shell::stages::{Connector, Reconciler};
 use serde_json::{Value, json};
@@ -597,4 +597,59 @@ fn the_bridges_preflight_of_an_account_that_is_not_agentic_refuses() {
         "{refused:?}"
     );
     assert_eq!(calls(&server), ["get_accounts"]);
+}
+
+/// DEC-945 item 1: the bridge's quote read is `get_equity_quotes` alone, on the `Ordinary`
+/// budget with exactly `{"symbols": [symbol]}` and no account, answered with the simulator's
+/// locked quote; a second read answers the quote the broker holds then, not the first one.
+#[test]
+fn the_bridges_quote_is_the_brokers_latest_and_names_no_account() {
+    let server = read_server();
+    let shell = shell(&server);
+    let spy = InstrumentId::new("SPY").unwrap();
+    let quote = shell.bridge.equity_quote(&spy).unwrap();
+    assert_eq!(
+        quote,
+        Quote {
+            symbol: spy.clone(),
+            bid: price("500"),
+            ask: price("500"),
+        }
+    );
+    assert_eq!(calls(&server), ["get_equity_quotes"]);
+    assert_eq!(
+        *shell.seen.borrow(),
+        [(
+            CallClass::Ordinary,
+            "get_equity_quotes",
+            json!({"symbols": ["SPY"]})
+        )]
+    );
+    server
+        .drive(|sim| sim.apply(Event::Quote("SPY".to_owned(), price("501.25"))))
+        .unwrap()
+        .unwrap();
+    let moved = shell.bridge.equity_quote(&spy).unwrap();
+    assert_eq!((moved.bid, moved.ask), (price("501.25"), price("501.25")));
+    assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
+}
+
+/// DEC-945 item 1: a symbol the broker quotes nothing for, and a garbled answer, each refuse the
+/// read as [`QUOTE_UNREAD`]; nothing but the quote read is called.
+#[test]
+fn the_bridges_quote_refuses_a_missing_or_garbled_answer() {
+    let server = read_server();
+    let shell = shell(&server);
+    let missing = shell.bridge.equity_quote(&InstrumentId::new("QQQ").unwrap());
+    assert!(
+        matches!(missing, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
+        "{missing:?}"
+    );
+    server.garble_next(Garble::NotJson).unwrap();
+    let garbled = shell.bridge.equity_quote(&InstrumentId::new("SPY").unwrap());
+    assert!(
+        matches!(garbled, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
+        "{garbled:?}"
+    );
+    assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
 }

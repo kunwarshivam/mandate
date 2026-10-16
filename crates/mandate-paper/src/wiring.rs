@@ -32,6 +32,7 @@ use mandate_shell::{AskedCycle, Cause, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
 use crate::PaperError;
+use crate::ask::BrokerAsk;
 use crate::connection::member;
 use crate::evidence::{Evidence, EvidenceRefusal, evidence};
 use crate::grant::{Asked, GrantRefusal, Journaled, grant};
@@ -414,6 +415,38 @@ pub fn robinhood_cross_check(
         Some(robinhood.ask),
         Some(iex.ask),
     )
+}
+
+/// The asked opening's cross-check at the check itself
+/// ([DEC-945](../../../docs/project/decisions/DEC-945.md) item 3; DEC-529 item 12; DEC-940 item
+/// 4): the broker's ask is asked of `broker` now, for the instrument `iex` is of, and held to
+/// `max_age` ([`BrokerAsk::ask`]); then it and `iex`'s ask go to [`cross_check_the_opening`]
+/// within the registered collar's own `x` for `asset_class` and the 20-day median dollar volume.
+/// It runs after the grant and before the one held opening is sent, and refuses with nothing
+/// sent.
+///
+/// # Errors
+/// [`PaperError::CrossCheck`]: `quote_absent` or `quote_stale` from the broker's read, and every
+/// refusal of [`cross_check_the_opening`].
+pub fn broker_cross_check<P: Pause + ?Sized>(
+    collar: &CollarMembers,
+    asset_class: AssetClass,
+    median_dollar_volume_20d: Option<Usd>,
+    broker: &BrokerAsk,
+    iex: &LatestQuote,
+    pause: &P,
+    max_age: Duration,
+) -> Result<(), PaperError> {
+    let _ = (
+        collar,
+        asset_class,
+        median_dollar_volume_20d,
+        broker,
+        iex,
+        pause,
+        max_age,
+    );
+    Err(PaperError::Unimplemented { story: "E7-26 O2" })
 }
 
 /// The run-level call frame of the watch's end (E7-26's G1b wiring row; LT-10; DEC-912 item 3;

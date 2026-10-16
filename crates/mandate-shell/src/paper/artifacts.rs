@@ -194,6 +194,12 @@ impl Artifacts {
         &self.config_refs
     }
 
+    /// The rule set's `iex_quote_max_age_s`: the age bound of the opening's quotes (DEC-470
+    /// item 2), which the runner's cross-check also holds the broker's own quote to (DEC-945).
+    pub fn quote_max_age(&self) -> Duration {
+        self.quote_max_age
+    }
+
     /// The production identity this reviewed input binds.
     pub fn production_identity(&self) -> ProductionIdentity<'_> {
         ProductionIdentity {

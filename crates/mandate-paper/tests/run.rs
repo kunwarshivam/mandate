@@ -1046,17 +1046,17 @@ fn an_alpaca_session_answers_its_own_iex_ask() {
         UtcNanos::parse_rfc3339(TUESDAY.0).unwrap(),
     );
     let ask = Some(facts.broker.quote.ask);
-    assert_eq!(
+    assert!(matches!(
         mandate_paper::Session::broker_ask(&scene.ports.broker, &facts.broker),
-        ask
-    );
+        mandate_paper::BrokerAsk::Quoted(quoted) if Some(quoted) == ask
+    ));
     let credentials =
         mandate_alpaca::Credentials::from_lookup(|_| Some("placeholder".to_owned())).unwrap();
     let connected = mandate_paper::Connected::Alpaca(
         mandate_alpaca::AlpacaPaperHttp::new(credentials).unwrap(),
     );
-    assert_eq!(
+    assert!(matches!(
         mandate_paper::Session::broker_ask(&connected, &facts.broker),
-        ask
-    );
+        mandate_paper::BrokerAsk::Quoted(quoted) if Some(quoted) == ask
+    ));
 }

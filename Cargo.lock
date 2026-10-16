@@ -1848,6 +1848,7 @@ dependencies = [
  "mandate-time",
  "proptest",
  "rustix",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
