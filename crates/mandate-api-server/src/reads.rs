@@ -280,19 +280,27 @@ fn object(members: Vec<(&str, Value)>) -> Option<Value> {
 
 /// The `account_ref` the control stream binds to `connection_id` (DEC-1020 item 3): the latest
 /// `ConnectionEstablished` at schema version 2 naming it, else its latest `ConnectionRequested`.
+/// That row decides: one without an `account_ref`, or with one outside the id grammar
+/// (`[A-Za-z0-9_-]+`), binds none rather than an older row's, so no stream name is formed from it.
 pub fn account_ref(control: &[StoredEvent], connection_id: &str) -> Option<String> {
-    let bound = |event_type: &str, schema_version: u64| {
+    let latest = |event_type: &str, schema_version: u64| {
         control.iter().rev().find_map(|row| {
-            if row.event_type != event_type || row.schema_version != schema_version {
-                return None;
-            }
             let event = envelope(row)?;
-            (text(&event, "payload.connection_id") == Some(connection_id))
-                .then(|| text(&event, "payload.account_ref").map(str::to_owned))
-                .flatten()
+            (row.event_type == event_type
+                && row.schema_version == schema_version
+                && text(&event, "payload.connection_id") == Some(connection_id))
+            .then_some(event)
         })
     };
-    bound("ConnectionEstablished", 2).or_else(|| bound("ConnectionRequested", 1))
+    let event = latest("ConnectionEstablished", 2).or_else(|| latest("ConnectionRequested", 1))?;
+    text(&event, "payload.account_ref")
+        .filter(|reference| {
+            !reference.is_empty()
+                && reference
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        })
+        .map(str::to_owned)
 }
 
 /// The account's holdings at its last reconciliation (DEC-1020 item 3): the latest

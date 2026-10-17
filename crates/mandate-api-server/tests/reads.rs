@@ -569,6 +569,33 @@ fn a_connection_binds_the_account_its_latest_version_two_establishment_names() {
         "else the latest request"
     );
     assert_eq!(bound("conn_4"), None);
+
+    let later = |payload: &str| {
+        let mut rows = control.clone();
+        rows.push(versioned(
+            row(&ctl(), 9, "ConnectionEstablished", payload),
+            2,
+        ));
+        mandate_api_server::reads::account_ref(&rows, "conn_1")
+    };
+    assert_eq!(
+        later(r#"{"connection_id":"conn_1"}"#),
+        None,
+        "the latest row decides, even one that names no account"
+    );
+    assert_eq!(
+        later(r#"{"connection_id":"conn_1","account_ref":"../ws2:acct"}"#),
+        None,
+        "an account ref outside the id grammar forms no stream name"
+    );
+    assert_eq!(
+        later(r#"{"connection_id":"conn_1","account_ref":""}"#),
+        None
+    );
+    assert_eq!(
+        later(r#"{"connection_id":"conn_1","account_ref":"acct-3_x"}"#).as_deref(),
+        Some("acct-3_x")
+    );
 }
 
 #[test]

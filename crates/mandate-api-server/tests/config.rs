@@ -318,6 +318,19 @@ fn the_artifact_store_is_optional_and_refused_by_name_when_unusable() {
     );
     assert_eq!(reference, ArtifactRef::of(b"a document"));
 
+    let bare = credentials(None, 0o700);
+    assert_eq!(
+        artifact_store(Some(bare.as_os_str())).err(),
+        Some(StartRefusal::Setting {
+            name: "MANDATE_API_ARTIFACTS"
+        }),
+        "a directory that is not a store is refused"
+    );
+    assert!(
+        !bare.join("sha256").exists(),
+        "and nothing is written to it"
+    );
+
     let file = root.join("a-file");
     fs::write(&file, b"not a directory").expect("a file");
     let refused = artifact_store(Some(file.join("store").as_os_str()))
