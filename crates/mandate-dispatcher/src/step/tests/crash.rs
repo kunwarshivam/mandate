@@ -75,7 +75,7 @@ impl Fuse {
 struct Crashing(Shared, Rc<RefCell<Fuse>>);
 
 impl Journal for Crashing {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
         self.0.committed(stream)
     }
     fn append_notices(
@@ -235,7 +235,11 @@ fn key(row: &StoredEvent) -> Option<String> {
 /// recipient a `NoticeIssued` lists and each of that recipient's configured channels. It finds one
 /// `NoticeIssued` per key, exactly one `NoticeAttempted` per due send and none other, and every
 /// captured send a due send under that send's own idempotency key, with every due send captured.
-fn nt8(journal: &Shared, subjects: &[&str], sends: &[Sent]) -> Result<(), Box<dyn Error>> {
+pub(super) fn nt8(
+    journal: &Shared,
+    subjects: &[&str],
+    sends: &[Sent],
+) -> Result<(), Box<dyn Error>> {
     let j = journal.0.borrow();
     let mut keys = BTreeSet::new();
     for subject in subjects {

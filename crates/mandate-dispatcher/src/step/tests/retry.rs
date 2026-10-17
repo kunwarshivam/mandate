@@ -6,7 +6,7 @@
 //! `due`, or `mandate_notify::next_attempt`.
 
 use super::{A1, AUDIENCE, BUILD, Checked, Counter, NTF, Shared, alerts, text, world, writer};
-use crate::step::{Config, Journal, NoticeWriter, step};
+use crate::step::{Config, NoticeWriter, step};
 use crate::{DispatchError, Due, Next, due};
 use mandate_canon::{Value, parse};
 use mandate_journal::{Environment, StreamId};
@@ -120,7 +120,7 @@ fn records(journal: &Shared) -> Result<Vec<Record>, Box<dyn Error>> {
     let ntf = StreamId::parse(NTF).ok_or(NTF)?;
     let start = at(0)?.secs();
     let mut got = Vec::new();
-    for row in journal.committed(&ntf) {
+    for row in journal.rows(&ntf) {
         if row.event_type != "NoticeAttempted" {
             continue;
         }
@@ -562,7 +562,7 @@ fn check_due(
 ) -> Result<(), String> {
     let fail = |e: Box<dyn Error>| e.to_string();
     let ntf = StreamId::parse(NTF).ok_or(NTF)?;
-    let rows = journal.committed(&ntf);
+    let rows = journal.rows(&ntf);
     let notice = notice(journal).map_err(fail)?;
     let founder = Recipient::parse("founder").map_err(|e| e.to_string())?;
     let mut want = Vec::new();

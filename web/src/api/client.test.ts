@@ -138,6 +138,7 @@ describe("command outcomes (spec §3.5, §5, API-13)", () => {
       ok: true,
       effect: "recorded",
       accepted: { event_id: EVENT, phase: "recorded", step_up_status: "missing" },
+      body: { command_id: EVENT, phase: "recorded", step_up_status: "missing" },
     });
     const responses = client(() => json(202, { response_id: EVENT, phase: "recorded" }));
     const answered = await responses.api.send(responses.api.prepare("approval_response", PARAMS, {}));
@@ -313,7 +314,8 @@ describe("no order ticket (DEC-528)", () => {
   const EXPORTS: Record<string, string[]> = {
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
-    commands: ["UI_BUILD", "prepareApprovalResponse", "prepareOwnerCommand", "recordRef"],
+    commands: ["UI_BUILD", "prepareApprovalResponse", "prepareConfirm", "prepareOwnerCommand", "recordRef"],
+    confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["createMockServer"],
     operations: ["WEB_OPERATIONS", "operationFor"],

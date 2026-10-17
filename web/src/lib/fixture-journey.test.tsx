@@ -5,8 +5,13 @@ import { Providers } from "@/components/providers";
 import { lastPrice } from "@/fixtures/market";
 import type { Mandate, Workspace } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
+import { confirmStepUpDigest } from "@/api/confirm";
+import { BACKTEST_IDS } from "@/fixtures/backtests";
+import { VERSION } from "@/fixtures/versions";
 import { RECORD_AFTER_MS } from "@/test/harness";
 import { RuntimeProbe, probed } from "@/test/runtime-probe";
+import { CONFIRM_RECORD, DEPLOY_RECORD, setUpThrough } from "@/test/set-up";
+import type { SetUp } from "./mock-runtime";
 import { dec } from "./decimal";
 import {
   type NewAgent,
@@ -269,9 +274,7 @@ describe("after the owner answers", () => {
   });
 });
 
-describe("the runtime's deployment", () => {
-  const record = { screen: "A5" as const, environment: "paper" as const, shown: ["Confirm your mandate"] };
-
+describe("the runtime's set-up: create the version, confirm it, deploy it (DEC-2401)", () => {
   function mount(scenario: Parameters<typeof buildWorkspace>[0] = "normal", workspace: (ws: Workspace) => Workspace = (ws) => ws) {
     render(
       <Providers workspace={workspace(buildWorkspace(scenario))} tick={false} recordAfterMs={RECORD_AFTER_MS}>
@@ -280,50 +283,132 @@ describe("the runtime's deployment", () => {
     );
   }
 
+  const only = () => {
+    const [setUp] = probed().setUps;
+    return setUp;
+  };
+  const digest = (version: SetUp["version"]) => confirmStepUpDigest(version, null, null);
+
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("is sent, then recorded, then asks; nothing changes before it is recorded", () => {
+  it("records each step on its own, in order, and changes nothing before the deployment is recorded", () => {
     mount();
     const request = newAgent(probed().ws);
-    const agents = probed().ws.agents.length;
+    const before = structuredClone(probed().ws);
     let id = "";
     act(() => {
-      id = probed().deploy(request, record).id;
+      id = probed().createVersion(request).id;
     });
-    expect(probed().deployments).toEqual([expect.objectContaining({ id, phase: "sent", version: mandateVersion(request.mandate), record })]);
-    expect(probed().ws.agents).toHaveLength(agents);
+    expect(only()).toMatchObject({ id, version: mandateVersion(request.mandate), created: { phase: "sent", base: null, classification: null, validated: false }, confirmed: null, deployed: null });
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    const deployment = probed().deployments[0];
-    expect(deployment.phase).toBe("recorded");
-    expect(probed().ws.agents.at(-1)).toMatchObject({ agent_id: deployment.agentId, label: "Agent 4" });
-    expect(probed().ws.approvals.some((a) => a.agent_id === deployment.agentId)).toBe(false);
+    expect(only().created).toMatchObject({ phase: "recorded", recordedAt: before.now, base: null, classification: "risk_increasing", validated: true });
+    expect(probed().ws).toEqual(before);
+
+    act(() => probed().confirmVersion(id, CONFIRM_RECORD, digest(only().version)));
+    expect(only().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: digest(only().version) });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().confirmed?.phase).toBe("recorded");
+    expect(only().deployed).toBeNull();
+    expect(probed().ws).toEqual(before);
+
+    act(() => probed().deployVersion(id, DEPLOY_RECORD));
+    expect(only().deployed).toMatchObject({ phase: "sent", record: DEPLOY_RECORD });
+    expect(probed().ws.agents).toHaveLength(before.agents.length);
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    const setUp = only();
+    expect(setUp.deployed?.phase).toBe("recorded");
+    expect(probed().ws.agents.at(-1)).toMatchObject({ agent_id: setUp.agentId, label: "Agent 4", mandate_version: setUp.version });
+    expect(probed().ws.approvals.some((a) => a.agent_id === setUp.agentId)).toBe(false);
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 2));
-    expect(probed().ws.approvals[0]).toMatchObject({ agent_id: deployment.agentId, status: "delivered" });
+    expect(probed().ws.approvals[0]).toMatchObject({ agent_id: setUp.agentId, status: "delivered" });
+  });
+
+  it("refuses a confirm of a version not recorded, and a deployment of a version not confirmed, recording nothing", () => {
+    mount();
+    let id = "";
+    act(() => {
+      id = probed().createVersion(newAgent(probed().ws)).id;
+    });
+    act(() => probed().confirmVersion(id, CONFIRM_RECORD, digest(only().version)));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created" });
+    act(() => probed().deployVersion(id, DEPLOY_RECORD));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().deployed).toMatchObject({ phase: "undelivered", reason: "not_confirmed" });
+    expect(probed().ws.agents.some((a) => a.label === "Agent 4")).toBe(false);
+  });
+
+  it.each(["unreachable", "result-unknown"] as const)("refuses a confirm and a deployment whose step before is not recorded first, even in the %s scenario", (scenario) => {
+    mount(scenario);
+    let id = "";
+    act(() => {
+      id = probed().createVersion(newAgent(probed().ws)).id;
+    });
+    act(() => probed().confirmVersion(id, CONFIRM_RECORD, digest(only().version)));
+    act(() => probed().deployVersion(id, DEPLOY_RECORD));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created" });
+    expect(only().deployed).toMatchObject({ phase: "undelivered", reason: "not_confirmed" });
+  });
+
+  it("refuses a risk-increasing confirm sent without a passkey check, as the API does (step_up_required)", () => {
+    mount();
+    let id = "";
+    act(() => {
+      id = probed().createVersion(newAgent(probed().ws)).id;
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    act(() => probed().confirmVersion(id, CONFIRM_RECORD, null));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().confirmed).toMatchObject({ phase: "undelivered", reason: "step_up_required" });
   });
 
   it("rejects at application a second deployment the first one used the room for, and deploys nothing", () => {
     mount();
     const first = newAgent(probed().ws, { money: "$2,000", loss: "$200", symbols: ["MSFT"] });
     const second = newAgent(probed().ws, { money: "$2,000", loss: "$200", symbols: ["AAPL"] });
+    let ids: string[] = [];
     act(() => {
-      probed().deploy(first, record);
-      probed().deploy(second, record);
+      ids = [probed().createVersion(first).id, probed().createVersion(second).id];
     });
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    expect(probed().deployments.map((d) => d.phase)).toEqual(["recorded", "rejected"]);
-    expect(probed().deployments[1].reason).toBe("Your paper account has $1,478.36 that no agent uses, less than the $2,000.00 this agent asks for.");
+    expect(probed().setUps.map((s) => s.created.phase)).toEqual(["recorded", "recorded"]);
+    act(() => {
+      for (const s of probed().setUps) probed().confirmVersion(s.id, CONFIRM_RECORD, digest(s.version));
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    act(() => {
+      for (const id of ids) probed().deployVersion(id, DEPLOY_RECORD);
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(probed().setUps.map((s) => s.deployed?.phase)).toEqual(["recorded", "rejected"]);
+    expect(probed().setUps[1].deployed?.reason).toBe("Your paper account has $1,478.36 that no agent uses, less than the $2,000.00 this agent asks for.");
+    expect(probed().setUps[1].confirmed?.phase).toBe("recorded");
     expect(probed().ws.agents.filter((a) => a.label === "Agent 4")).toHaveLength(1);
-    expect(probed().ws.agents.some((a) => a.agent_id === probed().deployments[1].agentId)).toBe(false);
+    expect(probed().ws.agents.some((a) => a.agent_id === probed().setUps[1].agentId)).toBe(false);
+  });
+
+  it("refuses at validation a version a deployment could not pass (V-002), so no version exists", () => {
+    mount();
+    act(() => {
+      probed().createVersion(newAgent(probed().ws, { money: "$5,000", loss: "$500", symbols: ["MSFT"] }));
+    });
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().created).toMatchObject({ phase: "rejected", classification: null, validated: false, reason: "Your paper account has $3,478.36 that no agent uses, less than the $5,000.00 this agent asks for." });
+  });
+
+  it("finds the fixtures' completed backtest of a version, and none for a new one", () => {
+    mount();
+    expect(probed().backtestFor(VERSION.lmn)).toBe(BACKTEST_IDS.lmnCompleted);
+    expect(probed().backtestFor(mandateVersion(newAgent(probed().ws).mandate))).toBeNull();
   });
 
   it("approves, submits, fills, and protects the first buy through the same timers as every response", () => {
     mount();
-    act(() => {
-      probed().deploy(newAgent(probed().ws), record);
-    });
+    setUpThrough(newAgent(probed().ws));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
-    const agentId = probed().deployments[0].agentId;
+    const agentId = only().agentId;
     const approvalId = probed().ws.approvals[0].approval_id;
     act(() => probed().respond(approvalId, "approve", { screen: "D6", environment: "paper", shown: [], modelOutputExpanded: false }));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
@@ -337,42 +422,59 @@ describe("the runtime's deployment", () => {
     expect(probed().ws.approvals[0].status).toBe("acted");
   });
 
-  it.each([true, null, "absent"] as const)("rejects at application a deployment sent while the policy is %s, deploys nothing, and asks nothing", (value) => {
+  it.each([true, null, "absent"] as const)("refuses the version at validation while the policy is %s (V-047), so nothing is confirmed, deployed or asked", (value) => {
     mount("normal", withPolicy(value));
     const before = structuredClone(probed().ws);
     act(() => {
-      probed().deploy(newAgent(probed().ws), record);
+      probed().createVersion(newAgent(probed().ws));
     });
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 4));
-    const [d] = probed().deployments;
-    expect(d).toMatchObject({ phase: "rejected", rule: "V-047", reason: DEPLOY_SECOND_PERSON });
+    const setUp = only();
+    expect(setUp.created).toMatchObject({ phase: "rejected", rule: "V-047", reason: DEPLOY_SECOND_PERSON, validated: false });
+    expect(setUp.confirmed).toBeNull();
+    expect(setUp.deployed).toBeNull();
     expect(probed().ws.agents.map((a) => a.agent_id)).toEqual(before.agents.map((a) => a.agent_id));
     expect(probed().ws.approvals).toEqual(before.approvals);
-    expect(probed().ws.timeline[d.agentId]).toBeUndefined();
+    expect(probed().ws.timeline[setUp.agentId]).toBeUndefined();
+  });
+
+  it("rejects at application a deployment whose policy turned on after its confirmation (V-047), and deploys nothing", () => {
+    mount("normal", withPolicy(false, 1));
+    const before = structuredClone(probed().ws);
+    const id = setUpThrough(newAgent(probed().ws));
+    act(() => {
+      // Deliberate direct mutation: the policy changes between the confirmation and the deployment applying.
+      probed().ws.independent_approval_required = true;
+      vi.advanceTimersByTime(RECORD_AFTER_MS);
+    });
+    const setUp = probed().setUps.find((s) => s.id === id)!;
+    expect(setUp.confirmed?.phase).toBe("recorded");
+    expect(setUp.deployed).toMatchObject({ phase: "rejected", rule: "V-047", reason: DEPLOY_SECOND_PERSON });
+    expect(probed().ws.agents.map((a) => a.agent_id)).toEqual(before.agents.map((a) => a.agent_id));
   });
 
   it("deploys as before when the policy is off, even with one approver", () => {
     mount("normal", withPolicy(false, 1));
-    act(() => {
-      probed().deploy(newAgent(probed().ws), record);
-    });
+    setUpThrough(newAgent(probed().ws));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    const [d] = probed().deployments;
-    expect(d.phase).toBe("recorded");
-    expect(d.rule).toBeUndefined();
-    expect(probed().ws.agents.at(-1)).toMatchObject({ agent_id: d.agentId, label: "Agent 4" });
+    const setUp = only();
+    expect(setUp.deployed?.phase).toBe("recorded");
+    expect(setUp.deployed?.rule).toBeUndefined();
+    expect(probed().ws.agents.at(-1)).toMatchObject({ agent_id: setUp.agentId, label: "Agent 4" });
   });
 
   it.each([
     ["unreachable", "undelivered"],
     ["result-unknown", "unknown"],
-  ] as const)("deploys nothing in the %s scenario, and says %s", (scenario, phase) => {
+  ] as const)("creates no version in the %s scenario, says %s, and goes no further", (scenario, phase) => {
     mount(scenario);
     act(() => {
-      probed().deploy(newAgent(probed().ws), record);
+      probed().createVersion(newAgent(probed().ws));
     });
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
-    expect(probed().deployments[0].phase).toBe(phase);
+    expect(only().created.phase).toBe(phase);
+    expect(only().created.validated).toBe(false);
+    expect(only().confirmed).toBeNull();
     expect(probed().ws.agents.some((a) => a.label === "Agent 4")).toBe(false);
   });
 });
