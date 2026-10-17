@@ -576,8 +576,38 @@ impl Shared {
     /// the scripted price. The answer is every order's record. Any other body is `400` with
     /// nothing changed.
     fn market(&mut self, body: &[u8]) -> String {
-        let _ = (body, market_quotes);
-        reply(404, None, "")
+        let refused = || reply(400, None, &json!({"error": "not a market move"}).to_string());
+        let Some(quotes) = market_quotes(body) else {
+            return refused();
+        };
+        let mut moved = self.sim.clone();
+        for (symbol, price) in quotes {
+            if moved.apply(Event::Quote(symbol, price)).is_err() {
+                return refused();
+            }
+        }
+        self.sim = moved;
+        let numbers: Vec<String> = self
+            .sim
+            .accounts()
+            .iter()
+            .map(|account| account.number.clone())
+            .collect();
+        let orders = |sim: &Sim| -> Vec<Order> {
+            numbers
+                .iter()
+                .flat_map(|number| sim.orders(number).unwrap_or_default())
+                .collect()
+        };
+        let working: Vec<Order> = orders(&self.sim)
+            .into_iter()
+            .filter(|order| matches!(order.state, State::Confirmed | State::PartiallyFilled))
+            .collect();
+        for order in &working {
+            self.fill_scripted(order);
+        }
+        let records: Vec<Value> = orders(&self.sim).iter().map(order_json).collect();
+        reply(200, None, &json!({"orders": records}).to_string())
     }
 
     /// The first unused scripted fill of the order's symbol and side, applied after the place
