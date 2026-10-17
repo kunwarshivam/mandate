@@ -1,8 +1,14 @@
-// The Cloudflare Workers host (DEC-823, DEC-731). CI builds the Worker with OpenNext (`npm run cf:build`),
+// The Cloudflare Workers host (DEC-823, DEC-731, DEC-1005). CI builds the Worker with OpenNext (`npm run cf:build`),
 // has Wrangler write the bundle it would upload (`wrangler deploy --dry-run --outdir`, which needs no
 // Cloudflare account or token), and runs `node scripts/workers.mjs size <outdir>`, which fails when the
 // Worker is over its budget, or when the dry run left no Worker to measure. `hostingProblems` lists what would stop the app from running on Workers,
-// or leave a second host configured; the unit tests run it against this tree.
+// leave a second host deploying, or let anything but the deploy job of `web-deploy.yml` on `main` deploy or
+// reach the Cloudflare token; the unit tests run it against this tree.
+
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 /** The Worker's size budget (DEC-731 item 6): Workers Free's 3 MiB gzip cap, under the paid plan's 10 MiB. */
 export const WORKER_BUDGET = { gzipBytes: 3 * 1024 * 1024, rawBytes: 10 * 1024 * 1024 };
@@ -15,9 +21,22 @@ export const WORKER_BUDGET = { gzipBytes: 3 * 1024 * 1024, rawBytes: 10 * 1024 *
  * @returns {{ rawBytes: number, gzipBytes: number }}
  */
 export function workerSize(outdir) {
-  void outdir;
-  throw new Error("Unimplemented: E11-9");
+  if (!existsSync(outdir) || !statSync(outdir).isDirectory()) throw new Error(`no dry run output at ${outdir}`);
+  const modules = readdirSync(outdir, { recursive: true })
+    .map((name) => join(outdir, String(name)))
+    .filter((path) => statSync(path).isFile() && !path.endsWith(".map") && basename(path) !== "README.md");
+  if (modules.length === 0) throw new Error(`no Worker module in ${outdir}`);
+  let rawBytes = 0;
+  let gzipBytes = 0;
+  for (const path of modules) {
+    const content = readFileSync(path);
+    rawBytes += content.byteLength;
+    gzipBytes += gzipSync(content).byteLength;
+  }
+  return { rawBytes, gzipBytes };
 }
+
+const mib = (bytes) => `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
 
 /**
  * One line for each budget the Worker exceeds; none when it fits.
@@ -26,9 +45,10 @@ export function workerSize(outdir) {
  * @returns {string[]}
  */
 export function sizeProblems(size, budget = WORKER_BUDGET) {
-  void size;
-  void budget;
-  throw new Error("Unimplemented: E11-9");
+  const problems = [];
+  if (size.gzipBytes > budget.gzipBytes) problems.push(`the Worker is ${size.gzipBytes} bytes gzipped, over its gzip budget of ${budget.gzipBytes} (DEC-731 item 6)`);
+  if (size.rawBytes > budget.rawBytes) problems.push(`the Worker is ${size.rawBytes} bytes uncompressed, over its raw budget of ${budget.rawBytes} (DEC-731 item 6)`);
+  return problems;
 }
 
 /**
@@ -38,8 +58,16 @@ export function sizeProblems(size, budget = WORKER_BUDGET) {
  * @returns {{ status: number, lines: string[] }}
  */
 export function sizeCommand(args) {
-  void args;
-  throw new Error("Unimplemented: E11-9");
+  if (args.length !== 2 || args[0] !== "size") return { status: 2, lines: ["usage: node scripts/workers.mjs size <dry-run outdir>"] };
+  let size;
+  try {
+    size = workerSize(args[1]);
+  } catch (error) {
+    return { status: 1, lines: [error instanceof Error ? error.message : String(error)] };
+  }
+  const problems = sizeProblems(size);
+  const summary = `Worker: ${mib(size.rawBytes)} raw of ${mib(WORKER_BUDGET.rawBytes)}, ${mib(size.gzipBytes)} gzip of ${mib(WORKER_BUDGET.gzipBytes)}`;
+  return { status: problems.length === 0 ? 0 : 1, lines: [summary, ...problems] };
 }
 
 /**
@@ -49,6 +77,217 @@ export function sizeCommand(args) {
  * @returns {string[]}
  */
 export function hostingProblems(tree) {
-  void tree;
-  throw new Error("Unimplemented: E11-9");
+  const problems = [];
+  problems.push(...vercelProblems(tree));
+  if (tree.nextConfig.images?.unoptimized !== true) problems.push("next.config.ts: set images.unoptimized, so the Worker never optimises images (DEC-731 item 2)");
+  problems.push(...middlewareProblems(tree), ...wranglerProblems(tree), ...buildProblems(tree), ...workflowProblems(tree));
+  return problems;
+}
+
+/** Vercel keeps serving `main` until the founder moves the domains, so `vercel.json` may stay only while it deploys `main` alone (DEC-1005 item 4). */
+function vercelProblems(tree) {
+  if (!tree.exists("../vercel.json")) return [];
+  const enabled = JSON.parse(tree.read("../vercel.json"))?.git?.deploymentEnabled ?? {};
+  const mainOnly = Object.keys(enabled).length === 2 && enabled["**"] === false && enabled.main === true;
+  return mainOnly ? [] : ["../vercel.json: while it stays, it must deploy main alone and no other branch (DEC-1005 item 4)"];
+}
+
+function middlewareProblems(tree) {
+  if (tree.exists("src/proxy.ts")) return ["src/proxy.ts: OpenNext cannot run Node's proxy; the edge src/middleware.ts replaces it (DEC-731 item 1)"];
+  if (!tree.exists("src/middleware.ts")) return ["src/middleware.ts: missing; the edge middleware is the app's auth gate (DEC-731 item 1)"];
+  const source = tree.read("src/middleware.ts");
+  const problems = [];
+  if (/(from\s*|import\s*\(\s*|require\s*\(\s*)["']node:/.test(source)) problems.push("src/middleware.ts imports a node: module, which edge middleware cannot load (DEC-731 item 1)");
+  if (/export\s+const\s+runtime\b/.test(source)) problems.push("src/middleware.ts sets a runtime; edge middleware keeps Next's edge default (DEC-731 item 1)");
+  return problems;
+}
+
+const WORKER = "owlhead-web";
+const SECRET_LOOKING = /secret|service_role|private_key|-----BEGIN|\beyJ[\w-]{8,}\./i;
+
+function wranglerProblems(tree) {
+  if (!tree.exists("wrangler.jsonc")) return ["wrangler.jsonc: missing; it configures the Worker (DEC-731 item 3)"];
+  const text = tree.read("wrangler.jsonc");
+  const config = JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));
+  const flags = Array.isArray(config.compatibility_flags) ? config.compatibility_flags : [];
+  const services = Array.isArray(config.services) ? config.services : [];
+  const { vars, ...rest } = config;
+  const checks = [
+    [config.name === WORKER, `name must be "${WORKER}"`],
+    [config.main === ".open-next/worker.js", 'main must be ".open-next/worker.js", the worker OpenNext builds'],
+    [config.minify === true, "minify must be true, to keep the Worker under its size budget"],
+    [flags.includes("nodejs_compat"), "compatibility_flags must include nodejs_compat"],
+    [flags.includes("global_fetch_strictly_public"), "compatibility_flags must include global_fetch_strictly_public"],
+    [/^\d{4}-\d{2}-\d{2}$/.test(String(config.compatibility_date ?? "")), "compatibility_date must be set"],
+    [config.assets?.binding === "ASSETS", 'assets.binding must be "ASSETS"'],
+    [config.assets?.directory === ".open-next/assets", 'assets.directory must be ".open-next/assets"'],
+    [config.workers_dev === false, "workers_dev must be false, so only the custom domain serves the app (DEC-823 item 2)"],
+    [config.preview_urls === false, "preview_urls must be false, so no version gets its own address (DEC-823 item 2)"],
+    [config.build === undefined, "build must not be set; the deploy step runs no repository command while it holds the token (DEC-1005 item 2)"],
+    [config.routes === undefined && config.route === undefined, "routes must not be committed; the founder adds the custom domain in the dashboard (DEC-1005 item 5)"],
+    [services.some((s) => s?.binding === "WORKER_SELF_REFERENCE" && s?.service === WORKER), `services must bind WORKER_SELF_REFERENCE to "${WORKER}"`],
+    [!/account_id/.test(text), "account_id must not be committed; the founder's dashboard holds the account (DEC-823 item 4)"],
+    [vars === undefined, "vars must not be committed; the founder sets the public variables in the dashboard (DEC-823 items 4 and 5)"],
+    [!SECRET_LOOKING.test(JSON.stringify(rest)), "holds a secret-looking value; no credential goes in the Worker's configuration (DEC-823 item 4)"],
+  ];
+  return checks.filter(([ok]) => !ok).map(([, message]) => `wrangler.jsonc: ${message}`);
+}
+
+function buildProblems(tree) {
+  const problems = [];
+  const scripts = JSON.parse(tree.read("package.json")).scripts ?? {};
+  if (!/opennextjs-cloudflare build/.test(scripts["cf:build"] ?? "")) problems.push('package.json: the "cf:build" script must run opennextjs-cloudflare build');
+  if (!/opennextjs-cloudflare preview/.test(scripts["cf:preview"] ?? "")) problems.push('package.json: the "cf:preview" script must run opennextjs-cloudflare preview');
+  const ignored = tree.read(".gitignore").split("\n").map((line) => line.trim());
+  for (const dir of [".open-next/", ".wrangler/"]) {
+    if (!ignored.includes(`/${dir}`) && !ignored.includes(dir)) problems.push(`.gitignore: ignore ${dir}, the build's output`);
+  }
+  if (!tree.exists("open-next.config.ts")) problems.push("open-next.config.ts: missing; it configures the adapter");
+  else if (!/defineCloudflareConfig\(/.test(tree.read("open-next.config.ts"))) problems.push("open-next.config.ts must export defineCloudflareConfig(...)");
+  return problems;
+}
+
+const WEB_WORKFLOW = "../.github/workflows/web.yml";
+const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
+const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
+/** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-1005 item 1). */
+const DEPLOY_TRIGGERS = ["on:", "  push:", "    branches: [main]", "    paths:", '      - "web/**"', '      - ".github/workflows/web-deploy.yml"', "  workflow_dispatch:"].join("\n");
+/** The deploy job's condition, exactly: `main`, and the switch the founder sets once DEC-1005 is accepted (DEC-1005 item 7). */
+const DEPLOY_IF = "    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'";
+/** The one step that deploys, and the only secret and variables it may read (DEC-1005 items 2 and 3). */
+const DEPLOY_STEP = { run: "npx wrangler deploy", secrets: ["CLOUDFLARE_API_TOKEN"], vars: ["CLOUDFLARE_ACCOUNT_ID"] };
+/** The deploy workflow's top-level keys: nothing that sets an environment or defaults for every job. */
+const TOP_LEVEL = ["name", "on", "permissions", "concurrency", "jobs"];
+/** The variables the build may read: public values only, which Next inlines into the bundle (DEC-823 item 5). */
+const PUBLIC_VARS = /^NEXT_PUBLIC_[A-Z0-9_]+$/;
+
+/**
+ * What names a Cloudflare tool: Wrangler, the OpenNext adapter, or a Cloudflare action. The build's
+ * own dry-run directory and Wrangler's metrics switch are the two names that run nothing.
+ */
+const CLOUDFLARE_TOOL = /wrangler|opennext|cloudflare\//i;
+const HARMLESS = /\.wrangler\/dry-run\b|\bWRANGLER_SEND_METRICS\b/g;
+/** The only commands that may name a Cloudflare tool, exactly as written: the dry run and the Worker's build and preview scripts. */
+const ALLOWED_COMMANDS = ["npx wrangler deploy --dry-run --outdir .wrangler/dry-run", "opennextjs-cloudflare build", "opennextjs-cloudflare build && opennextjs-cloudflare preview"];
+
+/**
+ * One line for the first line of `lines` that names a Cloudflare tool and is not an allowed command
+ * exactly, or none. It is an allowlist, so a deploy hidden by flags, quotes, a path or a comment
+ * fails rather than passes; it checks for drift, and the environment, not this check, holds the token.
+ */
+function deployProblems(path, lines) {
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#") || !CLOUDFLARE_TOOL.test(trimmed.replace(HARMLESS, ""))) continue;
+    const command = trimmed.replace(/^(?:-\s+)?run:\s*/, "");
+    if (!ALLOWED_COMMANDS.includes(command)) {
+      return [`${path}: runs ${JSON.stringify(trimmed)}, a Cloudflare command other than the Worker's build and dry run; only the deploy job of ${DEPLOY_WORKFLOW} deploys (DEC-1005 item 1)`];
+    }
+  }
+  return [];
+}
+
+/** The workflow's lines with comments and blank lines left out. */
+const meaningful = (text) =>
+  text
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
+
+/** The lines of each top-level key's block, its own line first. */
+function topBlocks(lines) {
+  const blocks = new Map();
+  let current = null;
+  for (const line of lines) {
+    if (!/^\s/.test(line)) {
+      current = line.replace(/:.*$/, "");
+      blocks.set(current, []);
+    }
+    blocks.get(current)?.push(line);
+  }
+  return blocks;
+}
+
+/** Splits `lines` before each line `starts` accepts; the lines before the first such line come first. */
+function splitAt(lines, starts) {
+  const parts = [[]];
+  for (const line of lines) {
+    if (starts(line)) parts.push([]);
+    parts[parts.length - 1].push(line);
+  }
+  return parts;
+}
+
+/** The names each `secrets` and `vars` reference in `text` reads; a bare `secrets` or `vars` (as in `toJSON(secrets)`) reads `*`. GitHub's contexts ignore case, and so does this. */
+function references(text, context) {
+  return [...text.matchAll(new RegExp(`\\b${context}\\b(?:\\s*(?:\\.\\s*|\\[\\s*["'])([A-Za-z0-9_]+))?`, "gi"))].map((match) => match[1] ?? "*");
+}
+
+function deployWorkflowProblems(tree) {
+  if (!tree.exists(DEPLOY_WORKFLOW)) return [`${DEPLOY_WORKFLOW}: missing; it is the one job that deploys main (DEC-1005 item 1)`];
+  const lines = meaningful(tree.read(DEPLOY_WORKFLOW));
+  const blocks = topBlocks(lines);
+  const problems = [];
+  const fail = (message) => problems.push(`${DEPLOY_WORKFLOW}: ${message}`);
+  if ((blocks.get("on") ?? []).join("\n") !== DEPLOY_TRIGGERS) fail("must run only on a push to main touching web/ or itself, or on workflow_dispatch (DEC-1005 item 1)");
+  if ((blocks.get("permissions") ?? []).join("\n") !== "permissions: {}") fail("must set permissions: {} at the top (DEC-1005 item 3)");
+  const extra = [...blocks.keys()].filter((key) => !TOP_LEVEL.includes(key));
+  if (extra.length > 0) fail(`holds ${extra.join(", ")} at the top; only ${TOP_LEVEL.join(", ")} may be there, so no secret reaches the whole workflow (DEC-1005 item 2)`);
+  const [header, ...jobs] = splitAt((blocks.get("jobs") ?? []).slice(1), (line) => /^ {2}\S/.test(line));
+  if (header.length > 0 || jobs.length !== 1 || jobs[0][0] !== "  deploy:") return [...problems, `${DEPLOY_WORKFLOW}: must hold one job, deploy (DEC-1005 item 1)`];
+  const job = jobs[0];
+  const [settings, ...steps] = splitAt(job.slice(1), (line) => /^ {6}- /.test(line));
+  const has = (lines, wanted) => lines.includes(wanted);
+  if (!has(settings, DEPLOY_IF)) fail("the deploy job must run only on refs/heads/main, and only once WEB_DEPLOY_ENABLED is true (DEC-1005 items 1 and 7)");
+  if (!has(settings, "    environment: production")) fail("the deploy job must use the production environment, which holds the token (DEC-1005 item 2)");
+  if (!settings.join("\n").includes("    permissions:\n      contents: read")) fail("the deploy job may only read contents (DEC-1005 item 3)");
+  if (!has(job, "          persist-credentials: false")) fail("the checkout must not persist credentials (DEC-1005 item 3)");
+  const runOf = (step) => step.find((line) => /^ {6}- run: |^ {8}run: /.test(line))?.replace(/^ {6}- run: |^ {8}run: /, "");
+  const deploying = steps.filter((step) => runOf(step) === DEPLOY_STEP.run);
+  if (deploying.length !== 1 || steps.at(-1) !== deploying[0]) fail(`must end with the one step that runs ${DEPLOY_STEP.run} (DEC-1005 item 1)`);
+  const buildAt = steps.findIndex((step) => runOf(step) === "npm run cf:build");
+  if (buildAt < 0 || buildAt > steps.length - 2) fail("must build the Worker with npm run cf:build before it deploys (DEC-1005 item 1)");
+  for (const step of steps) {
+    const text = step.join("\n");
+    const isDeploy = step === deploying[0];
+    const secrets = references(text, "secrets");
+    const vars = references(text, "vars");
+    if (secrets.some((name) => !isDeploy || !DEPLOY_STEP.secrets.includes(name))) fail(`only the deploy step may read a secret, and only ${DEPLOY_STEP.secrets.join(", ")} (DEC-1005 item 2)`);
+    if (vars.some((name) => (isDeploy ? !DEPLOY_STEP.vars.includes(name) : !PUBLIC_VARS.test(name)))) fail(`the build may read only NEXT_PUBLIC_ variables, and the deploy step only ${DEPLOY_STEP.vars.join(", ")} (DEC-1005 item 2)`);
+  }
+  const outsideSteps = [...[...blocks.entries()].filter(([key]) => key !== "jobs").flatMap(([, block]) => block), ...header, ...settings].join("\n");
+  const gated = outsideSteps.replace(DEPLOY_IF, "");
+  if (references(gated, "secrets").length > 0 || references(gated, "vars").length > 0) fail("only a step may read a secret or a variable, never the whole job (DEC-1005 item 2)");
+  const sanctioned = deploying.length === 1 ? lines.filter((line) => !deploying[0].includes(line)) : lines;
+  problems.push(...deployProblems(DEPLOY_WORKFLOW, sanctioned));
+  return [...new Set(problems)];
+}
+
+function workflowProblems(tree) {
+  const workflows = existsSync(WORKFLOWS) ? readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/.test(name)).map((name) => `../.github/workflows/${name}`) : [];
+  const problems = [];
+  for (const path of new Set([WEB_WORKFLOW, ...workflows])) {
+    if (path === DEPLOY_WORKFLOW || !tree.exists(path)) continue;
+    const text = tree.read(path);
+    problems.push(...deployProblems(path, text.split("\n")));
+    if (/^\s*environment:.*\bproduction\b|^\s*name:\s*["']?production\b/im.test(text)) problems.push(`${path}: names the production environment; only the deploy job of ${DEPLOY_WORKFLOW} may (ES-12, DEC-1005 item 2)`);
+    if (/CLOUDFLARE_/.test(text)) problems.push(`${path}: holds a CLOUDFLARE_ value; only the deploy step of ${DEPLOY_WORKFLOW} reads the token and the account (DEC-1005 item 2)`);
+  }
+  problems.push(...deployWorkflowProblems(tree));
+  problems.push(...deployProblems("package.json", Object.values(JSON.parse(tree.read("package.json")).scripts ?? {}).map(String)));
+  if (!tree.exists(WEB_WORKFLOW)) return [...problems, `${WEB_WORKFLOW}: missing`];
+  const yml = tree.read(WEB_WORKFLOW);
+  if (!/npm run cf:build/.test(yml)) problems.push(`${WEB_WORKFLOW}: must build the Worker with npm run cf:build`);
+  if (!/wrangler deploy --dry-run --outdir/.test(yml)) problems.push(`${WEB_WORKFLOW}: must bundle the Worker with wrangler deploy --dry-run --outdir`);
+  if (!/node scripts\/workers\.mjs size/.test(yml)) problems.push(`${WEB_WORKFLOW}: must check the Worker's budget with node scripts/workers.mjs size`);
+  if (/\bsecrets\b|\bvars\./.test(yml)) problems.push(`${WEB_WORKFLOW}: reads a secret or a variable; the pull-request build has no credential (ES-12, DEC-1005 item 2)`);
+  if (!/^ {2}pull_request:/m.test(yml) || /^ {2}push:/m.test(yml)) problems.push(`${WEB_WORKFLOW}: runs on pull requests and never on a push; the deploy workflow handles main (DEC-1005 item 1)`);
+  return problems;
+}
+
+const invokedAsScript = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedAsScript) {
+  const { status, lines } = sizeCommand(process.argv.slice(2));
+  for (const line of lines) (status === 0 ? console.log : console.error)(line);
+  process.exitCode = status;
 }

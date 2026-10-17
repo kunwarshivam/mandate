@@ -425,8 +425,8 @@ jobs:
 
   # E21-36, E21-37 (DEC-993): the local cell on the runner. `cargo xtask ci cell` lints and renders
   # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from
-  # the image this change built, runs every drill, and runs every drill again with its bug planted,
-  # which each must catch. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
+  # the image this change built, runs every drill, runs every drill again with its bug planted,
+  # which each must catch, and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
   # `fast-python`.
   cell:
     if: ${{ !github.event.pull_request.draft }}
