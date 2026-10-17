@@ -178,3 +178,43 @@ fn anything_the_script_does_not_define_refuses_it() {
     assert!(Script::parse("not json").is_err());
     assert!(Script::parse("[]").is_err());
 }
+
+/// The broker's clock (DEC-962 item 3): `clock`, an RFC 3339 instant, is the core's clock when the
+/// script's core is built, so an order placed on it is stamped then; absent, the core has no clock,
+/// as before, and its orders no creation time.
+#[test]
+fn the_clock_member_sets_the_broker_clock_and_is_read_strictly() {
+    let at = mandate_time::UtcNanos::parse_rfc3339("2026-10-19T15:00:00Z").unwrap();
+    for text in ["2026-10-19T15:00:00Z", "2026-10-19T11:00:00-04:00"] {
+        let mut script = base();
+        script["clock"] = json!(text);
+        let script = parsed(&script).unwrap();
+        assert_eq!(script.clock(), Some(at), "{text}");
+        let mut sim = script.sim().unwrap();
+        let order = sim.place(&limit("buy", "1", "500", 1)).unwrap();
+        assert_eq!(order.created_at, Some(at), "{text}");
+    }
+    let unclocked = parsed(&base()).unwrap();
+    assert_eq!(unclocked.clock(), None);
+    let order = unclocked
+        .sim()
+        .unwrap()
+        .place(&limit("buy", "1", "500", 1))
+        .unwrap();
+    assert_eq!(order.created_at, None);
+    for bad in [
+        json!("monday"),
+        json!("2026-10-19"),
+        json!("2026-10-19T15:00:00"),
+        json!(1_792_422_000),
+        json!(null),
+    ] {
+        let mut script = base();
+        script["clock"] = bad.clone();
+        assert_eq!(
+            parsed(&script).unwrap_err(),
+            ScriptError::Member("clock"),
+            "{bad}"
+        );
+    }
+}
