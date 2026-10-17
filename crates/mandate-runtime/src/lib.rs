@@ -51,6 +51,7 @@ mod ports;
 mod research;
 mod state;
 mod step;
+mod tail;
 mod types;
 
 pub use error::{JsonError, RuntimeError};
@@ -65,6 +66,7 @@ pub use research::{
 };
 pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
+pub use tail::{TailError, tailed};
 pub use types::{
     AgentId, ApprovalSettings, Autonomy, Classified, Command, ConnectionId, DecisionClip,
     Deployment, DryRunVerdict, Effect, EventDraft, EventId, ExitOrigin, FlattenLeg, FlattenPlan,

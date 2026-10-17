@@ -18,7 +18,7 @@
 //!   magnitude of the answering servers' offsets, out of tolerance when none answered, and when
 //!   one is due.
 //! - [`records`] writes the five §9.20 records as drafts with deterministic event ids.
-//! - [`store`] is the journal port, over the in-memory journal and Postgres.
+//! - [`mandate_store`] is the journal port, over the in-memory journal and Postgres.
 //! - [`scheduler`] runs them under one writer epoch, with [`mandate_process`]'s lifecycle: a
 //!   `Fenced` append exits before anything more is written.
 //! - [`sntp`] asks a time server over UDP, the one network call, with the host clock injected.
@@ -30,9 +30,7 @@ pub mod measure;
 pub mod records;
 pub mod scheduler;
 pub mod sntp;
-pub mod store;
 pub mod tick;
 
 pub use measure::{Measurement, Sample, Trigger};
 pub use scheduler::{Config, Scheduler, TimeServers};
-pub use store::ClockStore;
