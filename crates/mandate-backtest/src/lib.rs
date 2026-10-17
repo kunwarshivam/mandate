@@ -99,8 +99,6 @@ pub enum BacktestError {
     CalendarUnavailable,
     #[error("a liquidity figure could not be computed: {0}")]
     Liquidity(&'static str),
-    #[error("a version backtest is not implemented yet")]
-    Unimplemented,
     #[error(transparent)]
     Builder(#[from] mandate_builder::BuilderError),
     /// The gate refused to decide; its code is kept, since `GateError` is neither `Clone` nor `Eq`.
@@ -145,7 +143,6 @@ impl BacktestError {
             Self::FlattenWithoutSell => "flatten_without_sell",
             Self::CalendarUnavailable => "calendar_unavailable",
             Self::Liquidity(code) => code,
-            Self::Unimplemented => "unimplemented",
             Self::Builder(e) => e.code(),
             Self::Gate(code) => code,
             Self::Spec(e) => e.code(),

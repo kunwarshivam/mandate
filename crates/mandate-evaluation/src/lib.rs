@@ -60,9 +60,6 @@ pub enum EvaluationError {
     /// A payload member the harness reads is missing or not of its §9.4 type.
     #[error("thesis record {index} has no well-typed `{member}`")]
     RecordMalformed { index: usize, member: &'static str },
-    /// A stub of the tests-first commit returns this, so every test fails on it (DEC-990 item 3).
-    #[error("the evaluation harness is not implemented yet")]
-    Unimplemented,
     /// The accounting fold could not price the round trip's fees.
     #[error("the round trip's fees could not be priced: {0}")]
     Accounting(&'static str),
@@ -89,7 +86,6 @@ impl EvaluationError {
         match self {
             Self::RecordRejected { .. } => "record_rejected",
             Self::RecordMalformed { .. } => "record_malformed",
-            Self::Unimplemented => "unimplemented",
             Self::Accounting(code) => code,
             Self::BaselineWithoutCloses => "baseline_without_closes",
             Self::Research(code) => code,
@@ -164,8 +160,79 @@ struct ReadThesis {
 /// it; `baseline_without_closes` for a baseline with no closes; a series' own refusals (empty, or
 /// out of order); and the arithmetic errors of the cost. A group the scorer refuses is not an error: its refusal is the group's.
 pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<EvaluationReport, EvaluationError> {
-    let _ = request;
-    Err(EvaluationError::Unimplemented)
+    let series = request
+        .closes
+        .iter()
+        .map(|(id, closes)| Ok((id.clone(), CloseSeries::new(id.clone(), closes.clone())?)))
+        .collect::<Result<BTreeMap<AssetId, CloseSeries>, EvaluationError>>()?;
+    let baseline = |id: &AssetId| {
+        series
+            .get(id)
+            .cloned()
+            .ok_or(EvaluationError::BaselineWithoutCloses)
+    };
+    let basket = request
+        .baselines
+        .basket
+        .iter()
+        .map(baseline)
+        .collect::<Result<Vec<_>, _>>()?;
+    let index = baseline(request.baselines.index)?;
+    let mut groups: BTreeMap<SignalModelKey, GroupTheses> = BTreeMap::new();
+    for (index, record) in request.records.iter().enumerate() {
+        mandate_spec::context::check_thesis_record(
+            &record.payload,
+            &record.mandate_version,
+            request.documents,
+        )
+        .map_err(|error| EvaluationError::RecordRejected {
+            index,
+            code: error.code(),
+        })?;
+        let read = read(index, record)?;
+        let group = groups.entry(read.key).or_default();
+        let window = request.decision.window;
+        if read.thesis.horizon_end > request.cut_off {
+            group.open = group.open.checked_add(1).ok_or(NumError::Overflow)?;
+        } else if read.thesis.horizon_end < window.from || read.thesis.horizon_end > window.to {
+            group.outside_window = group
+                .outside_window
+                .checked_add(1)
+                .ok_or(NumError::Overflow)?;
+        } else {
+            let round_trip_cost = round_trip_cost(&read.thesis, &series, request.cost)?;
+            group.closed.push(ClosedThesis {
+                round_trip_cost,
+                ..read.thesis
+            });
+        }
+    }
+    let mut scored = Vec::new();
+    for (key, theses) in groups {
+        let outcome = mandate_research::score::evaluate(&EvaluationInput {
+            decision: request.decision,
+            theses: &theses.closed,
+            instruments: &series,
+            basket: &basket,
+            index: &index,
+        });
+        scored.push(Group {
+            key,
+            closed: u32::try_from(theses.closed.len()).map_err(|_| NumError::Overflow)?,
+            open: theses.open,
+            outside_window: theses.outside_window,
+            outcome: outcome.map_err(|error| error.code()),
+        });
+    }
+    Ok(EvaluationReport {
+        decision_id: request.decision_id.to_owned(),
+        decision: request.decision.clone(),
+        cut_off: request.cut_off,
+        inputs: report::InputDigests::of(request)?,
+        basket: request.baselines.basket.to_vec(),
+        index: request.baselines.index.clone(),
+        groups: scored,
+    })
 }
 
 /// One signal model's theses, sorted as they resolved.

@@ -177,8 +177,53 @@ pub struct VersionRun {
 /// `bar_trade_date_mismatch`; and the arithmetic, fill-model, accounting, risk-state, gate, and
 /// calendar errors the run wraps. Every error refuses the whole run: no partial report exists.
 pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, BacktestError> {
-    let _ = input;
-    Err(BacktestError::Unimplemented)
+    check_inputs(input)?;
+    let benchmark_config = benchmark_config(input)?;
+    let benchmark_input = BacktestInput {
+        config: &benchmark_config,
+        bars: input.bars,
+        coverage_start: input.coverage_start,
+        first_bar_volumes: input.first_bar_volumes,
+    };
+    crate::check_trade_dates(&benchmark_input)?;
+    let benchmark = crate::walk(&benchmark_input, benchmark_config.strategy)?;
+    let calendar =
+        ExchangeCalendar::us_equities().map_err(|_| BacktestError::CalendarUnavailable)?;
+    let clock = RegularSeconds {
+        calendar: &calendar,
+    };
+    let mut run = Run::open(input, &benchmark_config, &calendar, &clock)?;
+    run.walk()?;
+    let starting_cash = run.starting_cash;
+    let strategy_metrics = Metrics::of(
+        starting_cash,
+        &run.equity,
+        &run.totals()?,
+        &input.settings.metrics,
+    )?;
+    let benchmark_metrics = benchmark.metrics(&benchmark_config)?;
+    let report = VersionReport {
+        mandate_version: mandate_version(input.mandate)?,
+        instrument: input.instrument.asset.clone(),
+        research_agent: research_agent(input.mandate),
+        inputs: VersionDigests::of(input)?,
+        excess_total_return: strategy_metrics
+            .total_return
+            .checked_sub(benchmark_metrics.total_return)?,
+        strategy: strategy_metrics,
+        benchmark: benchmark_metrics,
+        decisions: run.rows,
+        limits_latched: run.latched.iter().map(|key| key.journal_name()).collect(),
+        risk_exits: run.risk_exits,
+        most_restrictive_mode: run.most_restrictive,
+        strategy_equity: run.equity,
+        benchmark_equity: benchmark.equity,
+    };
+    Ok(VersionRun {
+        report,
+        orders: run.orders,
+        fills: run.fills,
+    })
 }
 
 /// The confirmed version's content hash, which names the report's mandate (DEC-1001 item 2).
