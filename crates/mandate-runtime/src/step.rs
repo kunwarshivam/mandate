@@ -39,6 +39,12 @@ pub fn handle(
     if let Input::Started(epoch) = &input {
         return started(state, *epoch, ports);
     }
+    if matches!(input, Input::Research(_)) {
+        return Err(RuntimeError::NotInterpreted {
+            what: "a research input outside handle_research".to_owned(),
+            story: "E19-3",
+        });
+    }
     if !state.has_started() {
         return Err(RuntimeError::NotStarted);
     }
@@ -183,7 +189,7 @@ fn applied(
             batch.journal("ModelOutputRecorded", None, modelled(output)?)?;
             Ok(())
         }
-        Input::Journal(_) | Input::Started(_) | Input::Command(_) => Ok(()),
+        Input::Journal(_) | Input::Started(_) | Input::Command(_) | Input::Research(_) => Ok(()),
     }
 }
 

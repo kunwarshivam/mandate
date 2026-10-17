@@ -48,6 +48,7 @@ mod error;
 mod escalation;
 mod payload;
 mod ports;
+mod research;
 mod state;
 mod step;
 mod types;
@@ -56,6 +57,11 @@ pub use error::{JsonError, RuntimeError};
 pub use mandate_approval::{ActorKind, LiveBroker, LiveScope};
 pub use ports::{
     FlattenPlanner, GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource,
+};
+pub use research::{
+    ActiveThesis, ItemFacts, JournalCatalog, Preconditions, RecordCatalog, ResearchConfig,
+    ResearchContext, ResearchInput, ResearchRecord, ResearchRequest, ResearchState, ResearchStep,
+    RetrievedObservation, handle_research,
 };
 pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
