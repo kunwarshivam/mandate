@@ -39469,3 +39469,3830 @@ segment_rows:
       outcome: Invalid
       reason: non_canonical
       path: payload.ranges[0].failure.check
+model_gateway:
+  spec: docs/specs/journal.md v0.45 §9.18 (DEC-996)
+  drafts:
+    call:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GW10A000000000000000M1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW00A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          result: judged
+        - candidate: 1
+          result: unknown_evidence
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    opened:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    reserved:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GW21A000000000000000M3
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW00A000000000000000C1
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    settled:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GW22A000000000000000M4
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW00A000000000000000C1
+        reservation: 01J9GW21A000000000000000M3
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: call.call_id.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.call_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.call_id
+  - name: call.call_id.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.call_id
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.call_id
+  - name: call.purpose.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.purpose
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.purpose
+  - name: call.purpose.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.purpose
+      value: compiler
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.purpose
+  - name: call.model.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.model
+      value: llm.research_agent
+    - path: artifact_refs
+      value:
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model
+  - name: call.endpoint.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.endpoint
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.endpoint
+  - name: call.request_digest.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.request_digest
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.request_digest
+  - name: call.request_digest.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.request_digest
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.request_digest
+  - name: call.sampling.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.sampling
+      value: '0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sampling
+  - name: call.prompt_ref.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.prompt_ref
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.prompt_ref
+  - name: call.prompt_ref.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.prompt_ref
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.prompt_ref
+  - name: call.response_ref.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.response_ref
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.response_ref
+  - name: call.response_ref.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.response_ref
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.response_ref
+  - name: call.reported_identity.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.reported_identity
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reported_identity
+  - name: call.provider_request_id.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.provider_request_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.provider_request_id
+  - name: call.outcome.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.outcome
+  - name: call.outcome.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: denied
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.outcome
+  - name: call.attempts.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.attempts
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: call.tokens.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.tokens
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tokens
+  - name: call.cost_usd.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.cost_usd
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: call.cost_usd.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.cost_usd
+      value: 1.2.3
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cost_usd
+  - name: call.price_table_ref.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.price_table_ref
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.price_table_ref
+  - name: call.price_table_ref.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.price_table_ref
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.price_table_ref
+  - name: call.cache_hit.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.cache_hit
+      value: 'false'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cache_hit
+  - name: call.deadline.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.deadline
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deadline
+  - name: call.deadline.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.deadline
+      value: '2026-10-16T14:01:00Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deadline
+  - name: call.completed_at.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.completed_at
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.completed_at
+  - name: call.completed_at.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.completed_at
+      value: '2026-10-16T14:00:41Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.completed_at
+  - name: call.reservation.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.reservation
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reservation
+  - name: call.reservation.form
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.reservation
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reservation
+  - name: call.observations.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.observations
+      value: 01J9GV00A000000000000000B1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.observations
+  - name: call.verdicts.kind
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+        candidate: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts
+  - name: call.call_id.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.call_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.call_id
+  - name: call.purpose.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.purpose
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.purpose
+  - name: call.model.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.model
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model
+  - name: call.endpoint.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.endpoint
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.endpoint
+  - name: call.request_digest.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.request_digest
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.request_digest
+  - name: call.sampling.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.sampling
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sampling
+  - name: call.outcome.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.outcome
+  - name: call.attempts.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.attempts
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: call.tokens.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.tokens
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tokens
+  - name: call.cost_usd.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.cost_usd
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: call.price_table_ref.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.price_table_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.price_table_ref
+  - name: call.cache_hit.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.cache_hit
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cache_hit
+  - name: call.deadline.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.deadline
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deadline
+  - name: call.completed_at.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.completed_at
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.completed_at
+  - name: call.observations.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.observations
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.observations
+  - name: call.verdicts.null
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts
+  - name: call.missing
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts
+  - name: call.extra
+    clause: §9.18 types
+    base_draft: call
+    changes:
+    - path: payload.zz_extra
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.zz_extra
+  - name: reserved.call_id.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.call_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.call_id
+  - name: reserved.call_id.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.call_id
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.call_id
+  - name: reserved.agent_id.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.agent_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent_id
+  - name: reserved.agent_id.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.agent_id
+      value: agent a
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.agent_id
+  - name: reserved.purpose.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.purpose
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.purpose
+  - name: reserved.purpose.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.purpose
+      value: admission
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.purpose
+  - name: reserved.model.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.model
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model
+  - name: reserved.endpoint.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.endpoint
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.endpoint
+  - name: reserved.key_owner.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.key_owner
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_owner
+  - name: reserved.key_owner.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.key_owner
+      value: workspace
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.key_owner
+  - name: reserved.price_table_ref.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.price_table_ref
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.price_table_ref
+  - name: reserved.price_table_ref.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.price_table_ref
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.price_table_ref
+  - name: reserved.max_cost_usd.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.max_cost_usd
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_cost_usd
+  - name: reserved.max_cost_usd.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.max_cost_usd
+      value: 1.2.3
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.max_cost_usd
+  - name: reserved.risk_day.kind
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.risk_day
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_day
+  - name: reserved.risk_day.form
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.risk_day
+      value: '2026-10-16T00:00:00Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.risk_day
+  - name: reserved.call_id.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.call_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.call_id
+  - name: reserved.purpose.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.purpose
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.purpose
+  - name: reserved.model.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.model
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model
+  - name: reserved.endpoint.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.endpoint
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.endpoint
+  - name: reserved.key_owner.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.key_owner
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_owner
+  - name: reserved.price_table_ref.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.price_table_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.price_table_ref
+  - name: reserved.max_cost_usd.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.max_cost_usd
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_cost_usd
+  - name: reserved.risk_day.null
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.risk_day
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_day
+  - name: reserved.missing
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.risk_day
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_day
+  - name: reserved.extra
+    clause: §9.18 types
+    base_draft: reserved
+    changes:
+    - path: payload.zz_extra
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.zz_extra
+  - name: settled.call_id.kind
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.call_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.call_id
+  - name: settled.call_id.form
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.call_id
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.call_id
+  - name: settled.reservation.kind
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.reservation
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reservation
+  - name: settled.reservation.form
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.reservation
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reservation
+  - name: settled.outcome.kind
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.outcome
+  - name: settled.outcome.form
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: budget_exhausted
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.outcome
+  - name: settled.attempts.kind
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.attempts
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: settled.tokens.kind
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.tokens
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tokens
+  - name: settled.cost_usd.kind
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.cost_usd
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: settled.cost_usd.form
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.cost_usd
+      value: 1.2.3
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cost_usd
+  - name: settled.call_id.null
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.call_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.call_id
+  - name: settled.reservation.null
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.reservation
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reservation
+  - name: settled.outcome.null
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.outcome
+  - name: settled.attempts.null
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.attempts
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: settled.tokens.null
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.tokens
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tokens
+  - name: settled.cost_usd.null
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.cost_usd
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: settled.missing
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.cost_usd
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: settled.extra
+    clause: §9.18 types
+    base_draft: settled
+    changes:
+    - path: payload.zz_extra
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.zz_extra
+  - name: call.143.model
+    clause: rule 143
+    base_draft: call
+    changes:
+    - path: payload.model.content_hash
+      value: sha256:f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6
+    - path: artifact_refs
+      value:
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      - sha256:f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model.content_hash
+  - name: call.144.actor
+    clause: rule 144
+    base_draft: call
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: call.145.rejected_kept
+    clause: 'rule 145: a refused prompt is never stored'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.prompt_ref
+  - name: call.145.prompt_dropped
+    clause: 'rule 145: every other call names its prompt'
+    base_draft: call
+    changes:
+    - path: payload.prompt_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.prompt_ref
+  - name: call.146.refusal_reserved
+    clause: 'rule 146: a refusal reserved nothing'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: budget_exhausted
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: 01J9GW21A000000000000000M3
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reservation
+  - name: call.146.hit_reserved
+    clause: 'rule 146: a cache hit reserved nothing'
+    base_draft: call
+    changes:
+    - path: payload.cache_hit
+      value: true
+    - path: payload.attempts
+      value: 0
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.reservation
+      value: 01J9GW21A000000000000000M3
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reservation
+  - name: call.146.sent_unreserved
+    clause: 'rule 146: a call that reached a provider reserved first'
+    base_draft: call
+    changes:
+    - path: payload.reservation
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reservation
+  - name: call.147.descending
+    clause: rule 147
+    base_draft: call
+    changes:
+    - path: payload.observations
+      value:
+      - 01J9GV00B000000000000000B2
+      - 01J9GV00A000000000000000B1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.observations
+  - name: call.147.twice
+    clause: 'rule 147: no item listed twice'
+    base_draft: call
+    changes:
+    - path: payload.observations
+      value:
+      - 01J9GV00A000000000000000B1
+      - 01J9GV00A000000000000000B1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.observations
+  - name: call.148.signal_verdicts
+    clause: 'rule 148: only a research call has candidates'
+    base_draft: call
+    changes:
+    - path: payload.purpose
+      value: llm_signal
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts
+  - name: call.148.failed_verdicts
+    clause: 'rule 148: a failed call has no candidates'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: schema_invalid
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts
+  - name: call.148.order
+    clause: 'rule 148: item i is candidate i'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        result: judged
+      - candidate: 2
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[1].candidate
+  - name: call.148.repeated
+    clause: 'rule 148: every candidate exactly once'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        result: judged
+      - candidate: 0
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[1].candidate
+  - name: call.72.no_response
+    clause: rule 72 on the agent stream
+    base_draft: call
+    changes:
+    - path: payload.response_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.response_ref
+  - name: call.73.refusal_attempted
+    clause: rule 73 on the agent stream
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: policy_denied
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: payload.attempts
+      value: 1
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: call.74.hit_cost
+    clause: rule 74 on the agent stream
+    base_draft: call
+    changes:
+    - path: payload.cache_hit
+      value: true
+    - path: payload.attempts
+      value: 0
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.cost_usd
+      value: '0.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: call.74.no_attempt
+    clause: rule 74 on the agent stream
+    base_draft: call
+    changes:
+    - path: payload.attempts
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: call.75.late
+    clause: 'rule 75 on the agent stream: a late ok'
+    base_draft: call
+    changes:
+    - path: payload.completed_at
+      value: '2026-10-16T14:01:00.000000001Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.completed_at
+  - name: call.75.cost
+    clause: rule 75 on the agent stream
+    base_draft: call
+    changes:
+    - path: payload.cost_usd
+      value: '-0.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: call.without_model
+    clause: '§9 row: `mod`'
+    base_draft: call
+    changes:
+    - path: config_refs
+      value: {}
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.model_version
+  - name: call.on_the_meter_stream
+    clause: '§9: an agent-stream record'
+    base_draft: call
+    changes:
+    - path: stream_id
+      value: meter:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: call.at_version_2
+    clause: '§9.18: schema version 1 only'
+    base_draft: call
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: opened.149
+    clause: rule 149
+    base_draft: opened
+    changes:
+    - path: payload.workspace_id
+      value: ws_other
+    expect:
+      outcome: Invalid
+      reason: stream_mismatch
+      path: stream_id
+  - name: opened.type
+    clause: §9.18 types
+    base_draft: opened
+    changes:
+    - path: payload.stream_type
+      value: control
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.stream_type
+  - name: opened.segments
+    clause: '§2: `meter:{workspace_id}`'
+    base_draft: opened
+    changes:
+    - path: stream_id
+      value: meter:ws_01J8Z2:x
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: stream_id
+  - name: reserved.150.actor
+    clause: rule 150
+    base_draft: reserved
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: settled.150.actor
+    clause: rule 150
+    base_draft: settled
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: reserved.151.no_agent
+    clause: 'rule 151: an agent''s call names it'
+    base_draft: reserved
+    changes:
+    - path: payload.agent_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent_id
+  - name: reserved.151.compiler_agent
+    clause: 'rule 151: the compiler has no agent'
+    base_draft: reserved
+    changes:
+    - path: payload.purpose
+      value: compiler
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent_id
+  - name: reserved.151.cost
+    clause: rule 151
+    base_draft: reserved
+    changes:
+    - path: payload.max_cost_usd
+      value: '-0.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_cost_usd
+  - name: settled.152.cost
+    clause: rule 152
+    base_draft: settled
+    changes:
+    - path: payload.cost_usd
+      value: '-0.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
+  - name: settled.152.attempts
+    clause: 'rule 152: an ok made an attempt'
+    base_draft: settled
+    changes:
+    - path: payload.attempts
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: reserved.on_the_agent_stream
+    clause: '§9: a meter-stream record'
+    base_draft: reserved
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: settled.at_version_2
+    clause: '§9.18: schema version 1 only'
+    base_draft: settled
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: call.purpose.llm_signal
+    clause: '§9.18: an LLM or fast signal model''s call'
+    base_draft: call
+    changes:
+    - path: payload.purpose
+      value: llm_signal
+    - path: payload.verdicts
+      value: []
+    - path: payload.observations
+      value: []
+    expect:
+      outcome: Valid
+  - name: call.purpose.fast_signal
+    clause: '§9.18: an LLM or fast signal model''s call'
+    base_draft: call
+    changes:
+    - path: payload.purpose
+      value: fast_signal
+    - path: payload.verdicts
+      value: []
+    - path: payload.observations
+      value: []
+    expect:
+      outcome: Valid
+  - name: call.refusal.policy_denied
+    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: policy_denied
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.refusal.budget_exhausted
+    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: budget_exhausted
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.refusal.rate_limited_local
+    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: rate_limited_local
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.refusal.meter_unavailable
+    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: meter_unavailable
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.refusal.model_withdrawn
+    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: model_withdrawn
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.input_rejected
+    clause: 'rule 145: the refused prompt is not stored'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    - path: payload.verdicts
+      value: []
+    - path: payload.prompt_ref
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.cache_hit
+    clause: 'rules 74 and 146: a hit costs nothing and reserves nothing'
+    base_draft: call
+    changes:
+    - path: payload.cache_hit
+      value: true
+    - path: payload.attempts
+      value: 0
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.reservation
+      value: null
+    expect:
+      outcome: Valid
+  - name: call.deadline_before_first_attempt
+    clause: 'rules 74 and 146: reserved, then the deadline passed'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - path: payload.verdicts
+      value: []
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.attempts
+      value: 1
+    - path: payload.cost_usd
+      value: '0'
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.identity_mismatch
+    clause: '§9.18: a mismatch keeps its response and is metered'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: identity_mismatch
+    - path: payload.verdicts
+      value: []
+    - path: payload.reported_identity
+      value: anthropic/claude-haiku
+    expect:
+      outcome: Valid
+  - name: call.at_the_deadline
+    clause: 'rule 75: completed exactly at the deadline'
+    base_draft: call
+    changes:
+    - path: payload.completed_at
+      value: '2026-10-16T14:01:00.000000000Z'
+    expect:
+      outcome: Valid
+  - name: call.no_candidates
+    clause: 'rule 148: a research call may return none'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value: []
+    expect:
+      outcome: Valid
+  - name: call.no_retrieval
+    clause: 'rule 147: a call with no retrieval plan'
+    base_draft: call
+    changes:
+    - path: payload.observations
+      value: []
+    expect:
+      outcome: Valid
+  - name: call.no_seed
+    clause: '§9.18: a provider that takes no seed'
+    base_draft: call
+    changes:
+    - path: payload.sampling
+      value:
+        temperature: '0'
+        seed: null
+    expect:
+      outcome: Valid
+  - name: call.every_harness_result
+    clause: 'rule 148: each harness result'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        result: judged
+      - candidate: 1
+        result: unknown_instrument
+      - candidate: 2
+        result: unknown_evidence
+      - candidate: 3
+        result: duplicate_instrument
+      - candidate: 4
+        result: forbidden_language
+      - candidate: 5
+        result: revisions_not_enabled
+      - candidate: 6
+        result: unknown_thesis
+    expect:
+      outcome: Valid
+  - name: reserved.compiler
+    clause: 'rule 151: the compiler''s call'
+    base_draft: reserved
+    changes:
+    - path: payload.agent_id
+      value: null
+    - path: payload.purpose
+      value: compiler
+    expect:
+      outcome: Valid
+  - name: reserved.free
+    clause: 'rule 151: a local endpoint priced at zero'
+    base_draft: reserved
+    changes:
+    - path: payload.max_cost_usd
+      value: '0'
+    expect:
+      outcome: Valid
+  - name: reserved.customer_key
+    clause: '§9.18: a customer''s key'
+    base_draft: reserved
+    changes:
+    - path: payload.key_owner
+      value: customer
+    expect:
+      outcome: Valid
+  - name: settled.deadline_no_attempt
+    clause: 'rule 152: the deadline passed before the first attempt'
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    expect:
+      outcome: Valid
+  - name: settled.over_reservation
+    clause: '§9.18: a settlement above its reservation is recorded as reported'
+    base_draft: settled
+    changes:
+    - path: payload.cost_usd
+      value: '0.06'
+    expect:
+      outcome: Valid
+  - name: settled.retried
+    clause: '§9.18: a call retried after a transport failure'
+    base_draft: settled
+    changes:
+    - path: payload.attempts
+      value: 3
+    expect:
+      outcome: Valid
+  streams:
+  - name: interleaved
+    clause: 'rule 153: settlements in any order'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        reservation: 01J9GW3R000000000000000002
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.02'
+      artifact_refs: []
+      pii_refs: []
+    expect: &id106
+      outcome: Valid
+  - name: open
+    clause: 'rule 153: a reservation never settled'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect: *id106
+  - name: reserved_twice
+    clause: 'rule 153: one reservation per call'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000009
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.call_id
+  - name: unreserved
+    clause: 'rule 153: a settlement names an earlier reservation'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.reservation
+  - name: names_the_opening
+    clause: 'rule 153: the reservation is a `MeterReserved`'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW20A000000000000000M2
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.reservation
+  - name: another_call
+    clause: 'rule 153: the same call'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000002
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.call_id
+  - name: settled_twice
+    clause: 'rule 153: one settlement per reservation'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000008
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.reservation
+  - name: settled_before_reserved
+    clause: 'rule 153: the reservation is earlier'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.reservation
+  folds:
+  - name: a_month_of_calls
+    clause: '§9.18 spend: settled at cost, open at maximum, by scope and period'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-09-30'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.02'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-01'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        reservation: 01J9GW3R000000000000000002
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.01'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000003
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000003
+        agent_id: agent_b
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.5'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000004
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000004
+        agent_id: null
+        purpose: compiler
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.03'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000004
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000004
+        reservation: 01J9GW3R000000000000000004
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.029'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000005
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000005
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.048'
+        risk_day: '2026-10-16'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000005
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000005
+        reservation: 01J9GW3R000000000000000005
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.06'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+    - scope: workspace
+      period: month:2026-10
+      spend_usd: '0.599'
+    - scope: workspace
+      period: month:2026-09
+      spend_usd: '0.02'
+    - scope: workspace
+      period: day:2026-10-16
+      spend_usd: '0.589'
+    - scope: agent_a
+      period: month:2026-10
+      spend_usd: '0.07'
+    - scope: agent_b
+      period: day:2026-10-16
+      spend_usd: '0.5'
+    - scope: agent_b
+      period: month:2026-09
+      spend_usd: '0'
+    admissions:
+    - scope: workspace
+      period: month:2026-10
+      cap_usd: '50'
+      max_cost_usd: '49.401'
+      admitted: true
+    - scope: workspace
+      period: month:2026-10
+      cap_usd: '50'
+      max_cost_usd: '49.4011'
+      admitted: false
+    - scope: agent_b
+      period: day:2026-10-16
+      cap_usd: '0.50'
+      max_cost_usd: '0.0001'
+      admitted: false
+    - scope: agent_b
+      period: day:2026-10-16
+      cap_usd: '0.50'
+      max_cost_usd: '0'
+      admitted: true
+  - name: the_monthly_cap_reached
+    clause: 'DEC-997 item 3: $50 a month per workspace'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW20A000000000000000M2
+      stream_id: meter:ws_01J8Z2
+      event_type: StreamOpened
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        stream_type: meter
+        workspace_id: ws_01J8Z2
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-02'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-03'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000003
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000003
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-04'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000004
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000004
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-05'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000005
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000005
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-06'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000006
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000006
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-07'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000007
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000007
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-08'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000008
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000008
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-09'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000009
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000009
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-10'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000010
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000010
+        agent_id: agent_a
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: platform
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '4.9'
+        risk_day: '2026-10-11'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000001
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        reservation: 01J9GW3R000000000000000001
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000002
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        reservation: 01J9GW3R000000000000000002
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000003
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000003
+        reservation: 01J9GW3R000000000000000003
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000004
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000004
+        reservation: 01J9GW3R000000000000000004
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000005
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000005
+        reservation: 01J9GW3R000000000000000005
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000006
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000006
+        reservation: 01J9GW3R000000000000000006
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000007
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000007
+        reservation: 01J9GW3R000000000000000007
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000008
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000008
+        reservation: 01J9GW3R000000000000000008
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000009
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000009
+        reservation: 01J9GW3R000000000000000009
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000010
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000010
+        reservation: 01J9GW3R000000000000000010
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '4.9'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+    - scope: workspace
+      period: month:2026-10
+      spend_usd: '49'
+    admissions:
+    - scope: workspace
+      period: month:2026-10
+      cap_usd: '50'
+      max_cost_usd: '1'
+      admitted: true
+    - scope: workspace
+      period: month:2026-10
+      cap_usd: '50'
+      max_cost_usd: '1.0001'
+      admitted: false
+    - scope: workspace
+      period: month:2026-11
+      cap_usd: '50'
+      max_cost_usd: '1.0001'
+      admitted: true

@@ -86,7 +86,7 @@ ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 STREAM_ID = T("stream_id")
 DIGEST_HEX = T("digest")
 DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
-STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2}
+STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
@@ -497,6 +497,63 @@ CONFIRMED_V2 = rec(
     ("base_version", opt(REF)),
 )
 REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
+
+# §9.18 (DEC-996): the agent stream's `ModelInvocationRecorded` and the model gateway's meter stream.
+AGENT_PURPOSES = ("research", "llm_signal", "fast_signal")
+HARNESS_RESULTS = (
+    "judged",
+    "unknown_instrument",
+    "unknown_evidence",
+    "duplicate_instrument",
+    "forbidden_language",
+    "revisions_not_enabled",
+    "unknown_thesis",
+)
+SETTLED_OUTCOMES = tuple(o for o in CALL_OUTCOMES if o not in CALL_REFUSALS)
+MODEL_REF = rec(("model_id", STR), ("model_version", STR), ("content_hash", REF))
+SCHEMAS[("agent", "ModelInvocationRecorded")] = rec(
+    ("call_id", ULID),
+    ("purpose", one_of(*AGENT_PURPOSES)),
+    ("model", MODEL_REF),
+    ("endpoint", STR),
+    ("request_digest", REF),
+    ("sampling", rec(("temperature", DEC), ("seed", opt(INT)))),
+    ("prompt_ref", opt(REF)),
+    ("response_ref", opt(REF)),
+    ("reported_identity", opt(STR)),
+    ("provider_request_id", opt(STR)),
+    ("outcome", one_of(*CALL_OUTCOMES)),
+    ("attempts", INT),
+    ("tokens", TOKENS),
+    ("cost_usd", DEC),
+    ("price_table_ref", REF),
+    ("cache_hit", BOOL),
+    ("deadline", TS),
+    ("completed_at", TS),
+    ("reservation", opt(ULID)),
+    ("observations", list_of(ULID)),
+    ("verdicts", list_of(rec(("candidate", INT), ("result", one_of(*HARNESS_RESULTS))))),
+)
+SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("workspace_id", IDENT_T))
+SCHEMAS[("meter", "MeterReserved")] = rec(
+    ("call_id", ULID),
+    ("agent_id", opt(IDENT_T)),
+    ("purpose", one_of(*AGENT_PURPOSES, "compiler")),
+    ("model", MODEL_REF),
+    ("endpoint", STR),
+    ("key_owner", one_of("platform", "customer")),
+    ("price_table_ref", REF),
+    ("max_cost_usd", DEC),
+    ("risk_day", DATE),
+)
+SCHEMAS[("meter", "MeterSettled")] = rec(
+    ("call_id", ULID),
+    ("reservation", ULID),
+    ("outcome", one_of(*SETTLED_OUTCOMES)),
+    ("attempts", INT),
+    ("tokens", TOKENS),
+    ("cost_usd", DEC),
+)
 
 # §3 and §9.10 (DEC-671): the `client` actor, `ConnectionRevoked`'s reason, and the client records.
 ACTOR_KINDS = ("system", "agent", "user", "broker", "platform_operator", "client")
@@ -1477,10 +1534,12 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         client = actor["kind"] == "client" and (p["origin"] == "version" or "rule.70.client_origin" in skip)
         person = actor["kind"] != "system" if "rule.70.not_system_only" in skip else actor["kind"] == "user"
         rule("70", person or client, "actor.kind")
+    kind = draft["stream_id"].split(":")[0]
     if event_type == "ModelInvocationRecorded":
         bound = draft["config_refs"].get("model_version")
         if bound is not None:
-            rule("71", p["model"]["content_hash"] == bound, "payload.model.content_hash")
+            name = "71" if kind == "ctl" else "143"
+            rule(name, p["model"]["content_hash"] == bound, "payload.model.content_hash")
         ok = p["outcome"] == "ok"
         if ok:
             missing = next((m for m in ("response_ref", "reported_identity") if p[m] is None), None)
@@ -1514,8 +1573,22 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             if "boundary.rule_75_strict" in skip:
                 late = instant_nanos(p["completed_at"]) >= instant_nanos(p["deadline"])
             rule("75.late", not late, "payload.completed_at")
-        services = actor["kind"] != "user" if "rule.76.not_user_only" in skip else actor["kind"] == "system"
-        rule("76", services, "actor.kind")
+        if kind == "ctl":
+            services = actor["kind"] != "user" if "rule.76.not_user_only" in skip else actor["kind"] == "system"
+            rule("76", services, "actor.kind")
+        else:
+            gateway_call_rules(p, actor, rule, skip)
+    if event_type in ("MeterReserved", "MeterSettled"):
+        rule("150", actor["kind"] == "system", "actor.kind")
+    if event_type == "MeterReserved":
+        (
+            rule("151.agent", (p["agent_id"] is None) == (p["purpose"] == "compiler"), "payload.agent_id")
+            and rule("151.cost", Decimal(p["max_cost_usd"]) >= 0, "payload.max_cost_usd")
+        )
+    if event_type == "MeterSettled":
+        rule("152.cost", Decimal(p["cost_usd"]) >= 0, "payload.cost_usd")
+        if p["outcome"] == "ok":
+            rule("152.attempts", p["attempts"] >= 1, "payload.attempts")
     if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
         (
             rule("77.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
@@ -1571,6 +1644,22 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             rule("93", held == (reason == "owner_hold"), "payload.held")
         floor = max(MODE_ORDER.index(p["lifecycle"]), 1 if held and "rule.94.held" not in skip else 0)
         rule("94", MODE_ORDER.index(p["to"]) >= floor, "payload.to")
+
+
+def gateway_call_rules(p: dict, actor: dict, rule, skip: frozenset[str]) -> None:
+    """§9.18's rules 144 to 148 on the agent stream's `ModelInvocationRecorded`, in number order."""
+    rule("144", actor["kind"] == "agent", "actor.kind")
+    rejected = p["outcome"] == "input_rejected"
+    rule("145", (p["prompt_ref"] is None) == rejected, "payload.prompt_ref")
+    reserved_nothing = p["outcome"] in CALL_REFUSALS or p["cache_hit"]
+    if "rule.146.refusals_only" in skip:
+        reserved_nothing = p["outcome"] in CALL_REFUSALS
+    rule("146", (p["reservation"] is None) == reserved_nothing, "payload.reservation")
+    rule("147", ascending(encoded(p["observations"])), "payload.observations", "non_canonical")
+    judged = p["purpose"] == "research" and p["outcome"] == "ok"
+    if rule("148.empty", judged or not p["verdicts"], "payload.verdicts"):
+        wrong = next((i for i, v in enumerate(p["verdicts"]) if v["candidate"] != i), None)
+        rule("148.order", wrong is None, f"payload.verdicts[{wrong}].candidate")
 
 
 def membership_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
@@ -2204,18 +2293,21 @@ def thesis_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
 
 
 def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """Rules 25, 26 and 28 (reason `stream_mismatch`), in that order: rule 28 is reported after rule 26, not
+    """Rules 25 (149 on the meter stream), 26 and 28 (reason `stream_mismatch`), in that order: rule 28 is reported after rule 26, not
     suppressed by it, so a draft breaking both names both."""
     p = draft["payload"]
     kind = draft["stream_id"].split(":")[0]
     out = []
-    if event_type == "StreamOpened" and "rule.25" not in skip:
+    name = "rule.149" if kind == "meter" else "rule.25"
+    if event_type == "StreamOpened" and name not in skip:
         if kind == "acct":
             opened = f"acct:{p['workspace_id']}:{p['account_ref']}"
+        elif kind == "meter":
+            opened = f"meter:{p['workspace_id']}"
         else:
             opened = f"ctl:{p['workspace_id']}"
         if draft["stream_id"] != opened:
-            out.append(Violation("rule.25", "stream_mismatch", "stream_id"))
+            out.append(Violation(name, "stream_mismatch", "stream_id"))
     refused = event_type == "OwnerCommandRefused" and p["command"] not in REFUSED_COMMANDS[kind]
     if refused and f"rule.26.{kind}" not in skip:
         out.append(Violation(f"rule.26.{kind}", "stream_mismatch", "payload.command"))
@@ -2316,7 +2408,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     kinds |= {k for k, e, _ in VERSIONED_SCHEMAS if e == event_type}
     if not kinds:
         return [Violation("catalogue", "unknown_event_type", "event_type")]
-    shape = {"acct": 3, "agent": 3, "ctl": 2}.get(stream[0])
+    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2}.get(stream[0])
     if shape != len(stream) or not all(IDENT_RE.match(s) for s in stream[1:]):
         return [Violation("stream", "non_canonical", "stream_id")]
     if stream[0] not in kinds:

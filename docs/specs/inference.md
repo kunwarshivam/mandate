@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.2, draft ([DEC-432](../project/decisions/DEC-432.md)): v0.1 with the post-merge review's blockers and majors fixed (DEC-432 items 17 to 22). Items 1 to 12 and 17 to 22 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.3, draft ([DEC-432](../project/decisions/DEC-432.md), [DEC-996](../project/decisions/DEC-996.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.45 (DEC-996, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,14 @@ is not built (§11).
 
 ## Change history
 
+- **v0.3 ([DEC-996](../project/decisions/DEC-996.md), [DEC-997](../project/decisions/DEC-997.md)):**
+  - §3.6: the agent stream's `ModelInvocationRecorded` and the meter stream are closed in
+    [journal spec §9.18](journal.md#918-model-gateway-records-dec-996) (E15-8). A refusal and a cache
+    hit have no meter record, and a crashed call's open reservation stays counted at its maximum and is
+    never settled (backlog E15-12 minors 7 and 8; §7.3 and §9 now say the same).
+  - §6: the aggregator is OpenRouter, with the routing lock of DEC-997 item 2 (Proposed).
+  - §7.3: a workspace cap of $50 a month for paper and demo, with per-agent monthly caps under it
+    (DEC-997 item 3, Proposed).
 - **v0.2 ([DEC-432](../project/decisions/DEC-432.md) items 17 to 23):** fixes from the independent
   review of v0.1 (PR #551). Each only tightens or clarifies.
   - §4.1: `content_hash` covers the pinned content only. `endpoints` and `status` are outside it, so
@@ -245,8 +253,11 @@ existing ones. So:
   `ThesisProposed`), which carries the content hash the call used.
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
   simply has no fresh output.
-- **The gateway owns a meter stream.** Reservations and settlements (§7.3) go to a new
-  per-workspace stream (`meter:{workspace_id}`, a proposed journal spec change, E15-8). The
+- **The agent-stream record is closed** in [journal spec §9.18](journal.md#918-model-gateway-records-dec-996)
+  (DEC-996), with these members, `reservation`, and a `prompt_ref` that is `null` for a prompt the
+  guard refused, which is never stored (INF-8, INF-14).
+- **The gateway owns a meter stream.** Reservations and settlements (§7.3) go to a per-workspace
+  stream (`meter:{workspace_id}`, journal spec §9.18: `MeterReserved` and `MeterSettled`). The
   reservation is appended before the first attempt leaves the deployment, so a crash cannot lose a
   cost, and spend per agent and per workspace folds from that stream.
 - **One meter writer per workspace** (DEC-432 item 20). The gateway may run as several replicas, but
@@ -390,7 +401,13 @@ pinned model.
 | 4. Self-hosted open weights | Exact weights digest and quantization | Prompts never leave the site | Local; the only option for air-gapped | GPU capacity and operations |
 
 **Decision (DEC-432 item 14, the founder, 2026-10-03): option 2**, not the direct APIs this draft
-recommended.
+recommended. **The aggregator is OpenRouter** ([DEC-997](../project/decisions/DEC-997.md), the
+founder's "Keep OpenRouter" of 2026-10-17, Proposed until confirmed on its PR). The routing lock is
+set per call: one pinned model slug with no fallback list, router, variant suffix, or alias; one
+upstream provider (`provider.order` and `provider.only`, `allow_fallbacks: false`,
+`require_parameters: true`); zero data retention (`data_collection: deny`, `zdr: true`); and no
+`tools`, `functions`, `plugins`, or `transforms`. The response's reported model and provider must
+both equal the pin, or the call is `identity_mismatch` (DEC-997 item 2).
 
 - **Every hosted call:** every model, for the platform's own workspaces and for users' agents
   alike, is reached through one aggregator with provider routing locked per pinned model (INF-2).
@@ -402,9 +419,10 @@ recommended.
 - **Hybrid and on-prem:** local-only by default (DEC-432 item 8). A customer may enable hosted
   endpoints in policy, and may bring their own key under the same routing lock (§7.4, DEC-432
   item 16). Self-hosted open weights (option 4) remain the local path after v1.
-- **Spend guard:** no new paid service beyond the spike key already provided. The gateway is built
-  against recorded fixtures and a provider adapter interface. Live calls run only in the team's
-  internal paper workspaces.
+- **Spend guard:** model spend is capped at $50 a month per workspace for paper and demo (DEC-997
+  item 3, §7.3), replacing DEC-432 item 14's "no new paid service". The gateway is built against
+  recorded responses and a provider adapter interface. Live calls run only in the team's internal
+  paper and demo workspaces, with the key read from the vault by the gateway alone.
 
 ---
 
@@ -442,13 +460,16 @@ One record per call (INF-6), written in the workspace deployment.
 |---|---|---|
 | Research cost cap | `behavior.research.cost_cap_usd_per_day`, an envelope field ([DEC-120](../project/04-decision-log.md#decisions)), tightened by the policy's `research_cost_cap_usd_per_day` | The research agent's calls, per agent per risk day |
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
+| Workspace monthly cap | [DEC-997](../project/decisions/DEC-997.md) item 3 (Proposed): **$50 a month** for paper and demo, deployment configuration | All calls of the workspace per calendar month of risk days; per-agent monthly caps under it, each at most the workspace cap |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
 | Rate caps | Per agent: research calls only in proposal rounds no more often than `behavior.research.interval_s`; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
   the maximum cost to the meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
   On completion the reservation becomes the actual cost. If the process dies first, the reservation
-  stays counted for that risk day (DEC-432 item 4). Spend never decreases within a risk day.
+  stays counted at its maximum for that risk day and month, and nothing settles it later (DEC-432
+  item 4, DEC-996 item 5). Spend never decreases within a period. Spend folds from the meter stream
+  alone ([journal spec §9.18](journal.md#918-model-gateway-records-dec-996)).
 - **Check 7 is unchanged.** Mandate spec §8.5 check 7 still refuses a thesis once the day's spend has
   reached the cap. The gateway's check is earlier and never lets a call push spend above a cap.
 - **Degrade, never add risk.** A refused call means no fresh output. Under §8.3 that can only shrink buys,
@@ -544,7 +565,7 @@ risk-day boundary and a restart.
 | Workspace quota hit | As above for the workspace | Every agent's calls refused | Next risk day, or the operator raises the quota | Clock or operator (a journaled change) | As above |
 | Meter unavailable | The meter writer is unreachable, or a replica's append is fenced | `meter_unavailable`; nothing sent; outputs missing; operator alerted | The holder is reachable, or a new holder has folded the stream | Supervisor (hand-over) | Unsettled reservations stay counted across the hand-over |
 | Prompt guard hit | Forbidden content in the prompt | `input_rejected`; nothing sent; journaled with the rule, not the content | The input source stops supplying it | Nobody; repeats alert the operator | Nothing carries over |
-| Gateway process crash | Process dies | In-flight calls lost; their reservations stay counted | Gateway restarts | Supervisor | On restart: unfinished reservations are settled as spent at their maximum; no call is re-sent under its old `call_id`; the runtime re-reads fresh outputs from the journal |
+| Gateway process crash | Process dies | In-flight calls lost; their reservations stay counted | Gateway restarts | Supervisor | On restart: unfinished reservations stay open and count at their maximum, never settled later (DEC-996 item 5); no call is re-sent under its old `call_id`; the runtime re-reads fresh outputs from the journal |
 | Agent runtime restart | Runtime restarts | No model is called during replay (INF-10) | Replay and reconciliation finish | Runtime | Outputs still fresh by §8.2 count; others are missing until the next call |
 | Mandate version change | Owner confirms a new version | Calls for the old pin stop; outputs of a model no longer pinned are ignored (`not_pinned`) | Immediately | Owner | Journaled |
 
@@ -586,7 +607,7 @@ the date only; it does not suggest a replacement.
 | Model client | `python/research_spike/src/research_spike/openrouter.py`: one aggregator, JSON output, temperature 0, cost from a cached price catalogue, 60 s HTTP timeout, no retries. Spike code, not product code | The gateway (E15-6) |
 | Pinning | The spike names a model by its aggregator name, with no dated snapshot, no upstream lock, and no check of the reported model | INF-1, INF-2, the registry (E15-7) |
 | Deadline | Fixed 60 s transport timeout | Pinned `deadline_ms` per entry (INF-3) |
-| Journaling | The spike writes `llm_call` records and prompt and response artifacts to its own hash-chained JSONL. `ModelInvocationRecorded` is registered in `mandate-journal`'s catalogue with its `mod` ref; its payload schema is not closed | §3.6 members, journal spec first (E15-8) |
+| Journaling | The spike writes `llm_call` records and prompt and response artifacts to its own hash-chained JSONL. The agent-stream `ModelInvocationRecorded` and the meter stream are closed in journal spec v0.45 §9.18 (DEC-996); `mandate-journal` does not register them yet | `mandate-journal`'s registration (E15-8's code change) |
 | Spend | `mandate-research` reads `research_spend_usd_today` and refuses a thesis by check 7. Nothing produces that number in product code | Meter, reservation, and caps (E15-9) |
 | Registry | Mandate pins id, version, and content hash (V-007); no registry service | E15-7 |
 | Prompt guard, egress allowlist, local-only policy key | None | E15-10 |
@@ -608,6 +629,10 @@ the date only; it does not suggest a replacement.
   hash covers, the matching mandate spec §8.1 sentence, the compiler's record left open, one meter
   writer per workspace, late responses never cached, and four of the agent harness spec's asks.
 - **Item 23, Proposed for the founder:** a prompt record that keeps no licensed text (§13 question 6).
+- **[DEC-996](../project/decisions/DEC-996.md), agent readings:** the closed agent-stream record and
+  the meter stream (journal spec §9.18), what the meter counts, and the one crash fold.
+- **[DEC-997](../project/decisions/DEC-997.md), Proposed for the founder:** OpenRouter, its routing
+  lock, and the $50 a month workspace cap.
 - **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
   fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider
   data terms as recommended, and bring-your-own provider keys allowed for hybrid and on-prem, with
@@ -621,7 +646,9 @@ the date only; it does not suggest a replacement.
    compiler's call record is on the workspace's control stream (§3.6). The meter stream's shape
    stays E15-8's.
 2. The policy key that lists allowed endpoints and regions does not exist in `policy.schema.json`.
-   Its shape (a set of providers, endpoints, or localities; child ⊆ parent) is part of E15-10.
+   Its shape (a set of providers, endpoints, or localities; child ⊆ parent) is part of E15-10. Until
+   it is specified, the gateway reads the allowed localities, providers, and regions from deployment
+   configuration, and an absent value allows nothing hosted (local-only, DEC-432 item 8).
 3. Whether a per-model cost cap becomes an envelope field for fast and LLM signal models, or the
    workspace quota is enough (E15-9).
 4. The thresholds of the §4.3 evaluation gate (99% schema conformance) are a first value and need

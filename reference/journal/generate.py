@@ -39,6 +39,7 @@ import connections
 import clients
 import cold
 import control
+import gateway
 import holds
 import membership
 import membership_fold
@@ -3845,6 +3846,7 @@ def render(
     cold_section: dict,
     verification_section: dict,
     rows_section: dict,
+    gateway_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3875,6 +3877,7 @@ def render(
             "cold_records": cold_section,
             "verification_runs": verification_section,
             "segment_rows": rows_section,
+            "model_gateway": gateway_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3936,6 +3939,7 @@ def main(argv: list[str] | None = None) -> int:
     cold_section = cold.build_section(v3)
     verification_section = verification.build_section()
     rows_section = segment_rows.build_section(account_section["chain"])
+    gateway_section = gateway.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3961,6 +3965,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
     problems += canceled.run_mutants(cancel_section)
+    problems += gateway.check_section(gateway_section)
+    problems += gateway.run_mutants(gateway_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4022,6 +4028,7 @@ def main(argv: list[str] | None = None) -> int:
         cold_section,
         verification_section,
         rows_section,
+        gateway_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4051,6 +4058,7 @@ def main(argv: list[str] | None = None) -> int:
         or cold.check_section(reread["cold_records"], v3)
         or verification.check_section(reread["verification_runs"])
         or segment_rows.check_section(reread["segment_rows"])
+        or gateway.check_section(reread["model_gateway"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4106,6 +4114,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(cancel_section['invalid_drafts'])} invalid and {len(cancel_section['valid_drafts'])} valid "
         f"approval-cancel drafts, {len(canceled.VALIDATOR_MUTANTS)} validator and "
         f"{len(canceled.vector_mutants(cancel_section))} vector mutants caught; "
+        f"{len(gateway_section['invalid_drafts'])} invalid and {len(gateway_section['valid_drafts'])} valid "
+        f"model-gateway drafts, {len(gateway_section['streams'])} meter streams, {len(gateway_section['folds'])} spend folds, "
+        f"{len(gateway.VALIDATOR_MUTANTS)} validator and {len(gateway.vector_mutants(gateway_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "
