@@ -84,6 +84,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
 
         "ModelInvocationRecorded" => entry(&[Agent, Control], &[MOD]),
         "ThesisProposed" | "ThesisRevised" => entry(AGENT, &[MAN, MOD]),
+        "ThesisInvalidated" => entry(AGENT, &[MAN]),
         "ModelOutputRecorded"
         | "DecisionMade"
         | "IntentProposed"
@@ -134,7 +135,10 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "CatalogEntryRegistered"
         | "DataBundleImported"
         | "UsageReportSealed"
-        | "ControlPlaneMessageRefused" => entry(CONTROL, NONE),
+        | "ControlPlaneMessageRefused"
+        | "ProcessStartIssued"
+        | "ProcessStopIssued"
+        | "ProcessCrashLooped" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

@@ -3,3 +3,16 @@
 workspace: ws1
 environment: paper
 localImages: true
+# The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
+# (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the
+# pod's loopback, which lane SI adds: until then no key set is fetched and every sign-in is refused,
+# and no subject links are mounted, so none could succeed anyway (fail closed).
+api:
+  org: 01KDEM0000000000000000000R
+  workspace: 01KDEM0000000000000000000W
+  issuer: http://127.0.0.1:8090
+  audience: authenticated
+  jwksUrl: http://127.0.0.1:8090/jwks
+  appOrigin: https://localhost:4317
+  tier: dev
+  subjectLinks: ""

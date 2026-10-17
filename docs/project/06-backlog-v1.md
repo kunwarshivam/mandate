@@ -2767,7 +2767,13 @@ enables `live` (ES-23, OPS-5).
   an agent the control stream does not deploy, and a property test over random event sequences
   with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
-  and its own outage stops no running process and no kill switch (OPS-4).
+  and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
+  crate's fold, driver, fake and Kubernetes adapter, with the property test. *Left:* the process
+  binary (loop, probes, Postgres journal port, the resolver over stored mandates), the chart's
+  templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell
+  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
+  an alert for an instance stuck `Pending` or `Unknown`; deleting exited pods; a check that the
+  pod templates mount no service-account token.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

@@ -83,7 +83,10 @@ const COMPANION: &str = "OrderRequestRecorded";
 
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
-    if crate::notices::governs(stream, event_type) || crate::gateway::governs(stream, event_type) {
+    if crate::notices::governs(stream, event_type)
+        || crate::gateway::governs(stream, event_type)
+        || crate::invalidation::governs(event_type)
+    {
         return true;
     }
     match stream.stream_type() {
@@ -94,6 +97,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::records::CONTROL.contains(&event_type)
                 || crate::control_plane::CONTROL.contains(&event_type)
                 || crate::membership::CONTROL.contains(&event_type)
+                || crate::deployment::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -119,9 +123,11 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::control_plane::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::deployment::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -173,7 +179,9 @@ pub(crate) fn payload(
         causation_id,
     )?;
     crate::control_plane::rules(event_type, &payload, actor)?;
+    crate::deployment::rules(event_type, &payload, actor)?;
     crate::gateway::rules(event_type, stream_type, &payload, config_refs, actor)?;
+    crate::invalidation::rules(event_type, stream_type, &payload, actor, causation_id)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
     let p = Payload(&payload);

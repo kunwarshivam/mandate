@@ -5,7 +5,6 @@ import { createPortal, flushSync } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
-import { LOGIN_PATH } from "@/lib/auth-routes";
 import type { DesktopStyle } from "@/lib/desktop-style";
 import { writeThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -24,6 +23,7 @@ import { DisplayProperties, Wallpaper } from "./wallpaper";
 import { glideFor, leanFor, leave, leaving, moving, openFrom, physical, reframe, settle } from "./window-motion";
 import { type AppId, TASK } from "./windows";
 import type { AmpState } from "./winamp";
+import { SIGN_IN_HREF } from "@/lib/hosts";
 
 /** Webamp is a megabyte of player, so it loads only when someone opens Winamp. */
 const Winamp = dynamic(() => import("./winamp"), { ssr: false });
@@ -193,7 +193,7 @@ const SHORTCUTS: Shortcut[] = [
 ];
 
 /** Sign in has no icon on the desktop, since the bar names it in words; the menus keep it last. */
-const SIGN_IN: Shortcut = { id: "signin", label: "Sign in", icon: sprite(KEY), href: LOGIN_PATH };
+const SIGN_IN: Shortcut = { id: "signin", label: "Sign in", icon: sprite(KEY), href: SIGN_IN_HREF };
 
 /** The owl assistant says hello this long after the desktop opens, once a visit. */
 const HELLO = 9_000;
@@ -693,7 +693,7 @@ export function Desktop({ home }: { home: ReactNode }) {
           )}
           {item("Print…", null)}
           {BAR_RULE}
-          <Link href={LOGIN_PATH} role="menuitem" className={MENU_ITEM}>
+          <Link href={SIGN_IN_HREF} role="menuitem" className={MENU_ITEM}>
             Sign in…
           </Link>
         </>,
