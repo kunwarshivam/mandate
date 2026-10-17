@@ -1,0 +1,29 @@
+[package]
+name = "mandate-research-driver"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The shell's research driver as a library: the per-agent trigger queue, and the step machine that hands research inputs to the core, commits each step's drafts, and only then hands the worker its requests"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-runtime.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-accounting.workspace = true
+mandate-approval.workspace = true
+mandate-builder.workspace = true
+mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-gateway.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-research.workspace = true
+mandate-research-run.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
+proptest.workspace = true
