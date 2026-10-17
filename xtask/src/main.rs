@@ -13,6 +13,8 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod cell;
+
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
@@ -20,7 +22,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | mutants | schema-mutants; or one part of test: test-nextest |
+                        postgres | mutants | schema-mutants | cell; or one part of test: test-nextest |
                         test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -35,6 +37,15 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
+  cell up               build this change's images, bring up the local k3d cell, install the
+                        workspace chart (deploy/cell/README.md)
+  cell drill [--seeded] [boot|journal|egress]...
+                        run the cell's drills; --seeded plants each drill's bug and fails if a
+                        drill still holds
+  cell down             delete the local cell
+  cell generate [--write]
+                        the Compose file and the journal's roles file from processes.json
+                        (drift check unless --write)
 ";
 
 /// The two required-check command groups (DEC-76). `pending` follows `test` in `fast` because it
@@ -57,7 +68,7 @@ const FULL_JOB: [&str; 5] = [
     "supply-chain",
     "postgres",
 ];
-const PR_JOBS: [&str; 12] = [
+const PR_JOBS: [&str; 13] = [
     "lint",
     "test",
     "pending",
@@ -70,6 +81,7 @@ const PR_JOBS: [&str; 12] = [
     "postgres",
     "mutants",
     "schema-mutants",
+    "cell",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -186,6 +198,25 @@ fn run() -> Result<()> {
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
+        ["cell", "up"] => cell::up(),
+        ["cell", "down"] => cell::down(),
+        ["cell", "generate"] => cell::generate(false),
+        ["cell", "generate", "--write"] => cell::generate(true),
+        ["cell", "drill", rest @ ..] => {
+            let (seeded, names) = match rest {
+                ["--seeded", names @ ..] => (true, names),
+                names => (false, names),
+            };
+            let drills = if names.is_empty() {
+                cell::DRILLS.to_vec()
+            } else {
+                names
+                    .iter()
+                    .map(|n| cell::Drill::parse(n))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            cell::drill(&drills, seeded)
+        }
         _ => {
             eprint!("{USAGE}");
             bail!("unknown command: {}", args.join(" "))
@@ -211,6 +242,7 @@ fn ci(job: &str) -> Result<()> {
         "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
         "portable" => portable(),
+        "cell" => cell::ci(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -546,6 +578,7 @@ fn workspace_lint() -> Result<()> {
     markers()?;
     proptest_seeds()?;
     feature_map()?;
+    cell::generate(false)?;
     sh("typos", &[])?;
     uv_tools(&["ruff", "check", "."])?;
     uv_tools(&["ruff", "format", "--check", "."])
@@ -2640,10 +2673,18 @@ const READ_ENV_NAMES: &[&str] = &[
     "GH_TOKEN",
     "GITLEAKS_SHA256",
     "GITLEAKS_VERSION",
+    "HELM_SHA256",
+    "HELM_VERSION",
     "IMPECCABLE_NO_TELEMETRY",
+    "K3D_SHA256",
+    "K3D_VERSION",
+    "KUBECONFORM_SHA256",
+    "KUBECONFORM_VERSION",
     "LABELED_PR",
     "LINT_RESULT",
     "MANDATE_MUTANTS_PLANNED",
+    "MANDATE_CELL_HELM_REQUIRED",
+    "MANDATE_CELL_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
@@ -11761,7 +11802,7 @@ mod tests {
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
     /// it but success while every other job passed: the matrix's result, a success only when every
-    /// one of its three shards succeeded. Each shard runs the sweep only after all three checkers
+    /// one of its six shards succeeded. Each shard runs the sweep only after all three checkers
     /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
@@ -11828,7 +11869,7 @@ mod tests {
             "if: ${{ !github.event.pull_request.draft }}",
             "timeout-minutes: 10",
             "fail-fast: false",
-            "shard: [\"0/3\", \"1/3\", \"2/3\"]",
+            "shard: [\"0/6\", \"1/6\", \"2/6\", \"3/6\", \"4/6\", \"5/6\"]",
             shard_env.as_str(),
             "run: cargo xtask ci schema-mutants",
         ] {
@@ -12362,10 +12403,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            10,
+            11,
             "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
              `fast-python`, `fast-portable`, `fast-rh-sim-live`, `full-checks`, the mutation \
-             plan, the mutants matrix, and `schema-mutants`"
+             plan, the mutants matrix, `schema-mutants`, and `cell`"
         );
         for checkout in checkouts {
             assert!(
