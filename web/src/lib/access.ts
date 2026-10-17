@@ -18,6 +18,7 @@ export function routeNeeds(pathname: string): Capability | null {
   switch (head) {
     case "agents":
     case "approvals":
+    case "backtests":
       return "agents.view";
     case "audit":
       return "audit.view";

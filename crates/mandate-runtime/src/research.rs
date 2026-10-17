@@ -416,6 +416,23 @@ impl ResearchState {
     }
 }
 
+/// A research batch the journal refused, which stored nothing: the runtime forgets its doubt of
+/// it, so trading inputs, the kill switch among them, are no longer held behind a batch that can
+/// never commit (`AGENTS.md` rules 3 and 13), and the run in flight is dropped. Returns whether a
+/// research batch was in doubt. A trading batch in doubt is never touched: only a research input's
+/// batch is forgotten, and the caller stops sending research inputs (DEC-2204).
+pub fn abandon_refused_research(state: &mut RuntimeState, research: &mut ResearchState) -> bool {
+    let research_batch = state
+        .unresolved_batch()
+        .is_some_and(|doubted| matches!(doubted.input, Input::Research(_)));
+    if research_batch {
+        state.forget_refused();
+        research.doubted = None;
+        research.run = None;
+    }
+    research_batch
+}
+
 /// The research step. Like [`crate::handle`] it is the only producer of research effects, it
 /// emits every draft before the request it authorises, and a batch whose append is unresolved
 /// blocks every other input until the same input re-derives the same drafts (journal spec §5.1).
