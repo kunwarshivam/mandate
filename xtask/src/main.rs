@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
@@ -371,6 +371,24 @@ fn rh_sim_tests() -> Result<()> {
         .as_str()
         .context("cargo metadata names no target directory")?;
     let binary = Path::new(target).join("debug").join("mandate-rh-sim");
+    rehearsal_runs(|args| {
+        eprintln!(
+            "    $ {RH_SIM_BIN_ENV}={} cargo {}",
+            binary.display(),
+            args.join(" ")
+        );
+        Command::new("cargo")
+            .args(args)
+            .env(RH_SIM_BIN_ENV, &binary)
+            .status()
+            .context("starting `cargo nextest`")
+    })
+}
+
+/// [`REHEARSAL_TESTED`]'s `rh-sim` test runs, one `cargo nextest run` a package, in order, each
+/// through `run`, which takes the `cargo` arguments and says how the run exited; the first that
+/// fails stops the rest and is named in the error.
+fn rehearsal_runs(mut run: impl FnMut(&[&str]) -> Result<ExitStatus>) -> Result<()> {
     for package in REHEARSAL_TESTED {
         let args = [
             "nextest",
@@ -382,16 +400,7 @@ fn rh_sim_tests() -> Result<()> {
             "--features",
             REHEARSAL,
         ];
-        eprintln!(
-            "    $ {RH_SIM_BIN_ENV}={} cargo {}",
-            binary.display(),
-            args.join(" ")
-        );
-        let status = Command::new("cargo")
-            .args(args)
-            .env(RH_SIM_BIN_ENV, &binary)
-            .status()
-            .context("starting `cargo nextest`")?;
+        let status = run(&args)?;
         if !status.success() {
             bail!("the rh-sim rehearsal build's tests of {package} failed with {status}");
         }
@@ -7813,8 +7822,9 @@ mod tests {
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
+    use std::process::{Command, ExitStatus};
     use std::time::Duration;
 
     use anyhow::{Context, Result, bail};
@@ -7835,8 +7845,8 @@ mod tests {
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, repo_root, schema_mutants,
-        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        plain_comment_lines, preflight_args, proptest_seeds_in, rehearsal_runs, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
         spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
@@ -11757,6 +11767,38 @@ mod tests {
             "the crates declaring `{REHEARSAL}` are the ones `test-rh-sim` tests with it"
         );
         Ok(())
+    }
+
+    /// DEC-963: `test-rh-sim` runs each crate's `rh-sim` build in a `cargo nextest run` of its
+    /// own, in order, passes only when every run passed, and stops at the first that fails,
+    /// naming its package.
+    #[test]
+    fn the_rh_sim_runs_test_each_crate_alone_and_stop_at_the_first_failure() {
+        let exited = |code: i32| ExitStatus::from_raw(code << 8);
+        let mut ran = Vec::new();
+        let passed = rehearsal_runs(|args| {
+            ran.push(args.join(" "));
+            Ok(exited(0))
+        });
+        assert!(passed.is_ok(), "{passed:?}");
+        assert_eq!(
+            ran,
+            [
+                "nextest run --locked --no-tests=fail --package mandate-mcp --features rh-sim",
+                "nextest run --locked --no-tests=fail --package mandate-paper --features rh-sim",
+            ]
+        );
+        let mut ran = 0;
+        let failed = rehearsal_runs(|_| {
+            ran += 1;
+            Ok(exited(1))
+        });
+        let error = failed.map_err(|error| error.to_string());
+        assert!(
+            matches!(&error, Err(message) if message.contains("tests of mandate-mcp failed")),
+            "{error:?}"
+        );
+        assert_eq!(ran, 1, "a failed run stops the rest");
     }
 
     /// The `cargo xtask ci <part>` parts a job's steps run, in order.
