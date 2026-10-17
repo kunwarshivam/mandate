@@ -1,0 +1,19 @@
+[package]
+name = "mandate-api-server"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The workspace API server process: HTTP over mandate-api's contract, sessions and authorization, tenant-scoped reads, probes, and drain (E21-31, DEC-978)"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum.workspace = true
+mandate-api.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "signal", "time"] }
+
+[dev-dependencies]
+axum.workspace = true
+tokio = { workspace = true, features = ["rt", "net"] }
