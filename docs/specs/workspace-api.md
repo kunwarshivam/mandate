@@ -747,21 +747,23 @@ pattern); the answer is the runtime's, from the agent stream.
   question alone (inference §8.3), commits `OwnerQuestionSubmitted`, and returns `202` with the
   message id (its `event_id`) and `state: "waiting"` (API-13: `unknown` on an ambiguous append).
 - **Read the thread.** `GET /agents/{id}/desk` returns `read-models/desk`: the asking member's own
-  50 most recent messages to that agent, newest first, each with its state (`waiting` until the
-  runtime's copy starts a run, `running`, then `answered` or `unavailable`). Other members'
-  messages are never served.
+  50 most recent messages to that agent, newest first, each with its state: `refused` when the guard refused it (no run starts); `waiting` until the
+  runtime's copy starts a run; `running`; then `answered` or `unavailable`. A question no run has
+  started within 60 s of its `recorded_at` is `unavailable` from then on, with the fallback
+  computed at read time (agent harness spec §15.5). Other members' messages are never served at
+  the desk; *Read records* holders see them in the journal like every record (§4.8).
 - **Read one.** `GET /agents/{id}/desk/messages/{message_id}`, the asking member's only (another
   member's id is the same `not_found`): the question as typed (never for a refused one), the
   state, the run's ref, and for `answered` the answer: each segment as `{"text": quoted model
-  text, "author": "agent", "cites": [ref]}`, the `not_recorded` items, and `disclaimer`
+  text, "author": "agent", "cites": [ref]}`, the `not_recorded` codes with their template text, `written_after_reading` (the refs of the untrusted results in the run's context when it was written, each a link; agent harness spec §15.4), and `disclaimer`
   (`NOTE-EXPLAINER-NOT-ADVICE`, a named placeholder, DEC-2241). `records` lists each cited ref, or
   for any other state every ref the run's tools returned, newest first, each with its record type
   and the path of the cited-record read below. No member holds an action (API-18). `as_of` names
   the control and agent streams' watermarks (API-14).
 - **Read a cited record.** `GET /agents/{id}/runs/{run_id}/records/{ref}` serves the record a run
-  returned, through the projection the product read models already serve for its type (a decision,
-  approval, order, position, thesis, mode, or the mandate's fields as §4.7 serves them, figures
-  included), authorized by the *View agents, positions, decisions* row. A ref the run did not return
+  returned, through the projection the product read models already serve for its type (one of agent harness spec §15.4's citable types: a decision, approval, order,
+  position, universe entry, thesis, run, mode, or the mandate's structural fields, as §4.3 and §4.7
+  serve them, figures included), authorized by the *View agents, positions, decisions* row. A ref the run did not return
   is the same `not_found`. It never serves the raw journal event, which stays *Read records* (§4.8).
 - **Transcript view.** `GET /agents/{id}/runs` and `GET /agents/{id}/runs/{run_id}`: every turn,
   tool call, tool result, and verdict of a run as E19-13's records hold them, model text quoted and
@@ -770,7 +772,7 @@ pattern); the answer is the runtime's, from the agent stream.
   the chat row. A client's `read` scope (§3.8) does not include transcripts.
 - **The approval's explanation.** `GET /approvals/{id}` (§4.3) gains `explanation`: its state
   (`none`, `running`, `shown`, `unavailable`) and, when `shown`, the answer in the shape above,
-  under the approval's own row. The read starts nothing and never waits (agent harness spec EX-9);
+  under the approval's own row, never through a client's `read` scope (§3.8). The read starts nothing and never waits (agent harness spec EX-9);
   the explanation is outside `content` and `content_hash` (API-12). Until DEC-2241 item 3 is
   decided it is served only where the deployment flag `desk.approval_explanations` is on.
 - **Never in a notice.** No notice, push payload, title, or URL carries a question, answer text, or

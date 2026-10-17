@@ -2303,6 +2303,8 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
   - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
     (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);
+  - every shown answer's `written_after_reading` and every turn's menu are recomputed by an oracle
+    from the run's records (EX-12); every returned field is servable to the reader's row (EX-13);
   - spend is reserved against the agent's, workspace's, and deployment's configured budgets, never a
     constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
     are byte-identical with the explain run absent, stalled, or failing (EX-9);
