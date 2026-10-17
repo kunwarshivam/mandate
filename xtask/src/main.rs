@@ -50,8 +50,11 @@ commands:
   release drill <dist> <out>
                         run the signed, unsigned and wrongly signed images' start-up check
   release publish <dist> <out>
-                        push the images to GHCR, sign them keyless and attest their SBOMs (main
-                        only, from CI)
+                        push this arch's images to GHCR, sign them keyless and attest their SBOMs
+                        (main only, from CI)
+  release publish-index <out>
+                        push and sign the multi-arch index over every arch's published images
+                        (main only, from CI, after each arch's publish)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress]...
@@ -228,6 +231,7 @@ fn run() -> Result<()> {
         ["release", "publish", dist, out] => {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
+        ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "generate"] => cell::generate(false),

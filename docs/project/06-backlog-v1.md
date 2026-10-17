@@ -2656,7 +2656,8 @@ enables `live` (ES-23, OPS-5).
   hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
-  `main`-only publish to GHCR land with DEC-971. **After R0:** the CLI runs the check (with
+  `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
+  under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
   E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
   which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
