@@ -1037,20 +1037,24 @@ names #1540 merges with, §15 means those records. One record is new, on the con
 |---|---|
 | `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies an accepted one at most once, as the `RunStarted` of an `owner` run whose `trigger.cause` names it, as it copies `OwnerRequestSubmitted`; a refused one is not copied |
 
-**What §15 still asks of #1540** (lane AH agreed to items 1 and 2 on 2026-10-17, for its next push):
+**What §15 still asks of #1540** (at head 36cf67d9 it already has `ToolResultRecorded.untrusted`
+and one `owner` `RunStarted` per cause, rule 173):
 
-1. `ToolResultRecorded` gains `untrusted`, true for a result that holds third-party or model text
-   (theses, headlines, run summaries).
-2. A stream rule: at most one `owner` `RunStarted` per `trigger.cause`.
-3. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
+1. `ToolResultRecorded`'s `code` list gains §15.5's results: `empty`, `uncited_segment`,
+   `unknown_citation`, `advice_language`, `too_long`, and `shown`. #1540's journal text says this
+   section adds them; whichever of the two merges second writes them into §9.22.
+2. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
    DEC-2243 once the founder decides it.
 
 The desk's tools are declared here, in §15.4, with their class: every one is `read`, `note` is
 `think`, and `answer` is `action`, the run's one owner-facing output, so #1540's rule 177 makes its
 `ToolCallRecorded` carry `provenance`, the untrusted results its prompt held, and
-`written_after_reading` is that list (ADR-0005 §16 item 3); its `ToolResultRecorded`'s `code` is
-the check result, one of §15.5's, which #1540's `code` list carries. `answer` acts on nothing: it
-only hands the answer to the checks, so it adds no action path (EX-1). Their names fill `RunStarted.menu` and `ToolCallRecorded.tool`, which #1540
+`written_after_reading` is that list (ADR-0005 §16 item 3); its `ToolResultRecorded` has `result` `ok` and, as
+`code`, the check result, one of §15.5's (item 1). `answer` acts on nothing: it
+only hands the answer to the checks, so it adds no action path (EX-1). Owner and explain entries
+have `RunStarted.output` `action_tools`, and `answer`'s mediation is §15.5's checks alone: no
+verdict record, builder, gate, autonomy rule, or HI-27 rate limit, and no candidacy under journal
+rule 151. HI-25's oracle covers it as its journaled check result. Their names fill `RunStarted.menu` and `ToolCallRecorded.tool`, which #1540
 types as text constrained by the menu, so no journal change is needed for them. The invariant names
 HI-24 to HI-28 cited here are #1540's.
 
@@ -1103,7 +1107,7 @@ template describes and never advises; and §15.5's check refuses the advice fixt
 | Bad model | Invents a reason | EX-4: every segment cites a record the run read, shown beside the text. A citation that does not support its sentence is disclosed (§15.5) |
 | Bad model | Recommends a trade, or tells the approver to approve | EX-5's fixture list, the template, and the placeholder. A paraphrase outside the list is a disclosed residual, listed in DEC-2241 for counsel |
 | Bad model | Loops on tool or answer calls to run up cost | §15.7's bounds, reserved spend (EX-7) |
-| Malicious content | Injection in a thesis or headline that asks the run to act or read elsewhere | EX-1: no action tool in slice 1; EX-3: no tool takes a scope |
+| Malicious content | Injection in a thesis or headline that asks the run to act or read elsewhere | EX-1: no tool but `answer`, which acts on nothing; EX-3: no tool takes a scope |
 | Malicious content | Injection that tries to exfiltrate figures | EX-6: no figure from a record's fields is in the prompt; the model has no outbound path (HI-28) |
 | Owner | Types figures or a key into a question | The numeric scrub (§15.4); the gateway's guard refuses a key before the question is stored |
 | Many members asking at once | Cost and queueing | §15.7's rate and spend bounds; one run in flight per agent, so trading's runs wait only as E19-13 allows |
