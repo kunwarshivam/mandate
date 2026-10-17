@@ -2252,35 +2252,31 @@ const API_PART: &str = "the workspace API server, through a port-forward";
 /// is stopped; a later demo whose port still answers that way reuses it rather than starting one.
 fn api_port_forward() -> Result<()> {
     let config = kubeconfig()?;
-    let target = format!("127.0.0.1:{API_LOCAL_PORT}:8080");
-    let forward = [
-        "--kubeconfig",
-        config.as_str(),
-        "--namespace",
-        NAMESPACE,
-        "port-forward",
-        "deployment/api",
-        target.as_str(),
-    ];
-    if output("kubectl", &["version", "--client"]).is_err() {
-        eprintln!(
-            "    api: no kubectl on this machine; forward it with `kubectl {}`",
-            forward.join(" ")
-        );
-        return Ok(());
-    }
-    Command::new("kubectl")
-        .args(forward)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("starting `kubectl port-forward` to the API server")?;
+    let forward = port_forward_args(&config);
+    let shown = forward.join(" ");
     let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
     if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
         eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
         return Ok(());
     }
+    if output("kubectl", &["version", "--client"]).is_err() {
+        eprintln!("    api: no kubectl on this machine; forward it with `kubectl {shown}`");
+        return Ok(());
+    }
+    let log_path = state()?.join("api-port-forward.log");
+    let log =
+        fs::File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?;
+    let mut child = Command::new("kubectl")
+        .args(&forward)
+        .stdout(Stdio::null())
+        .stderr(log)
+        .spawn()
+        .context("starting `kubectl port-forward` to the API server")?;
+    let said = || fs::read_to_string(&log_path).unwrap_or_default();
     for _ in 0..30 {
+        if let Some(status) = child.try_wait()? {
+            bail!("`kubectl {shown}` exited with {status}:\n{}", said());
+        }
         if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
             if status == 401 {
                 eprintln!(
@@ -2294,10 +2290,28 @@ fn api_port_forward() -> Result<()> {
         sleep(Duration::from_secs(1));
     }
     bail!(
-        "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s; a stale \
-         `kubectl port-forward` holding that port is stopped with \
-         `pkill -f 'port-forward deployment/api'`"
+        "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s through \
+         `kubectl {shown}`, which said:\n{}",
+        said()
     )
+}
+
+/// `kubectl` arguments forwarding [`API_LOCAL_PORT`] on this machine's loopback to the API
+/// listener's port 8080: the address is its own flag, since a port spec is `LOCAL:REMOTE` only.
+pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
+    [
+        "--kubeconfig",
+        kubeconfig,
+        "--namespace",
+        NAMESPACE,
+        "port-forward",
+        "--address",
+        "127.0.0.1",
+        "deployment/api",
+        &format!("{API_LOCAL_PORT}:8080"),
+    ]
+    .map(String::from)
+    .to_vec()
 }
 
 /// The status code of an HTTP/1.1 `GET path` to 127.0.0.1:`port`.
@@ -2645,6 +2659,26 @@ mod tests {
         let none = ca_bundle_from(None, |_| false).map_err(|e| e.to_string());
         assert!(none.is_err_and(|e| e.contains("set SSL_CERT_FILE")));
         Ok(())
+    }
+
+    #[test]
+    fn the_api_forward_binds_loopback_and_names_local_then_remote_port() {
+        let args = port_forward_args("k");
+        let at = |flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        };
+        assert_eq!(at("--address").as_deref(), Some("127.0.0.1"));
+        let spec = args.last().cloned().unwrap_or_default();
+        let ports: Vec<&str> = spec.split(':').collect();
+        assert_eq!(
+            ports,
+            [API_LOCAL_PORT.to_string().as_str(), "8080"],
+            "{spec}"
+        );
+        assert!(ports.iter().all(|p| p.parse::<u16>().is_ok()));
     }
 
     #[test]
