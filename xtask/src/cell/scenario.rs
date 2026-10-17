@@ -578,10 +578,24 @@ fn api_status(path: &str) -> Result<Result<u16, String>> {
             "no kubectl on this machine to forward the API's port with".into(),
         ));
     }
-    if let Err(e) = api_port_forward() {
-        return Ok(Err(format!("the port-forward to the API failed: {e:#}")));
+    let forwarded = api_port_forward();
+    Ok(answer_of(forwarded, || http_status(API_LOCAL_PORT, path)))
+}
+
+/// What the API answered, given the port-forward's result and a probe of the forwarded port. The
+/// forward bails on a reachable API that answers anything but 401, so its error alone cannot tell
+/// an unreachable API from a wrong one: the probe decides. A status it reads is the API's answer,
+/// which the verdict fails unless it is the expected one; only a probe that reads none means the
+/// API could not be asked.
+pub fn answer_of(
+    forwarded: Result<()>,
+    probe: impl FnOnce() -> Result<u16>,
+) -> Result<u16, String> {
+    match (forwarded, probe()) {
+        (_, Ok(status)) => Ok(status),
+        (Err(e), Err(_)) => Err(format!("the port-forward to the API failed: {e:#}")),
+        (Ok(()), Err(e)) => Err(format!("the API did not answer: {e:#}")),
     }
-    Ok(http_status(API_LOCAL_PORT, path).map_err(|e| format!("GET {path} failed: {e:#}")))
 }
 
 /// How an API check reads: `ran` only for the status it expects; `failed` for any other status,
@@ -799,6 +813,26 @@ mod tests {
         assert_eq!(
             api_verdict(&unreachable, 401, true),
             ("failed", "no kubectl".into(), true)
+        );
+    }
+
+    /// A wrong status from a reachable API is an answer, even when the port-forward bailed on it,
+    /// so the verdict fails it; only a probe that reads nothing makes the API unreachable.
+    #[test]
+    fn a_reachable_api_that_answers_wrongly_is_an_answer_not_unreachable() {
+        let bailed = || Err(anyhow::anyhow!("answered 404, not the one 401"));
+        assert_eq!(answer_of(bailed(), || Ok(404)), Ok(404));
+        assert_eq!(
+            api_verdict(&answer_of(bailed(), || Ok(404)), 401, false).0,
+            "failed"
+        );
+        assert_eq!(answer_of(Ok(()), || Ok(401)), Ok(401));
+        let refused = || Err(anyhow::anyhow!("connection refused"));
+        assert!(answer_of(bailed(), refused).is_err(), "nothing answered");
+        assert!(answer_of(Ok(()), refused).is_err(), "nothing answered");
+        assert_eq!(
+            api_verdict(&answer_of(Ok(()), refused), 401, false).0,
+            "not run"
         );
     }
 
