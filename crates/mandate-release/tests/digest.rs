@@ -6,6 +6,9 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use mandate_release::{BuildDigest, ReleaseError};
 use proptest::prelude::*;
@@ -79,6 +82,69 @@ fn the_running_digest_is_the_sha256_of_the_running_executable()
     let running = BuildDigest::running()?;
     let bytes = fs::read(env::current_exe()?)?;
     assert_eq!(running.to_hex(), oracle(&bytes));
+    Ok(())
+}
+
+/// Names the file whose appearance lets the child half of the replacement test report its digest.
+const CHILD: &str = "MANDATE_RELEASE_TEST_CHILD";
+
+/// The child half of
+/// [`a_release_installed_over_a_running_process_does_not_change_its_digest`]: it does nothing
+/// unless that test started it; then it waits until the parent has installed another release over
+/// its file, and prints the digest it runs.
+#[test]
+fn child_reports_its_running_digest_once_replaced() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(go) = env::var_os(CHILD).map(PathBuf::from) else {
+        return Ok(());
+    };
+    for _ in 0..1_000 {
+        if go.exists() {
+            println!("running={}", BuildDigest::running()?.reference());
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Err("the parent never released the child".into())
+}
+
+/// A release installed over a running process, by renaming a new file onto its path as an
+/// install does, leaves the process journaling the digest of the file it started from, not the
+/// new one (DEC-970 item 4). `current_exe()` would read the new file; `/proc/self/exe` does not.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_release_installed_over_a_running_process_does_not_change_its_digest()
+-> Result<(), Box<dyn std::error::Error>> {
+    let original = fs::read(env::current_exe()?)?;
+    let dir = scratch("replaced");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir)?;
+    let process = dir.join("process");
+    fs::copy(env::current_exe()?, &process)?;
+    let go = dir.join("go");
+    let child = Command::new(&process)
+        .args([
+            "--exact",
+            "child_reports_its_running_digest_once_replaced",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, &go)
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let replacement = b"another release".to_vec();
+    let staged = dir.join("staged");
+    fs::write(&staged, &replacement)?;
+    fs::rename(&staged, &process)?;
+    fs::write(&go, b"")?;
+    let output = child.wait_with_output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(output.status.success(), "{stdout}");
+    assert!(
+        stdout.contains(&format!("running=sha256:{}", oracle(&original))),
+        "{stdout}"
+    );
+    assert!(!stdout.contains(&oracle(&replacement)), "{stdout}");
+    fs::remove_dir_all(&dir)?;
     Ok(())
 }
 

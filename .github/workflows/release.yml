@@ -24,8 +24,10 @@ on:
 
 permissions: {}
 
+# A pull request's runs share one group, so a new push cancels the old run; every `main` commit
+# has a group of its own, so none is cancelled or skipped behind another.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -35,7 +37,9 @@ jobs:
   build-a:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Not a required check (DEC-464's ten minutes bind those): one uncached three-binary musl
+    # build took about three minutes on four cores, and a two-core runner may take twice that.
+    timeout-minutes: 15
     permissions:
       contents: read
     outputs:
@@ -63,7 +67,9 @@ jobs:
   build-b:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Not a required check (DEC-464's ten minutes bind those): one uncached three-binary musl
+    # build took about three minutes on four cores, and a two-core runner may take twice that.
+    timeout-minutes: 15
     permissions:
       contents: read
     outputs:
@@ -83,16 +89,24 @@ jobs:
         id: build
         run: cargo xtask release build out | tee -a "$GITHUB_OUTPUT"
 
+  # Runs whatever the builds did, so a failed or cancelled build fails this job rather than
+  # skipping it.
   compare:
     needs: [build-a, build-b]
+    if: ${{ always() && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
+      - name: A build did not finish
+        if: needs.build-a.result != 'success' || needs.build-b.result != 'success'
+        run: |
+          echo "a release build of this commit did not succeed"
+          exit 1
       - name: The two builds differ
         if: needs.build-a.outputs.digest == '' || needs.build-a.outputs.digest != needs.build-b.outputs.digest
         run: |
-          echo "the two release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS"
+          echo "the two release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS and toolchain"
           exit 1
       - name: The two builds are identical
         run: echo "both release builds of this commit printed the same SHA256SUMS digest"

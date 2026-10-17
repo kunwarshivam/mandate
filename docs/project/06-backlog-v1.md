@@ -2438,6 +2438,11 @@ items 13 to 20); no story here buys a service or touches live money.
   reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
+  *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
+  `BuildDigest` land with DEC-970. **After R0:** `crates/mandate-shell/src/envelope.rs` and
+  `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
+  name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
+  on R0 closing (DEC-967 item 2, DEC-970 item 7). Signing and the start-up check are E21-35's.
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's

@@ -15,6 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -213,13 +214,19 @@ pub(crate) fn compare_sums(a: &str, b: &str) -> Result<()> {
 }
 
 /// `cargo xtask release tools`: installs each [`TOOLS`] entry under [`TOOLS_DIR`] in
-/// `cargo_home`, checked against its SHA-256, and returns the directory that holds them.
+/// `cargo_home`, checked against its SHA-256, and returns the directory that holds them. An
+/// installed tool is reused only while its SHA-256 is still the one recorded when it was installed
+/// from the checked archive; otherwise it is fetched and checked again.
 pub(crate) fn tools(cargo_home: &Path) -> Result<PathBuf> {
     let bin = cargo_home.join(TOOLS_DIR).join("bin");
     fs::create_dir_all(&bin).with_context(|| format!("creating {}", bin.display()))?;
     for tool in TOOLS {
         let stamp = bin.join(format!(".{}-{}", tool.name, tool.version));
-        if stamp.is_file() && bin.join(tool.name).is_file() {
+        let installed = bin.join(tool.name);
+        if installed.is_file()
+            && fs::read_to_string(&stamp)
+                .is_ok_and(|recorded| sha256(&installed).is_ok_and(|now| now == recorded))
+        {
             continue;
         }
         eprintln!("    release: installing {} {}", tool.name, tool.version);
@@ -254,11 +261,43 @@ pub(crate) fn tools(cargo_home: &Path) -> Result<PathBuf> {
             .arg("-C")
             .arg(&work)
             .arg(tool.member))?;
-        fs::copy(work.join(tool.member), bin.join(tool.name))
+        fs::copy(work.join(tool.member), &installed)
             .with_context(|| format!("installing {}", tool.name))?;
-        fs::write(&stamp, tool.sha256).with_context(|| format!("writing {}", stamp.display()))?;
+        fs::write(&stamp, sha256(&installed)?)
+            .with_context(|| format!("writing {}", stamp.display()))?;
     }
     Ok(bin)
+}
+
+/// The whole environment of a release build: [`PASSED_ENV`] from `inherited`, then the build's own
+/// settings, which win. Nothing else reaches the build.
+pub(crate) fn build_env(
+    paths: &Paths,
+    path: OsString,
+    epoch: &str,
+    inherited: impl Fn(&str) -> Option<OsString>,
+) -> BTreeMap<String, OsString> {
+    let mut vars: BTreeMap<String, OsString> = PASSED_ENV
+        .iter()
+        .filter_map(|name| inherited(name).map(|value| ((*name).to_owned(), value)))
+        .collect();
+    let own: [(String, OsString); 7] = [
+        ("PATH".to_owned(), path),
+        (
+            "CARGO_HOME".to_owned(),
+            paths.cargo_home.clone().into_os_string(),
+        ),
+        (
+            "RUSTUP_HOME".to_owned(),
+            paths.rustup_home.clone().into_os_string(),
+        ),
+        ("RUSTFLAGS".to_owned(), rustflags(paths).into()),
+        ("SOURCE_DATE_EPOCH".to_owned(), epoch.into()),
+        ("CARGO_INCREMENTAL".to_owned(), "0".into()),
+        (format!("CC_{}", TARGET.replace('-', "_")), TARGET_CC.into()),
+    ];
+    vars.extend(own);
+    vars
 }
 
 /// `cargo xtask release build <out>`.
@@ -274,23 +313,20 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     )
     .context("joining PATH")?;
     let target_dir = root.join(TARGET_DIR);
-    let mut cargo = Command::new("cargo");
-    cargo.env_clear();
-    for name in PASSED_ENV {
-        if let Some(value) = env::var_os(name) {
-            cargo.env(name, value);
-        }
+    let vars = build_env(&paths, path, &epoch, |name| env::var_os(name));
+    for (program, args) in [
+        ("rustc", ["-vV"]),
+        (TARGET_CC, ["--version"]),
+        ("ld", ["--version"]),
+    ] {
+        run(Command::new(program).env_clear().envs(&vars).args(args))?;
     }
+    let mut cargo = Command::new("cargo");
     cargo
+        .env_clear()
+        .envs(&vars)
         .current_dir(root)
-        .args(build_args(&target_dir))
-        .env("PATH", path)
-        .env("CARGO_HOME", &paths.cargo_home)
-        .env("RUSTUP_HOME", &paths.rustup_home)
-        .env("RUSTFLAGS", rustflags(&paths))
-        .env("SOURCE_DATE_EPOCH", &epoch)
-        .env("CARGO_INCREMENTAL", "0")
-        .env(format!("CC_{}", TARGET.replace('-', "_")), TARGET_CC);
+        .args(build_args(&target_dir));
     run(&mut cargo)?;
     let bin_out = out.join("bin");
     let sbom_out = out.join("sbom");
@@ -488,6 +524,55 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// The build sees the proxy and home settings it inherits and its own settings, and nothing
+    /// else: no wrapper, no inherited rustflags, nothing `cargo run` handed xtask.
+    #[test]
+    fn the_build_environment_is_closed() {
+        let inherited = |name: &str| -> Option<OsString> {
+            match name {
+                "HOME"
+                | "HTTPS_PROXY"
+                | "RUSTC_WRAPPER"
+                | "RUSTC_WORKSPACE_WRAPPER"
+                | "CARGO_ENCODED_RUSTFLAGS"
+                | "CARGO_BUILD_RUSTFLAGS"
+                | "RUSTUP_TOOLCHAIN"
+                | "CARGO_MANIFEST_DIR"
+                | "RUSTFLAGS"
+                | "CARGO_HOME"
+                | "PATH" => Some(OsString::from(format!("inherited-{name}"))),
+                _ => None,
+            }
+        };
+        let vars = build_env(
+            &paths(),
+            OsString::from("/tools:/usr/bin"),
+            "1792212600",
+            inherited,
+        );
+        let names: Vec<&str> = vars.keys().map(String::as_str).collect();
+        assert_eq!(
+            names,
+            [
+                "CARGO_HOME",
+                "CARGO_INCREMENTAL",
+                "CC_x86_64_unknown_linux_musl",
+                "HOME",
+                "HTTPS_PROXY",
+                "PATH",
+                "RUSTFLAGS",
+                "RUSTUP_HOME",
+                "SOURCE_DATE_EPOCH",
+            ]
+        );
+        let value = |name: &str| vars.get(name).and_then(|v| v.to_str()).map(str::to_owned);
+        assert_eq!(value("RUSTFLAGS"), Some(rustflags(&paths())));
+        assert_eq!(value("CARGO_HOME").as_deref(), Some("/home/runner/.cargo"));
+        assert_eq!(value("PATH").as_deref(), Some("/tools:/usr/bin"));
+        assert_eq!(value("SOURCE_DATE_EPOCH").as_deref(), Some("1792212600"));
+        assert_eq!(value("HOME").as_deref(), Some("inherited-HOME"));
     }
 
     #[test]
