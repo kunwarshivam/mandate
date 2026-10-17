@@ -8,8 +8,12 @@ use ring::signature::{ED25519, UnparsedPublicKey};
 
 use crate::directory::{Ident, Refused};
 
-/// How far a call's time may be from the plane's, either way.
+/// How far a call's time may be behind the plane's.
 pub const MAX_SKEW_SECS: i64 = 300;
+
+/// How far a call's time may be ahead of the plane's. Small, because each call must be later than
+/// the last: a call far in the future would lock its deployment out until real time caught up.
+pub const MAX_AHEAD_SECS: i64 = 5;
 
 /// The calls a deployment makes, each on its one route. A call's method and path are checked
 /// against its operation, and both are fixed text, so the signed bytes are never ambiguous.
@@ -67,12 +71,11 @@ pub fn signed_request_bytes(
 }
 
 pub(crate) fn verify(signed: &Signed, key: &[u8; 32], now: UtcNanos) -> Result<(), Refused> {
-    let skew = now
+    let behind = now
         .secs()
         .checked_sub(signed.at.secs())
-        .and_then(i64::checked_abs)
         .ok_or(Refused::Stale)?;
-    if skew > MAX_SKEW_SECS {
+    if behind > MAX_SKEW_SECS || behind < MAX_AHEAD_SECS.saturating_neg() {
         return Err(Refused::Stale);
     }
     let bytes = signed_request_bytes(

@@ -32,5 +32,5 @@ pub use directory::{
     MemoryStore, Refused, Route, Store, Workspace,
 };
 pub use fleet::{Component, FleetRow, Health, Heartbeat, Reachability, UNREACHABLE_AFTER_SECS};
-pub use request::{MAX_SKEW_SECS, Operation, Signed, signed_request_bytes};
+pub use request::{MAX_AHEAD_SECS, MAX_SKEW_SECS, Operation, Signed, signed_request_bytes};
 pub use wire::{MAX_COMPONENTS, MAX_MEMBERS, role_name};

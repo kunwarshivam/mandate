@@ -160,6 +160,10 @@ pub trait Store {
     /// The time of the deployment's last accepted call.
     fn last_call(&self, deployment_id: &Ident) -> Option<UtcNanos>;
     fn put_last_call(&mut self, deployment_id: &Ident, at: UtcNanos);
+    /// Drops every outstanding enrollment token of the deployment.
+    fn clear_tokens(&mut self, deployment_id: &Ident);
+    /// Drops the deployment's last heartbeat and last call time, as a revocation does.
+    fn forget_calls(&mut self, deployment_id: &Ident);
 }
 
 /// The control plane's behaviour over a [`Store`].
@@ -197,7 +201,7 @@ impl<S: Store> ControlPlane<S> {
 
     /// A single-use enrollment token for an unenrolled deployment: the hex of `secret`, 32 random
     /// bytes the caller drew, kept only as its SHA-256 and valid until `expires_at` (E13-1, design
-    /// §3.1).
+    /// §3.1). It replaces any token issued before it, so only the newest is live.
     pub fn issue_token(
         &mut self,
         deployment_id: &Ident,
@@ -214,13 +218,15 @@ impl<S: Store> ControlPlane<S> {
             expires_at,
             used: false,
         };
+        self.store.clear_tokens(deployment_id);
         self.store
             .put_token(deployment_id, Digest::of(&secret), token);
         Ok(Digest::from_bytes(secret).to_hex())
     }
 
-    /// Revokes a deployment's key: the site sees an outage (design §4), never a trading stop. A
-    /// new token can then enroll a new key.
+    /// Revokes a deployment's key: the site sees an outage (design §4), never a trading stop. Every
+    /// outstanding token goes with it, so a leaked one cannot enroll again; only a token issued
+    /// after the revocation can enroll a new key, which starts with no call history.
     pub fn revoke(&mut self, deployment_id: &Ident) -> Result<(), Refused> {
         let deployment = self
             .deployment(deployment_id)
@@ -229,6 +235,8 @@ impl<S: Store> ControlPlane<S> {
             public_key: None,
             ..deployment
         });
+        self.store.clear_tokens(deployment_id);
+        self.store.forget_calls(deployment_id);
         Ok(())
     }
 
@@ -503,5 +511,14 @@ impl Store for MemoryStore {
 
     fn put_last_call(&mut self, deployment_id: &Ident, at: UtcNanos) {
         self.calls.insert(deployment_id.clone(), at);
+    }
+
+    fn clear_tokens(&mut self, deployment_id: &Ident) {
+        self.tokens.retain(|(id, _), _| id != deployment_id);
+    }
+
+    fn forget_calls(&mut self, deployment_id: &Ident) {
+        self.calls.remove(deployment_id);
+        self.heartbeats.remove(deployment_id);
     }
 }

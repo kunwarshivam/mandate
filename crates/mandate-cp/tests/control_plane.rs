@@ -255,8 +255,16 @@ fn only_the_enrolled_key_within_the_skew_authenticates_a_call() {
         .unwrap();
     assert_eq!(plane.heartbeat(&call(at(-301)), at(0)), Err(Refused::Stale));
     assert_eq!(plane.heartbeat(&call(at(-300)), at(0)), Ok(()));
-    assert_eq!(plane.heartbeat(&call(at(301)), at(0)), Err(Refused::Stale));
-    assert_eq!(plane.heartbeat(&call(at(300)), at(0)), Ok(()));
+    assert_eq!(
+        plane.heartbeat(&call(at(6)), at(0)),
+        Err(Refused::Stale),
+        "at most 5 s ahead"
+    );
+    assert_eq!(plane.heartbeat(&call(at(5)), at(0)), Ok(()));
+    assert_eq!(
+        (mandate_cp::MAX_SKEW_SECS, mandate_cp::MAX_AHEAD_SECS),
+        (300, 5)
+    );
     let forged = signed(CELL, &pair(8), Operation::Heartbeat, &body, at(301));
     assert_eq!(
         plane.heartbeat(&forged, at(301)),
@@ -680,7 +688,7 @@ fn a_key_given_at_creation_is_not_bound() {
 proptest! {
     /// No call signed by anything but the deployment's own enrolled key authenticates.
     #[test]
-    fn only_the_enrolled_key_authenticates(seed in 9u8..=255, skew in -300i64..=300) {
+    fn only_the_enrolled_key_authenticates(seed in 9u8..=255, skew in -300i64..=5) {
         let mut plane = enrolled();
         let body = heartbeat_body("ok");
         let forged = signed(CELL, &pair(seed), Operation::Heartbeat, &body, at(skew));
@@ -772,4 +780,72 @@ fn a_body_is_bounded_and_every_health_is_read() {
     assert_eq!(plane.sync_directory(&more, at(4)), Err(Refused::Malformed));
     assert_eq!(mandate_cp::MAX_COMPONENTS, 64);
     assert_eq!(mandate_cp::MAX_MEMBERS, 10_000);
+}
+
+/// Review of G1a, round 2: a revocation takes every outstanding token with it, and only the newest
+/// issued token is live, so a leaked token never enrolls after a revocation. The new key starts
+/// with no call history and no stale heartbeat.
+#[test]
+fn a_revocation_retires_every_outstanding_token() {
+    let mut plane = ControlPlane {
+        store: MemoryStore::default(),
+    };
+    let cell = deployment(CELL, DeploymentMode::ManagedCell, "https://cell1.example");
+    let first = plane.create_deployment(cell, [1; 32], at(600)).unwrap();
+    let second = plane.issue_token(&id(CELL), [2; 32], at(600)).unwrap();
+    assert_eq!(
+        plane.enroll(&id(CELL), &first, pair(7).public_key().as_ref(), at(0)),
+        Err(Refused::UnknownToken),
+        "an older token is replaced by the newer"
+    );
+    let latest = plane.issue_token(&id(CELL), [3; 32], at(600)).unwrap();
+    assert_eq!(
+        plane.enroll(&id(CELL), &second, pair(7).public_key().as_ref(), at(0)),
+        Err(Refused::UnknownToken)
+    );
+    plane.revoke(&id(CELL)).unwrap();
+    assert_eq!(
+        plane.enroll(&id(CELL), &latest, pair(7).public_key().as_ref(), at(0)),
+        Err(Refused::UnknownToken),
+        "a token outstanding at a revocation is retired with it"
+    );
+    let token = plane.issue_token(&id(CELL), [4; 32], at(600)).unwrap();
+    plane
+        .enroll(&id(CELL), &token, pair(7).public_key().as_ref(), at(0))
+        .unwrap();
+    let late = signed(
+        CELL,
+        &pair(7),
+        Operation::Heartbeat,
+        &heartbeat_body("ok"),
+        at(100),
+    );
+    plane.heartbeat(&late, at(100)).unwrap();
+    plane.revoke(&id(CELL)).unwrap();
+    let row = plane
+        .fleet(at(101))
+        .into_iter()
+        .find(|r| r.deployment_id == id(CELL))
+        .unwrap();
+    assert_eq!(
+        row.reachability,
+        Reachability::NeverSeen,
+        "the revoked key's heartbeat is gone"
+    );
+    let fresh = plane.issue_token(&id(CELL), [5; 32], at(600)).unwrap();
+    plane
+        .enroll(&id(CELL), &fresh, pair(17).public_key().as_ref(), at(1))
+        .unwrap();
+    let earlier = signed(
+        CELL,
+        &pair(17),
+        Operation::Heartbeat,
+        &heartbeat_body("ok"),
+        at(50),
+    );
+    assert_eq!(
+        plane.heartbeat(&earlier, at(50)),
+        Ok(()),
+        "the new key starts with no call history"
+    );
 }
