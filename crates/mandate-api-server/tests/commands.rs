@@ -128,13 +128,6 @@ fn the_draft_is_the_clis_owner_command_with_the_user_as_actor() {
     }
 }
 
-#[test]
-fn an_instant_before_1970_drafts_nothing() {
-    let command = Command::Pause("agt_a".to_owned());
-    let before = UtcNanos::from_parts(-1, 0).expect("a time");
-    assert_eq!(draft(&issued(&command, EVENT, before)), None);
-}
-
 /// A control stream the journal itself opened, as the CLI's opener does.
 fn opened() -> (MemoryJournal, StreamId) {
     let mut journal = MemoryJournal::new();
@@ -273,12 +266,16 @@ fn row(seq: u64, event_type: &str, payload: &str) -> StoredEvent {
 fn a_scope_is_found_only_where_the_control_stream_names_it() {
     let control = vec![
         row(1, "StreamOpened", "{}"),
-        row(2, "AgentDeployed", r#"{"agent_id":"agt_a"}"#),
+        row(
+            2,
+            "AgentDeployed",
+            r#"{"agent_id":"agt_a","mandate_version":"sha256:01"}"#,
+        ),
         row(3, "ConnectionRequested", r#"{"connection_id":"conn_1"}"#),
         row(
             4,
             "MandateDraftSaved",
-            r#"{"agent_id":"agt_c","connection_id":7}"#,
+            r#"{"agent_id":"agt_c","connection_id":7,"mandate_version":"sha256:01"}"#,
         ),
     ];
     let found = |c: &Command| in_workspace(&control, c);

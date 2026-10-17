@@ -164,7 +164,11 @@ fn seed(f: &Fixture) {
         ctl(),
         vec![
             row(1, "StreamOpened", "{}"),
-            row(2, "AgentDeployed", r#"{"agent_id":"agt_a"}"#),
+            row(
+                2,
+                "AgentDeployed",
+                r#"{"agent_id":"agt_a","mandate_version":"sha256:01"}"#,
+            ),
             row(3, "ConnectionRequested", r#"{"connection_id":"conn_1"}"#),
         ],
     );
@@ -373,11 +377,12 @@ fn a_kill_switch_forwards_no_step_up_and_says_it_is_unbound() {
         &ws("/kill-switch"),
         &cookie,
         Some(KEY),
-        br#"{"scope":{"kind":"workspace","id":null},"environment_shown":"paper","record":null,"owner_exit":null,"step_up":{"assertion_id":"as_1","authenticated_at":"2026-10-17T10:00:00Z","method":"passkey"}}"#,
+        br#"{"scope":{"kind":"workspace","id":null},"environment_shown":"paper","record":null,"owner_exit":null,"step_up":{"assertion_id":"01JBH3BTZ8K2M4N6P8R0S2T0AA","authenticated_at":"2026-10-17T10:00:00.000000000Z","method":"passkey"}}"#,
     );
     let answer = body(&reply);
     accepted(&reply);
     assert_eq!(text(&answer, &["step_up_status"]), "unbound");
+    assert_eq!(answer.get("dropped"), None, "every member parsed");
     let recorded = commands(&f);
     assert_eq!(member(&recorded[0], &["payload", "step_up"]), &Value::Null);
 }

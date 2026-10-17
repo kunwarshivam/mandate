@@ -9,11 +9,14 @@
 use std::time::Duration;
 
 use mandate_authn::Request;
+use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
 use mandate_identity::Permission;
-use mandate_journal::StoredEvent;
+use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_time::UtcNanos;
 
 use crate::journal::Journal;
+use crate::reads::deployed;
+use crate::routes::BUILD;
 
 /// How many appends a command makes before it answers that the journal did not settle.
 pub const ATTEMPTS: usize = 5;
@@ -43,19 +46,57 @@ pub enum Command {
 impl Command {
     /// §3.4's operation name, which is also the journaled `command`'s.
     pub fn operation(&self) -> &'static str {
-        ""
+        match self {
+            Self::Pause(_) => "pause",
+            Self::Hold(_) => "hold_openings",
+            Self::KillSwitch(_) => "kill_switch",
+        }
     }
 
     /// The matrix row that authorizes it (identity spec §4.2).
     pub fn permission(&self) -> Permission {
-        Permission::Pause
+        match self {
+            Self::Pause(_) => Permission::Pause,
+            Self::Hold(_) => Permission::HoldNewOpenings,
+            Self::KillSwitch(KillScope::Agent(_)) => Permission::KillSwitchAgent,
+            Self::KillSwitch(_) => Permission::KillSwitchConnectionOrWorkspace,
+        }
     }
 
     /// What it is to the session (identity spec §6.4): pause and the kill switch survive an
     /// outage; a hold does not.
     pub fn request(&self) -> Request {
-        Request::Other
+        match self {
+            Self::Pause(_) => Request::Pause,
+            Self::Hold(_) => Request::Other,
+            Self::KillSwitch(_) => Request::KillSwitch,
+        }
     }
+
+    /// The payload's `agent`, `scope`, and `subject` (journal spec §9.11, rule 91): the agent for
+    /// an agent's command, and for a kill switch the scope it stops.
+    fn named<'a>(&'a self, workspace: &'a str) -> (Option<&'a str>, &'static str, &'a str) {
+        match self {
+            Self::Pause(agent) | Self::Hold(agent) | Self::KillSwitch(KillScope::Agent(agent)) => {
+                (Some(agent), "agent", agent)
+            }
+            Self::KillSwitch(KillScope::Connection(connection)) => (None, "connection", connection),
+            Self::KillSwitch(KillScope::Workspace) => (None, "workspace", workspace),
+        }
+    }
+}
+
+/// An object of `members`, each name a valid key.
+fn object(members: Vec<(&str, Value)>) -> Option<Value> {
+    let mut object = Object::new();
+    for (name, value) in members {
+        object.insert(Key::new(name).ok()?, value);
+    }
+    Some(Value::Object(object))
+}
+
+fn text(value: &str) -> Value {
+    Value::Str(value.to_owned())
 }
 
 /// Who issued a command, where, and when.
@@ -74,31 +115,115 @@ pub struct Issued<'a> {
     pub command: &'a Command,
 }
 
-/// The canonical draft of `issued`'s `OwnerCommandIssued`, or `None` for an instant before 1970.
+/// The canonical draft of `issued`'s `OwnerCommandIssued`; `None` only for a value the canonical
+/// form cannot hold.
 pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
-    let _ = issued;
-    None
+    let second = u64::try_from(issued.now.secs()).ok().and_then(Int::new)?;
+    let (agent, scope, subject) = issued.command.named(issued.workspace);
+    let payload = object(vec![
+        ("agent", agent.map_or(Value::Null, text)),
+        ("command", text(issued.command.operation())),
+        ("scope", text(scope)),
+        ("subject", text(subject)),
+        ("release", Value::Null),
+        ("warning_shown", Value::Null),
+        ("bid", Value::Null),
+        ("bid_size", Value::Null),
+        ("floor", Value::Null),
+        ("user", text(issued.principal)),
+        ("submitted_at", Value::Int(second)),
+        ("step_up", Value::Null),
+    ])?;
+    let actor = object(vec![
+        ("build", text(BUILD)),
+        ("id", text(issued.principal)),
+        ("kind", text("user")),
+        ("version", text(env!("CARGO_PKG_VERSION"))),
+    ])?;
+    let one = Value::Int(Int::new(1)?);
+    let envelope = object(vec![
+        ("actor", actor),
+        ("artifact_refs", Value::Array(Vec::new())),
+        ("causation_id", Value::Null),
+        ("clock_source", text("local")),
+        ("config_refs", Value::Object(Object::new())),
+        ("correlation_id", Value::Null),
+        ("environment", text(issued.environment)),
+        ("envelope_version", one.clone()),
+        ("event_id", text(issued.event_id)),
+        ("event_time", text(&issued.now.to_string())),
+        ("event_type", text(COMMAND)),
+        ("payload", payload),
+        ("pii_refs", Value::Array(Vec::new())),
+        ("schema_version", one),
+        ("stream_id", text(&format!("ctl:{}", issued.workspace))),
+    ])?;
+    Some(to_canonical(&envelope))
+}
+
+/// The event type every owner command is.
+const COMMAND: &str = "OwnerCommandIssued";
+
+/// What a repeat must match: the event type, the stream, the actor's kind and id, and the payload
+/// without `submitted_at`.
+fn journaled(body: &[u8]) -> Option<[Value; 5]> {
+    let event = parse(body).ok()?;
+    let member = |path: &[&str]| path.iter().try_fold(&event, |v, k| v.get(k)).cloned();
+    let Value::Object(mut payload) = member(&["payload"])? else {
+        return None;
+    };
+    payload.remove("submitted_at");
+    Some([
+        member(&["event_type"])?,
+        member(&["stream_id"])?,
+        member(&["actor", "kind"])?,
+        member(&["actor", "id"])?,
+        Value::Object(payload),
+    ])
 }
 
 /// Whether `stored` records the command `draft` does: the same event type, stream, actor, and
 /// payload, but the second it was submitted at (§3.4 step 1, DEC-1007 item 4).
 pub fn same(stored: &StoredEvent, draft: &[u8]) -> bool {
-    let _ = (stored, draft);
-    false
+    match (journaled(&stored.body), journaled(draft)) {
+        (Some(stored), Some(draft)) => stored == draft,
+        _ => false,
+    }
 }
 
 /// Whether the control stream holds `command`'s scope (DEC-1007 item 5): an agent an
 /// `AgentDeployed` names, a connection an event names, or, for the workspace, any row at all.
 pub fn in_workspace(control: &[StoredEvent], command: &Command) -> bool {
-    let _ = (control, command);
-    false
+    let agent = |id: &str| {
+        deployed(control)
+            .iter()
+            .any(|deployment| deployment.0 == id)
+    };
+    let connection = |id: &str| {
+        control.iter().any(|row| {
+            parse(&row.body).ok().is_some_and(|event| {
+                event
+                    .get("payload")
+                    .and_then(|payload| payload.get("connection_id"))
+                    .and_then(Value::as_str)
+                    == Some(id)
+            })
+        })
+    };
+    match command {
+        Command::Pause(id) | Command::Hold(id) | Command::KillSwitch(KillScope::Agent(id)) => {
+            agent(id)
+        }
+        Command::KillSwitch(KillScope::Connection(id)) => connection(id),
+        Command::KillSwitch(KillScope::Workspace) => !control.is_empty(),
+    }
 }
 
 /// How an append ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Settled {
     /// The event is stored: committed now or before.
-    Stored(StoredEvent),
+    Stored(Box<StoredEvent>),
     /// Another event of other content is stored under the id.
     Conflict,
     /// An attempt's commit was ambiguous and none since confirmed it.
@@ -115,6 +240,37 @@ pub async fn settle(
     draft: &[u8],
     now: UtcNanos,
 ) -> Settled {
-    let _ = (journal, stream, event_id, draft, now);
-    Settled::Unavailable
+    let mut ambiguous = false;
+    for _ in 0..ATTEMPTS {
+        match attempt(journal, stream, draft, now).await {
+            Some(AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows)) => {
+                match rows.into_iter().find(|row| row.event_id == event_id) {
+                    Some(row) => return Settled::Stored(Box::new(row)),
+                    None => ambiguous = true,
+                }
+            }
+            Some(AppendOutcome::IdempotencyConflict { .. }) => return Settled::Conflict,
+            Some(AppendOutcome::Ambiguous) => ambiguous = true,
+            Some(_) | None => {}
+        }
+        tokio::time::sleep(BACKOFF).await;
+    }
+    if ambiguous {
+        Settled::Unknown
+    } else {
+        Settled::Unavailable
+    }
+}
+
+/// One attempt: a new writer epoch, the head now, and the append; `None` when the journal did not
+/// answer.
+async fn attempt(
+    journal: &dyn Journal,
+    stream: &str,
+    draft: &[u8],
+    now: UtcNanos,
+) -> Option<AppendOutcome> {
+    let epoch = journal.take_ownership(stream).await.ok()?;
+    let head = journal.head(stream).await.ok()?;
+    journal.append(stream, head, epoch, now, draft).await.ok()
 }

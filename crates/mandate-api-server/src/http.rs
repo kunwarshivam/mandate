@@ -136,7 +136,7 @@ pub(crate) fn unauthenticated() -> Response {
 
 /// §3.3 item 1's check, which the browser-only session routes make first and refuse with 403: one
 /// `Origin`, exactly the app origin, and one `X-Mandate-Request: 1`.
-fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
+pub(crate) fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
     let mut marks = headers.get_all(CSRF_HEADER).iter();
     let marked = matches!((marks.next(), marks.next()), (Some(mark), None) if mark == "1");
     marked && is_app_origin(headers, app_origin)
