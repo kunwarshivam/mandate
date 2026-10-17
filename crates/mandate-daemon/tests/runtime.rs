@@ -615,9 +615,19 @@ proptest! {
 /// The control stream's `ConnectionEstablished` of `connection` at `schema_version`, naming
 /// `reference` as its account (journal spec §9.8: version 2 carries `account_ref`).
 fn established(rig: &Rig, connection: &str, reference: &str, schema_version: u64) {
+    established_in(rig, connection, reference, schema_version, "paper");
+}
+
+fn established_in(
+    rig: &Rig,
+    connection: &str,
+    reference: &str,
+    schema_version: u64,
+    environment: &str,
+) {
     let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
     let payload = format!(
-        r#"{{"connection_id":"{connection}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{reference}"}}"#
+        r#"{{"connection_id":"{connection}","broker":"alpaca","environment":"{environment}","scopes":[],"account_ref":"{reference}"}}"#
     );
     rig.control.borrow_mut().push(versioned(
         CONTROL,
@@ -853,10 +863,43 @@ fn an_establishment_naming_another_account_stops_the_process() {
     );
 }
 
+/// A paper process follows only a paper connection's account, and folds only paper rows: an
+/// establishment for another environment names nothing, and an account row of another environment
+/// stops the process (`AGENTS.md` rule 8).
+#[test]
+fn a_paper_runtime_follows_only_a_paper_account() {
+    let rig = Rig::default();
+    established_in(&rig, CONNECTION, ACCOUNT_REF, 2, "live");
+    reconciled(&rig, ACCOUNT);
+    let mut process = start(&rig, NOW);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    assert_eq!(
+        mode(&process),
+        Mode::Paused,
+        "a live establishment names nothing"
+    );
+
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = start(&rig, NOW);
+    reconciled(&rig, ACCOUNT);
+    rig.accounts.borrow_mut().last_mut().unwrap().environment = "live".into();
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+    assert_eq!(mode(&process), Mode::Paused);
+}
+
 #[derive(Debug, Clone)]
 enum AccountOp {
     Establish,
     Reconcile { clean: bool },
+    Submitted,
     Applied { here: bool, to: &'static str },
     Unreadable,
     Step,
@@ -867,6 +910,7 @@ fn account_op() -> impl Strategy<Value = AccountOp> {
     prop_oneof![
         Just(AccountOp::Establish),
         any::<bool>().prop_map(|clean| AccountOp::Reconcile { clean }),
+        Just(AccountOp::Submitted),
         (
             any::<bool>(),
             prop_oneof![
@@ -883,22 +927,125 @@ fn account_op() -> impl Strategy<Value = AccountOp> {
     ]
 }
 
+/// One account row as the oracle reads it, from the laid-down row alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Laid {
+    Clean,
+    Unclean,
+    Submitted,
+    Applied { agent: String, to: String },
+}
+
+fn laid(rig: &Rig) -> Vec<Laid> {
+    rig.accounts
+        .borrow()
+        .iter()
+        .map(|r| {
+            let body = parse(&r.body).unwrap();
+            let payload = body.get("payload").unwrap();
+            let field = |name: &str| {
+                payload
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            match r.event_type.as_str() {
+                "ReconciliationRun" if field("result") == "clean" => Laid::Clean,
+                "ReconciliationRun" => Laid::Unclean,
+                "OrderSubmitted" => Laid::Submitted,
+                _ => Laid::Applied {
+                    agent: field("agent"),
+                    to: field("to"),
+                },
+            }
+        })
+        .collect()
+}
+
+/// Whether `rows` end with the broker's truth known: a clean reconciliation with no submission
+/// after it (trading spec §11).
+fn known(rows: &[Laid]) -> bool {
+    rows.iter()
+        .rposition(|r| *r == Laid::Clean)
+        .is_some_and(|clean| !rows[clean..].contains(&Laid::Submitted))
+}
+
+/// The executor's latest mode for this agent in `rows`, `normal` with none.
+fn copied(rows: &[Laid]) -> Mode {
+    rows.iter()
+        .rev()
+        .find_map(|r| match r {
+            Laid::Applied { agent, to } if agent == AGENT => Some(to.as_str()),
+            _ => None,
+        })
+        .map_or(Mode::Normal, |to| match to {
+            "exits_only" => Mode::ExitsOnly,
+            "paused" => Mode::Paused,
+            "stopped" => Mode::Stopped,
+            _ => Mode::Normal,
+        })
+}
+
+/// The oracle's own account of the hold: how many account rows the process has folded, how many
+/// it had folded at its start, and whether the hold is held. Taken at a start unless the folded
+/// rows already end known (no intent is ever outstanding here); lifted on a pass that folds a
+/// clean reconciliation from after that start, with no submission after the last one
+/// (DEC-1014 item 6).
+struct Oracle {
+    folded: usize,
+    at_start: usize,
+    held: bool,
+}
+
+impl Oracle {
+    fn started(rows: &[Laid], established: bool) -> Self {
+        let folded = if established { rows.len() } else { 0 };
+        Self {
+            folded,
+            at_start: folded,
+            held: !known(&rows[..folded]),
+        }
+    }
+
+    fn passed(&mut self, rows: &[Laid], established: bool) {
+        if established {
+            self.folded = rows.len();
+        }
+        let since = &rows[self.at_start..self.folded];
+        if self.held && since.contains(&Laid::Clean) && known(&rows[..self.folded]) {
+            self.held = false;
+        }
+    }
+
+    fn mode(&self, rows: &[Laid]) -> Mode {
+        let copied = copied(&rows[..self.folded]);
+        if self.held {
+            copied.max(Mode::Paused)
+        } else {
+            copied
+        }
+    }
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(ProptestConfig::with_cases(128))]
 
     /// Whatever the interleaving of the executor's records, the connection's establishment,
-    /// unreadable account reads, passes, and restarts, once the account is established and a pass
-    /// reads it: the process is ready, and its effective mode is the executor's latest mode for this
-    /// agent, held at least `paused` until a clean reconciliation (trading spec §11, DEC-1014). The
-    /// oracle reads only the rows the test laid down.
+    /// unreadable account reads, passes, and restarts: the process stays ready, and after each start
+    /// and each pass that reads the account its effective mode is the executor's latest mode for
+    /// this agent, held at least `paused` from a start that did not find the broker's truth known
+    /// until a clean reconciliation after that start, with no submission after it (trading spec
+    /// §11, DEC-1014). The oracle reads only the rows the test laid down.
     #[test]
     fn the_runtime_s_mode_follows_its_account_stream_whatever_the_interleaving(
-        ops in proptest::collection::vec(account_op(), 1..24),
+        ops in proptest::collection::vec(account_op(), 1..32),
     ) {
         let rig = Rig::default();
         let mut second = NOW;
         let mut process = start(&rig, second);
         let mut is_established = false;
+        let mut oracle = Oracle::started(&laid(&rig), is_established);
         for op in ops {
             second += 1;
             match op {
@@ -914,6 +1061,12 @@ proptest! {
                     "ReconciliationRun",
                     if clean { r#"{"result":"clean"}"# } else { r#"{"result":"mismatch"}"# },
                 ),
+                AccountOp::Submitted => on_account(
+                    &rig,
+                    ACCOUNT,
+                    "OrderSubmitted",
+                    r#"{"client_order_id":"o1","attempt":1}"#,
+                ),
                 AccountOp::Applied { here, to } => {
                     let agent = if here { AGENT } else { "agent-b" };
                     on_account(
@@ -928,68 +1081,23 @@ proptest! {
                     tick(&rig, second);
                     process.step(at(second));
                     rig.account_down.set(false);
+                    if !is_established {
+                        oracle.passed(&laid(&rig), false);
+                    }
                 }
                 AccountOp::Step => {
                     tick(&rig, second);
                     process.step(at(second));
+                    oracle.passed(&laid(&rig), is_established);
+                    prop_assert_eq!(mode(&process), oracle.mode(&laid(&rig)), "after a pass");
                 }
                 AccountOp::Restart => {
                     process = start(&rig, second);
-                    if is_established {
-                        prop_assert_eq!(mode(&process), expected_mode(&rig), "at the start");
-                    }
+                    oracle = Oracle::started(&laid(&rig), is_established);
+                    prop_assert_eq!(mode(&process), oracle.mode(&laid(&rig)), "at the start");
                 }
             }
+            prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
         }
-        if !is_established {
-            established(&rig, CONNECTION, ACCOUNT_REF, 2);
-        }
-        second += 1;
-        tick(&rig, second);
-        process.step(at(second));
-        prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
-        prop_assert_eq!(mode(&process), expected_mode(&rig), "{:?}", kinds(&rig));
-    }
-}
-
-/// The effective mode the account rows the test laid down call for: the executor's latest mode for
-/// this agent, held at least `paused` until a clean reconciliation. Computed from the rows alone.
-fn expected_mode(rig: &Rig) -> Mode {
-    let laid: Vec<(String, String)> = rig
-        .accounts
-        .borrow()
-        .iter()
-        .map(|r| {
-            let body = parse(&r.body).unwrap();
-            let payload = body.get("payload").unwrap();
-            let field = |name: &str| {
-                payload
-                    .get(name)
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            match r.event_type.as_str() {
-                "ReconciliationRun" => ("reconciled".to_owned(), field("result")),
-                _ => (field("agent"), field("to")),
-            }
-        })
-        .collect();
-    let ever_clean = laid
-        .iter()
-        .any(|(kind, result)| kind == "reconciled" && result == "clean");
-    let copied = laid.iter().rev().find(|(agent, _)| agent == AGENT).map_or(
-        Mode::Normal,
-        |(_, to)| match to.as_str() {
-            "exits_only" => Mode::ExitsOnly,
-            "paused" => Mode::Paused,
-            "stopped" => Mode::Stopped,
-            _ => Mode::Normal,
-        },
-    );
-    if ever_clean {
-        copied
-    } else {
-        copied.max(Mode::Paused)
     }
 }
