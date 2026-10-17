@@ -38,8 +38,8 @@ use std::time::Duration;
 use mandate_api_server::clock::SystemClock;
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
-    StartRefusal, artifact_store, check_bind, check_database_url, check_environment,
-    read_session_key,
+    INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store, check_bind, check_database_url,
+    check_environment, internal_paper_workspace, read_session_key,
 };
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::Postgres;
@@ -168,6 +168,10 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
                 name: "MANDATE_API_WORKSPACE",
             },
         )?,
+        internal_paper: match env::var_os(INTERNAL_PAPER_WORKSPACE) {
+            None => false,
+            value => internal_paper_workspace(value.as_deref())?,
+        },
     };
     let credentials = env::var_os("CREDENTIALS_DIRECTORY")
         .map(PathBuf::from)

@@ -39,6 +39,11 @@ pub enum StartRefusal {
     SessionKeyExposed,
     /// A required setting is absent or malformed; carries only its name.
     Setting { name: &'static str },
+    /// [`INTERNAL_PAPER_WORKSPACE`] is on, and the hosted control stream is not shown to be paper
+    /// (DEC-1143 item 2).
+    InternalWorkspaceNotPaper,
+    /// The check is not built yet.
+    Unimplemented { story: &'static str },
 }
 
 impl fmt::Display for StartRefusal {
@@ -57,6 +62,11 @@ impl fmt::Display for StartRefusal {
             Self::Setting { name } => {
                 write!(f, "a required setting is absent or malformed: {name}")
             }
+            Self::InternalWorkspaceNotPaper => write!(
+                f,
+                "{INTERNAL_PAPER_WORKSPACE} is on, and the control stream is not shown to be paper"
+            ),
+            Self::Unimplemented { story } => write!(f, "{story} is not implemented yet"),
         }
     }
 }
@@ -233,4 +243,31 @@ pub fn artifact_store(
             name: "MANDATE_API_ARTIFACTS",
         })?;
     Ok(Some(std::sync::Arc::new(store)))
+}
+
+/// The setting that marks the hosted workspace one of the team's internal paper workspaces, the
+/// only ones `GET /evaluations/{id}` answers in (DEC-103, DEC-1002 item 6, DEC-1143).
+pub const INTERNAL_PAPER_WORKSPACE: &str = "MANDATE_API_INTERNAL_PAPER_WORKSPACE";
+
+/// [`INTERNAL_PAPER_WORKSPACE`]'s value: off when absent or empty, on only for exactly `true`, off
+/// for exactly `false` (DEC-1143 item 1).
+///
+/// # Errors
+/// [`StartRefusal::Setting`] naming it for any other value.
+pub fn internal_paper_workspace(value: Option<&OsStr>) -> Result<bool, StartRefusal> {
+    let _ = value;
+    Err(StartRefusal::Unimplemented { story: "E17-8" })
+}
+
+/// The start check for an internal paper workspace (DEC-1143 item 2): the hosted control stream,
+/// as read at start, has a row and every row is `paper`. A stream that could not be read is
+/// refused too: the setting is never taken on trust.
+///
+/// # Errors
+/// [`StartRefusal::InternalWorkspaceNotPaper`].
+pub fn check_internal_paper(
+    control: Result<&[mandate_journal::StoredEvent], crate::journal::JournalUnavailable>,
+) -> Result<(), StartRefusal> {
+    let _ = control;
+    Err(StartRefusal::Unimplemented { story: "E17-8" })
 }

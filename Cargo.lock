@@ -1627,6 +1627,7 @@ dependencies = [
  "ring",
  "rustix",
  "rustls",
+ "serde_json",
  "tokio",
 ]
 

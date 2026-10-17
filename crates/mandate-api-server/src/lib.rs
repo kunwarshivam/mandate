@@ -22,10 +22,12 @@
 //! - [`writes`] and [`commands`]: pause, the kill switch, and an approval's Skip, recorded as the
 //!   CLI records them on the workspace's control stream before the `202`, and replayed by key
 //!   (DEC-1007).
+//! - [`backtests`]: the backtest and evaluation reads' folds (DEC-1001, DEC-1002, DEC-1143).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
 
+pub mod backtests;
 pub mod clock;
 pub mod commands;
 pub mod config;

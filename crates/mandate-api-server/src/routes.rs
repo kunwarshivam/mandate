@@ -476,3 +476,31 @@ pub(crate) async fn path_refused(app: &App, headers: &HeaderMap, request: Reques
         unauthenticated()
     }
 }
+
+/// `GET /v1/workspaces/{ws}/backtests/{backtest_id}` (§4.2, DEC-1001 item 5).
+pub async fn one_backtest(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let _ = (app, headers, path);
+    with_type(
+        StatusCode::NOT_IMPLEMENTED,
+        "text/plain",
+        "E4-5 is not implemented yet".into(),
+    )
+}
+
+/// `GET /v1/workspaces/{ws}/evaluations/{evaluation_id}` (§4.7, DEC-1002 items 6 and 7).
+pub async fn one_evaluation(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let _ = (app, headers, path);
+    with_type(
+        StatusCode::NOT_IMPLEMENTED,
+        "text/plain",
+        "E17-8 is not implemented yet".into(),
+    )
+}
