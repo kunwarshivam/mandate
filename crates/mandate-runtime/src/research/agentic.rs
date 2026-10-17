@@ -509,6 +509,9 @@ fn final_output(
     } else {
         judge::Judged::default()
     };
+    if agentic.state.started().kind == RunKind::Monitor && !judged.theses.is_empty() {
+        return proposed_while_monitoring(agentic, record, turn, batch, out);
+    }
     let (body, invalidations, theses) = match super::invocation(record, &judged.verdicts) {
         Ok(body) => (body, judged.invalidations, judged.theses),
         Err(_) => (super::invocation(record, &[])?, Vec::new(), Vec::new()),
@@ -541,6 +544,37 @@ fn final_output(
         })
         .map_err(loop_error)?;
     end(agentic, reply.ends.unwrap_or(EndReason::Done(None)), batch)?;
+    out.ended = true;
+    Ok(out)
+}
+
+/// A `monitor` reply that proposes a thesis (§6.9): the gateway pins a monitoring run's output
+/// schema without `theses`, so such a reply never reaches judging there; the core refuses it the
+/// same way, whatever the gateway did. The turn's record is journaled with no verdicts, nothing of
+/// its output is used, and the run ends `error`, as a `schema_invalid` reply's does.
+fn proposed_while_monitoring(
+    agentic: &mut Agentic,
+    record: &CallRecord,
+    turn: u32,
+    batch: &mut Batch<'_>,
+    mut out: Out,
+) -> Result<Out, RuntimeError> {
+    batch.journal(
+        "ModelInvocationRecorded",
+        None,
+        super::invocation(record, &[])?,
+    )?;
+    let reply = agentic
+        .state
+        .on_reply(&ReplyInput {
+            turn,
+            ok: false,
+            cost: record.cost,
+            tool_calls: Vec::new(),
+            final_output: None,
+        })
+        .map_err(loop_error)?;
+    end(agentic, reply.ends.unwrap_or(EndReason::Error), batch)?;
     out.ended = true;
     Ok(out)
 }
