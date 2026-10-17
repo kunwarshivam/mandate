@@ -28,7 +28,7 @@ else.
 12. [Decisions](#12-decisions)
 13. [Open questions](#13-open-questions)
 14. [Backlog](#14-backlog)
-15. [Owner and explain runs: the desk](#15-owner-and-explain-runs-the-desk) (E12-5, E19-14; [DEC-2240](../project/decisions/DEC-2240.md))
+15. [Owner and explain runs: the desk](#15-owner-and-explain-runs-the-desk) (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md))
 
 ## 1. Scope
 
@@ -822,7 +822,7 @@ paper). E19 holds only what none of them covered.
 
 ## 15. Owner and explain runs: the desk
 
-*Added for E12-5 and E19-14 ([DEC-2240](../project/decisions/DEC-2240.md), agent readings;
+*Added for E12-5 and E19-15 ([DEC-2240](../project/decisions/DEC-2240.md), agent readings;
 [DEC-2241](../project/decisions/DEC-2241.md), [DEC-2242](../project/decisions/DEC-2242.md), and
 [DEC-2243](../project/decisions/DEC-2243.md), Proposed for the founder). It builds on E19-13's
 agentic loop (lane AH's harness design input, ADR-0005 when it merges: its §4 run kinds, §5
@@ -882,26 +882,26 @@ amends them) hold for these runs as for any; these add what is particular to the
 | EX-3 | **Scope comes from construction, never the model.** The workspace and agent are the process's (§5.1); no tool argument names a workspace, stream, agent, role, or principal; an argument the tool's schema does not name is refused by the schema check | Schema test over every tool; a property that every tool call's effective scope equals the process's |
 | EX-4 | **Every segment cites a record the run read.** An answer is shown only if it has at least one segment and each segment cites at least one ref returned by a tool of the same run, or it has no segment and at least one `not_recorded` item; a `not_recorded` item is a closed topic code rendered from the platform's template, never model text (§15.5) | Property with a compromised model citing random refs, refs of other runs, and nothing, and putting facts in `not_recorded`: no answer with an uncited segment or an unread citation is shown; the oracle rebuilds the readable set from the run's journaled tool results |
 | EX-5 | **No fixture advice phrase is shown.** No shown answer contains a phrase of the advice fixture list (§15.5): a recommendation to buy, sell, hold, approve, skip, or change the mandate, a price target, or a likely profit (DEC-126). Paraphrases outside the list are a disclosed residual (§15.10) | Property: a compromised model that embeds each fixture phrase in any case and spacing; none is shown. A list of neutral sentences ("the agent bought", "the gate refused") all pass, so the check is not vacuous. A seeded mutant that drops any one phrase from the checker's copy is caught. The list is a versioned file of the desk crate, `fixtures/advice-phrases.txt`, inside the entry's content hash |
-| EX-6 | **No figure from a record's numeric fields, and no number from the question, in a prompt.** Tool results reach the model through the redacted projection (§15.4), and the question and every free-text field enter the prompt through the numeric scrub (§15.4). Spelled-out numbers are a disclosed residual. What does reach the provider is DEC-2243's question | Canary test: canary quantities, prices, dollar amounts, and account refs in every record field the tools read, in the question, and in thesis text and headlines; none appears in any prompt artifact |
+| EX-6 | **No quantity, price, limit value, dollar figure, P&L, or account reference from a record, and no number from the question, in a prompt.** A thesis's conviction and confidence, which the research model itself wrote, do reach it. Tool results reach the model through the redacted projection (§15.4), and the question and every free-text field enter the prompt through the numeric scrub (§15.4). Spelled-out numbers are a disclosed residual. What does reach the provider is DEC-2243's question | Canary test: canary quantities, prices, limit values, dollar amounts, P&L, and account refs in every record field the tools read, in the question, and in thesis text and headlines; none appears in any prompt artifact |
 | EX-7 | **Bounded.** A run makes at most §15.7's turns and tool calls and ends within its deadline, and its spend is reserved through the gateway against the agent's, the workspace's, and the deployment's budgets before any byte leaves (INF-7) | Property over random model behaviour; independent counters over the run's journaled records and the meter fold |
 | EX-8 | **Journaled before shown.** No answer is shown, and no turn reads a tool result, before its record commits (HI-24). A failed or `Ambiguous` append shows no model text | Fault injection on every append |
 | EX-9 | **Off every risk path.** An approval is raised, delivered, answered, and timed out exactly as without an explain run; a missing or late explanation only leaves the card without one. No owner or explain run delays a tick, an exit, protection, or a kill switch (rule 3, HI-14, HI-21). Their spend can make later research calls `budget_exhausted` sooner, which is the safe direction (HI-9) | Property over the approval flow, with no other run queued: one input sequence run with the explain run absent, stalled until its deadline, and failing; every draft and the account stream are byte-identical across the three |
 | EX-10 | **Nothing in notifications.** No notice, push payload, page title, or URL carries answer text, a question, or a cited record's content (rule 6, API-10) | Payload capture on every notice; a URL lint over the desk routes |
 | EX-11 | **Replay without a model.** Every shown answer, its checks, and its outcome are rebuilt from the journal (HI-3, INF-10) | Replay with a gateway that fails on any call |
 | EX-12 | **Provenance is complete.** Every shown answer's `written_after_reading` equals the set of untrusted results returned before its `answer` call, and the menu offered at each turn equals the trigger's menu (ADR-0005 §16 items 2 and 3) | Property with an adaptive compromised model (it picks its calls from the run so far, §16 item 9): an oracle that re-folds the run's tool results recomputes the set and the menu; seeded bugs (a result dropped, a tool added mid-run) are caught |
-| EX-13 | **Nothing beyond the reader's row.** Every field a run's tools return is in the cited-record projection for its type (§15.4, workspace API §4.6.1), and reaches only that run's readers (§15.3): an owner run's only the asking operator, under the chat row; an explain run's the view row's holders, and then only fields §4.3's and §4.7's reads already serve | Property: for every tool, menu, and returned row, an oracle built from §4.6.1's projection table and §15.3's reader table, written apart from the tools, accepts every returned field and every route serving it; seeded bugs (a tool returning a gate check's rule-set version, the explain menu gaining `records.decisions`, an owner run's record served to another member) are caught |
+| EX-13 | **Nothing beyond the reader's row.** Every field a run's tools return is in the cited-record projection for its type (§15.4, workspace API §4.6.1), and reaches only that run's readers (§15.3): an owner run's only the asking operator, under the chat row; an explain run's the view row's holders, and then only the approval, thesis, universe-entry, and mode projections | Property: for every tool, menu, and returned row, an oracle built from §4.6.1's projection table and §15.3's reader table, written apart from the tools, accepts every returned field and every route serving it; seeded bugs (a tool returning a gate check's rule-set version, the explain menu gaining `records.decisions`, an owner run's record served to another member) are caught |
 
 ### 15.3 Who asks, and who reads
 
 | Surface | Authorized by (workspace API §3.7) | Notes |
 |---|---|---|
 | Send a desk message | *Chat thread with the agent* | A client has no chat. Other members do not see the question at the desk; the journal's *Read records* holders (workspace admin, auditor, service account) can, as they can every record (workspace API §4.8, journal spec §7) |
-| Read one's own thread, its answers, the cited records, the fallback records, and the owner run's transcript | *Chat thread with the agent*, the asking member only | The decision and order fields an owner run returns (the autonomy outcome and its rule, the dry run's verdict and reason code, a refused order's binding-gate verdict and first reason code) reach only this member, under the chat row: [DEC-192](../project/04-decision-log.md#decisions) (Accepted) already assembles chat answers from "the decision's `DecisionMade`, its thesis, the rule or delegation that decided it, and the gate's result" |
-| Read an approval's explanation, its cited records, and the explain run's transcript | *View agents, positions, decisions* | With the approval (workspace API §4.3). The explain menu (below) returns only fields §4.3's approval read and §4.7's universe and theses (D4) and agent (D2) reads already serve, so nothing beyond that row reaches its readers. Never through a client's `read` scope (workspace API §3.8) |
+| Read one's own thread, its answers, the cited records, the fallback records, and the owner run's transcript | *Chat thread with the agent*, the asking member only | The decision and order fields an owner run returns (the autonomy outcome and its rule, the dry run's verdict and reason code, a refused order's binding-gate verdict and first reason code) reach only this member, under the chat row. [DEC-192](../project/04-decision-log.md#decisions) (Accepted) assembles a "why" answer from "the decision's `DecisionMade`, its thesis, the rule or delegation that decided it, and the gate's result"; keeping those fields to the asking operator is this section's own tightening (DEC-2240 item 4, under DEC-176) |
+| Read an approval's explanation, its cited records, and the explain run's transcript | *View agents, positions, decisions* | With the approval (workspace API §4.3). The explain menu (below) returns the approval's, thesis's, universe entry's, and mode's fields of workspace API §4.6.1, which are §4.3's and §4.7's (D2, D4) plus refs and the admission verdict, all within the view row's "decisions" Never through a client's `read` scope (workspace API §3.8) |
 | Transcript of a research run (ideation, monitoring) | *Read records* in slice 1 | Its tool results hold news, filings, and quotes, and licensed text must stay where DEC-431 item 17 keeps it (HI-23); the model-output trace (J2) is already *Read records*. A redacted research transcript under the view row is a later change |
 
 No permission row is added or widened: what reaches a member beyond the view row's existing reads
-reaches only the asking operator, under the chat row, as DEC-192 already decided.
+reaches only the asking operator, under the chat row.
 
 ### 15.4 Tools
 
@@ -909,7 +909,7 @@ Each tool is read-only, typed, and pinned with its argument schema in the run ki
 its content hash, ADR-0005 §5). Every returned row carries a `ref`, the opaque handle
 `ev:<event_id>` or `art:<sha256>`; only a returned ref may be cited. A fold's row takes the ref of
 the event that last changed it: a position its last fill's, a universe entry its `UniverseChanged`'s,
-the mode its last `AgentModeChanged`'s or restriction's, a run its first record's; the mandate's is
+the mode its last `AgentModeChanged`'s or restriction's, or the agent stream's `StreamOpened`'s before any, a run its first record's; the mandate's is
 `art:` and its document's hash. Where E19-13's final tool set (#1540) defines a read of the same
 meaning, the desk uses that tool under that name with the projection below; every other tool here
 is the desk's own (§15.6 item 6). These are the fields each returns, and the cited-record
@@ -958,7 +958,7 @@ Tools outside a run's menu are left out of its schema:
 | Run | Menu |
 |---|---|
 | `owner`, slice 1 | Every read tool above, `note`, and `answer`. No action tool |
-| `explain` | `records.approval`, `memory.thesis`, `memory.universe`, `mode.read`, `note`, and `answer`; `memory.universe` filtered by code to the approval's instrument. Every field is one the view row's existing reads serve (§15.3) |
+| `explain` | `records.approval`, `memory.thesis`, `memory.universe`, `mode.read`, `note`, and `answer`; `memory.universe` filtered by code to the approval's instrument. Every field is within the view row (§15.3) |
 | `owner`, slice 2 | The slice-1 menu, plus the action tools only when the owner chose to make a request (a control the web app shows, journaled with the message), never because the model or a result asked; §15.12 |
 
 **Provenance** (ADR-0005 §16 item 3). Every shown answer and explanation records which untrusted
@@ -1013,7 +1013,7 @@ deadline) is E19-13's. For the desk:
 | Event | What the owner sees |
 |---|---|
 | The guard refuses the question | `OwnerQuestionSubmitted` is journaled with no question (journal spec §9.23); the runtime copies nothing and starts no run. The desk shows it `refused`, with generic text asking the member to leave out keys, account numbers, and personal details |
-| No run starts for a question within 60 s of its `recorded_at` (the agent paused or stopped, the process down, a precondition of §15.1 unmet, or a run in flight) | The desk shows it `unavailable`, with the fallback. The runtime starts no run for a question whose `recorded_at` is more than 60 s before the risk clock at its copy. If a run still starts under watermark lag, its states override: `running` and then `answered` replace `unavailable`, so the desk never shows an answer and `unavailable` at once |
+| No run starts for a question within 60 s of its `recorded_at` (the agent paused or stopped, the process down, a precondition of §15.1 unmet, or a run in flight) | The desk shows it `unavailable`, with the fallback. The runtime starts no run for a question whose `recorded_at` is more than 60 s before the risk clock at its copy (two deployment clocks, within the scheduler's tolerance, journal spec §5.4); the desk's own `unavailable` uses the API's clock at the read. If a run still starts under watermark lag, its states override: `running` and then `answered` replace `unavailable`, so the desk never shows an answer and `unavailable` at once |
 | The process restarts during a run | E19-13 ends it; the desk shows the fallback. Its reservations stay counted (inference §7.3) |
 | The agent is paused, stopped, or killed | No owner or explain run starts; one in flight is cancelled at its next step (ADR-0005 §4). The desk serves the fallback for each later question |
 | The approval an explain run explains resolves | The explanation, if already shown, stays with the resolved approval; a run still in flight ends, and the card is left without one. No second explain run starts for that approval |
@@ -1022,41 +1022,34 @@ deadline) is E19-13's. For the desk:
 
 ### 15.6 Records
 
-E19-13's records carry the runs. As #1540 stands (head a0111b82): one `ModelInvocationRecorded` per
-turn, one `ToolCallRecorded` per tool call with its result, and one `ResearchRunEnded` per run, on
-the agent stream, written by the runtime core; it has no start record, and its run kinds are
-`ideate` and `monitor`. The asks below add what the desk needs; whatever names #1540 merges with,
-§15 means those records. The `answer` tool's call is a `ToolCallRecorded` whose result is the check
-outcome, so the check is journaled like any tool result. One record is new, on the control stream
+E19-13's records carry the runs ([#1540](https://github.com/kunwarshivam/mandate/pull/1540) at head
+676e141c, journal spec §9.22 there), on the agent stream, written by the runtime core:
+`RunStarted` with `kind` `owner` or `explain`, `trigger` `owner_question` or `approval` and its
+`cause`, and the run's `menu`; one `ModelInvocationRecorded` per turn; `ToolCallRecorded` and
+`ToolResultRecorded` for every tool call, the `answer` check's result as the result's `code`;
+`RunSummaryRecorded`; and `RunEnded`, whose reason `answered` marks a shown answer. #1540's rule 173
+allows one `explain` run per approval and, in its next push, one `owner` run per question. Whatever
+names #1540 merges with, §15 means those records. One record is new, on the control stream
 ([journal spec §9.23](journal.md#923-desk-question-records-dec-2240)):
 
 | Event | When |
 |---|---|
-| `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies an accepted one at most once, as the start of an `owner` run that names it, as it copies `OwnerRequestSubmitted`; a refused one is not copied |
+| `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies an accepted one at most once, as the `RunStarted` of an `owner` run whose `trigger.cause` names it, as it copies `OwnerRequestSubmitted`; a refused one is not copied |
 
-**What this section asks of E19-13's records**, for #1540 (raised there on 2026-10-17; lane AH
-agreed to items 1 to 4 in session messages, against ADR-0005's names):
+**What §15 still asks of #1540** (lane AH agreed to items 1 and 2 on 2026-10-17, for its next push):
 
-1. The run kinds gain `owner` and `explain`, and the run's records name its cause from its first
-   record on: the copied `OwnerQuestionSubmitted`'s event id, or the `ApprovalRequested`'s. That
-   first record is the question's copy, so journal spec §2's list of copies names it.
-2. At most one `owner` run per question and one `explain` run per approval, as stream rules.
-3. The `answer` tool's result is one of §15.5's check results, and the run's end record says
-   whether an answer was shown.
-4. Tool calls use whatever request shape E19-13 pins, with DEC-997 item 2 amended there (DEC-2203)
-   if that shape is a provider's native tool call.
-5. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
+1. `ToolResultRecorded` gains `untrusted`, true for a result that holds third-party or model text
+   (theses, headlines, run summaries).
+2. A stream rule: at most one `owner` `RunStarted` per `trigger.cause`.
+3. The `answer` tool's `ToolCallRecorded` carries `provenance` as an action's does, the untrusted
+   results its prompt held, so `written_after_reading` is that list (ADR-0005 §16 item 3).
+4. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
    DEC-2243 once the founder decides it.
-6. `ToolCallRecorded`'s closed `tool` member lists every desk tool #1540 does not itself define,
-   from §15.4's table: `records.decisions`, `records.decision`, `records.approvals`,
-   `records.approval`, `records.orders`, `memory.positions`, `memory.universe`, `memory.theses`,
-   `memory.thesis`, `memory.runs`, `mandate.read`, `mode.read`, and `answer` (#1540's `note` is
-   reused).
-7. Each tool result records whether it is untrusted, so `written_after_reading` folds from the
-   records (ADR-0005 §16 item 3).
 
-The invariant names HI-24 to HI-28 cited here are ADR-0005 §10's; where #1540 numbers them
-differently, its numbers win and §15 is renumbered when it merges.
+The desk's tools are declared here, in §15.4, with their class: every one is `read`, and `note` and
+`answer` are `think`. Their names fill `RunStarted.menu` and `ToolCallRecorded.tool`, which #1540
+types as text constrained by the menu, so no journal change is needed for them. The invariant names
+HI-24 to HI-28 cited here are #1540's.
 
 ### 15.7 Bounds and spend
 
@@ -1067,7 +1060,7 @@ differently, its numbers win and §15 is renumbered when it merges.
 | Tool calls per turn; per run | 4; 16 | 4; 8 |
 | `answer` calls | 3 | 2 |
 | Result size | §15.4's caps; 16 KiB per result | The same |
-| Deadline | 60 s from the question's `recorded_at` | 60 s from the ask, or the approval's deadline if sooner |
+| Deadline | `RunStarted.deadline`, the cut-off plus the entry's `max_run_s` of 60 s, on the risk clock | The same, or the approval's deadline if sooner |
 | Rate | 30 questions per member per risk day; 1 waiting or in flight per member (a second is `rate_limited`); at most one desk run ahead of a queued monitoring run, so invalidations never starve | 1 per approval |
 
 **Spend is settings, never constants** (DEC-2240 item 9). Every turn is reserved through the
@@ -1117,7 +1110,7 @@ template describes and never advises; and §15.5's check refuses the advice fixt
 
 As of 2026-10-17: nothing of §15 is built. E19-13 (lane AH) is writing the loop, its run records,
 and the tool contract; the gateway's HTTPS transport is in review (#1519); the workspace API server
-is E21-31 (#1457). The work is backlog E19-14; the crate that holds the desk's tools, scrub, and
+is E21-31 (#1457). The work is backlog E19-15; the crate that holds the desk's tools, scrub, and
 checks is safety-critical (tenant isolation and roles), so it gets a `layers.toml` entry, a
 CODEOWNERS line, the lint header, and mutants on its diff.
 

@@ -12,7 +12,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
-- **v0.50 ([DEC-2240](../project/decisions/DEC-2240.md); E12-5, E19-14):** §9.23 closes the
+- **v0.50 ([DEC-2240](../project/decisions/DEC-2240.md); E12-5, E19-15):** §9.23 closes the
   desk's `OwnerQuestionSubmitted` on the control stream at schema version 1 before anything writes
   it, with rules 190 and 191 (v0.48 and v0.49, §9.21 and §9.22, and rules 165 to 189 are left for lanes I2 and AH, whose changes merge first). The run that answers is E19-13's, on its own records. Agent-accepted
   under DEC-176: the record is new, is not a risk input, and a refused question is never stored.
@@ -4185,7 +4185,9 @@ idempotency key of the runtime's copy.
 190. `OwnerQuestionSubmitted`: the actor is a `user` (`actor.kind`). A client has no desk
      (workspace API §3.7), and a question is always a person's.
 191. `OwnerQuestionSubmitted`: `question_ref` is `null` exactly when `guard_rule` is not
-     (`payload.question_ref`), so a refused question is never stored and an accepted one always is.
+     (`payload.question_ref`), so a refused question is never stored and an accepted one always is;
+     and `guard_rule` is never `input_contract` (`payload.guard_rule`), which judges a template's
+     inputs, not a question's text.
 
 **No vectors.** As for §9.15 and §9.20, `reference/journal` does not model this record, and the test
 vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member type and

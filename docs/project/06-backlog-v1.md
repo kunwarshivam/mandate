@@ -2285,11 +2285,11 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     sequences;
   - a run still produces opinions only (rule 4) and never sizes or places an order.
 
-- **E19-14 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
+- **E19-15 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
   [#1536](https://github.com/kunwarshivam/mandate/issues/1536), lane EX)** As an owner, I want to
   ask my agent at the desk "why did you buy X?", "why did you ask me?", "what are you watching?", or
   "why was this refused?" and get an answer from my own records, each claim linked to the record it
-  rests on, a plain-language explanation under each approval ask, and a transcript of every run, so
+  rests on, a plain-language explanation under each approval ask, and a transcript of every desk and explain run, so
   that I understand what my agent did without reading the journal
   ([agent harness spec §15](../specs/agent-harness.md#15-owner-and-explain-runs-the-desk),
   [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 as `owner` and `explain` runs).
