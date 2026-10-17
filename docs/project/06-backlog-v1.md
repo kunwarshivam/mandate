@@ -113,6 +113,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
   mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
   in a follow-up story, so the job starts green.
+- **E1-8 (Should)** As an engineer, I want parallel PRs not to collide on DEC numbers or on shared
+  lists, so that about twenty lanes can land at once without a merge conflict or an extra CI cycle
+  each ([DEC-2600](decisions/DEC-2600.md), claim #1494).
+  *Accepted when:* DEC numbers come from per-category ranges of 100 from DEC-2000; a check run by
+  both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
+  are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
+  weaker.
 
 ### E2 Market data
 
@@ -5243,6 +5250,14 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   deployed agent's stream on each request, which is unbounded. Project them per stream with
   watermarks, woken by `LISTEN`/`NOTIFY` (workspace API spec §6.1), before an agent's stream grows
   past what one request can read.
+- **Limit usage in the API's agent read (DEC-1020 item 5).** The drawdown rung, the day-trade
+  count, and headroom are not journaled, so the agent read serves none. Once E6-4 journals
+  `RiskLimitTriggered` and `RiskLimitLifted`, and the gate journals its checks' inputs, add them as
+  members folded from those rows.
+- **Per-agent positions (DEC-1020 item 4).** The API's agent read shows the account's holdings at
+  reconciliation. A per-agent view needs the executor's attribution journaled, or a fold of
+  `FillApplied` joined through `OrderRequestRecorded.agent_id` that matches the executor's
+  accounting.
 - **The runtime folds the owner's hold, then the API serves it (DEC-191, DEC-1007 item 1).**
   Journal spec §9.11 closes `hold_openings` and `lift_hold`, but the runtime's command fold refuses
   any command it does not know, so a hold would stop it at that event. Fold both into

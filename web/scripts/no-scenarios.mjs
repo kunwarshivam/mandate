@@ -32,7 +32,8 @@ export async function probe(origin) {
   const setCookie = byParam.headers.getSetCookie().join("; ");
   const byCookie = await fetch(`${origin}/`, { headers: { cookie: `${COOKIE}=stale` } });
   const html = await byCookie.text();
-  const mockApi = await fetch(`${origin}/v1/workspaces/ws_probe/health`);
+  // Not followed: with sign-in on, a redirect to /login would answer 200 and pass for the mock.
+  const mockApi = await fetch(`${origin}/v1/workspaces/ws_probe/health`, { redirect: "manual" });
   return {
     mockApiStatus: mockApi.status,
     paramStatus: byParam.status,

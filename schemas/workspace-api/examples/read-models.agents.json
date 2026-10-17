@@ -23,7 +23,22 @@
       "mandate_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
       "deployed_at": "2026-10-08T13:00:00.000000000Z",
       "mode": "normal",
-      "pending_approvals": 1
+      "pending_approvals": 1,
+      "label": "momentum-spy",
+      "mandate": {
+        "allocation_usd": "5000",
+        "max_loss_from_allocation": "0.2",
+        "goal": "continuous",
+        "goal_end_date": null,
+        "asset_classes": [
+          "us_equity"
+        ],
+        "max_position_usd": "2000",
+        "max_order_usd": "500",
+        "max_orders_per_day": 20,
+        "max_daily_loss": "0.03",
+        "max_drawdown": "0.1"
+      }
     }
   ]
 }

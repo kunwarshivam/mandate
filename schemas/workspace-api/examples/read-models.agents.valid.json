@@ -40,5 +40,12 @@
     "set": {
       "/agents/0/pending_approvals": 0
     }
+  },
+  {
+    "label": "a list row with no stored document",
+    "set": {
+      "/agents/0/label": null,
+      "/agents/0/mandate": null
+    }
   }
 ]

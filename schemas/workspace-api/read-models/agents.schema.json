@@ -15,7 +15,7 @@
     "agents": {
       "type": "array",
       "items": {
-        "$ref": "agent.schema.json#/$defs/Agent"
+        "$ref": "agent.schema.json#/$defs/AgentRow"
       }
     },
     "as_of": {
