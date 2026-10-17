@@ -15,14 +15,17 @@ use std::io::Write;
 
 use anyhow::bail;
 use clap::{Args, Subcommand};
+use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
 
-use crate::agent::{self, Scope};
-use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted};
+use crate::agent::{self, Command, Scope};
+use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted, agent_stream};
+use crate::deploy::active;
 use crate::gestures;
 use crate::inbox::InstantIds;
 use crate::postgres::JournalArgs;
 use crate::register::{OwnerArgs, open};
+use crate::version::{Row, refused, rows, stored};
 
 /// `mandate agent`: the deployment gesture, and the brakes.
 #[derive(Debug, Subcommand)]
@@ -56,12 +59,12 @@ impl ReachArgs {
     /// The scope these flags name.
     #[must_use]
     pub fn scope(&self) -> Scope {
-        todo_scope(self)
+        match (&self.agent, &self.connection) {
+            (Some(agent), _) => Scope::Agent(agent.clone()),
+            (None, Some(connection)) => Scope::Connection(connection.clone()),
+            (None, None) => Scope::Workspace,
+        }
     }
-}
-
-fn todo_scope(_reach: &ReachArgs) -> Scope {
-    Scope::Workspace
 }
 
 #[derive(Debug, Args)]
@@ -88,12 +91,39 @@ pub struct Paused {
 /// # Errors
 /// [`ControlError::Journal`] when the control stream cannot be read.
 pub fn reached(
-    _journal: &dyn ControlJournal,
-    _store: &dyn ArtifactSource,
-    _owner: &Owner,
-    _scope: &Scope,
+    journal: &dyn ControlJournal,
+    store: &dyn ArtifactSource,
+    owner: &Owner,
+    scope: &Scope,
 ) -> Result<BTreeSet<String>, ControlError> {
-    Err(ControlError::Unimplemented { story: "E21-34" })
+    let connection = match scope {
+        Scope::Agent(agent) => return Ok(BTreeSet::from([agent.clone()])),
+        Scope::Connection(connection) => Some(connection.as_str()),
+        Scope::Workspace => None,
+    };
+    let rows = rows(journal, owner)?;
+    let agents: BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r.event_type == "AgentDeployed")
+        .filter_map(|r| r.member("agent_id"))
+        .collect();
+    let on_connection = |deployed: &Row| {
+        let named = deployed
+            .member("mandate_version")
+            .and_then(|version| stored(store, version).ok())
+            .and_then(|(document, _)| {
+                document
+                    .get("connection_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+        connection.is_none_or(|wanted| named.is_none_or(|named| named == wanted))
+    };
+    Ok(agents
+        .into_iter()
+        .filter(|agent| active(&rows, agent).is_some_and(on_connection))
+        .map(str::to_owned)
+        .collect())
 }
 
 /// Pauses every agent [`reached`] names, one agent-scoped `OwnerCommandIssued` each, going on past
@@ -102,14 +132,25 @@ pub fn reached(
 /// # Errors
 /// [`reached`]'s; each agent's own failure is in its [`Paused`].
 pub fn pause(
-    _journal: &mut dyn ControlJournal,
-    _store: &dyn ArtifactSource,
-    _ids: &mut dyn Ids,
-    _owner: &Owner,
-    _scope: &Scope,
-    _now: Now,
+    journal: &mut dyn ControlJournal,
+    store: &dyn ArtifactSource,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    scope: &Scope,
+    now: Now,
 ) -> Result<Vec<Paused>, ControlError> {
-    Err(ControlError::Unimplemented { story: "E21-34" })
+    let agents = reached(journal, store, owner, scope)?;
+    Ok(agents
+        .into_iter()
+        .map(|agent| {
+            let outcome = agent_stream(owner, &agent)
+                .map_err(|_| refused("agent_invalid"))
+                .and_then(|_| {
+                    agent::command(journal, ids, owner, &agent, &Command::Pause, None, now)
+                });
+            Paused { agent, outcome }
+        })
+        .collect())
 }
 
 /// Commits a kill switch of `scope`, with no step-up evidence (DEC-2000 item 4).
@@ -117,26 +158,45 @@ pub fn pause(
 /// # Errors
 /// [`ControlError::Journal`] when the append fails; never a refusal.
 pub fn kill(
-    _journal: &mut dyn ControlJournal,
-    _ids: &mut dyn Ids,
-    _owner: &Owner,
-    _scope: &Scope,
-    _now: Now,
+    journal: &mut dyn ControlJournal,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    scope: &Scope,
+    now: Now,
 ) -> Result<Submitted, ControlError> {
-    let _ = agent::kill;
-    Err(ControlError::Unimplemented { story: "E21-34" })
+    agent::kill(journal, ids, owner, scope, None, now)
 }
 
 /// The line a kill switch prints.
 #[must_use]
-pub fn killed_line(_owner: &Owner, _scope: &Scope, _submitted: &Submitted) -> String {
-    String::new()
+pub fn killed_line(owner: &Owner, scope: &Scope, submitted: &Submitted) -> String {
+    let (kind, subject) = match scope {
+        Scope::Agent(agent) => ("agent", agent.as_str()),
+        Scope::Connection(connection) => ("connection", connection.as_str()),
+        Scope::Workspace => ("workspace", owner.workspace.as_str()),
+    };
+    format!(
+        "kill_switch {kind} {subject} committed as event {} at seq {}",
+        submitted.event_id, submitted.seq
+    )
 }
 
 /// The lines a pause prints, one per agent, or one saying nothing was in scope.
 #[must_use]
-pub fn paused_lines(_paused: &[Paused]) -> Vec<String> {
-    Vec::new()
+pub fn paused_lines(paused: &[Paused]) -> Vec<String> {
+    if paused.is_empty() {
+        return vec!["no deployed agent in scope; nothing committed".to_owned()];
+    }
+    paused
+        .iter()
+        .map(|p| match &p.outcome {
+            Ok(at) => format!(
+                "paused {} as event {} at seq {}",
+                p.agent, at.event_id, at.seq
+            ),
+            Err(why) => format!("pause {} not committed: {why}", p.agent),
+        })
+        .collect()
 }
 
 /// Runs `agent pause` and prints [`paused_lines`].

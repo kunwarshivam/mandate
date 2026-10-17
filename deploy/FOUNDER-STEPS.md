@@ -232,7 +232,7 @@ SSH. Try it once now, before any agent runs, and again after any change to the C
     in [README.md](README.md), *The kill switch without Cloudflare*):
 
     ```bash
-    sudo -u owlhead_api mandate agent pause <AGENT> --workspace <WORKSPACE> --user <USER> \
+    sudo -u owlhead_api mandate agent pause --agent <AGENT> --workspace <WORKSPACE> --user <USER> \
       --journal 'postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql' \
       --store /var/lib/owlhead/artifacts
     ```

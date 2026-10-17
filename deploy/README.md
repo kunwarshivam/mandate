@@ -154,24 +154,21 @@ The web app's pause and kill switch go through Cloudflare. The fallback needs on
 
 ```bash
 ssh owlhead_admin@<IP>
-sudo -u owlhead_api mandate agent pause <AGENT> --workspace <WORKSPACE> --user <USER> \
+sudo -u owlhead_api mandate agent kill --agent <AGENT> --workspace <WORKSPACE> --user <USER> \
   --journal 'postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql' \
   --store /var/lib/owlhead/artifacts
-sudo -u owlhead_api mandate agent kill --help     # the scope flags: agent, connection, or workspace
+# or --connection <CONNECTION>, or --workspace-wide; `agent pause` takes the same scope flags
 ```
 
-The CLI commits one control-stream event per command ([the CLI module](../crates/mandate-cli/src/agent.rs):
-`pause` needs no code; a kill switch is never refused for a missing code). The login is by peer
+A kill switch is one control-stream event of its scope; a pause is one agent-scoped event per agent
+it reaches ([the CLI module](../crates/mandate-cli/src/brake.rs), DEC-2000). Neither needs a code,
+and a kill switch is never refused. The runbook is
+[RB-03](../docs/runbooks/RB-03-kill-switches.md). The login is by peer
 authentication on the Unix socket as `owlhead_api`, so no password is involved. FOUNDER-STEPS step 16
 rehearses it once.
 
 ## Deferred
 
-- **The CLI's `pause` and `kill` subcommands are not in the binary yet.** `crates/mandate-cli` has
-  the code (`agent.rs`) but its `agent` subcommand offers only `deploy` today. The fallback above is
-  documented as the intended path, and step 16 fails closed: the rehearsal does not pass until
-  `mandate agent --help` lists `pause` and `kill`. The exact flags of `kill` are then read from
-  `--help`, not from this file. Nothing in this PR can rehearse it, because agents have no host.
 - **Egress by name or port** (see *Egress*): not expressible in systemd units.
 - **A live deployment** needs a new decision for the kill switch and for Cloudflare's place in
   front of the API (DEC-822 item 6).
