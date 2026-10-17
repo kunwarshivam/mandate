@@ -8858,12 +8858,13 @@ mod tests {
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
     };
-    use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{
-        CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION, SWEEP_SHARD_MUTANTS, SweepPlan,
-        crate_graph, is_docs_path, literal_paths, nextest_args, normalized_join, references_path,
-        select, selection_in, source_references,
+        BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
+        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, is_docs_path, literal_paths,
+        nextest_args, normalized_join, references_path, select, selection_in, source_references,
+        tokens,
     };
+    use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{unoptimised_config, unoptimised_packages};
 
@@ -14203,6 +14204,50 @@ mod tests {
             )),
             "a scan missing the rooted piece is caught"
         );
+        Ok(())
+    }
+
+    /// DEC-1190 item 2: every binary a crate's code is handed by an environment variable is in
+    /// [`BINARY_COUPLINGS`], so the crate follows the one that builds it. A `MANDATE_*_BIN` name off
+    /// the table fails here, as a new test running another crate's binary would otherwise go
+    /// unselected when that crate changes; `CARGO_BIN_EXE_*`, which cargo sets only for the
+    /// reading package's own binaries, needs no entry.
+    #[test]
+    fn every_binary_handed_to_a_test_is_coupled() -> Result<()> {
+        let root = repo_root()?;
+        let graph = crate_graph(&root)?;
+        let tracked = tracked_paths(&root)?;
+        let mut named = BTreeSet::new();
+        for dir in graph.dirs.values().filter(|dir| *dir != "xtask") {
+            let prefix = format!("{dir}/");
+            for file in tracked
+                .iter()
+                .filter(|f| f.starts_with(&prefix) && f.ends_with(".rs"))
+            {
+                for (token, _) in tokens(&fs::read_to_string(root.join(file))?) {
+                    if let Token::Str(literal) = token
+                        && literal.starts_with("MANDATE_")
+                        && literal.ends_with("_BIN")
+                    {
+                        named.insert(literal);
+                    }
+                }
+            }
+        }
+        let coupled: BTreeSet<String> = BINARY_COUPLINGS
+            .iter()
+            .map(|(var, _)| (*var).to_owned())
+            .collect();
+        assert_eq!(
+            named, coupled,
+            "each binary variable a crate reads is coupled"
+        );
+        for (_, binary) in BINARY_COUPLINGS {
+            assert!(
+                graph.dirs.contains_key(binary),
+                "{binary} is a workspace crate"
+            );
+        }
         Ok(())
     }
 
