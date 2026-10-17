@@ -28,6 +28,7 @@ mod connections;
 mod control;
 mod control_plane;
 mod control_verify;
+mod deployment;
 mod draft;
 mod gateway;
 mod invalidation;

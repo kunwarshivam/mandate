@@ -137,7 +137,10 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "CatalogEntryRegistered"
         | "DataBundleImported"
         | "UsageReportSealed"
-        | "ControlPlaneMessageRefused" => entry(CONTROL, NONE),
+        | "ControlPlaneMessageRefused"
+        | "ProcessStartIssued"
+        | "ProcessStopIssued"
+        | "ProcessCrashLooped" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),
