@@ -98,6 +98,7 @@ upgrades every release in place.
 | The cell: k3d, CloudNativePG, the migration Job | Always |
 | The demo workspace, its control stream verified | Always |
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
+| Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
 | A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
@@ -106,8 +107,23 @@ The API server listens only on its pod's loopback, so nothing in the cluster rea
 tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
 or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
 the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
-reuses one that still answers. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
-in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
+reuses one that still answers.
+
+Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
+- It runs as a sidecar of the API pod on its loopback (`127.0.0.1:8090`), and the server starts
+  only once the stub answers.
+- It runs only in a dev or ci cell and only from a local build, so no hosted values file can name
+  it.
+- `cell up` runs it once lane SI's `crates/mandate-stub-issuer` and the server's E21-53 check are
+  both in the checkout. It then links the demo owner (`01KDEM0000000000000000000P`, subject
+  `demo-owner`) with `mandate identity link` and mounts the result as the `subject-links`
+  ConfigMap.
+- `cell demo` also forwards 127.0.0.1:8090 to the stub. It then asks the stub for a token and opens
+  a session with it through `POST /v1/sessions`, which must answer 204 with the session cookie.
+- Until both pieces are in, no stub runs, no links are mounted, every sign-in is refused, and the
+  demo names the sign-in step as skipped.
+
+The session signing key is made in the pod's memory at each
 start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
 the usual Debian, Fedora, openSUSE or Alpine path), without which the server refuses to start; when `cell up` cannot install the workspace release, it prints the API pod's
 state, logs and the namespace's events. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
