@@ -14,6 +14,10 @@ const NAMES = {
   performance: "[[DISCLOSURE-PERFORMANCE]]",
   hypothetical: "[[LEGEND-HYPOTHETICAL]]",
   retailAutoLive: "[[RETAIL-AUTO-LIVE]]",
+  /** DEC-1003 item 1: on a research-agent version's backtest, that it tests mechanics, not thesis quality. */
+  backtestMechanics: "[[NOTE-BACKTEST-MECHANICS]]",
+  /** DEC-1003 item 1: on every backtest report, what the run cannot know. */
+  backtestLimits: "[[NOTE-BACKTEST-LIMITS]]",
 } as const;
 
 export type PlaceholderName = keyof typeof NAMES;

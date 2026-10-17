@@ -7,10 +7,12 @@
  * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
  * poll finds them (spec §5.5). A status is `recorded` when first read and `applied` after; a recorded
  * pause pauses its agent and a recorded Skip skips its request, so a screen can follow a command to its
- * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does.
+ * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does. A backtest
+ * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
 import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
 import type { Watermark } from "./types";
+import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
 import type { Agent, Approval, ApprovalStatus, Health, Scenario } from "@/fixtures/types";
 import { dec, mul, toDecimalString } from "@/lib/decimal";
@@ -169,6 +171,11 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if (approvalRoute) {
       const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
       return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } } } }) : problem(404, "not_found", "none");
+    }
+    const backtestRoute = route.match(/^\/backtests\/([^/]+)$/);
+    if (backtestRoute) {
+      const body = servedBacktestFixture(decodeURIComponent(backtestRoute[1])) as { backtest: unknown } | undefined;
+      return body ? read({ backtest: body.backtest }) : problem(404, "not_found", "none");
     }
     const status = route.match(/^\/commands\/([0-9A-Z]{26})$/);
     const command = status ? commands.find((c) => c.event_id === status[1]) : undefined;
