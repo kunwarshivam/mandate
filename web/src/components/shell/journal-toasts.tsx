@@ -33,7 +33,7 @@ function actionName(kind: CommandKind): string {
  * Stop sheet and the approval screen say "sent" in their own status text.
  */
 export function JournalToasts() {
-  const { commands, responses, deployments } = useRuntime();
+  const { commands, responses, setUps } = useRuntime();
   const toasts = useKumoToastManager();
   const announced = useRef(new Set<string>());
 
@@ -50,13 +50,20 @@ export function JournalToasts() {
       announced.current.add(key);
       toasts.add({ title: "Recorded in the journal", description: r.response === "skip" ? "Your skip." : "Your approval." });
     }
-    for (const d of deployments) {
-      const key = `dep:${d.id}`;
-      if (d.phase !== "recorded" || announced.current.has(key)) continue;
-      announced.current.add(key);
-      toasts.add({ title: "Recorded in the journal", description: "Your confirmed mandate." });
+    for (const s of setUps) {
+      const steps = [
+        ["version", s.created.phase, "Your mandate version."],
+        ["confirm", s.confirmed?.phase, "Your confirmed mandate."],
+        ["deploy", s.deployed?.phase, "Your agent, on paper."],
+      ] as const;
+      for (const [step, phase, description] of steps) {
+        const key = `set:${s.id}:${step}`;
+        if (phase !== "recorded" || announced.current.has(key)) continue;
+        announced.current.add(key);
+        toasts.add({ title: "Recorded in the journal", description });
+      }
     }
-  }, [commands, responses, deployments, toasts]);
+  }, [commands, responses, setUps, toasts]);
 
   return null;
 }

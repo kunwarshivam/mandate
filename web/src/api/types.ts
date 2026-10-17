@@ -99,7 +99,7 @@ export interface PreparedCommand {
   readonly body: string;
 }
 
-/** A 2xx answer to a command: the control-stream event that recorded it (spec §5). */
+/** A 2xx answer to a command: the control-stream event that recorded it (spec §5). The outcome keeps the body, for a command whose 202 says more (§5.1). */
 export interface Accepted {
   event_id: string;
   phase: "recorded";
@@ -107,7 +107,7 @@ export interface Accepted {
 }
 
 export type CommandOutcome =
-  | { ok: true; effect: "recorded"; accepted: Accepted }
+  | { ok: true; effect: "recorded"; accepted: Accepted; body: unknown }
   | { ok: false; error: ApiError; command: PreparedCommand };
 
 /** Spec §5.4. `record` and `step_up` may be `null`: Stop works before anything has loaded. */
