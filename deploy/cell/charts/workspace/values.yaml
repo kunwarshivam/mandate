@@ -72,3 +72,15 @@ run:
 verify:
   id: ""
   streams: []
+
+# The cell's one ingress: cloudflared dialing out to Cloudflare's tunnel edge, so the cluster
+# exposes no port (DEC-967 item 6). Off in the local cell, which has no tunnel.
+ingress:
+  cloudflared:
+    enabled: false
+    # cloudflared, pinned by digest (D-5).
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    # The Secret holding the tunnel token as its `token` key, made by the operator, never a value.
+    tokenFrom: cloudflared-tunnel
+    # The tunnel edge's CIDRs (region1 and region2.v2.argotunnel.com), reached on port 7844.
+    edge: []

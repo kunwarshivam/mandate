@@ -178,11 +178,11 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   `.github/workflows/ci.yml` (keep the two in sync). The binaries it downloads are
   x86_64 Linux builds. It downloads only from `github.com` (release assets redirect to
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
-  `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
+  `static.crates.io`, `pypi.org`, `files.pythonhosted.org`, and, best effort, `get.helm.sh` (helm
+  publishes its binaries nowhere else; DEC-993 item 3), never from `astral.sh`, so it runs
   behind restrictive egress proxies. The one exception is PostgreSQL 18 for the Postgres journal
   tests: it tries the system package manager and `apt.postgresql.org`, and if that fails those
-  tests skip. helm is the other: its binaries are only on `get.helm.sh`, fetched best effort, and
-  without it the cell's checks skip (DEC-993 item 3). It also sets `python-install-mirror` in uv's user config
+  tests skip; without helm the cell's checks skip too. It also sets `python-install-mirror` in uv's user config
   (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too. Work under `web/`
   (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`,
   `registry.npmjs.org`, for `npm ci`, and `cdn.playwright.dev`, for the Chromium download that

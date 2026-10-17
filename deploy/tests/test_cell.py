@@ -381,11 +381,11 @@ ALLOWED_APIS = {"v1", "apps/v1", "batch/v1", "networking.k8s.io/v1"}
 
 
 def portable(docs: list[dict]) -> list[str]:
-    """No k3s-only, Hetzner-only or cloud-only API (DEC-967 item 6): core Kubernetes APIs only, no
+    """No k3s-only, provider-only or cloud-only API (DEC-967 item 6): core Kubernetes APIs only, no
     storage class, node name or ingress class in the workspace chart."""
     problems = [f"{d['kind']} uses {d['apiVersion']}" for d in docs if d["apiVersion"] not in ALLOWED_APIS]
     text = json.dumps(docs)
-    for word in ("storageClassName", "nodeName", "nodeSelector", "ingressClassName", "cattle.io", "hetzner"):
+    for word in ("storageClassName", "nodeName", "nodeSelector", "ingressClassName", "cattle.io", "hetzner", "digitalocean"):
         if word in text:
             problems.append(f"the chart names {word}")
     return problems
@@ -507,11 +507,72 @@ def test_migration_first():
     assert migration_first(render_all()) == []
 
 
+def without_ingress(docs: list[dict]) -> list[dict]:
+    return [d for d in docs if d["metadata"]["name"] not in ("cloudflared", "egress-cloudflared")]
+
+
 def test_portable_across_k3d_k3s_and_managed():
-    renders = [render_all("-f", str(CELL / "values" / v)) for v in VALUES_FILES]
+    renders = [render_all("-f", str(CELL / "values" / v), "--set", "localImages=true") for v in VALUES_FILES]
     for docs in renders:
         assert portable(docs) == []
-    assert renders[0] == renders[1] == renders[2], "only values differ between clusters, and these hold none"
+    assert renders[1] == renders[2], "k3s and a managed cluster render the same chart from the same values"
+    assert without_ingress(renders[0]) == without_ingress(renders[1]), "k3d differs only by the tunnel"
+
+
+def ingress_only_by_tunnel(docs: list[dict]) -> list[str]:
+    """The cell's one ingress is cloudflared dialing out (DEC-967 item 6): no Service, NodePort,
+    LoadBalancer or Ingress object; the tunnel token a mounted file, never a value or an
+    environment variable; and its egress DNS and the tunnel edge on port 7844 only."""
+    problems = [f"{d['kind']} {d['metadata']['name']}" for d in docs if d["kind"] in ("Service", "Ingress")]
+    tunnels = [d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "cloudflared"]
+    for t in tunnels:
+        c = pod_spec(t)["containers"][0]
+        if "--token" in c.get("args", []) or any("TUNNEL_TOKEN" in e["name"] for e in c.get("env", [])):
+            problems.append("the tunnel token is not a file")
+        if "/run/secrets/tunnel/token" not in c.get("args", []):
+            problems.append("the tunnel does not read its token file")
+        policy = policies(docs).get("egress-cloudflared")
+        if policy is None:
+            problems.append("no egress policy for the tunnel")
+            continue
+        got = set().union(*(rule_destinations(r, {}) for r in policy["spec"].get("egress") or []))
+        if any(d not in DNS and d[2] != 7844 for d in got) or policy["spec"].get("ingress"):
+            problems.append(f"the tunnel's egress is {sorted(got)}")
+    return problems
+
+
+def test_ingress_only_by_tunnel():
+    tunnel = render("-f", str(CELL / "values" / "k3s.yaml"))
+    assert [d["metadata"]["name"] for d in tunnel if d["kind"] == "Deployment"] == ["cloudflared"]
+    assert ingress_only_by_tunnel(tunnel) == []
+    assert hardened(tunnel) == [] and gated(tunnel) == []
+    assert not [d for d in render_all() if d["metadata"]["name"] == "cloudflared"], "off in the local cell"
+    for bad in (
+        "ingress.cloudflared.tokenFrom=",
+        "ingress.cloudflared.image=cloudflare/cloudflared:latest",
+    ):
+        assert helm(CHART, "-f", str(CELL / "values" / "k3s.yaml"), "--set", bad).returncode != 0, bad
+    leaky = mutate(
+        tunnel,
+        "cloudflared",
+        "Deployment",
+        lambda w: first_container(w)["env"].append({"name": "TUNNEL_TOKEN", "value": "x"}),
+    )
+    assert ingress_only_by_tunnel(leaky)
+    exposed = [
+        *tunnel,
+        {"kind": "Service", "apiVersion": "v1", "metadata": {"name": "api"}, "spec": {"type": "NodePort"}},
+    ]
+    assert ingress_only_by_tunnel(exposed)
+    wide = mutate(
+        tunnel,
+        "egress-cloudflared",
+        "NetworkPolicy",
+        lambda p: p["spec"]["egress"].append(
+            {"to": [{"ipBlock": {"cidr": "192.0.2.0/24"}}], "ports": [{"port": 443}]}
+        ),
+    )
+    assert ingress_only_by_tunnel(wide)
 
 
 def test_environment_is_paper_or_backtest():
@@ -670,7 +731,7 @@ SEEDED = [
     (
         portable,
         lambda d: mutate(
-            d, "executor", "Deployment", lambda w: pod_spec(w).update(nodeSelector={"node": "hetzner-1"})
+            d, "executor", "Deployment", lambda w: pod_spec(w).update(nodeSelector={"node": "pool-1"})
         ),
     ),
 ]

@@ -40,7 +40,10 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   process's start (OPS-13);
 - `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
   cell's own `mandate.local/` build;
-- no k3s-only, Hetzner-only or cloud-only API: the k3d, k3s and managed renderings are identical.
+- the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
+  local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
+- no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
+  k3d's differs only by the tunnel.
 
 ## The local cell
 
