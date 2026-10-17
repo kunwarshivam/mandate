@@ -720,7 +720,7 @@ pub(super) fn end(
     let (name, bound) = end_names(plan.reason);
     let body = payload::object(vec![
         ("reason", payload::text(name)),
-        ("bound", bound.map_or(Value::Null, |b| payload::text(b))),
+        ("bound", bound.map_or(Value::Null, payload::text)),
         ("turns", payload::count(agentic.counts.turns, "turns")?),
         (
             "tool_calls",
