@@ -2,6 +2,7 @@
 //! caller injects. The only network call the scheduler makes; it carries no credential.
 
 use std::net::{ToSocketAddrs, UdpSocket};
+use std::thread;
 use std::time::Duration;
 
 use mandate_time::UtcNanos;
@@ -12,6 +13,8 @@ use crate::scheduler::TimeServers;
 /// How long one server may take to answer.
 pub const TIMEOUT: Duration = Duration::from_secs(1);
 
+/// The NTP port, used when a server's name carries none.
+pub const PORT: u16 = 123;
 const PACKET: usize = 48;
 /// Leap indicator 0, version 4, mode 3 (client).
 const REQUEST: u8 = 0b0010_0011;
@@ -25,19 +28,35 @@ pub struct Servers<C> {
     pub now: C,
 }
 
-impl<C: Fn() -> UtcNanos> TimeServers for Servers<C> {
+impl<C: Fn() -> UtcNanos + Sync> TimeServers for Servers<C> {
+    /// Asks every server at once, each on a thread of its own, so a measurement takes at most one
+    /// [`TIMEOUT`] however many servers are silent, and the loop's next tick is not held longer.
     fn ask(&mut self) -> Vec<Sample> {
-        self.names
-            .iter()
-            .filter_map(|name| query(name, &self.now))
-            .collect()
+        let now = &self.now;
+        thread::scope(|scope| {
+            let asked: Vec<_> = self
+                .names
+                .iter()
+                .map(|name| scope.spawn(move || query(name, now)))
+                .collect();
+            asked
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().flatten())
+                .collect()
+        })
     }
 }
 
-/// One server's answer, or `None` when it did not answer in [`TIMEOUT`], answered something that
+/// One server's answer, asked at `server` (a host, or `host:port`), or `None` when it did not answer in [`TIMEOUT`], answered something that
 /// is not a server reply to this request, or flagged its clock unsynchronized.
 pub fn query(server: &str, now: &dyn Fn() -> UtcNanos) -> Option<Sample> {
-    let address = format!("{server}:123").to_socket_addrs().ok()?.next()?;
+    let address = if server.contains(':') {
+        server.to_socket_addrs()
+    } else {
+        (server, PORT).to_socket_addrs()
+    }
+    .ok()?
+    .next()?;
     let socket = UdpSocket::bind(if address.is_ipv4() {
         "0.0.0.0:0"
     } else {

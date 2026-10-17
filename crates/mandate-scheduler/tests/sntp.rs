@@ -86,3 +86,42 @@ fn a_reply_that_is_not_a_synchronized_servers_answer_to_this_request_is_no_sampl
     empty[40..48].copy_from_slice(&[0; 8]);
     assert!(judge("a", &req, &empty, sent, sent).is_none());
 }
+
+/// A loopback SNTP server that answers each request once, 80 ms ahead of the host clock, so the
+/// whole exchange runs through `Servers::ask` with no network beyond 127.0.0.1.
+fn fake_server(answers: usize, mode: u8) -> String {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let address = socket.local_addr().unwrap().to_string();
+    std::thread::spawn(move || {
+        for _ in 0..answers {
+            let mut request = [0u8; 48];
+            let Ok((_, from)) = socket.recv_from(&mut request) else {
+                return;
+            };
+            let answer = reply(&request, mode, 3, (T, 80), (T, 80));
+            socket.send_to(&answer, from).unwrap();
+        }
+    });
+    address
+}
+
+#[test]
+fn every_server_is_asked_and_only_real_answers_are_samples() {
+    use mandate_scheduler::TimeServers;
+    let good = fake_server(1, SERVER);
+    let wrong_mode = fake_server(1, 0b0010_0011);
+    let silent = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut servers = mandate_scheduler::sntp::Servers {
+        names: vec![
+            good.clone(),
+            wrong_mode,
+            silent.local_addr().unwrap().to_string(),
+        ],
+        now: || at(T, 0),
+    };
+    let samples = servers.ask();
+    assert_eq!(samples.len(), 1, "{samples:?}");
+    assert_eq!(samples[0].server, good);
+    assert_eq!(samples[0].stratum, 3);
+    assert!((samples[0].offset_ns + 80_000_000).abs() < 1_000);
+}
