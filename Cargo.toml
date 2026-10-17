@@ -50,6 +50,7 @@ mandate-robinhood = { path = "crates/mandate-robinhood", version = "0.0.0" }
 mandate-release = { path = "crates/mandate-release", version = "0.0.0" }
 mandate-research = { path = "crates/mandate-research", version = "0.0.0" }
 mandate-research-run = { path = "crates/mandate-research-run", version = "0.0.0" }
+mandate-research-driver = { path = "crates/mandate-research-driver", version = "0.0.0" }
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-sources = { path = "crates/mandate-sources", version = "0.0.0" }
 mandate-sources-http = { path = "crates/mandate-sources-http", version = "0.0.0" }
