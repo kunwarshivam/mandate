@@ -25,6 +25,7 @@ use mandate_num::{
 };
 use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 use mandate_sim::{FirstBarVolumes, Instrument, Nanos, Session, SimBar, SimConfig, Slippage};
+use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::{ModelId, ProvenanceMap};
 use mandate_spec::{Mandate, ValidatedMandate, ValidationContext};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
@@ -108,6 +109,7 @@ pub fn validate(document: &Json) -> ValidatedMandate {
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
         current_mandate_version: None,
+        stop_limit_asset_classes: stop_limit_asset_classes("alpaca"),
     };
     ValidatedMandate::new(mandate, &context, &[])
         .unwrap_or_else(|e| panic!("the document validates: {e}"))
