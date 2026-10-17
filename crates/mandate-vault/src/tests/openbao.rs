@@ -3,7 +3,11 @@
 use crate::SourceError;
 use reqwest::StatusCode;
 
-use crate::openbao::{refusal, seal_verdict};
+use mandate_connections::record::ConnectionId;
+use serde_json::json;
+
+use crate::openbao::{refusal, role_settings, seal_verdict};
+use crate::policy::Identity;
 
 const UNSEALED_RAFT: &[u8] =
     br#"{"type":"shamir","initialized":true,"sealed":false,"t":3,"n":5,"storage_type":"raft"}"#;
@@ -85,6 +89,31 @@ fn only_the_vaults_own_refusals_are_refusals_and_the_rest_are_outages() {
             got.is_err_and(|e| e.is_outage()),
             !matches!(want, SourceError::Denied | SourceError::Missing),
             "{code}"
+        );
+    }
+}
+
+#[test]
+fn each_role_lives_as_long_as_its_process_type_may() {
+    let c = ConnectionId::new("c1").unwrap();
+    assert_eq!(
+        role_settings(&Identity::TokenExchange(c.clone())),
+        json!({"token_ttl": "600s", "token_max_ttl": "600s", "secret_id_num_uses": 1, "secret_id_ttl": "600s"})
+    );
+    assert_eq!(
+        role_settings(&Identity::Executor(c)),
+        json!({"token_ttl": "86400s", "token_max_ttl": "2592000s", "secret_id_num_uses": 0, "secret_id_ttl": "0s"})
+    );
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Runtime,
+        Identity::SecretImport,
+    ] {
+        assert_eq!(
+            role_settings(&identity),
+            json!({"token_ttl": "86400s", "token_max_ttl": "86400s", "secret_id_num_uses": 0, "secret_id_ttl": "0s"}),
+            "{identity:?}"
         );
     }
 }

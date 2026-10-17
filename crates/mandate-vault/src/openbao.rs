@@ -463,7 +463,7 @@ impl fmt::Debug for RoleCredentials {
 
 /// The AppRole settings of one identity's role: its token's lifetime and its secret ids' uses
 /// and lifetime (zero: unlimited).
-fn role_settings(identity: &Identity) -> Value {
+pub(crate) fn role_settings(identity: &Identity) -> Value {
     match identity {
         Identity::TokenExchange(_) => json!({
             "token_ttl": format!("{GRANT_SECS}s"),
