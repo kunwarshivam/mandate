@@ -17,8 +17,10 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   model-spend cap (a deployment setting, the founder's clarification of DEC-997 item 3) folds across
   every workspace. It holds a copy of every workspace's `MeterReserved` and `MeterSettled`, with the
   same members, so no record schema changes; rule 154 names its `StreamOpened`, and rules 155 to 158
-  bind it unchanged. A reservation is appended to it before the workspace's own stream, so a failure
-  between them only over-counts. Agent-accepted under DEC-176: it only refuses more.
+  bind it unchanged, a copy's settlement naming the copy of its reservation. A reservation is
+  appended to it before the workspace's own stream, so a failure between them leaves an orphan
+  that only over-counts; inference spec §3.3 and §3.6 say so in the same change. Agent-accepted
+  under DEC-176: it only refuses more.
   - **Versions.** v0.48 and v0.49 are held by open changes (v0.49 by lane AH's DEC-2203); this
     change takes v0.50 and adds no rule number, and is renumbered at merge if that changes.
 
@@ -1243,6 +1245,13 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 | `StreamOpened` | — | stream type, workspace; closed in §9.19 |
 | `MeterReserved` | — | A call's reservation of its maximum cost before its first attempt: call, agent, purpose, model, endpoint, key owner, price table, maximum cost, risk day; closed in §9.19 |
 | `MeterSettled` | — | The call's settlement: call, reservation, outcome, attempts, tokens, cost; closed in §9.19 |
+
+**Deployment meter stream** (owner: the deployment's model-gateway meter writer; [DEC-2204](../project/decisions/DEC-2204.md))
+
+| Event type | Required refs | Key payload fields |
+|---|---|---|
+| `StreamOpened` | — | stream type, deployment; closed in §9.19 |
+| `MeterReserved`, `MeterSettled` | — | Copies of every workspace's meter records, the meter stream's schemas; closed in §9.19 |
 
 **Notice stream** (owner: the workspace's notification dispatcher; [notifications spec §5.5](notifications.md#55-records))
 
@@ -3459,7 +3468,7 @@ stream owner copies a fact from it and the dispatcher writes nothing else.
 | Type | Values | Refused as |
 |---|---|---|
 | `notice_id` | Exactly 32 lowercase hexadecimal digits: notifications spec §4.2's random notice id. Never an event id, which is a `ulid` and carries its creation time | As `id` |
-| `stream_id` | A stream id in §2's grammar, of one of the six stream types (the meter stream's since v0.46, §9.19) | As `id` |
+| `stream_id` | A stream id in §2's grammar, of one of the seven stream types (the meter stream's since v0.46, the deployment meter stream's since v0.50, §9.19) | As `id` |
 | `opaque` | 1 to 256 characters, each U+0021 to U+007E: a provider's message id, which has no space and so cannot carry a sentence | As `id` |
 | `kind` | Notifications spec §3.2's closed set of 33 kinds, below | As `id` |
 
@@ -3874,7 +3883,8 @@ numbers follow §9.17's rule 142.
 
 The model gateway ([inference spec](inference.md)) is the one component that calls a model. It
 writes none of the existing streams: the caller appends each call's `ModelInvocationRecorded` to its
-own stream (inference spec §3.6), and the gateway's meter writer owns the meter stream. §9.2's
+own stream (inference spec §3.6), each workspace's meter writer owns that workspace's meter stream,
+and the deployment's meter writer owns the deployment meter stream ([DEC-2204](../project/decisions/DEC-2204.md)). §9.2's
 conventions apply unchanged: every member is present on every record (§4.2), `null` only where the
 type is nullable, any other member refused, and opaque text non-empty. Each schema is
 `schema_version` 1.
@@ -3917,20 +3927,45 @@ rule 152 says. Rules 71 and 76 are the control stream's alone.
 **`StreamOpened`** on the meter stream: `{stream_type: "meter", workspace_id: id}`.
 
 **The deployment meter stream** ([DEC-2204](../project/decisions/DEC-2204.md)),
-`dmeter:{deployment_id}`, opens with `StreamOpened`:
-`{stream_type: "deployment_meter", deployment_id: id}`. The deployment's one meter writer appends to
-it a copy of every workspace's `MeterReserved` and `MeterSettled`, with the same members, so the
-deployment's cap counts every workspace's calls. A reservation is appended to it after every
-workspace cap admitted the call and before the workspace's own stream, and a settlement after the
-workspace's own; an append that fails leaves that stream's reservation open at its maximum, so the
-deployment stream over-counts and never under-counts. Rules 155 to 158 bind it as they bind a
-workspace's meter stream.
+`dmeter:{deployment_id}`, where `deployment_id` is the deployment's enrolled id (§9.17's
+`ControlPlaneEnrolled`). It opens with `StreamOpened`:
+`{stream_type: "deployment_meter", deployment_id: id}`, and its one writer is the deployment's meter
+writer, fenced by epoch like every writer. It holds a copy of every workspace's `MeterReserved` and
+`MeterSettled`, so the deployment's cap counts every workspace's calls:
+
+- **A copy is its own record.** It has its own `event_id` (§3), and every member equal to the
+  workspace record's except a settlement's `reservation`, which names the `event_id` of the
+  deployment stream's copy of its `MeterReserved`. So rule 158 holds on this stream as written, and
+  call ids, which are ULIDs, never repeat across workspaces. That a copy agrees with its workspace
+  record is checked by no rule at append; the verifier owns it, as for the cross-stream links below.
+- **The order.** The workspace's writer checks every workspace cap against its own stream and
+  appends nothing; then the deployment's writer checks the deployment cap and appends the copy, its
+  check and append one step; then the workspace's writer appends its reservation, and only then may
+  the first attempt leave. The workspace's writer admits one reservation at a time, from its check to
+  its own append, so no two calls are admitted against the same headroom on either stream. A
+  settlement is appended to the workspace's stream and then copied here.
+- **What a failure leaves.** A refusal at either check, or a deployment writer that cannot be
+  reached or is fenced, appends nothing to either stream (`meter_unavailable`). A workspace append
+  that fails after the copy leaves an **orphan**: a reservation on this stream with no workspace
+  record and no `ModelInvocationRecorded` naming it, open and counted at its maximum, never settled;
+  the call is `meter_unavailable` and sends nothing, and the operator is alerted. A settlement copy
+  that fails leaves its reservation open at its maximum, as a crash does. So this stream never
+  counts a call below its reserved maximum, nor below the workspace stream's count of it, except
+  for a settlement above its reservation that the workspace stream holds and this stream does not.
+- **Who reads it.** It holds other workspaces' call, agent, and model ids, so it is the platform
+  operator's: its hot-store rows carry no `workspace_id` (§6.1), no workspace member's read, range,
+  or export (§9.13) includes it, and no workspace's stream copies from it. A workspace's offboarding
+  or erasure leaves its ids here, as ids and costs only, for the records retention period (§6.2).
+  Rules 155 to 158 bind it as they bind a workspace's meter stream; rule 154 names its id. Its
+  reference vectors follow with the meter streams' registration in `mandate-journal` (DEC-998
+  item 8), before any live call.
 
 **`MeterReserved`** on the meter stream: a call's reservation of its maximum cost (inference spec
 §7.2), appended by the workspace's one meter writer before the call's first attempt leaves the
 deployment, after every cap that applies admitted it (inference spec §7.3). A refusal reserves
-nothing and has no meter record, `meter_unavailable` included (inference spec §3.3), and neither
-does a cache hit, which reaches no provider and costs nothing.
+nothing and has no record on the workspace's meter stream, `meter_unavailable` included (inference
+spec §3.3), and neither does a cache hit, which reaches no provider and costs nothing. The one
+refusal that leaves a record anywhere is the deployment meter stream's orphan above.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -3957,8 +3992,8 @@ done with the call.
 | `cost_usd` | `decimal` | From the reservation's price table and the reported tokens, or the reservation's maximum when the reply's cost cannot be read (inference §3.4); `append` checks only that it is not negative (rule 157) |
 
 **Spend** folds from the meter stream alone (inference spec §7.3). For a scope (the workspace, or
-one `agent_id`, on the workspace's stream; the deployment, on the deployment meter stream) and a period (one risk day, or every risk day of one calendar month; no other period
-exists at this version, so the license's cycle allotment of inference §7.3 is not yet folded), spend
+one `agent_id`, on the workspace's stream; the deployment, on the deployment meter stream) and a
+period (one risk day, or every risk day of one calendar month; no other period exists at this version, so the license's cycle allotment of inference §7.3 is not yet folded), spend
 is the sum, over the scope's `MeterReserved` records in the period, of the settlement's `cost_usd`
 for a settled reservation and the reservation's `max_cost_usd` for an open one. An open reservation
 is one with no `MeterSettled`: a call still in flight, or one whose process died. It stays counted at
