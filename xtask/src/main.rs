@@ -409,8 +409,8 @@ fn rehearsal_runs(mut run: impl FnMut(&[&str]) -> Result<ExitStatus>) -> Result<
 }
 
 /// The packages `cargo xtask ci test-rh-sim` tests with the `rh-sim` feature, each in its own
-/// build: every workspace crate that declares it (DEC-922, DEC-963).
-const REHEARSAL_TESTED: [&str; 2] = ["mandate-mcp", "mandate-paper"];
+/// build: every workspace crate that declares it (DEC-922, DEC-963, DEC-962 item 2).
+const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
 /// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
 /// <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every test
@@ -11786,6 +11786,7 @@ mod tests {
             [
                 "nextest run --locked --no-tests=fail --package mandate-mcp --features rh-sim",
                 "nextest run --locked --no-tests=fail --package mandate-paper --features rh-sim",
+                "nextest run --locked --no-tests=fail --package mandate-cli --features rh-sim",
             ]
         );
         let mut ran = 0;
