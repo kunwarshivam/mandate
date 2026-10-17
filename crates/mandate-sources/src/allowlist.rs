@@ -3,7 +3,7 @@
 //! [`PermittedUrl`] (DP-9, DEC-433 item 11).
 //!
 //! A source is in effect only while its entry says `counsel_confirmed = true` (DEC-433 item 20,
-//! DEC-996 item 2): an unconfirmed entry is listed for review, permits no fetch, and contributes
+//! DEC-1130 item 2): an unconfirmed entry is listed for review, permits no fetch, and contributes
 //! nothing to [`Allowlist::research_allowlist`].
 
 use std::collections::{BTreeMap, BTreeSet};

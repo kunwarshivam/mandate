@@ -6,7 +6,7 @@
     reason = "tests: a broken fixture or a wrong answer should stop the test"
 )]
 //! Ingestion and the stores on recorded fixtures (data-plane spec §4.2 to §4.5, §5.2; DP-1, DP-2;
-//! DEC-996 items 4, 5 and 7).
+//! DEC-1130 items 4, 5 and 7).
 
 mod common;
 

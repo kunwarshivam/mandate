@@ -1,5 +1,5 @@
 //! The HTTPS transport behind `mandate_sources::fetch::Fetcher` (E17-7, data-plane spec §4.2 step
-//! 1, DEC-996 item 3). It runs only in a cell whose egress policy allows the allowlisted hosts; CI
+//! 1, DEC-1130 item 3). It runs only in a cell whose egress policy allows the allowlisted hosts; CI
 //! drives the fetchers on recorded responses and never builds a request here.
 //!
 //! It sends only to a [`PermittedUrl`], which only the allowlist can build (DP-9); it follows no

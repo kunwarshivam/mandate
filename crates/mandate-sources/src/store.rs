@@ -3,7 +3,7 @@
 //! time (DP-1).
 //!
 //! Both are in memory. Where records live in a cell is the workspace data service's (lane M2,
-//! E2-6); this store moves onto its storage interface once that is on `main` (DEC-996 item 8).
+//! E2-6); this store moves onto its storage interface once that is on `main` (DEC-1130 item 8).
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -6,7 +6,7 @@
     reason = "tests: a broken fixture or a wrong answer should stop the test"
 )]
 //! The fetchers on recorded responses: requests built from typed values, permitted before they
-//! reach the transport (DP-9), paced, and capped (DEC-996 items 3 and 10). No network.
+//! reach the transport (DP-9), paced, and capped (DEC-1130 items 3 and 10). No network.
 
 mod common;
 

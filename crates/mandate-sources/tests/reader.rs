@@ -7,7 +7,7 @@
     reason = "tests: a broken fixture or a wrong answer should stop the test"
 )]
 //! The typed reader lane I2 consumes (agent harness spec §6.3, §10.2; data-plane spec §4.6; DP-1,
-//! DP-9; DEC-996 items 5, 6 and 9).
+//! DP-9; DEC-1130 items 5, 6 and 9).
 
 mod common;
 

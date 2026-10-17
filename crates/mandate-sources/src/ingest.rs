@@ -46,7 +46,7 @@ pub struct IngestContext<'a> {
 
 /// A vendor's continuation token: 1 to 256 characters of `A-Z`, `a-z`, `0-9`, `/`, `=`, `_`, and
 /// `-`, so it can ride in a query string unchanged. No `+`, which a server decodes as a space and
-/// `%` cannot escape here (DEC-996 item 3): a page whose token holds one ends the paging.
+/// `%` cannot escape here (DEC-1130 item 3): a page whose token holds one ends the paging.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageToken(String);
 

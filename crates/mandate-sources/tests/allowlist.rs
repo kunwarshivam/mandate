@@ -5,7 +5,7 @@
     clippy::indexing_slicing,
     reason = "tests: a broken fixture or a wrong answer should stop the test"
 )]
-//! The allowlist file and the URL guard (E17-7, DP-9, DEC-433 items 11 and 20, DEC-996 items 1 to
+//! The allowlist file and the URL guard (E17-7, DP-9, DEC-433 items 11 and 20, DEC-1130 items 1 to
 //! 3).
 
 mod common;

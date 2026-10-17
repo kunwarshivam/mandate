@@ -45,7 +45,7 @@ pub struct ReadQuery {
 
 /// Whether licensed text goes out with a read. Until the inference spec's prompt record keeps
 /// licensed text out of the artifact store, research reads none (agent harness spec §6.2's third
-/// precondition, DEC-431 item 17; DEC-996 item 6).
+/// precondition, DEC-431 item 17; DEC-1130 item 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LicensedText {
     Withheld,

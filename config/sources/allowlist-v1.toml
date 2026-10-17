@@ -1,11 +1,11 @@
-# The vetted-source allowlist (DEC-101, E17-7, data-plane spec §4.1, DEC-996), version 1. Versioned
+# The vetted-source allowlist (DEC-101, E17-7, data-plane spec §4.1, DEC-1130), version 1. Versioned
 # configuration: a change is a new file `allowlist-v<N+1>.toml` whose `version` is N+1, and this
 # file is never edited after it reaches main. E17-7 holds its contents (E2-19).
 #
 # A source is on the allowlist only while `counsel_confirmed` is true: DEC-433 item 20 allowlists
 # only sources whose terms allow keeping what a thesis cited, as counsel confirms per vendor. An
 # unconfirmed entry is listed so its endpoints are reviewed, but nothing fetches from it and no
-# reader returns its items (DEC-996 item 2). Flipping it is the founder's (DEC-79: legal).
+# reader returns its items (DEC-1130 item 2). Flipping it is the founder's (DEC-79: legal).
 #
 # Each endpoint is an `https://` host and a path prefix; a fetch to any other URL is refused before
 # a byte is sent (DP-9, DEC-433 item 11).

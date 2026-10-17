@@ -10,7 +10,7 @@
 )]
 //! The research agent's inputs beyond prices (backlog E17-7, with the news and filings halves of
 //! E2-9 and E2-10 that it needs; [data-plane spec §4](../../../docs/specs/data-plane.md#4-news-filings-and-fundamentals);
-//! DEC-996).
+//! DEC-1130).
 //!
 //! - [`allowlist`]: the vetted-source allowlist, versioned configuration read from
 //!   `config/sources/allowlist-v<N>.toml`, and the only way to build a [`allowlist::PermittedUrl`]

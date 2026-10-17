@@ -686,6 +686,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "OrderAbandoned"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
+        | "CandidateVerdictsRecorded"
         | "DecisionMade"
         | "ThesisProposed"
         | "ThesisRevised"

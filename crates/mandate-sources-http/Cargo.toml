@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "The HTTPS transport for mandate-sources' fetchers: permitted URLs only, no redirects, a declared user agent, and the response cap enforced while reading (E17-7, DEC-996)"
+description = "The HTTPS transport for mandate-sources' fetchers: permitted URLs only, no redirects, a declared user agent, and the response cap enforced while reading (E17-7, DEC-1130)"
 
 [lints]
 workspace = true

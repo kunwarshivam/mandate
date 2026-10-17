@@ -51,6 +51,7 @@
 /crates/mandate-runtime/    @kunwarshivam
 /crates/mandate-research/   @kunwarshivam
 /crates/mandate-sources/    @kunwarshivam
+/crates/mandate-research-run/ @kunwarshivam
 /crates/mandate-builder/   @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-liquidity/  @kunwarshivam
@@ -64,6 +65,7 @@
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-agentd/     @kunwarshivam
+/crates/mandate-cp-agent/   @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
