@@ -5,6 +5,7 @@
 // leave a second host deploying, or let anything but the deploy job of `web-deploy.yml` on `main` deploy or
 // reach the Cloudflare token; the unit tests run it against this tree.
 
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,12 +85,9 @@ export function hostingProblems(tree) {
   return problems;
 }
 
-/** Vercel keeps serving `main` until the founder moves the domains, so `vercel.json` may stay only while it deploys `main` alone (DEC-1005 item 4). */
+/** Workers alone hosts the app, so no Vercel configuration may come back (DEC-1090; DEC-823 item 3). */
 function vercelProblems(tree) {
-  if (!tree.exists("../vercel.json")) return [];
-  const enabled = JSON.parse(tree.read("../vercel.json"))?.git?.deploymentEnabled ?? {};
-  const mainOnly = Object.keys(enabled).length === 2 && enabled["**"] === false && enabled.main === true;
-  return mainOnly ? [] : ["../vercel.json: while it stays, it must deploy main alone and no other branch (DEC-1005 item 4)"];
+  return tree.exists("../vercel.json") ? ["../vercel.json: remove it; Cloudflare Workers alone hosts the app (DEC-1090)"] : [];
 }
 
 function middlewareProblems(tree) {
@@ -148,6 +146,12 @@ function buildProblems(tree) {
 }
 
 const WEB_WORKFLOW = "../.github/workflows/web.yml";
+/**
+ * The other workflows that may use the `production` environment, each pinned to the SHA-256 of the
+ * text a reviewer read (DEC-1091): `r2-lockcheck.yml` (E21-40, #1454), dispatched from `main` only,
+ * one job, R2's key and the token in its one step. Any edit fails until the pin is re-read and moved.
+ */
+const PINNED_PRODUCTION_WORKFLOWS = { "../.github/workflows/r2-lockcheck.yml": "fb00fb81f15b06337dce27c44a9d124cc9a817f7986643439c26d34dca3c2d8e" };
 const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
 /** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-1005 item 1). */
@@ -270,6 +274,11 @@ function workflowProblems(tree) {
     if (path === DEPLOY_WORKFLOW || !tree.exists(path)) continue;
     const text = tree.read(path);
     problems.push(...deployProblems(path, text.split("\n")));
+    const pin = PINNED_PRODUCTION_WORKFLOWS[path];
+    if (pin !== undefined) {
+      if (createHash("sha256").update(text).digest("hex") !== pin) problems.push(`${path}: differs from the reviewed text pinned in PINNED_PRODUCTION_WORKFLOWS; re-read it and move the pin in a reviewed change (DEC-1091)`);
+      continue;
+    }
     if (/^\s*environment:.*\bproduction\b|^\s*name:\s*["']?production\b/im.test(text)) problems.push(`${path}: names the production environment; only the deploy job of ${DEPLOY_WORKFLOW} may (ES-12, DEC-1005 item 2)`);
     if (/CLOUDFLARE_/.test(text)) problems.push(`${path}: holds a CLOUDFLARE_ value; only the deploy step of ${DEPLOY_WORKFLOW} reads the token and the account (DEC-1005 item 2)`);
   }
