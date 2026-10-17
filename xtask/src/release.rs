@@ -26,8 +26,57 @@ use anyhow::{Context, Result, bail, ensure};
 
 use crate::image;
 
-/// The one target every release binary is built for: static, so the image needs no libc.
-pub(crate) const TARGET: &str = "x86_64-unknown-linux-musl";
+/// The architectures a release is built for, each natively on a runner of its own (DEC-1060): no
+/// cross toolchain, so each arch's build is the same reproducible path as the other's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Arch {
+    Amd64,
+    Arm64,
+}
+
+impl Arch {
+    pub(crate) const ALL: [Self; 2] = [Self::Amd64, Self::Arm64];
+
+    /// The arch Rust names `rust_arch` (`std::env::consts::ARCH`), if a release is built for it.
+    pub(crate) fn of(rust_arch: &str) -> Option<Self> {
+        match rust_arch {
+            "x86_64" => Some(Self::Amd64),
+            "aarch64" => Some(Self::Arm64),
+            _ => None,
+        }
+    }
+
+    /// The arch of the machine running xtask: a release builds only for its own host.
+    pub(crate) fn host() -> Result<Self> {
+        Self::of(env::consts::ARCH)
+            .with_context(|| format!("no release is built on {}", env::consts::ARCH))
+    }
+
+    /// The OCI platform's `architecture`, and the suffix of the arch's tags.
+    pub(crate) fn oci(self) -> &'static str {
+        match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+        }
+    }
+
+    /// The target every release binary of this arch is built for: static musl, so the image needs
+    /// no libc.
+    pub(crate) fn target(self) -> &'static str {
+        match self {
+            Self::Amd64 => "x86_64-unknown-linux-musl",
+            Self::Arm64 => "aarch64-unknown-linux-musl",
+        }
+    }
+
+    /// The release tools for a machine of this arch.
+    pub(crate) fn tools(self) -> [Tool; 3] {
+        match self {
+            Self::Amd64 => AMD64_TOOLS,
+            Self::Arm64 => ARM64_TOOLS,
+        }
+    }
+}
 
 /// The C compiler the musl target's C code (`ring`) is built with: the runner's own `gcc`, named
 /// rather than searched for, so both builds use the same one.
@@ -80,8 +129,8 @@ pub(crate) struct Tool {
     pub(crate) member: Option<&'static str>,
 }
 
-/// The release build's tools (D-7, DEC-990; rows in `docs/dependencies.md`).
-pub(crate) const TOOLS: [Tool; 3] = [
+/// The release build's tools on amd64 (D-7, DEC-990; rows in `docs/dependencies.md`).
+const AMD64_TOOLS: [Tool; 3] = [
     Tool {
         name: "cargo-auditable",
         version: "0.7.7",
@@ -101,6 +150,32 @@ pub(crate) const TOOLS: [Tool; 3] = [
         version: "3.1.3",
         url: "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64",
         sha256: "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+        member: None,
+    },
+];
+
+/// The same tools at the same versions on arm64, each checked against its project's published
+/// checksum when pinned (DEC-1060).
+const ARM64_TOOLS: [Tool; 3] = [
+    Tool {
+        name: "cargo-auditable",
+        version: "0.7.7",
+        url: "https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.7/cargo-auditable-aarch64-unknown-linux-gnu.tar.xz",
+        sha256: "bcb2d46002a8dd8e94d0d669cb39d38c9651db2ae5d1f3f1f1bab516ee1e212c",
+        member: Some("cargo-auditable-aarch64-unknown-linux-gnu/cargo-auditable"),
+    },
+    Tool {
+        name: "syft",
+        version: "1.52.0",
+        url: "https://github.com/anchore/syft/releases/download/v1.52.0/syft_1.52.0_linux_arm64.tar.gz",
+        sha256: "c46d5e4c28e12aa4c5becfaa343ef1c7f89045b6b895f2c21d471c62db09c706",
+        member: Some("syft"),
+    },
+    Tool {
+        name: "cosign",
+        version: "3.1.3",
+        url: "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-arm64",
+        sha256: "c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a",
         member: None,
     },
 ];
@@ -146,15 +221,15 @@ pub(crate) fn rustflags(paths: &Paths) -> String {
 }
 
 /// The `cargo` arguments of a release build: every [`BINARIES`] package, `--locked`, the release
-/// profile, the musl [`TARGET`], and no feature flag of any kind.
-pub(crate) fn build_args(target_dir: &Path) -> Vec<String> {
+/// profile, `arch`'s musl target, and no feature flag of any kind.
+pub(crate) fn build_args(target_dir: &Path, arch: Arch) -> Vec<String> {
     let mut args: Vec<String> = [
         "auditable",
         "build",
         "--locked",
         "--release",
         "--target",
-        TARGET,
+        arch.target(),
     ]
     .map(str::to_owned)
     .to_vec();
@@ -224,14 +299,15 @@ pub(crate) fn compare_sums(a: &str, b: &str) -> Result<()> {
     Ok(())
 }
 
-/// `cargo xtask release tools`: installs each [`TOOLS`] entry under [`TOOLS_DIR`] in
+/// `cargo xtask release tools`: installs each of the host arch's tools ([`Arch::tools`]) under
+/// [`TOOLS_DIR`] in
 /// `cargo_home`, checked against its SHA-256, and returns the directory that holds them. An
 /// installed tool is reused only while its SHA-256 is still the one recorded when it was installed
 /// from the checked archive; otherwise it is fetched and checked again.
 pub(crate) fn tools(cargo_home: &Path) -> Result<PathBuf> {
     let bin = cargo_home.join(TOOLS_DIR).join("bin");
     fs::create_dir_all(&bin).with_context(|| format!("creating {}", bin.display()))?;
-    for tool in TOOLS {
+    for tool in Arch::host()?.tools() {
         let stamp = bin.join(format!(".{}-{}", tool.name, tool.version));
         let installed = bin.join(tool.name);
         if installed.is_file()
@@ -291,6 +367,7 @@ pub(crate) fn tools(cargo_home: &Path) -> Result<PathBuf> {
 /// settings, which win. Nothing else reaches the build.
 pub(crate) fn build_env(
     paths: &Paths,
+    arch: Arch,
     path: OsString,
     epoch: &str,
     inherited: impl Fn(&str) -> Option<OsString>,
@@ -312,7 +389,10 @@ pub(crate) fn build_env(
         ("RUSTFLAGS".to_owned(), rustflags(paths).into()),
         ("SOURCE_DATE_EPOCH".to_owned(), epoch.into()),
         ("CARGO_INCREMENTAL".to_owned(), "0".into()),
-        (format!("CC_{}", TARGET.replace('-', "_")), TARGET_CC.into()),
+        (
+            format!("CC_{}", arch.target().replace('-', "_")),
+            TARGET_CC.into(),
+        ),
     ];
     vars.extend(own);
     vars
@@ -324,14 +404,15 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     let tools = tools(&paths.cargo_home)?;
     let epoch = git(root, &["log", "-1", "--format=%ct", "HEAD"])?;
     let commit = git(root, &["rev-parse", "HEAD"])?;
-    run(Command::new("rustup").args(["target", "add", TARGET]))?;
+    let arch = Arch::host()?;
+    run(Command::new("rustup").args(["target", "add", arch.target()]))?;
     let path = env::join_paths(
         std::iter::once(tools.clone())
             .chain(env::split_paths(&env::var_os("PATH").unwrap_or_default())),
     )
     .context("joining PATH")?;
     let target_dir = root.join(TARGET_DIR);
-    let vars = build_env(&paths, path, &epoch, |name| env::var_os(name));
+    let vars = build_env(&paths, arch, path, &epoch, |name| env::var_os(name));
     for (program, args) in [
         ("rustc", ["-vV"]),
         (TARGET_CC, ["--version"]),
@@ -348,7 +429,7 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
         .env_clear()
         .envs(&vars)
         .current_dir(root)
-        .args(build_args(&target_dir));
+        .args(build_args(&target_dir, arch));
     run(&mut cargo)?;
     let bin_out = out.join("bin");
     let sbom_out = out.join("sbom");
@@ -357,7 +438,7 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     }
     let mut sums = BTreeMap::new();
     for (_, bin) in BINARIES {
-        let built = target_dir.join(TARGET).join("release").join(bin);
+        let built = target_dir.join(arch.target()).join("release").join(bin);
         let shipped = bin_out.join(bin);
         fs::copy(&built, &shipped).with_context(|| format!("copying {}", built.display()))?;
         sums.insert(bin.to_owned(), sha256(&shipped)?);
@@ -409,6 +490,7 @@ const REPOSITORY: &str = "kunwarshivam/mandate";
 /// half kept as `<out>/test-key/cosign.pub`. Only the founder's hardware key signs a release for a
 /// hosted cell, and it is never here.
 pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> Result<()> {
+    let arch = Arch::host()?;
     let paths = Paths::from_env(root)?;
     let tools = tools(&paths.cargo_home)?;
     let revision = git(root, &["rev-parse", "HEAD"])?;
@@ -440,7 +522,7 @@ pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> R
             None => None,
         };
         let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
-        let layout = image::layout(name, &bytes, signature.as_deref(), &revision);
+        let layout = image::layout(name, arch.oci(), &bytes, signature.as_deref(), &revision);
         image::write(&layout, &out.join("images").join(name))?;
         listing.push_str(&format!("sha256:{}  {name}\n", layout.manifest));
     }
@@ -448,7 +530,7 @@ pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> R
         fs::remove_file(key).with_context(|| format!("deleting {}", key.display()))?;
     }
     fs::write(out.join("IMAGES"), &listing).context("writing IMAGES")?;
-    eprint!("    images of {revision}:\n{listing}");
+    eprint!("    {} images of {revision}:\n{listing}", arch.oci());
     Ok(())
 }
 
@@ -479,7 +561,7 @@ pub(crate) fn drill(root: &Path, dist: &Path, out: &Path) -> Result<()> {
         ("unsigned", None),
         ("wrong", Some(wrong.as_slice())),
     ] {
-        let layout = image::layout(DRILLED, &bytes, signature, "drill");
+        let layout = image::layout(DRILLED, Arch::host()?.oci(), &bytes, signature, "drill");
         let dir = drill.join(image);
         image::write(&layout, &dir.join("layout"))?;
         image::unpack(&layout, &dir.join("layout"), &dir.join("rootfs"))?;
@@ -540,63 +622,100 @@ pub(crate) fn drill(root: &Path, dist: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `cargo xtask release publish <dist> <out>` (E21-35): only from a push to `main`, where CI's
-/// `publish` job runs it (ES-12). Builds the images of `dist` without a binary signature (the
-/// founder's hardware key is not wired, so no binary is release-signed and none starts outside dev
-/// and CI), pushes each to GHCR as `main-<commit>`, checks the registry reports the image's own
-/// digest, signs each image's digest keyless with cosign (the run's GitHub OIDC identity) and
-/// attaches its SBOM as a CycloneDX attestation, and writes `<out>/PUBLISHED`. The token is read
-/// from `GH_TOKEN` and reaches curl and cosign only through a file and stdin.
+/// The tag of one arch's image of commit `revision`.
+pub(crate) fn arch_tag(revision: &str, arch: Arch) -> String {
+    format!("main-{revision}-{}", arch.oci())
+}
+
+/// The tag of commit `revision`'s multi-arch index, the one a cell pulls.
+pub(crate) fn index_tag(revision: &str) -> String {
+    format!("main-{revision}")
+}
+
+/// A signed-in session with GHCR: the 0600 file holding the Basic header the registry trades for
+/// push tokens, in a 0700 directory deleted when the session ends, and cosign logged in through its
+/// stdin. The token is read from `GH_TOKEN` and reaches nothing else.
+struct Registry {
+    secrets: PathBuf,
+    basic: PathBuf,
+}
+
+impl Registry {
+    fn sign_in(tools: &Path, out: &Path) -> Result<Self> {
+        let token = env::var("GH_TOKEN").context("GH_TOKEN is not set")?;
+        let actor = env::var("GITHUB_ACTOR").context("GITHUB_ACTOR is not set")?;
+        let secrets = out.join("auth");
+        fs::create_dir_all(&secrets).context("creating the auth directory")?;
+        fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
+        let basic = secrets.join("basic");
+        write_secret(
+            &basic,
+            &format!(
+                "Authorization: Basic {}\n",
+                image::base64(format!("{actor}:{token}").as_bytes())
+            ),
+        )?;
+        let mut login = Command::new(tools.join("cosign"))
+            .args([
+                "login",
+                REGISTRY_HOST,
+                "--username",
+                &actor,
+                "--password-stdin",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(io::stderr())
+            .spawn()
+            .context("starting `cosign login`")?;
+        if let Some(mut stdin) = login.stdin.take() {
+            io::Write::write_all(&mut stdin, token.as_bytes())
+                .context("handing cosign the token")?;
+        }
+        ensure!(login.wait()?.success(), "cosign login failed");
+        Ok(Self { secrets, basic })
+    }
+
+    /// A header file carrying a push token for `repository`.
+    fn bearer(&self, repository: &str) -> Result<PathBuf> {
+        let token = image_token(&self.basic, repository)?;
+        let bearer = self.secrets.join("bearer");
+        write_secret(&bearer, &format!("Authorization: Bearer {token}\n"))?;
+        Ok(bearer)
+    }
+
+    fn sign_out(self) -> Result<()> {
+        fs::remove_dir_all(&self.secrets).context("deleting the auth directory")
+    }
+}
+
+/// `cargo xtask release publish <dist> <out>` (E21-35, DEC-1060): only from a push to `main`,
+/// where CI's per-arch `publish` jobs run it (ES-12), each on a runner of its own arch. Builds the
+/// host arch's images of `dist` without a binary signature (the founder's hardware key is not
+/// wired, so no binary is release-signed and none starts outside dev and CI), pushes each to GHCR
+/// as `main-<commit>-<arch>`, checks the registry reports the image's own digest, signs each
+/// image's digest keyless with cosign (the run's GitHub OIDC identity) and attaches its SBOM as a
+/// CycloneDX attestation, and writes `<out>/PUBLISHED`.
 pub(crate) fn publish(root: &Path, dist: &Path, out: &Path) -> Result<()> {
-    let token = env::var("GH_TOKEN").context("GH_TOKEN is not set")?;
-    let actor = env::var("GITHUB_ACTOR").context("GITHUB_ACTOR is not set")?;
+    let arch = Arch::host()?;
     images(root, dist, out, false)?;
     let paths = Paths::from_env(root)?;
     let tools = tools(&paths.cargo_home)?;
     let revision = git(root, &["rev-parse", "HEAD"])?;
-    let secrets = out.join("auth");
-    fs::create_dir_all(&secrets).context("creating the auth directory")?;
-    fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
-    let basic = secrets.join("basic");
-    write_secret(
-        &basic,
-        &format!(
-            "Authorization: Basic {}\n",
-            image::base64(format!("{actor}:{token}").as_bytes())
-        ),
-    )?;
-    let mut login = Command::new(tools.join("cosign"))
-        .args([
-            "login",
-            REGISTRY_HOST,
-            "--username",
-            &actor,
-            "--password-stdin",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(io::stderr())
-        .spawn()
-        .context("starting `cosign login`")?;
-    if let Some(mut stdin) = login.stdin.take() {
-        io::Write::write_all(&mut stdin, token.as_bytes()).context("handing cosign the token")?;
-    }
-    ensure!(login.wait()?.success(), "cosign login failed");
+    let registry = Registry::sign_in(&tools, out)?;
     let sums = parse_sums(&fs::read_to_string(dist.join("SHA256SUMS"))?)?;
     let mut published = String::new();
     for name in sums.keys() {
         let repository = format!("{REPOSITORY}/{name}");
-        let token_json = image_token(&basic, &repository)?;
-        let bearer = secrets.join("bearer");
-        write_secret(&bearer, &format!("Authorization: Bearer {token_json}\n"))?;
+        let bearer = registry.bearer(&repository)?;
         let dir = out.join("images").join(name);
         let bytes = fs::read(dist.join("bin").join(name))?;
-        let layout = image::layout(name, &bytes, None, &revision);
+        let layout = image::layout(name, arch.oci(), &bytes, None, &revision);
         let digest = image::push(
             &layout,
             &dir,
             REGISTRY,
             &repository,
-            &format!("main-{revision}"),
+            &arch_tag(&revision, arch),
             Some(&bearer),
         )?;
         let reference = format!("{REGISTRY_HOST}/{repository}@{digest}");
@@ -605,11 +724,59 @@ pub(crate) fn publish(root: &Path, dist: &Path, out: &Path) -> Result<()> {
             .args(["attest", "--yes", "--type", "cyclonedx", "--predicate"])
             .arg(dist.join("sbom").join(format!("{name}.cdx.json")))
             .arg(&reference))?;
-        published.push_str(&format!("{reference}  {name}\n"));
+        published.push_str(&format!("{reference}  {name}  {}\n", arch.oci()));
     }
-    fs::remove_dir_all(&secrets).context("deleting the auth directory")?;
+    registry.sign_out()?;
     fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
     eprint!("    published {revision}:\n{published}");
+    Ok(())
+}
+
+/// `cargo xtask release publish-index <out>` (DEC-1060): only from a push to `main`, after every
+/// arch's `publish` job. For each release binary it reads each arch's `main-<commit>-<arch>` image
+/// back from GHCR by the registry's own digest and size, pushes the OCI index over them as
+/// `main-<commit>`, checks the registry reports the index's digest, signs the index digest
+/// keyless, and writes `<out>/PUBLISHED`: the one reference per binary a cell pulls on any arch.
+pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let registry = Registry::sign_in(&tools, out)?;
+    let mut published = String::new();
+    for (_, name) in BINARIES {
+        let repository = format!("{REPOSITORY}/{name}");
+        let bearer = registry.bearer(&repository)?;
+        let mut platforms = Vec::new();
+        for arch in Arch::ALL {
+            let (manifest, size) = image::remote_manifest(
+                REGISTRY,
+                &repository,
+                &arch_tag(&revision, arch),
+                Some(&bearer),
+            )?;
+            platforms.push(image::Platform {
+                architecture: arch.oci().to_owned(),
+                manifest,
+                size,
+            });
+        }
+        let (bytes, digest) = image::index(&platforms)?;
+        let reported = image::push_index(
+            &bytes,
+            &digest,
+            &out.join("index"),
+            REGISTRY,
+            &repository,
+            &index_tag(&revision),
+            Some(&bearer),
+        )?;
+        let reference = format!("{REGISTRY_HOST}/{repository}@{reported}");
+        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+        published.push_str(&format!("{reference}  {name}\n"));
+    }
+    registry.sign_out()?;
+    fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
+    eprint!("    published the index of {revision}:\n{published}");
     Ok(())
 }
 
@@ -782,7 +949,13 @@ mod tests {
     /// feature, so the runner's `live` cannot be built here (DEC-529 item 3).
     #[test]
     fn the_build_is_locked_static_and_featureless() {
-        let args = build_args(Path::new("/t"));
+        for arch in Arch::ALL {
+            locked_static_and_featureless(arch);
+        }
+    }
+
+    fn locked_static_and_featureless(arch: Arch) {
+        let args = build_args(Path::new("/t"), arch);
         assert_eq!(args.first().map(String::as_str), Some("auditable"));
         assert_eq!(args.get(1).map(String::as_str), Some("build"));
         for flag in ["--locked", "--release"] {
@@ -794,7 +967,8 @@ mod tests {
                 .and_then(|at| args.get(at + 1))
                 .cloned()
         };
-        assert_eq!(after("--target").as_deref(), Some(TARGET));
+        assert_eq!(after("--target").as_deref(), Some(arch.target()));
+        assert!(arch.target().ends_with("-unknown-linux-musl"), "{arch:?}");
         assert_eq!(after("--target-dir").as_deref(), Some("/t"));
         let packages: Vec<&str> = args
             .iter()
@@ -856,6 +1030,7 @@ mod tests {
         };
         let vars = build_env(
             &paths(),
+            Arch::Amd64,
             OsString::from("/tools:/usr/bin"),
             "1792212600",
             inherited,
@@ -981,35 +1156,133 @@ mod tests {
         Ok(out)
     }
 
-    /// Only the publish job may write packages or mint an OIDC token for keyless signing, and it
-    /// runs only on a push to `main`: never from a pull request or a branch (ES-12, E21-35).
+    /// The jobs that publish, one a runner of each arch and the index over them.
+    const PUBLISH_JOBS: [&str; 3] = ["publish-amd64", "publish-arm64", "publish-index"];
+
+    /// Only the publish jobs may write packages or mint an OIDC token for keyless signing, and
+    /// they run only on a push to `main`: never from a pull request or a branch (ES-12, E21-35).
+    /// Each arch publishes from a runner of its own arch, after its builds compared, and the index
+    /// only after every arch has published (DEC-1060).
     #[test]
-    fn only_the_main_publish_job_can_write_packages_or_sign() -> Result<()> {
+    fn only_the_main_publish_jobs_can_write_packages_or_sign() -> Result<()> {
         let jobs = release_jobs()?;
         for (name, body) in &jobs {
             let writes = body.contains("packages: write") || body.contains("id-token: write");
-            assert_eq!(writes, name == "publish", "{name}");
+            assert_eq!(writes, PUBLISH_JOBS.contains(&name.as_str()), "{name}");
         }
-        let publish = jobs
-            .get("publish")
-            .context("release.yml has no publish job")?;
+        for name in PUBLISH_JOBS {
+            let job = jobs
+                .get(name)
+                .with_context(|| format!("release.yml has no {name}"))?;
+            assert!(
+                job.contains(
+                    "    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n"
+                ),
+                "{name}: {job}"
+            );
+            for permission in ["contents: read", "packages: write", "id-token: write"] {
+                assert!(job.contains(permission), "{name}: {permission}");
+            }
+        }
+        for arch in Arch::ALL {
+            let name = format!("publish-{}", arch.oci());
+            let job = jobs.get(&name).with_context(|| format!("no {name}"))?;
+            assert!(
+                job.contains(&format!("needs: [build-a-{}, compare]", arch.oci())),
+                "{name}: {job}"
+            );
+            assert!(
+                job.contains(&format!("runs-on: {}\n", runner(arch))),
+                "{name}: {job}"
+            );
+        }
+        let index = jobs.get("publish-index").context("no publish-index")?;
         assert!(
-            publish.contains(
-                "    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n"
-            ),
-            "{publish}"
+            index.contains("needs: [publish-amd64, publish-arm64]"),
+            "{index}"
         );
-        for permission in ["contents: read", "packages: write", "id-token: write"] {
-            assert!(publish.contains(permission), "{permission}");
-        }
-        assert!(publish.contains("needs: [build-a, compare]"), "{publish}");
         Ok(())
+    }
+
+    fn runner(arch: Arch) -> &'static str {
+        match arch {
+            Arch::Amd64 => "ubuntu-24.04",
+            Arch::Arm64 => "ubuntu-24.04-arm",
+        }
+    }
+
+    /// Every arch is built twice, on two runners of its own arch, and compared; nothing is built
+    /// for one arch on another's runner (DEC-1060).
+    #[test]
+    fn every_arch_is_built_twice_on_its_own_runners_and_compared() -> Result<()> {
+        let jobs = release_jobs()?;
+        let compare = jobs.get("compare").context("no compare")?;
+        for arch in Arch::ALL {
+            for copy in ["a", "b"] {
+                let name = format!("build-{copy}-{}", arch.oci());
+                let job = jobs.get(&name).with_context(|| format!("no {name}"))?;
+                assert!(
+                    job.contains(&format!("runs-on: {}\n", runner(arch))),
+                    "{name}"
+                );
+                assert!(compare.contains(&name), "compare does not need {name}");
+            }
+            let a = format!("needs.build-a-{}.outputs.digest", arch.oci());
+            let b = format!("needs.build-b-{}.outputs.digest", arch.oci());
+            assert!(
+                compare.contains(&format!("{a} == '' || {a} != {b}")),
+                "compare does not compare {:?}: {compare}",
+                arch
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rust_names_map_to_release_arches() {
+        assert_eq!(Arch::of("x86_64"), Some(Arch::Amd64));
+        assert_eq!(Arch::of("aarch64"), Some(Arch::Arm64));
+        for other in ["arm", "x86", "riscv64", "", "amd64", "arm64"] {
+            assert_eq!(Arch::of(other), None, "{other}");
+        }
+        assert_eq!(Arch::Amd64.oci(), "amd64");
+        assert_eq!(Arch::Arm64.oci(), "arm64");
+        assert_eq!(Arch::Amd64.target(), "x86_64-unknown-linux-musl");
+        assert_eq!(Arch::Arm64.target(), "aarch64-unknown-linux-musl");
+    }
+
+    /// Each arch's tools are its own builds of the same versions: the asset names the arch, and no
+    /// arch shares another's checksum.
+    #[test]
+    fn each_arch_has_its_own_builds_of_the_same_tools() {
+        let names = |arch: Arch| arch.tools().map(|tool| (tool.name, tool.version));
+        assert_eq!(names(Arch::Amd64), names(Arch::Arm64));
+        for (amd, arm) in Arch::Amd64.tools().iter().zip(Arch::Arm64.tools().iter()) {
+            assert!(
+                amd.url.contains("x86_64") || amd.url.contains("amd64"),
+                "{}",
+                amd.url
+            );
+            assert!(
+                arm.url.contains("aarch64") || arm.url.contains("arm64"),
+                "{}",
+                arm.url
+            );
+            assert_ne!(amd.sha256, arm.sha256, "{}", amd.name);
+        }
+    }
+
+    #[test]
+    fn tags_name_the_commit_and_the_arch() {
+        assert_eq!(arch_tag("abc", Arch::Amd64), "main-abc-amd64");
+        assert_eq!(arch_tag("abc", Arch::Arm64), "main-abc-arm64");
+        assert_eq!(index_tag("abc"), "main-abc");
     }
 
     /// Each tool is pinned to a GitHub release asset of its own version, with a SHA-256.
     #[test]
     fn every_tool_is_a_pinned_github_release_asset() {
-        for tool in TOOLS {
+        for tool in Arch::ALL.iter().flat_map(|arch| arch.tools()) {
             assert!(
                 tool.url.starts_with("https://github.com/"),
                 "{}: {}",
@@ -1034,7 +1307,7 @@ mod tests {
         let registry = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/dependencies.md"),
         )?;
-        for tool in TOOLS {
+        for tool in Arch::ALL.iter().flat_map(|arch| arch.tools()) {
             let row = registry
                 .lines()
                 .find(|line| line.starts_with(&format!("| `{}` |", tool.name)))
