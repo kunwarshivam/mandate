@@ -139,7 +139,6 @@ struct Start {
     key: SessionKey,
     issuer: IssuerConfig,
     keys: Arc<FetchedKeys>,
-    links: PathBuf,
     database_url: String,
     hosted: Hosted,
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
@@ -191,14 +190,12 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         FetchedKeys::new(&setting("MANDATE_API_JWKS_URL")?).map_err(|_| StartRefusal::Setting {
             name: "MANDATE_API_JWKS_URL",
         })?;
-    let links = PathBuf::from(subject::SUBJECT_LINKS);
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
     let start = Start {
         settings,
         key,
         issuer,
         keys: Arc::new(keys),
-        links,
         database_url,
         hosted,
         artifacts,
@@ -246,7 +243,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         settings: start.settings,
         sessions: Arc::new(Sessions::new(&start.key, Box::new(OsRandom::new()))),
         tokens: Arc::new(Issuer::new(start.issuer, start.keys)),
-        links: start.links,
+        links: Arc::new(subject::Fixed),
         clock: Arc::new(SystemClock),
         journal: Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
             |_| io::Error::other("the journal's connection settings are refused"),

@@ -4,7 +4,6 @@
 //! headers only for the configured app origin. The probes' router answers `/livez` and `/readyz`
 //! and a bodiless 404 for anything else.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -27,7 +26,7 @@ use crate::objects::ObjectStore;
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::stepup::StepUp;
-use crate::subject::{self, LinkRefusal};
+use crate::subject::{self, LinkRefusal, SubjectLinks};
 use crate::token::{Checked, TokenCheck};
 use crate::version_routes;
 use crate::writes;
@@ -63,8 +62,8 @@ pub struct App {
     pub settings: Settings,
     pub sessions: Arc<Sessions>,
     pub tokens: Arc<dyn TokenCheck>,
-    /// The subject-link file (§3.11 item 7).
-    pub links: PathBuf,
+    /// The subject links (§3.11 item 7): [`subject::Fixed`] in the deployment.
+    pub links: Arc<dyn SubjectLinks>,
     pub clock: Arc<dyn Clock>,
     pub journal: Arc<dyn Journal>,
     /// How the control stream's rows become membership records.
@@ -232,7 +231,7 @@ async fn open_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
         let Checked::Subject { issuer, subject } = app.tokens.check(&token, now) else {
             return None;
         };
-        let principal = subject::principal(&app.links, &issuer, &subject).ok()?;
+        let principal = app.links.principal(&issuer, &subject).ok()?;
         let replaced = session_cookie(&headers);
         app.sessions
             .open(
@@ -262,7 +261,7 @@ async fn refresh_session(State(app): State<Arc<App>>, headers: HeaderMap, body: 
             None | Some(Checked::Unreachable) => Answer::Unreachable,
             Some(Checked::Refused) => Answer::Failed,
             Some(Checked::Subject { issuer, subject }) => {
-                match subject::principal(&app.links, &issuer, &subject) {
+                match app.links.principal(&issuer, &subject) {
                     Ok(principal) => Answer::Granted {
                         subject: subject::digest(&issuer, &subject),
                         principal,

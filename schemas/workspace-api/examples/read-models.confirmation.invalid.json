@@ -1,0 +1,175 @@
+[
+  {
+    "label": "risk-increasing without step-up",
+    "set": {
+      "/step_up_required": false
+    }
+  },
+  {
+    "label": "risk-reducing with step-up",
+    "set": {
+      "/classification": "risk_reducing"
+    }
+  },
+  {
+    "label": "an agent named",
+    "set": {
+      "/agent_id": "agt_1"
+    }
+  },
+  {
+    "label": "a base version named",
+    "set": {
+      "/base_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+    }
+  },
+  {
+    "label": "an unknown classification",
+    "set": {
+      "/classification": "mutant_value",
+      "/step_up_required": false
+    }
+  },
+  {
+    "label": "no paths to confirm",
+    "set": {
+      "/required_paths": []
+    }
+  },
+  {
+    "label": "a path that is not a pointer",
+    "set": {
+      "/required_paths/0": "capital"
+    }
+  },
+  {
+    "label": "the root as a path",
+    "set": {
+      "/required_paths/0": ""
+    }
+  },
+  {
+    "label": "a path listed twice",
+    "set": {
+      "/required_paths": [
+        "/capital",
+        "/capital"
+      ]
+    }
+  },
+  {
+    "label": "a warning code that is not a W-code",
+    "set": {
+      "/warnings/0": "W-01"
+    }
+  },
+  {
+    "label": "a warning listed twice",
+    "set": {
+      "/warnings": [
+        "W-001",
+        "W-001"
+      ]
+    }
+  },
+  {
+    "label": "step-up as text",
+    "set": {
+      "/step_up_required": "true"
+    }
+  },
+  {
+    "label": "a malformed screen digest",
+    "set": {
+      "/screen_digest": "sha256:12"
+    }
+  },
+  {
+    "label": "a malformed version",
+    "set": {
+      "/mandate_version": "md5:12"
+    }
+  },
+  {
+    "label": "a document that is not a mandate",
+    "remove": [
+      "/document/capital"
+    ]
+  },
+  {
+    "label": "no envelope build",
+    "remove": [
+      "/build"
+    ]
+  },
+  {
+    "label": "a malformed watermark",
+    "set": {
+      "/as_of": [
+        {
+          "stream_id": "ctl:x"
+        }
+      ]
+    }
+  },
+  {
+    "label": "auto: no /mandate_version",
+    "remove": [
+      "/mandate_version"
+    ]
+  },
+  {
+    "label": "auto: no /document",
+    "remove": [
+      "/document"
+    ]
+  },
+  {
+    "label": "auto: no /agent_id",
+    "remove": [
+      "/agent_id"
+    ]
+  },
+  {
+    "label": "auto: no /base_version",
+    "remove": [
+      "/base_version"
+    ]
+  },
+  {
+    "label": "auto: no /classification",
+    "remove": [
+      "/classification"
+    ]
+  },
+  {
+    "label": "auto: no /required_paths",
+    "remove": [
+      "/required_paths"
+    ]
+  },
+  {
+    "label": "auto: no /warnings",
+    "remove": [
+      "/warnings"
+    ]
+  },
+  {
+    "label": "auto: no /step_up_required",
+    "remove": [
+      "/step_up_required"
+    ]
+  },
+  {
+    "label": "auto: no /screen_digest",
+    "remove": [
+      "/screen_digest"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  }
+]
