@@ -765,7 +765,7 @@ proptest! {
     /// outside the founding scope, and each run answers what the oracle's model says.
     #[test]
     fn no_history_yields_two_founders_or_a_wider_grant(steps in prop::collection::vec(step(), 1..24)) {
-        let result = history(&steps, |stream, n, at| found(stream, n, at));
+        let result = history(&steps, found);
         prop_assert!(result.is_ok(), "{result:?}");
     }
 }
@@ -793,7 +793,7 @@ fn the_oracle_catches_a_writer_that_skips_the_decision() {
         },
     ];
     assert!(history(&steps, skipping).is_err());
-    assert!(history(&steps, |s, n, at| found(s, n, at)).is_ok());
+    assert!(history(&steps, found).is_ok());
 }
 
 /// The oracle reads the grant's scope too: a writer granting a wider role set is reported.
