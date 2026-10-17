@@ -44,7 +44,7 @@
       "max_daily_loss": "0.03",
       "max_drawdown": "0.1"
     },
-    "positions": [
+    "account_positions": [
       {
         "instrument": "b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081",
         "qty": "12",

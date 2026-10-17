@@ -545,11 +545,11 @@ per workspace deployment (item 6).
      The caller can only narrow its own session this way;
    - a token that does not verify, names another subject, or whose subject the link file no longer
      maps to the session's principal: a failed refresh, which ends the session (`refresh_failed`);
-   - a rotated secret presented again to the refresh route ends the session (`refresh_reuse`).
-     On any other route, the secret the last granted refresh rotated away still admits the call
-     for 30 seconds after that refresh, so a command in flight across it is served; after that,
-     and for any older secret, the call gets the one 401 and the session is kept
-     ([DEC-1022](../project/decisions/DEC-1022.md)).
+   - a rotated secret presented again ends the session (`refresh_reuse`), on any route, with one
+     exception ([DEC-1022](../project/decisions/DEC-1022.md), Proposed). For the 30 seconds
+     after a granted refresh, the secret it rotated away still serves a pause and a kill switch,
+     so a risk-reducing command in flight across the refresh lands; any other call with it then
+     gets the one 401 and the session is kept. The refresh route treats it as reuse even then.
 
    - A pause or a kill switch on a full session whose access has lapsed with no refresh is not
      refused for it: the server records an outage refresh itself (route 1) and serves the call, so
@@ -738,12 +738,12 @@ and `pending_approvals`. An owner's hold shows as the mode it sets, `exits_only`
 names in the content-addressed store (checked against its digest), the agent's `label` (the
 document's `name`) and `mandate`, its envelope as the document states it (allocation and floor,
 goal type and end date, asset classes, and the position, order, daily-loss, and drawdown limits);
-both are `null` when the store does not hold the document. The single read adds `positions`: the
-account's holdings at its last reconciliation, the latest `BrokerPositionObserved` per instrument
-on the account stream of the connection the document names (model and broker quantities, the
-mismatch flag, and when observed), `null` when that stream is not found. They are the account's,
-not the agent's: no journaled fold attributes holdings per agent yet. The account stream's
-watermark joins `as_of`. Limit usage (the ladder's rung, the day-trade count, headroom) is not
+both are `null` when the store does not hold the document, or holds it encrypted. The single read
+adds the account's holdings at its last reconciliation as `account_positions`, the latest
+`BrokerPositionObserved` per instrument on the account stream of the connection the document
+names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
+is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
+agent yet. The account stream's watermark joins `as_of`. Limit usage (the ladder's rung, the day-trade count, headroom) is not
 journaled yet and is not served; it joins with E6-4's risk records. The rest of D2 (restrictions,
 the floor, the universe) is planned as optional members.
 

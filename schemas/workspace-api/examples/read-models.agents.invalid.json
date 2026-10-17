@@ -150,9 +150,9 @@
     }
   },
   {
-    "label": "a list row with positions",
+    "label": "a list row with account positions",
     "set": {
-      "/agents/0/positions": []
+      "/agents/0/account_positions": []
     }
   },
   {

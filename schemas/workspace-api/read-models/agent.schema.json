@@ -163,17 +163,17 @@
       }
     },
     "AgentDetail": {
-      "description": "One agent with its account's positions (DEC-1020): the latest BrokerPositionObserved per instrument on the account stream of the connection the mandate document names, model quantity first. null when the document or the connection's account stream is not found.",
+      "description": "One agent with its account's positions, named as the account's (DEC-1020): the latest BrokerPositionObserved per instrument on the account stream of the connection the mandate document names, model quantity first. null when the document or the connection's account stream is not found.",
       "allOf": [
         {
           "$ref": "#/$defs/Agent"
         }
       ],
       "required": [
-        "positions"
+        "account_positions"
       ],
       "properties": {
-        "positions": {
+        "account_positions": {
           "oneOf": [
             {
               "type": "array",

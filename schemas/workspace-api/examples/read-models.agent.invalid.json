@@ -156,9 +156,9 @@
     ]
   },
   {
-    "label": "a missing positions",
+    "label": "a missing account_positions",
     "remove": [
-      "/agent/positions"
+      "/agent/account_positions"
     ]
   },
   {
@@ -224,31 +224,31 @@
   {
     "label": "a position missing instrument",
     "remove": [
-      "/agent/positions/0/instrument"
+      "/agent/account_positions/0/instrument"
     ]
   },
   {
     "label": "a position missing qty",
     "remove": [
-      "/agent/positions/0/qty"
+      "/agent/account_positions/0/qty"
     ]
   },
   {
     "label": "a position missing broker_qty",
     "remove": [
-      "/agent/positions/0/broker_qty"
+      "/agent/account_positions/0/broker_qty"
     ]
   },
   {
     "label": "a position missing mismatch",
     "remove": [
-      "/agent/positions/0/mismatch"
+      "/agent/account_positions/0/mismatch"
     ]
   },
   {
     "label": "a position missing observed_at",
     "remove": [
-      "/agent/positions/0/observed_at"
+      "/agent/account_positions/0/observed_at"
     ]
   },
   {
@@ -272,7 +272,7 @@
   {
     "label": "an unknown position member",
     "set": {
-      "/agent/positions/0/extra": 1
+      "/agent/account_positions/0/extra": 1
     }
   },
   {
@@ -349,43 +349,43 @@
   {
     "label": "an empty instrument",
     "set": {
-      "/agent/positions/0/instrument": ""
+      "/agent/account_positions/0/instrument": ""
     }
   },
   {
     "label": "an instrument of 201 characters",
     "set": {
-      "/agent/positions/0/instrument": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "/agent/account_positions/0/instrument": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   },
   {
     "label": "a quantity that is a number",
     "set": {
-      "/agent/positions/0/qty": 12
+      "/agent/account_positions/0/qty": 12
     }
   },
   {
     "label": "a mismatch that is a string",
     "set": {
-      "/agent/positions/0/mismatch": "false"
+      "/agent/account_positions/0/mismatch": "false"
     }
   },
   {
     "label": "an observation time without a time",
     "set": {
-      "/agent/positions/0/observed_at": "2026-10-08"
+      "/agent/account_positions/0/observed_at": "2026-10-08"
     }
   },
   {
-    "label": "positions that are a string",
+    "label": "account positions that are a string",
     "set": {
-      "/agent/positions": "none"
+      "/agent/account_positions": "none"
     }
   },
   {
     "label": "a position that is a number",
     "set": {
-      "/agent/positions": [
+      "/agent/account_positions": [
         1
       ]
     }

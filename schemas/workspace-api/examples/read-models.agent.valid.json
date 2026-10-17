@@ -40,13 +40,13 @@
     "set": {
       "/agent/label": null,
       "/agent/mandate": null,
-      "/agent/positions": null
+      "/agent/account_positions": null
     }
   },
   {
     "label": "no positions held",
     "set": {
-      "/agent/positions": []
+      "/agent/account_positions": []
     }
   },
   {
@@ -74,8 +74,8 @@
   {
     "label": "a mismatched position",
     "set": {
-      "/agent/positions/0/broker_qty": "11",
-      "/agent/positions/0/mismatch": true
+      "/agent/account_positions/0/broker_qty": "11",
+      "/agent/account_positions/0/mismatch": true
     }
   },
   {
