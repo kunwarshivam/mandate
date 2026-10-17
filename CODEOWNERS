@@ -65,6 +65,7 @@
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-agentd/     @kunwarshivam
 /crates/mandate-cp-agent/   @kunwarshivam
+/crates/mandate-cp-site/    @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam

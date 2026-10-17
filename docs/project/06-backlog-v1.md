@@ -2361,6 +2361,9 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
   all four kinds (license, release manifest, catalog entry, data bundle); `cp-agent` reaches the site
   only through a port it declares and workspace services implement; a test shows `cp-agent` never
   takes a writer epoch, and the kill switch commits with `cp-agent` hung.
+  *Follow-up (DEC-983):* a stateful fuzz of message sequences through `cp-agent` into
+  `mandate-cp-site` that also asserts every effect follows its own record (today's fuzz checks one
+  message at a time and the record types only).
 - **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
   verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
   lapsed license refuses only new deployments and new openings; it never blocks an exit, a
