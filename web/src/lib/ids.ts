@@ -8,3 +8,5 @@ export const EVENT_ID = new RegExp(`^${ULID}$`);
 /** Broker asset IDs are UUIDs; routes use them so an instrument's ticker stays out of history. */
 export const ASSET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const CONNECTION_ID = new RegExp(`^con_${ULID}$`);
+/** A backtest is named by the API's opaque `Id` (`common.schema.json`), which embeds nothing. */
+export const BACKTEST_ID = /^[A-Za-z0-9_-]{1,64}$/;

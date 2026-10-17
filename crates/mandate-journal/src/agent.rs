@@ -38,6 +38,11 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     stream.stream_type() == StreamType::Agent && CLOSED.contains(&event_type)
 }
 
+/// Whether this module closes `event_type` at `schema_version` on the agent stream.
+pub(crate) fn closes(event_type: &str, schema_version: u64) -> bool {
+    CLOSED.contains(&event_type) && schema(event_type, schema_version).is_some()
+}
+
 /// The payload normalized against its §9.1 schema, then consistency rules 1 to 13 in number order
 /// (reported only on a well-typed payload). `causation_id` is the envelope's, which rule 10 reads.
 pub(crate) fn payload(
