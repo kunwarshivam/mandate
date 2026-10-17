@@ -12,11 +12,14 @@
 //!
 //! Slice 1 hosts only [`IdleHost`] over an in-memory journal, behind `--fixture`; without it the
 //! process refuses, because no deployment's production cycle is wired in yet (DEC-968 item 6).
-//! It prints `health <addr>` once it is listening and SIGTERM is handled, drains on SIGTERM, and
-//! exits with its stop's status. SIGINT is not handled: it ends the process as a crash does, which
+//! It prints `health <addr>` once it is listening and SIGTERM is handled, then `metrics <addr>` for
+//! its Prometheus pull exporter on loopback, drains on SIGTERM, and exits with its stop's status.
+//! An exporter that cannot start prints `metrics_unavailable` to stderr and the process runs on
+//! unchanged (OPS-11). SIGINT is not handled: it ends the process as a crash does, which
 //! the next process recovers from the journal.
 
 use std::cell::RefCell;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::rc::Rc;
@@ -25,8 +28,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use mandate_agentd::{Config, IdleHost, MemoryStore, Status, Supervisor, health};
+use mandate_agentd::{Config, IdleHost, Instrumented, MemoryStore, Status, Supervisor, health};
 use mandate_journal::{Environment, MemoryJournal};
+use mandate_telemetry::{Metrics, ProcessType, Release};
 use mandate_time::UtcNanos;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -65,9 +69,11 @@ fn run() -> std::io::Result<u8> {
     let status = Status::default();
     let addr = health::serve(SocketAddr::from(([127, 0, 0, 1], 0)), status.clone())?;
     println!("health {addr}");
+    let metrics = start_metrics();
     let started = Instant::now();
     let now = || u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
-    let mut supervisor = Supervisor::start(store, IdleHost { streams }, &config, status, now());
+    let host = Instrumented::new(IdleHost { streams }, metrics);
+    let mut supervisor = Supervisor::start(store, host, &config, status, now());
     loop {
         if let mandate_agentd::Phase::Stopped(stop) = supervisor.phase() {
             eprintln!("{}", stop.code());
@@ -80,6 +86,21 @@ fn run() -> std::io::Result<u8> {
         supervisor.tick(now());
         thread::sleep(TICK);
     }
+}
+
+/// The process's metrics, served on an ephemeral loopback port. Any failure leaves the metrics off
+/// or unserved, and the process runs on as without them; even the announcement's write may fail
+/// without stopping it.
+fn start_metrics() -> Metrics {
+    let metrics = Release::parse(env!("CARGO_PKG_VERSION"))
+        .and_then(|release| Metrics::new(ProcessType::AgentProcess, &release))
+        .unwrap_or_else(|_| Metrics::off());
+    let _announced =
+        match mandate_telemetry::serve(SocketAddr::from(([127, 0, 0, 1], 0)), metrics.clone()) {
+            Ok(exporter) => writeln!(std::io::stdout(), "metrics {}", exporter.addr()),
+            Err(_) => writeln!(std::io::stderr(), "metrics_unavailable"),
+        };
+    metrics
 }
 
 /// Registers SIGTERM before the process announces itself, and sets `terminate` when it arrives.
