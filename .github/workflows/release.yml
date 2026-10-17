@@ -1,0 +1,98 @@
+# The release build (E21-8, DEC-970; infrastructure design §7.1 step 2, ES-14, ES-17). Two jobs
+# build the same commit with `cargo xtask release build`: on two runners, in two checkout paths,
+# with no cache, so nothing one build left behind can reach the other. `compare` fails unless both
+# printed the same digest of their SHA256SUMS, which lists every binary's SHA-256: one commit,
+# byte-identical binaries. On `main` and on demand, `build-a`'s binaries, SHA256SUMS and SBOMs are
+# kept as the run's artifact, `release-<commit>`, which E21-35's images are built from. A pull
+# request that changes the release build runs the same jobs and keeps and publishes nothing
+# (ES-12). Nothing here builds a feature, so no release build holds `live` (DEC-529 item 3).
+name: release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/release.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+      - "crates/mandate-release/**"
+      - "xtask/**"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-a:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name != 'pull_request'
+        with:
+          name: release-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+  build-b:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: elsewhere/src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: elsewhere/src
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release again, elsewhere
+        id: build
+        run: cargo xtask release build out | tee -a "$GITHUB_OUTPUT"
+
+  compare:
+    needs: [build-a, build-b]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: The two builds differ
+        if: needs.build-a.outputs.digest == '' || needs.build-a.outputs.digest != needs.build-b.outputs.digest
+        run: |
+          echo "the two release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS"
+          exit 1
+      - name: The two builds are identical
+        run: echo "both release builds of this commit printed the same SHA256SUMS digest"
