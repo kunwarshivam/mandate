@@ -269,9 +269,14 @@ export function ApiRuntimeProvider({
     return request;
   }, []);
 
+  const readBacktest = useCallback<Runtime["readBacktest"]>(async (backtestId) => {
+    void backtestId;
+    throw new Error("Unimplemented: E4-5");
+  }, []);
+
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
-    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
