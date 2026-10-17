@@ -235,7 +235,7 @@ def rule_drafts() -> list[dict]:
                 "by_a_user",
                 "rule 137: workspace control services write it as a system actor",
                 record,
-                [change("actor", USER)],
+                [change("actor", dict(USER))],
                 "schema",
                 "actor.kind",
             )
