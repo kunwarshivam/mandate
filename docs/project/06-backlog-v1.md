@@ -4944,9 +4944,11 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   sessions keep no roles snapshot. Take the snapshot at sign-in and at each granted refresh, cleared
   in the same step as a deactivation, so these calls are authorized from it as API-7 and identity
   spec §4.5 require.
-- **Bind step-up on the API's owner commands (DEC-1007 item 3).** The API forwards no step-up, so a
-  kill switch through it never carries the owner-exit privilege. Verify the passkey assertion
-  locally (identity spec §3.3) and forward it bound, with `step_up_status: bound`.
+- **Bind step-up on the API's owner commands and grants (DEC-1007 items 3 and 10).** The API
+  forwards no step-up, so a kill switch through it never carries the owner-exit privilege and an
+  `approved` is refused. Verify the passkey assertion locally (identity spec §3.3), forward it
+  bound, with `step_up_status: bound`, and serve `approved` after checking the mandate's
+  `approvers` (§5.2).
 - **Journal the API-7 members with no place (DEC-1007 item 4).** `record`, `environment_shown`, and
   a kill switch's `owner_exit` are kept but not written. Close the remaining `OwnerCommandIssued`
   commands in a journal spec change with these members, then write them and compare them on a

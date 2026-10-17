@@ -587,6 +587,10 @@ per workspace deployment (item 6).
       switch is unaffected.
     - Holding new openings is not served yet: the runtime does not fold `hold_openings`, and a
       hold it could not read would stop it at that event, the kill switch behind it included.
+    - An approval's Skip (§5.2) is recorded as the CLI records it, as `ApprovalResponseSubmitted`
+      with `step_up: null`; the runtime judges the deadline, the state, the content hash, and the
+      approvers. An `approved` is refused `step_up_required` or `step_up_missing` until step-up
+      is bound (DEC-1007 item 10).
 
 ---
 
@@ -1734,7 +1738,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval content, hash, and admission (`mandate-approval`) | **Exists** (pure core) |
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
-| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, and pause and the kill switch by E21-31 (§3.11) |
+| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
 | Drafts, compile, versions, confirm endpoints | **Planned** (E10-11) |
 | Deployment manager endpoints and the reserved kill-switch path | **Planned** (E10-12) |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
