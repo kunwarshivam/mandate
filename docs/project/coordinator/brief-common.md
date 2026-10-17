@@ -1,0 +1,22 @@
+## Ground rules (every lane)
+
+- **Credentials:** run `unset MANDATE_ALPACA_PAPER_KEY_ID MANDATE_ALPACA_PAPER_SECRET` in every shell. Never read, print or use them. Never place real orders. No live credentials, ever.
+- **The plan:** `docs/project/tasks/managed-cells.md` and DEC-967, (merged in #1431); your story's row is in `docs/project/06-backlog-v1.md` on main. Read AGENTS.md, the `mandate-mode` skill and the coordination playbook first. Claim your story with a claim issue before coding.
+- **Demo target:** the founder chose to host cell #1 for the 2026-10-26 demo, paper and demo data only (DEC-995: DigitalOcean nyc3, two droplets, Cloudflare Tunnel, Access and R2 in front). Speed matters, but every safety rule still holds.
+- **Dependencies:** the founder pre-approved D-1 to D-7 as kinds (DEC-969). Add each `docs/dependencies.md` row in the PR that first uses it. Cite DEC-969, state why, name the alternatives, and pin the exact version. Anything outside those seven kinds: stop and report to me.
+- **Process:**
+  - DEC-921: one PR, tests committed first and failing on stubs, then the implementation.
+  - ES-22: spec changes go in their own PR, before the code PR.
+  - Safety-critical crates: an xtask/layers.toml entry, a CODEOWNERS line, the lint header.
+  - No plain `//` comments in Rust (DEC-80). No unwrap or expect on trading paths.
+  - New decisions are agent-accepted under DEC-79 and DEC-176 when reversible, and you reserve the number per `docs/project/decisions/README.md`. Founder-reserved items stay Proposed, and you take the most conservative option.
+  - Run `cargo xtask check` (or the relevant subset plus `cargo xtask ci fast`) before every push.
+  - Keep each PR reviewable; split it into slices if needed.
+- **Never** touch the four R0-path files (crates/mandate-paper live runner, mandate-shell run path, scripts/r0-rehearsal.sh, crates/mandate-cli live entry) until R0 closes. If your lane needs a hook there, record it and stop that part.
+- **Review:**
+  - Before you report, run an independent review with a Sonnet subagent (a different model), and fix every blocker and major.
+  - Add the line `Review (Sonnet, head <sha>): PASS — <one line>` to the PR body.
+  - For safety-critical crates, report local `cargo mutants --in-diff` with 0 missed.
+- **Commits:** no Co-authored-by trailer (CI rejects it). Don't label, approve or merge; the coordinator does that.
+- **DEC numbers:** take the next free number in your category range (DEC-2000s infra, 2100 API, 2300 trading, 2600 process); see DEC-2600.
+- **Report:** send only `#PR head <sha> ready` with `send_message` to session `session_01BFjCWYU2cDwPmFkR3RAHQK` once fast and full are green and the Sonnet line names that head. Merge main yourself when it conflicts; a merge-only delta needs no new review. Report blockers in one line.
