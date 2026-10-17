@@ -1,5 +1,5 @@
-# The nightly checks on main (ADR-0001 ES-11, ES-12, DEC-76, DEC-1006). Pull requests run only
-# the jobs their diff selects (DEC-1006), so every night main runs everything unselected:
+# The nightly checks on main (ADR-0001 ES-11, ES-12, DEC-76, DEC-1190). Pull requests run only
+# the jobs their diff selects (DEC-1190), so every night main runs everything unselected:
 # `dispatch-ci` starts the per-PR `ci` workflow on main, where `select` has no diff base and
 # selects every crate and every job (all tests, `schema-mutants`, the macOS `portable` job), and
 # that run opens an issue itself if it fails (`ci.yml`'s `report-main`). Beside it, this workflow
@@ -7,8 +7,8 @@
 # seeded-bug mutation check of the reference implementation and a full-history secret scan, and
 # the whole-crate mutation sweep of every safety-critical crate, a seventh of it a day so every
 # mutant is tested once a week, while most shared runners stay with pull requests
-# (DEC-1006 item 5). A failure opens an issue naming only the run and the jobs. Weekly from
-# DEC-256 until DEC-1006; skipped when main has not changed since the last successful run.
+# (DEC-1190 item 5). A failure opens an issue naming only the run and the jobs. Weekly from
+# DEC-256 until DEC-1190; skipped when main has not changed since the last successful run.
 name: nightly
 
 on:
@@ -47,7 +47,7 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # Every per-PR job, unscoped: `ci.yml` dispatched on main selects everything (DEC-1006).
+  # Every per-PR job, unscoped: `ci.yml` dispatched on main selects everything (DEC-1190).
   dispatch-ci:
     needs: changed
     if: needs.changed.outputs.run == 'true'
@@ -127,7 +127,7 @@ jobs:
           shared-key: select
       - run: cargo xtask ci nightly
 
-  # DEC-1006 item 5. Tonight's share of the whole-crate mutation sweep: the gate's own listing of
+  # DEC-1190 item 5. Tonight's share of the whole-crate mutation sweep: the gate's own listing of
   # every safety-critical crate's source, cut into shards of at most eight mutants, of which the
   # shards whose index is today's (days since the Unix epoch) modulo the rotation run. It runs even
   # when main is unchanged, so no day's share is skipped and every shard runs once a rotation.
@@ -209,7 +209,7 @@ jobs:
       - run: cargo xtask ci sweep
 
   # Opens an issue when any nightly job fails or is cancelled, naming only the run and the jobs'
-  # verdicts, never a log line (DEC-1006 item 5).
+  # verdicts, never a log line (DEC-1190 item 5).
   report:
     needs: [changed, dispatch-ci, postgres-oldest, reference, sweep-plan, sweep]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
@@ -224,4 +224,4 @@ jobs:
           VERDICTS: changed ${{ needs.changed.result }}, dispatch-ci ${{ needs.dispatch-ci.result }}, postgres-oldest ${{ needs.postgres-oldest.result }}, reference ${{ needs.reference.result }}, sweep-plan ${{ needs.sweep-plan.result }}, sweep ${{ needs.sweep.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly failed at ${GITHUB_SHA}" -f body="The nightly run on main failed (${VERDICTS}): ${RUN_URL} (DEC-1006)"
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly failed at ${GITHUB_SHA}" -f body="The nightly run on main failed (${VERDICTS}): ${RUN_URL} (DEC-1190)"

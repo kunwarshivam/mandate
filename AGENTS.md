@@ -200,7 +200,7 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   deterministic `cargo xtask ci mutants` shard, and every `cargo xtask ci schema-mutants` shard (DEC-688). Every
   required check and aggregated job must finish in under ten minutes; add parallel shards rather
   than removing tests, baselines, mutants, or safety gates (DEC-464). Both CI and `cargo xtask
-  check` scope the jobs to the diff (DEC-1006): `cargo xtask ci select` takes the changed paths,
+  check` scope the jobs to the diff (DEC-1190): `cargo xtask ci select` takes the changed paths,
   the crates that own them or name them in their sources, and every crate built on those. Tests,
   doctests, pending tests, and the rehearsal and Postgres runs cover only those crates, and a
   crate handed another's binary (`MANDATE_RH_SIM_BIN`) follows that crate.

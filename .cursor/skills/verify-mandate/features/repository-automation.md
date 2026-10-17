@@ -16,7 +16,7 @@
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants); `select`, `source_references` and `dependents_closure`, the affected-set
   selection every scoped job follows, and `sweep_plan` with `sweep_scheduled`, the nightly's
-  whole-crate mutation sweep through the gate's own `gate_run` (DEC-1006).
+  whole-crate mutation sweep through the gate's own `gate_run` (DEC-1190).
 - **CI:** `.github/workflows/ci.yml` (`select`, then `fast`, `full`),
   `.github/workflows/nightly.yml` (dispatches `ci` on main, Postgres 17, the reference extras,
   the sweep).

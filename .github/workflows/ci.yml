@@ -7,8 +7,8 @@
 # over the non-mutation full checks, the mutation plan, every deterministic mutation shard the plan
 # sized to the diff (DEC-538), and the workspace API schemas' mutation sweep (DEC-688). Run
 # `cargo xtask check` locally for the same complete set, unsharded. main itself is covered by the
-# nightly workflow, which dispatches this workflow on main every night (DEC-1006).
-# DEC-1006 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
+# nightly workflow, which dispatches this workflow on main every night (DEC-1190).
+# DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
 # changed paths, the crates owning them or naming them in their sources, and every crate built on
 # those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
 # `fast-portable`, `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when it says
@@ -54,7 +54,7 @@ env:
   ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 
 jobs:
-  # DEC-1006. The affected-set selection every scoped job follows: one boolean a job, and the
+  # DEC-1190. The affected-set selection every scoped job follows: one boolean a job, and the
   # one-line reasons `fast` and `full` print. It builds only xtask.
   select:
     if: ${{ !github.event.pull_request.draft }}
@@ -80,14 +80,14 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: select
-      - name: Select the jobs this diff needs (DEC-1006)
+      - name: Select the jobs this diff needs (DEC-1190)
         id: select
         run: cargo xtask ci select >> "$GITHUB_OUTPUT"
 
   # DEC-871. `fast`'s parts run in parallel jobs, so each stays under ten minutes (DEC-464):
   # `cargo xtask ci fast` in one job took 13 to 14.6 minutes. `fast-lint` runs lint and the spec
   # guard, and the documentation-only short path (DEC-112); the other jobs start only when `select`
-  # says the diff needs them (DEC-1006).
+  # says the diff needs them (DEC-1190).
   fast-lint:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
@@ -316,7 +316,7 @@ jobs:
     permissions: {}
     if: ${{ always() && !github.event.pull_request.draft }}
     needs: [select, fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
-    # DEC-871, DEC-1006. The required `fast` verdict: `select` and `fast-lint` must succeed, and
+    # DEC-871, DEC-1190. The required `fast` verdict: `select` and `fast-lint` must succeed, and
     # each scoped part must have succeeded where `select` selected it and been skipped where it did
     # not; a matrix succeeds only when every shard did. A failed or cancelled part, a skip `select`
     # did not ask for, and a part that ran when it should not have all fail it. xtask's tests run
@@ -337,7 +337,7 @@ jobs:
           PORTABLE_RESULT: ${{ needs.fast-portable.result }}
           RH_SIM_LIVE_RESULT: ${{ needs.fast-rh-sim-live.result }}
         run: |
-          printf 'Affected-set selection (DEC-1006): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
           test "$SELECT_RESULT" = success
           test "$LINT_RESULT" = success
           test "$TESTS_SELECTED:$TEST_RESULT" = true:success || test "$TESTS_SELECTED:$TEST_RESULT" = false:skipped
@@ -521,7 +521,7 @@ jobs:
     # count that is not a number, a skipped matrix beside a plan that counted mutants, and a matrix
     # that ran beside a plan of zero all fail. xtask's tests run this script over that table.
     # `schema-mutants` must succeed, which a matrix does only when every shard succeeded (DEC-688).
-    # DEC-1006: `full-checks` and `schema-mutants` must have run and succeeded where `select`
+    # DEC-1190: `full-checks` and `schema-mutants` must have run and succeeded where `select`
     # selected them and been skipped where it did not, beside a `select` that succeeded.
     steps:
       - name: Require the selection, every full check it named, the mutation plan, every shard it sized, and schema-mutants where named
@@ -536,7 +536,7 @@ jobs:
           MUTANTS_RESULT: ${{ needs.mutants.result }}
           SCHEMA_MUTANTS_RESULT: ${{ needs.schema-mutants.result }}
         run: |
-          printf 'Affected-set selection (DEC-1006): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
           test "$SELECT_RESULT" = success
           test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_RESULT" = true:success || test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_RESULT" = false:skipped
           test "$SCHEMA_MUTANTS_SELECTED:$SCHEMA_MUTANTS_RESULT" = true:success || test "$SCHEMA_MUTANTS_SELECTED:$SCHEMA_MUTANTS_RESULT" = false:skipped
@@ -547,7 +547,7 @@ jobs:
             *) test "$MUTANTS_RESULT" = success ;;
           esac
 
-  # DEC-1006 item 5. The nightly dispatches this workflow on main, where `select` has no diff base
+  # DEC-1190 item 5. The nightly dispatches this workflow on main, where `select` has no diff base
   # and selects everything; when that run fails, this opens an issue naming only the run and the
   # verdicts, never a log line. A run cancelled by a newer dispatch reports nothing, nor does a
   # dispatch on any other branch.
@@ -566,4 +566,4 @@ jobs:
           FULL_RESULT: ${{ needs.full.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly: ci on main failed at ${GITHUB_SHA}" -f body="The nightly ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1006)"
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly: ci on main failed at ${GITHUB_SHA}" -f body="The nightly ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190)"

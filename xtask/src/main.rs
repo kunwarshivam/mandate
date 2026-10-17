@@ -23,9 +23,9 @@ commands:
                         postgres | mutants | schema-mutants | sweep; or one part of test:
                         test-nextest | test-doc | test-rh-sim | test-python. Tests, pending
                         tests, doctests, the rehearsal and Postgres runs and `portable` run over
-                        the crates the diff selects (DEC-1006); with no diff base, all of them
+                        the crates the diff selects (DEC-1190); with no diff base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
-  ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1006)
+  ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
@@ -311,7 +311,7 @@ fn ci(job: &str) -> Result<()> {
 fn portable() -> Result<()> {
     if !selection()?.runner() {
         eprintln!(
-            "    portable: the diff reaches no crate {RUNNER_CRATE} is built from (DEC-1006)"
+            "    portable: the diff reaches no crate {RUNNER_CRATE} is built from (DEC-1190)"
         );
         return Ok(());
     }
@@ -344,14 +344,14 @@ fn portable() -> Result<()> {
     )
 }
 
-/// One of [`TEST_PARTS`], over the crates the diff selects (DEC-1006); `partition`, a `K/N`
+/// One of [`TEST_PARTS`], over the crates the diff selects (DEC-1190); `partition`, a `K/N`
 /// counted from 1, runs only the nextest run's `K`th of `N` slices (DEC-871).
 fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     match part {
         "test-nextest" => {
             let selected = selection()?;
             if !selected.tests() {
-                eprintln!("    test-nextest: no crate affected (DEC-1006)");
+                eprintln!("    test-nextest: no crate affected (DEC-1190)");
                 return Ok(());
             }
             let args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
@@ -370,7 +370,7 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
                 .map(|p| p.name.as_str())
                 .collect();
             if libraries.is_empty() {
-                eprintln!("    test-doc: no selected crate has a library (DEC-1006)");
+                eprintln!("    test-doc: no selected crate has a library (DEC-1190)");
                 return Ok(());
             }
             let mut args = vec!["test", "--locked", "--doc"];
@@ -390,7 +390,7 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
 }
 
 /// The `--package` list a scoped run passes, or `None` for a `--workspace` run, when the
-/// selection is everything (DEC-1006).
+/// selection is everything (DEC-1190).
 fn scoped_packages(selected: &Selection) -> Option<Vec<String>> {
     selected
         .everything
@@ -405,7 +405,7 @@ fn scoped_packages(selected: &Selection) -> Option<Vec<String>> {
 fn rh_sim_tests() -> Result<()> {
     let tested = selection()?.among(&REHEARSAL_TESTED);
     if tested.is_empty() {
-        eprintln!("    test-rh-sim: no crate declaring `{REHEARSAL}` is affected (DEC-1006)");
+        eprintln!("    test-rh-sim: no crate declaring `{REHEARSAL}` is affected (DEC-1190)");
         return Ok(());
     }
     sh(
@@ -474,7 +474,7 @@ fn rehearsal_runs(
 const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
 /// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
-/// there are none to scope it to (DEC-1006): every test of them or, with `partition` (`K/N`, `1
+/// there are none to scope it to (DEC-1190): every test of them or, with `partition` (`K/N`, `1
 /// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
 /// test once (DEC-871).
 fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
@@ -521,7 +521,7 @@ fn postgres() -> Result<()> {
     }
     let tested = selection()?.among(&PG_TESTED);
     if tested.is_empty() {
-        eprintln!("    postgres: no crate with Postgres tests is affected (DEC-1006)");
+        eprintln!("    postgres: no crate with Postgres tests is affected (DEC-1190)");
         return Ok(());
     }
     let mut args = vec!["nextest", "run"];
@@ -541,7 +541,7 @@ fn postgres() -> Result<()> {
     Ok(())
 }
 
-/// The paths whose change selects every crate and every job (DEC-1006 item 3): the workspace's
+/// The paths whose change selects every crate and every job (DEC-1190 item 3): the workspace's
 /// build inputs, its tool configuration, CI itself, and xtask, which runs every check. Every
 /// `Cargo.toml` is one too, wherever it is ([`selects_everything`]): a manifest can change a
 /// feature or a dependency other crates are built with. An entry ending in `/` is a directory.
@@ -559,7 +559,7 @@ const EVERY_JOB_PATHS: [&str; 11] = [
     ".python-version",
 ];
 
-/// The paths outside every crate that the selection knows (DEC-1006 item 3): each is read by a
+/// The paths outside every crate that the selection knows (DEC-1190 item 3): each is read by a
 /// job that runs on every change outside the documentation (`fast-lint`, `full-checks`,
 /// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
 /// Markdown anywhere is known too. A changed path outside every crate and outside this list
@@ -586,7 +586,7 @@ const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
 ];
 
 /// The paths the workspace API schema checkers and their mutation sweep read besides `schemas/`
-/// (DEC-1006 item 2): every spec, `check_planned.py` globbing `docs/specs/*.md` (the journal
+/// (DEC-1190 item 2): every spec, `check_planned.py` globbing `docs/specs/*.md` (the journal
 /// spec among them), the backlog it checks planned operations against, and the requirements file
 /// that pins their Python environment ([`pinned_python`]).
 const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
@@ -602,7 +602,7 @@ const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
 const RUNNER_CRATE: &str = "mandate-paper";
 
 /// The binaries a test runs by a path an environment variable names, each with the crate that
-/// builds it (DEC-1006 item 2): `mandate-mcp`'s rehearsal tests run the simulator `test-rh-sim`
+/// builds it (DEC-1190 item 2): `mandate-mcp`'s rehearsal tests run the simulator `test-rh-sim`
 /// builds (DEC-922 item 3) without depending on its crate. A crate whose sources name the variable
 /// is selected whenever the binary's crate is, as if it depended on it.
 const BINARY_COUPLINGS: [(&str, &str); 1] = [(RH_SIM_BIN_ENV, "mandate-rh-sim")];
@@ -627,7 +627,7 @@ fn path_under(path: &str, entry: &str) -> bool {
     }
 }
 
-/// Whether a change to `path` selects every crate and every job (DEC-1006 item 3).
+/// Whether a change to `path` selects every crate and every job (DEC-1190 item 3).
 fn selects_everything(path: &str) -> bool {
     EVERY_JOB_PATHS.iter().any(|entry| path_under(path, entry))
         || path == "Cargo.toml"
@@ -651,7 +651,7 @@ fn is_docs_path(path: &str) -> bool {
         || path.starts_with("LICENSE")
 }
 
-/// The workspace's crates as the selection reads them (DEC-1006 item 2).
+/// The workspace's crates as the selection reads them (DEC-1190 item 2).
 #[derive(Clone, Debug, Default)]
 struct CrateGraph {
     /// Each member's directory, relative to the repository root.
@@ -732,7 +732,7 @@ fn owning_crate<'g>(graph: &'g CrateGraph, path: &str) -> Option<&'g str> {
         .map(|(name, _)| name.as_str())
 }
 
-/// The repository paths each member's Rust sources name (DEC-1006 item 2): every piece of every
+/// The repository paths each member's Rust sources name (DEC-1190 item 2): every piece of every
 /// string literal that could be a path, a leading `/` dropped (`concat!(env!(..), "/../..")`),
 /// resolved against the file's directory (`include_str!`), the crate's directory
 /// (`CARGO_MANIFEST_DIR`), `crates/` (a sibling crate named from a computed `crates` directory)
@@ -838,7 +838,7 @@ fn references_path(reference: &str, path: &str) -> bool {
     }
 }
 
-/// What one diff runs (DEC-1006): the crates whose tests, doctests, pending tests and rehearsal
+/// What one diff runs (DEC-1190): the crates whose tests, doctests, pending tests and rehearsal
 /// builds run, and whether the jobs scoped by path run at all. Lint, the spec guard and the
 /// mutation gate are not here: they run on every change as before.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -901,7 +901,7 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {}; \
-             schema-mutants {}; lint, the spec guard and mutants run as always (DEC-1006)",
+             schema-mutants {}; lint, the spec guard and mutants run as always (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
@@ -927,7 +927,7 @@ impl Selection {
     }
 }
 
-/// What the diff of `changed` paths runs (DEC-1006 items 2 and 3); `None` means there is no base
+/// What the diff of `changed` paths runs (DEC-1190 items 2 and 3); `None` means there is no base
 /// to compare against (a run on main, the nightly), which runs everything. When in doubt it
 /// selects more: a path it does not know, any build input, and a member turning on another
 /// member's feature all select everything.
@@ -1050,7 +1050,7 @@ fn selection() -> Result<Selection> {
 }
 
 /// `cargo xtask ci select`: the selection as `GITHUB_OUTPUT` lines on stdout, and as a table in
-/// the job's summary when GitHub gives it one (DEC-1006 item 4).
+/// the job's summary when GitHub gives it one (DEC-1190 item 4).
 fn ci_select() -> Result<()> {
     let selected = selection()?;
     print!("{}", selected.outputs());
@@ -1062,7 +1062,7 @@ fn ci_select() -> Result<()> {
             .context("opening the job summary")?;
         writeln!(
             file,
-            "### Affected-set selection (DEC-1006)\n\n{}\n",
+            "### Affected-set selection (DEC-1190)\n\n{}\n",
             selected.reasons()
         )?;
     }
@@ -3165,7 +3165,7 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// `web-e2e.yml`'s `node -p` probe prints the Playwright version from a `package.json`, and its
 /// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists. `nightly.yml`'s clock
 /// line writes the runner's time, in seconds, to the step's outputs for the sweep's rotation
-/// (DEC-1006 item 5).
+/// (DEC-1190 item 5).
 const READ_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/nightly.yml",
@@ -3214,7 +3214,7 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// so `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and `NODE_OPTIONS`, in any
 /// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums, the
 /// `MANDATE_*`, `*_RESULT` and `*_SELECTED` names, the selection's `REASONS`, and the failure
-/// reports' `RUN_URL` and `VERDICTS` (DEC-1006), `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
+/// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
 /// the telemetry switches, and `nightly.yml`'s service `POSTGRES_PASSWORD`.
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
@@ -6393,7 +6393,7 @@ fn gate_diff_of(
 /// it, so every line is an added line and every mutant the gate would make in it is in the diff.
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
-/// The diff of the nightly's whole-crate sweep (DEC-1006 item 5): every `.rs` file under a
+/// The diff of the nightly's whole-crate sweep (DEC-1190 item 5): every `.rs` file under a
 /// safety-critical crate's `src/`, as if each were new, through the same [`GateDiff`] the gate
 /// reads, so the sweep is the per-PR gate over a diff that touches everything.
 fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
@@ -6424,12 +6424,12 @@ fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
 }
 
 /// The mutants a shard of the whole-crate sweep tests at most, so a shard stays within ten
-/// minutes (DEC-1006 item 5): DEC-473 found fourteen or fifteen `mandate-executor` mutants a shard
+/// minutes (DEC-1190 item 5): DEC-473 found fourteen or fifteen `mandate-executor` mutants a shard
 /// reaching the cap and eight fitting. Slice sharding over `ceil(n / 8)` shards gives each shard
 /// `ceil(n / ceil(n / 8))` mutants, never more than this.
 const SWEEP_SHARD_MUTANTS: usize = 8;
 
-/// The fewest days one whole-crate sweep is spread over (DEC-1006 item 5): shard `k` runs on the
+/// The fewest days one whole-crate sweep is spread over (DEC-1190 item 5): shard `k` runs on the
 /// days whose index is `k` modulo the rotation, so every mutant is tested once a week, and a
 /// night's matrix leaves most of the shared runners to pull requests. [`SweepPlan::rotation_for`] lengthens it once a seventh would not fit one matrix.
 const SWEEP_ROTATION: u64 = 7;
@@ -6532,7 +6532,7 @@ fn sweep(root: &Path) -> Result<()> {
     sweep_scheduled(root, shard, planned)
 }
 
-/// One shard of the whole-crate sweep (DEC-1006 item 5): the gate over [`gate_diff_whole`], each
+/// One shard of the whole-crate sweep (DEC-1190 item 5): the gate over [`gate_diff_whole`], each
 /// shard judged by the tests of the crates its own mutants are in and their oracles, which is what
 /// the gate runs for a pull request touching only those crates.
 fn sweep_scheduled(root: &Path, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
@@ -7664,7 +7664,7 @@ fn pending_nextest(root: &Path, args: &[&str], build: BuildDir) -> Command {
 }
 
 /// Runs every test the working tree marks pending in `packages`, or in the whole workspace when
-/// there are none to scope it to (DEC-1006), and names each one that passes or does not run,
+/// there are none to scope it to (DEC-1190), and names each one that passes or does not run,
 /// building where `build` says. A behaviour-only row naming a test that is no longer pending is
 /// stale whichever packages run.
 fn pending_problems(root: &Path, build: BuildDir, scope: Option<&[String]>) -> Result<Vec<String>> {
@@ -7719,7 +7719,7 @@ fn pending_problems(root: &Path, build: BuildDir, scope: Option<&[String]>) -> R
     if let Some(scope) = scope {
         tests.retain(|test| scope.contains(&test.package));
         if tests.is_empty() {
-            eprintln!("    pending: no pending test in an affected crate (DEC-1006)");
+            eprintln!("    pending: no pending test in an affected crate (DEC-1190)");
             return Ok(stale);
         }
     }
@@ -12529,7 +12529,7 @@ mod tests {
 
     /// DEC-538's `full` verdict, run as GitHub runs it (`bash -e`) over every combination of the
     /// three jobs' results and the plan's count, against a truth table written out here: the
-    /// matrix's skip passes only beside a plan that succeeded and counted zero. DEC-1006 adds the
+    /// matrix's skip passes only beside a plan that succeeded and counted zero. DEC-1190 adds the
     /// selection: `full-checks` passes as skipped only when `select` did not select it, and a
     /// `full-checks` that ran when unselected, or a selection that failed, fails `full`.
     #[test]
@@ -12718,7 +12718,7 @@ mod tests {
     }
 
     /// DEC-610: a draft runs no `ci` job. `select`, `fast-lint` and the mutation plan are skipped
-    /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1006) and the matrix
+    /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
     /// report runs only on a dispatch on main, marking a pull request ready starts its run, and a
     /// newer push still cancels the older run of the same ref.
@@ -12925,7 +12925,7 @@ mod tests {
 
     /// DEC-964: the crates declaring both `live` and `rh-sim` are the runner alone, and CI's
     /// `fast-rh-sim-live` job runs each one's guarded tests in the `live,rh-sim` build, started
-    /// only when the selection takes the runner (DEC-1006), with read-only permissions and ten
+    /// only when the selection takes the runner (DEC-1190), with read-only permissions and ten
     /// minutes (DEC-464).
     #[test]
     fn the_rehearsal_job_tests_every_crate_declaring_live_and_rh_sim() -> Result<()> {
@@ -12960,7 +12960,7 @@ mod tests {
         assert_eq!(
             declaring,
             [RUNNER_CRATE],
-            "the job's switch is the runner's (DEC-1006)"
+            "the job's switch is the runner's (DEC-1190)"
         );
         for line in [
             "needs: select",
@@ -13117,7 +13117,7 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-871's `fast` verdict with DEC-1006's selection, run as GitHub runs it (`bash -e`):
+    /// DEC-871's `fast` verdict with DEC-1190's selection, run as GitHub runs it (`bash -e`):
     /// `select` and `fast-lint` must succeed, and each scoped part must have succeeded where its
     /// switch is `true` and been skipped where it is `false`; any other switch fails it. Each part
     /// is judged over every result and switch with the others valid, and 3000 seeded random
@@ -13315,7 +13315,7 @@ mod tests {
         Ok(())
     }
 
-    /// The jobs `select` scopes, each with the output that starts it (DEC-1006 item 2).
+    /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
     const SELECT_GATES: [(&str, &str); 7] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
@@ -13326,7 +13326,7 @@ mod tests {
         ("schema-mutants", "schema_mutants"),
     ];
 
-    /// DEC-1006 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
+    /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
     /// switch the selection prints, every scoped job needs it and starts only on its own switch,
     /// no other job follows it, and no scoped job keeps the documentation-only step it replaced.
     #[test]
@@ -13386,7 +13386,7 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-1006 item 5 in `nightly.yml`: it runs every night, dispatches `ci` on main (which then
+    /// DEC-1190 item 5 in `nightly.yml`: it runs every night, dispatches `ci` on main (which then
     /// selects everything and reports its own failure), sizes tonight's sweep from the plan and
     /// passes each shard its share, starts the database the gate's Postgres tests need, keeps
     /// every job within ten minutes (DEC-464), and opens an issue on any failed or cancelled job
@@ -13501,7 +13501,7 @@ mod tests {
         Ok(())
     }
 
-    /// A small workspace for the selection's tests (DEC-1006): `mandate-num` at the bottom,
+    /// A small workspace for the selection's tests (DEC-1190): `mandate-num` at the bottom,
     /// `mandate-risk` (safety-critical) on it, `mandate-executor` on that, the runner on the
     /// executor, `mandate-identity` on `mandate-num` alone, and `mandate-canon` on nothing.
     fn sample_graph() -> CrateGraph {
@@ -13547,7 +13547,7 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
-    /// DEC-1006 items 2 and 3 over sample diffs: each diff's selected crates and scoped jobs,
+    /// DEC-1190 items 2 and 3 over sample diffs: each diff's selected crates and scoped jobs,
     /// written out by hand. A safety-critical crate touched only through a dependency is
     /// selected; documentation selects only the crates whose sources read it; every build input,
     /// CI, xtask, any manifest and an unknown path select everything.
@@ -13924,7 +13924,7 @@ mod tests {
             .collect()
     }
 
-    /// DEC-1006 item 6, the property: over random workspaces and random changed crates, the
+    /// DEC-1190 item 6, the property: over random workspaces and random changed crates, the
     /// selected set always holds every crate that depends on a changed one, directly or not, and
     /// nothing else, by an oracle computed another way ([`reaching`]). The oracle is shown to
     /// catch a seeded selector that stops at direct dependents.
@@ -14026,7 +14026,7 @@ mod tests {
         );
     }
 
-    /// DEC-1006 item 2 on this repository: the cross-tree reads the selection depends on are found
+    /// DEC-1190 item 2 on this repository: the cross-tree reads the selection depends on are found
     /// by the scan, so a change to each file selects the crate that reads it, and no crate but
     /// xtask is taken to read every crate.
     #[test]
@@ -14175,7 +14175,7 @@ mod tests {
             .collect()
     }
 
-    /// DEC-1006 item 2, the scan's oracle: every tracked path outside a crate that any run of path
+    /// DEC-1190 item 2, the scan's oracle: every tracked path outside a crate that any run of path
     /// characters in the crate's text names, read without the tokenizer, is one the scan says the
     /// crate reads, so changing it selects the crate. The oracle is shown to catch a scan that
     /// misses a rooted `concat!` piece, the gap the independent review found in `mandate-notify`.
@@ -14206,7 +14206,7 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-1006 item 6, the seeded check: in a fixture workspace whose `gate` crate stands for a
+    /// DEC-1190 item 6, the seeded check: in a fixture workspace whose `gate` crate stands for a
     /// safety-critical one, a change to `dep` alone, which `gate` is built on, breaks `gate`'s
     /// test. The selection takes `gate`, and the scoped nextest run it drives fails on that test;
     /// a seeded selector that runs only the changed crate passes, so the check tells them apart.
@@ -14303,7 +14303,7 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-1006 item 5: the sweep's shards each hold at most [`SWEEP_SHARD_MUTANTS`] under slice
+    /// DEC-1190 item 5: the sweep's shards each hold at most [`SWEEP_SHARD_MUTANTS`] under slice
     /// sharding, the nights of one rotation together run every shard exactly once, no night needs
     /// more than one matrix, the rotation is a week until a seventh outgrows a matrix and longer
     /// after, and a night's outputs are the matrix GitHub reads.
@@ -14507,7 +14507,7 @@ mod tests {
         assert_eq!(
             checkouts.len(),
             11,
-            "one checkout in each source-reading job: `select` (DEC-1006), `fast-lint`, \
+            "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, and `schema-mutants`"
         );

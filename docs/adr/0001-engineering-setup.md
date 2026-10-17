@@ -32,8 +32,8 @@ repository stands today, so a reader does not take a planned item for a built on
   tests, doctests, rehearsal and Postgres runs cover the crates the diff affects, and `fast-python`,
   `fast-portable`, `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when the diff
   needs them; lint, the spec guard and mutants run as before
-  ([DEC-1006](../project/decisions/DEC-1006.md)). The `nightly` workflow runs every night and on
-  demand (DEC-1006, weekly from DEC-256): it dispatches `ci` on main, which selects everything,
+  ([DEC-1190](../project/decisions/DEC-1190.md)). The `nightly` workflow runs every night and on
+  demand (DEC-1190, weekly from DEC-256): it dispatches `ci` on main, which selects everything,
   and runs Postgres 17, ten seeds of `reference/mandate/fuzz.py`, `reference/mandate/mutants.py`,
   a full-history gitleaks scan, and a seventh of the whole-crate mutation sweep of the
   safety-critical crates. cargo-fuzz, the differential run against `mandate-cli oracle`,

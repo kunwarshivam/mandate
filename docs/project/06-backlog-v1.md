@@ -115,7 +115,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   in a follow-up story, so the job starts green.
 - **E1-8 (Must)** As a builder sharing GitHub's free runners with sixteen others, I want each
   PR's CI scoped to what its diff can break, so that finished PRs stop waiting 30 to 60 minutes in
-  the queue without any gate weakening (the founder's "Gate by risk", 2026-10-17; DEC-1006).
+  the queue without any gate weakening (the founder's "Gate by risk", 2026-10-17; DEC-1190).
   *Accepted when:* `cargo xtask ci select` computes the changed crates, the crates naming a
   changed path in their sources, and every reverse dependent of those; tests, doctests, pending
   tests and the rehearsal and Postgres runs cover that set; `fast-python`, `fast-portable`,
