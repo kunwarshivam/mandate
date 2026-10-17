@@ -111,6 +111,14 @@ fn main() -> anyhow::Result<()> {
             workspace::open(&args, now()?, &mut io::stdout().lock())?;
             Ok(())
         }
+        Command::Workspace(WorkspaceCommand::Found(args)) => {
+            let mut last = now()?.at;
+            let mut clock = move || {
+                last = now().map_or(last, |n| n.at);
+                last
+            };
+            workspace::found(&args, &mut clock, &mut io::stdout().lock()).map(drop)
+        }
         Command::Connection(ConnectionCommand::Record(args)) => {
             connection::run(&args, now()?, &mut io::stdout().lock()).map(drop)
         }

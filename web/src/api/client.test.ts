@@ -312,8 +312,11 @@ describe("no order ticket (DEC-528)", () => {
    */
   const EXPORTS: Record<string, string[]> = {
     client: ["CSRF_HEADER", "OPERATIONS", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
+    commands: ["UI_BUILD", "prepareApprovalResponse", "prepareOwnerCommand", "recordRef"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["createMockServer"],
+    operations: ["WEB_OPERATIONS", "operationFor"],
+    reads: ["emptyWorkspace", "loadWorkspace"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
   };
   const MODULES = Object.fromEntries(
