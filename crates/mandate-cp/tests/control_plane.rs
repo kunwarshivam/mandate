@@ -689,3 +689,87 @@ proptest! {
         prop_assert_eq!(plane.heartbeat(&genuine, at(0)), Ok(()));
     }
 }
+
+#[test]
+fn the_role_names_are_identity_specs() {
+    let names = Role::ALL.map(role_name);
+    assert_eq!(
+        names,
+        [
+            "org_owner",
+            "org_admin",
+            "billing_admin",
+            "workspace_admin",
+            "operator",
+            "approver",
+            "viewer",
+            "auditor"
+        ]
+    );
+}
+
+/// The bounds on a call's body, at their edges, and every health a component reports.
+#[test]
+fn a_body_is_bounded_and_every_health_is_read() {
+    let mut plane = enrolled();
+    let components = |n: usize, health: &str| -> Vec<u8> {
+        let items: Vec<String> = (0..n)
+            .map(|i| format!(r#"{{"name":"c{i}","version":"1","health":"{health}"}}"#))
+            .collect();
+        canonical(&format!(
+            r#"{{"release_digest":"{}","components":[{}]}}"#,
+            "a".repeat(64),
+            items.join(",")
+        ))
+    };
+    let full = signed(
+        CELL,
+        &pair(7),
+        Operation::Heartbeat,
+        &components(mandate_cp::MAX_COMPONENTS, "down"),
+        at(1),
+    );
+    assert_eq!(plane.heartbeat(&full, at(1)), Ok(()));
+    let row = plane
+        .fleet(at(1))
+        .into_iter()
+        .find(|r| r.deployment_id == id(CELL))
+        .unwrap();
+    assert_eq!(row.health, Some(Health::Down));
+    let over = signed(
+        CELL,
+        &pair(7),
+        Operation::Heartbeat,
+        &components(mandate_cp::MAX_COMPONENTS + 1, "ok"),
+        at(2),
+    );
+    assert_eq!(plane.heartbeat(&over, at(2)), Err(Refused::Malformed));
+    let members = |n: usize| -> Vec<u8> {
+        let items: Vec<String> = (0..n)
+            .map(|i| {
+                format!(
+                    r#"{{"user_id":"u{i}","workspace_id":"ws_a","role":"viewer","state":"active"}}"#
+                )
+            })
+            .collect();
+        canonical(&format!(r#"{{"members":[{}]}}"#, items.join(",")))
+    };
+    let most = signed(
+        CELL,
+        &pair(7),
+        Operation::Directory,
+        &members(mandate_cp::MAX_MEMBERS),
+        at(3),
+    );
+    assert_eq!(plane.sync_directory(&most, at(3)), Ok(()));
+    let more = signed(
+        CELL,
+        &pair(7),
+        Operation::Directory,
+        &members(mandate_cp::MAX_MEMBERS + 1),
+        at(4),
+    );
+    assert_eq!(plane.sync_directory(&more, at(4)), Err(Refused::Malformed));
+    assert_eq!(mandate_cp::MAX_COMPONENTS, 64);
+    assert_eq!(mandate_cp::MAX_MEMBERS, 10_000);
+}
