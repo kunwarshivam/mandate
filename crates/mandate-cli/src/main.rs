@@ -6,6 +6,7 @@ use clap::Parser;
 use mandate_cli::artifact::ArtifactCommand;
 use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
+use mandate_cli::db::DbCommand;
 use mandate_cli::gestures::{AgentCommand, VersionCommand};
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
@@ -15,7 +16,7 @@ use mandate_cli::sim_clock::from_env;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, connection, download, gestures, inbox, inspect, journal, register,
+    Cli, Command, artifact, connection, db, download, gestures, inbox, inspect, journal, register,
     vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
@@ -151,6 +152,10 @@ fn main() -> anyhow::Result<()> {
                 &mut io::stdin().lock(),
                 &mut io::stdout().lock(),
             )
+        }
+        Command::Db(DbCommand::Migrate(args)) => {
+            db::migrate(&args, &mut io::stdout().lock())?;
+            Ok(())
         }
     }
 }

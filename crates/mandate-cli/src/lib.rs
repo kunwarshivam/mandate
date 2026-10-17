@@ -13,7 +13,8 @@
 //! it (E2-2); `journal verify` runs journal spec §11 over an exported journal and its artifact
 //! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4); `journal
 //! verify-cold` runs the cold store's per-range checks over a directory of segments and
-//! manifests (E5-8). `approvals` and
+//! manifests (E5-8). `db migrate` applies the journal's roles, schema and migrations as the
+//! deploy step before any process starts (E21-50). `approvals` and
 //! `agent` are M7's owner control: the inbox, the owner's answers, and the owner's commands, each
 //! committed to the workspace control stream (E8-1 to E8-3). Their `clap` commands land once
 //! `mandate-journal` registers the control stream's schemas, without which a real journal refuses
@@ -28,6 +29,7 @@ pub mod artifact;
 pub mod config;
 pub mod connection;
 pub mod control;
+pub mod db;
 pub mod deploy;
 pub mod download;
 pub mod gestures;
@@ -89,4 +91,7 @@ pub enum Command {
     /// Import a platform secret into the demo host's local vault, from stdin only.
     #[command(subcommand)]
     Vault(vault::VaultCommand),
+    /// Apply the journal's roles, schema and migrations: the deploy step before any process starts.
+    #[command(subcommand)]
+    Db(db::DbCommand),
 }
