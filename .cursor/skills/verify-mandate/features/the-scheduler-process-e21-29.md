@@ -8,8 +8,8 @@
   the last plus a second and the host clock's second; the first tick of each trading date),
   `src/measure.rs` (`Measurement::judge`: the median by magnitude of the answering servers, out of
   tolerance when none answered; `due`: at start, before the regular session, every five minutes),
-  `src/records.rs` (the five records as drafts with deterministic ids), `src/store.rs`
-  (`ClockStore` over `MemoryJournal` and Postgres), `src/scheduler.rs` (`Scheduler`: one writer
+  `src/records.rs` (the five records as drafts with deterministic ids, through `mandate-store`'s
+  shared envelope; its `Store` is the journal port, over `MemoryJournal` and Postgres), `src/scheduler.rs` (`Scheduler`: one writer
   epoch, replay, a batch in doubt retried as the same bytes, `mandate-process`'s lifecycle),
   `src/sntp.rs` (one SNTP request per server over UDP), and the `mandate-scheduler` binary (`run`,
   and `probe` for `exec` probes; SIGTERM drains). The closed records are registered in
