@@ -130,5 +130,159 @@
     "set": {
       "/approvals/0/state": "mutant_value"
     }
+  },
+  {
+    "label": "a missing order",
+    "remove": [
+      "/approvals/0/order"
+    ]
+  },
+  {
+    "label": "an order missing instrument",
+    "remove": [
+      "/approvals/0/order/instrument"
+    ]
+  },
+  {
+    "label": "an order missing asset_class",
+    "remove": [
+      "/approvals/0/order/asset_class"
+    ]
+  },
+  {
+    "label": "an order missing side",
+    "remove": [
+      "/approvals/0/order/side"
+    ]
+  },
+  {
+    "label": "an order missing qty",
+    "remove": [
+      "/approvals/0/order/qty"
+    ]
+  },
+  {
+    "label": "an order missing limit",
+    "remove": [
+      "/approvals/0/order/limit"
+    ]
+  },
+  {
+    "label": "an order missing order_usd",
+    "remove": [
+      "/approvals/0/order/order_usd"
+    ]
+  },
+  {
+    "label": "an order missing purpose",
+    "remove": [
+      "/approvals/0/order/purpose"
+    ]
+  },
+  {
+    "label": "an order missing tif",
+    "remove": [
+      "/approvals/0/order/tif"
+    ]
+  },
+  {
+    "label": "an order missing protection",
+    "remove": [
+      "/approvals/0/order/protection"
+    ]
+  },
+  {
+    "label": "an unknown order member",
+    "set": {
+      "/approvals/0/order/extra": 1
+    }
+  },
+  {
+    "label": "an order asset class outside the closed set",
+    "set": {
+      "/approvals/0/order/asset_class": "mutant_value"
+    }
+  },
+  {
+    "label": "an order side outside the closed set",
+    "set": {
+      "/approvals/0/order/side": "mutant_value"
+    }
+  },
+  {
+    "label": "a sell order",
+    "set": {
+      "/approvals/0/order/side": "sell"
+    }
+  },
+  {
+    "label": "an order purpose outside the closed set",
+    "set": {
+      "/approvals/0/order/purpose": "mutant_value"
+    }
+  },
+  {
+    "label": "a time in force outside the closed set",
+    "set": {
+      "/approvals/0/order/tif": "mutant_value"
+    }
+  },
+  {
+    "label": "an order quantity that is a number",
+    "set": {
+      "/approvals/0/order/qty": 3
+    }
+  },
+  {
+    "label": "an empty order instrument",
+    "set": {
+      "/approvals/0/order/instrument": ""
+    }
+  },
+  {
+    "label": "an order instrument of 201 characters",
+    "set": {
+      "/approvals/0/order/instrument": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "label": "an unknown protection member",
+    "set": {
+      "/approvals/0/order/protection/extra": 1
+    }
+  },
+  {
+    "label": "protection without a stop",
+    "set": {
+      "/approvals/0/order/protection": {
+        "take_profit": null
+      }
+    }
+  },
+  {
+    "label": "protection without a take profit",
+    "set": {
+      "/approvals/0/order/protection": {
+        "stop": "95"
+      }
+    }
+  },
+  {
+    "label": "a take profit that is a number",
+    "set": {
+      "/approvals/0/order/protection/take_profit": 110
+    }
+  },
+  {
+    "label": "protection that is a string",
+    "set": {
+      "/approvals/0/order/protection": "none"
+    }
+  },
+  {
+    "label": "an order that is a string",
+    "set": {
+      "/approvals/0/order": "x"
+    }
   }
 ]

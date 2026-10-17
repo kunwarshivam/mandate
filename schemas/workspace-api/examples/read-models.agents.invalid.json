@@ -148,5 +148,29 @@
     "set": {
       "/agents/0/environment": "mutant_value"
     }
+  },
+  {
+    "label": "a list row with positions",
+    "set": {
+      "/agents/0/positions": []
+    }
+  },
+  {
+    "label": "a list row missing label",
+    "remove": [
+      "/agents/0/label"
+    ]
+  },
+  {
+    "label": "a list row missing mandate",
+    "remove": [
+      "/agents/0/mandate"
+    ]
+  },
+  {
+    "label": "an unknown list row member",
+    "set": {
+      "/agents/0/extra": 1
+    }
   }
 ]

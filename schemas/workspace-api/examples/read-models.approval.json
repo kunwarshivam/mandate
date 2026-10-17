@@ -27,6 +27,20 @@
       "action": {
         "side": "buy"
       }
+    },
+    "order": {
+      "instrument": "b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081",
+      "asset_class": "us_equity",
+      "side": "buy",
+      "qty": "3",
+      "limit": "101.5",
+      "order_usd": "304.5",
+      "purpose": "open",
+      "tif": "day",
+      "protection": {
+        "stop": "95",
+        "take_profit": null
+      }
     }
   }
 }

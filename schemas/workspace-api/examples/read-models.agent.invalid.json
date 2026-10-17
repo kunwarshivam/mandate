@@ -142,5 +142,252 @@
     "set": {
       "/agent/environment": "mutant_value"
     }
+  },
+  {
+    "label": "a missing label",
+    "remove": [
+      "/agent/label"
+    ]
+  },
+  {
+    "label": "a missing mandate",
+    "remove": [
+      "/agent/mandate"
+    ]
+  },
+  {
+    "label": "a missing positions",
+    "remove": [
+      "/agent/positions"
+    ]
+  },
+  {
+    "label": "a mandate summary missing allocation_usd",
+    "remove": [
+      "/agent/mandate/allocation_usd"
+    ]
+  },
+  {
+    "label": "a mandate summary missing max_loss_from_allocation",
+    "remove": [
+      "/agent/mandate/max_loss_from_allocation"
+    ]
+  },
+  {
+    "label": "a mandate summary missing goal",
+    "remove": [
+      "/agent/mandate/goal"
+    ]
+  },
+  {
+    "label": "a mandate summary missing goal_end_date",
+    "remove": [
+      "/agent/mandate/goal_end_date"
+    ]
+  },
+  {
+    "label": "a mandate summary missing asset_classes",
+    "remove": [
+      "/agent/mandate/asset_classes"
+    ]
+  },
+  {
+    "label": "a mandate summary missing max_position_usd",
+    "remove": [
+      "/agent/mandate/max_position_usd"
+    ]
+  },
+  {
+    "label": "a mandate summary missing max_order_usd",
+    "remove": [
+      "/agent/mandate/max_order_usd"
+    ]
+  },
+  {
+    "label": "a mandate summary missing max_orders_per_day",
+    "remove": [
+      "/agent/mandate/max_orders_per_day"
+    ]
+  },
+  {
+    "label": "a mandate summary missing max_daily_loss",
+    "remove": [
+      "/agent/mandate/max_daily_loss"
+    ]
+  },
+  {
+    "label": "a mandate summary missing max_drawdown",
+    "remove": [
+      "/agent/mandate/max_drawdown"
+    ]
+  },
+  {
+    "label": "a position missing instrument",
+    "remove": [
+      "/agent/positions/0/instrument"
+    ]
+  },
+  {
+    "label": "a position missing qty",
+    "remove": [
+      "/agent/positions/0/qty"
+    ]
+  },
+  {
+    "label": "a position missing broker_qty",
+    "remove": [
+      "/agent/positions/0/broker_qty"
+    ]
+  },
+  {
+    "label": "a position missing mismatch",
+    "remove": [
+      "/agent/positions/0/mismatch"
+    ]
+  },
+  {
+    "label": "a position missing observed_at",
+    "remove": [
+      "/agent/positions/0/observed_at"
+    ]
+  },
+  {
+    "label": "a label outside the mandate name's pattern",
+    "set": {
+      "/agent/label": "Momentum SPY"
+    }
+  },
+  {
+    "label": "a label that is a number",
+    "set": {
+      "/agent/label": 7
+    }
+  },
+  {
+    "label": "an unknown mandate summary member",
+    "set": {
+      "/agent/mandate/extra": 1
+    }
+  },
+  {
+    "label": "an unknown position member",
+    "set": {
+      "/agent/positions/0/extra": 1
+    }
+  },
+  {
+    "label": "goal outside the closed set",
+    "set": {
+      "/agent/mandate/goal": "mutant_value"
+    }
+  },
+  {
+    "label": "an asset class outside the closed set",
+    "set": {
+      "/agent/mandate/asset_classes": [
+        "mutant_value"
+      ]
+    }
+  },
+  {
+    "label": "no asset class",
+    "set": {
+      "/agent/mandate/asset_classes": []
+    }
+  },
+  {
+    "label": "an asset class twice",
+    "set": {
+      "/agent/mandate/asset_classes": [
+        "us_equity",
+        "us_equity"
+      ]
+    }
+  },
+  {
+    "label": "zero orders per day",
+    "set": {
+      "/agent/mandate/max_orders_per_day": 0
+    }
+  },
+  {
+    "label": "orders per day as a string",
+    "set": {
+      "/agent/mandate/max_orders_per_day": "20"
+    }
+  },
+  {
+    "label": "a goal end date in month 13",
+    "set": {
+      "/agent/mandate/goal_end_date": "2026-13-01"
+    }
+  },
+  {
+    "label": "a goal end date that is a number",
+    "set": {
+      "/agent/mandate/goal_end_date": 5
+    }
+  },
+  {
+    "label": "an allocation that is a number",
+    "set": {
+      "/agent/mandate/allocation_usd": 5000
+    }
+  },
+  {
+    "label": "an empty mandate summary",
+    "set": {
+      "/agent/mandate": {}
+    }
+  },
+  {
+    "label": "a mandate summary that is a string",
+    "set": {
+      "/agent/mandate": "x"
+    }
+  },
+  {
+    "label": "an empty instrument",
+    "set": {
+      "/agent/positions/0/instrument": ""
+    }
+  },
+  {
+    "label": "an instrument of 201 characters",
+    "set": {
+      "/agent/positions/0/instrument": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "label": "a quantity that is a number",
+    "set": {
+      "/agent/positions/0/qty": 12
+    }
+  },
+  {
+    "label": "a mismatch that is a string",
+    "set": {
+      "/agent/positions/0/mismatch": "false"
+    }
+  },
+  {
+    "label": "an observation time without a time",
+    "set": {
+      "/agent/positions/0/observed_at": "2026-10-08"
+    }
+  },
+  {
+    "label": "positions that are a string",
+    "set": {
+      "/agent/positions": "none"
+    }
+  },
+  {
+    "label": "a position that is a number",
+    "set": {
+      "/agent/positions": [
+        1
+      ]
+    }
   }
 ]
