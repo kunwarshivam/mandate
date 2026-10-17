@@ -464,6 +464,7 @@ pub fn fee_config() -> &'static mandate_accounting::Config {
             taf_per_share: mandate_num::FeePerShare::parse("0.0002")
                 .unwrap_or_else(|e| panic!("{e}")),
             taf_cap: mandate_num::FeeCap::parse("9.79").unwrap_or_else(|e| panic!("{e}")),
+            fee_rounding: mandate_accounting::FeeRounding::DailyTotal,
             taf_cap_basis: mandate_accounting::TafCapBasis::PerExecution,
             cat_per_share: mandate_num::FeePerShare::parse("0.00001")
                 .unwrap_or_else(|e| panic!("{e}")),
@@ -533,6 +534,7 @@ pub fn broker_fill(
     BrokerFill {
         fill_id: FillId(id.to_owned()),
         client_order_id: client_order_id.map(str::to_owned),
+        broker_order_id: None,
         instrument: instrument(FixedInstruments::LIQUID_EQUITY),
         side: Side::Buy,
         qty: qty(quantity),

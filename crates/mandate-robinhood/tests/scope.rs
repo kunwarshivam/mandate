@@ -22,7 +22,7 @@ use mandate_executor::{
 };
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty};
-use mandate_robinhood::{AccountRead, RobinhoodConnector, RobinhoodError, Tools};
+use mandate_robinhood::{AccountRead, RobinhoodConnector, RobinhoodError, Tickers, Tools};
 use proptest::collection::vec;
 use proptest::prelude::any;
 use proptest::test_runner::{Config, TestRunner};
@@ -79,7 +79,10 @@ fn connector(answers: &[(&'static str, Value)]) -> (RobinhoodConnector<Scripted>
         answers,
         calls: Rc::clone(&calls),
     };
-    (RobinhoodConnector::new(tools, OURS.to_owned()), calls)
+    (
+        RobinhoodConnector::new(tools, OURS.to_owned(), tickers()),
+        calls,
+    )
 }
 
 fn ready<F: Future>(future: F) -> F::Output {
@@ -171,10 +174,10 @@ fn only_the_agentic_accounts_records_reach_the_caller() {
         ];
         let (c, calls) = connector(&script);
         let outcome = ready(c.read(read, &Map::new()));
-        let mut sent = vec![(CallClass::Ordinary, "get_accounts", json!({}))];
+        let mut sent = vec![(CallClass::Read, "get_accounts", json!({}))];
         let expected = expected_check(&list).map(|_| {
             sent.push((
-                CallClass::Ordinary,
+                CallClass::Read,
                 tool_of(read),
                 json!({"account_number": OURS}),
             ));
@@ -277,7 +280,7 @@ fn a_read_naming_another_account_is_refused_with_nothing_called() {
     let ours = object(json!({"account_number": OURS, "tag": 0}));
     assert_eq!(read, Ok(vec![ours]));
     let last = calls.borrow().last().cloned();
-    let sent = (CallClass::Ordinary, "get_equity_orders", filters.into());
+    let sent = (CallClass::Read, "get_equity_orders", filters.into());
     assert_eq!(last, Some(sent), "the recorded account, named once");
 }
 
@@ -327,7 +330,7 @@ fn an_answer_that_cannot_be_attributed_refuses_the_whole_read() {
 #[test]
 fn a_failed_account_check_holds_no_exit_on_the_agentic_account() {
     let order = json!({"id": "rh-1", "state": "confirmed", "quantity": "2",
-        "filled_quantity": "0", "limit_price": "475", "stop_price": null});
+        "filled_quantity": "0", "limit_price": "475", "stop_price": null, "symbol": "SPY"});
     let mut cancelled = order.clone();
     cancelled["state"] = json!("cancelled");
     let script = [
@@ -431,7 +434,7 @@ fn every_read_checks_the_account_list_afresh() {
         lists: RefCell::new(lists),
         calls: Rc::clone(&calls),
     };
-    let c = RobinhoodConnector::new(tools, OURS.to_owned());
+    let c = RobinhoodConnector::new(tools, OURS.to_owned(), tickers());
     assert_eq!(
         ready(c.read(AccountRead::Positions, &Map::new())),
         Ok(vec![])
@@ -492,7 +495,7 @@ fn a_shorter_prefix_or_an_empty_number_is_a_near_miss_never_another_account() {
             unreadable(&outcome, &format!("{read:?} record {named:?}"));
             let sent = calls.borrow().last().cloned();
             let exact = json!({ "account_number": OURS });
-            let expected = (CallClass::Ordinary, tool_of(read), exact);
+            let expected = (CallClass::Read, tool_of(read), exact);
             assert_eq!(
                 sent,
                 Some(expected),
@@ -552,7 +555,7 @@ fn every_listed_filter_key_reaches_its_tool_as_given() {
         assert_eq!(outcome, Ok(vec![ours]), "{read:?}");
         filters.insert("account_number".to_owned(), json!(OURS));
         let sent = calls.borrow().last().cloned();
-        let expected = (CallClass::Ordinary, tool_of(read), Value::Object(filters));
+        let expected = (CallClass::Read, tool_of(read), Value::Object(filters));
         assert_eq!(sent, Some(expected), "{read:?}");
     }
 }
@@ -624,4 +627,10 @@ fn the_one_member_envelope_check_is_the_preflights_not_the_reads() {
         &sole,
         "a preflight read refuses an envelope holding more than its records member",
     );
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }

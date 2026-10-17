@@ -1023,6 +1023,10 @@ impl Pause for WaitClock {
     async fn pause(&self, duration: Duration) {
         let paused = self.waited.get() + duration.as_secs();
         assert!(paused < 3_600, "the grant wait ran past an hour");
+        assert!(
+            self.wakes.get() < 1_000,
+            "the grant wait paused without end"
+        );
         self.wakes.set(self.wakes.get() + 1);
         self.waited.set(paused);
     }
@@ -1106,6 +1110,36 @@ fn the_grant_wait_rereads_the_control_stream_per_wake() {
     );
 }
 
+/// DEC-949 item 2: the wait's last pause is cut to the ask's deadline, so its last read is at the
+/// deadline itself — 300 s, 300 s, 300 s, then 100 s — and denies there.
+#[test]
+fn the_grant_wait_pauses_no_later_than_the_deadline() {
+    let journal = ask_row(1, APPROVAL, DEADLINE_S, &bound_order_hash());
+    let reads = Rc::new(Cell::new(0_u64));
+    let counted = Rc::clone(&reads);
+    let unanswered = WakeRead {
+        agent: vec![journal.clone()],
+        control: Vec::new(),
+    };
+    let source = move || {
+        counted.set(counted.get() + 1);
+        Ok(unanswered.clone())
+    };
+    let clock = WaitClock::at(NOW_S);
+    let waits = Rc::clone(&clock.wakes);
+    let denied = wait_for_the_grant(&[journal], source, &clock, Duration::from_secs(300));
+    assert!(
+        matches!(denied, Err(PaperError::Grant(GrantRefusal::TimedOut))),
+        "{denied:?}"
+    );
+    assert_eq!((reads.get(), waits.get()), (5, 4));
+    assert_eq!(
+        clock.now().secs(),
+        DEADLINE_S,
+        "the last read is at the deadline"
+    );
+}
+
 /// #1311's review directive: the call order — DEC-529 item 12's "the collar and the risk mark
 /// use Robinhood's own quote … which must agree with Alpaca's IEX quote within the collar or
 /// the run refuses" through the frame the opening's submit waits on (DEC-914 items 3 and 7; the
@@ -1153,11 +1187,13 @@ fn the_opening_leaves_only_after_the_collars_own_cross_check() {
 
 /// The asked cycle as the runner's frame sees it (DEC-940): the shell's session behind
 /// [`AskedCycle`], scripted here — the agent rows the ask is bound from, one [`Wake`] per wake in
-/// order (the last repeated once they run out), and every call logged with the clock it read.
+/// order (the last repeated once they run out), the deadline's wake (DEC-949: by default the
+/// bound ask's rows and an empty control stream), and every call logged with the clock it read.
 struct Cycle {
     agent: Vec<StoredEvent>,
     wakes: VecDeque<Result<Wake, ShellError>>,
     last: Option<Wake>,
+    expired: Option<ShellError>,
     log: Rc<RefCell<Vec<String>>>,
 }
 
@@ -1167,6 +1203,7 @@ impl Cycle {
             agent: vec![ask_row(1, APPROVAL, DEADLINE_S, &bound_order_hash())],
             wakes: VecDeque::from(wakes),
             last: None,
+            expired: None,
             log: Rc::clone(log),
         }
     }
@@ -1189,6 +1226,17 @@ impl AskedCycle for Cycle {
             }
             Some(Err(stop)) => Err(stop),
             None => self.last.clone().ok_or(ShellError::ProposalInvalid),
+        }
+    }
+
+    fn expire(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
+        self.log.borrow_mut().push(format!("expire@{}", now.secs()));
+        match self.expired.take() {
+            Some(stop) => Err(stop),
+            None => Ok(Wake {
+                agent: self.agent.clone(),
+                control: Vec::new(),
+            }),
         }
     }
 
@@ -1336,14 +1384,76 @@ fn a_raw_answer_alone_never_submits() {
     );
     assert_eq!(
         log.borrow().last().map(String::as_str),
-        Some("wake@1900:255.2"),
-        "the last wake is the last before the deadline: none at it hands the runtime a tick"
+        Some("expire@2000"),
+        "the wake at the deadline ticks the runtime, with no quote, so it closes the ask (DEC-949)"
     );
     assert_eq!(
         log.borrow().len(),
-        21,
-        "the binding read and ten wakes, each after its fresh quote"
+        22,
+        "the binding read, ten wakes each after its fresh quote, and the deadline's tick"
     );
+}
+
+/// DEC-949 item 2: an interval that does not divide the time left still ticks the runtime at the
+/// deadline itself — the last pause is cut to it — never an interval past it.
+#[test]
+fn the_wait_ticks_the_runtime_at_the_deadline_not_past_it() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let unadmitted = wakes_to_the_grant().into_iter().take(2).collect();
+    let mut cycle = Cycle::of(unadmitted, &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(300),
+        logged_quotes(&log, &["255.2"]),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(left, Err(PaperError::Grant(GrantRefusal::TimedOut))),
+        "{left:?}"
+    );
+    let wakes: Vec<String> = log
+        .borrow()
+        .iter()
+        .filter(|call| call.starts_with("wake@") || call.starts_with("expire@"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        wakes,
+        [
+            "wake@1000:255.2",
+            "wake@1300:255.2",
+            "wake@1600:255.2",
+            "wake@1900:255.2",
+            "expire@2000"
+        ]
+    );
+}
+
+/// DEC-949 item 3: a deadline tick the shell refuses stops the wait with the shell's own stop,
+/// and nothing is checked or sent.
+#[test]
+fn a_refused_deadline_tick_stops_the_wait() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
+    cycle.expired = Some(ShellError::ReconciliationMismatch);
+    let clock = WaitClock::at(DEADLINE_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(
+            left,
+            Err(PaperError::Shell(ShellError::ReconciliationMismatch))
+        ),
+        "{left:?}"
+    );
+    assert_eq!(*log.borrow(), ["agent", "expire@2000"]);
 }
 
 /// DEC-529 item 12: a cross-check that refuses after the grant sends nothing.
@@ -1419,9 +1529,10 @@ fn a_refused_wake_stops_the_wait() {
     assert_eq!(*log.borrow(), ["agent", "quote", "wake@1000:255.2"]);
 }
 
-/// An ask already past its deadline when the wait binds it denies before any wake.
+/// DEC-949 item 1: an ask already at or past its deadline when the wait binds it ticks the
+/// runtime once, with no quote, so the runtime closes it, and denies; nothing is checked or sent.
 #[test]
-fn an_ask_past_its_deadline_never_wakes() {
+fn an_ask_past_its_deadline_ticks_the_runtime_once_and_denies() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
     let clock = WaitClock::at(DEADLINE_S);
@@ -1436,7 +1547,7 @@ fn an_ask_past_its_deadline_never_wakes() {
         matches!(left, Err(PaperError::Grant(GrantRefusal::TimedOut))),
         "{left:?}"
     );
-    assert_eq!(*log.borrow(), ["agent"]);
+    assert_eq!(*log.borrow(), ["agent", "expire@2000"]);
 }
 
 /// DEC-943 item 2: each wake hands the shell the mark of the quote its own fresh read returned,

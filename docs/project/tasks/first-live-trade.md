@@ -292,7 +292,8 @@ sees its output during the run (`AGENTS.md` rule 8).
 2. **Rehearsal (DEC-124).** Start `mandate-rh-sim`; open a live workspace on a separate journal
    (`mandate workspace open --environment live`, [DEC-952](../decisions/DEC-952.md)); run the
    connect check against the simulator (`mandate-paper --connect-check`, DEC-946) and record the
-   connection with the id it prints; register, confirm and deploy a rehearsal mandate, every
+   connection with the id it prints; register (the fee schedule is the live Robinhood one,
+   DEC-958), confirm and deploy a rehearsal mandate, every
    command with `--environment live`; run the whole flow, including the grant, the fill, the
    stop, and a restart that sends nothing; then `journal export` and `journal verify`: clean.
    `scripts/r0-rehearsal.sh` runs these steps ([r0-rehearsal.md](r0-rehearsal.md)).
@@ -300,7 +301,10 @@ sees its output during the run (`AGENTS.md` rule 8).
    is a cash account or has margin disabled. Open the live workspace, a workspace of its own and
    never a paper one (`mandate workspace open --environment live`, DEC-952); every later owner
    command names it with `--environment live`. Download and `inspect` the instrument's bars;
-   register the configuration with a dated ETP classification; run `mandate-paper
+   register the configuration with a dated ETP classification, and as the fee schedule the live
+   Robinhood one, `mandate config register --kind fee_config
+   config/fees/robinhood-live-2026-10-16.json` ([DEC-958](../decisions/DEC-958.md); a live run
+   refuses the paper-only one); run `mandate-paper
    --connect-check` with the account number typed into `MANDATE_RH_ACCOUNT_NUMBER`, and
    `connection record` the live connection with the event id it prints (DEC-946); create,
    confirm and deploy the mandate with `ask` for openings and `max_order_usd` covering one share.

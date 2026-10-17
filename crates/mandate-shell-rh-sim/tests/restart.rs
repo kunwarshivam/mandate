@@ -27,7 +27,7 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use common::wire::Wire;
-use common::{AGENTIC, NOT_AGENTIC, account as holder, price};
+use common::{AGENTIC, NOT_AGENTIC, account as holder, price, tickers};
 use mandate_alpaca::Exchange;
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_executor::{
@@ -130,7 +130,8 @@ fn bridge(
         line,
         placed: Cell::new(false),
     };
-    let robinhood = RobinhoodConnector::restore(tools, AGENTIC.to_owned(), records).unwrap();
+    let robinhood =
+        RobinhoodConnector::restore(tools, AGENTIC.to_owned(), tickers(), records).unwrap();
     let runtime = Builder::new_current_thread().build().unwrap();
     RobinhoodBridge::new(runtime, robinhood)
 }
@@ -162,16 +163,16 @@ impl Connector for Unbracketed {
 }
 
 /// The simulated broker at the first run's clock: one agentic account beside one that is not
-/// (DEC-875 item 1), SPY quoted at 655.20 in the regular session under the instrument id the run
-/// sends as its `symbol` (the connector sends the instrument id as it is), and, when `lose`, the answer to
-/// the next place lost.
+/// (DEC-875 item 1), SPY quoted at 655.20 in the regular session under its ticker, which the
+/// connector sends for the run's asset id (DEC-956 item 1), and, when `lose`, the answer to the
+/// next place lost.
 fn broker(lose: bool) -> Rc<SimServer> {
     let mut sim = Sim::new(vec![
         holder(AGENTIC, true, false),
         holder(NOT_AGENTIC, false, false),
     ])
     .unwrap();
-    sim.apply(Event::Quote(SPY.to_owned(), price("655.2")))
+    sim.apply(Event::Quote("SPY".to_owned(), price("655.2")))
         .unwrap();
     sim.apply(Event::Session(Session::Regular)).unwrap();
     sim.apply(Event::Clock(at(FIRST))).unwrap();
@@ -412,9 +413,10 @@ fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
 /// left, and journals its adoption as `OrderStateChanged` version 2 carrying the broker's
 /// `order_id`. The broker holds one order and saw one place: nothing was sent again. The
 /// reconciliation that follows reads the broker's working order, whose record carries no key of
-/// ours (U-R2), and stops the restart before its cycle, fail closed: today on a known defect,
-/// the executor's `ExternalActivityIngested` draft naming `instrument` where the journal's schema
-/// refuses it, which this test does not pin. The run is refused on such an account anyway
+/// ours (U-R2), and stops the restart before its cycle, fail closed: the order is marked
+/// `Unknown` again and the executor drafts `ExternalActivityIngested`, which has no registered
+/// schema, so the journal refuses it (DEC-956 item 5). Matching it by its journaled broker id is
+/// DEC-956 item 2's proposal, for the founder. The run is refused on such an account anyway
 /// (DEC-529 item 3, DEC-470 item 1).
 #[test]
 fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
@@ -426,6 +428,10 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
     let [order] = held.as_slice() else {
         panic!("the lost answer's order is the broker's only one: {held:?}")
     };
+    assert_eq!(
+        order.symbol, "SPY",
+        "Robinhood was sent the registered ticker, never the asset id (DEC-956 item 1)"
+    );
 
     let records = folded(&account_rows(&first));
     let restart = bridge(&server, Line::Up, &records);

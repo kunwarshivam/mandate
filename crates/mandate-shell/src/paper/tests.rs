@@ -8,7 +8,7 @@ use mandate_alpaca::{
 };
 use mandate_builder::buy_action;
 use mandate_canon::Digest;
-use mandate_domain::AssetId;
+use mandate_domain::{AssetId, Environment};
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
     BrokerAccount, BrokerOrder, BrokerPosition, FillConfigRefs, InstrumentSnapshot, MandateView,
@@ -24,15 +24,17 @@ use mandate_time::{Date, UtcNanos};
 
 use crate::Cause;
 use crate::control::{
-    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
-    confirmed_version,
+    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Origin, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_canon::to_canonical;
 use mandate_spec::context::Membership;
 use std::collections::BTreeMap;
 
 use super::artifacts::reference;
-use super::context::{GateQuote, PaperClock, TrustedPaperContext, protection_prices};
+use super::context::{
+    GateQuote, PaperClock, ReconcilingPaperContext, TrustedPaperContext, protection_prices,
+};
 use super::gate::{gate_mandate, gate_template};
 use super::{
     Artifacts, BrokerFacts, LiquidityFacts, MarketFacts, PaperFacts, load_contexts, robinhood_facts,
@@ -132,6 +134,10 @@ impl Deployed {
             seq: seq.saturating_add(1),
             event_type: event_type.to_owned(),
             payload: parsed,
+            origin: Origin {
+                stream_id: "ctl:ws_spy".to_owned(),
+                environment: Environment::Paper,
+            },
         });
         Ok(())
     }
@@ -559,6 +565,99 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         None,
         "another instrument's fill names none"
     );
+    Ok(())
+}
+
+/// DEC-955 item 5: the own-fill reconciliation's context answers the reviewed agent on the
+/// reviewed instrument as the trusted context does, names the registered fill configuration (or
+/// none when a reference is missing, which the journal refuses), and answers no binding request,
+/// so nothing it carries can let an order through.
+#[test]
+fn the_reconciling_context_names_the_fill_configuration_and_answers_no_gate_request()
+-> Result<(), String> {
+    let loaded = msft_deployment()?;
+    let refs = loaded.config_refs().clone();
+    let context = ReconcilingPaperContext {
+        agent: AGENT.to_owned(),
+        asset: OTHER_ASSET.to_owned(),
+        increment: loaded.instrument.increment,
+        config_refs: refs.clone(),
+    };
+    let ours = ExecutorAgentId(AGENT.to_owned());
+    let theirs = ExecutorAgentId("agent_other".to_owned());
+    let reviewed = symbol(OTHER_ASSET)?;
+    let other = symbol("SPY")?;
+    assert!(context.covers(&ours, &reviewed));
+    assert!(!context.covers(&theirs, &reviewed));
+    assert!(!context.covers(&ours, &other));
+    let version = refs
+        .mandate_version
+        .clone()
+        .ok_or("the registered mandate version")?;
+    assert_eq!(
+        context.version(&ours),
+        Some(mandate_executor::MandateVersion(version))
+    );
+    assert_eq!(context.version(&theirs), None);
+    assert_eq!(context.crypto_stop_limit_offset(&ours), None);
+    assert_eq!(context.asset_class(&reviewed), Some(AssetClass::UsEquity));
+    assert_eq!(context.asset_class(&other), None);
+    assert_eq!(
+        context.increment(&reviewed),
+        Some(mandate_num::ShareIncrement::Whole)
+    );
+    assert_eq!(context.increment(&other), None);
+    assert_eq!(context.exit_tier(&reviewed), None);
+    let (Some(fee), Some(calendar), Some(snapshot)) = (
+        refs.fee_config.clone(),
+        refs.trading_calendar.clone(),
+        refs.instrument_snapshot.clone(),
+    ) else {
+        return Err("the registered references".to_owned());
+    };
+    assert_eq!(
+        context.fill_refs(&reviewed),
+        Some(FillConfigRefs {
+            fee_config: fee,
+            settlement_calendar: calendar.clone(),
+            trading_calendar: calendar,
+            instrument_snapshot: snapshot,
+        })
+    );
+    assert_eq!(context.fill_refs(&other), None);
+    let missing: [fn(&mut mandate_executor::BindingGateConfigRefs); 3] = [
+        |refs| refs.fee_config = None,
+        |refs| refs.trading_calendar = None,
+        |refs| refs.instrument_snapshot = None,
+    ];
+    for drop in missing {
+        let mut partial = refs.clone();
+        drop(&mut partial);
+        let short = ReconcilingPaperContext {
+            config_refs: partial,
+            agent: AGENT.to_owned(),
+            asset: OTHER_ASSET.to_owned(),
+            increment: loaded.instrument.increment,
+        };
+        assert_eq!(
+            short.fill_refs(&reviewed),
+            None,
+            "a missing reference names none"
+        );
+    }
+    for side in [Side::Buy, Side::Sell] {
+        let request = BindingGateRequest {
+            agent: &ours,
+            instrument: &reviewed,
+            side,
+            qty: qty("1")?,
+            limit: price("255.2")?,
+            purpose: Purpose::Open,
+            tif: mandate_executor::TimeInForce::Day,
+            protection: None,
+        };
+        assert!(context.input(&request).is_none(), "no request is answered");
+    }
     Ok(())
 }
 

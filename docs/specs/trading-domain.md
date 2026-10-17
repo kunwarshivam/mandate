@@ -2,13 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.18:** §6.2 and §2.1 add `fee_rounding`: under `per_fee_per_fill` each regulatory fee of
+  each fill is rounded up to the cent before summing, for a broker that rounds each fee separately
+  (Robinhood), so a live sell is never booked below the broker's figure (DEC-958 item 4,
+  [DEC-960](../project/decisions/DEC-960.md)). Absent, it is `daily_total`, §6.2 as before, so no
+  Alpaca or paper outcome changes. Rates are transcribed from the broker's schedule, not only
+  Alpaca's. A tightening under DEC-176: it only raises recorded costs to at least the broker's.
+  Reference cases: RC-26.
 - **v0.17:** §7.3's `connection_unavailable` row no longer lists a reconnect as lifting the
   restriction: the connection's condition clears by good probes for `degraded`, by
   re-authorization for `suspended` ([DEC-800](../project/decisions/DEC-800.md) item 5, journal
@@ -173,7 +180,7 @@
 | Notional amount | Truncate to 0.01; minimum 1.00 USD |
 | Buy limit / stop price | Round down to the tick of the rounded price |
 | Sell limit / stop price | Round up to the tick of the rounded price |
-| Equity regulatory fees | Accrued per fill at full precision; charged as a daily total, `round(total, 2, ceiling)` (§6.2) |
+| Equity regulatory fees | `daily_total`: accrued per fill at full precision; `per_fee_per_fill`: each fee of each fill accrued as `round(fee, 2, ceiling)`. Either way charged as a daily total, `round(total, 2, ceiling)` (§6.2) |
 | Crypto fee quantity | `round(gross × bps ÷ 10000, 9, half_up)` |
 | Crypto fee in USD | `round(x, 2, half_up)` per fill |
 | Fee reservation (buying power) | Per order: `round(estimated fees, 2, ceiling)` |
@@ -713,15 +720,26 @@ fee-configuration version.
 
 | Fee | Side | Basis |
 |---|---|---|
-| Commission | — | Zero on Alpaca |
+| Commission | — | Zero on Alpaca and Robinhood |
 | SEC Section 31 | Sells | Rate × proceeds |
 | FINRA TAF | Sells | Rate × shares, capped per execution by default (`taf_cap_basis`: `per_execution` or `per_order`) |
 | CAT | Buys and sells | Rate × shares |
 
-- Accrued per fill at full precision (USD). **`FeesCharged` (equities) at 20:00 ET for each trade
-  date** replaces the accrual with `round(daily total, 2, ceiling)`.
+- **Rounding** (`fee_rounding` in the fee configuration; absent means `daily_total`,
+  [DEC-960](../project/decisions/DEC-960.md)):
+  - `daily_total`: each fee is accrued per fill at full precision (USD).
+  - `per_fee_per_fill`: each fee of a fill (SEC Section 31, FINRA TAF, CAT) is computed at full
+    precision, after the TAF cap, and accrued as `round(fee, 2, ceiling)`, separately, before the
+    fill's fees are summed. A per-order TAF cap counts the full-precision TAF already charged on
+    the order. Use it for a broker that rounds each fee of a trade to the cent, so the platform
+    never books less than the broker charges.
+- **`FeesCharged` (equities) at 20:00 ET for each trade date** replaces the accrual with
+  `round(daily total, 2, ceiling)`. Under `per_fee_per_fill` the total is already whole cents, so
+  the charge equals the accrual.
 - Accrued fees are a liability in equity and reserved against buying power.
-- Rates come from an effective-dated configuration transcribed from Alpaca's fee schedule.
+- Rates and `fee_rounding` come from an effective-dated configuration transcribed from the
+  broker's fee schedule (Alpaca's for paper; Robinhood's for the live Robinhood account,
+  [DEC-958](../project/decisions/DEC-958.md)).
 
 ### 6.3 Crypto fees (Alpaca)
 
@@ -1202,6 +1220,7 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 | RC-23 | Fractionable split residual; non-terminating adjusted mark | Accounting |
 | RC-24 | Exit price ladder in extended hours; presumed-halt variant | Executor |
 | RC-25 | Close window and sessions: openings denied in the window, discretionary exits allowed in the window and deferred after hours, risk exits allowed, owner exits allowed after bid confirmation | Gate |
+| RC-26 | Per-fee rounding: each regulatory fee of each fill rounded up to the cent; the `daily_total` default unchanged | Accounting |
 
 ## 15. Open questions
 

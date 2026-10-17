@@ -23,7 +23,7 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, to_canonical};
 use mandate_domain::Environment;
 use mandate_journal::ArtifactStore;
-use mandate_shell::control::{ControlRecord, DeploymentRefusal};
+use mandate_shell::control::{ControlRecord, DeploymentRefusal, Origin};
 use mandate_shell::{Cause, ShellError, Stage};
 
 use std::time::Duration;
@@ -99,6 +99,10 @@ fn record(seq: u64, event_type: &str, payload: &str) -> Result<ControlRecord, St
         seq,
         event_type: event_type.to_owned(),
         payload: parse(payload)?,
+        origin: Origin {
+            stream_id: "ctl:ws_paper".to_owned(),
+            environment: Environment::Paper,
+        },
     })
 }
 
@@ -142,6 +146,7 @@ fn scene(
         bars: std::env::temp_dir()
             .join(format!("g1a-door-probe-{name}-bars-{}", std::process::id())),
         place_one_order: false,
+        reconcile_only: false,
         acknowledged: Environment::Paper,
     };
     Ok((
@@ -407,4 +412,43 @@ fn the_asked_openings_cross_check_reads_both_asks_within_the_collar() -> Result<
         Err(PaperError::CrossCheck(QuoteRefusal::Stale))
     ));
     Ok(())
+}
+
+/// One stored control row on `stream_id`, its envelope naming `environment`, with an empty
+/// payload: the members `control_record` reads.
+fn stored_row(stream_id: &str, environment: &str) -> mandate_journal::StoredEvent {
+    mandate_journal::StoredEvent {
+        stream_id: stream_id.to_owned(),
+        seq: 3,
+        event_id: format!("{:0>26}", 3),
+        event_type: "ConfigSnapshotRegistered".to_owned(),
+        schema_version: 1,
+        environment: environment.to_owned(),
+        recorded_at: "2026-10-10T15:05:00Z".to_owned(),
+        prev_hash: mandate_canon::Digest::of(&[]),
+        hash: mandate_canon::Digest::of(&[]),
+        body: br#"{"payload":{}}"#.to_vec(),
+    }
+}
+
+/// DEC-957 item 4: the run's control read carries each row's own stream and environment into its
+/// record, so the artifacts can bind only their own stream's registrations, and a row naming
+/// neither environment refuses the read rather than being read as one.
+#[test]
+fn a_control_record_carries_its_rows_stream_and_environment() {
+    for (environment, expected) in [("paper", Environment::Paper), ("live", Environment::Live)] {
+        let record = crate::control_record(&stored_row("ctl:ws_live", environment));
+        let origin = record.map(|record| record.origin);
+        assert_eq!(
+            origin.ok(),
+            Some(Origin {
+                stream_id: "ctl:ws_live".to_owned(),
+                environment: expected,
+            })
+        );
+    }
+    for environment in ["", "Live", "demo"] {
+        let refused = crate::control_record(&stored_row("ctl:ws_live", environment));
+        assert!(matches!(refused, Err(PaperError::Control)), "{environment}");
+    }
 }

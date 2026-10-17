@@ -6,10 +6,17 @@
 # only. No credential is read or written; the simulated OAuth login is driven by the same two
 # requests a browser makes on the simulator's page.
 #
-# Usage: scripts/r0-rehearsal.sh [--no-build] [--work DIR]
+# Usage: scripts/r0-rehearsal.sh [--no-build] [--work DIR] [--sim-clock INSTANT]
 #
-#   --no-build   reuse the binaries already in CARGO_TARGET_DIR
-#   --work DIR   the scratch directory (default: a new one under ${TMPDIR:-/tmp})
+#   --no-build           reuse the binaries already in CARGO_TARGET_DIR
+#   --work DIR           the scratch directory (default: a new one under ${TMPDIR:-/tmp})
+#   --sim-clock INSTANT  run the whole rehearsal on a clock that reads INSTANT, an RFC 3339 UTC
+#                        instant inside a regular session, when the script starts and moves with
+#                        the system clock from there (DEC-962): every runner and CLI process gets
+#                        MANDATE_RH_SIM_CLOCK at its own start on that one timeline, the simulator
+#                        its `clock`, and the fixture's daily bars and the instrument snapshot its
+#                        date. The CLI is then built with its `rh-sim` feature, which only this
+#                        rehearsal turns on; the runner is the `rh-sim` build already.
 #
 # The journal: MANDATE_PG_URL, a superuser DSN, if set (a schema of its own is created and
 # dropped); otherwise a private PostgreSQL cluster is started from the `initdb` and `pg_ctl` on
@@ -23,14 +30,37 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD=1
 WORK=""
+SIM_CLOCK=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-build) BUILD=0 ;;
     --work) WORK=${2:?--work needs a directory}; shift ;;
-    *) echo "usage: $0 [--no-build] [--work DIR]" >&2; exit 2 ;;
+    --sim-clock) SIM_CLOCK=${2:?--sim-clock needs an RFC 3339 instant}; shift ;;
+    *) echo "usage: $0 [--no-build] [--work DIR] [--sim-clock INSTANT]" >&2; exit 2 ;;
   esac
   shift
 done
+
+# The rehearsal's one timeline (DEC-962): SIM_CLOCK when the script starts, moving with the
+# system clock. sim_now prints its reading as canonical RFC 3339, read at each process's start.
+CLI_FEATURES=()
+if [ -n "$SIM_CLOCK" ]; then
+  [[ $SIM_CLOCK =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$ ]] ||
+    { echo "--sim-clock: not an RFC 3339 instant" >&2; exit 2; }
+  SIM_EPOCH_NS=$(date -u -d "$SIM_CLOCK" +%s%N) || { echo "--sim-clock: not an instant" >&2; exit 2; }
+  REAL_EPOCH_NS=$(date -u +%s%N)
+  CLI_FEATURES=(--features mandate-cli/rh-sim)
+fi
+sim_now() {
+  local ns fraction
+  ns=$((SIM_EPOCH_NS + $(date -u +%s%N) - REAL_EPOCH_NS))
+  fraction=$(printf %09d $((ns % 1000000000)))
+  date -u -d "@$((ns / 1000000000))" "+%Y-%m-%dT%H:%M:%S.${fraction}Z"
+}
+# clocked COMMAND...: COMMAND on the rehearsal's clock, when one is set.
+clocked() {
+  if [ -n "$SIM_CLOCK" ]; then env "MANDATE_RH_SIM_CLOCK=$(sim_now)" "$@"; else "$@"; fi
+}
 WORK=${WORK:-$(mktemp -d "${TMPDIR:-/tmp}/r0-rehearsal.XXXXXX")}
 mkdir -p "$WORK"
 WORK=$(cd "$WORK" && pwd)
@@ -40,8 +70,8 @@ export RUST_BACKTRACE=0
 BIN=$CARGO_TARGET_DIR/debug
 RECORD=$WORK/steps.md
 STORE=$WORK/store
-BARS=$WORK/bars
-mkdir -p "$STORE" "$BARS"
+MARKET=$WORK/market
+mkdir -p "$STORE" "$MARKET"
 
 WORKSPACE=ws_r0
 OWNER=founder
@@ -77,8 +107,8 @@ as_pg() {
   if [ "$(id -u)" = 0 ]; then runuser -u postgres -- "$@"; else "$@"; fi
 }
 
-printf "# R0 rehearsal record\n\nWork directory: \`%s\`; commit \`%s\`.\n\n" \
-  "$WORK" "$(git -C "$ROOT" rev-parse --short HEAD)" >"$RECORD"
+printf "# R0 rehearsal record\n\nWork directory: \`%s\`; commit \`%s\`; run clock \`%s\`.\n\n" \
+  "$WORK" "$(git -C "$ROOT" rev-parse --short HEAD)" "${SIM_CLOCK:-the system clock}" >"$RECORD"
 
 # step ID EXPECT COMMAND...: runs COMMAND, saves its output under $WORK/out/ID.*, and passes when
 # it exits 0 and its stdout and stderr together contain EXPECT (an extended regex).
@@ -110,14 +140,17 @@ report() {
 
 # --- R0 step 1: the builds ------------------------------------------------------------------
 if [ "$BUILD" = 1 ]; then
-  step 1a 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-cli -p mandate-rh-sim || true
+  step 1a 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-cli -p mandate-rh-sim \
+    ${CLI_FEATURES[@]+"${CLI_FEATURES[@]}"} || true
   step 1b 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-paper \
     --features live,rh-sim,mandate-mcp/rh-sim || true
+  # The stored daily bars' writer (DEC-961 item 3): an example, built from dev-dependencies only.
+  step 1c 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" -p mandate-paper --example rehearsal_bars || true
 fi
-for binary in mandate mandate-rh-sim mandate-paper; do
+for binary in mandate mandate-rh-sim mandate-paper examples/rehearsal_bars; do
   [ -x "$BIN/$binary" ] || { echo "missing $BIN/$binary: build first" >&2; exit 1; }
 done
-cli() { "$BIN/mandate" "$@"; }
+cli() { clocked "$BIN/mandate" "$@"; }
 
 # --- The journal: a private Postgres schema, migrated as the owner role ----------------------
 start_postgres() {
@@ -163,24 +196,38 @@ LIVE_OWNER=("${AS_OWNER[@]}")
 # --- R0 step 2: the rehearsal ----------------------------------------------------------------
 # The simulator's one agentic account; the runner scopes every request to it (CN-8, DEC-947).
 RH_ACCOUNT=RHSIM00000001
+SIM_CLOCK_MEMBER=""
+if [ -n "$SIM_CLOCK" ]; then SIM_CLOCK_MEMBER=",\"clock\":\"$(sim_now)\""; fi
 cat >"$WORK/sim.json" <<JSON
 {"accounts":[{"number":"$RH_ACCOUNT","agentic_allowed":true,"cash":"100","buying_power":"100","pattern_day_trader":false}],
- "session":"regular","quotes":{"$SYMBOL":"85"},"fills":[{"symbol":"$SYMBOL","side":"buy","price":"85"}]}
+ "session":"regular","quotes":{"$SYMBOL":"85"},"fills":[{"symbol":"$SYMBOL","side":"buy","price":"85"}]$SIM_CLOCK_MEMBER}
 JSON
 "$BIN/mandate-rh-sim" --script "$WORK/sim.json" >"$WORK/sim.out" 2>"$WORK/sim.err" &
 SIM_PID=$!
 for _ in $(seq 50); do grep -q 'serving' "$WORK/sim.out" 2>/dev/null && break; sleep 0.1; done
 ENDPOINT=$(sed -n 's/^mandate-rh-sim: serving //p' "$WORK/sim.out")
+# The live run's market reads (DEC-933 item 2) come from a fixture in the rh-sim build (DEC-961):
+# the IEX quote within a cent of the simulator's ask of 85, inside DEC-529's collar, stamped as it
+# is read; the minute bars; and the stored daily bars `--bars` names, rising to 85, through the
+# last completed session. No market-data key is read and no data host dialed.
+printf '{"ask":"85.01","ask_size":"100","asset_id":"%s","bid":"84.99","bid_size":"100","exchange":"ARCA","minute_volume":"20000","symbol":"%s"}\n' \
+  "$ASSET_ID" "$SYMBOL" >"$MARKET/market.json"
+BARS_AT=()
+if [ -n "$SIM_CLOCK" ]; then BARS_AT=("$(sim_now)"); fi
+step 2a0 'bars-1Day' "$BIN/examples/rehearsal_bars" "$MARKET/daily" "$SYMBOL" 85 ${BARS_AT[@]+"${BARS_AT[@]}"} || true
+BARS=$(tail -n 1 "$WORK/out/2a0.out")
+BARS=${BARS:-$MARKET/daily}
 step 2a 'resource' curl -sf "${ENDPOINT%/mcp}/.well-known/oauth-protected-resource/mcp" || true
 
 step 2b 'opened ctl:' cli workspace open --workspace "$WORKSPACE" --environment live "${JOURNAL[@]}" || true
 
 cat >"$WORK/instrument.json" <<JSON
-{"asset_class":"us_equity","etp":"plain","etp_classified_at":"$(date -u +%Y-%m-%dT00:00:00Z)","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"$ASSET_ID","symbol":"$SYMBOL"}
+{"asset_class":"us_equity","etp":"plain","etp_classified_at":"$(if [ -n "$SIM_CLOCK" ]; then sim_now | cut -c1-10; else date -u +%Y-%m-%d; fi)T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"$ASSET_ID","symbol":"$SYMBOL"}
 JSON
 step 2c 'registered' cli config register --kind instrument_snapshot "$WORK/instrument.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 TRACER=$ROOT/crates/mandate-shell/tests/fixtures/tracer/config
-step 2c-fee 'registered' cli config register --kind fee_config "$TRACER/fee-config.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
+# The live Robinhood fee schedule (DEC-958): a live run refuses the tracer's paper-only one.
+step 2c-fee 'registered' cli config register --kind fee_config "$ROOT/config/fees/robinhood-live-2026-10-16.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 step 2c-cal 'registered' cli config register --kind trading_calendar "$TRACER/trading-calendar.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 step 2c-rules 'registered' cli config register --kind rule_set "$TRACER/rule-set.json" "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 step 2d 'registered' cli model register quant.ma_crossover 1.0.0 "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
@@ -205,7 +252,7 @@ login() {
 connect_check() {
   local id=2d2 pid status=0 result=FAIL
   mkdir -p "$WORK/out"
-  env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" \
+  clocked env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" \
     "$BIN/mandate-paper" --connect-check --workspace "$WORKSPACE" --account-ref "$ACCOUNT_REF" \
     --connection "$CONNECTION" --journal "$DSN" --confirm-live >"$WORK/out/$id.out" 2>"$WORK/out/$id.err" &
   pid=$!
@@ -258,7 +305,7 @@ step 2j '^code ' cli agent deploy "$AGENT" "$VERSION" "${LIVE_OWNER[@]}" "${JOUR
 CODE=$(sed -n 's/^code //p' "$WORK/out/2j.out" | head -n 1)
 step 2k '^deployed' cli agent deploy "$AGENT" "$VERSION" --code "${CODE:-none}" "${LIVE_OWNER[@]}" "${JOURNAL[@]}" || true
 
-RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
+RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" "MANDATE_RH_SIM_MARKET=$MARKET" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
   --account-ref "$ACCOUNT_REF" --journal "$DSN" --store "$STORE" --bars "$BARS" --confirm-live)
 
 # run ID EXIT EXPECT ARGS...: the runner in the background, logged in through the simulator's
@@ -268,7 +315,7 @@ run() {
   local id=$1 exit=$2 expect=$3 pid status=0 result=FAIL output
   shift 3
   mkdir -p "$WORK/out"
-  "${RUN[@]}" "$@" >"$WORK/out/$id.out" 2>"$WORK/out/$id.err" &
+  clocked "${RUN[@]}" "$@" >"$WORK/out/$id.out" 2>"$WORK/out/$id.err" &
   pid=$!
   login "$WORK/out/$id.err" "$pid" || true
   if [ "$id" = 2m ]; then grant "$pid"; fi
@@ -282,7 +329,7 @@ run() {
     esac
   fi
   [ "$result" = PASS ] || FAILED=1
-  report "$id" "$result" "$status" "mandate-paper ${RUN[*]:3} $*"
+  report "$id" "$result" "$status" "mandate-paper ${RUN[*]:5} $*"
 }
 
 # grant PID: the founder's inbox while the placing run waits (`mandate approvals`, cli_confirm).

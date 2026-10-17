@@ -170,6 +170,7 @@ mod tests {
         Ok(BrokerFill {
             fill_id: FillId("f-1".to_owned()),
             client_order_id: Some("md-1".to_owned()),
+            broker_order_id: None,
             instrument: id(named)?,
             side: Side::Buy,
             qty: Qty::parse("1").map_err(|e| e.to_string())?,

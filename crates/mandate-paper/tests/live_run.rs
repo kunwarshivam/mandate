@@ -8,13 +8,14 @@
 //! host (ES-19, LT-1, `AGENTS.md` rule 8).
 
 use mandate_canon::{Digest, Value};
+use mandate_domain::Environment;
 use mandate_journal::{StreamId, StreamType};
 use mandate_num::{Fraction, Price};
 use mandate_paper::{
     Asked, Evidence, EvidenceRefusal, GrantRefusal, Journaled, Lt10Refusal, QuoteRefusal, Watched,
     cross_check, evidence, grant, lt10,
 };
-use mandate_shell::control::ControlRecord;
+use mandate_shell::control::{ControlRecord, Origin};
 use mandate_time::UtcNanos;
 
 /// The ask's approval: the `ApprovalRequested`'s event id, an opaque id (TI-8).
@@ -63,6 +64,10 @@ fn journaled(
             seq,
             event_type: event_type.to_owned(),
             payload: json(payload),
+            origin: Origin {
+                stream_id: "ctl:ws_live".to_owned(),
+                environment: Environment::Live,
+            },
         },
     }
 }

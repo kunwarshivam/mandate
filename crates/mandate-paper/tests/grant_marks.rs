@@ -96,6 +96,10 @@ impl Pause for Clock {
 
     async fn pause(&self, duration: Duration) {
         let step = i64::try_from(duration.as_nanos()).unwrap();
+        assert!(
+            step > 0,
+            "the run paused for no time: a loop that never ends"
+        );
         let next = self.nanos.get() + step;
         assert!(
             next - at(PREFLIGHT).secs() * NANOS_PER_S < 3_600 * NANOS_PER_S,
@@ -678,6 +682,64 @@ fn a_stale_fresh_read_at_the_grant_refuses_with_nothing_sent() {
             .payloads(AGENT_STREAM, "ApprovalResponded")
             .is_empty(),
         "the stale wake handed the runtime nothing"
+    );
+}
+
+/// DEC-949 (DEC-940 item 7), rule 3: an ask nobody answers inside its 600-second timeout is closed
+/// by the runtime itself. The wait ticks the runtime at the deadline, the runtime journals its
+/// `ApprovalTimedOut` — exactly `{approval, on_timeout: skip}`, caused by the ask it ends (journal
+/// spec §9.7, rule 135) — through the validating journal, the run ends denied, and nothing is
+/// sent.
+#[test]
+fn an_unanswered_ask_is_closed_by_the_runtimes_own_timeout_with_nothing_sent() {
+    let run = granted_after(700, PREFLIGHT_QUOTE);
+    assert!(
+        matches!(&run.outcome, Err(PaperError::Grant(GrantRefusal::TimedOut))),
+        "{:?}",
+        run.outcome.as_ref().err()
+    );
+    assert_eq!(run.broker.openings(), 0, "nothing is sent");
+    assert_eq!(
+        run.clock.now().secs(),
+        at(PREFLIGHT).secs() + 600,
+        "the run ends at the ask's deadline"
+    );
+    let rows = run.journal.rows(AGENT_STREAM);
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .expect("the run asked");
+    let timeouts: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type == "ApprovalTimedOut")
+        .collect();
+    let [timeout] = &timeouts[..] else {
+        panic!("the runtime closes the ask once: {}", timeouts.len());
+    };
+    let body = mandate_canon::parse(&timeout.body).unwrap();
+    assert_eq!(
+        body.get("payload").unwrap(),
+        &json(&format!(
+            r#"{{"approval":"{}","on_timeout":"skip"}}"#,
+            request.event_id
+        ))
+    );
+    assert_eq!(
+        body.get("causation_id").and_then(Value::as_str),
+        Some(request.event_id.as_str()),
+        "the timeout is caused by the ask it ends"
+    );
+    let deadline = UtcNanos::from_parts(at(PREFLIGHT).secs() + 600, 0).unwrap();
+    assert_eq!(
+        body.get("event_time").and_then(Value::as_str),
+        Some(deadline.to_string().as_str()),
+        "the timeout is journaled at the deadline's wake"
+    );
+    assert!(
+        run.journal
+            .payloads(AGENT_STREAM, "ApprovalResponded")
+            .is_empty(),
+        "no answer reached the runtime"
     );
 }
 

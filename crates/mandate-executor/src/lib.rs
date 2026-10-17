@@ -89,6 +89,7 @@ mod listing;
 mod margin;
 mod opening;
 mod orders;
+mod own;
 mod payload;
 mod ports;
 mod protection;
@@ -101,10 +102,14 @@ pub mod tripwire;
 mod types;
 
 pub use error::{ExecutorError, JsonError};
-pub use fees::{FeeSchedule, fee_config, paper_only_fee_config};
+pub use fees::{
+    FeeSchedule, ROBINHOOD_LIVE_SCHEDULE, fee_config, paper_only_fee_config,
+    robinhood_live_fee_config,
+};
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
 pub use opening::equity_bracket_prices;
+pub use own::{book_own_fills, owed_orders};
 pub use ports::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
     BrokerConnector, ConnectorError, FillConfigRefs, IdGen, InstrumentSnapshot, MandateView, Ports,

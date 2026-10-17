@@ -147,6 +147,36 @@ fn draft_in(
     to_canonical(&envelope)
 }
 
+/// The cause and payload of the runtime's record that ended `asked` with `event_type`, as the
+/// runtime journals it (journal spec §9.7): an `ApprovalTimedOut` is `{approval, on_timeout:
+/// skip}`, caused by the ask it ends (rule 135); an `ApprovalCanceled` names the approval and an
+/// owner pause as its reason, with no cause.
+pub fn ending(asked: &Asked, event_type: &str) -> (Option<String>, Value) {
+    let approval = ("approval", text(&asked.approval));
+    if event_type == "ApprovalTimedOut" {
+        (
+            Some(asked.approval.clone()),
+            object(&[approval, ("on_timeout", text("skip"))]),
+        )
+    } else {
+        (None, object(&[approval, ("reason", text("owner_pause"))]))
+    }
+}
+
+/// [`Fixture::ended`]'s record of `asked` as the draft bytes the fixture journals, under
+/// `event_id`.
+pub fn ended_draft(asked: &Asked, event_type: &str, event_id: &str) -> Vec<u8> {
+    let (cause, payload) = ending(asked, event_type);
+    draft_in(
+        "paper",
+        &agent_stream(&asked.agent),
+        event_id,
+        event_type,
+        cause.as_deref(),
+        payload,
+    )
+}
+
 /// The content of the fixture's request for `qty` shares of `AAPL` at 155.
 pub fn content(qty: &str, deadline: i64) -> RequestContent {
     RequestContent {
@@ -561,14 +591,12 @@ impl Fixture {
     }
 
     pub fn ended(&mut self, asked: &Asked, event_type: &str) {
+        let (cause, payload) = ending(asked, event_type);
         self.append(
             &agent_stream(&asked.agent),
             event_type,
-            None,
-            object(&[
-                ("approval", text(&asked.approval)),
-                ("reason", text("owner_pause")),
-            ]),
+            cause.as_deref(),
+            payload,
         );
     }
 

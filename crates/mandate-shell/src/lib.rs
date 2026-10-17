@@ -61,7 +61,7 @@ pub use lt10::watch_may_end;
 pub use stages::Stage;
 pub use tail::tailed;
 pub use tracer::{
-    AskedCycle, Mark, MayEnd, ProductionCycle, Report, Setup, Wake, run_observed,
+    AskedCycle, Booked, Mark, MayEnd, ProductionCycle, Report, Setup, Wake, run_observed,
     run_observed_asked_watched, run_observed_watched,
 };
 pub use watch::{Watch, close_window_bound, poll_interval};

@@ -254,6 +254,37 @@ pub trait Executor {
     /// Folds one committed account-stream event back, which is how a single writer learns that its
     /// own append committed (journal spec §5.1).
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause>;
+    /// The orders the folded stream owns whose fills it may not have booked
+    /// (`mandate_executor::owed_orders`, DEC-955 item 2), and the activity cursor its last
+    /// reconciliation recorded, from which their fills are read. An executor without the
+    /// own-fill reconciliation answers that it has none, so the run stops rather than skip it.
+    fn owed(
+        &self,
+    ) -> Result<
+        (
+            Vec<mandate_executor::ClientOrderId>,
+            mandate_executor::ActivityCursor,
+        ),
+        Cause,
+    > {
+        Err(Cause::Absent {
+            what: "the own-fill reconciliation",
+        })
+    }
+    /// The fill records the broker's word calls for (`mandate_executor::book_own_fills`,
+    /// DEC-955 items 2 to 4), drafted at `epoch` and `at`; journal records only.
+    fn book_own(
+        &mut self,
+        epoch: mandate_executor::WriterEpoch,
+        at: mandate_executor::RiskClock,
+        orders: &[mandate_executor::BrokerOrder],
+        fills: &[mandate_executor::BrokerFill],
+    ) -> Result<Vec<mandate_executor::Effect>, Cause> {
+        let _ = (epoch, at, orders, fills);
+        Err(Cause::Absent {
+            what: "the own-fill reconciliation",
+        })
+    }
 }
 
 /// Step 13: one broker round trip. An `Err` is never a rejection (`BrokerConnector`'s contract).
@@ -314,5 +345,7 @@ mod grant_install;
 mod lt10_install;
 #[cfg(test)]
 mod observed;
+#[cfg(test)]
+mod own_fills_install;
 #[cfg(test)]
 mod tail_install;

@@ -20,7 +20,7 @@ use mandate_executor::{BrokerOrder, BrokerPosition};
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_robinhood::{
-    AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, RobinhoodError, Tools,
+    AccountSnapshot, PreflightFacts, Quote, RobinhoodConnector, RobinhoodError, Tickers, Tools,
 };
 use proptest::collection::vec;
 use proptest::prelude::{Just, Strategy, any, prop_oneof};
@@ -130,7 +130,10 @@ impl Answers {
             answers: answers.iter().map(|(t, c)| (*t, wrap(c))).collect(),
             calls: Rc::clone(&calls),
         };
-        (RobinhoodConnector::new(tools, OURS.to_owned()), calls)
+        (
+            RobinhoodConnector::new(tools, OURS.to_owned(), tickers()),
+            calls,
+        )
     }
 
     fn snapshot(&self) -> Result<AccountSnapshot, RobinhoodError> {
@@ -461,8 +464,8 @@ fn every_account_read_goes_through_the_scoped_read() {
     for (class, tool, arguments) in calls.iter() {
         assert_eq!(
             *class,
-            CallClass::Ordinary,
-            "{tool} draws on the ordinary budget"
+            CallClass::Read,
+            "{tool} is a read, on the ordinary budget (DEC-959 item 2)"
         );
         match *tool {
             "get_accounts" => checked = true,
@@ -504,6 +507,56 @@ fn every_account_read_goes_through_the_scoped_read() {
         let reached = calls.borrow().iter().any(|c| ACCOUNT_READS.contains(&c.1));
         assert!(!reached, "an account read went out without a passed check");
     }
+}
+
+/// R11 (DEC-959 item 1): handed the lapse's snapshot, the preflight reads only the
+/// tradability, behind its account check, and the quote, each a `Read`; it never reads the
+/// portfolio, the positions or the orders again, and its facts carry the snapshot it was handed,
+/// not one the broker would answer now.
+#[test]
+fn the_preflight_on_a_snapshot_reads_no_account_figure_again() {
+    let handed = AccountSnapshot {
+        cash: usd("99"),
+        buying_power: usd("98"),
+        positions: vec![held(SYMBOL, "0", "1")],
+        open_orders: Vec::new(),
+    };
+    let (connector, calls) = Answers::flat().connector();
+    let facts = ready(connector.preflight_facts_on(handed.clone(), &id(SYMBOL))).unwrap();
+    assert_eq!(facts.account, handed);
+    assert_eq!(
+        facts.quote,
+        Quote {
+            symbol: id(SYMBOL),
+            bid: Price::parse("85.1").unwrap(),
+            ask: Price::parse("85.13").unwrap(),
+        }
+    );
+    let calls = calls.borrow();
+    let sent: Vec<_> = calls
+        .iter()
+        .map(|(class, tool, _)| (*class, *tool))
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            (CallClass::Read, "get_accounts"),
+            (CallClass::Read, "get_equity_tradability"),
+            (CallClass::Read, "get_equity_quotes"),
+        ]
+    );
+    let mut refusing = Answers::flat();
+    refusing.tradability = json!({"account_number": OURS, "symbol": SYMBOL, "tradable": false});
+    let (connector, _) = refusing.connector();
+    assert_eq!(
+        ready(connector.preflight_facts_on(handed.clone(), &id(SYMBOL))),
+        Err(RobinhoodError::NotTradable)
+    );
+    let (connector, calls) = Answers::flat().connector();
+    let unregistered = id("IWM");
+    let refused = ready(connector.preflight_facts_on(handed, &unregistered));
+    assert_eq!(refused, Err(RobinhoodError::NoSymbol));
+    assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
 }
 
 #[test]
@@ -740,4 +793,10 @@ fn the_snapshot_matches_an_independent_oracle_over_random_records() {
         Ok(())
     });
     verdict.unwrap();
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }

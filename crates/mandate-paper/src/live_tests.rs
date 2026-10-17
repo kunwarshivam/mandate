@@ -9,33 +9,34 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
 
-use mandate_accounting::InstrumentId;
-use mandate_alpaca::AlpacaPaperHttp;
+use mandate_accounting::{InstrumentId, Side};
+use mandate_alpaca::Pause;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_executor::BrokerPosition;
+use mandate_executor::{BrokerOrder, BrokerPosition};
 use mandate_journal::{ArtifactStore, StreamId};
 use mandate_mcp::{CallClass, McpError, Tools};
-use mandate_num::{Price, SignedQty, Usd};
-use mandate_robinhood::{AccountSnapshot, RobinhoodConnector};
+use mandate_num::{Price, Qty, SignedQty, Usd};
+use mandate_robinhood::{AccountSnapshot, RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::control::{
     Build as BuiltWith, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal,
-    DoorChecks, LiveAdmission, McpHost, RunFacts,
+    DoorChecks, LiveAdmission, McpHost, Origin, RunFacts,
 };
 use mandate_shell::paper::{Artifacts, BrokerFacts};
 use mandate_shell::robinhood::{ACCOUNT_UNREAD, RobinhoodBridge};
 use mandate_shell::{Cause, ProductionCycle, Setup, ShellError, Stage};
 use mandate_spec::Violation;
 use mandate_spec::context::{AgentId, Membership};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 use serde_json::json;
 
 use crate::{
     ACCOUNT_NUMBER_VAR, Args, Broker, BrokerAsk, Build, Built, Connected, Connection, Dial,
-    LapseRefusal, Linked, PaperError, Ports, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
-    RobinhoodEndpoint, Session, SystemClock, live_admission, live_start, live_started,
+    LapseRefusal, LapseSnapshot, Linked, Market, PaperError, Ports, REHEARSAL_ENDPOINT_VAR,
+    REHEARSAL_HOST, RobinhoodEndpoint, Session, SystemClock, live_admission, live_start,
+    live_started, robinhood_reads,
 };
 
 const MANDATE: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/mandate.json");
@@ -76,6 +77,10 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
         seq,
         event_type: event_type.to_owned(),
         payload: canonical(payload),
+        origin: Origin {
+            stream_id: "ctl:ws_live".to_owned(),
+            environment: Environment::Live,
+        },
     }
 }
 
@@ -128,6 +133,7 @@ fn the_dial() -> Dial {
     Dial {
         endpoint: endpoint(),
         account_number: NUMBER.to_owned(),
+        market: None,
     }
 }
 
@@ -186,6 +192,7 @@ impl Session for Snapshotting {
         &self,
         _artifacts: &Artifacts,
         _pause: P,
+        _earlier: Option<&LapseSnapshot>,
     ) -> Result<BrokerFacts, Cause> {
         Err(Cause::Absent { what: "unread" })
     }
@@ -273,7 +280,7 @@ fn start(
         &the_dial(),
         ports,
     )
-    .map(|(confirmed, _)| confirmed)
+    .map(|started| started.confirmed)
 }
 
 /// R2 and R3 (DEC-947 items 1 and 2): a live deployment that passes every check needing no
@@ -490,7 +497,7 @@ impl Tools for Scripted {
     }
 }
 
-fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripted>, Calls) {
+fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripted, Market>, Calls) {
     let calls = Calls::default();
     let tools = Scripted {
         answers,
@@ -499,8 +506,11 @@ fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripte
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("the runtime builds");
-    let bridge = RobinhoodBridge::new(runtime, RobinhoodConnector::new(tools, NUMBER.to_owned()));
-    (Linked::new(bridge, None::<AlpacaPaperHttp>), calls)
+    let bridge = RobinhoodBridge::new(
+        runtime,
+        RobinhoodConnector::new(tools, NUMBER.to_owned(), Tickers::default()),
+    );
+    (Linked::new(bridge, None::<Market>), calls)
 }
 
 /// R4 (DEC-947 item 4): the Robinhood session reads the agentic account's snapshot through its
@@ -546,6 +556,7 @@ fn args(acknowledged: Environment) -> Args {
         store: std::env::temp_dir().join("live-start-unused-store"),
         bars: std::env::temp_dir().join("live-start-unused-bars"),
         place_one_order: false,
+        reconcile_only: false,
         acknowledged,
     }
 }
@@ -558,6 +569,19 @@ fn rehearsal_vars() -> Vec<(String, String)> {
         ),
         (ACCOUNT_NUMBER_VAR.to_owned(), NUMBER.to_owned()),
     ]
+}
+
+/// DEC-961 item 1: the dial names the market fixture's directory only in the `rh-sim` build;
+/// every other build, the `live` one included, reads no fixture whatever the environment holds.
+#[test]
+fn only_the_rehearsal_build_dials_a_market_fixture() {
+    let mut vars = rehearsal_vars();
+    vars.push(("MANDATE_RH_SIM_MARKET".to_owned(), "/fixture".to_owned()));
+    let dialed = crate::dial(Build::Rehearsal, &vars).expect("the rehearsal dials");
+    let expected = cfg!(feature = "rh-sim").then(|| std::path::PathBuf::from("/fixture"));
+    assert_eq!(dialed.market, expected);
+    let unset = crate::dial(Build::Rehearsal, &rehearsal_vars()).expect("the rehearsal dials");
+    assert_eq!(unset.market, None);
 }
 
 /// The rehearsal build: the simulator's endpoint and pin, compiled with `live`.
@@ -594,8 +618,8 @@ fn a_live_connection_starts_through_the_live_arm_with_the_runs_own_dial() {
         &mut ports,
     )
     .expect("the live run starts");
-    let (confirmed, _session) = started.expect("a live connection starts through the live arm");
-    assert_eq!(confirmed.mandate().environment, Environment::Live);
+    let started = started.expect("a live connection starts through the live arm");
+    assert_eq!(started.confirmed.mandate().environment, Environment::Live);
     assert_eq!(ports.dials.borrow().as_slice(), [Some(the_dial())]);
     assert_eq!(facts.live, before().live);
 }
@@ -689,5 +713,192 @@ fn a_paper_connection_or_none_is_left_to_the_run() {
         );
         assert!(matches!(started, Ok(None)), "{:?}", started.err());
         assert_eq!(ports.connects.get(), 0);
+    }
+}
+
+/// R11 (DEC-959 item 1): the live start hands the run the snapshot its lapse counted, read
+/// through the session it returns, with the run clock read before the read was sent.
+#[test]
+fn the_live_start_hands_the_run_the_snapshot_its_lapse_counted() {
+    let (records, store) = deployment("lapse-kept", &[]);
+    let mut ports = LivePorts::answering(Ok(Some(flat())));
+    let before_start = SystemClock.now();
+    let started = live_start(
+        &records,
+        &store,
+        &before(),
+        &live_robinhood(),
+        &stream(),
+        None,
+        &the_dial(),
+        &mut ports,
+    )
+    .expect("the live run starts");
+    let after_start = SystemClock.now();
+    let lapse = started.lapse.expect("the lapse's snapshot is kept");
+    assert_eq!(lapse.account, flat());
+    assert!(
+        before_start <= lapse.sent && lapse.sent <= after_start,
+        "{lapse:?}"
+    );
+}
+
+fn at(secs: i64, nanos: u32) -> UtcNanos {
+    UtcNanos::from_parts(secs, nanos).expect("a valid instant")
+}
+
+/// A lapse snapshot stands for the account at most its bound after it was sent, the bound
+/// included; one nanosecond older, across a clock that ran backwards, or listing any position
+/// record or working order (whose instrument it may name by a ticker registered only later,
+/// DEC-956), it does not.
+#[test]
+fn a_lapse_snapshot_is_fresh_within_its_bound_only() {
+    let kept = LapseSnapshot {
+        account: flat(),
+        sent: at(1_000, 500),
+    };
+    let bound = std::time::Duration::from_secs(10);
+    assert_eq!(kept.fresh(at(1_000, 500), bound), Some(&flat()));
+    assert_eq!(kept.fresh(at(1_010, 500), bound), Some(&flat()));
+    assert_eq!(kept.fresh(at(1_010, 501), bound), None);
+    assert_eq!(
+        kept.fresh(at(1_000, 499), bound),
+        None,
+        "the clock ran back"
+    );
+    assert_eq!(
+        kept.fresh(at(1_000, 500), std::time::Duration::ZERO),
+        Some(&flat())
+    );
+    let position = BrokerPosition {
+        instrument: InstrumentId::new("SPY").expect("a symbol"),
+        qty: SignedQty::parse("0").expect("a quantity"),
+        avg_entry_price: Price::parse("1").expect("a price"),
+    };
+    let holding = LapseSnapshot {
+        account: AccountSnapshot {
+            positions: vec![position],
+            ..flat()
+        },
+        sent: at(1_000, 500),
+    };
+    assert_eq!(
+        holding.fresh(at(1_000, 500), bound),
+        None,
+        "a position record"
+    );
+    let order = BrokerOrder {
+        broker_order_id: "o1".to_owned(),
+        client_order_id: None,
+        instrument: InstrumentId::new("SPY").expect("a symbol"),
+        side: Side::Buy,
+        qty: Qty::parse("1").expect("a quantity"),
+        filled_qty: Qty::parse("0").expect("a quantity"),
+        limit_price: None,
+        stop_price: None,
+        status: "accepted".to_owned(),
+        reject_code: None,
+        replaced_by_broker_order_id: None,
+        legs: Vec::new(),
+        created_on: None,
+    };
+    let ordering = LapseSnapshot {
+        account: AccountSnapshot {
+            open_orders: vec![order],
+            ..flat()
+        },
+        sent: at(1_000, 500),
+    };
+    assert_eq!(
+        ordering.fresh(at(1_000, 500), bound),
+        None,
+        "a working order"
+    );
+}
+
+/// The scripted agentic account, its tradability and its quote, on a bridge of its own.
+fn preflight_bridge() -> (Rc<RobinhoodBridge<Scripted>>, Calls) {
+    let answers = BTreeMap::from([
+        (
+            "get_accounts",
+            json!({"accounts": [{"account_number": NUMBER, "agentic_allowed": true}]}),
+        ),
+        (
+            "get_portfolio",
+            json!({"account_number": NUMBER, "cash": "100", "buying_power": "100"}),
+        ),
+        ("get_equity_positions", json!({"positions": []})),
+        ("get_equity_orders", json!({"orders": []})),
+        (
+            "get_equity_tradability",
+            json!({"account_number": NUMBER, "symbol": "SPY", "tradable": true}),
+        ),
+        (
+            "get_equity_quotes",
+            json!({"quotes": [{"symbol": "SPY", "bid_price": "85", "ask_price": "85"}]}),
+        ),
+    ]);
+    let calls = Calls::default();
+    let tools = Scripted {
+        answers,
+        calls: Rc::clone(&calls),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("the runtime builds");
+    let asset = InstrumentId::new("b28f4066-5c6d-479b-a2af-85dc1a8f16fb").expect("an asset id");
+    let tickers = Tickers::registered([(asset, "SPY".to_owned())]).expect("one ticker");
+    let connector = RobinhoodConnector::new(tools, NUMBER.to_owned(), tickers);
+    (RobinhoodBridge::new(runtime, connector), calls)
+}
+
+/// R11 (DEC-959 item 1): the preflight stands on a fresh lapse snapshot and reads only the
+/// tradability and the quote; a stale one, one across a clock that ran back, or none is never
+/// reused, and the account is read again in full.
+#[test]
+fn the_preflight_reuses_a_fresh_lapse_snapshot_and_rereads_a_stale_one() {
+    let symbol = InstrumentId::new("SPY").expect("a symbol");
+    let handed = AccountSnapshot {
+        cash: usd("99"),
+        ..flat()
+    };
+    let kept = LapseSnapshot {
+        account: handed.clone(),
+        sent: at(1_000, 0),
+    };
+    let bound = std::time::Duration::from_secs(10);
+    let (bridge, calls) = preflight_bridge();
+    let facts = robinhood_reads(&bridge, &symbol, Some(&kept), at(1_010, 0), bound)
+        .expect("the preflight reads");
+    assert_eq!(facts.account, handed);
+    assert_eq!(
+        calls.borrow().as_slice(),
+        [
+            "get_accounts",
+            "get_equity_tradability",
+            "get_equity_quotes"
+        ]
+    );
+    let full = [
+        "get_accounts",
+        "get_portfolio",
+        "get_accounts",
+        "get_equity_positions",
+        "get_accounts",
+        "get_equity_orders",
+        "get_accounts",
+        "get_equity_tradability",
+        "get_equity_quotes",
+    ];
+    for (earlier, now) in [
+        (Some(&kept), at(1_010, 1)),
+        (Some(&kept), at(999, 0)),
+        (None, at(1_000, 0)),
+    ] {
+        let (bridge, calls) = preflight_bridge();
+        let facts =
+            robinhood_reads(&bridge, &symbol, earlier, now, bound).expect("the preflight reads");
+        assert_eq!(facts.account, flat(), "{now:?}");
+        assert_eq!(calls.borrow().as_slice(), full, "{now:?}");
     }
 }

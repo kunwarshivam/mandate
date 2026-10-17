@@ -5,7 +5,7 @@ use core::fmt;
 
 use crate::metrics::Metrics;
 use crate::{BacktestError, BacktestInput, RunConfig};
-use mandate_accounting::{AccountType, Config as FeeConfig, TafCapBasis};
+use mandate_accounting::{AccountType, Config as FeeConfig, FeeRounding, TafCapBasis};
 use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_num::{NumError, Ratio, TickRule};
 use mandate_sim::{Session, SimBar, SimConfig, Slippage};
@@ -321,8 +321,11 @@ fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
     ])
 }
 
+/// The fee configuration as the digest sees it. `fee_rounding` appears only when it is
+/// `per_fee_per_fill`: absent means `daily_total` (spec §6.2, DEC-960), so every report under the
+/// default keeps the digest it had before the field existed.
 fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
-    let equities = object(vec![
+    let mut equities = vec![
         ("sec_rate", decimal(config.equities.sec_rate)),
         ("taf_per_share", decimal(config.equities.taf_per_share)),
         ("taf_cap", decimal(config.equities.taf_cap.to_usd())),
@@ -334,7 +337,12 @@ fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
             }),
         ),
         ("cat_per_share", decimal(config.equities.cat_per_share)),
-    ])?;
+    ];
+    match config.equities.fee_rounding {
+        FeeRounding::DailyTotal => {}
+        FeeRounding::PerFeePerFill => equities.push(("fee_rounding", text("per_fee_per_fill"))),
+    }
+    let equities = object(equities)?;
     let crypto = object(vec![
         ("maker_bps", decimal(config.crypto.maker)),
         ("taker_bps", decimal(config.crypto.taker)),

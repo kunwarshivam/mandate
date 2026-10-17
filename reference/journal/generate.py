@@ -34,6 +34,7 @@ from pathlib import Path
 import account
 import approval
 import audit
+import canceled
 import connections
 import clients
 import cold
@@ -3829,6 +3830,7 @@ def render(
     approval_section: dict,
     timeout_section: dict,
     requests_section: dict,
+    cancel_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
@@ -3858,6 +3860,7 @@ def render(
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
             "approval_requests": requests_section,
+            "approval_cancellations": cancel_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
@@ -3918,6 +3921,7 @@ def main(argv: list[str] | None = None) -> int:
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
     requests_section = requests.build_section()
+    cancel_section = canceled.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
@@ -3955,6 +3959,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += timeouts.run_mutants(timeout_section)
     problems += requests.check_section(requests_section)
     problems += requests.run_mutants(requests_section)
+    problems += canceled.check_section(cancel_section)
+    problems += canceled.run_mutants(cancel_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4001,6 +4007,7 @@ def main(argv: list[str] | None = None) -> int:
         approval_section,
         timeout_section,
         requests_section,
+        cancel_section,
         broker_profile,
         connections_section,
         request_section,
@@ -4028,6 +4035,8 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_shape_section(reread["protection_shapes"])
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
+        or canceled.check_section(reread["approval_cancellations"])
+        or requests.check_section(reread["approval_requests"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
         or connections.check_section(reread["connection_requests"])
@@ -4094,6 +4103,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
         f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "
         f"{len(requests.vector_mutants(requests_section))} vector mutants caught; "
+        f"{len(cancel_section['invalid_drafts'])} invalid and {len(cancel_section['valid_drafts'])} valid "
+        f"approval-cancel drafts, {len(canceled.VALIDATOR_MUTANTS)} validator and "
+        f"{len(canceled.vector_mutants(cancel_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "

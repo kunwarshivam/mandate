@@ -24,8 +24,8 @@ use mandate_journal::{AppendOutcome, StreamId, TrustedStart, verify_events};
 use mandate_journal_pg::APP_ROLE;
 use mandate_mcp::{ALLOWLIST, Listed};
 use mandate_paper::{
-    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Observed, PaperError, ProductionCheck, SeenContract,
-    connect_check,
+    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Observed, PaperError, ProductionCheck, RunClock,
+    SeenContract, connect_check, run_clock,
 };
 use mandate_time::UtcNanos;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -102,13 +102,19 @@ fn the_binarys_journal_ports_own_the_stream_and_append_the_check() {
         return;
     };
     let stream = StreamId::parse(STREAM).unwrap();
-    let mut ports = ProductionCheck { journal: dsn(&db) };
+    let mut ports = ProductionCheck {
+        journal: dsn(&db),
+        clock: clock(),
+    };
     assert_eq!(ports.own(&stream).unwrap(), (1, 0));
     assert_eq!(ports.own(&stream).unwrap(), (2, 0));
     let before = ports.now();
     assert!(before > UtcNanos::parse("2026-01-01T00:00:00.000000000Z").unwrap());
     let vars = vec![(ACCOUNT_NUMBER_VAR.to_owned(), "5QRSENTINEL77".to_owned())];
-    let mut journaled = Journaled(ProductionCheck { journal: dsn(&db) });
+    let mut journaled = Journaled(ProductionCheck {
+        journal: dsn(&db),
+        clock: clock(),
+    });
     let checked = connect_check(&args(dsn(&db)), &vars, &mut journaled).unwrap();
     let rows = db.block_on(db.journal().rows(&stream)).unwrap();
     let types: Vec<&str> = rows.iter().map(|row| row.event_type.as_str()).collect();
@@ -128,7 +134,10 @@ fn an_append_at_a_stale_head_did_not_commit() {
         return;
     };
     let stream = StreamId::parse(STREAM).unwrap();
-    let mut ports = ProductionCheck { journal: dsn(&db) };
+    let mut ports = ProductionCheck {
+        journal: dsn(&db),
+        clock: clock(),
+    };
     let (epoch, _) = ports.own(&stream).unwrap();
     let outcome = ports.append(&stream, 7, epoch, ports.now(), &[b"{}".to_vec()]);
     assert!(
@@ -148,6 +157,7 @@ fn an_append_at_a_stale_head_did_not_commit() {
 fn the_connect_checks_ports_harden_the_process() {
     let mut ports = ProductionCheck {
         journal: String::new(),
+        clock: clock(),
     };
     ports.harden().unwrap();
     let limit = getrlimit(Resource::Core);
@@ -161,9 +171,15 @@ fn the_connect_checks_ports_harden_the_process() {
 fn the_connect_checks_ports_never_print_the_dsn() {
     let ports = ProductionCheck {
         journal: "postgres://paper:hunter2-sentinel@db-sentinel.invalid:1/journal".to_owned(),
+        clock: clock(),
     };
     let printed = format!("{ports:?}");
     assert!(printed.starts_with("ProductionCheck"), "{printed}");
     assert!(!printed.contains("hunter2"), "{printed}");
     assert!(!printed.contains("db-sentinel"), "{printed}");
+}
+
+/// This build's run clock with no clock variable: the system's.
+fn clock() -> RunClock {
+    run_clock(&[]).unwrap()
 }

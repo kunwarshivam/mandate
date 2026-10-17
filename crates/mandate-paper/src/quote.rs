@@ -124,7 +124,7 @@ pub fn fresh_ask(
 }
 
 /// Whole nanoseconds since the epoch.
-fn nanos(at: UtcNanos) -> Option<i128> {
+pub(crate) fn nanos(at: UtcNanos) -> Option<i128> {
     i128::from(at.secs())
         .checked_mul(1_000_000_000)?
         .checked_add(i128::from(at.nanos()))

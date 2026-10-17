@@ -1,6 +1,8 @@
 //! A scripted HTTP/1.1 server on a loopback port: one canned answer per connection, in order,
 //! and a record of every request it read. No test reaches the network.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -24,6 +26,12 @@ impl StepClock {
 impl Monotonic for StepClock {
     fn elapsed(&self) -> Duration {
         Duration::from_nanos(self.0.load(Ordering::SeqCst))
+    }
+
+    /// A wait moves the clock by exactly `span` and returns at once.
+    fn pause(&self, span: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.set(self.elapsed() + span);
+        Box::pin(std::future::ready(()))
     }
 }
 

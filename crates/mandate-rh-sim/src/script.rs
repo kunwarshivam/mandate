@@ -3,7 +3,9 @@
 //! `regular`, closed when absent), `quotes` (symbol to price) and `fills` are not. A fill names a
 //! symbol, a side, a price and, optionally, a quantity, the whole unfilled quantity when absent;
 //! the server uses it once, on the first placed order of that symbol and side it can fill, in
-//! any account, a re-sent place of an order still working included.
+//! any account, a re-sent place of an order still working included. `clock`, an RFC 3339 instant,
+//! is the broker's clock when the server starts, moving with the time it serves from then on
+//! (DEC-962 item 3); absent, the broker has no clock and its orders no creation time.
 //!
 //! Read strictly: a member the script does not define, a number written as a JSON number rather
 //! than canonical decimal text, or a value outside its enumeration refuses the whole script, so
@@ -12,6 +14,7 @@
 //! [DEC-926]: ../../../docs/project/decisions/DEC-926.md
 
 use mandate_num::{Price, Qty, Usd};
+use mandate_time::UtcNanos;
 use serde_json::{Map, Value};
 
 use crate::{Account, Event, Session, Side, Sim, SimError};
@@ -36,13 +39,14 @@ pub enum ScriptError {
     Sim(#[from] SimError),
 }
 
-/// A script read in full: the accounts, the session, the quotes and the fills.
+/// A script read in full: the accounts, the session, the quotes, the fills and the clock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Script {
     accounts: Vec<Account>,
     session: Session,
     quotes: Vec<(String, Price)>,
     fills: Vec<ScriptedFill>,
+    clock: Option<UtcNanos>,
 }
 
 impl Script {
@@ -50,7 +54,11 @@ impl Script {
     pub fn parse(text: &str) -> Result<Self, ScriptError> {
         let value: Value = serde_json::from_str(text).map_err(|_| ScriptError::NotJson)?;
         let top = value.as_object().ok_or(ScriptError::NotJson)?;
-        only(top, &["accounts", "session", "quotes", "fills"], "script")?;
+        only(
+            top,
+            &["accounts", "session", "quotes", "fills", "clock"],
+            "script",
+        )?;
         let accounts = list(top.get("accounts"), "accounts")?
             .iter()
             .map(account)
@@ -82,24 +90,42 @@ impl Script {
                 .map(fill)
                 .collect::<Result<Vec<_>, _>>()?,
         };
+        let clock = match top.get("clock") {
+            None => None,
+            Some(clock) => {
+                let text = clock.as_str().ok_or(ScriptError::Member("clock"))?;
+                let at = UtcNanos::parse_rfc3339(text).map_err(|_| ScriptError::Member("clock"))?;
+                Some(at)
+            }
+        };
         let script = Self {
             accounts,
             session,
             quotes,
             fills,
+            clock,
         };
         script.sim()?;
         Ok(script)
     }
 
-    /// A fresh core over the script's accounts, with its quotes and in its session.
+    /// A fresh core over the script's accounts, with its quotes, in its session, and on its clock
+    /// when it has one.
     pub fn sim(&self) -> Result<Sim, SimError> {
         let mut sim = Sim::new(self.accounts.clone())?;
+        if let Some(at) = self.clock {
+            sim.apply(Event::Clock(at))?;
+        }
         for (symbol, quote) in &self.quotes {
             sim.apply(Event::Quote(symbol.clone(), *quote))?;
         }
         sim.apply(Event::Session(self.session))?;
         Ok(sim)
+    }
+
+    /// The broker's clock when the server starts, if the script sets one.
+    pub fn clock(&self) -> Option<UtcNanos> {
+        self.clock
     }
 
     /// The scripted fills, in the order the script lists them.

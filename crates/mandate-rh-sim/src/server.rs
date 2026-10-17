@@ -20,14 +20,14 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mandate_time::UtcNanos;
 use serde_json::{Map, Value, json};
 
 use crate::oauth::{OAuth, Routed};
 use crate::{
-    Alert, MarketHours, Order, OrderFilter, OrderRequest, OrderType, Position, Script,
+    Alert, Event, MarketHours, Order, OrderFilter, OrderRequest, OrderType, Position, Script,
     ScriptedFill, Side, Sim, SimError, State, TimeInForce,
 };
 
@@ -101,6 +101,45 @@ struct Shared {
     oauth: Option<OAuth>,
     /// The scripted fills not yet used, in the script's order.
     fills: Vec<ScriptedFill>,
+    /// The broker's clock, on a rehearsal server whose script sets one (DEC-962 item 3).
+    clock: Option<BrokerClock>,
+}
+
+/// The rehearsal's broker clock: the script's instant when the server started, moved by the time
+/// served since, which each `tools/call` sets on the core before it acts.
+#[derive(Debug, Clone, Copy)]
+struct BrokerClock {
+    start: UtcNanos,
+    started: Instant,
+}
+
+impl BrokerClock {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the rehearsal server's edge reads the monotonic clock to move the scripted broker clock (DEC-962 item 3)"
+    )]
+    fn new(start: UtcNanos) -> Self {
+        Self {
+            start,
+            started: Instant::now(),
+        }
+    }
+
+    /// `start` moved by the time since the server started, if [`UtcNanos`] holds it.
+    fn now(self) -> Option<UtcNanos> {
+        moved(self.start, self.started.elapsed())
+    }
+}
+
+/// `start` moved forward by `elapsed`, if [`UtcNanos`] holds the result.
+fn moved(start: UtcNanos, elapsed: Duration) -> Option<UtcNanos> {
+    let nanos = start.nanos().checked_add(elapsed.subsec_nanos())?;
+    let (carry, nanos) = (nanos / 1_000_000_000, nanos % 1_000_000_000);
+    let secs = start
+        .secs()
+        .checked_add(i64::try_from(elapsed.as_secs()).ok()?)?
+        .checked_add(i64::from(carry))?;
+    UtcNanos::from_parts(secs, nanos).ok()
 }
 
 /// A running server over one [`Sim`]; it stops when dropped.
@@ -115,7 +154,7 @@ pub struct SimServer {
 impl SimServer {
     /// Binds `127.0.0.1:0` and serves `sim` as `variant` until dropped.
     pub fn start(sim: Sim, variant: Variant) -> Result<Self, ServerError> {
-        Self::launch(sim, variant, 0, None)
+        Self::launch(sim, variant, 0, None, None)
     }
 
     /// The rehearsal server (DEC-922 items 3 and 4): `script`'s core, honest, on
@@ -125,7 +164,14 @@ impl SimServer {
         let sim = script
             .sim()
             .map_err(|e| ServerError::Listen(e.to_string()))?;
-        Self::launch(sim, Variant::Honest, port, Some(script.fills().to_vec()))
+        let clock = script.clock().map(BrokerClock::new);
+        Self::launch(
+            sim,
+            Variant::Honest,
+            port,
+            Some(script.fills().to_vec()),
+            clock,
+        )
     }
 
     fn launch(
@@ -133,6 +179,7 @@ impl SimServer {
         variant: Variant,
         port: u16,
         rehearsal: Option<Vec<ScriptedFill>>,
+        clock: Option<BrokerClock>,
     ) -> Result<Self, ServerError> {
         let listen = |error: std::io::Error| ServerError::Listen(error.to_string());
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).map_err(listen)?;
@@ -146,6 +193,7 @@ impl SimServer {
             garble: None,
             oauth,
             fills: rehearsal.unwrap_or_default(),
+            clock,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (served, stopped) = (Arc::clone(&shared), Arc::clone(&stop));
@@ -390,6 +438,9 @@ impl Shared {
         let args = params
             .and_then(|p| p.get("arguments"))
             .and_then(Value::as_object);
+        if let Some(now) = self.clock.and_then(BrokerClock::now) {
+            drop(self.sim.apply(Event::Clock(now)));
+        }
         let outcome = self.run(&name, args.unwrap_or(&empty));
         if matches!(outcome, Err(Refusal::Core(SimError::AnswerLost))) {
             return None;
@@ -420,8 +471,9 @@ impl Shared {
     /// The four order tools drive the core, and the five account reads serve what the core holds
     /// (DEC-875 item 4): the accounts, the portfolio's two scripted figures, the positions with
     /// their fills' average, the one symbol's tradability, and the locked quotes at the prices
-    /// the market scripted. `get_equity_orders` takes the three filters the core models
-    /// ([`ORDER_FILTERS`], DEC-941 item 2) and refuses the others. Anything a tool's assumed
+    /// the market scripted. `get_equity_orders` takes the three filters the core models and the
+    /// cursor of its own pages ([`ORDER_FILTERS`], DEC-941 item 2, DEC-956 item 3) and refuses
+    /// the others. Anything a tool's assumed
     /// input does not name is refused, never answered with a guess.
     fn run(&mut self, name: &str, args: &Map<String, Value>) -> Result<Value, Refusal> {
         let account = text(args, "account_number")?.unwrap_or_default();
@@ -472,8 +524,15 @@ impl Shared {
                         .collect::<Vec<_>>()}))
             }
             "get_equity_orders" if args.keys().all(|key| ORDER_FILTERS.contains(&key.as_str())) => {
-                let orders = self.sim.listed(&account, &order_filter(args)?)?;
-                Ok(json!({"orders": orders.iter().map(order_json).collect::<Vec<_>>()}))
+                let cursor = text(args, "cursor")?;
+                let (orders, next) =
+                    self.sim
+                        .page(&account, &order_filter(args)?, cursor.as_deref())?;
+                let mut page = json!({"orders": orders.iter().map(order_json).collect::<Vec<_>>()});
+                if let (Some(next), Some(fields)) = (next, page.as_object_mut()) {
+                    fields.insert("next_cursor".to_owned(), json!(next));
+                }
+                Ok(page)
             }
             "get_equity_tradability"
                 if args
@@ -524,9 +583,16 @@ impl Shared {
     }
 }
 
-/// The arguments `get_equity_orders` takes: the account, and the filters the core models
-/// (DEC-941 item 2). `order_id`, `state` and `cursor` are refused, never ignored.
-const ORDER_FILTERS: [&str; 4] = ["account_number", "symbol", "created_at_gte", "placed_agent"];
+/// The arguments `get_equity_orders` takes: the account, the filters the core models (DEC-941
+/// item 2), and the page `cursor` it issued (DEC-956 item 3). `order_id` and `state` are
+/// refused, never ignored.
+const ORDER_FILTERS: [&str; 5] = [
+    "account_number",
+    "symbol",
+    "created_at_gte",
+    "placed_agent",
+    "cursor",
+];
 
 /// `get_equity_orders`'s filters: `created_at_gte` is RFC 3339 text and `placed_agent` one of the
 /// contract's four values, or the call is refused.

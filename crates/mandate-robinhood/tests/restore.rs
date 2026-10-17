@@ -20,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 use mandate_accounting::{InstrumentId, Side};
-use mandate_canon::parse;
+use mandate_canon::{Value as Canon, parse};
 use mandate_executor::{
     BrokerConnector, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerUnknown, ClientOrderId,
     ConnectorError, EventId, FoldedEvent, IntentId, OrderType, Purpose, Seq, SubmitOrder,
@@ -28,7 +28,7 @@ use mandate_executor::{
 };
 use mandate_mcp::{CallClass, McpError};
 use mandate_num::{Price, Qty};
-use mandate_robinhood::{RobinhoodConnector, Tools};
+use mandate_robinhood::{RobinhoodConnector, Tickers, Tools};
 use proptest::test_runner::{Config, TestRunner};
 use serde_json::{Value, json};
 
@@ -38,10 +38,12 @@ const NO_ORDER_ID: ConnectorError = ConnectorError::NotSent {
     code: "no_order_id",
 };
 
-/// Every call the connector makes, answered with an order in `state`: the named one for a cancel.
+/// Every call the connector makes, answered with an order in `state`: the named one for a cancel,
+/// in the ticker [`tickers_by_id`] finds for it, and a place's in the ticker it was sent.
 struct Recording {
     calls: Calls,
     state: &'static str,
+    symbols: BTreeMap<String, String>,
 }
 
 impl Tools for Recording {
@@ -54,8 +56,17 @@ impl Tools for Recording {
         self.calls
             .borrow_mut()
             .push((class, tool, arguments.clone()));
-        let record = json!({"id": arguments.get("order_id").unwrap_or(&json!("rh-new")), "state": self.state, "quantity": "2",
-            "filled_quantity": "0", "limit_price": "499", "stop_price": null});
+        let id = arguments
+            .get("order_id")
+            .unwrap_or(&json!("rh-new"))
+            .clone();
+        let named = id.as_str().and_then(|id| self.symbols.get(id)).cloned();
+        let symbol = arguments
+            .get("symbol")
+            .cloned()
+            .or(named.map(Value::String));
+        let record = json!({"id": id, "state": self.state, "quantity": "2",
+            "filled_quantity": "0", "limit_price": "499", "stop_price": null, "symbol": symbol});
         Ok(json!({ "structuredContent": record }).to_string())
     }
 }
@@ -70,9 +81,56 @@ fn restored(
     let tools = Recording {
         calls: Rc::clone(&calls),
         state,
+        symbols: tickers_by_id(records),
     };
-    let connector = RobinhoodConnector::restore(tools, ACCOUNT.to_owned(), records).unwrap();
+    let connector =
+        RobinhoodConnector::restore(tools, ACCOUNT.to_owned(), tickers(), records).unwrap();
     (connector, calls)
+}
+
+/// Each broker id the stream journals, beside the instrument its key's `OrderSubmitted`, or else
+/// the `OrderSubmitted` of the first order it `replaces`, names: the ticker the broker's record
+/// for it carries, since each instrument here is registered as its own ticker.
+fn tickers_by_id(records: &[FoldedEvent]) -> BTreeMap<String, String> {
+    let text = |record: &FoldedEvent, member: &str| {
+        record
+            .payload
+            .get(member)
+            .and_then(Canon::as_str)
+            .map(str::to_owned)
+    };
+    let mut instruments = BTreeMap::new();
+    let mut origins = BTreeMap::new();
+    for record in records {
+        let Some(key) = text(record, "client_order_id") else {
+            continue;
+        };
+        if record.event_type == "OrderSubmitted" {
+            instruments.extend(text(record, "instrument_id").map(|i| (key.clone(), i)));
+        }
+        origins.extend(text(record, "replaces").map(|old| (key.clone(), old)));
+    }
+    let mut symbols = BTreeMap::new();
+    for record in records {
+        let (Some(key), Some(id)) = (
+            text(record, "client_order_id"),
+            text(record, "broker_order_id"),
+        ) else {
+            continue;
+        };
+        let mut at = key;
+        for _ in 0..records.len() {
+            if let Some(instrument) = instruments.get(&at) {
+                symbols.insert(id.clone(), instrument.clone());
+                break;
+            }
+            match origins.get(&at) {
+                Some(old) => at = old.clone(),
+                None => break,
+            }
+        }
+    }
+    symbols
 }
 
 fn cancel(
@@ -775,7 +833,8 @@ fn rebuilt_within_seconds(records: &[FoldedEvent]) {
     let records = records.to_vec();
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
-        let rebuilt = RobinhoodConnector::restore(NoTools, ACCOUNT.to_owned(), &records).is_ok();
+        let rebuilt =
+            RobinhoodConnector::restore(NoTools, ACCOUNT.to_owned(), tickers(), &records).is_ok();
         done.send(rebuilt).unwrap();
     });
     assert_eq!(
@@ -1193,4 +1252,10 @@ fn interleaved(alternates: bool) {
         Ok(())
     });
     verdict.unwrap();
+}
+
+/// Each symbol these tests trade, registered as its own asset id (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "VTI", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
 }
