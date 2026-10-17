@@ -34,5 +34,32 @@
     "set": {
       "/approvals/0/deadline": 0
     }
+  },
+  {
+    "label": "a version-1 request: no time in force or protection",
+    "set": {
+      "/approvals/0/order/tif": null,
+      "/approvals/0/order/protection": null
+    }
+  },
+  {
+    "label": "protection with a take profit",
+    "set": {
+      "/approvals/0/order/protection/take_profit": "112"
+    }
+  },
+  {
+    "label": "a crypto increase",
+    "set": {
+      "/approvals/0/order/asset_class": "crypto",
+      "/approvals/0/order/purpose": "increase",
+      "/approvals/0/order/tif": "ioc"
+    }
+  },
+  {
+    "label": "a good-till-cancelled order",
+    "set": {
+      "/approvals/0/order/tif": "gtc"
+    }
   }
 ]

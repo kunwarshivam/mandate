@@ -13,7 +13,7 @@
   ],
   "properties": {
     "agent": {
-      "$ref": "#/$defs/Agent"
+      "$ref": "#/$defs/AgentDetail"
     },
     "as_of": {
       "$ref": "../common.schema.json#/$defs/AsOf"
@@ -21,7 +21,7 @@
   },
   "$defs": {
     "Agent": {
-      "description": "One deployed agent (\u00a74.7, DEC-979): an agent AgentDeployed names on the control stream. mode is the last AgentModeChanged's to, stopped after AgentStopped, and null before either (not reported; never read as normal).",
+      "description": "One deployed agent (\u00a74.7, DEC-979): an agent AgentDeployed names on the control stream. mode is the last AgentModeChanged's to, stopped after AgentStopped, and null before either (not reported; never read as normal). label and mandate come from the mandate document the deployed version names, read from the content-addressed store; null when the store does not hold it (DEC-1020).",
       "type": "object",
       "required": [
         "agent_id",
@@ -29,9 +29,10 @@
         "mandate_version",
         "deployed_at",
         "mode",
-        "pending_approvals"
+        "pending_approvals",
+        "label",
+        "mandate"
       ],
-      "additionalProperties": false,
       "properties": {
         "agent_id": {
           "$ref": "../common.schema.json#/$defs/Id"
@@ -66,6 +67,165 @@
         "pending_approvals": {
           "type": "integer",
           "minimum": 0
+        },
+        "label": {
+          "oneOf": [
+            {
+              "description": "The mandate document's name (mandate schema `name`).",
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mandate": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MandateSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MandateSummary": {
+      "description": "The deployed mandate version's envelope as its document states it (DEC-1020): capital, goal, the asset classes it may use, and the key risk limits. Values are the document's own, unchanged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocation_usd",
+        "max_loss_from_allocation",
+        "goal",
+        "goal_end_date",
+        "asset_classes",
+        "max_position_usd",
+        "max_order_usd",
+        "max_orders_per_day",
+        "max_daily_loss",
+        "max_drawdown"
+      ],
+      "properties": {
+        "allocation_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_loss_from_allocation": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "goal": {
+          "enum": [
+            "continuous",
+            "accumulate",
+            "profit_stop"
+          ]
+        },
+        "goal_end_date": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asset_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "crypto",
+              "us_equity"
+            ]
+          }
+        },
+        "max_position_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_order_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_orders_per_day": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_daily_loss": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_drawdown": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        }
+      }
+    },
+    "AgentDetail": {
+      "description": "One agent with its account's positions, named as the account's (DEC-1020): the latest BrokerPositionObserved per instrument on the account stream of the connection the mandate document names, model quantity first. null when the document or the connection's account stream is not found.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/Agent"
+        }
+      ],
+      "required": [
+        "account_positions"
+      ],
+      "properties": {
+        "account_positions": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Position"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "AgentRow": {
+      "description": "One agent in the list.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/Agent"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Position": {
+      "description": "One instrument at the account's last reconciliation (journal spec \u00a79.6's BrokerPositionObserved): the executor's model quantity, the broker's, and whether they differed. Account-wide: an account the agent shares with another shows both agents' holdings.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument",
+        "qty",
+        "broker_qty",
+        "mismatch",
+        "observed_at"
+      ],
+      "properties": {
+        "instrument": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "broker_qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "mismatch": {
+          "type": "boolean"
+        },
+        "observed_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
         }
       }
     }
