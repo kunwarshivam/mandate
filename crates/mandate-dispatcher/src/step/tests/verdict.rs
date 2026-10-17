@@ -23,7 +23,7 @@ type Recorded = (u64, String, String, String, Option<Value>);
 fn attempts(journal: &Shared) -> Result<Vec<Recorded>, Box<dyn Error>> {
     let ntf = StreamId::parse(NTF).ok_or(NTF)?;
     let mut got = Vec::new();
-    for row in journal.committed(&ntf) {
+    for row in journal.rows(&ntf) {
         if row.event_type != "NoticeAttempted" {
             continue;
         }
@@ -136,12 +136,12 @@ struct Holding {
 }
 
 impl Journal for Holding {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
-        let mut rows = self.journal.committed(stream);
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+        let mut rows = self.journal.committed(stream)?;
         if stream.as_str() == NTF {
             rows.push(self.stored.clone());
         }
-        rows
+        Ok(rows)
     }
     fn append_notices(
         &mut self,
@@ -205,10 +205,7 @@ fn a_stored_version_1_failed_attempt_ends_its_channel() -> Checked {
         .map(|p| text(p, "notice"))
         .ok_or("one notice")?;
     let ntf = StreamId::parse(NTF).ok_or(NTF)?;
-    let last = journal
-        .committed(&ntf)
-        .pop()
-        .ok_or("the notice stream's head")?;
+    let last = journal.rows(&ntf).pop().ok_or("the notice stream's head")?;
     let mut holding = Holding {
         journal: journal.clone(),
         stored: stored_version_1(&notice, &last)?,

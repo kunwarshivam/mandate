@@ -46,6 +46,7 @@
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-evaluation/ @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
+/crates/mandate-gateway-http/ @kunwarshivam
 /crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
 /crates/mandate-identity-system/ @kunwarshivam
