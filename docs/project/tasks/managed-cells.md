@@ -13,10 +13,48 @@ confirms"), which is everything in Waves 0 to 2 below.
 
 - **After R0, straight to managed cells** (infrastructure §1.1, §3.2), not one always-on VM.
 - **Build the service pieces now, in parallel, in crates R0 does not touch.**
-- **The only spend is Cloudflare Workers for `web/`.** No VM, cluster, managed database, object
-  store, key management service, registry, paging tool or paid CI runner. So every piece is built
-  and tested on a **local and CI cell** (kind or k3d) before any hosting is bought, and every
-  hosting cost is a founder decision listed [below](#hosting-spend-for-the-founder-to-approve-later).
+- **The only spend approved so far is Cloudflare Workers for `web/`.** No VM, cluster, managed
+  database, object store, key management service, registry, paging tool or paid CI runner. So
+  every piece is built and tested on a **local and CI cell** (kind or k3d) before any hosting is
+  bought, and every hosting cost is a founder decision listed
+  [below](#hosting-spend-for-the-founder-to-approve-later).
+- **One architecture, small first** (DEC-967 item 6): "dont over engineer, but dont under
+  engineer." See [One architecture](#one-architecture-from-one-node-to-many-cells).
+- **Cell #1: k3s on one or two Hetzner VMs in Ashburn, VA** (item 7); **the journal's Postgres in
+  the cell under the CloudNativePG operator** (item 8); **object storage on Cloudflare R2**, off the
+  VMs, behind a plain S3 endpoint and a lock check (item 9); **MinIO only as an optional cache**
+  (item 10). The VMs and R2 still need the founder's spend approval (H1, H3).
+
+## One architecture, from one node to many cells
+
+The same Helm chart is the product at every size. What changes with size is configuration and
+node count, never the application, the chart's structure or a lane's code:
+
+| Size | Where | What changes |
+|---|---|---|
+| Developer machine and CI | kind or k3d | Nothing but the values file: one node, a fixture broker, a local S3 test store |
+| Cell #1 | k3s on one or two Hetzner VMs, Ashburn | The values file: two nodes when the founder approves the second VM, R2's endpoint, the tunnel |
+| Busier cell | The same k3s, more nodes | Node count; a workspace still sits on one node (§3.2) |
+| More cells | One chart install per cell | A second install, its own Postgres, vault and bucket |
+| Managed Kubernetes later | GKE, EKS or similar | The storage class and the ingress values; the chart and images are unchanged |
+
+So every work item holds to these rules:
+
+- **Only portable Kubernetes.** Deployments, StatefulSets through the CloudNativePG operator,
+  Jobs, `NetworkPolicy`, `PersistentVolumeClaim` by storage-class name, Secrets mounted as files.
+  No k3s-only, Hetzner-only or cloud-only API in any crate or template; the storage class (k3s's
+  local-path, later a CSI driver) and the ingress are values. The cell's only ingress is a
+  `cloudflared` pod (an outbound tunnel), so no cloud load balancer is needed or assumed.
+- **Storage is a plain S3 endpoint plus a lock check.** WAL archives, base backups, artifacts and,
+  later, cold segments go to an S3-compatible endpoint named in configuration, and a start-up
+  check confirms the write-once retention journal spec §6.2 requires before anything relies on
+  it (E21-40). Providers swap by configuration.
+- **Nothing that matters only at large scale goes in the first slices:** no multiple regions, no
+  service mesh, no autoscaling, no multi-cell routing, no dedicated node pools. Each is a values
+  change or a later story when traffic asks for it.
+- **The single-VM systemd path in `deploy/` (DEC-822) is a dev and demo convenience, not the
+  production path.** It stays for the 2026-10-26 demo and local use; no story in this plan adds a
+  process to it or depends on it, and the chart replaces it as the way the product is deployed.
 
 ## What the cell is, and what it is not
 
@@ -33,7 +71,8 @@ process its own pod, a workspace's data service, executors and runtimes on one n
 | Vault (OpenBao, DEC-434 item 14), behind `SecretSource` | One per cell | Lane V (V1, E21-32) |
 | Deployment manager | One per cell | Lane D (E21-33) |
 | Metrics exporter, alert rules, kill-switch surface | Per process; one alert path per cell | Lane O (E21-3, E21-4, E21-34, E21-39) |
-| Journal Postgres | One per cell, synchronous standby before live only (§4.1) | Lane K (chart), Lane C (drills) |
+| Journal Postgres, under the CloudNativePG operator: a primary and a synchronous standby, WAL archived to object storage, point-in-time recovery (DEC-967 item 8) | One cluster per cell | Lane S (E21-41) |
+| Object storage: a plain S3 endpoint with a lock check, Cloudflare R2 for cell #1 (DEC-967 item 9) | One bucket set per cell, off the cell's VMs | Lane S (E21-40) |
 
 **Out of scope here:** the model gateway, the cold exporter and anchorer (E5-7), the market-data
 service's live ingest, the token-exchange process's hosting (it waits on E10-13 and DEC-821's
@@ -72,7 +111,7 @@ first dependency is a founder decision (listed under [Dependencies](#dependencie
 
 ## Lanes
 
-Eight lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
+Nine lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
 PR at a time. **SC** marks a safety-critical story: tests PR first, reviewed by an agent on a
 different model, zero missed mutants, green CI (`AGENTS.md` Safety-critical paths, DEC-79).
 
@@ -145,10 +184,22 @@ gains each process as its lane's image lands.
 
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
-| C1 | **E21-37** (its drills exercise SC paths; the harness itself is tooling) | `cargo xtask cell up` and `cell drill`: a kind (or k3d) cluster on the CI runner and on a developer machine, the chart installed from the PR's images, and the drills: kill each process at each step with zero duplicates; two executors for one account, the older `Fenced` before it sends (OPS-3); a request to each live trading host fails at the network layer (OPS-5); the kill switch with the exporter, API and deployment manager down (OPS-4); the upgrade drill (OPS-7); a restore of the cell's Postgres verified by journal §11 (OPS-8). Each drill fails on a seeded bug before it is trusted. A CI job under ten minutes (DEC-464), sharded by drill | everything above; `mandate-journal-pg` and `mandate-cli` from the start | — |
+| C1 | **E21-37** (its drills exercise SC paths; the harness itself is tooling) | `cargo xtask cell up` and `cell drill`: a k3d cluster (k3s in containers, cell #1's own distribution; kind if k3d cannot run on the runner) on the CI runner and on a developer machine, the chart installed from the PR's images, and the drills: kill each process at each step with zero duplicates; two executors for one account, the older `Fenced` before it sends (OPS-3); a request to each live trading host fails at the network layer (OPS-5); the kill switch with the exporter, API and deployment manager down (OPS-4); the upgrade drill (OPS-7); a restore of the cell's Postgres verified by journal §11 (OPS-8). Each drill fails on a seeded bug before it is trusted. A CI job under ten minutes (DEC-464), sharded by drill | everything above; `mandate-journal-pg` and `mandate-cli` from the start | — |
 
 C1's first slice needs no process lane: it boots K1's skeleton and runs the migration and a
 journal verification, so the cell runs in CI from Wave 0.
+
+### Lane S: storage (object storage and the journal's Postgres)
+
+| Order | Story | What | Existing crates it needs | New crate |
+|---|---|---|---|---|
+| S1 | **E21-40** (SC; first) | The object-store compatibility check and its interface: can R2 give journal spec §6.2's write-once retention and its start-up lock check, by per-object S3 Object Lock headers or by R2's bucket lock rules? A plain S3 endpoint and a `LockCheck` that reads the provider's real retention setting and refuses anything weaker. If R2 has bucket-level locks only, either the check reads R2's bucket-lock rule and accepts nothing weaker, or the cold store alone goes to a provider with standard Object Lock in compliance mode (for example Backblaze B2), recorded as a DEC. The check runs against an S3 test store in CI and, once H3 is approved, against R2 itself | `mandate-journal-cold` (what the cold store needs), `mandate-artifacts-fs` (the artifact layout to keep) | `mandate-objectstore` (SC) |
+| S2 | **E21-41** (SC) | The journal's Postgres in the cell under CloudNativePG: two instances with `synchronous_commit = on` and one synchronous standby, the journal's roles and `migrations/` applied by the migration Job (OPS-13), WAL archived to the S1 endpoint, point-in-time recovery restored and verified (OPS-8). On one node the standby shares the node, disclosed as no second failure domain; the second VM gives it one | `mandate-journal-pg`, `mandate-cli` (`db migrate`, `journal verify`), S1 | — |
+| S3 | E21-5 (SC, exists) | The backup drill and restore procedure, on S2's archive | S2, E21-25 | — |
+
+MinIO is not in this lane. It may come later only as an optional in-cell cache, never the only
+copy or the backup, and only after the founder and counsel decide its AGPL-3.0 licence (DEC-967
+item 10, DEC-434 item 16).
 
 ### Lane W: `web/` on Cloudflare Workers (the one approved spend)
 
@@ -168,6 +219,7 @@ flowchart LR
         K1["K1 E21-36 chart skeleton"]
         C1a["C1 E21-37 cell boots"]
         W1["W1 E21-38 Workers"]
+        S1["S1 E21-40 object store check"]
     end
     subgraph W1g["Wave 1"]
         P2["P2 E21-29 scheduler"]
@@ -177,6 +229,7 @@ flowchart LR
         D1["D1 E21-33 deployment manager"]
         O2["O2 E21-4 alerts"]
         R2["R2 E21-35 images, signing"]
+        S2["S2 E21-41 CloudNativePG"]
     end
     subgraph W2["Wave 2"]
         P4["P4 E21-7 drain, hand-over"]
@@ -186,7 +239,7 @@ flowchart LR
         C1b["C1 drills"]
     end
     G{{"Local-cell gate"}}
-    H["Founder: H1 staging spend"]
+    H["Founder: H1 VMs, H3 R2"]
     P1 --> P2 & P3 & D1
     V1 --> V2 --> V3
     P3 --> V3
@@ -194,6 +247,9 @@ flowchart LR
     R1 --> R2
     K1 --> C1a
     K1 --> D1
+    S1 --> S2
+    K1 --> S2
+    S2 --> C1b
     P3 --> P4
     D1 --> P4
     P3 --> O4
@@ -201,15 +257,17 @@ flowchart LR
     P4 & V3 & O3 & O4 & C1b --> G --> H
 ```
 
-- **Wave 0** (start now, in parallel): P1, V1, O1, R1, K1 and C1's first slice, W1. None needs
-  another lane.
+- **Wave 0** (start now, in parallel): P1, V1, O1, R1, K1 and C1's first slice, W1, S1's interface
+  and its CI half. None needs another lane.
 - **Wave 1**: P2 and P3 after P1; A1 once the HTTP dependency (D-1) is approved and E10-10's first
-  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1.
+  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1.
 - **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; C1's drills
   as each process image lands.
 - **After R0 closes**: P5, and any queued change to the four R0 files.
 - **The local-cell gate**: every C1 drill passes in CI on `main` for a week of merges. Only then is
-  the founder asked for H1, the staging cell.
+  the founder asked for H1 (the VMs) and H3 (R2); S1's check against R2 itself runs the day H3 is
+  approved, before anything is stored there. Whether cell #1 also counts as DEC-434 item 19's
+  minimal staging cell is asked with H1; it carries paper and demo only either way.
 
 What the lanes need from each other is small on purpose: `mandate-process` (P1) is the one crate
 four lanes import, so it lands first and its interface is reviewed before P3, A1, V2 and D1 build
@@ -224,19 +282,25 @@ cost model (§10) is the formula; these are its first inputs.
 
 | ID | Decision | Trigger | Options, rough cost per month |
 |---|---|---|---|
-| H0 | Does the demo host (DEC-822, a Hetzner CX22) keep running after the 2026-10-26 demo? | The demo ends | Keep it, about $5 to $7; or retire it once a staging cell exists |
-| H1 | **Hosting provider and region for the first cell**, staging first (DEC-434 items 13 and 19) | The local-cell gate | Managed Kubernetes on a hyperscaler (control plane $0 to $75, plus 3 small nodes $60 to $200): about $100 to $300. Self-run k3s on 3 small VMs at a budget provider: about $25 to $60, with the operating work on us. Item 13 also requires compliance-mode object lock, a key service and two US regions, which narrows the providers |
-| H2 | Journal Postgres for the cell (DEC-434 item 15) | H1 | Self-run in the cell, as item 15 prefers: volumes and snapshots, about $5 to $30. A managed service with a synchronous standby: about $100 to $400. The standby itself is required only before live (§4.1) |
-| H3 | Object storage with compliance-mode object lock (journal §6.2, infrastructure §4.2) | H1, or E5-7's shipping job | At small volume, about $1 to $25, growing with records kept six years; a second region before live roughly doubles it. Confirm compliance-mode lock, not only governance mode, per provider |
-| H4 | Key management for OpenBao's auto-unseal (DEC-434 item 14, §5.2) | H1 | A cloud key service: about $1 to $5. Without one, a manual unseal by the founder after every vault restart |
+| H0 | Does the demo host (DEC-822, a Hetzner CX22) keep running after the 2026-10-26 demo? It is a dev and demo convenience now (DEC-967 item 6) | The demo ends | Keep it, about $5 to $7; or retire it once cell #1 runs |
+| H1 | **Cell #1's VMs: k3s on one or two Hetzner Cloud VMs in Ashburn, VA** (DEC-967 item 7; DEC-434 items 13 and 19) | The local-cell gate | Confirm at order time which server types Ashburn offers: as the recording agent knows it, Hetzner's US locations offer the shared AMD (CPX) and dedicated (CCX) lines, and the cheapest shared Intel line (CX, the demo host's CX22) is EU-only. One CPX31 (4 vCPU, 8 GB): about $15 to $20; two: about $30 to $40. Two CPX21 (3 vCPU, 4 GB) are cheaper, about $18 to $25, but tight for Postgres, OpenBao, Prometheus and the processes. Plus volumes, about $0.05 per GB (40 GB per node: about $2 each), and one primary IPv4 per VM, under $1 each. US locations include less traffic than the EU's; the cell's traffic is small |
+| H2 | The journal's Postgres (DEC-434 item 15) | — | **Decided as relayed** (DEC-967 item 8): in the cell under CloudNativePG, so no separate spend; it runs on H1's VMs and archives to H3 |
+| H3 | **Object storage: Cloudflare R2**, location hint eastern North America (DEC-967 item 9) | The local-cell gate, and S1's check against R2 passing | Storage about $0.015 per GB-month after a 10 GB free tier, no egress fee, operations about $4.50 per million writes and $0.36 per million reads after their free tiers: about **$0 to $2** at cell #1's scale (a few GB of WAL, backups and artifacts). Grows with records kept six years (§4.5) |
+| H3b | Fallback for the cold store only, if S1 finds R2's locks weaker than journal spec §6.2 needs: **Backblaze B2** with standard S3 Object Lock in compliance mode | S1's finding | About $6 per TB-month, first 10 GB free; at cell #1's scale about $0 to $1. Recorded as its own DEC when taken |
+| H4 | Key management for OpenBao's auto-unseal (DEC-434 item 14, §5.2) | H1 | Hetzner has no key service. Options: a cloud key service elsewhere, about $1 to $5; or a manual unseal by the founder after every vault restart, which costs nothing and adds a step after every node reboot |
 | H5 | Container registry for signed images | R2 reaches a hosted cell | Free for public images on the repository's host; a private registry about $0 to $20 |
 | H6 | Paging and on-call tool (DEC-434 item 20) | O3, before design partners | A free tier, or about $10 to $30 per user |
 | H7 | Larger CI runners, if the cell job cannot stay under ten minutes on standard runners by sharding (DEC-464) | C1 | About $0.01 to $0.05 per runner-minute: a few dollars to tens of dollars a month at today's PR rate |
 | H8 | A hardware signing key for ES-17, if the founder holds none | R2 reaches a hosted cell | One-off, about $50 to $90 |
-| H9 | The production cells, a second region, a synchronous standby, the global control plane | The Phase 2 gate, counsel and the penetration test | Not estimated here; roughly double H1 to H3 per region, plus the control plane (DEC-440 item 16) |
+| H9 | The production cells, a second region, a standby in a second failure domain, the global control plane | The Phase 2 gate, counsel and the penetration test | Not estimated here; roughly double H1 to H3 per region, plus the control plane (DEC-440 item 16) |
 
 Already approved, for comparison: Cloudflare Workers for `web/` (DEC-967 item 3), on the paid plan
 from about $5 a month.
+
+**Cell #1 in total, if H1 and H3 are approved as recommended:** two CPX31-class VMs with volumes
+and addresses, about $35 to $45 a month, plus R2 at about $0 to $2, plus Workers at about $5:
+**roughly $40 to $50 a month**. Starting on one VM halves the compute, at the cost of a standby
+that shares the primary's node (E21-41).
 
 ## Dependencies the founder approves
 
@@ -250,7 +314,7 @@ row; these are the expected first rows.
 | D-2 | O1 | The OpenTelemetry metrics API and a Prometheus exporter (ES-18) | Already the design's choice; the row is new |
 | D-3 | D1 | A Kubernetes API client, or plain HTTPS to the API server through the existing `reqwest` and `rustls` | The second adds no crate |
 | D-4 | K1, C1 | CI tools: `kind` or `k3d`, `helm`, `kubeconform`; pinned in `.github/workflows/ci.yml` and `.cursor/install.sh` together (`AGENTS.md` Setup), downloaded from GitHub releases only | Tools, not crates, but pinned and reviewed the same way |
-| D-5 | K1, V2, C1 | Container images: PostgreSQL 18, OpenBao, Prometheus, Alertmanager, each pinned by digest | Our own images need none: static binaries on an empty base |
+| D-5 | K1, S2, V2, C1 | The CloudNativePG operator and its chart; container images for PostgreSQL 18, OpenBao, Prometheus, Alertmanager and `cloudflared`, each pinned by digest; k3s itself for cell #1 | Our own images need none: static binaries on an empty base |
 | D-6 | W1 | The Workers adapter for Next.js and its CLI (npm) | Each an npm row |
 | D-7 | R1, R2 | `cosign`, an SBOM generator, `cargo-auditable` (ES-14, ES-17) | Tools, pinned as D-4 |
 

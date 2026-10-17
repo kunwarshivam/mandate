@@ -2558,7 +2558,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
   overview.
 
-Rows E21-28 to E21-39 come from the [managed-cells plan](tasks/managed-cells.md)
+Rows E21-28 to E21-41 come from the [managed-cells plan](tasks/managed-cells.md)
 ([DEC-967](decisions/DEC-967.md), Proposed until the founder confirms the relayed answers). Each
 names its lane. None buys hosting, and none edits `crates/mandate-paper/src/lib.rs` or
 `crates/mandate-shell/src/control.rs`, `adapters.rs` or `paper/` before R0 closes (DEC-967 item 2).
@@ -2648,8 +2648,8 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
   hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
-- **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart and one
-  Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
+- **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
+  and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
   render the processes of design §3.1 that exist, one pod or service each; a workspace's executors,
   runtimes and data service share a node by pod affinity; the executor and scheduler have requests
@@ -2658,10 +2658,14 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   the data plane accepts no inbound connection; migrations run as a Job under the migration-owner
   role before processes roll, never at start (OPS-13); secrets arrive only as mounted files, never
   environment variables (DEC-822 item 4); `helm lint`, a schema check and a test that renders the
-  chart and asserts each of these pass in CI; and `environment` accepts only `paper` or `backtest`.
-- **E21-37 (Proposed, M8; lane C1; its drills test SC paths)** As the founder, I want a local and CI cell, so that every
+  chart and asserts each of these pass in CI; `environment` accepts only `paper` or `backtest`; and
+  no template or crate uses a k3s-only, Hetzner-only or cloud-only API, the storage class, the node
+  count and the ingress (a `cloudflared` pod) being values, shown by rendering the same chart for
+  k3d, k3s and a managed Kubernetes values file (DEC-967 item 6).
+- **E21-37 (Proposed, M8; lane C1; its drills test SC paths)** As the founder, I want a local and
+  CI cell, so that every
   process, the chart and the drills are proven before any hosting is bought (DEC-967 item 3).
-  *Accepted when:* `cargo xtask cell up` brings up a kind or k3d cluster on a developer machine and
+  *Accepted when:* `cargo xtask cell up` brings up a k3d cluster (kind if k3d cannot run there) on a developer machine and
   on the CI runner and installs the chart from the change's own images, with no cloud account, no
   broker credential and no broker host; `cargo xtask cell drill` runs, as each process exists: a
   kill of each process at each step of submission with zero duplicates; two executors for one
@@ -2687,6 +2691,31 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   opaque ID, a reason code and a runbook link only (OPS-10), shown by a payload capture; the sink
   is a placeholder until the founder picks a paging tool (the plan's H6); and losing the whole
   alert path changes no order (OPS-11).
+- **E21-40 (Proposed, M8, first in lane S; SC)** As an auditor, I want the object store checked for
+  write-once retention before anything relies on it, so that a provider swap can never silently
+  weaken journal spec §6.2 (DEC-967 item 9). *Accepted when:* a written finding, from the
+  provider's documentation and a test against the bucket once H3 is approved, says whether
+  Cloudflare R2 offers per-object S3 Object Lock headers in compliance mode or bucket lock rules
+  only, and what each can and cannot prevent (deletion, overwrite, shortening retention, removing
+  the rule); a new crate `mandate-objectstore` reaches storage only through a plain S3 endpoint
+  named in configuration and a `LockCheck` that reads the provider's real retention setting at
+  start and refuses to start the cold exporter or the artifact writer on anything weaker than
+  §6.2; if R2 has bucket-level locks only, a DEC records either that the check reads R2's
+  bucket-lock rule and accepts nothing weaker, or that the cold store alone goes to a provider with
+  standard Object Lock (for example Backblaze B2); a test per refusal (no lock, governance mode
+  only, a retention shorter than required, a rule removable by the writer's credential) refuses;
+  and a swap of provider is a configuration change with the same tests passing.
+- **E21-41 (Proposed, M8; SC; lane S2)** As an operator, I want the journal's Postgres run in the
+  cell by the CloudNativePG operator, so that cell #1 has a standby, a WAL archive and
+  point-in-time recovery from the start (DEC-967 item 8; design §4.1, §6.2). *Accepted when:* the
+  chart installs a two-instance cluster with `synchronous_commit = on` and one synchronous standby,
+  and with the standby down appends wait and return `Unavailable` rather than commit asynchronously
+  (OPS-2); the journal's roles are those of `migrations/0001_journal.sql`, applied only by the
+  migration Job (OPS-13); WAL and base backups go to E21-40's endpoint under a key separate from
+  the database's; a local-cell drill restores to a point in time and passes journal spec §11 over
+  every stream (OPS-8); a failover drill with intents in flight shows zero duplicates and zero lost
+  acknowledged appends; and while the cell has one node the standby's shared failure domain is
+  disclosed in the cell's own status, not hidden.
 
 ## Won't (v1)
 
