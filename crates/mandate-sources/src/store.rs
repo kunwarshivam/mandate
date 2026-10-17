@@ -153,6 +153,8 @@ impl ItemStore {
     }
 
     /// The records known by `as_of`: for each vendor item, only its latest version known by then.
+    /// A vendor item's versions are stored in rising version order ([`Self::ingest`] refuses any
+    /// other), so the last one seen is the latest.
     pub fn as_of(&self, query: &StoreQuery<'_>) -> StoreAnswer<'_> {
         let mut latest: BTreeMap<(&SourceId, &VendorId), &SourceRecord> = BTreeMap::new();
         for record in &self.records {
@@ -160,12 +162,7 @@ impl ItemStore {
             if typed.knowledge_time > query.as_of || !query.sources.contains(&typed.source) {
                 continue;
             }
-            let slot = latest
-                .entry((&typed.source, &typed.vendor_id))
-                .or_insert(record);
-            if slot.typed.vendor_version < typed.vendor_version {
-                *slot = record;
-            }
+            latest.insert((&typed.source, &typed.vendor_id), record);
         }
         let mut records: Vec<&SourceRecord> = latest
             .into_values()

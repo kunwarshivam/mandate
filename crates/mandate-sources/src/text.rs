@@ -48,11 +48,6 @@ impl UntrustedText {
     pub fn len_bytes(&self) -> usize {
         self.text.len()
     }
-
-    /// Whether it holds no bytes.
-    pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
-    }
 }
 
 impl fmt::Debug for UntrustedText {

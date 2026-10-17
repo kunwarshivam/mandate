@@ -26,7 +26,9 @@
 //!
 //! **All text is untrusted** (DP-8). Headlines, summaries, links, and excerpts exist only as
 //! [`text::UntrustedText`], which has no `Display`, no `Deref`, and no conversion into any other
-//! type, and no typed field of a record is ever derived from text. The crate sits in a layer above
+//! type. No typed field a decision reads (tags, source, times, ids, the allowlist version, the
+//! filing fields) is derived from text; only the digest, the byte length, and a news item's story
+//! group are functions of its bytes, as data-plane spec §4.4 and DEC-266 intend. The crate sits in a layer above
 //! the order builder, the risk gate, and the executor (`xtask/layers.toml`), so none of them can
 //! reach it.
 

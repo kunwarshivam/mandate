@@ -474,10 +474,10 @@ fn identifiers_parse_only_in_their_allowed_forms() {
             "{bad:?}"
         );
     }
-    for good in ["abc", "MTcw+/=_-"] {
+    for good in ["abc", "MTcw/=_-"] {
         assert_eq!(PageToken::parse(good).unwrap().as_str(), good);
     }
-    for bad in ["", "a&b", "a b", "x\"&symbols=GME", &"x".repeat(257)] {
+    for bad in ["", "a&b", "a b", "a+b", "x\"&symbols=GME", &"x".repeat(257)] {
         assert_eq!(PageToken::parse(bad), Err(SourceError::BadField), "{bad:?}");
     }
 }

@@ -37,7 +37,7 @@ fn a_news_request_names_only_typed_values_and_carries_the_credential() {
     ))
     .unwrap();
     assert_eq!(body, page);
-    let token = PageToken::parse("MTcw+/=").unwrap();
+    let token = PageToken::parse("MTcw/=").unwrap();
     block_on(f.alpaca_news(
         &news_source(),
         &auth(),
@@ -51,7 +51,7 @@ fn a_news_request_names_only_typed_values_and_carries_the_credential() {
         f.transport().sent.borrow().as_slice(),
         [
             ("https://data.alpaca.markets/v1beta1/news?symbols=AAPL,BRK.B&start=2026-10-15T00:00:00Z&limit=50&sort=desc".to_owned(), true),
-            ("https://data.alpaca.markets/v1beta1/news?symbols=MSFT&start=2026-10-15T00:00:00.500000000Z&limit=50&sort=desc&page_token=MTcw+/=".to_owned(), true),
+            ("https://data.alpaca.markets/v1beta1/news?symbols=MSFT&start=2026-10-15T00:00:00.500000000Z&limit=50&sort=desc&page_token=MTcw/=".to_owned(), true),
         ]
     );
 }

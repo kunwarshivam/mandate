@@ -44,14 +44,15 @@ pub struct IngestContext<'a> {
     pub ciks: &'a CikTable,
 }
 
-/// A vendor's continuation token: 1 to 256 characters of `A-Z`, `a-z`, `0-9`, `+`, `/`, `=`,
-/// `_`, and `-`, so it can ride in a query string unchanged.
+/// A vendor's continuation token: 1 to 256 characters of `A-Z`, `a-z`, `0-9`, `/`, `=`, `_`, and
+/// `-`, so it can ride in a query string unchanged. No `+`, which a server decodes as a space and
+/// `%` cannot escape here (DEC-996 item 3): a page whose token holds one ends the paging.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageToken(String);
 
 impl PageToken {
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let allowed = |b: u8| b.is_ascii_alphanumeric() || b"+/=_-".contains(&b);
+        let allowed = |b: u8| b.is_ascii_alphanumeric() || b"/=_-".contains(&b);
         if !(1..=256).contains(&text.len()) || !text.bytes().all(allowed) {
             return Err(SourceError::BadField);
         }
