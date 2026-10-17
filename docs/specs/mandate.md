@@ -20,8 +20,8 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
-- **v0.7, amended ([DEC-942](../project/decisions/DEC-942.md), proposed by an agent; awaiting the
-  founder's sign-off):** §6.4's content object gains one key, `execution`, present only when the
+- **v0.7, amended ([DEC-942](../project/decisions/DEC-942.md), Accepted by the founder on
+  2026-10-17):** §6.4's content object gains one key, `execution`, present only when the
   order builder produced an execution plan for the asked order. It holds that plan (asset class,
   time in force, whether protection is required, and the protective stop and take-profit), so the
   content hash the owner's grant repeats covers the protective prices as well as the size and
