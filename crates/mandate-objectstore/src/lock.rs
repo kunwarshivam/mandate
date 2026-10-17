@@ -134,8 +134,67 @@ fn codes(refusals: &BTreeSet<Refusal>) -> String {
 /// years that the writer's credential could neither shorten, delete, nor unlock by rewriting the
 /// bucket's rule.
 pub fn judge_s3(evidence: &S3Evidence) -> Result<(), Refused> {
-    let _ = evidence;
-    Ok(())
+    let mut refusals = BTreeSet::new();
+    let bucket = &evidence.bucket;
+    if !bucket.versioning_enabled {
+        refusals.insert(Refusal::VersioningOff);
+    }
+    if !bucket.object_lock_enabled {
+        refusals.insert(Refusal::NoLock);
+    } else {
+        match bucket.default_rule {
+            None => {
+                refusals.insert(Refusal::NoDefaultRetention);
+            }
+            Some((mode, period)) => {
+                if mode != LockMode::Compliance {
+                    refusals.insert(Refusal::GovernanceOnly);
+                }
+                if !period_is_enough(period) {
+                    refusals.insert(Refusal::RetentionTooShort);
+                }
+            }
+        }
+    }
+    let probe = &evidence.probe;
+    match (probe.mode, probe.retained_secs) {
+        (Some(mode), Some(secs)) => {
+            if mode != LockMode::Compliance {
+                refusals.insert(Refusal::GovernanceOnly);
+            }
+            if secs < REQUIRED_RETENTION_SECS {
+                refusals.insert(Refusal::RetentionTooShort);
+            }
+        }
+        _ => {
+            refusals.insert(Refusal::NoLock);
+        }
+    }
+    if !probe.shorten_refused {
+        refusals.insert(Refusal::RetentionShortenable);
+    }
+    if !probe.delete_refused {
+        refusals.insert(Refusal::DeleteAllowed);
+    }
+    if !probe.rule_write_refused {
+        refusals.insert(Refusal::RuleRemovableByWriter);
+    }
+    verdict(refusals)
+}
+
+fn period_is_enough(period: RetentionPeriod) -> bool {
+    match period {
+        RetentionPeriod::Days(days) => days >= REQUIRED_RETENTION_DAYS,
+        RetentionPeriod::Years(years) => years >= REQUIRED_RETENTION_YEARS,
+    }
+}
+
+fn verdict(refusals: BTreeSet<Refusal>) -> Result<(), Refused> {
+    if refusals.is_empty() {
+        Ok(())
+    } else {
+        Err(Refused(refusals))
+    }
 }
 
 /// One rule of an R2 bucket's lock configuration, as Cloudflare's API returns it from
@@ -179,18 +238,30 @@ pub enum R2ParseError {
     /// The body is not the API's `{"success": true, "result": {"rules": [...]}}`.
     #[error("the R2 lock response is not a successful rules list")]
     Malformed,
-    /// Not built yet (E21-40).
-    #[error("not implemented: {story}")]
-    Unimplemented {
-        /// The story that builds it.
-        story: &'static str,
-    },
 }
 
 /// Reads the rules from the body of Cloudflare's get-bucket-lock response.
 pub fn parse_r2_rules(body: &[u8]) -> Result<Vec<R2Rule>, R2ParseError> {
-    let _ = body;
-    Err(R2ParseError::Unimplemented { story: "E21-40" })
+    let response: R2LockResponse =
+        serde_json::from_slice(body).map_err(|_| R2ParseError::Malformed)?;
+    match response {
+        R2LockResponse {
+            success: true,
+            result: Some(R2LockResult { rules }),
+        } => Ok(rules),
+        _ => Err(R2ParseError::Malformed),
+    }
+}
+
+#[derive(Deserialize)]
+struct R2LockResponse {
+    success: bool,
+    result: Option<R2LockResult>,
+}
+
+#[derive(Deserialize)]
+struct R2LockResult {
+    rules: Vec<R2Rule>,
 }
 
 /// Judges R2's bucket lock rules for objects written under `key_prefix`. R2 has no compliance
@@ -198,6 +269,20 @@ pub fn parse_r2_rules(body: &[u8]) -> Result<Vec<R2Rule>, R2ParseError> {
 /// bucket's configuration can delete them and so unlock every object, which is governance at
 /// best. The judgement therefore always refuses, naming as well whatever the rules lack.
 pub fn judge_r2(rules: &[R2Rule], key_prefix: &str) -> Result<(), Refused> {
-    let _ = (rules, key_prefix);
-    Ok(())
+    let mut refusals = BTreeSet::from([Refusal::GovernanceOnly]);
+    let covering: Vec<&R2Condition> = rules
+        .iter()
+        .filter(|rule| rule.enabled && key_prefix.starts_with(rule.prefix.as_deref().unwrap_or("")))
+        .map(|rule| &rule.condition)
+        .collect();
+    if covering.is_empty() {
+        refusals.insert(Refusal::NoLock);
+    } else if !covering.iter().any(|condition| match condition {
+        R2Condition::Indefinite => true,
+        R2Condition::Age { max_age_seconds } => *max_age_seconds >= REQUIRED_RETENTION_SECS,
+        R2Condition::Date { .. } => false,
+    }) {
+        refusals.insert(Refusal::RetentionTooShort);
+    }
+    verdict(refusals)
 }
