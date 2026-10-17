@@ -27,4 +27,8 @@
 //! The S3 client, the start-up probe that gathers the evidence, and the writer that only a passed
 //! check can build are the next slices.
 
+pub mod check;
 pub mod lock;
+pub mod r2;
+pub mod s3;
+pub mod sigv4;

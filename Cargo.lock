@@ -1840,10 +1840,17 @@ dependencies = [
 name = "mandate-objectstore"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
+ "jiff",
  "proptest",
+ "reqwest",
+ "ring",
+ "rustls",
+ "secrecy",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
