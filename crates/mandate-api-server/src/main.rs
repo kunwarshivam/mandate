@@ -41,11 +41,15 @@ use mandate_api_server::config::{
     StartRefusal, check_bind, check_database_url, check_environment, read_session_key,
 };
 use mandate_api_server::http::{self, App, Settings};
+use mandate_api_server::journal::Postgres;
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
+use mandate_api_server::members::{self, Hosted};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::token::Issuer;
 use mandate_authn::{Algorithm, IssuerConfig};
+use mandate_identity::{OrgId, WorkspaceId};
+use mandate_journal_pg::PgJournal;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
@@ -130,6 +134,8 @@ struct Start {
     issuer: IssuerConfig,
     keys: Arc<FetchedKeys>,
     links: PathBuf,
+    database_url: String,
+    hosted: Hosted,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -145,12 +151,20 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
     let args = args(env::args_os().skip(1))?;
     check_bind(args.bind, args.pod_address)?;
     check_bind(args.probe_bind, args.pod_address)?;
-    if let Some(url) = env::var_os("MANDATE_API_DATABASE_URL") {
-        let url = url.into_string().map_err(|_| StartRefusal::Setting {
-            name: "MANDATE_API_DATABASE_URL",
-        })?;
-        check_database_url(&url)?;
-    }
+    let database_url = setting("MANDATE_API_DATABASE_URL")?;
+    check_database_url(&database_url)?;
+    let hosted = Hosted {
+        org: OrgId::from_ulid_text(&setting("MANDATE_API_ORG")?).map_err(|_| {
+            StartRefusal::Setting {
+                name: "MANDATE_API_ORG",
+            }
+        })?,
+        workspace: WorkspaceId::from_ulid_text(&setting("MANDATE_API_WORKSPACE")?).map_err(
+            |_| StartRefusal::Setting {
+                name: "MANDATE_API_WORKSPACE",
+            },
+        )?,
+    };
     let credentials = env::var_os("CREDENTIALS_DIRECTORY")
         .map(PathBuf::from)
         .ok_or(StartRefusal::SessionKeyMissing)?;
@@ -177,6 +191,8 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         issuer,
         keys: Arc::new(keys),
         links,
+        database_url,
+        hosted,
     };
     Ok((args, start))
 }
@@ -223,6 +239,11 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         tokens: Arc::new(Issuer::new(start.issuer, start.keys)),
         links: start.links,
         clock: Arc::new(SystemClock),
+        journal: Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
+            |_| io::Error::other("the journal's connection settings are refused"),
+        )?)),
+        members: Arc::new(members::until_parser),
+        hosted: start.hosted,
     };
     let api = spawn_listener(
         serve(

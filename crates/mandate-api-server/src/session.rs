@@ -18,7 +18,7 @@ use mandate_authn::{
     EndReason, OrgKind, ProviderAnswer, Reach, RefreshSecret, Refreshed, Request, SessionLimits,
     SessionPolicy, SessionRecord, SessionRefusal,
 };
-use mandate_identity::{PrincipalId, SessionRef};
+use mandate_identity::{PrincipalId, SessionKind, SessionRef};
 use mandate_time::UtcNanos;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::{digest, hmac};
@@ -106,6 +106,8 @@ pub enum Answer {
 pub struct Authenticated {
     pub principal: PrincipalId,
     pub reference: SessionRef,
+    /// Full, or reduction-only once an outage narrowed it (identity spec §6.4 route 1).
+    pub kind: SessionKind,
 }
 
 struct Entry {
@@ -325,6 +327,10 @@ impl Sessions {
                 Ok(Authenticated {
                     principal: entry.principal,
                     reference: entry.reference,
+                    kind: match entry.record.reach() {
+                        Reach::Full => SessionKind::Full,
+                        Reach::Outage | Reach::ReductionOnly => SessionKind::ReductionOnly,
+                    },
                 })
             }
             Err(_) => {
@@ -334,6 +340,14 @@ impl Sessions {
                 Err(Unauthenticated)
             }
         }
+    }
+
+    /// Whether the session `cookie` names is live but reaches only pause and the kill switch (an
+    /// outage or reduction-only session), so a refused ordinary request answers `reduction_only`
+    /// rather than the one 401 (§3.5). It changes nothing.
+    pub fn reduction_only(&self, cookie: &str, now: UtcNanos) -> bool {
+        let _ = (cookie, now);
+        false
     }
 
     /// How many sessions are held, for the tests' independent count.

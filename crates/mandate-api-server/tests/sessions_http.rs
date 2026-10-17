@@ -81,6 +81,9 @@ fn fixture_with(keys: bool) -> Fixture {
         tokens: Arc::new(Issuer::new(config, Arc::clone(&switch) as Arc<dyn Keys>)),
         links: links.clone(),
         clock: Arc::clone(&clock) as Arc<dyn mandate_api_server::clock::Clock>,
+        journal: Arc::new(common::MemJournal::default()),
+        members: Arc::new(mandate_api_server::members::until_parser),
+        hosted: common::hosted(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

@@ -43,6 +43,9 @@ fn app() -> App {
         tokens: Arc::new(Issuer::new(config, Arc::new(FixedKeys(None)))),
         links: dir.join("absent"),
         clock: common::ManualClock::at(1_791_000_000),
+        journal: Arc::new(common::MemJournal::default()),
+        members: Arc::new(mandate_api_server::members::until_parser),
+        hosted: common::hosted(),
     }
 }
 

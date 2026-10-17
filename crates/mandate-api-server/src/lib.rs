@@ -26,8 +26,10 @@
 pub mod clock;
 pub mod config;
 pub mod http;
+pub mod journal;
 pub mod keys;
 pub mod lifecycle;
+pub mod members;
 pub mod reads;
 pub mod session;
 pub mod subject;

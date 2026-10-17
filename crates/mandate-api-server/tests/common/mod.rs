@@ -257,3 +257,42 @@ pub fn at(secs: i64) -> mandate_time::UtcNanos {
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+/// The workspace the test deployment hosts, and its organization.
+pub const WORKSPACE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Y";
+pub const ORG: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3X";
+
+pub fn hosted() -> mandate_api_server::members::Hosted {
+    mandate_api_server::members::Hosted {
+        org: mandate_identity::OrgId::from_ulid_text(ORG).expect("a ULID"),
+        workspace: mandate_identity::WorkspaceId::from_ulid_text(WORKSPACE).expect("a ULID"),
+    }
+}
+
+/// An in-memory journal: rows by stream, and streams that fail to read.
+#[derive(Default)]
+pub struct MemJournal {
+    pub streams:
+        std::sync::Mutex<std::collections::BTreeMap<String, Vec<mandate_journal::StoredEvent>>>,
+    pub failing: std::sync::Mutex<std::collections::BTreeSet<String>>,
+}
+
+impl mandate_api_server::journal::Journal for MemJournal {
+    fn rows<'a>(&'a self, stream: &'a str) -> mandate_api_server::journal::Rows<'a> {
+        let failing = self.failing.lock().expect("unpoisoned").contains(stream);
+        let rows = self
+            .streams
+            .lock()
+            .expect("unpoisoned")
+            .get(stream)
+            .cloned()
+            .unwrap_or_default();
+        Box::pin(async move {
+            if failing {
+                Err(mandate_api_server::journal::JournalUnavailable)
+            } else {
+                Ok(rows)
+            }
+        })
+    }
+}

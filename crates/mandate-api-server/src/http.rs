@@ -19,7 +19,9 @@ use mandate_api::wire::encode;
 use mandate_canon::Value;
 
 use crate::clock::Clock;
+use crate::journal::Journal;
 use crate::lifecycle::{Drain, Lifecycle};
+use crate::members::{Hosted, ParseMembers};
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
@@ -58,6 +60,11 @@ pub struct App {
     /// The subject-link file (§3.11 item 7).
     pub links: PathBuf,
     pub clock: Arc<dyn Clock>,
+    pub journal: Arc<dyn Journal>,
+    /// How the control stream's rows become membership records.
+    pub members: Arc<ParseMembers>,
+    /// The one workspace this deployment hosts.
+    pub hosted: Hosted,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
