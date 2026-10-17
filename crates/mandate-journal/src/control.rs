@@ -92,6 +92,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::connections::CONTROL.contains(&event_type)
                 || crate::workspace::CONTROL.contains(&event_type)
                 || crate::records::CONTROL.contains(&event_type)
+                || crate::membership::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -120,6 +121,7 @@ pub(crate) fn payload(
         actor,
         causation_id,
         pii_refs,
+        event_time,
     } = envelope;
     if event_type == "OwnerCommandIssued"
         && schema_version == 1
@@ -132,6 +134,7 @@ pub(crate) fn payload(
         .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -156,6 +159,7 @@ pub(crate) fn payload(
         causation_id,
     )?;
     crate::notices::rules(event_type, &payload, causation_id)?;
+    crate::membership::rules(event_type, &payload, actor, event_time)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -309,14 +313,15 @@ pub(crate) fn payload(
 }
 
 /// The envelope members [`payload`]'s rules read: `config_refs` (rules 22, 38, and 71), the actor
-/// (rules 46, 70, 76, 78, 79, 85, and 88 to 91), `causation_id` (rules 65, 69, and 84), and
-/// `pii_refs` (rule 62).
+/// (rules 46, 70, 76, 78, 79, 85, 88 to 91, and 98 to 105), `causation_id` (rules 65, 69, and 84),
+/// `pii_refs` (rule 62), and `event_time` (rules 103 and 106).
 #[derive(Clone, Copy)]
 pub(crate) struct Envelope<'a> {
     pub(crate) config_refs: Option<&'a Value>,
     pub(crate) actor: Option<&'a Value>,
     pub(crate) causation_id: Option<&'a Value>,
     pub(crate) pii_refs: Option<&'a Value>,
+    pub(crate) event_time: Option<&'a Value>,
 }
 
 /// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
