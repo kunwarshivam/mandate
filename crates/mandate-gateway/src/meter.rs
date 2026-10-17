@@ -2,19 +2,25 @@
 //! settlements on completion, and caps checked against spend folded from the meter records alone
 //! (journal spec §9.19). One meter writer per workspace; a writer that cannot read or append refuses
 //! the call `meter_unavailable`, so nothing is sent.
+//!
+//! **Budgets are settings** ([DEC-2207](../../../docs/project/decisions/DEC-2207.md), DEC-2203 item
+//! 9): no figure is in this crate. The deployment's monthly cap folds from the deployment meter
+//! stream, a copy of every workspace's records, which each reservation reaches before the
+//! workspace's own stream, so any failure between the two only over-counts.
 
+use core::fmt;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use mandate_canon::{Digest, Value};
 use mandate_time::Date;
 
 use crate::kinds::{KeyOwner, Outcome, Purpose};
 use crate::money::{MoneyError, Usage, Usd6};
+use crate::provider::IdSource;
 use crate::record::{model_value, tokens_value};
 use crate::registry::{ModelRef, int, object};
-
-/// DEC-997 item 3: model spend is capped at $50.00 a month per workspace for paper and demo.
-pub const DEMO_WORKSPACE_MONTHLY_MICROS: u64 = 50_000_000;
 
 /// A call's reservation of its maximum cost (`MeterReserved`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,11 +210,49 @@ pub fn rule_158(earlier: &[MeterRecord], record: &MeterRecord) -> Result<(), Sto
     Ok(())
 }
 
-/// Whose spend a cap bounds.
+/// A meter store several writers' handles share, as every workspace's gateway in one process shares
+/// the deployment's meter writer. A real cell reaches that writer through a port instead.
+#[derive(Debug, Clone, Default)]
+pub struct SharedMeter(Rc<RefCell<MemoryMeter>>);
+
+impl SharedMeter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The shared store's records, in append order.
+    pub fn records(&self) -> Vec<MeterRecord> {
+        self.0.borrow().records().to_vec()
+    }
+
+    /// As [`MemoryMeter::fail_with`], for every handle.
+    pub fn fail_with(&self, failure: Option<StoreError>) {
+        self.0.borrow_mut().fail_with(failure);
+    }
+
+    /// As [`MemoryMeter::limit_appends`], for every handle.
+    pub fn limit_appends(&self, limit: Option<usize>) {
+        self.0.borrow_mut().limit_appends(limit);
+    }
+}
+
+impl MeterStore for SharedMeter {
+    fn read(&self) -> Result<Vec<MeterRecord>, StoreError> {
+        self.0.borrow().read()
+    }
+
+    fn append(&mut self, record: MeterRecord) -> Result<(), StoreError> {
+        self.0.borrow_mut().append(record)
+    }
+}
+
+/// Whose spend a cap bounds. `Deployment` folds the deployment meter stream; the others fold the
+/// workspace's.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scope {
     Workspace,
     Agent(String),
+    Deployment,
 }
 
 /// The period a cap sums over: one risk day, or every risk day of one calendar month.
@@ -253,7 +297,7 @@ pub fn spend(records: &[MeterRecord], scope: &Scope, period: Period) -> Result<U
             MeterRecord::Settled(_) => None,
         })
         .filter(|x| match scope {
-            Scope::Workspace => true,
+            Scope::Workspace | Scope::Deployment => true,
             Scope::Agent(agent) => x.agent_id.as_deref() == Some(agent.as_str()),
         })
         .filter(|x| period.holds(x.risk_day))
@@ -267,7 +311,8 @@ pub fn spend(records: &[MeterRecord], scope: &Scope, period: Period) -> Result<U
         })
 }
 
-/// The caps one workspace's calls are held to (inference spec §7.3, DEC-997 item 3).
+/// The caps one workspace's calls are held to on its own stream (inference spec §7.3): its monthly
+/// budget, a workspace setting, and the per-agent caps under it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caps {
     workspace_monthly: Usd6,
@@ -278,12 +323,13 @@ pub struct Caps {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CapError {
-    #[error("a per-agent cap above the workspace cap (DEC-997 item 3)")]
+    #[error("a per-agent cap above the workspace's monthly budget")]
     AboveWorkspace,
 }
 
 impl Caps {
-    /// The workspace's monthly cap; every agent's monthly cap is the same until set lower.
+    /// The workspace's monthly budget, from its setting; every agent's monthly cap is the same until
+    /// set lower.
     pub fn new(workspace_monthly: Usd6) -> Self {
         Self {
             workspace_monthly,
@@ -291,11 +337,6 @@ impl Caps {
             agent_monthly_default: workspace_monthly,
             research_daily: BTreeMap::new(),
         }
-    }
-
-    /// DEC-997 item 3's $50.00 a month.
-    pub fn demo() -> Self {
-        Self::new(Usd6::from_micros(DEMO_WORKSPACE_MONTHLY_MICROS))
     }
 
     pub fn workspace_monthly(&self) -> Usd6 {
@@ -365,23 +406,117 @@ impl Caps {
 }
 
 /// Why the meter refused a reservation; either way nothing is sent and nothing is recorded on the
-/// meter stream.
+/// workspace's meter stream. `Orphaned` is `meter_unavailable` that left a copy open on the
+/// deployment's stream (DEC-2207 item 4), so its caller alerts the operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeterRefusal {
     BudgetExhausted,
     Unavailable,
+    Orphaned,
 }
 
-/// One workspace's meter writer over its store.
-#[derive(Debug, Clone)]
+/// The deployment's meter writer, as a workspace's writer reaches it: the deployment meter stream
+/// and the deployment's monthly cap, a deployment setting (DEC-2207 items 1 to 3).
+pub struct DeploymentMeter {
+    store: Box<dyn MeterStore>,
+    monthly: Usd6,
+    ids: Box<dyn IdSource>,
+}
+
+impl fmt::Debug for DeploymentMeter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeploymentMeter")
+            .field("monthly", &self.monthly)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeploymentMeter {
+    /// The deployment's writer over its stream, with its monthly cap and the source of its copies'
+    /// event ids: each copy is its own record (DEC-2207 item 2).
+    pub fn new(store: Box<dyn MeterStore>, monthly: Usd6, ids: Box<dyn IdSource>) -> Self {
+        Self {
+            store,
+            monthly,
+            ids,
+        }
+    }
+
+    pub fn monthly(&self) -> Usd6 {
+        self.monthly
+    }
+
+    /// Checks the deployment cap and appends the copy, in one step (DEC-2207 item 4).
+    fn reserve(&mut self, reservation: &Reservation) -> Result<(), MeterRefusal> {
+        let copy = Reservation {
+            event_id: self.ids.next_id(),
+            ..reservation.clone()
+        };
+        let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
+        let spent = spend(
+            &records,
+            &Scope::Deployment,
+            Period::month_of(copy.risk_day),
+        )
+        .map_err(|_| MeterRefusal::BudgetExhausted)?;
+        let after = spent
+            .checked_add(copy.max_cost)
+            .map_err(|_| MeterRefusal::BudgetExhausted)?;
+        if after > self.monthly {
+            return Err(MeterRefusal::BudgetExhausted);
+        }
+        self.store
+            .append(MeterRecord::Reserved(copy))
+            .map_err(|_| MeterRefusal::Unavailable)
+    }
+
+    /// Copies a settlement, naming the deployment stream's copy of its reservation (DEC-2207 item
+    /// 2). With no copy of the call's reservation, nothing is appended.
+    fn settle(&mut self, settlement: &Settlement) -> Result<(), StoreError> {
+        let records = self.store.read()?;
+        let reservation = records
+            .iter()
+            .find_map(|r| match r {
+                MeterRecord::Reserved(x) if x.call_id == settlement.call_id => {
+                    Some(x.event_id.clone())
+                }
+                _ => None,
+            })
+            .ok_or(StoreError::Rule158("no copy of the call's reservation"))?;
+        self.store.append(MeterRecord::Settled(Settlement {
+            event_id: self.ids.next_id(),
+            reservation,
+            ..settlement.clone()
+        }))
+    }
+
+    /// The deployment's spend for one calendar month, from the deployment stream.
+    pub fn spend(&self, period: Period) -> Result<Usd6, MeterRefusal> {
+        let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
+        spend(&records, &Scope::Deployment, period).map_err(|_| MeterRefusal::Unavailable)
+    }
+}
+
+/// One workspace's meter writer over its store, reaching the deployment's writer for the
+/// deployment cap.
+#[derive(Debug)]
 pub struct Meter<S> {
     store: S,
     caps: Caps,
+    deployment: DeploymentMeter,
 }
 
 impl<S: MeterStore> Meter<S> {
-    pub fn new(store: S, caps: Caps) -> Self {
-        Self { store, caps }
+    pub fn new(store: S, caps: Caps, deployment: DeploymentMeter) -> Self {
+        Self {
+            store,
+            caps,
+            deployment,
+        }
+    }
+
+    pub fn deployment(&self) -> &DeploymentMeter {
+        &self.deployment
     }
 
     pub fn store(&self) -> &S {
@@ -397,7 +532,11 @@ impl<S: MeterStore> Meter<S> {
     }
 
     /// Appends `reservation` only if, for every cap that applies, spend plus its maximum is at
-    /// most the cap (inference spec §7.3). A store that cannot be read or appended to refuses.
+    /// most the cap (inference spec §7.3), the deployment's included. The workspace's caps are
+    /// checked first with nothing appended; then the deployment's writer checks its cap and appends
+    /// the copy; then the workspace's own reservation is appended (DEC-2207 item 4). A store that
+    /// cannot be read or appended to refuses; a workspace append that fails after the copy leaves
+    /// the copy open, an orphan that only over-counts.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<Reservation, MeterRefusal> {
         let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
         let caps = self.caps.applying(
@@ -415,16 +554,21 @@ impl<S: MeterStore> Meter<S> {
                 return Err(MeterRefusal::BudgetExhausted);
             }
         }
+        self.deployment.reserve(&reservation)?;
         self.store
             .append(MeterRecord::Reserved(reservation.clone()))
-            .map_err(|_| MeterRefusal::Unavailable)?;
+            .map_err(|_| MeterRefusal::Orphaned)?;
         Ok(reservation)
     }
 
-    /// Appends the settlement. If it cannot be appended, the reservation stays open and counts at
+    /// Appends the settlement to the workspace's stream, then, only once that is appended, its copy
+    /// to the deployment's (DEC-2207 item 5), so the deployment never counts a call below the
+    /// workspace's count of it. Either append that fails leaves that stream's reservation open at
     /// its maximum, which never lowers spend (DEC-998 item 5).
     pub fn settle(&mut self, settlement: Settlement) -> Result<(), StoreError> {
-        self.store.append(MeterRecord::Settled(settlement))
+        self.store
+            .append(MeterRecord::Settled(settlement.clone()))?;
+        self.deployment.settle(&settlement)
     }
 
     /// Spend for a scope and period, from the store's records.

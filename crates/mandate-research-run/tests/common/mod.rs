@@ -10,7 +10,7 @@ use mandate_canon::Digest;
 use mandate_domain::{AssetClass, AssetId};
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
-use mandate_gateway::meter::{Caps, MemoryMeter, Meter};
+use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{
@@ -298,7 +298,15 @@ pub fn parts(caps: Caps) -> GatewayParts<MemoryMeter, ManualClock> {
             },
         },
         registry: registry().0,
-        meter: Meter::new(MemoryMeter::new(), caps),
+        meter: Meter::new(
+            MemoryMeter::new(),
+            caps,
+            DeploymentMeter::new(
+                Box::new(MemoryMeter::new()),
+                Usd6::dollars(1_000_000).unwrap_or(Usd6::ZERO),
+                Box::new(SequentialIds::starting_at(1 << 100)),
+            ),
+        ),
         clock: ManualClock::at(at(CUT_OFF + 5)),
         ids: Box::new(SequentialIds::starting_at(1 << 80)),
     }
@@ -360,7 +368,7 @@ pub fn recorded_gateway(replies: Vec<Vec<u8>>) -> (ResearchGateway, Selection) {
             .collect(),
     );
     research_gateway(
-        parts(Caps::demo()),
+        parts(budget()),
         Box::new(NoKeys),
         None::<NoHostedTransport>,
         recorded,
@@ -379,4 +387,9 @@ pub fn usage() -> Usage {
 /// The pinned model's reply carrying `output`.
 pub fn reply(output: &str) -> Vec<u8> {
     recorded_reply(output, SLUG, REPORTED_PROVIDER, usage())
+}
+
+/// A workspace's monthly model budget for the tests, a setting (DEC-2207 item 1): $50 here.
+pub fn budget() -> Caps {
+    Caps::new(Usd6::dollars(50).unwrap())
 }

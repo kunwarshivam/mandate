@@ -6,14 +6,14 @@ use std::time::Duration;
 
 use mandate_canon::{Digest, Value, parse};
 use mandate_gateway::guard::GuardContext;
-use mandate_gateway::meter::{Caps, MemoryMeter, Meter};
+use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usd6};
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, ProviderKey, SecretError, SecretSource, SequentialIds};
 use mandate_gateway::registry::{
-    Endpoint, Identity, Locality, ModelRef, PinnedContent, Registry, Reported, Route, Snapshot,
-    Status, Template,
+    Endpoint, Identity, Locality, Mode, ModelRef, PinnedContent, Registry, Reported, Route,
+    Snapshot, Status, Template,
 };
 use mandate_gateway::{CallRequest, Gateway, KeyOwner, Purpose, RateCaps, Settings};
 use mandate_gateway_http::{HttpsTransport, SystemClock};
@@ -61,6 +61,9 @@ fn content() -> PinnedContent {
         deadline_ms: 60_000,
         max_output_tokens: 1_000,
         seed: Some(7),
+        top_p: None,
+        reasoning: None,
+        mode: Mode::SingleCall,
         methodology: "Reads bars and filings; proposes theses with evidence.".to_owned(),
         authorship: "platform".to_owned(),
     }
@@ -136,7 +139,15 @@ pub fn gateway(host: &str, transport: HttpsTransport) -> (HttpsGateway, ModelRef
         Box::new(OpenRouter),
         transport,
         Box::new(TestKey),
-        Meter::new(MemoryMeter::new(), Caps::demo()),
+        Meter::new(
+            MemoryMeter::new(),
+            Caps::new(Usd6::parse("50").unwrap()),
+            DeploymentMeter::new(
+                Box::new(MemoryMeter::new()),
+                Usd6::parse("50").unwrap(),
+                Box::new(SequentialIds::starting_at(1 << 100)),
+            ),
+        ),
         SystemClock,
         Box::new(SequentialIds::starting_at(1 << 80)),
     );
@@ -163,6 +174,10 @@ pub fn request(model: &ModelRef, n: u128) -> CallRequest {
         deadline: after(now, Duration::from_secs(30)),
         observations: vec![],
         key_owner: KeyOwner::Platform,
+        run_kind: None,
+        turns: vec![],
+        tools: vec![],
+        spend_ceiling: None,
     }
 }
 
