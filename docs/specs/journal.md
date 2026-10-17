@@ -18,7 +18,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   report artifact (§6.3) and the digests that reproduce it; neither carries a figure inline. The
   backtest record was catalogued with no registered payload, so no writer could append one; this
   admits a record that was impossible and loosens nothing (DEC-176). v0.44 is another change's
-  number (E20-3).
+  number (E20-3, [#1450](https://github.com/kunwarshivam/mandate/pull/1450), which takes §9.17 and rules 137 to 142).
   - **The marker.** `BacktestRunRecorded`'s `marker` is always `backtest`, so no reader can take a
     backtest for a paper or live result.
   - **No vectors yet.** Registration in `mandate-journal`, with vectors, is E4-5's and E17-8's; until
@@ -3599,7 +3599,7 @@ stream of one of the team's internal paper workspaces (DEC-103).
 
 **No mapping to `JournaledFact`.** No fold reads either record: they are what the backtest and
 evaluation produced, and the go-live record names a backtest by its id (`AgentDeployed`). The rule
-numbers follow rule 142, the highest a concurrent change (E20-3, v0.44, §9.17) takes, and are renumbered at merge if another takes them.
+numbers follow rule 142, the highest that E20-3 ([#1450](https://github.com/kunwarshivam/mandate/pull/1450), v0.44, §9.17) takes; whichever of the two merges second renumbers to follow the other.
 
 
 ## 10. Anchoring
