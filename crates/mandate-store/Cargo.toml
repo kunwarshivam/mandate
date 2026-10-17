@@ -1,0 +1,17 @@
+[package]
+name = "mandate-store"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The journal port a long-running process writes its own stream through and reads the streams it follows, over the in-memory journal and Postgres (E21-29, E21-30; DEC-1012)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-journal-pg.workspace = true
+mandate-time.workspace = true
+tokio = { workspace = true, features = ["rt"] }

@@ -1666,6 +1666,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-daemon"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-process",
+ "mandate-runtime",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
@@ -2024,8 +2038,8 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-journal",
- "mandate-journal-pg",
  "mandate-process",
+ "mandate-store",
  "mandate-time",
  "proptest",
  "tokio",
@@ -2101,6 +2115,17 @@ dependencies = [
  "mandate-time",
  "proptest",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-store"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-time",
+ "tokio",
 ]
 
 [[package]]

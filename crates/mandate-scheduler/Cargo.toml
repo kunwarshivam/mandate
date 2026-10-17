@@ -12,8 +12,8 @@ workspace = true
 [dependencies]
 mandate-canon.workspace = true
 mandate-journal.workspace = true
-mandate-journal-pg.workspace = true
 mandate-process.workspace = true
+mandate-store.workspace = true
 mandate-time.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
