@@ -71,8 +71,15 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real
   cycle.
+- **E17-7's allowlist** ([DEC-1130](decisions/DEC-1130.md), claim #1460): item 2, confirming
+  Alpaca news (counsel's answer under DEC-433 item 20) in a new allowlist version; until then the
+  research agent reads SEC EDGAR filings only.
 - **E21-28's lifecycle core** ([DEC-994](decisions/DEC-994.md), claim #1433): item 8, one PR
   over ES-13's 400 lines, as DEC-968 item 9.
+- **CI's nightly mutation sweep** ([DEC-1190](decisions/DEC-1190.md) item 5, claim #1481): a
+  seventh of the whole-crate sweep each night (about 12 runner-hours), every mutant once a week,
+  or the full sweep every night as worded (about 45 to 50 runner-hours on the shared pool;
+  `SWEEP_ROTATION = 1`). Meanwhile the seven-run rotation runs.
 - **DEC-1003** (lane I4): the disclosure placeholder names a backtest or evaluation report
   carries (`LEGEND-HYPOTHETICAL`, `NOTE-BACKTEST-MECHANICS`, `NOTE-BACKTEST-LIMITS`,
   `NOTE-FORWARD-PAPER-INTERNAL`) and, with counsel, their text. Meanwhile the names show as

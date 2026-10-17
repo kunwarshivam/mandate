@@ -28,12 +28,17 @@ repository stands today, so a reader does not take a planned item for a built on
   `config/` and `assets/`.
 - **CI jobs.** `fast` runs `lint`, `test`, `pending`, `spec-guard`, and `portable` (the runner on macOS, [DEC-954](../project/decisions/DEC-954.md)); in CI it is a quick aggregate over parallel jobs that run exactly those parts: `fast-lint` (lint, spec guard), three `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests), `fast-python` (pytest) ([DEC-871](../project/decisions/DEC-871.md)), and `fast-portable`, which lints `mandate-paper` and runs its core-dump hardening tests on a macOS runner ([DEC-954](../project/decisions/DEC-954.md)). `full` runs `refcases`,
   `reference`, `supply-chain`, `postgres`, and `mutants`. `cargo xtask check` runs all nine, and
-  there is no `cargo xtask ci pr` (ES-15 means `cargo xtask check`). The `nightly` workflow now runs
-  weekly, on Sunday and on demand (DEC-256): every per-PR job, ten seeds of
-  `reference/mandate/fuzz.py`, `reference/mandate/mutants.py`, and a full-history gitleaks scan.
-  cargo-fuzz, the differential run against `mandate-cli oracle`, benchmarks (gungraun, criterion),
-  the aarch64 build and replay, Postgres 17, cargo-audit, and the beta-toolchain canary are not
-  built yet.
+  there is no `cargo xtask ci pr` (ES-15 means `cargo xtask check`). Per PR, the tests, pending
+  tests, doctests, rehearsal and Postgres runs cover the crates the diff affects, and `fast-python`,
+  `fast-portable`, `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when the diff
+  needs them; lint, the spec guard and mutants run as before
+  ([DEC-1190](../project/decisions/DEC-1190.md)). The `nightly` workflow runs every night and on
+  demand (DEC-1190, weekly from DEC-256): it dispatches `ci` on main, which selects everything,
+  and runs Postgres 17, ten seeds of `reference/mandate/fuzz.py`, `reference/mandate/mutants.py`,
+  a full-history gitleaks scan, and a seventh of the whole-crate mutation sweep of the
+  safety-critical crates. cargo-fuzz, the differential run against `mandate-cli oracle`,
+  benchmarks (gungraun, criterion), the aarch64 build and replay, cargo-audit, and the
+  beta-toolchain canary are not built yet.
 - **Merge.** A pull request merges by label (DEC-175): the coordinator
   writes `Coordinator-approved-head: <sha>` into the description and adds the
   `coordinator-approved` label, and `.github/workflows/merge.yml` runs
