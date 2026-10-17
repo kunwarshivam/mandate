@@ -8,12 +8,54 @@ import { TooltipProvider } from "@cloudflare/kumo/components/tooltip";
 import { KumoLocaleProvider, LinkProvider, type LinkComponentProps } from "@cloudflare/kumo/utils";
 import { JournalToasts } from "@/components/shell/journal-toasts";
 import type { Workspace } from "@/fixtures/types";
+import { emptyWorkspace } from "@/api/reads";
+import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import type { ApiSource } from "@/lib/data-source";
 import { HandoffProvider } from "@/lib/handoff";
 import { RuntimeProvider } from "@/lib/mock-runtime";
 
 const AppLink = forwardRef<HTMLAnchorElement, LinkComponentProps>(function AppLink({ href, to, ...rest }, ref) {
   return <NextLink ref={ref} href={href ?? to ?? "#"} {...rest} />;
 });
+
+function Frame({ children }: { children: ReactNode }) {
+  return (
+    <MotionConfig reducedMotion="user">
+      <KumoLocaleProvider>
+        <LinkProvider component={AppLink}>
+          <TooltipProvider delay={300}>
+            <Toasty>{children}</Toasty>
+          </TooltipProvider>
+        </LinkProvider>
+      </KumoLocaleProvider>
+    </MotionConfig>
+  );
+}
+
+/**
+ * The providers over a deployment's workspace API (DEC-975). `source` is `null` when the server's
+ * configuration names the API but does not parse: the fixture stand-in then holds an unreachable
+ * workspace with nothing in it, which takes no command, so nothing on screen passes for a record.
+ */
+export function ApiProviders({ source, children }: { source: Pick<ApiSource, "origin" | "workspaceId"> | null; children: ReactNode }) {
+  const body = (
+    <HandoffProvider>
+      {children}
+      <JournalToasts />
+    </HandoffProvider>
+  );
+  return (
+    <Frame>
+      {source ? (
+        <ApiRuntimeProvider source={source}>{body}</ApiRuntimeProvider>
+      ) : (
+        <RuntimeProvider initial={emptyWorkspace("unreachable", new Date().toISOString())} tick={false}>
+          {body}
+        </RuntimeProvider>
+      )}
+    </Frame>
+  );
+}
 
 export function Providers({
   workspace,
@@ -27,21 +69,13 @@ export function Providers({
   tick?: boolean;
 }) {
   return (
-    <MotionConfig reducedMotion="user">
-      <KumoLocaleProvider>
-        <LinkProvider component={AppLink}>
-          <TooltipProvider delay={300}>
-            <Toasty>
-              <RuntimeProvider initial={workspace} recordAfterMs={recordAfterMs} tick={tick}>
-                <HandoffProvider>
-                  {children}
-                  <JournalToasts />
-                </HandoffProvider>
-              </RuntimeProvider>
-            </Toasty>
-          </TooltipProvider>
-        </LinkProvider>
-      </KumoLocaleProvider>
-    </MotionConfig>
+    <Frame>
+      <RuntimeProvider initial={workspace} recordAfterMs={recordAfterMs} tick={tick}>
+        <HandoffProvider>
+          {children}
+          <JournalToasts />
+        </HandoffProvider>
+      </RuntimeProvider>
+    </Frame>
   );
 }
