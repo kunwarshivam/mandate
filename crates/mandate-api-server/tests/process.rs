@@ -312,7 +312,6 @@ fn the_drain_bound_may_only_be_shortened() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_internal_paper_setting_starts_only_on_a_journal_shown_paper() {
     let setting = "MANDATE_API_INTERNAL_PAPER_WORKSPACE";
     let (code, text) = refused(command(&LOCAL, &[(setting, "true")]));

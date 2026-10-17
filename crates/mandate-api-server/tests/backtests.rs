@@ -52,7 +52,6 @@ fn completed_view(id: &str, report: &str) -> BacktestView {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_completed_and_a_refused_backtest_are_found_by_their_ids() {
     let control = vec![
         opened(),
@@ -83,7 +82,6 @@ fn a_completed_and_a_refused_backtest_are_found_by_their_ids() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn an_id_is_found_only_by_equality_and_only_on_its_own_record() {
     let control = vec![
         opened(),
@@ -102,7 +100,6 @@ fn an_id_is_found_only_by_equality_and_only_on_its_own_record() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn an_id_outside_the_id_grammar_names_nothing_even_on_a_record() {
     let long = "a".repeat(65);
     let control = vec![
@@ -119,7 +116,6 @@ fn an_id_outside_the_id_grammar_names_nothing_even_on_a_record() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_body_that_does_not_parse_is_skipped_as_the_other_reads_skip_it() {
     let mut broken = completed("bt_1", &reference(0x12));
     broken.body = b"not json".to_vec();
@@ -132,7 +128,6 @@ fn a_body_that_does_not_parse_is_skipped_as_the_other_reads_skip_it() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_second_record_with_the_same_id_is_unreadable_never_first_or_last() {
     let first = completed("bt_1", &reference(0x12));
     for second in [
@@ -185,7 +180,6 @@ fn n(value: u64) -> Value {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_record_that_breaks_section_9_18_is_unreadable_never_served() {
     let done = backtest_payload(
         "bt_1",
@@ -253,7 +247,6 @@ fn a_record_that_breaks_section_9_18_is_unreadable_never_served() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn an_evaluation_is_found_by_its_id_and_a_duplicate_or_malformed_one_is_unreadable() {
     let record = |seq, id: &str, report: &str| {
         row(
@@ -303,7 +296,6 @@ fn an_evaluation_is_found_by_its_id_and_a_duplicate_or_malformed_one_is_unreadab
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_backtest_report_is_served_only_as_its_own_versions_report_object() {
     let (bytes, _) = example_report(BACKTEST_EXAMPLE, "backtest");
     let view = BacktestView {
@@ -351,7 +343,6 @@ fn a_backtest_report_is_served_only_as_its_own_versions_report_object() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn an_evaluation_report_is_served_only_as_a_version_1_evaluation_object() {
     let (bytes, _) = example_report(EVALUATION_EXAMPLE, "evaluation");
     assert_eq!(evaluation_report(&bytes), Ok(parse(&bytes).expect("JSON")));
@@ -374,7 +365,6 @@ fn an_evaluation_report_is_served_only_as_a_version_1_evaluation_object() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn a_paper_stream_has_a_row_and_every_row_on_paper() {
     let shown = |rows: &[StoredEvent]| check_internal_paper(Ok(rows));
     assert_eq!(shown(&[opened(), row(2, "AgentDeployed", "{}")]), Ok(()));
@@ -395,7 +385,6 @@ fn a_paper_stream_has_a_row_and_every_row_on_paper() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_internal_paper_setting_is_off_unless_exactly_true() {
     assert_eq!(internal_paper_workspace(None), Ok(false));
     assert_eq!(internal_paper_workspace(Some(OsStr::new(""))), Ok(false));
@@ -423,7 +412,6 @@ fn the_internal_paper_setting_is_off_unless_exactly_true() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn the_start_check_refuses_the_setting_outside_a_paper_stream() {
     let paper_rows = [opened(), row(2, "AgentDeployed", "{}")];
     assert_eq!(check_internal_paper(Ok(&paper_rows)), Ok(()));

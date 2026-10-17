@@ -42,8 +42,6 @@ pub enum StartRefusal {
     /// [`INTERNAL_PAPER_WORKSPACE`] is on, and the hosted control stream is not shown to be paper
     /// (DEC-1143 item 2).
     InternalWorkspaceNotPaper,
-    /// The check is not built yet.
-    Unimplemented { story: &'static str },
 }
 
 impl fmt::Display for StartRefusal {
@@ -66,7 +64,6 @@ impl fmt::Display for StartRefusal {
                 f,
                 "{INTERNAL_PAPER_WORKSPACE} is on, and the control stream is not shown to be paper"
             ),
-            Self::Unimplemented { story } => write!(f, "{story} is not implemented yet"),
         }
     }
 }
@@ -255,8 +252,13 @@ pub const INTERNAL_PAPER_WORKSPACE: &str = "MANDATE_API_INTERNAL_PAPER_WORKSPACE
 /// # Errors
 /// [`StartRefusal::Setting`] naming it for any other value.
 pub fn internal_paper_workspace(value: Option<&OsStr>) -> Result<bool, StartRefusal> {
-    let _ = value;
-    Err(StartRefusal::Unimplemented { story: "E17-8" })
+    match value.map(OsStr::to_str) {
+        None | Some(Some("" | "false")) => Ok(false),
+        Some(Some("true")) => Ok(true),
+        Some(_) => Err(StartRefusal::Setting {
+            name: INTERNAL_PAPER_WORKSPACE,
+        }),
+    }
 }
 
 /// The start check for an internal paper workspace (DEC-1143 item 2): the hosted control stream,
@@ -268,6 +270,8 @@ pub fn internal_paper_workspace(value: Option<&OsStr>) -> Result<bool, StartRefu
 pub fn check_internal_paper(
     control: Result<&[mandate_journal::StoredEvent], crate::journal::JournalUnavailable>,
 ) -> Result<(), StartRefusal> {
-    let _ = control;
-    Err(StartRefusal::Unimplemented { story: "E17-8" })
+    match control {
+        Ok(rows) if crate::backtests::paper(rows) => Ok(()),
+        _ => Err(StartRefusal::InternalWorkspaceNotPaper),
+    }
 }

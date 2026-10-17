@@ -14,8 +14,11 @@
 //!
 //! Every function here is pure: rows and bytes in, values out. The store is read by the route.
 
+use mandate_api::wire::Id;
 use mandate_canon::Value;
 use mandate_journal::{ArtifactRef, StoredEvent};
+
+use crate::reads::envelope;
 
 /// The backtest's record (journal spec §9.18).
 pub const BACKTEST_RECORDED: &str = "BacktestRunRecorded";
@@ -35,8 +38,6 @@ pub enum Found<T> {
     One(T),
     /// A record names it but breaks §9.18's shape, or more than one does: the read's 503.
     Unreadable,
-    /// The fold is not built yet.
-    Unimplemented { story: &'static str },
 }
 
 /// How a recorded backtest ended.
@@ -73,8 +74,6 @@ pub enum Unserved {
     NotAReport,
     /// A backtest report of another mandate version than its record names.
     OtherVersion,
-    /// The check is not built yet.
-    Unimplemented { story: &'static str },
 }
 
 /// One recorded evaluation, before its report is read.
@@ -86,14 +85,62 @@ pub struct EvaluationView {
 
 /// The backtest the control stream records under `backtest_id`.
 pub fn backtest(control: &[StoredEvent], backtest_id: &str) -> Found<BacktestView> {
-    let _ = (control, backtest_id);
-    Found::Unimplemented { story: "E4-5" }
+    the_one(
+        control,
+        BACKTEST_RECORDED,
+        "backtest_id",
+        backtest_id,
+        |payload| {
+            let mandate_version = text(payload, "mandate_version")
+                .filter(|version| ArtifactRef::parse(version).is_some())?;
+            if text(payload, "marker") != Some("backtest")
+                || payload.get("report_version").and_then(Value::as_int) != Some(2)
+            {
+                return None;
+            }
+            let outcome = match (
+                text(payload, "result"),
+                payload.get("report"),
+                payload.get("refusal"),
+            ) {
+                (Some("completed"), Some(Value::Str(report)), Some(Value::Null)) => {
+                    Outcome::Completed {
+                        report_ref: ArtifactRef::parse(report)?,
+                    }
+                }
+                (Some("refused"), Some(Value::Null), Some(Value::Str(code))) if is_code(code) => {
+                    Outcome::Refused {
+                        refusal: code.clone(),
+                    }
+                }
+                _ => return None,
+            };
+            Some(BacktestView {
+                backtest_id: backtest_id.to_owned(),
+                mandate_version: mandate_version.to_owned(),
+                outcome,
+            })
+        },
+    )
 }
 
 /// The evaluation the control stream records under `evaluation_id`.
 pub fn evaluation(control: &[StoredEvent], evaluation_id: &str) -> Found<EvaluationView> {
-    let _ = (control, evaluation_id);
-    Found::Unimplemented { story: "E17-8" }
+    the_one(
+        control,
+        EVALUATION_RECORDED,
+        "evaluation_id",
+        evaluation_id,
+        |payload| {
+            if payload.get("report_version").and_then(Value::as_int) != Some(1) {
+                return None;
+            }
+            Some(EvaluationView {
+                evaluation_id: evaluation_id.to_owned(),
+                report_ref: text(payload, "report").and_then(ArtifactRef::parse)?,
+            })
+        },
+    )
 }
 
 /// The backtest report `bytes` hold, when it is a JSON object of `report_version` 2 for the version
@@ -102,8 +149,12 @@ pub fn evaluation(control: &[StoredEvent], evaluation_id: &str) -> Found<Evaluat
 /// # Errors
 /// [`Unserved`]: anything else is never served.
 pub fn backtest_report(bytes: &[u8], view: &BacktestView) -> Result<Value, Unserved> {
-    let _ = (bytes, view);
-    Err(Unserved::Unimplemented { story: "E4-5" })
+    let report = report(bytes, "backtest_report", 2)?;
+    if text(&report, "mandate_version") == Some(view.mandate_version.as_str()) {
+        Ok(report)
+    } else {
+        Err(Unserved::OtherVersion)
+    }
 }
 
 /// The evaluation report `bytes` hold, when it is a JSON object of `report_version` 1.
@@ -111,13 +162,63 @@ pub fn backtest_report(bytes: &[u8], view: &BacktestView) -> Result<Value, Unser
 /// # Errors
 /// [`Unserved::NotAReport`] for anything else.
 pub fn evaluation_report(bytes: &[u8]) -> Result<Value, Unserved> {
-    let _ = bytes;
-    Err(Unserved::Unimplemented { story: "E17-8" })
+    report(bytes, "forward_paper_evaluation", 1)
 }
 
 /// Whether the control stream shows a paper workspace: it has a row, and every row's environment
 /// is [`PAPER`] (DEC-1143 item 2).
 pub fn paper(control: &[StoredEvent]) -> bool {
-    let _ = control;
-    false
+    !control.is_empty() && control.iter().all(|row| row.environment == PAPER)
+}
+
+/// The one schema-version-1 `event_type` row whose payload's `member` equals `id`, read by `read`.
+/// An id outside the id grammar names nothing. A row whose body does not parse is skipped, as the
+/// other reads skip it.
+fn the_one<T>(
+    control: &[StoredEvent],
+    event_type: &str,
+    member: &str,
+    id: &str,
+    read: impl Fn(&Value) -> Option<T>,
+) -> Found<T> {
+    if Id::try_from(id.to_owned()).is_err() {
+        return Found::Absent;
+    }
+    let mut found = Found::Absent;
+    for row in control.iter().filter(|row| row.event_type == event_type) {
+        let Some(payload) = envelope(row).and_then(|event| event.get("payload").cloned()) else {
+            continue;
+        };
+        if text(&payload, member) != Some(id) {
+            continue;
+        }
+        let view = (row.schema_version == 1).then(|| read(&payload)).flatten();
+        found = match (found, view) {
+            (Found::Absent, Some(view)) => Found::One(view),
+            _ => return Found::Unreadable,
+        };
+    }
+    found
+}
+
+/// The JSON object `bytes` hold when its `kind` and `report_version` are these.
+fn report(bytes: &[u8], kind: &str, version: u64) -> Result<Value, Unserved> {
+    let report = mandate_canon::parse(bytes).map_err(|_| Unserved::NotAReport)?;
+    let shaped = report.as_object().is_some()
+        && text(&report, "kind") == Some(kind)
+        && report.get("report_version").and_then(Value::as_int) == Some(version);
+    shaped.then_some(report).ok_or(Unserved::NotAReport)
+}
+
+/// The text member `name` of `value`.
+fn text<'v>(value: &'v Value, name: &str) -> Option<&'v str> {
+    value.get(name).and_then(Value::as_str)
+}
+
+/// ADR-0001 ES-09's stable code: `[a-z][a-z0-9_]{0,63}`.
+fn is_code(code: &str) -> bool {
+    let mut bytes = code.bytes();
+    bytes.next().is_some_and(|first| first.is_ascii_lowercase())
+        && code.len() <= 64
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }

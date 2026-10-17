@@ -288,6 +288,12 @@ the spec invariants (DP-n) its tests cover.
   §9.18) is registered in `mandate-journal` with vectors for rules 143 and 144; `GET
   /backtests/{id}` serves `read-models/backtest` in the workspace that ran it only; disclosures
   stay DEC-1003's placeholder names.
+  *Route (claim [#1463](https://github.com/kunwarshivam/mandate/issues/1463), lane I4,
+  [DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves `GET /backtests/{id}` from the
+  control stream's one `BacktestRunRecorded` naming the id, under the view row; a completed run's
+  report comes from the store, digest-checked, and one the store lacks or that fails its check is
+  `journal_unavailable`, as is a duplicate id; `running` is not served until `POST /backtests`
+  journals a run in flight. Its tests build the rows directly until the registration lands.
 
 ### E5 Journal
 
@@ -2139,6 +2145,9 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   thesis against itself, and writes the report artifact and `EvaluationRunRecorded` (journal spec
   §9.18, rule 145; registration with vectors follows). `GET /evaluations/{id}` serves it in an
   internal paper workspace only.
+  *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves it only with
+  `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
+  is paper throughout; otherwise every evaluation id is the 404 an absent one gets.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled

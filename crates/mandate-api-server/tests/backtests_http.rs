@@ -337,7 +337,6 @@ fn evaluated(seq: u64, report: &str) -> StoredEvent {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_completed_backtest_serves_its_report_from_the_store() {
     let f = fixture(PLAIN);
     let (bytes, report) = example_report(BACKTEST_EXAMPLE, "backtest");
@@ -356,7 +355,6 @@ fn a_completed_backtest_serves_its_report_from_the_store() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_refused_backtest_serves_its_code_and_no_report_even_without_a_store() {
     for with_store in [true, false] {
         let f = fixture(Deployment {
@@ -392,7 +390,6 @@ fn a_refused_backtest_serves_its_code_and_no_report_even_without_a_store() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn an_unknown_id_another_workspace_and_no_membership_are_the_same_404() {
     let f = fixture(INTERNAL);
     let (bytes, report) = example_report(BACKTEST_EXAMPLE, "backtest");
@@ -431,7 +428,6 @@ fn an_unknown_id_another_workspace_and_no_membership_are_the_same_404() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn without_a_session_both_reads_are_the_one_401_and_a_member_without_the_view_row_403() {
     let f = fixture(INTERNAL);
     let (bytes, report) = example_report(BACKTEST_EXAMPLE, "backtest");
@@ -463,7 +459,6 @@ fn without_a_session_both_reads_are_the_one_401_and_a_member_without_the_view_ro
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_completed_run_whose_report_is_absent_or_fails_its_check_is_503_never_a_null_report() {
     let f = fixture(PLAIN);
     let (bytes, report) = example_report(BACKTEST_EXAMPLE, "backtest");
@@ -508,7 +503,6 @@ fn a_completed_run_whose_report_is_absent_or_fails_its_check_is_503_never_a_null
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_second_record_with_the_same_id_is_503_and_a_malformed_one_too() {
     let f = fixture(PLAIN);
     let (bytes, report) = example_report(BACKTEST_EXAMPLE, "backtest");
@@ -527,7 +521,6 @@ fn a_second_record_with_the_same_id_is_503_and_a_malformed_one_too() {
 }
 
 #[test]
-#[ignore = "pending E4-5"]
 fn a_control_stream_that_cannot_be_read_is_503_never_absent() {
     let f = fixture(INTERNAL);
     seed(&f, vec![]);
@@ -544,7 +537,6 @@ fn a_control_stream_that_cannot_be_read_is_503_never_absent() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn an_evaluation_is_served_in_an_internal_paper_workspace() {
     let f = fixture(INTERNAL);
     let (bytes, report) = example_report(EVALUATION_EXAMPLE, "evaluation");
@@ -574,7 +566,6 @@ fn an_evaluation_is_served_in_an_internal_paper_workspace() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn with_the_setting_off_an_evaluation_is_the_404_of_an_absent_id_even_when_recorded() {
     let f = fixture(PLAIN);
     let (bytes, report) = example_report(EVALUATION_EXAMPLE, "evaluation");
@@ -592,7 +583,6 @@ fn with_the_setting_off_an_evaluation_is_the_404_of_an_absent_id_even_when_recor
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn with_the_setting_on_a_stream_that_is_not_paper_throughout_answers_404() {
     let f = fixture(INTERNAL);
     let (bytes, report) = example_report(EVALUATION_EXAMPLE, "evaluation");
@@ -627,7 +617,6 @@ fn with_the_setting_on_a_stream_that_is_not_paper_throughout_answers_404() {
 }
 
 #[test]
-#[ignore = "pending E17-8"]
 fn an_evaluation_whose_report_is_absent_fails_its_check_or_is_doubled_is_503() {
     let f = fixture(INTERNAL);
     let (bytes, report) = example_report(EVALUATION_EXAMPLE, "evaluation");
