@@ -2066,6 +2066,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-sources-http"
+version = "0.0.0"
+dependencies = [
+ "mandate-sources",
+ "reqwest",
+ "rustls",
+ "secrecy",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-spec"
 version = "0.0.0"
 dependencies = [

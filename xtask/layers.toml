@@ -302,6 +302,14 @@ safety_critical = true
 pure = true
 allowed_external = ["secrecy", "serde", "serde_json", "thiserror", "toml"]
 
+# The HTTPS transport for mandate-sources' fetchers (E17-7, DEC-996 item 3): it only sends to a
+# PermittedUrl the allowlist built, follows no redirect, and caps each body. Layer 7, above
+# mandate-sources; nothing in the trading path depends on it.
+[crates.mandate-sources-http]
+layer = 7
+safety_critical = false
+pure = false
+
 [crates.mandate-marketdata]
 layer = 6
 safety_critical = false

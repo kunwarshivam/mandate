@@ -117,7 +117,11 @@ pub fn symbols() -> SymbolTable {
                     until: Some(at("2026-06-01T00:00:00Z")),
                 },
             ),
-            (symbol("XYZ"), asset(XYZ_NEW), forever("2026-06-01T00:00:00Z")),
+            (
+                symbol("XYZ"),
+                asset(XYZ_NEW),
+                forever("2026-06-01T00:00:00Z"),
+            ),
         ],
     )
     .unwrap()

@@ -4,8 +4,6 @@
 /// Why a load, a fetch, an ingestion, or a read was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SourceError {
-    #[error("the operation is not implemented yet")]
-    Unimplemented,
     #[error("the allowlist file is malformed")]
     AllowlistMalformed,
     #[error("the allowlist names a source twice")]
@@ -46,7 +44,6 @@ impl SourceError {
     /// Stable reason code (ADR-0001 ES-09).
     pub fn code(self) -> &'static str {
         match self {
-            Self::Unimplemented => "unimplemented",
             Self::AllowlistMalformed => "allowlist_malformed",
             Self::DuplicateSource => "duplicate_source",
             Self::BadEndpoint => "bad_endpoint",

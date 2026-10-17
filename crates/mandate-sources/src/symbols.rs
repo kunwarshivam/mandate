@@ -14,8 +14,11 @@ pub struct Symbol(String);
 
 impl Symbol {
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        Err(SourceError::Unimplemented)
+        let allowed = |b: u8| b.is_ascii_uppercase() || b.is_ascii_digit() || b"./-".contains(&b);
+        if !(1..=12).contains(&text.len()) || !text.bytes().all(allowed) {
+            return Err(SourceError::BadField);
+        }
+        Ok(Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -30,8 +33,10 @@ pub struct Cik(u64);
 impl Cik {
     /// Accepts 1 to 10 ASCII digits, leading zeros allowed, and nothing else.
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        Err(SourceError::Unimplemented)
+        if !(1..=10).contains(&text.len()) || !text.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(SourceError::BadField);
+        }
+        text.parse().map(Self).map_err(|_| SourceError::BadField)
     }
 
     pub fn get(self) -> u64 {
@@ -53,13 +58,16 @@ pub struct Validity {
 
 impl Validity {
     pub fn contains(self, at: UtcNanos) -> bool {
-        let _ = at;
-        false
+        self.from <= at && self.until.is_none_or(|until| at < until)
+    }
+
+    fn is_empty(self) -> bool {
+        self.until.is_some_and(|until| until <= self.from)
     }
 
     fn overlaps(self, other: Self) -> bool {
-        let _ = other;
-        false
+        self.until.is_none_or(|until| other.from < until)
+            && other.until.is_none_or(|until| self.from < until)
     }
 }
 
@@ -74,12 +82,8 @@ impl SymbolTable {
     /// Refuses two rows for one ticker whose validities overlap, and a validity that ends at or
     /// before it starts.
     pub fn new(version: u32, rows: Vec<(Symbol, AssetId, Validity)>) -> Result<Self, SourceError> {
-        let _ = Validity::overlaps;
-        let _ = rows;
-        Ok(Self {
-            version,
-            rows: Vec::new(),
-        })
+        check_rows(&rows, |(symbol, _, validity)| (symbol.clone(), *validity))?;
+        Ok(Self { version, rows })
     }
 
     pub fn version(&self) -> u32 {
@@ -88,8 +92,10 @@ impl SymbolTable {
 
     /// The instrument `symbol` named at `at`, if any.
     pub fn resolve(&self, symbol: &Symbol, at: UtcNanos) -> Option<&AssetId> {
-        let _ = (symbol, at);
-        None
+        self.rows
+            .iter()
+            .find(|(s, _, validity)| s == symbol && validity.contains(at))
+            .map(|(_, asset, _)| asset)
     }
 }
 
@@ -104,11 +110,10 @@ impl CikTable {
     /// Refuses a validity that ends at or before it starts, and the same CIK and ticker twice with
     /// overlapping validities.
     pub fn new(version: u32, rows: Vec<(Cik, Symbol, Validity)>) -> Result<Self, SourceError> {
-        let _ = rows;
-        Ok(Self {
-            version,
-            rows: Vec::new(),
-        })
+        check_rows(&rows, |(cik, symbol, validity)| {
+            ((*cik, symbol.clone()), *validity)
+        })?;
+        Ok(Self { version, rows })
     }
 
     pub fn version(&self) -> u32 {
@@ -117,7 +122,31 @@ impl CikTable {
 
     /// The tickers `cik` filed under at `at`, in order.
     pub fn symbols(&self, cik: Cik, at: UtcNanos) -> Vec<&Symbol> {
-        let _ = (cik, at);
-        Vec::new()
+        self.rows
+            .iter()
+            .filter(|(c, _, validity)| *c == cik && validity.contains(at))
+            .map(|(_, symbol, _)| symbol)
+            .collect()
     }
+}
+
+/// Refuses an empty validity, and two rows with one key whose validities overlap.
+fn check_rows<R, K: PartialEq>(
+    rows: &[R],
+    key: impl Fn(&R) -> (K, Validity),
+) -> Result<(), SourceError> {
+    for (i, row) in rows.iter().enumerate() {
+        let (k, validity) = key(row);
+        if validity.is_empty() {
+            return Err(SourceError::BadField);
+        }
+        let clash = rows.iter().skip(i.saturating_add(1)).any(|other| {
+            let (other_key, other_validity) = key(other);
+            other_key == k && validity.overlaps(other_validity)
+        });
+        if clash {
+            return Err(SourceError::BadField);
+        }
+    }
+    Ok(())
 }

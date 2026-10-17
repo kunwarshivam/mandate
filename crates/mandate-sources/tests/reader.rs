@@ -58,7 +58,11 @@ impl World {
 
     fn add_news(&mut self, source: &str, body: &str, received: UtcNanos) {
         let source = common::source(source);
-        let page = alpaca_news_page(&self.tables.ctx(&source, received, Capture::Live), body.as_bytes()).unwrap();
+        let page = alpaca_news_page(
+            &self.tables.ctx(&source, received, Capture::Live),
+            body.as_bytes(),
+        )
+        .unwrap();
         for draft in page.drafts {
             self.news.ingest(draft).unwrap();
         }
@@ -90,9 +94,16 @@ fn news_reads_hold_the_harness_caps_newest_first() {
     let base = at("2026-10-16T11:30:00Z");
     for i in 0..60 {
         let t = UtcNanos::from_parts(base.secs() - i * 1_800, 0).unwrap();
-        world.add_news("alpaca.news", &news_item(u32::try_from(i).unwrap(), t, "h", "s", "AAPL"), t);
+        world.add_news(
+            "alpaca.news",
+            &news_item(u32::try_from(i).unwrap(), t, "h", "s", "AAPL"),
+            t,
+        );
     }
-    let batch = world.reader(LicensedText::Included).news(&query(&[AAPL])).unwrap();
+    let batch = world
+        .reader(LicensedText::Included)
+        .news(&query(&[AAPL]))
+        .unwrap();
     assert_eq!(batch.items.len(), usize::try_from(NEWS_LIMIT).unwrap());
     assert_eq!(batch.items[0].typed.vendor_id.as_str(), "0");
     assert_eq!(batch.items[49].typed.vendor_id.as_str(), "49");
@@ -108,7 +119,13 @@ fn the_window_is_48_hours_of_knowledge_time_and_a_query_only_narrows_it() {
     }
     let reader = world.reader(LicensedText::Included);
     let ids = |q: &ReadQuery| -> Vec<String> {
-        reader.news(q).unwrap().items.iter().map(|i| i.typed.vendor_id.as_str().to_owned()).collect()
+        reader
+            .news(q)
+            .unwrap()
+            .items
+            .iter()
+            .map(|i| i.typed.vendor_id.as_str().to_owned())
+            .collect()
     };
     assert_eq!(ids(&query(&[AAPL])), ["1", "2"]);
     let mut wider = query(&[AAPL]);
@@ -130,11 +147,29 @@ fn nothing_after_the_cut_off_and_nothing_outside_the_universe_is_read() {
     let mut world = World::new();
     let before = hours(CUT, -2);
     let after = hours(CUT, 1);
-    world.add_news("alpaca.news", &news_item(1, before, "h", "s", "AAPL"), before);
-    world.add_news("alpaca.news", &news_item(2, before, "h", "s", "MSFT"), after);
-    world.add_news("alpaca.news", &news_item(3, before, "h", "s", "TSLA"), before);
+    world.add_news(
+        "alpaca.news",
+        &news_item(1, before, "h", "s", "AAPL"),
+        before,
+    );
+    world.add_news(
+        "alpaca.news",
+        &news_item(2, before, "h", "s", "MSFT"),
+        after,
+    );
+    world.add_news(
+        "alpaca.news",
+        &news_item(3, before, "h", "s", "TSLA"),
+        before,
+    );
     let reader = world.reader(LicensedText::Included);
-    let ids: Vec<String> = reader.news(&query(&[AAPL, MSFT])).unwrap().items.iter().map(|i| i.typed.vendor_id.as_str().to_owned()).collect();
+    let ids: Vec<String> = reader
+        .news(&query(&[AAPL, MSFT]))
+        .unwrap()
+        .items
+        .iter()
+        .map(|i| i.typed.vendor_id.as_str().to_owned())
+        .collect();
     assert_eq!(ids, ["1"]);
     assert!(reader.news(&query(&[])).unwrap().items.is_empty());
 }
@@ -145,8 +180,14 @@ fn a_query_under_another_allowlist_version_is_refused() {
     let mut stale = query(&[AAPL]);
     stale.allowlist_version = AllowlistVersion(6);
     let reader = world.reader(LicensedText::Included);
-    assert_eq!(reader.news(&stale), Err(SourceError::AllowlistVersionMismatch));
-    assert_eq!(reader.filings(&stale), Err(SourceError::AllowlistVersionMismatch));
+    assert_eq!(
+        reader.news(&stale),
+        Err(SourceError::AllowlistVersionMismatch)
+    );
+    assert_eq!(
+        reader.filings(&stale),
+        Err(SourceError::AllowlistVersionMismatch)
+    );
 }
 
 #[test]
@@ -154,10 +195,14 @@ fn a_source_revoked_in_the_version_in_effect_is_never_returned() {
     let mut world = World::new();
     let t = hours(CUT, -1);
     world.add_news("alpaca.news", &news_item(1, t, "h", "s", "AAPL"), t);
-    let revoked = Allowlist::parse(&TEST_ALLOWLIST.replace("version = 7", "version = 8").replace(
-        "id = \"alpaca.news\"\nkind = \"news\"\nlicensed = true\ncounsel_confirmed = true",
-        "id = \"alpaca.news\"\nkind = \"news\"\nlicensed = true\ncounsel_confirmed = false",
-    ))
+    let revoked = Allowlist::parse(
+        &TEST_ALLOWLIST
+            .replace("version = 7", "version = 8")
+            .replace(
+                "id = \"alpaca.news\"\nkind = \"news\"\nlicensed = true\ncounsel_confirmed = true",
+                "id = \"alpaca.news\"\nkind = \"news\"\nlicensed = true\ncounsel_confirmed = false",
+            ),
+    )
     .unwrap();
     assert!(revoked.active(&news_source()).is_none());
     let reader = StoreReader {
@@ -175,16 +220,29 @@ fn a_source_revoked_in_the_version_in_effect_is_never_returned() {
 fn licensed_text_is_withheld_unless_included_and_the_typed_fields_stay() {
     let mut world = World::new();
     let t = hours(CUT, -1);
-    world.add_news("alpaca.news", &news_item(1, t, "headline", "summary", "AAPL"), t);
-    let withheld = world.reader(LicensedText::Withheld).news(&query(&[AAPL])).unwrap();
-    let included = world.reader(LicensedText::Included).news(&query(&[AAPL])).unwrap();
+    world.add_news(
+        "alpaca.news",
+        &news_item(1, t, "headline", "summary", "AAPL"),
+        t,
+    );
+    let withheld = world
+        .reader(LicensedText::Withheld)
+        .news(&query(&[AAPL]))
+        .unwrap();
+    let included = world
+        .reader(LicensedText::Included)
+        .news(&query(&[AAPL]))
+        .unwrap();
     let (w, i) = (&withheld.items[0], &included.items[0]);
     assert!(w.licensed && i.licensed);
     assert_eq!(w.typed, i.typed);
     assert_eq!((&w.headline, &w.summary, &w.link), (&None, &None, &None));
     assert_eq!(i.headline.as_ref().unwrap().as_untrusted_str(), "headline");
     assert_eq!(i.summary.as_ref().unwrap().as_untrusted_str(), "summary");
-    assert_eq!(i.link.as_ref().unwrap().as_untrusted_str(), "https://www.example-wire.com/1");
+    assert_eq!(
+        i.link.as_ref().unwrap().as_untrusted_str(),
+        "https://www.example-wire.com/1"
+    );
 }
 
 #[test]
@@ -193,8 +251,16 @@ fn a_news_item_s_text_is_at_most_2000_bytes_headline_first() {
     let t = hours(CUT, -1);
     let headline = "H".repeat(900);
     let summary = "S".repeat(3_000);
-    world.add_news("alpaca.news", &news_item(1, t, &headline, &summary, "AAPL"), t);
-    let item = &world.reader(LicensedText::Included).news(&query(&[AAPL])).unwrap().items[0];
+    world.add_news(
+        "alpaca.news",
+        &news_item(1, t, &headline, &summary, "AAPL"),
+        t,
+    );
+    let item = &world
+        .reader(LicensedText::Included)
+        .news(&query(&[AAPL]))
+        .unwrap()
+        .items[0];
     let headline_len = item.headline.as_ref().unwrap().len_bytes();
     let link_len = item.link.as_ref().unwrap().len_bytes();
     let summary_len = item.summary.as_ref().unwrap().len_bytes();
@@ -209,25 +275,45 @@ fn add_filings(world: &mut World, received: &str, capture: Capture, document: &[
     let ctx = world.tables.ctx(&source, at(received), capture);
     let index = edgar_submissions(&ctx, &body).unwrap();
     for entry in &index.entries {
-        world.filings.ingest(edgar_filing(&ctx, entry, document).unwrap_or_else(|e| panic!("{e:?}"))).ok();
+        let own = [document, entry.accession.as_str().as_bytes()].concat();
+        world
+            .filings
+            .ingest(edgar_filing(&ctx, entry, &own).unwrap())
+            .unwrap();
     }
 }
 
 #[test]
 fn filings_reads_hold_seven_days_and_the_excerpt_cap() {
     let mut world = World::new();
-    add_filings(&mut world, "2026-10-15T00:00:00Z", Capture::Backfill, "x".repeat(7_000).as_bytes());
+    add_filings(
+        &mut world,
+        "2026-10-15T00:00:00Z",
+        Capture::Backfill,
+        "x".repeat(7_000).as_bytes(),
+    );
     let mut q = query(&[AAPL]);
     q.as_of = at("2026-10-15T00:00:00Z");
     let batch = world.reader(LicensedText::Withheld).filings(&q).unwrap();
-    let forms: Vec<&str> = batch.items.iter().map(|e| e.typed.filing.as_ref().unwrap().form.as_str()).collect();
+    let forms: Vec<&str> = batch
+        .items
+        .iter()
+        .map(|e| e.typed.filing.as_ref().unwrap().form.as_str())
+        .collect();
     assert_eq!(forms, ["10-K/A"]);
     let excerpt = batch.items[0].excerpt.as_ref().unwrap();
     assert_eq!(excerpt.len_bytes(), FILING_EXCERPT_BYTES);
     assert_eq!(batch.dropped, 0);
     let mut wide = q.clone();
     wide.as_of = at("2026-10-02T00:00:00Z");
-    let forms: Vec<String> = world.reader(LicensedText::Withheld).filings(&wide).unwrap().items.iter().map(|e| e.typed.filing.as_ref().unwrap().form.as_str().to_owned()).collect();
+    let forms: Vec<String> = world
+        .reader(LicensedText::Withheld)
+        .filings(&wide)
+        .unwrap()
+        .items
+        .iter()
+        .map(|e| e.typed.filing.as_ref().unwrap().form.as_str().to_owned())
+        .collect();
     assert_eq!(forms, ["8-K"]);
     assert_eq!(FILINGS_LIMIT, 20);
 }
@@ -239,7 +325,14 @@ fn a_news_read_never_returns_filings_and_a_filings_read_never_news() {
     world.add_news("alpaca.news", &news_item(1, t, "h", "s", "AAPL"), t);
     add_filings(&mut world, "2026-10-16T11:00:00Z", Capture::Live, b"doc");
     let reader = world.reader(LicensedText::Included);
-    assert!(reader.news(&query(&[AAPL])).unwrap().items.iter().all(|i| i.typed.filing.is_none()));
+    assert!(
+        reader
+            .news(&query(&[AAPL]))
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| i.typed.filing.is_none())
+    );
     let filings = reader.filings(&query(&[AAPL])).unwrap();
     assert_eq!(filings.items.len(), 3);
     assert!(filings.items.iter().all(|e| e.typed.filing.is_some()));
@@ -250,7 +343,11 @@ fn each_item_s_drift_observation_is_its_typed_record_at_knowledge_time() {
     let mut world = World::new();
     let published = hours(CUT, -5);
     let received = hours(CUT, -3);
-    world.add_news("alpaca.news", &news_item(1, published, "h", "s", "AAPL"), received);
+    world.add_news(
+        "alpaca.news",
+        &news_item(1, published, "h", "s", "AAPL"),
+        received,
+    );
     add_filings(&mut world, "2026-10-16T11:00:00Z", Capture::Live, b"doc");
     let reader = world.reader(LicensedText::Withheld);
     let news = &reader.news(&query(&[AAPL])).unwrap().items[0];
@@ -264,10 +361,15 @@ fn each_item_s_drift_observation_is_its_typed_record_at_knowledge_time() {
     let seen = observation(&filing.typed);
     assert_eq!(seen.class, InputClass::Filing);
     assert_eq!(seen.source, edgar_source());
-    assert_eq!(seen.length_bytes, 3);
+    assert_eq!(seen.length_bytes, 23);
+    assert_eq!(seen.observed_at, at("2026-10-16T11:00:00Z"));
     let mut drift = DriftState::new();
     drift.observe(&seen).unwrap();
-    assert!(drift.report().unwrap().unusual().unwrap().is_empty());
+    assert_eq!(
+        drift.report().unwrap().unusual().unwrap(),
+        BTreeSet::from([edgar_source()]),
+        "one observation is no baseline yet, which E17-5 reads as unusual"
+    );
     let sources: BTreeSet<_> = world.tables.allowlist.research_allowlist().sources;
     assert!(sources.contains(&seen.source));
 }

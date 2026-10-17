@@ -81,7 +81,11 @@ fn injected_news_text_changes_no_typed_field() {
     }
     for (x, y) in a.records().iter().zip(b.records()) {
         assert_eq!(decision_fields(x.typed()), decision_fields(y.typed()));
-        assert_eq!(x.typed().source, news_source(), "the vendor's own `source` member is ignored");
+        assert_eq!(
+            x.typed().source,
+            news_source(),
+            "the vendor's own `source` member is ignored"
+        );
         assert_eq!(x.typed().allowlist_version, AllowlistVersion(7));
         assert_eq!(x.typed().knowledge_time, at(RECEIVED));
     }
@@ -97,7 +101,10 @@ fn injected_news_text_changes_no_typed_field() {
         ],
         "tags come from `symbols` alone: no GME, NVDA, or TSLA named in text"
     );
-    assert_eq!(injected.next_page_token, None, "a continuation token carrying a payload is dropped");
+    assert_eq!(
+        injected.next_page_token, None,
+        "a continuation token carrying a payload is dropped"
+    );
 }
 
 #[test]
@@ -112,9 +119,21 @@ fn injected_news_text_stays_inside_its_caps() {
     }
     for r in store.records() {
         let t = r.text();
-        assert!(t.headline.as_ref().is_none_or(|x| x.len_bytes() <= STORED_HEADLINE_BYTES));
-        assert!(t.summary.as_ref().is_none_or(|x| x.len_bytes() <= STORED_SUMMARY_BYTES));
-        assert!(t.link.as_ref().is_none_or(|x| x.len_bytes() <= STORED_LINK_BYTES));
+        assert!(
+            t.headline
+                .as_ref()
+                .is_none_or(|x| x.len_bytes() <= STORED_HEADLINE_BYTES)
+        );
+        assert!(
+            t.summary
+                .as_ref()
+                .is_none_or(|x| x.len_bytes() <= STORED_SUMMARY_BYTES)
+        );
+        assert!(
+            t.link
+                .as_ref()
+                .is_none_or(|x| x.len_bytes() <= STORED_LINK_BYTES)
+        );
         assert_eq!(t.excerpt, None);
     }
     let reader = StoreReader {
@@ -127,7 +146,10 @@ fn injected_news_text_stays_inside_its_caps() {
         .news(&ReadQuery {
             as_of: at("2026-10-16T13:00:00Z"),
             allowlist_version: AllowlistVersion(7),
-            instruments: [AAPL, MSFT, TSLA, GME, NVDA].iter().map(|i| asset(i)).collect(),
+            instruments: [AAPL, MSFT, TSLA, GME, NVDA]
+                .iter()
+                .map(|i| asset(i))
+                .collect(),
             window_s: None,
             limit: None,
         })
@@ -139,7 +161,12 @@ fn injected_news_text_stays_inside_its_caps() {
             .map(|x| x.as_ref().map_or(0, |t| t.len_bytes()))
             .sum::<usize>();
         assert!(bytes <= NEWS_ITEM_BYTES);
-        assert!(item.typed.tags.iter().all(|t| *t != asset(GME) && *t != asset(NVDA)));
+        assert!(
+            item.typed
+                .tags
+                .iter()
+                .all(|t| *t != asset(GME) && *t != asset(NVDA))
+        );
     }
 }
 
@@ -168,20 +195,34 @@ fn an_injected_filing_index_and_document_change_no_typed_field() {
     let tables = Tables::new();
     let source = edgar_source();
     let ctx = tables.ctx(&source, at(RECEIVED), Capture::Live);
-    let index = edgar_submissions(&ctx, &fixture("injection/edgar-submissions-injection.json")).unwrap();
+    let index =
+        edgar_submissions(&ctx, &fixture("injection/edgar-submissions-injection.json")).unwrap();
     assert_eq!(index.entries.len(), 1);
     assert_eq!(
         index.refused,
-        vec![(1, SourceError::BadField), (2, SourceError::BadField), (3, SourceError::BadField)]
+        vec![
+            (1, SourceError::BadField),
+            (2, SourceError::BadField),
+            (3, SourceError::BadField)
+        ]
     );
     let entry = &index.entries[0];
-    let injected = edgar_filing(&ctx, entry, &fixture("injection/edgar-doc-injection.htm")).unwrap();
-    let plain = edgar_filing(&ctx, entry, b"<html><body>Item 8.01. Nothing to report.</body></html>").unwrap();
+    let injected =
+        edgar_filing(&ctx, entry, &fixture("injection/edgar-doc-injection.htm")).unwrap();
+    let plain = edgar_filing(
+        &ctx,
+        entry,
+        b"<html><body>Item 8.01. Nothing to report.</body></html>",
+    )
+    .unwrap();
     let mut a = ItemStore::filings();
     let mut b = ItemStore::filings();
     a.ingest(injected).unwrap();
     b.ingest(plain).unwrap();
-    assert_eq!(decision_fields(a.records()[0].typed()), decision_fields(b.records()[0].typed()));
+    assert_eq!(
+        decision_fields(a.records()[0].typed()),
+        decision_fields(b.records()[0].typed())
+    );
     assert_eq!(a.records()[0].typed().tags, BTreeSet::from([asset(AAPL)]));
 }
 
@@ -198,7 +239,10 @@ fn no_fetch_takes_a_url_from_an_item() {
     for r in store.records() {
         if let Some(link) = &r.text().link {
             assert!(
-                tables.allowlist.permit(&news_source(), link.as_untrusted_str()).is_err(),
+                tables
+                    .allowlist
+                    .permit(&news_source(), link.as_untrusted_str())
+                    .is_err(),
                 "an item's link is never a permitted URL"
             );
         }

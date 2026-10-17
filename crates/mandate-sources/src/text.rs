@@ -30,9 +30,12 @@ pub struct UntrustedText {
 impl UntrustedText {
     /// `raw` cut to at most `cap_bytes` bytes, never inside a character.
     pub fn bounded(raw: &str, cap_bytes: usize) -> Self {
-        let _ = (raw, cap_bytes);
+        let end = (0..=cap_bytes.min(raw.len()))
+            .rev()
+            .find(|i| raw.is_char_boundary(*i))
+            .unwrap_or(0);
         Self {
-            text: String::new(),
+            text: raw.get(..end).unwrap_or_default().to_owned(),
         }
     }
 

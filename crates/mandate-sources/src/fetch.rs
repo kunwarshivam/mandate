@@ -19,6 +19,11 @@ use crate::allowlist::{Allowlist, PermittedUrl};
 use crate::ingest::{EdgarIndexEntry, PageToken};
 use crate::symbols::{Cik, Symbol};
 
+/// Where each request goes; [`Allowlist::permit`] still decides whether it may.
+const ALPACA_NEWS: &str = "https://data.alpaca.markets/v1beta1/news";
+const EDGAR_SUBMISSIONS: &str = "https://data.sec.gov/submissions/";
+const EDGAR_ARCHIVES: &str = "https://www.sec.gov/Archives/edgar/data/";
+
 /// The most tickers one news request names.
 pub const MAX_NEWS_SYMBOLS: usize = 50;
 /// Items per news page.
@@ -102,8 +107,20 @@ impl<T: Transport> Fetcher<T> {
         page: Option<&PageToken>,
         now: UtcNanos,
     ) -> Result<Vec<u8>, SourceError> {
-        let _ = (source, auth, symbols, start, page, now);
-        Err(SourceError::Unimplemented)
+        if symbols.is_empty() || symbols.len() > MAX_NEWS_SYMBOLS {
+            return Err(SourceError::BadField);
+        }
+        let tickers: Vec<&str> = symbols.iter().map(Symbol::as_str).collect();
+        let mut url = format!(
+            "{ALPACA_NEWS}?symbols={}&start={}&limit={NEWS_PAGE_LIMIT}&sort=desc",
+            tickers.join(","),
+            query_time(start)
+        );
+        if let Some(token) = page {
+            url.push_str("&page_token=");
+            url.push_str(token.as_str());
+        }
+        self.send(source, &url, Some(auth), now).await
     }
 
     /// One filer's submissions index.
@@ -113,8 +130,8 @@ impl<T: Transport> Fetcher<T> {
         cik: Cik,
         now: UtcNanos,
     ) -> Result<Vec<u8>, SourceError> {
-        let _ = (source, cik, now);
-        Err(SourceError::Unimplemented)
+        let url = format!("{EDGAR_SUBMISSIONS}CIK{}.json", cik.padded());
+        self.send(source, &url, None, now).await
     }
 
     /// One filing's primary document.
@@ -124,7 +141,68 @@ impl<T: Transport> Fetcher<T> {
         entry: &EdgarIndexEntry,
         now: UtcNanos,
     ) -> Result<Vec<u8>, SourceError> {
-        let _ = (source, entry, now);
-        Err(SourceError::Unimplemented)
+        let url = format!(
+            "{EDGAR_ARCHIVES}{}/{}/{}",
+            entry.cik.get(),
+            entry.accession.as_str().replace('-', ""),
+            entry.primary_document.as_str()
+        );
+        self.send(source, &url, None, now).await
+    }
+
+    /// Permits `url` (DP-9), paces it, sends it, and checks the answer. The request counts against
+    /// the interval from the moment it is sent, whatever comes back.
+    async fn send(
+        &mut self,
+        source: &SourceId,
+        url: &str,
+        auth: Option<&NewsAuth>,
+        now: UtcNanos,
+    ) -> Result<Vec<u8>, SourceError> {
+        let permitted = self.allowlist.permit(source, url)?;
+        let interval_ms = self
+            .allowlist
+            .active(source)
+            .ok_or(SourceError::SourceNotAllowlisted)?
+            .min_interval_ms();
+        if let Some(last) = self.last_request.get(source) {
+            let next = nanos_since_epoch(*last)?
+                .checked_add(
+                    i128::from(interval_ms)
+                        .checked_mul(1_000_000)
+                        .ok_or(SourceError::Time)?,
+                )
+                .ok_or(SourceError::Time)?;
+            if nanos_since_epoch(now)? < next {
+                return Err(SourceError::TooSoon);
+            }
+        }
+        self.last_request.insert(source.clone(), now);
+        let response = self.transport.get(&permitted, auth).await?;
+        if response.status != 200 {
+            return Err(SourceError::Status);
+        }
+        let length =
+            u64::try_from(response.body.len()).map_err(|_| SourceError::ResponseTooLarge)?;
+        if length > permitted.max_response_bytes() {
+            return Err(SourceError::ResponseTooLarge);
+        }
+        Ok(response.body)
+    }
+}
+
+fn nanos_since_epoch(t: UtcNanos) -> Result<i128, SourceError> {
+    i128::from(t.secs())
+        .checked_mul(1_000_000_000)
+        .and_then(|n| n.checked_add(i128::from(t.nanos())))
+        .ok_or(SourceError::Time)
+}
+
+/// RFC 3339 for a query string: whole seconds without a fraction, otherwise all nine digits.
+fn query_time(t: UtcNanos) -> String {
+    let text = t.to_string();
+    match text.strip_suffix(".000000000Z") {
+        Some(whole) => format!("{whole}Z"),
+        None => text,
     }
 }

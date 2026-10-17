@@ -27,10 +27,26 @@ fn fetcher(answers: Vec<Result<RawResponse, SourceError>>) -> Fetcher<Recorded> 
 fn a_news_request_names_only_typed_values_and_carries_the_credential() {
     let page = fixture("recorded/alpaca-news-page.json");
     let mut f = fetcher(vec![Recorded::ok(&page), Recorded::ok(&page)]);
-    let body = block_on(f.alpaca_news(&news_source(), &auth(), &[symbol("AAPL"), symbol("BRK.B")], at("2026-10-15T00:00:00Z"), None, at(NOW))).unwrap();
+    let body = block_on(f.alpaca_news(
+        &news_source(),
+        &auth(),
+        &[symbol("AAPL"), symbol("BRK.B")],
+        at("2026-10-15T00:00:00Z"),
+        None,
+        at(NOW),
+    ))
+    .unwrap();
     assert_eq!(body, page);
     let token = PageToken::parse("MTcw+/=").unwrap();
-    block_on(f.alpaca_news(&news_source(), &auth(), &[symbol("MSFT")], at("2026-10-15T00:00:00.5Z"), Some(&token), at("2026-10-16T12:00:01Z"))).unwrap();
+    block_on(f.alpaca_news(
+        &news_source(),
+        &auth(),
+        &[symbol("MSFT")],
+        at("2026-10-15T00:00:00.5Z"),
+        Some(&token),
+        at("2026-10-16T12:00:01Z"),
+    ))
+    .unwrap();
     assert_eq!(
         f.transport().sent.borrow().as_slice(),
         [
@@ -44,12 +60,22 @@ fn a_news_request_names_only_typed_values_and_carries_the_credential() {
 fn edgar_requests_carry_no_credential_and_name_the_archive_path() {
     let index = fixture("recorded/edgar-submissions-0000320193.json");
     let mut f = fetcher(vec![Recorded::ok(&index), Recorded::ok(b"<html/>")]);
-    let body = block_on(f.edgar_submissions(&edgar_source(), mandate_sources::symbols::Cik::parse("320193").unwrap(), at(NOW))).unwrap();
+    let body = block_on(f.edgar_submissions(
+        &edgar_source(),
+        mandate_sources::symbols::Cik::parse("320193").unwrap(),
+        at(NOW),
+    ))
+    .unwrap();
     let tables = Tables::new();
     let source = edgar_source();
     let ctx: IngestContext<'_> = tables.ctx(&source, at(NOW), Capture::Live);
     let parsed = edgar_submissions(&ctx, &body).unwrap();
-    block_on(f.edgar_document(&edgar_source(), &parsed.entries[1], at("2026-10-16T12:00:00.125Z"))).unwrap();
+    block_on(f.edgar_document(
+        &edgar_source(),
+        &parsed.entries[1],
+        at("2026-10-16T12:00:00.125Z"),
+    ))
+    .unwrap();
     assert_eq!(
         f.transport().sent.borrow().as_slice(),
         [
@@ -69,7 +95,14 @@ fn an_unlisted_or_unconfirmed_or_mismatched_source_sends_nothing() {
             Err(SourceError::SourceNotAllowlisted)
         );
         assert_eq!(
-            block_on(f.alpaca_news(&source(id), &auth(), &[symbol("AAPL")], at(NOW), None, at(NOW))),
+            block_on(f.alpaca_news(
+                &source(id),
+                &auth(),
+                &[symbol("AAPL")],
+                at(NOW),
+                None,
+                at(NOW)
+            )),
             Err(SourceError::SourceNotAllowlisted)
         );
     }
@@ -78,7 +111,14 @@ fn an_unlisted_or_unconfirmed_or_mismatched_source_sends_nothing() {
         Err(SourceError::EndpointNotAllowlisted)
     );
     assert_eq!(
-        block_on(f.alpaca_news(&edgar_source(), &auth(), &[symbol("AAPL")], at(NOW), None, at(NOW))),
+        block_on(f.alpaca_news(
+            &edgar_source(),
+            &auth(),
+            &[symbol("AAPL")],
+            at(NOW),
+            None,
+            at(NOW)
+        )),
         Err(SourceError::EndpointNotAllowlisted)
     );
     assert!(f.transport().sent.borrow().is_empty());
@@ -86,11 +126,21 @@ fn an_unlisted_or_unconfirmed_or_mismatched_source_sends_nothing() {
 
 #[test]
 fn the_checked_in_allowlist_lets_no_news_request_out() {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/sources/allowlist-v1.toml");
-    let list = mandate_sources::allowlist::Allowlist::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../config/sources/allowlist-v1.toml");
+    let list =
+        mandate_sources::allowlist::Allowlist::parse(&std::fs::read_to_string(path).unwrap())
+            .unwrap();
     let mut f = Fetcher::new(list, Recorded::answering(vec![Recorded::ok(b"{}")]));
     assert_eq!(
-        block_on(f.alpaca_news(&news_source(), &auth(), &[symbol("AAPL")], at(NOW), None, at(NOW))),
+        block_on(f.alpaca_news(
+            &news_source(),
+            &auth(),
+            &[symbol("AAPL")],
+            at(NOW),
+            None,
+            at(NOW)
+        )),
         Err(SourceError::SourceNotAllowlisted)
     );
     assert!(f.transport().sent.borrow().is_empty());
@@ -98,7 +148,11 @@ fn the_checked_in_allowlist_lets_no_news_request_out() {
 
 #[test]
 fn a_request_inside_the_minimum_interval_is_refused_before_sending() {
-    let mut f = fetcher(vec![Recorded::ok(b"{}"), Recorded::ok(b"{}"), Recorded::ok(b"{}")]);
+    let mut f = fetcher(vec![
+        Recorded::ok(b"{}"),
+        Recorded::ok(b"{}"),
+        Recorded::ok(b"{}"),
+    ]);
     let cik = mandate_sources::symbols::Cik::parse("320193").unwrap();
     block_on(f.edgar_submissions(&edgar_source(), cik, at("2026-10-16T12:00:00Z"))).unwrap();
     assert_eq!(
@@ -110,7 +164,15 @@ fn a_request_inside_the_minimum_interval_is_refused_before_sending() {
         Err(SourceError::TooSoon)
     );
     block_on(f.edgar_submissions(&edgar_source(), cik, at("2026-10-16T12:00:00.125Z"))).unwrap();
-    block_on(f.alpaca_news(&news_source(), &auth(), &[symbol("AAPL")], at(NOW), None, at("2026-10-16T12:00:00.125Z"))).unwrap();
+    block_on(f.alpaca_news(
+        &news_source(),
+        &auth(),
+        &[symbol("AAPL")],
+        at(NOW),
+        None,
+        at("2026-10-16T12:00:00.125Z"),
+    ))
+    .unwrap();
     assert_eq!(f.transport().sent.borrow().len(), 3);
 }
 
@@ -118,7 +180,10 @@ fn a_request_inside_the_minimum_interval_is_refused_before_sending() {
 fn a_failed_send_still_counts_against_the_interval() {
     let mut f = fetcher(vec![Err(SourceError::Transport), Recorded::ok(b"{}")]);
     let cik = mandate_sources::symbols::Cik::parse("320193").unwrap();
-    assert_eq!(block_on(f.edgar_submissions(&edgar_source(), cik, at(NOW))), Err(SourceError::Transport));
+    assert_eq!(
+        block_on(f.edgar_submissions(&edgar_source(), cik, at(NOW))),
+        Err(SourceError::Transport)
+    );
     assert_eq!(
         block_on(f.edgar_submissions(&edgar_source(), cik, at("2026-10-16T12:00:00.1Z"))),
         Err(SourceError::TooSoon)
@@ -128,17 +193,48 @@ fn a_failed_send_still_counts_against_the_interval() {
 #[test]
 fn a_non_200_status_and_an_oversized_body_are_refused() {
     let mut f = fetcher(vec![
-        Ok(RawResponse { status: 429, body: b"slow down".to_vec() }),
-        Ok(RawResponse { status: 301, body: Vec::new() }),
-        Ok(RawResponse { status: 200, body: vec![b'x'; 8_388_609] }),
-        Ok(RawResponse { status: 200, body: vec![b'x'; 8_388_608] }),
+        Ok(RawResponse {
+            status: 429,
+            body: b"slow down".to_vec(),
+        }),
+        Ok(RawResponse {
+            status: 301,
+            body: Vec::new(),
+        }),
+        Ok(RawResponse {
+            status: 200,
+            body: vec![b'x'; 8_388_609],
+        }),
+        Ok(RawResponse {
+            status: 200,
+            body: vec![b'x'; 8_388_608],
+        }),
     ]);
     let cik = mandate_sources::symbols::Cik::parse("320193").unwrap();
-    let times = ["2026-10-16T12:00:00Z", "2026-10-16T12:00:01Z", "2026-10-16T12:00:02Z", "2026-10-16T12:00:03Z"];
-    assert_eq!(block_on(f.edgar_submissions(&edgar_source(), cik, at(times[0]))), Err(SourceError::Status));
-    assert_eq!(block_on(f.edgar_submissions(&edgar_source(), cik, at(times[1]))), Err(SourceError::Status));
-    assert_eq!(block_on(f.edgar_submissions(&edgar_source(), cik, at(times[2]))), Err(SourceError::ResponseTooLarge));
-    assert_eq!(block_on(f.edgar_submissions(&edgar_source(), cik, at(times[3]))).unwrap().len(), 8_388_608);
+    let times = [
+        "2026-10-16T12:00:00Z",
+        "2026-10-16T12:00:01Z",
+        "2026-10-16T12:00:02Z",
+        "2026-10-16T12:00:03Z",
+    ];
+    assert_eq!(
+        block_on(f.edgar_submissions(&edgar_source(), cik, at(times[0]))),
+        Err(SourceError::Status)
+    );
+    assert_eq!(
+        block_on(f.edgar_submissions(&edgar_source(), cik, at(times[1]))),
+        Err(SourceError::Status)
+    );
+    assert_eq!(
+        block_on(f.edgar_submissions(&edgar_source(), cik, at(times[2]))),
+        Err(SourceError::ResponseTooLarge)
+    );
+    assert_eq!(
+        block_on(f.edgar_submissions(&edgar_source(), cik, at(times[3])))
+            .unwrap()
+            .len(),
+        8_388_608
+    );
 }
 
 #[test]

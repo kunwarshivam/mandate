@@ -71,7 +71,10 @@ fn a_news_page_becomes_records_from_structured_fields() {
         store.ingest(draft).unwrap();
     }
     let second = store.records()[1].typed();
-    assert_eq!(second.item_id.as_str(), "alpaca.news/41000002@2026-10-15T13:05:00.500000000Z");
+    assert_eq!(
+        second.item_id.as_str(),
+        "alpaca.news/41000002@2026-10-15T13:05:00.500000000Z"
+    );
     assert_eq!(second.source, source);
     assert_eq!(second.allowlist_version, AllowlistVersion(7));
     assert_eq!(second.kind, SourceKind::News);
@@ -105,8 +108,16 @@ fn a_news_page_becomes_records_from_structured_fields() {
 #[test]
 fn an_unknown_ticker_is_dropped_and_tags_resolve_as_of_knowledge_time() {
     let tables = Tables::new();
-    let store = news_store(&tables, "recorded/alpaca-news-page.json", RECEIVED, Capture::Live);
-    assert_eq!(store.records()[2].typed().tags, BTreeSet::from([asset(AAPL)]));
+    let store = news_store(
+        &tables,
+        "recorded/alpaca-news-page.json",
+        RECEIVED,
+        Capture::Live,
+    );
+    assert_eq!(
+        store.records()[2].typed().tags,
+        BTreeSet::from([asset(AAPL)])
+    );
 
     let body = br#"{"news":[{"id":1,"headline":"h","created_at":"2026-05-01T00:00:00Z","updated_at":"2026-05-01T00:00:00Z","summary":"","url":"","symbols":["XYZ"]}],"next_page_token":null}"#;
     let source = news_source();
@@ -127,13 +138,21 @@ fn an_unknown_ticker_is_dropped_and_tags_resolve_as_of_knowledge_time() {
         body,
     )
     .unwrap();
-    assert_eq!(backfilled.drafts[0].tags(), &BTreeSet::from([asset(XYZ_OLD)]));
+    assert_eq!(
+        backfilled.drafts[0].tags(),
+        &BTreeSet::from([asset(XYZ_OLD)])
+    );
 }
 
 #[test]
 fn knowledge_time_is_receipt_for_live_and_the_vendor_update_for_backfill() {
     let tables = Tables::new();
-    let live = news_store(&tables, "recorded/alpaca-news-page.json", RECEIVED, Capture::Live);
+    let live = news_store(
+        &tables,
+        "recorded/alpaca-news-page.json",
+        RECEIVED,
+        Capture::Live,
+    );
     let backfill = news_store(
         &tables,
         "recorded/alpaca-news-page.json",
@@ -170,7 +189,11 @@ fn a_source_time_after_receipt_beyond_the_skew_is_refused() {
     .unwrap();
     assert!(just_inside.refused.is_empty());
     let outside = alpaca_news_page(
-        &tables.ctx(&source, at("2026-10-15T14:29:58.999999999Z"), Capture::Backfill),
+        &tables.ctx(
+            &source,
+            at("2026-10-15T14:29:58.999999999Z"),
+            Capture::Backfill,
+        ),
         &body,
     )
     .unwrap();
@@ -182,13 +205,31 @@ fn a_source_time_after_receipt_beyond_the_skew_is_refused() {
 fn an_exact_copy_is_stored_once_and_a_vendor_update_is_a_linked_version() {
     let tables = Tables::new();
     let mut store = ItemStore::news();
-    let first = ingest_news(&mut store, &tables, "recorded/alpaca-news-page.json", RECEIVED, Capture::Live);
-    let again = ingest_news(&mut store, &tables, "recorded/alpaca-news-page.json", "2026-10-15T17:05:00Z", Capture::Live);
+    let first = ingest_news(
+        &mut store,
+        &tables,
+        "recorded/alpaca-news-page.json",
+        RECEIVED,
+        Capture::Live,
+    );
+    let again = ingest_news(
+        &mut store,
+        &tables,
+        "recorded/alpaca-news-page.json",
+        "2026-10-15T17:05:00Z",
+        Capture::Live,
+    );
     assert!(first.iter().all(|i| matches!(i, Ingested::Stored(_))));
     assert!(again.iter().all(|i| matches!(i, Ingested::Duplicate(_))));
     assert_eq!(store.records().len(), 3);
 
-    let update = ingest_news(&mut store, &tables, "recorded/alpaca-news-update.json", "2026-10-15T16:00:02Z", Capture::Live);
+    let update = ingest_news(
+        &mut store,
+        &tables,
+        "recorded/alpaca-news-update.json",
+        "2026-10-15T16:00:02Z",
+        Capture::Live,
+    );
     assert_eq!(store.records().len(), 4);
     let original = store.records()[2].typed().clone();
     let newer = store.records()[3].typed();
@@ -203,13 +244,22 @@ fn an_exact_copy_is_stored_once_and_a_vendor_update_is_a_linked_version() {
 fn different_content_under_a_stored_vendor_version_is_refused() {
     let tables = Tables::new();
     let source = news_source();
-    let mut store = news_store(&tables, "recorded/alpaca-news-page.json", RECEIVED, Capture::Live);
+    let mut store = news_store(
+        &tables,
+        "recorded/alpaca-news-page.json",
+        RECEIVED,
+        Capture::Live,
+    );
     let before = store.records().to_vec();
     for updated_at in ["2026-10-15T12:00:00Z", "2026-10-15T11:00:00Z"] {
         let body = format!(
             r#"{{"news":[{{"id":41000001,"headline":"rewritten","created_at":"2026-10-15T12:00:00Z","updated_at":"{updated_at}","summary":"","url":"","symbols":["AAPL"]}}],"next_page_token":null}}"#
         );
-        let page = alpaca_news_page(&tables.ctx(&source, at(RECEIVED), Capture::Live), body.as_bytes()).unwrap();
+        let page = alpaca_news_page(
+            &tables.ctx(&source, at(RECEIVED), Capture::Live),
+            body.as_bytes(),
+        )
+        .unwrap();
         let draft = page.drafts.into_iter().next().unwrap();
         assert_eq!(store.ingest(draft), Err(SourceError::RevisedInPlace));
     }
@@ -219,7 +269,12 @@ fn different_content_under_a_stored_vendor_version_is_refused() {
 #[test]
 fn syndicated_copies_share_a_group_and_other_stories_do_not() {
     let tables = Tables::new();
-    let store = news_store(&tables, "recorded/alpaca-news-syndicated.json", "2026-10-16T10:00:00Z", Capture::Live);
+    let store = news_store(
+        &tables,
+        "recorded/alpaca-news-syndicated.json",
+        "2026-10-16T10:00:00Z",
+        Capture::Live,
+    );
     let groups: Vec<_> = store.records().iter().map(|r| r.typed().group).collect();
     assert_eq!(groups[0], groups[1]);
     assert_ne!(groups[0], groups[2]);
@@ -274,19 +329,31 @@ fn the_edgar_index_reads_rows_and_never_the_filer_s_own_tickers() {
     let tables = Tables::new();
     let source = edgar_source();
     let body = fixture("recorded/edgar-submissions-0000320193.json");
-    let index = edgar_submissions(&tables.ctx(&source, at(RECEIVED), Capture::Live), &body).unwrap();
+    let index =
+        edgar_submissions(&tables.ctx(&source, at(RECEIVED), Capture::Live), &body).unwrap();
     assert!(index.refused.is_empty());
     assert_eq!(index.entries.len(), 3);
     let eight_k = &index.entries[1];
     assert_eq!(eight_k.cik, Cik::parse("0000320193").unwrap());
-    assert_eq!(eight_k.accession, VendorId::parse("0000320193-26-000090").unwrap());
+    assert_eq!(
+        eight_k.accession,
+        VendorId::parse("0000320193-26-000090").unwrap()
+    );
     assert_eq!(eight_k.form, FormType::parse("8-K").unwrap());
     assert_eq!(eight_k.accepted_at, at("2026-10-01T20:05:00Z"));
-    assert_eq!(eight_k.primary_document, DocumentName::parse("aapl-8k-20261001.htm").unwrap());
+    assert_eq!(
+        eight_k.primary_document,
+        DocumentName::parse("aapl-8k-20261001.htm").unwrap()
+    );
     assert_eq!(index.entries[0].form.as_str(), "10-K/A");
 
     let document = fixture("recorded/edgar-doc-8k.htm");
-    let draft = edgar_filing(&tables.ctx(&source, at(RECEIVED), Capture::Backfill), eight_k, &document).unwrap();
+    let draft = edgar_filing(
+        &tables.ctx(&source, at(RECEIVED), Capture::Backfill),
+        eight_k,
+        &document,
+    )
+    .unwrap();
     assert_eq!(draft.tags(), &BTreeSet::from([asset(AAPL)]));
     assert_eq!(draft.knowledge_time(), at("2026-10-01T20:05:00Z"));
     let mut store = ItemStore::filings();
@@ -309,11 +376,17 @@ fn an_amended_filing_is_a_new_record_and_the_original_stays_readable() {
     let tables = Tables::new();
     let source = edgar_source();
     let body = fixture("recorded/edgar-submissions-0000320193.json");
-    let index = edgar_submissions(&tables.ctx(&source, at(RECEIVED), Capture::Backfill), &body).unwrap();
+    let index =
+        edgar_submissions(&tables.ctx(&source, at(RECEIVED), Capture::Backfill), &body).unwrap();
     let mut store = ItemStore::filings();
     for entry in index.entries.iter().rev() {
         let doc = format!("document {}", entry.accession.as_str());
-        let draft = edgar_filing(&tables.ctx(&source, at(RECEIVED), Capture::Backfill), entry, doc.as_bytes()).unwrap();
+        let draft = edgar_filing(
+            &tables.ctx(&source, at(RECEIVED), Capture::Backfill),
+            entry,
+            doc.as_bytes(),
+        )
+        .unwrap();
         store.ingest(draft).unwrap();
     }
     assert_eq!(store.records().len(), 3);
@@ -343,15 +416,27 @@ fn a_long_document_is_cut_to_the_stored_excerpt() {
     let tables = Tables::new();
     let source = edgar_source();
     let body = fixture("recorded/edgar-submissions-0000320193.json");
-    let index = edgar_submissions(&tables.ctx(&source, at(RECEIVED), Capture::Live), &body).unwrap();
+    let index =
+        edgar_submissions(&tables.ctx(&source, at(RECEIVED), Capture::Live), &body).unwrap();
     let document = "é".repeat(STORED_EXCERPT_BYTES);
-    let draft = edgar_filing(&tables.ctx(&source, at(RECEIVED), Capture::Live), &index.entries[0], document.as_bytes()).unwrap();
+    let draft = edgar_filing(
+        &tables.ctx(&source, at(RECEIVED), Capture::Live),
+        &index.entries[0],
+        document.as_bytes(),
+    )
+    .unwrap();
     let mut store = ItemStore::filings();
     store.ingest(draft).unwrap();
     let excerpt = store.records()[0].text().excerpt.as_ref().unwrap();
     assert_eq!(excerpt.len_bytes(), STORED_EXCERPT_BYTES);
-    assert_eq!(excerpt.as_untrusted_str(), "é".repeat(STORED_EXCERPT_BYTES / 2));
-    assert_eq!(store.records()[0].typed().length_bytes, u64::try_from(document.len()).unwrap());
+    assert_eq!(
+        excerpt.as_untrusted_str(),
+        "é".repeat(STORED_EXCERPT_BYTES / 2)
+    );
+    assert_eq!(
+        store.records()[0].typed().length_bytes,
+        u64::try_from(document.len()).unwrap()
+    );
 }
 
 #[test]
@@ -383,7 +468,11 @@ fn identifiers_parse_only_in_their_allowed_forms() {
         assert_eq!(DocumentName::parse(good).unwrap().as_str(), good);
     }
     for bad in ["", "..", "a/b.htm", "../x", "a..b", "a b"] {
-        assert_eq!(DocumentName::parse(bad), Err(SourceError::BadField), "{bad:?}");
+        assert_eq!(
+            DocumentName::parse(bad),
+            Err(SourceError::BadField),
+            "{bad:?}"
+        );
     }
     for good in ["abc", "MTcw+/=_-"] {
         assert_eq!(PageToken::parse(good).unwrap().as_str(), good);
@@ -400,30 +489,83 @@ fn tagging_tables_refuse_overlaps_and_empty_validities() {
         until: until.map(at),
     };
     assert_eq!(
-        SymbolTable::new(1, vec![
-            (symbol("XYZ"), asset(XYZ_OLD), row("2020-01-01T00:00:00Z", None)),
-            (symbol("XYZ"), asset(XYZ_NEW), row("2025-01-01T00:00:00Z", None)),
-        ]),
+        SymbolTable::new(
+            1,
+            vec![
+                (
+                    symbol("XYZ"),
+                    asset(XYZ_OLD),
+                    row("2020-01-01T00:00:00Z", None)
+                ),
+                (
+                    symbol("XYZ"),
+                    asset(XYZ_NEW),
+                    row("2025-01-01T00:00:00Z", None)
+                ),
+            ]
+        ),
         Err(SourceError::BadField)
     );
     assert_eq!(
-        SymbolTable::new(1, vec![(symbol("XYZ"), asset(XYZ_OLD), row("2020-01-01T00:00:00Z", Some("2020-01-01T00:00:00Z")))]),
+        SymbolTable::new(
+            1,
+            vec![(
+                symbol("XYZ"),
+                asset(XYZ_OLD),
+                row("2020-01-01T00:00:00Z", Some("2020-01-01T00:00:00Z"))
+            )]
+        ),
         Err(SourceError::BadField)
     );
-    let table = SymbolTable::new(1, vec![
-        (symbol("XYZ"), asset(XYZ_OLD), row("2020-01-01T00:00:00Z", Some("2025-01-01T00:00:00Z"))),
-        (symbol("XYZ"), asset(XYZ_NEW), row("2025-01-01T00:00:00Z", None)),
-    ])
+    let table = SymbolTable::new(
+        1,
+        vec![
+            (
+                symbol("XYZ"),
+                asset(XYZ_OLD),
+                row("2020-01-01T00:00:00Z", Some("2025-01-01T00:00:00Z")),
+            ),
+            (
+                symbol("XYZ"),
+                asset(XYZ_NEW),
+                row("2025-01-01T00:00:00Z", None),
+            ),
+        ],
+    )
     .unwrap();
     assert_eq!(table.version(), 1);
-    assert_eq!(table.resolve(&symbol("XYZ"), at("2019-12-31T23:59:59.999999999Z")), None);
-    assert_eq!(table.resolve(&symbol("XYZ"), at("2020-01-01T00:00:00Z")), Some(&asset(XYZ_OLD)));
-    assert_eq!(table.resolve(&symbol("XYZ"), at("2024-12-31T23:59:59.999999999Z")), Some(&asset(XYZ_OLD)));
-    assert_eq!(table.resolve(&symbol("XYZ"), at("2025-01-01T00:00:00Z")), Some(&asset(XYZ_NEW)));
-    assert_eq!(table.resolve(&symbol("ABC"), at("2025-01-01T00:00:00Z")), None);
+    assert_eq!(
+        table.resolve(&symbol("XYZ"), at("2019-12-31T23:59:59.999999999Z")),
+        None
+    );
+    assert_eq!(
+        table.resolve(&symbol("XYZ"), at("2020-01-01T00:00:00Z")),
+        Some(&asset(XYZ_OLD))
+    );
+    assert_eq!(
+        table.resolve(&symbol("XYZ"), at("2024-12-31T23:59:59.999999999Z")),
+        Some(&asset(XYZ_OLD))
+    );
+    assert_eq!(
+        table.resolve(&symbol("XYZ"), at("2025-01-01T00:00:00Z")),
+        Some(&asset(XYZ_NEW))
+    );
+    assert_eq!(
+        table.resolve(&symbol("ABC"), at("2025-01-01T00:00:00Z")),
+        None
+    );
     let ciks = ciks();
     assert_eq!(ciks.version(), 2);
-    assert_eq!(ciks.symbols(Cik::parse("320193").unwrap(), at(RECEIVED)), vec![&symbol("AAPL")]);
-    assert!(ciks.symbols(Cik::parse("1318605").unwrap(), at(RECEIVED)).is_empty());
-    assert!(ciks.symbols(Cik::parse("320193").unwrap(), at("1999-01-01T00:00:00Z")).is_empty());
+    assert_eq!(
+        ciks.symbols(Cik::parse("320193").unwrap(), at(RECEIVED)),
+        vec![&symbol("AAPL")]
+    );
+    assert!(
+        ciks.symbols(Cik::parse("1318605").unwrap(), at(RECEIVED))
+            .is_empty()
+    );
+    assert!(
+        ciks.symbols(Cik::parse("320193").unwrap(), at("1999-01-01T00:00:00Z"))
+            .is_empty()
+    );
 }

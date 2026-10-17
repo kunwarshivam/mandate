@@ -36,16 +36,24 @@ struct Arrival {
 }
 
 fn arrival() -> impl Strategy<Value = Arrival> {
-    (0u8..4, 0u16..400, 0u8..3, 0u16..4_000, any::<bool>(), 0u8..3).prop_map(
-        |(vendor, version_s, body, received_s, capture_backfill, ticker)| Arrival {
-            vendor,
-            version_s,
-            body,
-            received_s,
-            capture_backfill,
-            ticker,
-        },
+    (
+        0u8..4,
+        0u16..400,
+        0u8..3,
+        0u16..4_000,
+        any::<bool>(),
+        0u8..3,
     )
+        .prop_map(
+            |(vendor, version_s, body, received_s, capture_backfill, ticker)| Arrival {
+                vendor,
+                version_s,
+                body,
+                received_s,
+                capture_backfill,
+                ticker,
+            },
+        )
 }
 
 fn secs(offset: u16) -> UtcNanos {
@@ -58,7 +66,12 @@ fn page(a: &Arrival) -> String {
     let time = secs(a.version_s);
     format!(
         r#"{{"news":[{{"id":{},"headline":"story {} body {}","created_at":"{}","updated_at":"{}","summary":"","url":"","symbols":["{}"]}}],"next_page_token":null}}"#,
-        a.vendor, a.vendor, a.body, time, time, TICKERS[usize::from(a.ticker)]
+        a.vendor,
+        a.vendor,
+        a.body,
+        time,
+        time,
+        TICKERS[usize::from(a.ticker)]
     )
 }
 
@@ -207,7 +220,13 @@ fn a_source_outside_the_query_is_never_returned() {
     let source = news_source();
     let mut store = ItemStore::news();
     let body = fixture("recorded/alpaca-news-page.json");
-    for draft in alpaca_news_page(&tables.ctx(&source, at("2026-10-15T17:00:00Z"), Capture::Live), &body).unwrap().drafts {
+    for draft in alpaca_news_page(
+        &tables.ctx(&source, at("2026-10-15T17:00:00Z"), Capture::Live),
+        &body,
+    )
+    .unwrap()
+    .drafts
+    {
         store.ingest(draft).unwrap();
     }
     let other = BTreeSet::from([edgar_source()]);

@@ -39,7 +39,10 @@ fn the_checked_in_file_keeps_alpaca_news_out_until_counsel_confirms() {
     let list = checked_in(1);
     assert!(list.active(&news_source()).is_none());
     assert_eq!(
-        list.permit(&news_source(), "https://data.alpaca.markets/v1beta1/news?symbols=AAPL"),
+        list.permit(
+            &news_source(),
+            "https://data.alpaca.markets/v1beta1/news?symbols=AAPL"
+        ),
         Err(SourceError::SourceNotAllowlisted)
     );
     let research = list.research_allowlist();
@@ -65,7 +68,10 @@ fn the_research_allowlist_holds_exactly_the_confirmed_sources() {
 fn permit_accepts_urls_under_an_endpoint_of_the_named_source() {
     let list = allowlist();
     for (id, url) in [
-        ("sec.edgar", "https://data.sec.gov/submissions/CIK0000320193.json"),
+        (
+            "sec.edgar",
+            "https://data.sec.gov/submissions/CIK0000320193.json",
+        ),
         (
             "sec.edgar",
             "https://www.sec.gov/Archives/edgar/data/320193/000032019326000090/aapl-8k-20261001.htm",
@@ -80,9 +86,12 @@ fn permit_accepts_urls_under_an_endpoint_of_the_named_source() {
         assert_eq!(permitted.source(), &source(id));
     }
     assert_eq!(
-        list.permit(&news_source(), "https://data.alpaca.markets/v1beta1/news?symbols=AAPL")
-            .unwrap()
-            .max_response_bytes(),
+        list.permit(
+            &news_source(),
+            "https://data.alpaca.markets/v1beta1/news?symbols=AAPL"
+        )
+        .unwrap()
+        .max_response_bytes(),
         1_048_576
     );
 }
@@ -124,11 +133,17 @@ fn permit_refuses_every_url_outside_the_endpoints() {
 fn permit_refuses_unlisted_and_unconfirmed_sources_whatever_the_url() {
     let list = allowlist();
     assert_eq!(
-        list.permit(&source("evil.blog"), "https://data.sec.gov/submissions/x.json"),
+        list.permit(
+            &source("evil.blog"),
+            "https://data.sec.gov/submissions/x.json"
+        ),
         Err(SourceError::SourceNotAllowlisted)
     );
     assert_eq!(
-        list.permit(&source("wire.unconfirmed"), "https://news.example.com/v1/latest"),
+        list.permit(
+            &source("wire.unconfirmed"),
+            "https://news.example.com/v1/latest"
+        ),
         Err(SourceError::SourceNotAllowlisted)
     );
     assert!(list.active(&source("wire.unconfirmed")).is_none());
@@ -157,7 +172,10 @@ fn malformed_files_are_refused() {
             SourceError::AllowlistMalformed,
         ),
         (
-            base.replace("https://news.example.com/v1/", "http://news.example.com/v1/"),
+            base.replace(
+                "https://news.example.com/v1/",
+                "http://news.example.com/v1/",
+            ),
             SourceError::BadEndpoint,
         ),
         (
@@ -165,7 +183,10 @@ fn malformed_files_are_refused() {
             SourceError::BadEndpoint,
         ),
         (
-            base.replace("max_response_bytes = 1048576\nendpoints = [\"https://news", "max_response_bytes = 0\nendpoints = [\"https://news"),
+            base.replace(
+                "max_response_bytes = 1048576\nendpoints = [\"https://news",
+                "max_response_bytes = 0\nendpoints = [\"https://news",
+            ),
             SourceError::AllowlistMalformed,
         ),
         (

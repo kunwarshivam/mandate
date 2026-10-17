@@ -13,6 +13,14 @@ use serde::Deserialize;
 
 use crate::SourceError;
 
+const HTTPS: &str = "https://";
+
+/// The only bytes a permitted URL may hold after its scheme: no `%`, so nothing is decoded into a
+/// traversal; no `@`, `#`, `\`, or whitespace; no `..` and no `//` (checked beside it).
+fn url_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"-._~/?&=:,+".contains(&b)
+}
+
 /// What a source delivers, which decides the parser, the store, and the read it feeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,8 +40,39 @@ impl Endpoint {
     /// Parses `https://<host><path prefix>`: a lowercase DNS host with no port or user info, and a
     /// path prefix starting with `/`.
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        Err(SourceError::Unimplemented)
+        let rest = text.strip_prefix(HTTPS).ok_or(SourceError::BadEndpoint)?;
+        let slash = rest.find('/').ok_or(SourceError::BadEndpoint)?;
+        let (host, path_prefix) = rest.split_at(slash);
+        let host_ok = !host.is_empty()
+            && !host.contains("..")
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b".-".contains(&b));
+        let path_ok = !path_prefix.contains("..")
+            && !path_prefix.contains("//")
+            && path_prefix
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-._~/".contains(&b));
+        if !host_ok || !path_ok {
+            return Err(SourceError::BadEndpoint);
+        }
+        Ok(Self {
+            host: host.to_owned(),
+            path_prefix: path_prefix.to_owned(),
+        })
+    }
+
+    /// Whether `host` and `path_and_query` lie under this endpoint: the same host, and the path
+    /// prefix followed by nothing, or by `/` or `?` when the prefix does not end in `/`.
+    fn covers(&self, host: &str, path_and_query: &str) -> bool {
+        let Some(after) = path_and_query.strip_prefix(self.path_prefix.as_str()) else {
+            return false;
+        };
+        host == self.host
+            && (self.path_prefix.ends_with('/')
+                || after.is_empty()
+                || after.starts_with('/')
+                || after.starts_with('?'))
     }
 
     pub fn host(&self) -> &str {
@@ -145,10 +184,41 @@ impl Allowlist {
     /// Parses one allowlist file. Unknown keys, a version of 0, a repeated source, a source with
     /// no endpoint, a zero response cap, and an endpoint that is not `https://` are refused.
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        let _: Option<FileShape> = None;
-        let _: Option<EntryShape> = None;
-        Err(SourceError::Unimplemented)
+        let file: FileShape = toml::from_str(text).map_err(|_| SourceError::AllowlistMalformed)?;
+        if file.version == 0 {
+            return Err(SourceError::AllowlistMalformed);
+        }
+        let mut entries = BTreeMap::new();
+        for shape in file.source {
+            let id = SourceId::new(&shape.id).map_err(|_| SourceError::AllowlistMalformed)?;
+            if shape.max_response_bytes == 0 {
+                return Err(SourceError::AllowlistMalformed);
+            }
+            if shape.endpoints.is_empty() {
+                return Err(SourceError::BadEndpoint);
+            }
+            let endpoints = shape
+                .endpoints
+                .iter()
+                .map(|e| Endpoint::parse(e))
+                .collect::<Result<Vec<_>, _>>()?;
+            let entry = SourceEntry {
+                id: id.clone(),
+                kind: shape.kind,
+                licensed: shape.licensed,
+                counsel_confirmed: shape.counsel_confirmed,
+                min_interval_ms: shape.min_interval_ms,
+                max_response_bytes: shape.max_response_bytes,
+                endpoints,
+            };
+            if entries.insert(id, entry).is_some() {
+                return Err(SourceError::DuplicateSource);
+            }
+        }
+        Ok(Self {
+            version: AllowlistVersion(file.version),
+            entries,
+        })
     }
 
     pub fn version(&self) -> AllowlistVersion {
@@ -162,22 +232,46 @@ impl Allowlist {
 
     /// The entry for `id` if it is in effect: listed and confirmed by counsel.
     pub fn active(&self, id: &SourceId) -> Option<&SourceEntry> {
-        let _ = id;
-        None
+        self.entries.get(id).filter(|e| e.counsel_confirmed)
     }
 
     /// The sources in effect, as admission check 14 reads them (`mandate-research`).
     pub fn research_allowlist(&self) -> SourceAllowlist {
         SourceAllowlist {
             version: self.version,
-            sources: BTreeSet::new(),
+            sources: self
+                .entries
+                .values()
+                .filter(|e| e.counsel_confirmed)
+                .map(|e| e.id.clone())
+                .collect::<BTreeSet<_>>(),
         }
     }
 
     /// `url` as a [`PermittedUrl`] if `source` is in effect and `url` lies under one of its
     /// endpoints; refused otherwise, before any byte is sent (DP-9).
     pub fn permit(&self, source: &SourceId, url: &str) -> Result<PermittedUrl, SourceError> {
-        let _ = (source, url);
-        Err(SourceError::Unimplemented)
+        let entry = self
+            .active(source)
+            .ok_or(SourceError::SourceNotAllowlisted)?;
+        let rest = url
+            .strip_prefix(HTTPS)
+            .filter(|rest| {
+                !rest.contains("..") && !rest.contains("//") && rest.bytes().all(url_byte)
+            })
+            .ok_or(SourceError::EndpointNotAllowlisted)?;
+        let (host, path_and_query) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+        if !entry
+            .endpoints
+            .iter()
+            .any(|e| e.covers(host, path_and_query))
+        {
+            return Err(SourceError::EndpointNotAllowlisted);
+        }
+        Ok(PermittedUrl {
+            source: source.clone(),
+            url: url.to_owned(),
+            max_response_bytes: entry.max_response_bytes,
+        })
     }
 }

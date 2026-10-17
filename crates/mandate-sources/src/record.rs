@@ -31,8 +31,11 @@ pub struct VendorId(String);
 
 impl VendorId {
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        Err(SourceError::Unimplemented)
+        let allowed = |b: u8| b.is_ascii_alphanumeric() || b"._-".contains(&b);
+        if !(1..=64).contains(&text.len()) || !text.bytes().all(allowed) {
+            return Err(SourceError::BadField);
+        }
+        Ok(Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -47,8 +50,11 @@ pub struct FormType(String);
 
 impl FormType {
     pub fn parse(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        Err(SourceError::Unimplemented)
+        let allowed = |b: u8| b.is_ascii_uppercase() || b.is_ascii_digit() || b"-/ ".contains(&b);
+        if !(1..=16).contains(&text.len()) || !text.bytes().all(allowed) {
+            return Err(SourceError::BadField);
+        }
+        Ok(Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {

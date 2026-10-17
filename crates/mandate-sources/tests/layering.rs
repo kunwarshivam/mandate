@@ -22,7 +22,10 @@ fn the_order_path_cannot_reach_untrusted_text() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../xtask/layers.toml");
     let policy: toml::Table = std::fs::read_to_string(path).unwrap().parse().unwrap();
     let own = layer_of(&policy, "mandate-sources");
-    assert_eq!(policy["crates"]["mandate-sources"]["safety_critical"].as_bool(), Some(true));
+    assert_eq!(
+        policy["crates"]["mandate-sources"]["safety_critical"].as_bool(),
+        Some(true)
+    );
     for order_path in [
         "mandate-builder",
         "mandate-risk",
