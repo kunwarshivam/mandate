@@ -157,8 +157,19 @@ impl HttpsTransport {
 
 /// A rustls client configuration that trusts only `certificates`.
 fn only(certificates: &[Vec<u8>]) -> Result<rustls::ClientConfig, SetupError> {
-        let _ = certificates; Err(SetupError::Root)
+    if certificates.is_empty() {
+        return Err(SetupError::Root);
     }
+    let mut store = rustls::RootCertStore::empty();
+    for der in certificates {
+        store
+            .add(rustls::pki_types::CertificateDer::from(der.clone()))
+            .map_err(|_| SetupError::Root)?;
+    }
+    Ok(rustls::ClientConfig::builder()
+        .with_root_certificates(store)
+        .with_no_client_auth())
+}
 
 impl Transport for HttpsTransport {
     fn send(
@@ -168,7 +179,25 @@ impl Transport for HttpsTransport {
         deadline: UtcNanos,
         clock: &mut dyn Clock,
     ) -> Delivery {
-        let _ = (request, key, deadline, clock); Delivery::ConnectFailed
+        let Some(url) = url_for(&request.host, &request.path) else {
+            return Delivery::ConnectFailed;
+        };
+        let key = match key.map(bearer) {
+            None => None,
+            Some(Some(header)) => Some(header),
+            Some(None) => return Delivery::ConnectFailed,
+        };
+        let Some(budget) = budget(clock.now(), deadline) else {
+            return Delivery::TimedOut;
+        };
+        let body = request.body.clone();
+        let this = &*self;
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| this.runtime.block_on(this.attempt(url, body, key, budget)))
+                .join()
+                .unwrap_or(Delivery::TimedOut)
+        })
     }
 }
 
@@ -177,18 +206,49 @@ impl Transport for HttpsTransport {
 /// from 1 to 65535; the path starts with `/` and is visible ASCII without `?`, `#` or `\`; and the
 /// parsed URL's host and port must be exactly the ones given, so nothing is reinterpreted.
 pub fn url_for(host: &str, path: &str) -> Option<Url> {
-        let _ = (host, path); None
+    let (name, port) = match host.split_once(':') {
+        Some((name, port)) => (name, Some(port)),
+        None => (host, None),
+    };
+    let name_ok = !name.is_empty()
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        });
+    let port = match port {
+        None => None,
+        Some(digits) if digits.bytes().all(|b| b.is_ascii_digit()) => {
+            Some(digits.parse::<u16>().ok().filter(|&p| p > 0)?)
+        }
+        Some(_) => return None,
+    };
+    let path_ok = path.starts_with('/')
+        && path
+            .bytes()
+            .all(|b| b.is_ascii_graphic() && !matches!(b, b'?' | b'#' | b'\\'));
+    if !name_ok || !path_ok {
+        return None;
     }
+    let url = Url::parse(&format!("https://{host}{path}")).ok()?;
+    (url.host_str() == Some(name) && url.port() == port && url.path() == path).then_some(url)
+}
 
 /// The `Retry-After` delay in milliseconds, from its delay-seconds form only (DEC-2200 item 8).
 pub fn retry_after_ms(value: &str) -> Option<u64> {
-        let _ = value; None
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
     }
+    value.parse::<u64>().ok()?.checked_mul(1_000)
+}
 
 /// The time left from `now` to `deadline`, or `None` when none is left (DEC-2200 item 6).
 pub fn budget(now: UtcNanos, deadline: UtcNanos) -> Option<Duration> {
-        let _ = (now, deadline); None
-    }
+    let left = nanos(deadline).checked_sub(nanos(now))?;
+    let left = u64::try_from(left).ok().filter(|&n| n > 0)?;
+    Some(Duration::from_nanos(left))
+}
 
 fn nanos(at: UtcNanos) -> i128 {
     i128::from(at.secs())
@@ -227,10 +287,16 @@ impl Clock for SystemClock {
         reason = "the transport's edge reads the wall clock for a cell; the gateway's core never does (ES-05)"
     )]
     fn now(&mut self) -> UtcNanos {
-        UtcNanos::EPOCH
+        let since = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let secs = i64::try_from(since.as_secs()).unwrap_or(i64::MAX);
+        UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
     }
 
     fn wait_until(&mut self, at: UtcNanos) {
-        let _ = at;
+        if let Some(left) = budget(self.now(), at) {
+            std::thread::sleep(left);
+        }
     }
 }
