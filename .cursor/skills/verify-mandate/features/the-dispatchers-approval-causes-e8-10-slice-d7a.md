@@ -20,7 +20,7 @@
   link); retries with no window for an approval while an alert beside it is abandoned at 24 hours;
   and an interleaving property over alerts, requests, steps, and restarts whose oracle derives one
   key per cause from the committed subject rows and §3.2's table typed in the test, shown to catch
-  a missing, a doubled, and a mis-kinded approval notice. Live tests pin rule 125 (an approval
+  a missing, a doubled, and a wrongly kinded approval notice. Live tests pin rule 125 (an approval
   notice only from an agent stream of its workspace) and that an `ApprovalRequested` shown on an
   account stream is no cause and holds back no alert. `crash.rs` runs NT-8's crash oracle, which
   now counts approval requests on agent streams, with two requests among the causes.

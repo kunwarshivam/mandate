@@ -611,8 +611,8 @@ fn approvals_and_alerts_interleave_into_one_notice_per_cause_across_steps_and_re
 /// with no notice, one with two, and one issued as a `safety` kind; and to accept the alerts-only
 /// journal the step writes today.
 #[test]
-fn the_interleaving_oracle_catches_a_missing_a_doubled_and_a_mis_kinded_approval_notice() -> Checked
-{
+fn the_interleaving_oracle_catches_a_missing_a_doubled_and_a_wrongly_kinded_approval_notice()
+-> Checked {
     let alone = world()?;
     agent(&alone)?;
     alerts(&alone, A1, 1, &[(1, "risk_limit"), (2, "kill_switch")])?;
