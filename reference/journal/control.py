@@ -890,6 +890,30 @@ CP_RECORDS = (
 )
 CP_SEQUENCED = ("LicenseApplied", "ReleaseOffered", "ReleaseInstalled", "CatalogEntryRegistered", "DataBundleImported")
 
+# §9.21 v0.48 (DEC-1170): the deployment manager's records, written by workspace control services on
+# the control stream. No member is free text: IDs, enumerations, and integers only.
+DM_PROCESSES = ("runtime", "executor")
+SCHEMAS[("ctl", "ProcessStartIssued")] = rec(
+    ("process", one_of(*DM_PROCESSES)),
+    ("subject", IDENT_T),
+    ("generation", INT),
+    ("cause", one_of("deployed", "restart", "kill_switch")),
+)
+SCHEMAS[("ctl", "ProcessStopIssued")] = rec(
+    ("process", one_of(*DM_PROCESSES)),
+    ("subject", IDENT_T),
+    ("generation", INT),
+    ("cause", one_of("agent_stopped")),
+)
+SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
+    ("process", one_of(*DM_PROCESSES)),
+    ("subject", IDENT_T),
+    ("generation", INT),
+    ("restarts", INT),
+    ("window_seconds", INT),
+)
+DM_RECORDS = ("ProcessStartIssued", "ProcessStopIssued", "ProcessCrashLooped")
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -1466,6 +1490,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += audit_violations(event_type, draft, skip)
     out += cold_violations(event_type, draft, skip)
     out += control_plane_violations(event_type, draft, skip)
+    out += deployment_manager_violations(event_type, draft, skip)
     return out
 
 
@@ -2164,6 +2189,28 @@ def control_plane_violations(event_type: str, draft: dict, skip: frozenset[str])
         rule("142.reason", not unknown or p["reason"] in ("out_of_list", "malformed"), "payload.reason")
         rule("142.sequence", not unknown or p["sequence"] is None, "payload.sequence")
         rule("142.replayed", p["reason"] != "replayed" or p["sequence"] is not None, "payload.sequence")
+    return out
+
+
+def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.21's rules 165 to 168, on a well-typed payload, in number order."""
+    if event_type not in DM_RECORDS:
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    least = 0 if "boundary.rule_166" in skip else 1
+    rule("165", draft["actor"]["kind"] == "system", "actor.kind")
+    rule("166", p["generation"] >= least, "payload.generation")
+    if event_type == "ProcessStartIssued":
+        rule("167", (p["cause"] == "deployed") == (p["generation"] == 1), "payload.cause")
+    if event_type == "ProcessCrashLooped":
+        rule("168.restarts", p["restarts"] >= 1, "payload.restarts")
+        rule("168.window", p["window_seconds"] >= 1, "payload.window_seconds")
     return out
 
 

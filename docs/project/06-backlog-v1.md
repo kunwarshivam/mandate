@@ -1507,15 +1507,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   a kill switch without step-up is recorded and stops (DEC-158 (c)); go-live returns
   `live_unavailable`; status moves `recorded` → `taken` → `applied` or `refused` from the owning
   streams' events only.
-  **Specified for the server (lane A2, [DEC-2100](decisions/DEC-2100.md), [DEC-2101](decisions/DEC-2101.md)):**
+  **Specified for the server (lane A2, [DEC-2101](decisions/DEC-2101.md), [DEC-2102](decisions/DEC-2102.md)):**
   versions from a document, a new mandate's confirmation screen and confirm, deploy, go-live,
   resume, Stop, owner exit, acknowledgment, and command status (workspace API spec §3.11 items 11
   and 12), with step-up through a port that refuses until E9-4 binds it. **Still owed:** drafts,
   compile, validate, diffs, and an agent's later versions (with `MandateConfirmed` version 2,
   E10-15); the confirmation screen's worst-case figures, unasked dollars, and provenance badges;
   `DeploymentRejected`; the acknowledgment route, until `mandate-journal` registers
-  `OwnerAcknowledged` on the control stream (DEC-2101 item 7); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
-  the deploy request's schema with its `mandate-api` type, which must land together (DEC-2100
+  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
+  the deploy request's schema with its `mandate-api` type, which must land together (DEC-2101
   item 6).
 - **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
   revoke broker accounts through the API without any credential ever coming back (spec §4.5).
@@ -2908,6 +2908,28 @@ enables `live` (ES-23, OPS-5).
   then migrated by the command ends with each file applied once; no process applies a migration at
   start, shown by the existing xtask lint; and the chart's migration Job (E21-36), E21-41 and the
   CI cell (E21-37) all run it.
+- **E21-52 (Proposed, M8; SC; lane SI)** As an operator of a `dev` or `ci` cell, I want a local stub
+  token issuer, so that `cargo xtask cell demo` can open an API session without the managed issuer
+  (DEC-2100; the E2E lane's gap 1). *Accepted when:* the tool crate `mandate-stub-issuer`, which no
+  crate may depend on, serves one ES256 key set on loopback and signs access tokens the API server
+  verifies unchanged through `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE` and `MANDATE_API_JWKS_URL`;
+  its key is made at each start and never stored; tests show that it refuses to start with
+  `stub_issuer_tier` in every tier but `dev` and `ci`, and with `stub_issuer_bind` for an address
+  that is not a loopback IP literal, port 0, or a port in use, each before any key is made; a test
+  builds it with `--release`, runs it, and sees only `stub_issuer_not_built` and exit 2; xtask's
+  profile check refuses debug assertions in `release` and every profile inheriting it; tests show
+  a wrong `Host` gets 421 and a `POST /token` without `application/json` gets 415; a test signs in
+  through `POST /v1/sessions` with a stub token for a linked subject, and is refused for a subject
+  linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
+  namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
+  fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
+- **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
+  key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
+  issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
+  reads `MANDATE_DEPLOYMENT_TIER` with `mandate_release::startup::Tier::from_setting` (§3.11 item
+  2), and refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http`
+  and the tier is anything but `dev` or `ci` (no value included), shown by a test for each tier;
+  and it still starts with an `https` URL in every tier.
 
 ## Won't (v1)
 

@@ -39,10 +39,10 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(nextConfig.images).toEqual({ unoptimized: true });
   });
 
-  it("pending E11-9: keeps vercel.json only while it deploys main alone, until the founder moves the domains (DEC-1005 item 4)", () => {
+  it("pending E21-38: flags any Vercel configuration at the repository root, since Workers alone hosts the app (DEC-1090)", () => {
+    expect(existsSync(join(WEB, "..", "vercel.json"))).toBe(false);
     expect(hostingProblems(tree({ "../vercel.json": null }))).toEqual([]);
-    expect(hostingProblems(tree({ "../vercel.json": '{ "git": { "deploymentEnabled": { "**": false, "main": true } } }' }))).toEqual([]);
-    for (const text of ['{ "git": {} }', "{}", '{ "git": { "deploymentEnabled": { "**": true, "main": true } } }', '{ "git": { "deploymentEnabled": { "**": false, "main": true, "preview": true } } }']) {
+    for (const text of ['{ "git": { "deploymentEnabled": { "**": false, "main": true } } }', '{ "git": {} }', "{}"]) {
       expect(hostingProblems(tree({ "../vercel.json": text })), text).toEqual(only("vercel.json"));
     }
   });
@@ -162,6 +162,9 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(yml).toContain("    environment: production\n");
     expect(yml).toContain("    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'\n");
     expect(yml.match(/\bsecrets\.[A-Z_]+/g)).toEqual(["secrets.CLOUDFLARE_API_TOKEN"]);
+    for (const name of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN"]) {
+      expect(yml, name).toContain(`          ${name}: \${{ vars.${name} }}\n`);
+    }
   });
 
   it("pending E21-38: flags any trigger but a push to main or a dispatch", () => {
@@ -256,6 +259,22 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment:\n      name: production\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
     expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment:\n      name: 'Production'\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
     expect(hostingProblems(tree({ [ci]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual(only("ci.yml: holds a CLOUDFLARE_"));
+  });
+
+  it("pending E21-38: lets r2-lockcheck.yml use the production environment only exactly as reviewed, and flags any edit to it (DEC-1091)", () => {
+    expect(hostingProblems(tree())).toEqual([]);
+    const r2 = "../.github/workflows/r2-lockcheck.yml";
+    const yml = real(r2);
+    for (const edit of [
+      yml.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n"),
+      yml.replace("    if: github.ref == 'refs/heads/main'\n", ""),
+      yml.replace("R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}", "R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}\n          LEAK: ${{ toJSON(secrets) }}"),
+      `${yml}\n# a comment\n`,
+    ]) {
+      expect(edit).not.toBe(yml);
+      expect(hostingProblems(tree({ [r2]: edit })), edit).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: differs from the reviewed")]));
+    }
+    expect(hostingProblems(tree({ [r2]: `${yml}      - run: npx wrangler deploy\n` }))).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: runs")]));
   });
 });
 
