@@ -25,7 +25,8 @@
 #      and mandate-tenant (DEC-642 item 7, DEC-668): the sealed `Tenant` trait and the ID values it
 #      returns, below mandate-identity, which re-exports them; its allowed_dependents list is the
 #      only thing that may implement `Tenant`
-#   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
+#   1  mandate-cp-agent (E20-3, DEC-982: the control-plane link's inbound checks, kept off the
+#      journal), mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
@@ -89,7 +90,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-cp-agent",
     "mandate-cp-site",
     "mandate-identity-seal",
     "mandate-identity-testkit",
@@ -250,6 +250,30 @@ layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
+
+# The cell's control-plane agent (E20-3, DEC-981; control-plane design §3, CP-4, CP-5): the closed
+# inbound message set and its signature checks, handed to workspace control services through a port
+# this crate declares and they implement. It reaches no journal, runtime, executor, mandate registry
+# or vault crate, directly or through any chain, so it can never append, hold a writer epoch, place
+# an order, or read a credential.
+[crates.mandate-cp-agent]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["ring"]
+forbidden_internal = [
+    "mandate-journal",
+    "mandate-journal-pg",
+    "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
 
 [crates.mandate-liquidity]
 layer = 1
