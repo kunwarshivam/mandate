@@ -2904,11 +2904,20 @@ enables `live` (ES-23, OPS-5).
   crate may depend on, serves one ES256 key set on loopback and signs access tokens the API server
   verifies unchanged through `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE` and `MANDATE_API_JWKS_URL`;
   its key is made at each start and never stored; tests show that it refuses to start with
-  `stub_issuer_tier` in every tier but `dev` and `ci`, with `stub_issuer_bind` on any address that
-  is not loopback, and with `stub_issuer_not_built` in a build without debug assertions, each
-  before any key is made; a test signs in through `POST /v1/sessions` with a stub token for a
-  linked subject, and is refused for a subject linked under another issuer; and the E2E lane's
-  `cell demo` runs it.
+  `stub_issuer_tier` in every tier but `dev` and `ci`, and with `stub_issuer_bind` for an address
+  that is not a loopback IP literal, port 0, or a port in use, each before any key is made; a test
+  builds it with `--release`, runs it, and sees only `stub_issuer_not_built` and exit 2; xtask's
+  profile check refuses debug assertions in `release` and every profile inheriting it; tests show
+  a wrong `Host` gets 421 and a `POST /token` without `application/json` gets 415; a test signs in
+  through `POST /v1/sessions` with a stub token for a linked subject, and is refused for a subject
+  linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
+  namespace once E21-53 is on `main`.
+- **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
+  key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
+  issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
+  refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http` and
+  `MANDATE_DEPLOYMENT_TIER` is anything but `dev` or `ci` (no value included), shown by a test for
+  each tier, and still starts with an `https` URL in every tier.
 
 ## Won't (v1)
 
@@ -5313,7 +5322,3 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   a kill switch's `owner_exit` are kept but not written. Close the remaining `OwnerCommandIssued`
   commands in a journal spec change with these members, then write them and compare them on a
   repeat.
-- **The API server refuses an `http` key-set URL outside dev and CI (DEC-2100, E21-31).**
-  `MANDATE_API_JWKS_URL` accepts `http` to a loopback host, which only tests and the stub issuer
-  serve. Refuse it at start unless `MANDATE_DEPLOYMENT_TIER` is `dev` or `ci`, so a production
-  server can never trust a loopback issuer even if its settings name one.

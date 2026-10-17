@@ -758,9 +758,10 @@ the RP ID matches.
 **The stub issuer** ([DEC-2100](../project/decisions/DEC-2100.md)): a `dev` or `ci` cell may
 configure, as its one issuer, the local stub `mandate-stub-issuer`. It runs on loopback only, signs
 ES256 access tokens with a P-256 key it makes at each start and never stores, and refuses to start
-in any other tier or in any build without debug assertions. It is verified like any other issuer.
-Because a subject link is the digest of the issuer and the subject together, a link made for it
-never signs in through another issuer.
+in any other tier or in any build without debug assertions. The server verifies its tokens through
+the same issuer settings and checks as any other issuer's, and refuses its `http` key-set URL
+outside `dev` and `ci`. Because a subject link is the digest of the issuer and the subject together,
+a link made for it never signs in through another issuer.
 
 ### 6.2 Sessions
 

@@ -508,7 +508,8 @@ per workspace deployment (item 6).
    world-readable. In a `dev` or `ci` cell only, the three issuer settings may name the local stub
    issuer ([DEC-2100](../project/decisions/DEC-2100.md)), which runs on loopback with a key it
    makes at each start, so a cell without the managed issuer can open a session. The server reads
-   them the same way, and the stub refuses to run in any other tier.
+   them the same way. The stub refuses to run in any other tier, and the server refuses an `http`
+   key-set URL outside `dev` and `ci` (E21-53, DEC-2100 item 9).
 3. **Probes.** On the probes' listener only, `GET /livez` and `GET /readyz`, unauthenticated and
    reading no data. The body is `{"status": "live"}`, `{"status": "ready"}`, or, with 503,
    `{"status": "not_ready"}`; any other request there is 404 with no body. Readiness is the
