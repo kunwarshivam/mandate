@@ -2488,10 +2488,12 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "clap",
  "mandate-api-server",
  "mandate-authn",
  "mandate-identity",
  "mandate-journal",
+ "mandate-release",
  "mandate-time",
  "ring",
  "serde_json",

@@ -12,9 +12,11 @@ workspace = true
 [dependencies]
 axum.workspace = true
 base64.workspace = true
+clap.workspace = true
+mandate-release.workspace = true
 ring.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "signal"] }
+tokio = { workspace = true, features = ["rt", "net", "signal", "macros"] }
 
 [dev-dependencies]
 axum.workspace = true

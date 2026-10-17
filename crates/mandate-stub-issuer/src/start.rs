@@ -1,7 +1,9 @@
 //! The start checks (DEC-2100 items 2, 3 and 5), in the order they run. Each refusal is written to
 //! standard error as its code alone, and the process exits 2.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+use mandate_release::startup::Tier;
 
 /// Why the stub refused to start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,8 +15,6 @@ pub enum Refused {
     /// An address that is not `127.0.0.1` or `[::1]` with a port from 1 to 65535, or a port in
     /// use (items 5 and 10).
     Bind,
-    /// The check is not written yet.
-    Unimplemented { story: &'static str },
 }
 
 impl Refused {
@@ -24,17 +24,30 @@ impl Refused {
             Self::NotBuilt => "stub_issuer_not_built",
             Self::Tier => "stub_issuer_tier",
             Self::Bind => "stub_issuer_bind",
-            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
 
 /// The address to bind, or the first refusal: `built` is whether this build has debug
 /// assertions, `tier` the value of `MANDATE_DEPLOYMENT_TIER`, and `bind` the `--bind` argument.
+/// The tier is read as every process reads it, so no value or an unknown one is production.
 ///
 /// # Errors
 /// [`Refused::NotBuilt`], then [`Refused::Tier`], then [`Refused::Bind`].
 pub fn check(built: bool, tier: Option<&str>, bind: &str) -> Result<SocketAddr, Refused> {
-    let _ = (built, tier, bind);
-    Err(Refused::Unimplemented { story: "E21-52" })
+    if !built {
+        return Err(Refused::NotBuilt);
+    }
+    if !matches!(Tier::from_setting(tier), Tier::Dev | Tier::Ci) {
+        return Err(Refused::Tier);
+    }
+    let addr: SocketAddr = bind.parse().map_err(|_| Refused::Bind)?;
+    let loopback = match addr.ip() {
+        IpAddr::V4(ip) => ip == Ipv4Addr::LOCALHOST,
+        IpAddr::V6(ip) => ip == Ipv6Addr::LOCALHOST,
+    };
+    if !loopback || addr.port() == 0 {
+        return Err(Refused::Bind);
+    }
+    Ok(addr)
 }

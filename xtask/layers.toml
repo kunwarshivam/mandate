@@ -668,7 +668,7 @@ forbidden_internal = ["mandate-cli", "mandate-paper"]
 layer = "tool"
 safety_critical = true
 pure = false
-allowed_external = ["axum", "base64", "ring", "serde_json", "tokio"]
+allowed_external = ["axum", "base64", "clap", "ring", "serde_json", "tokio"]
 allowed_dependents = []
 
 # The journal port a long-running process writes and follows through (E21-29, E21-30, DEC-1012):
