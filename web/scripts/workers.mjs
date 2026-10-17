@@ -84,12 +84,9 @@ export function hostingProblems(tree) {
   return problems;
 }
 
-/** Vercel keeps serving `main` until the founder moves the domains, so `vercel.json` may stay only while it deploys `main` alone (DEC-1005 item 4). */
+/** Workers alone hosts the app, so no Vercel configuration may come back (DEC-1090; DEC-823 item 3). */
 function vercelProblems(tree) {
-  if (!tree.exists("../vercel.json")) return [];
-  const enabled = JSON.parse(tree.read("../vercel.json"))?.git?.deploymentEnabled ?? {};
-  const mainOnly = Object.keys(enabled).length === 2 && enabled["**"] === false && enabled.main === true;
-  return mainOnly ? [] : ["../vercel.json: while it stays, it must deploy main alone and no other branch (DEC-1005 item 4)"];
+  return tree.exists("../vercel.json") ? ["../vercel.json: remove it; Cloudflare Workers alone hosts the app (DEC-1090)"] : [];
 }
 
 function middlewareProblems(tree) {
