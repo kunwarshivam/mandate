@@ -85,6 +85,8 @@ fn fixture_with(keys: bool) -> Fixture {
         members: Arc::new(mandate_api_server::members::until_parser),
         hosted: common::hosted(),
         artifacts: None,
+        objects: None,
+        step_up: Arc::new(mandate_api_server::stepup::Unbound),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

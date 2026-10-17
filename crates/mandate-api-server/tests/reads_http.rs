@@ -82,6 +82,8 @@ fn fixture_with(
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
         artifacts,
+        objects: None,
+        step_up: Arc::new(mandate_api_server::stepup::Unbound),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),
