@@ -584,6 +584,28 @@ fn workspace_lint() -> Result<()> {
     uv_tools(&["ruff", "format", "--check", "."])
 }
 
+/// The decision-number check (DEC-2600 item 3), the one script both CI paths run: the docs-only
+/// path's `docs-checks.sh` and this lint job.
+const DECISION_NUMBERS: &str = ".github/scripts/decision-numbers.sh";
+
+/// [`DECISION_NUMBERS`] over the repository at `root`: refuses two decision files anywhere in the
+/// tree that take one number, and a decision whose heading names a number other than its file's.
+fn decision_numbers(root: &Path) -> Result<()> {
+    let script = repo_root()?.join(DECISION_NUMBERS);
+    eprintln!("    $ bash {DECISION_NUMBERS}");
+    let out = Command::new("bash")
+        .arg(&script)
+        .current_dir(root)
+        .output()
+        .context("starting `bash`")?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    eprint!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+    if !out.status.success() {
+        bail!("decisions: {}", stderr.trim());
+    }
+    Ok(())
+}
+
 /// Every file under `dir` whose extension is one of `extensions`, sorted by path so the linter's
 /// command line and report order are stable (E1-4, DEC-329). Directory symlinks are not followed.
 fn files_by_extension(dir: &Path, extensions: &[&str]) -> Result<Vec<PathBuf>> {
@@ -1078,6 +1100,14 @@ fn layers() -> Result<()> {
     report(layer_problems(&policy, &metadata()?)?, "layers")
 }
 
+/// Every way the CODEOWNERS text `text` breaks `policy` (ADR-0001 ES-13, DEC-2600 item 5): a
+/// safety-critical crate with no `/crates/<name>/` line, and crate lines out of sorted order, which
+/// would send two PRs adding two crates to the same place in the file.
+fn codeowners_problems(text: &str, policy: &Layers) -> Vec<String> {
+    let _ = (text, policy);
+    Vec::new()
+}
+
 /// Every way the workspace in `meta` breaks `policy`.
 fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
     let packages = workspace_packages(meta);
@@ -1305,6 +1335,38 @@ fn registry() -> Result<BTreeSet<(String, String)>> {
         }
     }
     Ok(entries)
+}
+
+/// What a cargo row's "Used by" cell says (DEC-2600 item 4): the crates are derived from `cargo
+/// metadata` by `cargo xtask deps --used-by`, so no PR edits a shared list to add its crate.
+const USED_BY_DERIVED: &str = "`cargo xtask deps --used-by`";
+
+/// One row of the registry's table: its name, ecosystem, and "Used by" cell.
+struct RegistryRow {
+    name: String,
+    ecosystem: String,
+    used_by: String,
+}
+
+/// The rows of the registry text `text` shaped `| `name` | ecosystem | used by | ...`.
+fn registry_rows(text: &str) -> Vec<RegistryRow> {
+    let _ = text;
+    Vec::new()
+}
+
+/// Every way the registry text `text` breaks its shape (DEC-2600 item 4): a name registered twice
+/// in one ecosystem, which a union merge of two edits to one row would leave, and a cargo row whose
+/// "Used by" cell is not [`USED_BY_DERIVED`].
+fn registry_problems(text: &str) -> Vec<String> {
+    let _ = registry_rows(text);
+    Vec::new()
+}
+
+/// Each external cargo dependency of the workspace in `meta` with the workspace crates that use
+/// it, a crate that uses it only as a dev- or build-dependency marked `(dev)` or `(build)`.
+fn used_by(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let _ = meta;
+    BTreeMap::new()
 }
 
 /// The uv workspace root and every member listed in its `[tool.uv.workspace].members`.
@@ -8135,19 +8197,20 @@ mod tests {
         Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
         PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, SCHEMA_CHECKERS,
         SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
-        UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
-        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
-        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in,
+        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
+        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
+        feature_files, feature_map_problems, files_by_extension, first_panic_line,
         forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
         is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, rehearsal_runs, repo_root,
-        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
-        workspace_closure, workspace_packages,
+        plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems, registry_rows,
+        rehearsal_runs, repo_root, schema_mutants, shard_packages, shellcheck_scripts,
+        simulator_harnesses, simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr,
+        status_flip_problems, test_binary, test_order_config, test_outcomes, unique_temp_path,
+        unjudged_mutants, used_by, verdicts, workspace_closure, workspace_packages,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -18547,5 +18610,182 @@ jq -r "$filter" "$src"
             "the workspace checks run only after it passes"
         );
         Ok(())
+    }
+
+    /// A fixture git repository for the decision-number check, with `files` untracked, which
+    /// the check reads as it reads a lane's new reservation before its first commit.
+    fn decision_repository(name: &str, files: &[(&str, &str)]) -> Result<PathBuf> {
+        let root = fixture_repository(name, files)?;
+        let status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status()?;
+        assert!(status.success(), "git init");
+        Ok(root)
+    }
+
+    /// Two decision files that take one number are refused wherever they sit in the tree, a
+    /// leading zero or a suffix included, each path named; a heading whose number differs from
+    /// its file name is refused; distinct numbers pass (DEC-2600 item 3).
+    #[test]
+    fn two_decision_files_with_one_number_are_refused() -> Result<()> {
+        let dec = |n: &str| format!("# DEC-{n}: a decision\n");
+        let clean = decision_repository(
+            "decisions-clean",
+            &[
+                ("docs/project/decisions/DEC-2600.md", &dec("2600")),
+                ("docs/project/decisions/DEC-2601.md", &dec("2601")),
+                ("docs/project/decisions/README.md", "# Decisions\n"),
+            ],
+        )?;
+        let passed = decision_numbers(&clean).map_err(|err| format!("{err:#}"));
+        fs::remove_dir_all(&clean).ok();
+        assert_eq!(passed, Ok(()), "distinct numbers pass");
+        let cases: [(&str, &[(&str, &str)], &[&str]); 3] = [
+            (
+                "decisions-elsewhere",
+                &[
+                    ("docs/project/decisions/DEC-2600.md", "# DEC-2600: one\n"),
+                    ("docs/specs/DEC-2600.md", "# DEC-2600: two\n"),
+                ],
+                &[
+                    "docs/project/decisions/DEC-2600.md",
+                    "docs/specs/DEC-2600.md",
+                ],
+            ),
+            (
+                "decisions-zero",
+                &[
+                    ("docs/project/decisions/DEC-2600.md", "# DEC-2600: one\n"),
+                    (
+                        "docs/project/decisions/DEC-02600-draft.md",
+                        "# DEC-2600: two\n",
+                    ),
+                ],
+                &["DEC-2600.md", "DEC-02600-draft.md"],
+            ),
+            (
+                "decisions-heading",
+                &[(
+                    "docs/project/decisions/DEC-2601.md",
+                    "# DEC-2602: misnumbered\n",
+                )],
+                &["DEC-2601.md", "DEC-2602"],
+            ),
+        ];
+        for (name, files, named) in cases {
+            let root = decision_repository(name, files)?;
+            let refused = decision_numbers(&root)
+                .map_err(|err| format!("{err:#}"))
+                .err();
+            fs::remove_dir_all(&root).ok();
+            let refused = refused.unwrap_or_default();
+            for needle in named {
+                assert!(
+                    refused.contains(needle),
+                    "{name} names `{needle}`: {refused:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The registry refuses a name registered twice in one ecosystem and a cargo row whose
+    /// "Used by" is a hand-kept list; npm and python rows keep their own cells (DEC-2600 item 4).
+    #[test]
+    fn the_registry_refuses_duplicates_and_hand_kept_cargo_lists() {
+        let header = "| Name | Ecosystem | Used by | Purpose |\n|---|---|---|---|\n";
+        let derived = format!("| `anyhow` | cargo | {USED_BY_DERIVED} | errors |\n");
+        let clean = format!(
+            "{header}{derived}| `ruff` | python | python workspace (dev) | lint |\n\
+             | Next.js | npm | web | app |\n"
+        );
+        assert_eq!(registry_problems(&clean), Vec::<String>::new());
+        let rows = registry_rows(&clean);
+        assert_eq!(
+            rows.len(),
+            2,
+            "the header and the npm summary row are not named rows"
+        );
+        assert_eq!(rows[0].name, "anyhow");
+        assert_eq!(rows[0].ecosystem, "cargo");
+        assert_eq!(rows[0].used_by, USED_BY_DERIVED);
+        let twice = format!("{header}{derived}{derived}");
+        assert_eq!(
+            registry_problems(&twice),
+            vec!["cargo dependency `anyhow` has 2 rows; keep one".to_owned()]
+        );
+        let listed = format!("{header}| `anyhow` | cargo | xtask; mandate-cli | errors |\n");
+        assert_eq!(
+            registry_problems(&listed),
+            vec![format!(
+                "cargo dependency `anyhow`'s Used by cell must be {USED_BY_DERIVED}, which derives \
+                 it from cargo metadata, not a hand-kept list"
+            )]
+        );
+    }
+
+    /// "Used by" is derived from the workspace: each external dependency with the crates that use
+    /// it, a dev- or build-only use marked, a normal use winning over a dev one, and workspace
+    /// crates left out (DEC-2600 item 4).
+    #[test]
+    fn used_by_is_derived_from_cargo_metadata() {
+        let meta = workspace(vec![
+            member(
+                "a",
+                &[("serde", None), ("proptest", Some("dev")), ("b", None)],
+            ),
+            member("b", &[("serde", Some("dev")), ("cc", Some("build"))]),
+            member("c", &[("proptest", Some("dev")), ("proptest", None)]),
+        ]);
+        let set = |names: &[&str]| {
+            names
+                .iter()
+                .map(|n| (*n).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        let expected = BTreeMap::from([
+            ("cc".to_owned(), set(&["b (build)"])),
+            ("proptest".to_owned(), set(&["a (dev)", "c"])),
+            ("serde".to_owned(), set(&["a", "b (dev)"])),
+        ]);
+        assert_eq!(used_by(&meta), expected);
+    }
+
+    /// CODEOWNERS names every safety-critical crate on its own line, sorted, so two PRs adding two
+    /// crates touch two places; a missing crate and an out-of-order line are each refused
+    /// (DEC-2600 item 5).
+    #[test]
+    fn codeowners_lists_every_safety_critical_crate_sorted() {
+        let mut layers = policy(
+            &[("mandate-a", 0), ("mandate-b", 1), ("mandate-c", 1)],
+            &[],
+            &[],
+        );
+        for name in ["mandate-a", "mandate-c"] {
+            if let Some(own) = layers.crates.get_mut(name) {
+                own.safety_critical = true;
+            }
+        }
+        let owner = |name: &str| format!("/crates/{name}/ @owner\n");
+        let clean = format!(
+            "/docs/ @owner\n\n{}{}",
+            owner("mandate-a"),
+            owner("mandate-c")
+        );
+        assert_eq!(codeowners_problems(&clean, &layers), Vec::<String>::new());
+        let missing = owner("mandate-a");
+        assert_eq!(
+            codeowners_problems(&missing, &layers),
+            vec![
+                "safety-critical crate `mandate-c` has no `/crates/mandate-c/` line in CODEOWNERS"
+                    .to_owned()
+            ]
+        );
+        let unsorted = format!("{}{}", owner("mandate-c"), owner("mandate-a"));
+        assert_eq!(
+            codeowners_problems(&unsorted, &layers),
+            vec!["CODEOWNERS: `/crates/mandate-a/` must come before `/crates/mandate-c/`; keep the crate lines sorted".to_owned()]
+        );
     }
 }
