@@ -1,0 +1,20 @@
+[package]
+name = "mandate-research-run"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The agent harness's research worker: the pinned retrieval plan, read-only reader and gateway ports, the capture records, and the strict parse of a model's output into typed candidates"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

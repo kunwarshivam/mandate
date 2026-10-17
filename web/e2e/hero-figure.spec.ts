@@ -135,6 +135,8 @@ for (const { name, path, value } of HEROES) {
   });
 
   test(`${name}: scrubbing changes only the glyphs of the figure and the pill, and nothing moves`, async ({ page }) => {
+    /** Two widths, each scrubbed point by point: alone it takes about 30 s, Playwright's default budget. */
+    test.setTimeout(90_000);
     for (const width of [1440, 390]) {
       await open(page, path, width);
       const figure = page.locator(value);
@@ -171,6 +173,8 @@ for (const { name, path, value } of HEROES) {
 
 /** A pointer cannot land on the range's first point reliably, so the exact zero is `charts.test.tsx`'s. */
 test("the change sits on a pill tinted by its sign, and colour-blind friendly when asked", async ({ page }) => {
+  /** 41 scrubbed points in two palettes, each read back: alone it takes about 30 s, Playwright's default budget. */
+  test.setTimeout(90_000);
   for (const cvd of [false, true]) {
     await open(page, "/", 1440);
     // Outside `next dev` the preference has no switch yet, so the attribute it sets is set directly.

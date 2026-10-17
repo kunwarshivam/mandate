@@ -29,3 +29,14 @@ export function parseBetaRequest(body: unknown): BetaParse {
   if (address.length > EMAIL_MAX || !EMAIL.test(address)) return { ok: false, reason: "email" };
   return { ok: true, request: { email: address, role: isRole(role) ? role : null } };
 }
+
+/**
+ * Whether the form takes requests (DEC-987). Always in development, the tests and the e2e builds,
+ * which keep their own store or stub the route. In any other build only once Supabase's URL and
+ * publishable key are configured, because a production build has no file to fall back on (DEC-731
+ * item 4). Closed, the form says so and sends nothing, and the route stores nothing.
+ */
+export function betaOpen(nodeEnv: string | undefined, supabaseUrl: string, publishableKey: string, e2eFlag: string | undefined): boolean {
+  if (nodeEnv === "development" || nodeEnv === "test" || e2eFlag === "1") return true;
+  return supabaseUrl.trim() !== "" && publishableKey.trim() !== "";
+}

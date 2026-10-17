@@ -11,7 +11,9 @@ workspace = true
 
 [dependencies]
 mandate-journal.workspace = true
+mandate-process.workspace = true
 mandate-shell.workspace = true
+mandate-telemetry.workspace = true
 mandate-time.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
