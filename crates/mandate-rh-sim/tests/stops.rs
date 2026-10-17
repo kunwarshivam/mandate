@@ -143,3 +143,32 @@ fn the_untriggered_refusal_names_itself() {
         "the market has not reached the order's stop"
     );
 }
+
+/// A buy stop triggers at or above its stop: a `stop_market` buy at 520 does not fill while SPY
+/// quotes 519, and fills once a quote reaches 520; one placed while SPY already quotes above its
+/// stop is triggered at once.
+#[test]
+fn a_buy_stop_triggers_at_or_above_its_stop() -> Outcome {
+    let mut sim = sim()?;
+    let buy = |stop: &str, n: u32| OrderRequest {
+        side: "buy".to_owned(),
+        ..sell("stop_market", "1", Some(stop), None, n)
+    };
+    let waiting = sim.place(&buy("520", 1))?;
+    quote(&mut sim, "519")?;
+    assert_eq!(
+        sim.fill(&waiting.id, qty("1"), price("519")),
+        Err(SimError::NotTriggered)
+    );
+    quote(&mut sim, "520")?;
+    assert_eq!(
+        sim.fill(&waiting.id, qty("1"), price("521"))?.state,
+        State::Filled
+    );
+    let through = sim.place(&buy("510", 2))?;
+    assert_eq!(
+        sim.fill(&through.id, qty("1"), price("521"))?.state,
+        State::Filled
+    );
+    Ok(())
+}
