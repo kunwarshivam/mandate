@@ -2,12 +2,12 @@
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, ContentRef, Iso, ShownEnvironment, Workspace } from "@/fixtures/types";
-import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
+import { FIRST_VERSION_CLASSIFICATION, type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
 import { clock } from "./format";
 import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
-import { servedBacktestFixture } from "@/fixtures/backtests";
+import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
 import type { Applies, Classification } from "@/api/confirm";
 
@@ -64,30 +64,6 @@ export interface ApprovalResponse {
   recordedAt?: Iso;
   reason?: string;
   record: ApprovalRecord;
-}
-
-/** What A5 showed when the owner confirmed (brief §4.1): every line of the record screen, in order. */
-export interface DeployRecord {
-  screen: "A5";
-  environment: ShownEnvironment;
-  shown: string[];
-}
-
-export interface Deployment {
-  id: string;
-  /**
-   * `rejected`: the checks repeated when it applied failed (V-047, V-002, V-006), and `reason` says which.
-   * `unknown`: the deployment took it but no journal entry came back.
-   */
-  phase: "sent" | "recorded" | "rejected" | "undelivered" | "unknown";
-  sentAt: Iso;
-  recordedAt?: Iso;
-  agentId: string;
-  version: ContentRef;
-  reason?: string;
-  /** The rule a rejection falls under, for the record and never the sentence (C-6); set for V-047 only. */
-  rule?: string;
-  record: DeployRecord;
 }
 
 /**
@@ -198,11 +174,9 @@ export interface Runtime {
   reachable: boolean;
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
-  deployments: Deployment[];
   mandateChanges: MandateChangeRequest[];
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
-  deploy: (request: NewAgent, record: DeployRecord) => Deployment;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -366,7 +340,6 @@ export function RuntimeProvider({
   const [now, setNow] = useState(initial.now);
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const nowRef = useRef(initial.now);
   const wsRef = useRef(initial);
@@ -456,35 +429,6 @@ export function RuntimeProvider({
     [silent, recordAfterMs, change],
   );
 
-  const deploy = useCallback(
-    (request: NewAgent, record: DeployRecord): Deployment => {
-      counter.current += 1;
-      const seed = `${initial.scenario}:${counter.current}`;
-      const deployment: Deployment = {
-        id: `dep-${counter.current}`,
-        phase: "sent",
-        sentAt: nowRef.current,
-        agentId: agentIdFor(request.mandate, seed),
-        version: mandateVersion(request.mandate),
-        record,
-      };
-      setDeployments((list) => [...list, deployment]);
-      const update = (patch: Partial<Deployment>) => setDeployments((list) => list.map((d) => (d.id === deployment.id ? { ...d, ...patch } : d)));
-      window.setTimeout(() => {
-        const at = nowRef.current;
-        if (!reachable) return update({ phase: "undelivered" });
-        if (silent) return update({ phase: "unknown" });
-        const check = checkDeploy(wsRef.current, request.mandate);
-        if (!check.ok) return update({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
-        change((current) => deployAgent(current, request, at, seed).ws);
-        update({ phase: "recorded", recordedAt: at });
-        window.setTimeout(() => change((current) => firstProposal(current, deployment.agentId, nowRef.current, seed)), recordAfterMs * 2);
-      }, recordAfterMs);
-      return deployment;
-    },
-    [initial.scenario, reachable, silent, recordAfterMs, change],
-  );
-
   const changeMandate = useCallback(
     (proposal: Proposal, origin: Origin, record: ChangeRecord): MandateChangeRequest => {
       counter.current += 1;
@@ -537,26 +481,97 @@ export function RuntimeProvider({
     [reachable, silent, recordAfterMs, recorded],
   );
 
-  const [setUps] = useState<SetUp[]>([]);
-  const createVersion = useCallback((request: NewAgent): SetUp => {
-    void request;
-    throw new Error("Unimplemented: E10-11");
+  const [setUps, setSetUps] = useState<SetUp[]>([]);
+  /** The set-ups as last written, and each one's mandate and seed, so a step reads the step before it as recorded. */
+  const setUpsRef = useRef<SetUp[]>([]);
+  const drafts = useRef(new Map<string, { request: NewAgent; seed: string }>());
+  const patchSetUp = useCallback((id: string, patch: (s: SetUp) => SetUp) => {
+    setUpsRef.current = setUpsRef.current.map((s) => (s.id === id ? patch(s) : s));
+    setSetUps(setUpsRef.current);
   }, []);
-  const confirmVersion = useCallback((setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => {
-    void setUpId;
-    void record;
-    void stepUp;
-    throw new Error("Unimplemented: E10-11");
-  }, []);
-  const deployVersion = useCallback((setUpId: string, record: DeployToPaperRecord) => {
-    void setUpId;
-    void record;
-    throw new Error("Unimplemented: E10-12");
-  }, []);
-  const backtestFor = useCallback((version: ContentRef): string | null => {
-    void version;
-    throw new Error("Unimplemented: E10-12");
-  }, []);
+
+  /**
+   * Step 1: the version is created only from a passing validation, which repeats V-047, V-002 and
+   * V-006 against the workspace as it stands; a first version has no base, and is classified as
+   * `FIRST_VERSION_CLASSIFICATION`.
+   */
+  const createVersion = useCallback(
+    (request: NewAgent): SetUp => {
+      counter.current += 1;
+      const seed = `${initial.scenario}:${counter.current}`;
+      const setUp: SetUp = {
+        id: `set-${counter.current}`,
+        agentId: agentIdFor(request.mandate, seed),
+        version: mandateVersion(request.mandate),
+        created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+        confirmed: null,
+        deployed: null,
+      };
+      drafts.current.set(setUp.id, { request, seed });
+      setUpsRef.current = [...setUpsRef.current, setUp];
+      setSetUps(setUpsRef.current);
+      const created = (patch: Partial<VersionStep>) => patchSetUp(setUp.id, (s) => ({ ...s, created: { ...s.created, ...patch } }));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!reachable) return created({ phase: "undelivered", reason: "unreachable" });
+        if (silent) return created({ phase: "unknown" });
+        const check = checkDeploy(wsRef.current, request.mandate);
+        if (!check.ok) return created({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
+        created({ phase: "recorded", recordedAt: at, classification: FIRST_VERSION_CLASSIFICATION, validated: true });
+      }, recordAfterMs);
+      return setUp;
+    },
+    [initial.scenario, reachable, silent, recordAfterMs, patchSetUp],
+  );
+
+  /** Step 2, as the API judges it (§5.1): the version must exist, and a risk-increasing one needs the step-up. */
+  const confirmVersion = useCallback(
+    (setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      if (!setUp) return;
+      const confirmed = (patch: Partial<ConfirmStep>) => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, ...patch } : null }));
+      /** What the journal holds when the confirm arrives: a version not yet recorded is not found. */
+      const created = setUp.created;
+      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp } }));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!reachable) return confirmed({ phase: "undelivered", reason: "unreachable" });
+        if (silent) return confirmed({ phase: "unknown" });
+        if (created.phase !== "recorded") return confirmed({ phase: "undelivered", reason: "not_found" });
+        if (created.classification === "risk_increasing" && stepUp === null) return confirmed({ phase: "undelivered", reason: "step_up_required" });
+        confirmed({ phase: "recorded", recordedAt: at });
+      }, recordAfterMs);
+    },
+    [reachable, silent, recordAfterMs, patchSetUp],
+  );
+
+  /** Step 3: only a confirmed version deploys, and V-047, V-002 and V-006 are checked again as it applies. */
+  const deployVersion = useCallback(
+    (setUpId: string, record: DeployToPaperRecord) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      const draft = drafts.current.get(setUpId);
+      if (!setUp || !draft) return;
+      const deployed = (patch: Partial<DeployStep>) => patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, ...patch } : null }));
+      /** What the journal holds when the deployment arrives: only a recorded confirmation deploys. */
+      const confirmedAtSend = setUp.confirmed?.phase === "recorded";
+      patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!reachable) return deployed({ phase: "undelivered", reason: "unreachable" });
+        if (silent) return deployed({ phase: "unknown" });
+        if (!confirmedAtSend) return deployed({ phase: "undelivered", reason: "not_confirmed" });
+        const check = checkDeploy(wsRef.current, draft.request.mandate);
+        if (!check.ok) return deployed({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
+        change((current) => deployAgent(current, draft.request, at, draft.seed).ws);
+        deployed({ phase: "recorded", recordedAt: at });
+        window.setTimeout(() => change((current) => firstProposal(current, setUp.agentId, nowRef.current, draft.seed)), recordAfterMs * 2);
+      }, recordAfterMs);
+    },
+    [reachable, silent, recordAfterMs, patchSetUp, change],
+  );
+
+  /** The fixtures' completed run of exactly this version, if they hold one. */
+  const backtestFor = useCallback((version: ContentRef): string | null => backtestOfVersion(version), []);
 
   /** A fixture backtest in its served shape, through the API's own decoder; an id no fixture holds is the API's 404. */
   const readBacktest = useCallback(async (backtestId: string): Promise<BacktestRead> => {
@@ -565,8 +580,8 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

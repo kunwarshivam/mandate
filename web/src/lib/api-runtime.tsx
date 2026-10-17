@@ -3,7 +3,8 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
+import { prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "@/api/commands";
+import { confirmAccepted } from "@/api/confirm";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -17,10 +18,11 @@ import {
   type Command,
   type CommandKind,
   type CommandRecord,
-  type Deployment,
+  type ConfirmStep,
   type MandateChangeRequest,
   type Runtime,
   RuntimeContext,
+  type SetUp,
 } from "./mock-runtime";
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
@@ -29,7 +31,8 @@ const SENDS = 4;
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
 
-type Delivery = { phase: "recorded"; eventId: string } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
+/** `body` is the 2xx answer's, for a command whose 202 says more (§5.1); `null` when only a problem said it was recorded. */
+type Delivery = { phase: "recorded"; eventId: string; body: unknown } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
 
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const later = (ms: number, iso: Iso): Iso => new Date(Date.parse(iso) + ms).toISOString();
@@ -73,7 +76,6 @@ export function ApiRuntimeProvider({
   const [now, setNow] = useState<Iso>(ws.now);
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const wsRef = useRef(ws);
   /**
@@ -168,11 +170,11 @@ export function ApiRuntimeProvider({
       let eventId: string | null = null;
       for (let attempt = 0; attempt < SENDS; attempt += 1) {
         const outcome = await client.send(command);
-        if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id };
+        if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
         if (error.effect === "none") return { phase: "undelivered", reason: error.code };
         eventId = error.event_id ?? eventId;
-        if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
+        if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId, body: null };
         if (!error.retryable) break;
         await wait(retryMs * 2 ** attempt);
       }
@@ -253,15 +255,7 @@ export function ApiRuntimeProvider({
     [client, deliver, follow],
   );
 
-  /** Set-up and mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
-  const deploy = useCallback<Runtime["deploy"]>((request, record) => {
-    counter.current += 1;
-    const deployment: Deployment = { id: `dep-${counter.current}`, phase: "sent", sentAt: nowRef.current, agentId: "", version: mandateVersion(request.mandate), record };
-    setDeployments((list) => [...list, deployment]);
-    window.setTimeout(() => setDeployments((list) => list.map((d) => (d.id === deployment.id ? { ...d, phase: "undelivered", reason: "not_sent" } : d))), 0);
-    return deployment;
-  }, []);
-
+  /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
     const request: MandateChangeRequest = { id: `chg-${counter.current}`, agentId: proposal.agentId, version: proposal.version, number: proposal.number, phase: "sent", sentAt: nowRef.current, origin, record };
@@ -270,33 +264,85 @@ export function ApiRuntimeProvider({
     return request;
   }, []);
 
-  const [setUps] = useState<Runtime["setUps"]>([]);
+  const [setUps, setSetUps] = useState<SetUp[]>([]);
+  const setUpsRef = useRef<SetUp[]>([]);
+  const patchSetUp = useCallback((id: string, patch: (s: SetUp) => SetUp) => {
+    setUpsRef.current = setUpsRef.current.map((s) => (s.id === id ? patch(s) : s));
+    setSetUps(setUpsRef.current);
+  }, []);
+
+  /**
+   * Step 1 (`POST /mandate-drafts/{id}/versions`) has no request schema yet, so nothing is sent and
+   * nothing is invented: the step answers `not_sent`, and no version exists (DEC-2401 item 4).
+   */
   const createVersion = useCallback<Runtime["createVersion"]>((request) => {
-    void request;
-    throw new Error("Unimplemented: E10-11");
-  }, []);
-  const confirmVersion = useCallback<Runtime["confirmVersion"]>((setUpId, record, stepUp) => {
-    void setUpId;
-    void record;
-    void stepUp;
-    throw new Error("Unimplemented: E10-11");
-  }, []);
-  const deployVersion = useCallback<Runtime["deployVersion"]>((setUpId, record) => {
-    void setUpId;
-    void record;
-    throw new Error("Unimplemented: E10-12");
-  }, []);
-  const backtestFor = useCallback<Runtime["backtestFor"]>((version) => {
-    void version;
-    throw new Error("Unimplemented: E10-12");
-  }, []);
+    counter.current += 1;
+    const setUp: SetUp = {
+      id: `set-${counter.current}`,
+      agentId: "",
+      version: mandateVersion(request.mandate),
+      created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+      confirmed: null,
+      deployed: null,
+    };
+    setUpsRef.current = [...setUpsRef.current, setUp];
+    setSetUps(setUpsRef.current);
+    window.setTimeout(() => patchSetUp(setUp.id, (s) => ({ ...s, created: { ...s.created, phase: "undelivered", reason: "not_sent" } })), 0);
+    return setUp;
+  }, [patchSetUp]);
+
+  /**
+   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1), sent as its schema states it. The server
+   * judges the version, its base and the step-up; a 202 is recorded only once it decodes as
+   * `confirm-accepted`, and one that does not is unknown.
+   */
+  const confirmVersion = useCallback<Runtime["confirmVersion"]>(
+    (setUpId, record, stepUp) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      if (!setUp) return;
+      const confirmed = (patch: Partial<ConfirmStep>) => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, ...patch } : null }));
+      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp } }));
+      const prepared = prepareConfirm(client, { version: setUp.version, agentId: null, base: setUp.created.base, record });
+      void (async () => {
+        const delivered = await deliver(prepared);
+        if (!mounted.current) return;
+        if (delivered.phase === "undelivered") return confirmed({ phase: "undelivered", reason: delivered.reason });
+        if (delivered.phase === "unknown") {
+          confirmed({ phase: "unknown" });
+          if (delivered.eventId) void follow(delivered.eventId);
+          return;
+        }
+        const accepted = confirmAccepted(delivered.body, "");
+        if (!accepted.ok) {
+          confirmed({ phase: "unknown" });
+          void follow(delivered.eventId);
+          return;
+        }
+        confirmed({ phase: "recorded", recordedAt: nowRef.current, classification: accepted.value.classification, applies: accepted.value.applies });
+      })();
+    },
+    [client, deliver, follow, patchSetUp],
+  );
+
+  /** Step 3 (`POST /agents`) has no request schema yet either: not sent, and no agent exists. */
+  const deployVersion = useCallback<Runtime["deployVersion"]>(
+    (setUpId, record) => {
+      if (!setUpsRef.current.some((s) => s.id === setUpId)) return;
+      patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
+      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, phase: "undelivered", reason: "not_sent" } : null })), 0);
+    },
+    [patchSetUp],
+  );
+
+  /** No route lists a version's backtests (DEC-2400), so the deploy step shows none over the API. */
+  const backtestFor = useCallback<Runtime["backtestFor"]>(() => null, []);
 
   /** `GET /backtests/{id}` (DEC-2400): read when a screen asks, not with the workspace's refresh, since no list names them. */
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

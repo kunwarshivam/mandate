@@ -31,7 +31,7 @@ export const UI_BUILD = "owlhead-web/E11-9";
 const ref = (text: string): ContentRef => `sha256:${sha256Hex(text)}`;
 
 /** The spec §5 `record`: the rendered screen as a content ref, and the build that rendered it. */
-export function recordRef(record: CommandRecord | ApprovalRecord): { artifact: ContentRef; ui_build: ContentRef } {
+export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord): { artifact: ContentRef; ui_build: ContentRef } {
   return { artifact: ref(JSON.stringify(record)), ui_build: ref(UI_BUILD) };
 }
 
@@ -89,9 +89,28 @@ export interface ConfirmInput {
   record: ConfirmRecord;
 }
 
-/** `POST /mandate-versions/{hash}/confirm`, its body exactly as `confirm-request.schema.json` requires it. */
+/**
+ * `POST /mandate-versions/{hash}/confirm`, its body exactly as `confirm-request.schema.json` requires
+ * it: every required member and no other. `screen_digest` is the SHA-256 of the lines the screen
+ * showed, in order, until the client reads `GET .../confirmation` (its digest is the server's, and
+ * the server refuses one that does not match, so nothing is confirmed on a screen it did not serve).
+ * `warnings_acknowledged` is empty: the summary shows no warning to acknowledge. `step_up` is `null`
+ * until E9-4, so a risk-increasing confirm is answered `step_up_required` and records nothing.
+ */
 export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): PreparedCommand {
-  void client;
-  void input;
-  throw new Error("Unimplemented: E10-11");
+  const { record } = input;
+  return client.prepare(
+    "confirm_version",
+    { version: input.version },
+    {
+      agent_id: input.agentId,
+      base_version: input.base,
+      confirmed_paths: record.paths,
+      warnings_acknowledged: [],
+      classification_shown: record.classification,
+      screen_digest: ref(JSON.stringify(record.shown)),
+      record: recordRef(record),
+      step_up: null,
+    },
+  );
 }

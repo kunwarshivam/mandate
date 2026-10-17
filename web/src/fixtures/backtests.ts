@@ -4,6 +4,7 @@
  * through (DEC-2400). Fixture values, not a record: each report is a simulated run of a mandate
  * version, and none is a performance record.
  */
+import { servedBacktest } from "@/api/backtest";
 import { AGENT_IDS } from "./workspace";
 import { INSTRUMENTS } from "./mandates";
 import { VERSION } from "./versions";
@@ -295,6 +296,11 @@ export function servedBacktestFixture(backtestId: string): unknown {
  * version, or `null`. A research-agent run is never offered (PX-9 (a)).
  */
 export function backtestOfVersion(version: string): string | null {
-  void version;
-  throw new Error("Unimplemented: E10-12");
+  for (const [id, body] of Object.entries(BACKTEST_FIXTURES)) {
+    const read = servedBacktest(body, id);
+    if (!read.ok) continue;
+    const { backtest } = read;
+    if (backtest.mandate_version === version && backtest.state === "completed" && !backtest.report.research_agent) return id;
+  }
+  return null;
 }
