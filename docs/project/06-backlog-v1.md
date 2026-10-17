@@ -2930,6 +2930,26 @@ enables `live` (ES-23, OPS-5).
   2), and refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http`
   and the tier is anything but `dev` or `ci` (no value included), shown by a test for each tier;
   and it still starts with an `https` URL in every tier.
+- **E21-54 (Proposed, M8, for the 2026-10-26 demo; lane E2E; claim #1528; DEC-2002)** As the
+  founder, I want the demo's whole story run end to end on the local cell by one command, so that
+  every link the demo needs is either proven or named by the PR or story that closes it.
+  *Accepted when:* `cargo xtask cell demo --scenario demo` runs on the local cell, with paper and
+  demo data only and no credential, the six steps in order: (1) the owner signs in to `web/` and
+  sees their workspace through the workspace API; (2) deploys an agent with a confirmed mandate
+  envelope; (3) the research loop reads news and filings and calls the model through
+  mandate-gateway, the recorded fake by default; (4) deterministic code sizes the order, the risk
+  gate and autonomy rules ask, the ask shows in `web/`, the owner approves it, the paper order
+  fills on a fixture broker and the protective stop goes out; (5) a backtest of the same mandate
+  version is shown; (6) the kill switch from `web/` stops the agent. Each gesture whose pieces are
+  on `main` runs in the cell and is checked by what it prints; each missing link is printed as a
+  gap naming its PR or story, never faked, and a test refuses a gap that names neither; the run
+  ends with the workspace's control stream exported and verified by journal spec §11; and a CI
+  job that is not a required check runs the scenario on every change so its ready steps stay
+  green. Slice 1 runs steps 1 and 2 through the CLI and names every other link; later slices
+  replace each gap as its PR lands: E21-52's local-cell token issuer for the API's sign-in, the
+  API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
+  the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
+  kill switch's CLI (O4) and the deployment manager (D1).
 
 ## Won't (v1)
 
