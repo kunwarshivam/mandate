@@ -299,6 +299,7 @@ fn commanded(
                 initiator: *initiator,
                 confirmation: confirmation.as_ref(),
                 step_up: None,
+                user: None,
                 cause: None,
             },
             ports,
@@ -320,6 +321,9 @@ pub(crate) struct Switching<'s> {
     pub(crate) initiator: Initiator,
     pub(crate) confirmation: Option<&'s OwnerConfirmation>,
     pub(crate) step_up: Option<(&'static str, &'s Value)>,
+    /// The owner who issued a control-stream switch, recorded whether or not a bid was confirmed
+    /// (journal spec §9 rule 12).
+    pub(crate) user: Option<&'s str>,
     pub(crate) cause: Option<EventId>,
 }
 
@@ -338,6 +342,7 @@ pub(crate) fn switched(
         initiator,
         confirmation,
         step_up,
+        user,
         cause,
     } = switching;
     if !state.deployment().in_scope(scope) {
@@ -355,7 +360,7 @@ pub(crate) fn switched(
         batch.journal(
             "OwnerExitRequested",
             cause.clone(),
-            owner_exit(scope, *confirmation, *step_up)?,
+            owner_exit(scope, *confirmation, *step_up, *user)?,
         )?;
     }
     let switch = batch.journal(
@@ -770,32 +775,30 @@ fn owner_exit(
     scope: &KillScope,
     confirmation: Option<&OwnerConfirmation>,
     step_up: Option<(&'static str, &Value)>,
+    issued_by: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     let (kind, subject) = match scope {
         KillScope::Agent(agent) => ("agent", agent.0.clone()),
         KillScope::Connection(connection) => ("connection", connection.0.clone()),
         KillScope::Workspace(workspace) => ("workspace", workspace.0.clone()),
     };
-    let shown = confirmation.map(|confirmed| {
-        (
-            confirmed.bid.to_string(),
-            confirmed.bid_size.to_string(),
-            confirmed.floor.to_string(),
-            confirmed.user.clone(),
-            confirmed.step_up.clone(),
-        )
-    });
-    let (bid, bid_size, floor, user, assertion) = shown.unwrap_or_default();
+    let shown = |member: fn(&OwnerConfirmation) -> String| {
+        confirmation.map_or(Value::Null, |confirmed| payload::text(&member(confirmed)))
+    };
+    let user = issued_by
+        .or(confirmation.map(|confirmed| confirmed.user.as_str()))
+        .unwrap_or_default();
+    let assertion = confirmation.map_or("", |confirmed| confirmed.step_up.as_str());
     let mut members = vec![
         ("scope", payload::text(kind)),
         ("subject", payload::text(&subject)),
-        ("bid", payload::text(&bid)),
-        ("bid_size", payload::text(&bid_size)),
-        ("floor", payload::text(&floor)),
-        ("user", payload::text(&user)),
+        ("bid", shown(|c| c.bid.to_string())),
+        ("bid_size", shown(|c| c.bid_size.to_string())),
+        ("floor", shown(|c| c.floor.to_string())),
+        ("user", payload::text(user)),
         (
             "step_up",
-            step_up.map_or_else(|| payload::text(&assertion), |(_, e)| e.clone()),
+            step_up.map_or_else(|| payload::text(assertion), |(_, e)| e.clone()),
         ),
         ("confirmed", Value::Bool(confirmation.is_some())),
     ];
