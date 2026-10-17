@@ -9767,8 +9767,8 @@ mod tests {
 
     /// The policy as written puts the API contract, the audit reads, the dispatcher, the
     /// founder's CLI (Phase 1's control services) and the planned `cp-agent` on the workspace
-    /// side, and the agent process, the shell, the paper runner, the executor and its connectors
-    /// on the agent side; the workspace as built respects it, and a crossing added to it is found
+    /// side, and the agent process and the runtime process (E21-30, DEC-1012), the shell, the
+    /// paper runner, the executor and its connectors on the agent side; the workspace as built respects it, and a crossing added to it is found
     /// (E21-42, DEC-986).
     #[test]
     fn workspace_services_reach_no_agent_process_crate() -> Result<()> {
@@ -9790,6 +9790,7 @@ mod tests {
             [
                 "mandate-agentd",
                 "mandate-alpaca",
+                "mandate-daemon",
                 "mandate-executor",
                 "mandate-mcp",
                 "mandate-paper",
