@@ -91,7 +91,7 @@ pub(crate) fn client_writes(
 const NEW_DRAFT: [&str; 4] = ["description", "goal_answers", "template", "version"];
 
 /// Inference spec §3.3's refusals: nothing left the deployment (rule 73).
-const REFUSALS: [&str; 6] = [
+pub(crate) const REFUSALS: [&str; 6] = [
     "policy_denied",
     "budget_exhausted",
     "rate_limited_local",
@@ -146,6 +146,7 @@ pub(crate) fn open_command(
 pub(crate) fn rules(
     event_type: &str,
     schema_version: u64,
+    stream: StreamType,
     payload: &Value,
     config_refs: Option<&Value>,
     actor: Option<&Value>,
@@ -175,7 +176,9 @@ pub(crate) fn rules(
                 "actor.kind",
             )
         }
-        ("ModelInvocationRecorded", 1) => compiler_rules(p, config_refs, writer),
+        ("ModelInvocationRecorded", 1) if stream == StreamType::Control => {
+            compiler_rules(p, config_refs, writer)
+        }
         ("MandateConfirmed", 2) => {
             ensure(
                 p.is_null("base_version") == p.is_null("agent_id"),
@@ -245,17 +248,31 @@ pub(crate) fn rules(
 
 /// Rules 71 to 76 on the compiler's control-stream `ModelInvocationRecorded`.
 fn compiler_rules(p: View<'_>, config_refs: Option<&Value>, writer: &str) -> Result<(), Invalid> {
+    bound_model(p.0, config_refs)?;
+    invocation_rules(p.0, false)?;
+    ensure(writer == "system", "actor.kind")
+}
+
+/// Rule 71, and on the agent stream rule 146: `model.content_hash` is the model `config_refs`
+/// binds. A missing ref is already `missing_config_ref`.
+pub(crate) fn bound_model(payload: &Value, config_refs: Option<&Value>) -> Result<(), Invalid> {
     let bound = config_refs
         .and_then(|refs| refs.get("model_version"))
         .and_then(Value::as_str);
-    let named =
-        p.0.get("model")
-            .and_then(|m| m.get("content_hash"))
-            .and_then(Value::as_str);
+    let named = payload
+        .get("model")
+        .and_then(|m| m.get("content_hash"))
+        .and_then(Value::as_str);
     ensure(
         bound.is_none_or(|bound| Some(bound) == named),
         "payload.model.content_hash",
-    )?;
+    )
+}
+
+/// Rules 72 to 75 on either stream's `ModelInvocationRecorded`. `zero_attempts` is the agent
+/// stream's rule 152 exception to rule 74: a call that sent nothing records `attempts` 0.
+pub(crate) fn invocation_rules(payload: &Value, zero_attempts: bool) -> Result<(), Invalid> {
+    let p = View(payload);
     let outcome = p.text("outcome");
     let ok = outcome == "ok";
     if ok {
@@ -287,7 +304,7 @@ fn compiler_rules(p: View<'_>, config_refs: Option<&Value>, writer: &str) -> Res
         )?;
         ensure(cost == "0", "payload.cost_usd")?;
     } else if !REFUSALS.contains(&outcome) {
-        ensure(attempts >= 1, "payload.attempts")?;
+        ensure(attempts >= 1 || zero_attempts, "payload.attempts")?;
     }
     ensure(!cost.starts_with('-'), "payload.cost_usd")?;
     if ok {
@@ -296,7 +313,7 @@ fn compiler_rules(p: View<'_>, config_refs: Option<&Value>, writer: &str) -> Res
             matches!((at("completed_at"), at("deadline")), (Some(done), Some(due)) if done <= due);
         ensure(in_time, "payload.completed_at")?;
     }
-    ensure(writer == "system", "actor.kind")
+    Ok(())
 }
 
 /// §9.10's batch clause of rule 84, over one `append` batch whose drafts each passed

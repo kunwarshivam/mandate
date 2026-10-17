@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | v0.49 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.49 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.49 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, and `model_gateway` section of §9.19; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `model_gateway` section of §9.19, and `deployment_manager` section of §9.21; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
@@ -26,10 +26,21 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     run's menu; indexes run from 0; each call has one result, coded as its class allows; a reply over
     the run's tool calls runs none of them.
   - **No vectors**, as for §9.15, §9.16, and §9.20.
-  - **Versions.** v0.48 and the rules from 165 are lane I2's E19-5 change (DEC-2202), and lane EX's
-    explainer change takes v0.50 and rules from 190; this change takes v0.49, §9.22, and rules 171 to
-    183, and is renumbered at merge to follow whatever lands first.
+  - **Versions.** v0.48, §9.21, and rules 165 to 168 are DEC-1170's deployment manager records. This
+    change takes v0.49, §9.22, and rules 171 to 183; lane I2's E19-5 change (DEC-2202) and lane EX's
+    explainer change (rules from 190) follow it, renumbered at merge to follow whatever lands first.
 
+- **v0.48 ([DEC-1170](../project/decisions/DEC-1170.md); E21-33):** §9.21 registers the deployment
+  manager's three records on the workspace control stream, closed at schema version 1:
+  `ProcessStartIssued`, `ProcessStopIssued`, and `ProcessCrashLooped`, with rules 165 to 168. Until
+  this version `append` refused each as `unknown_event_type`; it admits records that were
+  impossible and changes no other record, rule, or reading (DEC-176).
+  - **Which fact is a restart.** A `ProcessStartIssued` whose `cause` is `restart`; the crash-loop
+    bound (infrastructure design §3.4) counts their `recorded_at`, never the orchestrator's count
+    (DEC-994 item 4, DEC-1170 item 2).
+  - **Which fact is the pause.** `ProcessCrashLooped`: after it the manager starts nothing for the
+    process but a kill switch's one start, until the agent is stopped (DEC-1170 items 3 and 5).
+  - **No content.** Every member is an ID, a closed enumeration, or an integer.
 - **v0.47 ([DEC-1010](../project/decisions/DEC-1010.md); E21-29):** §9.20 closes the scheduler
   stream's five records at schema version 1 before the scheduler process writes them: its
   `StreamOpened`, `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`, and
@@ -1231,6 +1242,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `HostCliRegistered`, `HostCliRevoked` | — | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence ([identity spec §6.4](identity.md#64-the-risk-reduction-path)) |
 | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | — | operator (opaque), reason code, window, approvers ([identity spec §10.3](identity.md#103-break-glass-for-platform-staff-managed-mode)) |
 | `ControlPlaneEnrolled`, `LicenseApplied`, `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`, `CatalogEntryRegistered`, `DataBundleImported`, `UsageReportSealed`, `ControlPlaneMessageRefused` | — | The deployment's records of its link to the global control plane ([control-plane design §3.8](../design/control-plane.md#38-the-closed-message-set)): enrollment, license, release, catalog, data-bundle, and usage-report facts by opaque ID, sequence, and digest, and each refused inbound message with its reason; written by workspace control services, never by `cp-agent`; closed in §9.17 |
+| `ProcessStartIssued`, `ProcessStopIssued`, `ProcessCrashLooped` | — | The deployment manager's starts, stops, and crash loops (infrastructure design §3.4): process (`runtime`, `executor`), subject (the agent or the `account_ref`), generation, cause; for a crash loop the restarts counted and their window; closed in §9.21 |
 
 The identity records ([identity spec §12.1](identity.md#121-events-journal-9-control-stream),
 DEC-437 item 9) are control-stream records. The membership records close in §9.12. The client
@@ -4175,6 +4187,91 @@ number order after the members' types:
 the test vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member
 type and rule above and valid drafts for the cases a rule might be misread to refuse, and the
 scheduler's own tests hold the writer's rules for `clock`, `date`, and the tolerance batch.
+
+### 9.21 Deployment manager records ([DEC-1170](../project/decisions/DEC-1170.md))
+
+The deployment manager's record of the processes it starts and stops (infrastructure design §3.4,
+§7.3), closed at schema version 1 as §9.7's records are: every listed member is present, `null`
+only where the type is nullable, and any extra member is refused. §9.1's types apply. The rules
+number on from §9.20's. No record names a configuration.
+
+**Who writes them.** Workspace control services, the control stream's writer (§2, under the
+fencing of §5.1), as a `system` actor: rule 165. The deployment manager is one of them (design
+§3.1); it appends these three records and nothing else, so it never writes a mandate, a
+deployment, an envelope, or a command.
+
+**Where they go.** On the workspace control stream, `ctl:{workspace_id}`, of the workspace whose
+process it is.
+
+**Journal before acting.** A start or a stop is appended, and the manager calls the orchestrator
+only after `Committed` or `AlreadyCommitted` (§5.2). A call that fails is retried for the same
+`generation`, which is never appended twice. A slot (one `process` and `subject`) gets its next
+`generation` only once every earlier one is seen exited or gone, so the manager never runs two
+writers of one stream; each process still takes its stream's writer epoch, which fences any copy
+the manager could not see (§5.1).
+
+**Which fact is a restart.** A `ProcessStartIssued` whose `cause` is `restart`. The crash-loop
+bound of design §3.4 (Proposed: five restarts within ten minutes) counts the `recorded_at` of the
+slot's restarts since its `deployed` start, never the orchestrator's count, which resets when a
+pod is replaced. The orchestrator restarts nothing on its own, so every restart is journaled. A
+start whose `cause` is `kill_switch` is not counted.
+
+**Which fact is the pause.** `ProcessCrashLooped`. After it the manager starts the slot again only
+for a kill switch, once per `OwnerCommandIssued` with `kill_switch` whose scope covers it, and
+raises one opaque operator alert (design §8.2, RB-14). Nothing at this version ends the pause but
+the agent's `AgentStopped`, or for an executor every agent of its account stopped (DEC-1170 item
+3). An `AgentStopped` is final: no record here follows it for that agent's runtime.
+
+**The kill switch is never gated here.** No record here is written because of a kill switch except
+a `kill_switch` start: the manager never stops, drains, or replaces a process for one, and never
+waits on readiness (design §3.4, §3.6).
+
+**No content.** Every member is an `id`, a closed enumeration, or an `integer`: no instrument,
+quantity, price, mandate field, or personal data (`AGENTS.md` rule 6).
+
+**`ProcessStartIssued`**: the manager is about to start one process.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `process` | `runtime` \| `executor` | The agent's runtime, or the account's executor |
+| `subject` | `id` | The agent, for a runtime; the `account_ref`, for an executor |
+| `generation` | `integer` | 1 for the slot's first start, one more for each start after it: rules 166 and 167 |
+| `cause` | `deployed` \| `restart` \| `kill_switch` | The first start; a start after the previous one exited; a start for a kill switch whose scope covers the slot |
+
+A `kill_switch` start names the switch's `OwnerCommandIssued` as its `causation_id`; every other
+record here has a `null` one. `append` does not check the link, which crosses no stream but
+names an earlier event, as for §2's copies.
+
+**`ProcessStopIssued`**: the manager is about to stop one running process.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `process`, `subject` | As `ProcessStartIssued`'s | |
+| `generation` | `integer` | The generation stopped: rule 166 |
+| `cause` | `agent_stopped` | The agent's `AgentStopped`, or for an executor the last deployed agent of its account stopped |
+
+**`ProcessCrashLooped`**: the crash-loop bound was reached; the manager stops restarting the slot.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `process`, `subject` | As `ProcessStartIssued`'s | |
+| `generation` | `integer` | The slot's last generation: rule 166 |
+| `restarts` | `integer` | The restarts counted within the window: rule 168 |
+| `window_seconds` | `integer` | The bound's window: rule 168 |
+
+**Consistency rules** (reason `schema`; the path is the member named), checked in number order
+after the members' types:
+
+165. Every §9.21 record: `actor.kind` is `system` (`actor.kind`).
+166. Every §9.21 record: `generation` is at least 1 (`payload.generation`).
+167. `ProcessStartIssued`: `cause` is `deployed` exactly when `generation` is 1 (`payload.cause`).
+168. `ProcessCrashLooped`: `restarts` is at least 1 (`payload.restarts`), and so is
+     `window_seconds` (`payload.window_seconds`).
+
+`append` sees one record and checks no `generation` against the stream's earlier ones at this
+version. The test vectors' `deployment_manager` section holds a base draft of each record, an
+invalid draft for every member type and rule, and valid drafts for the cases a rule might be
+misread to refuse.
 
 ### 9.22 Run records ([DEC-2203](../project/decisions/DEC-2203.md))
 
