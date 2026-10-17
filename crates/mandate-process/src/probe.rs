@@ -1,5 +1,5 @@
 //! Liveness and readiness answers, and the Unix socket that serves them to `exec` probes
-//! (design §3.4, DEC-970 item 5). Every answer is one of a few fixed words: no id, symbol, price,
+//! (design §3.4, DEC-994 item 5). Every answer is one of a few fixed words: no id, symbol, price,
 //! quantity, or mandate content (`AGENTS.md` rule 6). This module reads no clock: the time a
 //! probe is judged at comes from the caller.
 
@@ -20,7 +20,7 @@ use crate::lifecycle::{Snapshot, State, nanos};
 /// The longest request or reply read, in one read of at most this long, and how many connections
 /// are answered at once; a connection over that is closed unanswered. A request or reply is one
 /// read, never a loop of reads, so a peer that trickles bytes holds its own connection for at most
-/// one silence bound, and never the others (DEC-970 item 5).
+/// one silence bound, and never the others (DEC-994 item 5).
 const LINE_BOUND: usize = 64;
 const SILENCE_BOUND: Duration = Duration::from_secs(1);
 const CONNECTION_BOUND: usize = 8;

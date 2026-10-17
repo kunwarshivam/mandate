@@ -1,4 +1,4 @@
-//! The probe answers and their Unix socket, with fixed generic words only (E21-28, DEC-970 item
+//! The probe answers and their Unix socket, with fixed generic words only (E21-28, DEC-994 item
 //! 5; `AGENTS.md` rule 6).
 
 use std::fs;

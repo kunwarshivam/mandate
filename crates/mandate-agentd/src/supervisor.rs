@@ -66,7 +66,7 @@ impl Host for IdleHost {
 }
 
 /// Why a supervisor stopped: the lifecycle's exits, shared with every long-running process
-/// (DEC-970 item 7), so each keeps its stable code and exit status.
+/// (DEC-994 item 7), so each keeps its stable code and exit status.
 pub use mandate_process::Exit as Stop;
 
 /// Where a supervisor is. Only `Ready` runs cycles and answers ready.
@@ -90,7 +90,7 @@ impl Phase {
         Self::Stopped(Stop::DrainIncomplete),
     ];
 
-    /// The shared lifecycle's state for this phase, which the probes answer from (DEC-970 item 7).
+    /// The shared lifecycle's state for this phase, which the probes answer from (DEC-994 item 7).
     pub fn state(self) -> State {
         match self {
             Self::Starting => State::Starting,

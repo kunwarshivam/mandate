@@ -1,4 +1,4 @@
-//! The lifecycle against an independent oracle (E21-28, DEC-970 item 6). The fold keeps facts
+//! The lifecycle against an independent oracle (E21-28, DEC-994 item 6). The fold keeps facts
 //! as inputs arrive; the oracle recomputes every answer from the whole input history at once, by
 //! searching it (the first drain request, the first terminal input, the facts after the epoch).
 //! A property test over random sequences compares the two after every input: the state, every

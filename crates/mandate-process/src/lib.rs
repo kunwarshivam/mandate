@@ -8,7 +8,7 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! The lifecycle every long-running process shares (E21-28, DEC-970; infrastructure design §3.4,
+//! The lifecycle every long-running process shares (E21-28, DEC-994; infrastructure design §3.4,
 //! §7.3).
 //!
 //! A [`Lifecycle`] folds what a process observes, each input at an injected time, into one
@@ -19,7 +19,7 @@
 //! never gated on readiness. It answers liveness against its bound and readiness, and abandons a
 //! drain past [`DRAIN_BOUND`] rather than forcing it. [`crash_loop`] applies the crash-loop bound
 //! to journaled restarts. [`probe`] turns a published [`Snapshot`] into fixed generic words, and
-//! serves them over a Unix socket for `exec` probes (DEC-970 item 5): no listener on any network.
+//! serves them over a Unix socket for `exec` probes (DEC-994 item 5): no listener on any network.
 
 pub mod lifecycle;
 pub mod probe;

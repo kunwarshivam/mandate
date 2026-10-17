@@ -2,7 +2,7 @@
 
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.4 (liveness,
   readiness, restart, the crash-loop bound), §7.3 (drain and its bound); [journal
-  spec](../../../../docs/specs/journal.md) §5.1 (writer epochs, `Fenced`); DEC-970.
+  spec](../../../../docs/specs/journal.md) §5.1 (writer epochs, `Fenced`); DEC-994.
 - **Code:** `mandate-process` (`crates/mandate-process`). `src/lifecycle.rs` (`Lifecycle`: the fold of `Input`s at
   injected times into `State`; `Kind`, `Action`, `Exit`, `Snapshot`, `DRAIN_BOUND`, `crash_loop`)
   and `src/probe.rs` (`answer`, `Status`, and the Unix socket's `serve` and `query` for `exec`

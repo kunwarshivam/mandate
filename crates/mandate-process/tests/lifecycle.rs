@@ -1,5 +1,5 @@
 //! The lifecycle's transitions, permissions, liveness, drain bound, and crash-loop bound, case by
-//! case (E21-28, DEC-970 items 1 to 4; infrastructure design §3.4, §7.3).
+//! case (E21-28, DEC-994 items 1 to 4; infrastructure design §3.4, §7.3).
 
 use std::time::Duration;
 

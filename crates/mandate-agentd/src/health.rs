@@ -17,7 +17,7 @@ use crate::supervisor::{Phase, Status};
 const LINE_BOUND: u64 = 1024;
 const READ_BOUND: Duration = Duration::from_secs(1);
 
-/// The status line and body for a request path in a phase, in the shared probe words (DEC-970
+/// The status line and body for a request path in a phase, in the shared probe words (DEC-994
 /// item 7). The phase carries no heartbeat bound yet (DEC-968 item 7).
 ///
 /// - `/livez`: `200 live` until the process has stopped, then `503 stopped`.
