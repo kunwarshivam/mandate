@@ -1,0 +1,38 @@
+[
+  {
+    "label": "mode not reported",
+    "set": {
+      "/agent/mode": null
+    }
+  },
+  {
+    "label": "mode exits_only",
+    "set": {
+      "/agent/mode": "exits_only"
+    }
+  },
+  {
+    "label": "mode paused",
+    "set": {
+      "/agent/mode": "paused"
+    }
+  },
+  {
+    "label": "mode stopped",
+    "set": {
+      "/agent/mode": "stopped"
+    }
+  },
+  {
+    "label": "a live agent",
+    "set": {
+      "/agent/environment": "live"
+    }
+  },
+  {
+    "label": "no pending approvals",
+    "set": {
+      "/agent/pending_approvals": 0
+    }
+  }
+]

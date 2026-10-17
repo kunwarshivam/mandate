@@ -1,0 +1,44 @@
+[
+  {
+    "label": "no agents",
+    "set": {
+      "/agents": []
+    }
+  },
+  {
+    "label": "mode not reported",
+    "set": {
+      "/agents/0/mode": null
+    }
+  },
+  {
+    "label": "mode exits_only",
+    "set": {
+      "/agents/0/mode": "exits_only"
+    }
+  },
+  {
+    "label": "mode paused",
+    "set": {
+      "/agents/0/mode": "paused"
+    }
+  },
+  {
+    "label": "mode stopped",
+    "set": {
+      "/agents/0/mode": "stopped"
+    }
+  },
+  {
+    "label": "a live agent",
+    "set": {
+      "/agents/0/environment": "live"
+    }
+  },
+  {
+    "label": "no pending approvals",
+    "set": {
+      "/agents/0/pending_approvals": 0
+    }
+  }
+]

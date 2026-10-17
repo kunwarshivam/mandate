@@ -1,0 +1,38 @@
+[
+  {
+    "label": "an empty inbox",
+    "set": {
+      "/approvals": []
+    }
+  },
+  {
+    "label": "state acted",
+    "set": {
+      "/approvals/0/state": "acted"
+    }
+  },
+  {
+    "label": "state skipped",
+    "set": {
+      "/approvals/0/state": "skipped"
+    }
+  },
+  {
+    "label": "state timed_out",
+    "set": {
+      "/approvals/0/state": "timed_out"
+    }
+  },
+  {
+    "label": "state canceled",
+    "set": {
+      "/approvals/0/state": "canceled"
+    }
+  },
+  {
+    "label": "a deadline of zero",
+    "set": {
+      "/approvals/0/deadline": 0
+    }
+  }
+]

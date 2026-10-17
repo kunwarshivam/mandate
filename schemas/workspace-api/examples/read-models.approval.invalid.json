@@ -1,0 +1,128 @@
+[
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "api_version v2",
+    "set": {
+      "/api_version": "v2"
+    }
+  },
+  {
+    "label": "a missing approval_id",
+    "remove": [
+      "/approval/approval_id"
+    ]
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/approval/agent_id"
+    ]
+  },
+  {
+    "label": "a missing state",
+    "remove": [
+      "/approval/state"
+    ]
+  },
+  {
+    "label": "a missing requested_at",
+    "remove": [
+      "/approval/requested_at"
+    ]
+  },
+  {
+    "label": "a missing deadline",
+    "remove": [
+      "/approval/deadline"
+    ]
+  },
+  {
+    "label": "a missing content_hash",
+    "remove": [
+      "/approval/content_hash"
+    ]
+  },
+  {
+    "label": "an approval id that is not a ULID",
+    "set": {
+      "/approval/approval_id": "apr_1"
+    }
+  },
+  {
+    "label": "an agent id with a space",
+    "set": {
+      "/approval/agent_id": "agt 1"
+    }
+  },
+  {
+    "label": "state approved",
+    "set": {
+      "/approval/state": "approved"
+    }
+  },
+  {
+    "label": "requested_at without nanoseconds",
+    "set": {
+      "/approval/requested_at": "2026-10-08T14:29:00Z"
+    }
+  },
+  {
+    "label": "a negative deadline",
+    "set": {
+      "/approval/deadline": -1
+    }
+  },
+  {
+    "label": "a deadline as a timestamp string",
+    "set": {
+      "/approval/deadline": "2026-10-08T14:34:00.000000000Z"
+    }
+  },
+  {
+    "label": "a content hash that is not a sha256 ref",
+    "set": {
+      "/approval/content_hash": "1212121212121212121212121212121212121212121212121212121212121212"
+    }
+  },
+  {
+    "label": "an unknown approval member",
+    "set": {
+      "/approval/score": "0.9"
+    }
+  },
+  {
+    "label": "a missing content",
+    "remove": [
+      "/approval/content"
+    ]
+  },
+  {
+    "label": "content as a string",
+    "set": {
+      "/approval/content": "x"
+    }
+  },
+  {
+    "label": "a missing approval",
+    "remove": [
+      "/approval"
+    ]
+  }
+]

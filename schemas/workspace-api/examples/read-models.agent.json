@@ -1,0 +1,27 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+      "seq": 41,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "agent": {
+    "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+    "environment": "paper",
+    "mandate_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "deployed_at": "2026-10-08T13:00:00.000000000Z",
+    "mode": "normal",
+    "pending_approvals": 1
+  }
+}

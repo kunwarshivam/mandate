@@ -1,0 +1,38 @@
+[
+  {
+    "label": "state acted",
+    "set": {
+      "/approval/state": "acted"
+    }
+  },
+  {
+    "label": "state skipped",
+    "set": {
+      "/approval/state": "skipped"
+    }
+  },
+  {
+    "label": "state timed_out",
+    "set": {
+      "/approval/state": "timed_out"
+    }
+  },
+  {
+    "label": "state canceled",
+    "set": {
+      "/approval/state": "canceled"
+    }
+  },
+  {
+    "label": "a deadline of zero",
+    "set": {
+      "/approval/deadline": 0
+    }
+  },
+  {
+    "label": "an empty content object",
+    "set": {
+      "/approval/content": {}
+    }
+  }
+]

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 9 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -295,7 +295,7 @@ Errors are RFC 9457 problem documents with these members:
 | `membership_unavailable` | 503 | The membership read, or the membership-index read of `GET /v1/me/workspaces` (§4.10), failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
 | `outcome_unknown` | 503 | The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
 | `address_limit` | 409 | **(planned: E8-14)** A member already holds 10 notification addresses on the channel (§4.11). `effect: none`, `retryable: false`; title "Too many notification addresses". An endpoint already held is not an error: §5.7 answers `200` |
-| `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7). `effect: none`, `retryable: true`; title "Try again" |
+| `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7), or the process is draining and the call is not an API-7 operation (§3.11). `effect: none`, `retryable: true`, with `Retry-After`; title "Try again" |
 | `fold_unavailable` | 503 | **(planned: E10-13)** An ordinary revoke (§4.5) whose journal fold of the connection's agents or of their positions cannot answer: it is unavailable, stale, or behind its watermark, its `seq` for a stream it needs being behind that stream's head as read in the same request ([DEC-693](../project/decisions/DEC-693.md) items 6 and 7). Nothing is assumed stopped or flat. `effect: none`, `retryable: false`; title "Account state unavailable". The owner sends a new request later, or revokes on compromise (§5.6), which never reads a fold |
 | `positions_held` | 409 | **(planned: E10-13)** An ordinary revoke (§4.5) while the positions fold answers that an agent on the connection holds positions (DEC-693 item 6). `effect: none`, `retryable: false`; title "Positions still held" |
 | `agents_not_stopped` | 409 | **(planned: E10-13)** An ordinary revoke (§4.5) while the agents fold answers that an agent on the connection is not `stopped` (DEC-693 item 6). `effect: none`, `retryable: false`; title "Agents not stopped" |
@@ -479,9 +479,50 @@ shedding applies to the API-7 operations, which run on the reserved pool of API-
 
 ---
 
+### 3.11 The server process (E21-31)
+
+The API is served by one binary, `mandate-api-server`, one Deployment per workspace deployment
+behind the cell's one ingress ([DEC-978](../project/decisions/DEC-978.md)). It holds no route of
+its own: it serves the operations of §4 as their stories land.
+
+1. **Bind.** `--bind <ip>:<port>` must be a loopback address, or equal `--pod-address`, the
+   pod's own address. The unspecified addresses and every other address refuse the start.
+2. **Environment.** Settings come from named variables that hold no secret:
+   `MANDATE_API_DATABASE_URL` (refused if it carries a password), `MANDATE_API_ISSUER`,
+   `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`, and
+   `MANDATE_API_SUBJECT_LINKS`. A variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or
+   `KEY` (ASCII case-insensitive) refuses the start (DEC-822 item 4). The session signing key is
+   the file `$CREDENTIALS_DIRECTORY/session-signing-key`: at least 32 bytes, refused when group- or
+   world-readable.
+3. **Probes.** `GET /livez` and `GET /readyz`, outside `/v1`, unauthenticated, reading no data
+   (API-1's exemption covers both). The body is `{"status": "live"}`, `{"status": "ready"}`, or,
+   with 503, `{"status": "not_ready"}`. Readiness is the process lifecycle's (E21-28). A process
+   that is not ready still serves every API-7 operation.
+4. **Drain.** On SIGTERM the process reports `not_ready`, finishes what is in flight, answers each
+   new call that is not an API-7 operation with `busy`, and keeps serving API-7 operations. It exits
+   when nothing is in flight, or at the drain bound (infrastructure §7.3, Proposed 90 seconds).
+5. **Browser sessions** (identity spec §6.2). `POST /v1/sessions` (§4.10) takes the managed
+   issuer's access token, verified as identity spec §6.1 says, under §3.3 item 1's `Origin` and
+   `X-Mandate-Request` checks. The subject maps to a user principal through the subject link, a
+   root-owned file of `sha256:` digests of the canonical `{"issuer", "subject"}` object, each with
+   its principal's ULID; no raw subject is stored. The server opens a session record and sets the
+   §3.3 item 5 cookie, `__Host-mandate_session`, whose value is an opaque session id and a fresh
+   32-byte secret authenticated with HMAC-SHA256 under the session signing key; the record keeps
+   only the secret's digest. The access lifetime is five minutes: `POST /v1/sessions/refresh`, with
+   the cookie and a fresh access token for the same subject, rotates the secret; a token that does
+   not verify or names another subject ends the session (`refresh_failed`), and a rotated secret
+   presented again ends it (`refresh_reuse`). `DELETE /v1/sessions/current` ends it (`sign_out`).
+   Every refusal on these routes is the one 401. Until a Postgres store exists, records live in the
+   process and a restart ends them (fail closed).
+6. **Memberships.** Each request folds journal §9.12's records from the workspace's control stream
+   (identity spec ID-3, uncached). A failed read is a failed membership read, never "no
+   membership".
+
+---
+
 ## 4. Resources and operations
 
-Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5. "Event" names the control-stream event the call
+Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/sessions*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5; and the probes of §3.11, outside `/v1`. "Event" names the control-stream event the call
 commits (journal spec §9). **Journal change** marks an event or member the journal spec does not
 define yet; §11's E10-15 adds them before the operation ships.
 
@@ -529,6 +570,13 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
+
+The inbox and the single read return `read-models/approvals` and `read-models/approval`
+([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state (`pending`, `acted`,
+`skipped`, `timed_out`, `canceled`, folded from the agent stream), `requested_at`, `deadline` (the
+journaled risk-clock seconds), and `content_hash`; the single read adds `content`. The inbox lists
+pending approvals by deadline, then resolved ones, most recent first; `state` other than `pending`
+or `resolved` is `invalid`. More of D5 and D6 arrives as optional members.
 
 ### 4.4 Delegations and autonomy
 
@@ -592,6 +640,12 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | Scorecards | `GET /agents/{id}/scorecards` | FR-8.4: the user's own results only. Never embedded in an approval, the model picker, or another workspace's view |
 | Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names |
 | Health | `GET /health` | The status strip (G1): market data, broker, deployment, relay, each with its last observation time |
+
+The first shapes served are `read-models/agents` and `read-models/agent`
+([DEC-979](../project/decisions/DEC-979.md)): each agent `AgentDeployed` names on the control stream,
+with its environment, deployed mandate version, `deployed_at`, `mode` (the last `AgentModeChanged`'s
+`to`, `stopped` after `AgentStopped`, `null` before either: not reported, never read as `normal`),
+and `pending_approvals`. The rest of D2 arrives as optional members.
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -1105,6 +1159,14 @@ Owed to the identity spec's lanes, and listed so the prefix rule above is comple
 `POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
 they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| Open a browser session | `POST /v1/sessions` | — | §3.11 item 5. Body `{access_token}`; answers 204 with the session cookie. Every refusal is the one 401 |
+| Refresh it | `POST /v1/sessions/refresh` | — | §3.11 item 5. The cookie and `{access_token}` for the same subject; 204 with the rotated cookie |
+| Sign out | `DELETE /v1/sessions/current` | — | §3.11 item 5. Ends the session; 204 and the cookie cleared |
+
+`SessionOpened` and `SessionRevoked` (identity spec §12.1) are journaled once the identity lanes register them; until then these routes write nothing to the journal.
+
 ### 4.11 Notification addresses (web push)
 
 A member's own push address: where the dispatcher sends their opaque notices (notifications spec
@@ -1595,7 +1657,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval content, hash, and admission (`mandate-approval`) | **Exists** (pure core) |
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
-| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10) |
+| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, and the first reads of §4.3 and §4.7 by E21-31 (§3.11) |
 | Drafts, compile, versions, confirm endpoints | **Planned** (E10-11) |
 | Deployment manager endpoints and the reserved kill-switch path | **Planned** (E10-12) |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/agent.schema.json",
+  "description": "GET /agents/{id} (\u00a74.7, DEC-979). More of D2 arrives as optional members (\u00a73.2).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "agent"
+  ],
+  "properties": {
+    "agent": {
+      "$ref": "#/$defs/Agent"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Agent": {
+      "description": "One deployed agent (\u00a74.7, DEC-979): an agent AgentDeployed names on the control stream. mode is the last AgentModeChanged's to, stopped after AgentStopped, and null before either (not reported; never read as normal).",
+      "type": "object",
+      "required": [
+        "agent_id",
+        "environment",
+        "mandate_version",
+        "deployed_at",
+        "mode",
+        "pending_approvals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "environment": {
+          "enum": [
+            "paper",
+            "live"
+          ]
+        },
+        "mandate_version": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "deployed_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "mode": {
+          "oneOf": [
+            {
+              "enum": [
+                "normal",
+                "exits_only",
+                "paused",
+                "stopped"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_approvals": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "unevaluatedProperties": false
+}
