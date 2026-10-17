@@ -1611,6 +1611,45 @@ fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
         .collect()
 }
 
+/// The runtime image Compose is given when this cell built none (its `mandate` image is pulled):
+/// the drill never starts the runtime, but Compose resolves every service's variables first.
+const RUNTIME_NOT_BUILT: &str = "mandate.local/runtime:0000000";
+
+/// The variables the Compose file requires (DEC-1013): the workspace, the `mandate` image, the
+/// runtime's image, and the runtime's deployment, read from the local cell's values so Compose and
+/// the k3d cell run one demo deployment.
+fn compose_env(root: &Path, image: &str, runtime: Option<&str>) -> Result<Vec<(String, String)>> {
+    let mut env = vec![
+        ("MANDATE_WORKSPACE".to_string(), WORKSPACE.to_string()),
+        ("MANDATE_IMAGE_MANDATE".to_string(), image.to_string()),
+        (
+            "MANDATE_IMAGE_RUNTIME".to_string(),
+            runtime.unwrap_or(RUNTIME_NOT_BUILT).to_string(),
+        ),
+    ];
+    for key in ["agent", "connection", "owner"] {
+        env.push((
+            format!("MANDATE_RUNTIME_{}", key.to_uppercase()),
+            runtime_value(root, key)?,
+        ));
+    }
+    Ok(env)
+}
+
+/// One of the local cell's `runtime:` values (`deploy/cell/values/k3d.yaml`).
+fn runtime_value(root: &Path, key: &str) -> Result<String> {
+    let text = fs::read_to_string(root.join(WORKSPACE_VALUES))
+        .with_context(|| format!("reading {WORKSPACE_VALUES}"))?;
+    let prefix = format!("  {key}: ");
+    text.lines()
+        .skip_while(|l| *l != "runtime:")
+        .take_while(|l| l.starts_with(' ') || *l == "runtime:")
+        .find_map(|l| l.strip_prefix(&prefix))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .with_context(|| format!("{WORKSPACE_VALUES} names no `runtime.{key}`"))
+}
+
 /// An image the workspace chart's values.yaml pins, read from its `images:` block, so the Compose
 /// file runs exactly the chart's default.
 fn values_image(root: &Path, key: &str) -> Result<String> {
@@ -1787,14 +1826,13 @@ const COMPOSE_SECRETS: &str = "deploy/cell/compose/secrets";
 
 /// `docker compose` with the Compose file, the drill's workspace label and this change's image.
 fn compose_cmd(args: &[&str]) -> Result<String> {
-    let image = image_tag()?;
+    let env = compose_env(Path::new("."), &image_tag()?, runtime_image()?.as_deref())?;
     let mut full = vec!["compose", "-f", "compose.json"];
     full.extend_from_slice(args);
     let out = Command::new("docker")
         .current_dir(COMPOSE_DIR)
         .args(&full)
-        .env("MANDATE_WORKSPACE", WORKSPACE)
-        .env("MANDATE_IMAGE_MANDATE", &image)
+        .envs(env)
         .output()
         .context("starting docker compose")?;
     let text = format!(
@@ -2303,6 +2341,40 @@ mod tests {
                 .iter()
                 .any(|p| p.name.starts_with("the agent runtime") && p.skipped.is_some())
         );
+    }
+
+    /// Every variable the generated Compose file requires is one the drill sets, so a service it
+    /// never starts still cannot stop it (DEC-1013).
+    #[test]
+    fn the_compose_drill_sets_every_variable_the_compose_file_requires() -> Result<()> {
+        let root = crate::repo_root()?;
+        let compose = fs::read_to_string(root.join(COMPOSE_FILE))?;
+        let required: std::collections::BTreeSet<&str> = compose
+            .split("${")
+            .skip(1)
+            .filter_map(|rest| rest.split_once(":?").map(|(name, _)| name))
+            .collect();
+        assert!(required.contains("MANDATE_RUNTIME_AGENT"), "{required:?}");
+        for runtime in [Some("mandate.local/runtime:0123456789ab"), None] {
+            let env = compose_env(&root, "mandate.local/mandate:0123456789ab", runtime)?;
+            let set: std::collections::BTreeSet<&str> = env
+                .iter()
+                .filter(|(_, v)| !v.is_empty())
+                .map(|(k, _)| k.as_str())
+                .collect();
+            let missing: Vec<&&str> = required.iter().filter(|r| !set.contains(**r)).collect();
+            assert!(missing.is_empty(), "the drill leaves {missing:?} unset");
+        }
+        let agent = compose_env(&root, "i", None)?
+            .into_iter()
+            .find(|(k, _)| k == "MANDATE_RUNTIME_AGENT")
+            .map(|(_, v)| v);
+        assert_eq!(
+            agent.as_deref(),
+            Some("demo-agent"),
+            "the k3d cell's deployment"
+        );
+        Ok(())
     }
 
     #[test]
