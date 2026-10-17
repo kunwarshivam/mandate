@@ -2313,7 +2313,11 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   - no agent pins an agentic entry before E19-6's bench and a §8.3 regression evaluation pass on it
     (DEC-2203 item 13).
 - **E19-14 (Should; SC; spec first)** As an owner, I want the agentic loop's follow-ups
-  ([DEC-2203](decisions/DEC-2203.md) items 12, 15, 17, 20). *Accepted when:* `ask_owner` has its
+  ([DEC-2203](decisions/DEC-2203.md) items 12, 14, 15, 17, 20). *Accepted when:* `propose_exit` has
+  its structured record with the instrument, a fourth `DecisionMade.exit_origin` (journal spec §9.1,
+  rule 8), mandate spec §8.3's builder branch for a stored request (the whole position less working
+  exits, working openings cancelled first, the same collar), and trading-domain spec §9.1's origin,
+  so an `action_tools` entry may declare it; `ask_owner` has its
   journaled question and answer records and its delivery (in-app, with an email ping of generic text
   only), so an entry may declare it; `propose_mandate_change` has its record and its draft path to the
   owner (always ASK, the diff with its classification, step-up, expiry, rate limit; a `monitor` run

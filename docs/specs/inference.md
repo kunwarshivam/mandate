@@ -728,7 +728,7 @@ the date only; it does not suggest a replacement.
 - **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
   fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider
   data terms as recommended, and bring-your-own provider keys allowed for hybrid and on-prem, with
-  platform keys for managed deployments (§7.4).
+  platform keys for managed deployments (§7.4), since superseded by DEC-2203 item 16: both, everywhere.
 
 ---
 

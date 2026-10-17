@@ -4304,7 +4304,8 @@ number order after the members' types:
      (`payload.instruments_read`, reason `non_canonical`); `watch` has at most 10 entries, no
      instrument twice (`payload.watch`).
 182. `RunEnded`: `bound` is not `null` when `reason` is `bound`, and is then not `max_turns`; it
-     may be `max_turns` or `max_tool_calls` when `reason` is `done`; and it is `null` for every other
+     may be `max_turns` or `max_tool_calls` when `reason` is `done` (`max_turns` when both ran out
+     on the last turn); and it is `null` for every other
      reason (`payload.bound`); and
      `discarded` is strictly ascending by bytes (`payload.discarded`, reason `non_canonical`) and
      empty when `reason` is `done` (`payload.discarded`); the first that fails. That each entry

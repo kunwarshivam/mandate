@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Accepted ([DEC-2203](../project/decisions/DEC-2203.md)): the founder's direction of 2026-10-17, with the items the founder decided the same day (DEC-2203 items 14, 15, 16, 19, 20) |
 | **Date** | 2026-10-17 |
-| **Deciders** | The founder (the direction, and the deployment cap's clarification); an agent (Claude Code, lane AH) for the readings, under DEC-79 and DEC-176, from the coordinator's design input and research memo |
+| **Deciders** | The founder (the direction; the deployment cap's clarification; DEC-2203 items 14, 15, 16, 19, and 20); an agent (Claude Code, lane AH) for the readings, under DEC-79 and DEC-176, from the coordinator's design input and research memo |
 
 Every ADR has a decision behind it; this one's is [DEC-2203](../project/decisions/DEC-2203.md). The
 normative text is the [agent harness spec](../specs/agent-harness.md) v0.2 §6.9 to §6.13 and §10.4,
@@ -111,7 +111,8 @@ records it.
 
 - The model chooses what it reads, inside the data universe, the allowlist, the cut-off, and its
   budget. A fooled model can read more allowlisted data and spend up to its run's ceiling; it still
-  produces at most a thesis or an invalidation, which the same deterministic rules judge (HI-10).
+  produces at most a proposal (a thesis, an invalidation, and once declared an exit request, an
+  owner question, or a mandate-change draft), which the same deterministic rules judge (HI-10).
 - Every turn, tool call, and result is a journal record, so the transcript view, audits, and replay
   read the same facts, and a run's cost and bounds fold from the journal.
 - The gateway now carries tool declarations and returns tool calls, so its INF-5 test changes from
