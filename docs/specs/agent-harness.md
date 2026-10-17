@@ -844,7 +844,8 @@ recorded". §15.5 says which part of that the checks enforce and which part is d
 ### 15.1 Scope and preconditions
 
 - **Slice 1 (the 2026-10-26 demo)** is read-only: both kinds get read and think tools only, and the
-  `answer` tool (§15.5). No action tool is in their tool set. Slice 2 (§15.12, planned) adds
+  `answer` tool (§15.5). No action tool is in their tool set but `answer`, which acts on nothing
+  and only hands the answer to the checks (§15.6). Slice 2 (§15.12, planned) adds
   proposals the owner confirms.
 - **Where they run.** In the agent process, on E19-13's loop beside the tick, never in it (HI-7,
   HI-21). They follow every run rule of E19-13: at most one run in flight per agent; owner and
@@ -957,7 +958,7 @@ Tools outside a run's menu are left out of its schema:
 
 | Run | Menu |
 |---|---|
-| `owner`, slice 1 | Every read tool above, `note`, and `answer`. No action tool |
+| `owner`, slice 1 | Every read tool above, `note`, and `answer`. No other action tool |
 | `explain` | `records.approval`, `memory.thesis`, `memory.universe`, `mode.read`, `note`, and `answer`; `memory.universe` filtered by code to the approval's instrument. Every field is within the view row (§15.3) |
 | `owner`, slice 2 | The slice-1 menu, plus the action tools only when the owner chose to make a request (a control the web app shows, journaled with the message), never because the model or a result asked; §15.12 |
 
@@ -1041,13 +1042,15 @@ names #1540 merges with, §15 means those records. One record is new, on the con
 1. `ToolResultRecorded` gains `untrusted`, true for a result that holds third-party or model text
    (theses, headlines, run summaries).
 2. A stream rule: at most one `owner` `RunStarted` per `trigger.cause`.
-3. The `answer` tool's `ToolCallRecorded` carries `provenance` as an action's does, the untrusted
-   results its prompt held, so `written_after_reading` is that list (ADR-0005 §16 item 3).
-4. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
+3. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
    DEC-2243 once the founder decides it.
 
-The desk's tools are declared here, in §15.4, with their class: every one is `read`, and `note` and
-`answer` are `think`. Their names fill `RunStarted.menu` and `ToolCallRecorded.tool`, which #1540
+The desk's tools are declared here, in §15.4, with their class: every one is `read`, `note` is
+`think`, and `answer` is `action`, the run's one owner-facing output, so #1540's rule 177 makes its
+`ToolCallRecorded` carry `provenance`, the untrusted results its prompt held, and
+`written_after_reading` is that list (ADR-0005 §16 item 3); its `ToolResultRecorded`'s `code` is
+the check result, one of §15.5's, which #1540's `code` list carries. `answer` acts on nothing: it
+only hands the answer to the checks, so it adds no action path (EX-1). Their names fill `RunStarted.menu` and `ToolCallRecorded.tool`, which #1540
 types as text constrained by the menu, so no journal change is needed for them. The invariant names
 HI-24 to HI-28 cited here are #1540's.
 
