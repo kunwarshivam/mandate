@@ -19,6 +19,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   Each turn stays one `ModelInvocationRecorded`, unchanged, its place in the run given by its order;
   rule 183 only places it inside its run. It adds records and loosens nothing: every other record,
   rule, and reading is unchanged (DEC-176).
+  - **Instruments are asset IDs.** `RunSummaryRecorded`'s `instruments_read` and `watch[].instrument_id`
+    are §9.3's `asset_id`, as §9.4 types the thesis records' (v0.11), not any `id`.
   - **What `append` checks.** A run starts once and ends once, and nothing of it follows its end; an
     approval is explained once; a tool call names an `ok` research turn of its run and a tool in the
     run's menu; indexes run from 0; each call has one result, coded as its class allows; a reply over
@@ -4239,8 +4241,8 @@ input (agent harness spec §6.12), once per run that ends.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `instruments_read` | `[id]` | The asset ids the run's reads returned items about, strictly ascending |
-| `watch` | `[{instrument_id: id, reason: earnings \| filing_pending \| price_band \| thesis_expiry \| news_flow}]` | At most 10 entries, as the model gave them, with instruments outside the run's scope dropped: rule 181 |
+| `instruments_read` | `[asset_id]` | The asset IDs (§9.3's type) the run's reads returned items about, strictly ascending |
+| `watch` | `[{instrument_id: asset_id, reason: earnings \| filing_pending \| price_band \| thesis_expiry \| news_flow}]` | At most 10 entries, as the model gave them, with instruments outside the run's scope dropped: rule 181 |
 | `proposed`, `admitted`, `invalidated` | `integer` | The run's theses proposed, theses admitted, and invalidations accepted |
 
 **`RunEnded`**: why the run ended, once, after every other record of the run except a late turn
