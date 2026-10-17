@@ -174,6 +174,7 @@ REQUIRED_REFS = {
     "UniverseChanged": ("mandate_version",),
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
+    "ThesisInvalidated": ("mandate_version",),
 }
 
 # §9.3 (DEC-403): the account stream's risk-state records.
@@ -276,6 +277,19 @@ THESIS = rec(
 )
 SCHEMAS[("agent", "ThesisProposed")] = THESIS
 SCHEMAS[("agent", "ThesisRevised")] = THESIS
+
+# §9.22 (DEC-2202): the invalidation verdict on the agent stream. Its batch and stream rules (186 and
+# 187) are `invalidation.py`'s; rules 184 and 185 are judged here with the other per-draft rules.
+INVALIDATION_CAUSES = ("model", "source_revoked")
+SCHEMAS[("agent", "ThesisInvalidated")] = rec(
+    ("thesis_id", IDENT_T),
+    ("lineage_id", IDENT_T),
+    ("instrument_id", ASSET_ID),
+    ("cause", one_of(*INVALIDATION_CAUSES)),
+    ("candidate", opt(INT)),
+    ("evidence", list_of(STR)),
+    ("source", opt(STR)),
+)
 
 # §9.7 (DEC-533): the owner's approval answer and the runtime's two records of it. Times are integer
 # risk-clock seconds, as §9.6's `ApprovalRequested.deadline` is, so their step-up evidence is not
@@ -1741,6 +1755,15 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             rule("76", services, "actor.kind")
         else:
             gateway_call_rules(p, actor, rule, skip)
+    if event_type == "ThesisInvalidated":
+        model = p["cause"] == "model"
+        (
+            rule("184.candidate", (p["candidate"] is not None) == model, "payload.candidate")
+            and rule("184.evidence", model or not p["evidence"], "payload.evidence")
+            and rule("184.source", (p["source"] is None) == model, "payload.source")
+            and rule("184.causation", draft["causation_id"] is not None, "causation_id")
+        )
+        rule("185", actor["kind"] == "agent", "actor.kind")
     if event_type in ("MeterReserved", "MeterSettled"):
         rule("155", actor["kind"] == "system", "actor.kind")
     if event_type == "MeterReserved":
