@@ -258,6 +258,20 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Subject links read from the test's own file at `.0`, where the deployment reads only
+/// [`mandate_api_server::subject::SUBJECT_LINKS`].
+pub struct LinksAt(pub std::path::PathBuf);
+
+impl mandate_api_server::subject::SubjectLinks for LinksAt {
+    fn principal(
+        &self,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<mandate_identity::PrincipalId, mandate_api_server::subject::LinkRefusal> {
+        mandate_api_server::subject::principal_at(&self.0, issuer, subject)
+    }
+}
+
 /// The workspace the test deployment hosts, and its organization.
 pub const WORKSPACE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Y";
 pub const ORG: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3X";
