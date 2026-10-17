@@ -6,12 +6,12 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
+use crate::supervisor::{Phase, Status};
+
 /// The longest request line read, and how long a client may stay silent, so that one client
 /// cannot hold the listener from the orchestrator's probes.
 const LINE_BOUND: u64 = 1024;
 const READ_BOUND: Duration = Duration::from_secs(1);
-
-use crate::supervisor::{Phase, Status};
 
 /// The status line and body for a request path in a phase.
 ///
