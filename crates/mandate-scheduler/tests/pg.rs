@@ -1,5 +1,5 @@
-//! The scheduler's Postgres store over a real Postgres journal (E21-29, DEC-1010): ownership
-//! fences, rows read back as written, and a scheduler that starts and ticks on it. The suite's PG
+//! The scheduler over a real Postgres journal (E21-29, DEC-1010): it starts, ticks, and measures
+//! on `mandate-store`'s Postgres store, and its records read back. The suite's PG
 //! class: it skips unless `MANDATE_PG_URL` is set, and fails without it where
 //! `MANDATE_PG_REQUIRED` is (DEC-109, DEC-519). The journal is a local test schema and nothing
 //! here carries a credential (`AGENTS.md` rules 7 and 8).
@@ -25,8 +25,8 @@ use std::time::Duration;
 use mandate_journal::{Environment, StreamId};
 use mandate_journal_pg::APP_ROLE;
 use mandate_process::State;
-use mandate_scheduler::store::PgStore;
-use mandate_scheduler::{ClockStore, Config, Sample, Scheduler, TimeServers};
+use mandate_scheduler::{Config, Sample, Scheduler, TimeServers};
+use mandate_store::{PgStore, Store};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
 /// 2026-10-16T13:00:00Z, a Friday, 09:00 in New York.
@@ -55,19 +55,6 @@ impl TimeServers for InTolerance {
             delay_ns: 1_000_000,
         }]
     }
-}
-
-#[test]
-fn each_owner_of_the_clock_stream_takes_a_newer_epoch_than_the_last() {
-    let Some(db) = support::TestDb::new() else {
-        return;
-    };
-    let mut first = PgStore::connect(&dsn(&db)).unwrap();
-    let mut second = PgStore::connect(&dsn(&db)).unwrap();
-    let taken = first.take_ownership(&stream()).unwrap();
-    let newer = second.take_ownership(&stream()).unwrap();
-    assert!(taken >= 1, "an owner holds epoch {taken}");
-    assert!(newer > taken, "{newer} fences {taken}");
 }
 
 #[test]

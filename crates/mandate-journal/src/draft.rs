@@ -331,9 +331,11 @@ fn subject(stream_id: &StreamId, payload: &Value) -> Option<String> {
             field("workspace_id")?,
             field("account_ref")?
         )),
-        StreamType::Agent | StreamType::Control | StreamType::Scheduler | StreamType::Notice => {
-            None
-        }
+        StreamType::Agent
+        | StreamType::Control
+        | StreamType::Scheduler
+        | StreamType::Notice
+        | StreamType::Meter => None,
     }
 }
 
