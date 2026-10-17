@@ -289,6 +289,30 @@ forbidden_internal = [
     "mandate-paper",
 ]
 
+# The global control plane's first slice (E21-43 with E20-1, E20-2, E20-5; DEC-984): the
+# directory, enrollment, routing and fleet health, over a store it declares. It runs outside every
+# cell (design §3), so it reaches no journal, runtime, executor, connector, vault, or process crate,
+# and not the cell's control-plane agent or its workspace-services handler: nothing it holds is a
+# path into a deployment (CP-4, CP-7, CP-12).
+[crates.mandate-cp]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["ring"]
+forbidden_internal = [
+    "mandate-journal",
+    "mandate-journal-pg",
+    "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
+
 [crates.mandate-liquidity]
 layer = 1
 safety_critical = true
