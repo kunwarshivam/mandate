@@ -289,3 +289,35 @@ fn thousandths(n: i64) -> String {
     let digits = format!("{fraction:03}");
     format!("{sign}{whole}.{}", digits.trim_end_matches('0'))
 }
+
+#[test]
+fn every_bound_admits_its_own_value_and_refuses_one_past_it() {
+    let exact = OutputBounds {
+        max_output_bytes: u32::try_from(ONE_THESIS.len()).unwrap_or(0),
+        ..bounds()
+    };
+    assert!(parse_output(ONE_THESIS.as_bytes(), &exact).is_ok());
+    let short = OutputBounds {
+        max_output_bytes: exact.max_output_bytes - 1,
+        ..bounds()
+    };
+    assert_eq!(
+        parse_output(ONE_THESIS.as_bytes(), &short).map(|_| ()),
+        Err(OutputRejection::TooLong)
+    );
+    let full_text = ONE_THESIS.replace("Services revenue keeps compounding.", &"x".repeat(2_000));
+    assert!(
+        parse_output(full_text.as_bytes(), &bounds()).is_ok(),
+        "2,000 bytes is in bounds"
+    );
+    for (length, ok) in [(128, true), (129, false)] {
+        let text = ONE_THESIS.replace(r#""n-1""#, &format!("\"{}\"", "e".repeat(length)));
+        assert_eq!(
+            parse_output(text.as_bytes(), &bounds()).is_ok(),
+            ok,
+            "evidence id of {length}"
+        );
+    }
+    let control = ONE_THESIS.replace(r#""n-1""#, r#""n\u0001x""#);
+    assert!(matches!(rejected(&control), OutputRejection::Range { .. }));
+}

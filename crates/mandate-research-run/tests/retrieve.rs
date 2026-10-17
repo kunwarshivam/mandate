@@ -437,3 +437,70 @@ fn two_bars_in_one_second_are_one_bar() {
     assert_eq!(kept(&retrieval.items, ItemKind::Bar).len(), 1);
     assert_eq!(dropped(&retrieval, DropReason::Duplicate).len(), 1);
 }
+
+#[test]
+fn a_bar_known_at_the_cut_off_is_kept() {
+    let mut fixture = Fixture::default();
+    fixture.bars = vec![common::bar("AAPL", CUT_OFF, "100")];
+    let retrieval =
+        retrieve(&plan(), &scope(), fixture.readers()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(kept(&retrieval.items, ItemKind::Bar).len(), 1);
+}
+
+#[test]
+fn text_at_its_cap_is_kept_whole_and_one_byte_more_is_cut() {
+    let mut fixture = Fixture::default();
+    let mut at_cap = news("n-cap", NEWSWIRE, "AAPL", CUT_OFF - 60);
+    at_cap.headline = "h".repeat(1_000);
+    at_cap.summary = "s".repeat(1_000);
+    at_cap.link = "l".repeat(512);
+    let mut over = news("n-over", NEWSWIRE, "AAPL", CUT_OFF - 50);
+    over.headline = "h".repeat(1_001);
+    over.summary = "s".repeat(1_000);
+    fixture.news = vec![at_cap, over];
+    let mut excerpt_cap = filing("f-cap", "AAPL", CUT_OFF - 60);
+    excerpt_cap.excerpt = "e".repeat(4_000);
+    excerpt_cap.form = "F".repeat(32);
+    let mut excerpt_over = filing("f-over", "AAPL", CUT_OFF - 50);
+    excerpt_over.excerpt = "e".repeat(4_001);
+    fixture.filings = vec![excerpt_cap, excerpt_over];
+    let retrieval =
+        retrieve(&plan(), &scope(), fixture.readers()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        dropped(&retrieval, DropReason::Trimmed),
+        vec!["f-over", "n-over"]
+    );
+    for item in &retrieval.items {
+        match item {
+            RetrievedItem::Filing(kept) => assert_eq!(kept.excerpt.len(), 4_000),
+            RetrievedItem::News(kept) => {
+                assert_eq!(kept.headline.len() + kept.summary.len(), 2_000);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn an_item_names_its_one_instrument_and_its_text_length() {
+    let mut one = news("n-1", NEWSWIRE, "AAPL", CUT_OFF - 60);
+    one.headline = "abc".to_owned();
+    one.summary = "de".to_owned();
+    let mut two = one.clone();
+    two.symbols.insert(symbol("MSFT"));
+    let one = RetrievedItem::News(one);
+    assert_eq!(one.symbol().map(|s| s.as_str()), Some("AAPL"));
+    assert_eq!(one.length_bytes(), 5);
+    assert_eq!(
+        RetrievedItem::News(two).symbol(),
+        None,
+        "a multi-instrument item names none"
+    );
+    let mut excerpt = filing("f-1", "AAPL", CUT_OFF - 60);
+    excerpt.excerpt = "1234567".to_owned();
+    assert_eq!(RetrievedItem::Filing(excerpt).length_bytes(), 7);
+    assert_eq!(
+        RetrievedItem::Bar(common::bar("AAPL", CUT_OFF, "1")).length_bytes(),
+        0
+    );
+}

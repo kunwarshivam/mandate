@@ -1638,3 +1638,456 @@ fn a_call_record_that_never_folds_back_frees_the_loop_after_the_bound() {
     );
     assert!(lp.events("ThesisProposed").is_empty());
 }
+
+fn booted() -> (Fixture, World) {
+    (Fixture::new(), World::open())
+}
+
+fn retrieved_items(world: &World, cut_off: i64) -> Vec<mandate_runtime::RetrievedObservation> {
+    let plane = RecordedPlane::load();
+    mandate_research_run::retrieve(
+        &common::research::config().plan,
+        &world.scope(clock(cut_off)),
+        plane.readers(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+    .items
+    .iter()
+    .map(|item| {
+        mandate_runtime::RetrievedObservation::capture(item, clock(cut_off))
+            .unwrap_or_else(|e| panic!("{e}"))
+            .0
+    })
+    .collect()
+}
+
+#[test]
+fn a_poll_behind_the_risk_clock_is_refused_and_one_at_it_is_not() {
+    let (f, world) = booted();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let last = lp
+        .shell
+        .state
+        .risk_clock()
+        .unwrap_or_else(|| panic!("a clock"))
+        .secs();
+    assert!(matches!(
+        lp.step(ResearchInput::Poll(clock(last - 1)), &ports, &world),
+        Err(RuntimeError::RiskClockWentBackwards { .. })
+    ));
+    assert!(
+        lp.step(ResearchInput::Poll(clock(last)), &ports, &world)
+            .is_ok()
+    );
+}
+
+#[test]
+fn worker_inputs_for_a_run_not_in_its_state_are_refused() {
+    let (f, world) = booted();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let items = retrieved_items(&world, CUT_OFF);
+    let stray = lp.step(
+        ResearchInput::Retrieved {
+            run_id: "01NORUN".to_owned(),
+            items: items.clone(),
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(stray, Err(RuntimeError::NotInterpreted { .. })),
+        "no run at all"
+    );
+    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+    let run_id = started[0].0.clone();
+    let wrong = lp.step(
+        ResearchInput::Retrieved {
+            run_id: "01OTHERRUN".to_owned(),
+            items: items.clone(),
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(wrong, Err(RuntimeError::NotInterpreted { .. })),
+        "another run's id"
+    );
+    let early = lp.step(
+        ResearchInput::Called {
+            run_id: run_id.clone(),
+            at: clock(CUT_OFF + 1),
+            outcome: Err(CallFailure {
+                call_id: "x".to_owned(),
+                kind: ErrorKind::ProviderUnavailable,
+                completed_at: mandate_time::UtcNanos::EPOCH,
+            }),
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(early, Err(RuntimeError::NotInterpreted { .. })),
+        "an answer before a call"
+    );
+    assert_eq!(
+        lp.research.in_flight(),
+        Some(run_id.as_str()),
+        "the run is kept"
+    );
+    lp.run(
+        ResearchInput::Retrieved {
+            run_id: run_id.clone(),
+            items: items.clone(),
+        },
+        &ports,
+        &world,
+    );
+    let twice = lp.step(ResearchInput::Retrieved { run_id, items }, &ports, &world);
+    assert!(
+        matches!(twice, Err(RuntimeError::NotInterpreted { .. })),
+        "a second retrieval"
+    );
+}
+
+#[test]
+fn a_retrieval_off_its_cut_off_or_with_an_item_twice_is_refused() {
+    for change in 0..2 {
+        let (f, world) = booted();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+        let mut items = retrieved_items(&world, CUT_OFF);
+        if change == 0 {
+            items[0].observation.as_of = clock(CUT_OFF - 1);
+        } else {
+            let first = items[0].clone();
+            items.push(first);
+        }
+        let refused = lp.step(
+            ResearchInput::Retrieved {
+                run_id: started[0].0.clone(),
+                items,
+            },
+            &ports,
+            &world,
+        );
+        assert!(
+            matches!(refused, Err(RuntimeError::NotInterpreted { .. })),
+            "change {change}"
+        );
+        assert!(lp.events("ObservationRecorded").is_empty());
+    }
+}
+
+#[test]
+fn the_worker_s_own_cancellation_ends_the_run_and_one_for_another_run_does_not() {
+    let (f, world) = booted();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+    lp.run(
+        ResearchInput::Cancelled {
+            run_id: "01OTHERRUN".to_owned(),
+            dispatched: false,
+        },
+        &ports,
+        &world,
+    );
+    assert_eq!(lp.research.in_flight(), Some(started[0].0.as_str()));
+    lp.run(
+        ResearchInput::Cancelled {
+            run_id: started[0].0.clone(),
+            dispatched: false,
+        },
+        &ports,
+        &world,
+    );
+    assert_eq!(lp.research.in_flight(), None);
+}
+
+#[test]
+fn an_acknowledgment_forgets_a_run_unless_its_planned_call_was_dispatched() {
+    for (planned, dispatched, remembered) in [
+        (false, true, false),
+        (true, false, false),
+        (true, true, true),
+    ] {
+        let (f, mut world) = booted();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+        let run_id = started[0].0.clone();
+        if planned {
+            lp.run(
+                ResearchInput::Retrieved {
+                    run_id: run_id.clone(),
+                    items: retrieved_items(&world, CUT_OFF),
+                },
+                &ports,
+                &world,
+            );
+        }
+        world.config = None;
+        lp.run(ResearchInput::Poll(clock(CUT_OFF + 1)), &ports, &world);
+        lp.run(
+            ResearchInput::Cancelled {
+                run_id: run_id.clone(),
+                dispatched,
+            },
+            &ports,
+            &world,
+        );
+        let answer = lp.step(
+            ResearchInput::Called {
+                run_id,
+                at: clock(CUT_OFF + 2),
+                outcome: Err(CallFailure {
+                    call_id: "x".to_owned(),
+                    kind: ErrorKind::ProviderUnavailable,
+                    completed_at: mandate_time::UtcNanos::EPOCH,
+                }),
+            },
+            &ports,
+            &world,
+        );
+        assert_eq!(
+            answer.is_ok(),
+            remembered,
+            "planned {planned}, dispatched {dispatched}"
+        );
+    }
+}
+
+#[test]
+fn a_stale_research_step_is_never_replayed_over_another_unresolved_batch() {
+    let (f, world) = booted();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+    let input = ResearchInput::Retrieved {
+        run_id: started[0].0.clone(),
+        items: retrieved_items(&world, CUT_OFF),
+    };
+    lp.run(input.clone(), &ports, &world);
+    lp.shell.next_append = common::AppendOutcome::Unresolved;
+    lp.shell.run(Input::Command(Command::Pause), &ports);
+    let replayed = mandate_runtime::handle_research(
+        &mut lp.shell.state,
+        &mut lp.research,
+        input,
+        &ports,
+        &world.context(),
+    );
+    assert!(matches!(
+        replayed,
+        Err(RuntimeError::AppendUnresolved { .. })
+    ));
+}
+
+#[test]
+fn the_research_fold_reads_only_research_call_records() {
+    let mut research = mandate_runtime::ResearchState::new();
+    let other = event(
+        common::AGENT_STREAM,
+        1,
+        "ModelInvocationRecorded",
+        common::object(&[("purpose", text("compiler"))]),
+    );
+    research.fold(&other).unwrap_or_else(|e| panic!("{e}"));
+    let unrelated = event(
+        common::AGENT_STREAM,
+        2,
+        "DecisionMade",
+        common::object(&[("purpose", text("research"))]),
+    );
+    research.fold(&unrelated).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(research.last_call(), None);
+    let unreadable = event(
+        common::AGENT_STREAM,
+        3,
+        "ModelInvocationRecorded",
+        common::object(&[("purpose", text("research"))]),
+    );
+    assert!(
+        research.fold(&unreadable).is_err(),
+        "a research record without called_at"
+    );
+}
+
+#[test]
+fn the_drift_fold_classes_news_and_filings_apart() {
+    let (f, world) = booted();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let mut plane = RecordedPlane::load();
+    plane
+        .news
+        .retain(|item| item.source.as_str() == "src.wire_two");
+    plane.filings = vec![mandate_research_run::Filing {
+        item_id: mandate_research_run::ItemId::new("f-aapl-8k").unwrap_or_else(|e| panic!("{e}")),
+        source: mandate_research_run::SourceId::new("src.edgar").unwrap_or_else(|e| panic!("{e}")),
+        symbol: mandate_research_run::Symbol::new("AAPL").unwrap_or_else(|e| panic!("{e}")),
+        form: "8-K".to_owned(),
+        knowledge_at: mandate_time::UtcNanos::from_parts(CUT_OFF - 600, 0)
+            .unwrap_or_else(|e| panic!("{e}")),
+        filed_at: mandate_time::UtcNanos::from_parts(CUT_OFF - 600, 0)
+            .unwrap_or_else(|e| panic!("{e}")),
+        excerpt: "Item 2.02.".to_owned(),
+        content_hash: mandate_canon::Digest::of(b"f-aapl-8k"),
+        licensed: false,
+    }];
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        &failing(ErrorKind::ProviderUnavailable),
+    );
+    let mut expected = mandate_research::drift::DriftState::new();
+    let observe = |source: &str, class, at: i64, id: &str, length: u64| {
+        mandate_research::drift::InputObservation {
+            source: mandate_research::SourceId::new(source).unwrap_or_else(|e| panic!("{e}")),
+            class,
+            observed_at: mandate_time::UtcNanos::from_parts(at, 0)
+                .unwrap_or_else(|e| panic!("{e}")),
+            content: mandate_research::ContentHash::new(mandate_canon::Digest::of(id.as_bytes())),
+            length_bytes: length,
+        }
+    };
+    let supply = &plane.news[0];
+    expected
+        .observe(&observe(
+            "src.wire_two",
+            mandate_research::drift::InputClass::News,
+            supply.knowledge_at.secs(),
+            supply.item_id.as_str(),
+            u64::try_from(supply.headline.len() + supply.summary.len()).unwrap_or(0),
+        ))
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    expected
+        .observe(&observe(
+            "src.edgar",
+            mandate_research::drift::InputClass::Filing,
+            CUT_OFF - 600,
+            "f-aapl-8k",
+            10,
+        ))
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(lp.research.drift(), &expected);
+}
+
+#[test]
+fn a_thesis_id_is_no_event_s_id() {
+    let (f, world) = booted();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let plane = RecordedPlane::load();
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        &recorded(RESPONSE_AAPL),
+    );
+    let thesis = payload_text(&lp.events("ThesisProposed")[0].payload, "thesis_id")
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        lp.shell
+            .agent_journal
+            .iter()
+            .all(|event| event.event_id.0 != thesis),
+        "a derived thesis id never meets a draft's id"
+    );
+}
+
+#[test]
+fn a_thesis_for_an_instrument_with_an_active_thesis_renews_its_lineage() {
+    for revision in [0u32, 2] {
+        let (f, mut world) = booted();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        world.admit(AAPL);
+        world.active = vec![
+            ActiveThesis {
+                thesis_id: "01MSFTTHESIS".to_owned(),
+                lineage_id: "01MSFTLINEAGE".to_owned(),
+                revision: 0,
+                instrument: AssetId::new(MSFT).unwrap_or_else(|e| panic!("{e}")),
+                symbol: mandate_research_run::Symbol::new("MSFT").unwrap_or_else(|e| panic!("{e}")),
+                expires_at: clock(CUT_OFF + 86_400),
+            },
+            ActiveThesis {
+                thesis_id: "01AAPLTHESIS".to_owned(),
+                lineage_id: "01AAPLLINEAGE".to_owned(),
+                revision,
+                instrument: AssetId::new(AAPL).unwrap_or_else(|e| panic!("{e}")),
+                symbol: mandate_research_run::Symbol::new("AAPL").unwrap_or_else(|e| panic!("{e}")),
+                expires_at: clock(CUT_OFF + 86_400),
+            },
+        ];
+        let plane = RecordedPlane::load();
+        full_run(
+            &mut lp,
+            clock(CUT_OFF),
+            &ports,
+            &world,
+            &plane,
+            &recorded(RESPONSE_AAPL),
+        );
+        let kind = if revision > 0 {
+            "ThesisRevised"
+        } else {
+            "ThesisProposed"
+        };
+        let records = lp.events(kind);
+        assert_eq!(records.len(), 1, "revision {revision}");
+        let record = &records[0].payload;
+        assert_eq!(payload_text(record, "lineage_id"), Some("01AAPLLINEAGE"));
+        assert_eq!(
+            record.get("revision").and_then(Value::as_int),
+            Some(u64::from(revision))
+        );
+        let predecessor = record.get("predecessor_thesis_id");
+        if revision > 0 {
+            assert_eq!(predecessor.and_then(Value::as_str), Some("01AAPLTHESIS"));
+        } else {
+            assert_eq!(predecessor, Some(&Value::Null));
+        }
+        assert_eq!(
+            verdicts(&lp),
+            vec!["renewed".to_owned()],
+            "revision {revision}"
+        );
+    }
+}
+
+#[test]
+fn a_cited_source_off_the_admission_allowlist_never_corroborates() {
+    let mut world = World::open();
+    world
+        .facts
+        .allowlist
+        .sources
+        .retain(|source| source.as_str() != "src.wire_two");
+    let lp = judged_with(RESPONSE_AAPL, &world);
+    let record = &lp.events("ThesisProposed")[0].payload;
+    assert_eq!(record.get("corroboration"), Some(&Value::Null));
+    assert_eq!(
+        payload_text(record, "reason"),
+        Some("source_not_allowlisted")
+    );
+}

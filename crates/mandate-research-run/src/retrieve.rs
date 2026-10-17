@@ -282,10 +282,10 @@ fn window_start(cut_off: UtcNanos, window_s: u32) -> Result<UtcNanos, ResearchRu
 
 /// The longest prefix of `text` at most `budget` bytes long that ends on a character boundary.
 fn cut(text: &str, budget: usize) -> &str {
-    let mut end = budget.min(text.len());
-    while !text.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
+    let end = (0..=budget.min(text.len()))
+        .rev()
+        .find(|end| text.is_char_boundary(*end))
+        .unwrap_or(0);
     text.get(..end).unwrap_or_default()
 }
 
