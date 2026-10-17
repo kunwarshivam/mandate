@@ -16,7 +16,7 @@ use mandate_gateway::money::Usd6;
 use mandate_time::UtcNanos;
 
 use crate::error::ResearchRunError;
-use crate::item::{ItemId, Symbol};
+use crate::item::{ItemId, ItemKind, Symbol};
 use crate::output::CandidateOutput;
 
 const STORY: &str = "E19-13";
@@ -387,6 +387,7 @@ pub struct EndPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FoldedEvent {
     Started(RunStart),
+    Seeded(Vec<(ItemKind, ItemId)>),
     Turn(ReplyInput),
     Result(ToolResult),
     Ended(EndReason),
@@ -421,6 +422,15 @@ impl RunState {
     /// What the run froze at its start.
     pub fn started(&self) -> &RunStart {
         &self.start
+    }
+
+    /// Takes the seed's items (§6.9 step 2), so a later `news.get` or `filings.get` may name them.
+    ///
+    /// # Errors
+    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    pub fn on_seed(&mut self, items: &[(ItemKind, ItemId)]) -> Result<(), ResearchRunError> {
+        let _ = items;
+        Err(ResearchRunError::Unimplemented { story: STORY })
     }
 
     /// The next turn's plan, given the run's time left on the risk clock (§6.9 step 3).
