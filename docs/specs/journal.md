@@ -2,16 +2,72 @@
 
 | | |
 |---|---|
-| **Status** | v0.45 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.47 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, and `control_plane` section of §9.17; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, and `model_gateway` section of §9.19; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.47 ([DEC-1010](../project/decisions/DEC-1010.md); E21-29):** §9.20 closes the scheduler
+  stream's five records at schema version 1 before the scheduler process writes them: its
+  `StreamOpened`, `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`, and
+  `ClockToleranceExceeded`, with rules 159 to 164. §5.4 named the measurements but not their
+  members; until this version a scheduler-stream record's payload was not checked. It binds the
+  scheduler stream only: the executor's account-stream copies keep §9's row (E7-4 slice 5).
+  Agent-accepted under DEC-176: it closes a gap that nothing wrote into, and every reading is the
+  one that adds no risk.
+  - **The measurement.** Offsets are signed `decimal` seconds (§4.4 keeps integers non-negative).
+    The measured `offset` is the median by magnitude of the answering servers', the larger of two;
+    a measurement no server answers has none and is out of tolerance (`AGENTS.md` rule 3).
+  - **What reads it.** Design §3.4's start-up check, read the stricter way: while the last
+    measurement is out of tolerance, or before the first, an executor takes no new opening (its
+    story, E21-30); exits, protection, the kill switch, and the ticks are never held. Design §3.4
+    says so in the same change.
+  - **The flagged interval.** Records are flagged from the last in-tolerance measurement before a
+    `ClockToleranceExceeded` to the next in-tolerance one: the earlier start flags more, never
+    fewer. Flags are computed by exports and read by no risk input.
+  - **The ticks.** `ClockAdvanced` carries its tick as `clock`, a whole-second `risk_clock`: one
+    tick per elapsed second, each the later of the previous plus one second and the host clock's
+    second, so a host clock that steps back never freezes or reverses the risk clock.
+    `TradingDayStarted` follows the first tick of each new trading date in its batch. `append` does
+    not compare ticks or dates across records at this version.
+  - **Versions.** v0.46, §9.19, and rules up to 158 are held by an open change (the gateway lane);
+    this change takes v0.47, §9.20, and rules 159 to 164, and is renumbered at merge if that
+    changes.
+
+- **v0.46 ([DEC-998](../project/decisions/DEC-998.md); E15-8, DEC-432 items 11, 19, 20, 22):**
+  §9.19 closes the agent stream's `ModelInvocationRecorded` at schema version 1 and adds the model
+  gateway's meter stream, `meter:{workspace_id}` (§2), with `StreamOpened`, `MeterReserved`, and
+  `MeterSettled` and rules 146 to 158. The agent-stream record was catalogued with no registered
+  payload, so `append` refused it and no gateway call could be journaled before its output was used
+  (inference spec INF-10). It admits records that were impossible and loosens nothing: every other
+  record, rule, and reading is unchanged (DEC-176). v0.44 (#1450) and v0.45 (#1472) are other
+  changes' numbers, as are rules 137 to 145.
+  - **Members.** §9.9's control-stream members (DEC-432 item 11) with `purpose` `research`,
+    `llm_signal`, or `fast_signal` and no draft, then the agent harness spec's two (DEC-432 item 22):
+    `observations`, the run's retrieved context, and `verdicts`, one per candidate in the response,
+    with its kind. It adds `reservation`, the meter record the call reserved under, and `guard_rule`.
+    For a prompt the guard refused, `prompt_ref` and `request_digest` are `null`: neither the prompt
+    nor the canonical request that holds it is stored (INF-8, INF-14). Rule 153 refuses a second
+    record of one call.
+  - **The meter stream.** One writer per workspace, fenced by epoch (DEC-432 item 20). A call that may
+    reach a provider reserves its maximum cost before its first attempt and settles once on completion.
+    A refusal (`meter_unavailable` among them) and a cache hit have no meter record. A reservation never
+    settled, because its call's process died, stays counted at its maximum (inference spec §7.3; this
+    picks one fold for backlog E15-12 minor 8). Spend folds from the stream alone. The range grammar of
+    §9.13 and the anchors' stream types name it.
+  - **Vectors.** A new generated `model_gateway` section holds base drafts for the four records, an
+    invalid draft for every member type and rule, valid drafts for the cases a rule might be misread to
+    refuse, agent and meter streams for rules 153 and 158, spend folds recomputed by an independent
+    accumulator, and a seeded fuzz of reservations, settlements, crashes, and month boundaries under
+    caps. The vectors stay version 3.
+  - **Order of the changes (ES-22).** Spec and vectors first. `mandate-journal`'s registration of the
+    records and the meter stream follows in its own code change; until it lands, no agent journals a
+    gateway call and no live call is made (DEC-998 item 8).
 - **v0.45 ([DEC-1001](../project/decisions/DEC-1001.md), [DEC-1002](../project/decisions/DEC-1002.md);
   E4-5, E17-8):** §9.18 closes the workspace control stream's `BacktestRunRecorded` at schema
   version 1 and adds `EvaluationRunRecorded`, the forward-paper evaluation's record. Both name a
@@ -759,6 +815,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 | Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, signal-model outputs, decisions, intents proposed, approvals, agent mode changes |
 | Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export, and the control-plane link's records (§9.17) |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
+| Meter | `meter:{workspace_id}` | The workspace's model-gateway meter writer, one replica at a time, fenced by epoch ([inference spec §3.6](inference.md#36-journaling)) | Model-call cost reservations and settlements (§9.19). Never a risk input; spend for caps folds from it |
 | Notice | `ntf:{workspace_id}` | The workspace's notification dispatcher ([notifications spec §5.1](notifications.md#51-the-dispatcher)) | Notices issued and every delivery attempt. Never a risk input; no other stream's owner copies from it |
 
 - **Identifier grammar:** every `{…}` segment matches `[A-Za-z0-9_-]+`. `account_ref` is an opaque
@@ -928,7 +985,8 @@ A new writer takes ownership by incrementing `writer_epoch`; the previous writer
 startup, before the regular session, and at least every 10 minutes, recording sources and stratum in
 `ClockOffsetRecorded`. If the offset exceeds the tolerance (default 50 ms), it journals
 `ClockToleranceExceeded`, and events recorded while out of tolerance are flagged in exports. Broker
-`event_time` remains authoritative for executions.
+`event_time` remains authoritative for executions. §9.20 closes these records, defines the measured offset, what reads it, and the
+flagged interval, and holds that a measurement no server answers is out of tolerance.
 
 ## 6. Storage
 
@@ -1101,7 +1159,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 |---|---|---|
 | `StreamOpened` | — | stream type, subject, environment |
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
-| `ModelInvocationRecorded` | mod | purpose (fast model, research; the compiler's is on the control stream, §9.9), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
+| `ModelInvocationRecorded` | mod | A gateway call's record (fast model, LLM signal model, research; the compiler's is on the control stream, §9.9): model, endpoint, request digest, sampling, prompt and response (artifacts), reported identity, provider request ID, outcome, attempts, tokens, cost, price table, cache hit, deadline, completion, the meter reservation, the retrieved context, and the candidates' verdicts; closed in §9.19 |
 | `ModelOutputRecorded` | v1: man; v2: man, reg | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
 | `DecisionMade` | v1: man; v2: man, pol, reg | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
@@ -1164,8 +1222,16 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 `NotificationAddressChanged`: its row and schema come with the notification records' change
 ([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md)).
 
-**Scheduler stream:** `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
-`ClockToleranceExceeded`.
+**Scheduler stream:** `StreamOpened`, `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
+`ClockToleranceExceeded`; closed in §9.20.
+
+**Meter stream** (owner: the workspace's model-gateway meter writer; [inference spec §3.6, §7.3](inference.md#73-budget-enforcement))
+
+| Event type | Required refs | Key payload fields |
+|---|---|---|
+| `StreamOpened` | — | stream type, workspace; closed in §9.19 |
+| `MeterReserved` | — | A call's reservation of its maximum cost before its first attempt: call, agent, purpose, model, endpoint, key owner, price table, maximum cost, risk day; closed in §9.19 |
+| `MeterSettled` | — | The call's settlement: call, reservation, outcome, attempts, tokens, cost; closed in §9.19 |
 
 **Notice stream** (owner: the workspace's notification dispatcher; [notifications spec §5.5](notifications.md#55-records))
 
@@ -1185,7 +1251,7 @@ a record with exactly the listed members, every one present (§4.2). The test ve
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
 closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
-and `ModelInvocationRecorded` in its own story. `ThesisProposed` and `ThesisRevised` are closed in
+and `ModelInvocationRecorded` in §9.19. `ThesisProposed` and `ThesisRevised` are closed in
 §9.4.
 `OwnerCommandRefused` is closed in §9.2, on both streams that write it.
 
@@ -2625,8 +2691,10 @@ for a user and has no agent, so its record is on the workspace's control stream,
 workspace services that called the gateway ([inference spec §3.6](inference.md#36-journaling)); this
 answers inference spec §13 question 1. Its members are [DEC-432](../project/decisions/DEC-432.md)
 item 11's, typed from inference spec §3.1 to §3.5. `config_refs.model_version` names the compiler's
-registered model. On the agent stream the record stays open until E15-8 closes it, with these
-members and the agent harness's.
+registered model. On the agent stream it is closed in §9.19, with these members and the agent
+harness's. Until a version 2 of this record makes `prompt_ref` nullable for `input_rejected` (rule
+148's reading, DEC-998 item 2), the compiler makes no gateway call, since a guard-refused prompt
+would otherwise be stored.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -3139,7 +3207,7 @@ and journals nothing about that stream.
 
 | Type | Values | Refused as |
 |---|---|---|
-| `stream_id` | §2's form: `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`, `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` | As `id` |
+| `stream_id` | §2's form: `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`, `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}` (§9.19), each segment `[A-Za-z0-9_-]+` | As `id` |
 | `digest` | 64 lowercase hex SHA-256: an event's `hash` or `prev_hash` (§3), or a digest of bytes the journal does not store, such as §12's verifier digest. It is not a `ref`: it names no stored artifact, so it is not listed in `artifact_refs` and §11 check 6 does not read it | As `id` |
 
 **`range`**, the unit every record covers: one stream's events from `from_seq` to `to_seq`, both
@@ -3380,7 +3448,7 @@ stream owner copies a fact from it and the dispatcher writes nothing else.
 | Type | Values | Refused as |
 |---|---|---|
 | `notice_id` | Exactly 32 lowercase hexadecimal digits: notifications spec §4.2's random notice id. Never an event id, which is a `ulid` and carries its creation time | As `id` |
-| `stream_id` | A stream id in §2's grammar, of one of the five stream types | As `id` |
+| `stream_id` | A stream id in §2's grammar, of one of the six stream types (the meter stream's since v0.46, §9.19) | As `id` |
 | `opaque` | 1 to 256 characters, each U+0021 to U+007E: a provider's message id, which has no space and so cannot carry a sentence | As `id` |
 | `kind` | Notifications spec §3.2's closed set of 33 kinds, below | As `id` |
 
@@ -3790,6 +3858,302 @@ stream of one of the team's internal paper workspaces (DEC-103).
 **No mapping to `JournaledFact`.** No fold reads either record: they are what the backtest and
 evaluation produced, and the go-live record names a backtest by its id (`AgentDeployed`). The rule
 numbers follow §9.17's rule 142.
+
+### 9.19 Model gateway records ([DEC-998](../project/decisions/DEC-998.md))
+
+The model gateway ([inference spec](inference.md)) is the one component that calls a model. It
+writes none of the existing streams: the caller appends each call's `ModelInvocationRecorded` to its
+own stream (inference spec §3.6), and the gateway's meter writer owns the meter stream. §9.2's
+conventions apply unchanged: every member is present on every record (§4.2), `null` only where the
+type is nullable, any other member refused, and opaque text non-empty. Each schema is
+`schema_version` 1.
+
+**`ModelInvocationRecorded`** on the agent stream: one record per gateway call the agent's runtime
+made, whatever its outcome, appended before the call's output is used (inference spec INF-10). Its
+members are §9.9's, with `purpose` for an agent and no draft, then the reservation, the guard's
+rule, and the agent harness spec's two ([agent harness spec §6.6](agent-harness.md), DEC-432
+item 22). The run id of a research call rides in `correlation_id`. `config_refs.model_version`
+names the model called (§9's `mod`).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `call_id` | `ulid` | The gateway's call (inference §3.1); its retries reuse it: rule 153 |
+| `purpose` | `research` \| `llm_signal` \| `fast_signal` | Inference §3.1's purposes for an agent. The compiler's is on the control stream (§9.9) |
+| `model` | `{model_id: text, model_version: text, content_hash: ref}` | The registry entry called: rule 146 |
+| `endpoint` | `text` | The registry endpoint that served it, or the one it was refused for (`none` when no endpoint was chosen) |
+| `request_digest` | `ref?` | SHA-256 of the canonical request (inference §3.1), which holds the rendered prompt; `null` exactly when the guard refused the prompt: rule 148 |
+| `sampling` | `{temperature: decimal, seed: integer?}` | `seed` is `null` where the provider takes none |
+| `prompt_ref` | `ref?` | The rendered prompt, or `null` exactly when the guard refused it: rule 148 |
+| `guard_rule` | `credential` \| `account_identifier` \| `personal_data` \| `foreign_workspace` \| `input_contract` \| `null` | The guard rule a refused prompt broke (inference §8.3), `input_contract` for inputs that differ from the template's contract; non-null exactly for `input_rejected`: rule 148. The content is never recorded |
+| `response_ref` | `ref?` | The response, or `null` when no response bytes were kept |
+| `reported_identity` | `text?` | What the provider says served the call (INF-2), as `model@provider` |
+| `provider_request_id` | `text?` | |
+| `outcome` | as §9.9's | Inference §3.3 |
+| `attempts` | `integer` | Attempts sent to a provider: rule 152 |
+| `tokens` | `{input: integer, output: integer, cached: integer}` | |
+| `cost_usd` | `decimal` | From the price table in effect (inference §7.2); not recomputed at append |
+| `price_table_ref` | `ref` | The price table version used |
+| `cache_hit` | `boolean` | Served from the gateway's cache (inference §3.5) |
+| `deadline` | `timestamp` | The call's absolute deadline |
+| `completed_at` | `timestamp` | When the gateway finished with it |
+| `reservation` | `ulid?` | The `event_id` of the call's `MeterReserved`, or `null` when it reserved nothing: rule 149. The link crosses streams, so `append` does not resolve it |
+| `observations` | `[ulid]` | The retrieved context: the `event_id`s of the `ObservationRecorded` records whose items the prompt holds, strictly ascending: rule 150. Empty for a call with no retrieval plan |
+| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (E19-5, not yet catalogued); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22) |
+
+Rules 72, 73 and 75 apply to this record as to the control stream's, and rule 74 does except where
+rule 152 says. Rules 71 and 76 are the control stream's alone.
+
+**`StreamOpened`** on the meter stream: `{stream_type: "meter", workspace_id: id}`.
+
+**`MeterReserved`** on the meter stream: a call's reservation of its maximum cost (inference spec
+§7.2), appended by the workspace's one meter writer before the call's first attempt leaves the
+deployment, after every cap that applies admitted it (inference spec §7.3). A refusal reserves
+nothing and has no meter record, `meter_unavailable` included (inference spec §3.3), and neither
+does a cache hit, which reaches no provider and costs nothing.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `call_id` | `ulid` | The gateway's call: rule 158 |
+| `agent_id` | `id?` | The calling agent, or `null` for the compiler: rule 156 |
+| `purpose` | `research` \| `llm_signal` \| `fast_signal` \| `compiler` | Inference §3.1 |
+| `model` | `{model_id: text, model_version: text, content_hash: ref}` | The registry entry the call is for |
+| `endpoint` | `text` | The endpoint the call is sent to |
+| `key_owner` | `platform` \| `customer` | Whose provider key pays (inference §7.1); both count toward every cap |
+| `price_table_ref` | `ref` | The price table the maximum is computed from |
+| `max_cost_usd` | `decimal` | The call's maximum cost (inference §7.2): rule 156 |
+| `risk_day` | `date` | The risk day ([mandate spec §5.4](mandate.md#54-daily-loss-dec-40-dec-49-dec-54)) the call counts against, from the meter writer's clock at the reservation; its calendar month is the month it counts against. The writer asserts it and `append` does not check it against `event_time` |
+
+**`MeterSettled`** on the meter stream: the call's actual cost, appended once when the gateway is
+done with the call.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `call_id` | `ulid` | The reserved call: rule 158 |
+| `reservation` | `ulid` | The `event_id` of its `MeterReserved`: rule 158 |
+| `outcome` | `ok` \| `deadline_exceeded` \| `provider_unavailable` \| `rate_limited_provider` \| `credential_invalid` \| `content_refused` \| `schema_invalid` \| `identity_mismatch` | Inference §3.3. A refusal never reserved, so it never settles |
+| `attempts` | `integer` | Attempts sent to a provider: rule 157 |
+| `tokens` | `{input: integer, output: integer, cached: integer}` | As the provider reported them |
+| `cost_usd` | `decimal` | From the reservation's price table and the reported tokens, or the reservation's maximum when the reply's cost cannot be read (inference §3.4); `append` checks only that it is not negative (rule 157) |
+
+**Spend** folds from the meter stream alone (inference spec §7.3). For a scope (the workspace, or
+one `agent_id`) and a period (one risk day, or every risk day of one calendar month; no other period
+exists at this version, so the license's cycle allotment of inference §7.3 is not yet folded), spend
+is the sum, over the scope's `MeterReserved` records in the period, of the settlement's `cost_usd`
+for a settled reservation and the reservation's `max_cost_usd` for an open one. An open reservation
+is one with no `MeterSettled`: a call still in flight, or one whose process died. It stays counted at
+its maximum and is never settled later, by a restart or by a new writer. So the only record that
+lowers spend is a reservation's own settlement, down to that call's cost; a crash, a restart, or a
+hand-over never does. A call is admitted only when, for every cap that applies, spend plus its own
+`max_cost_usd` is at most the cap; so spend never exceeds a cap while each settlement is at most its
+reservation. A settlement above its reservation (a provider that reports more tokens than the
+request allowed) is still recorded as reported and counted, and the gateway alerts the operator; the
+next call is then refused sooner. Every refusal and cache hit is on the caller's
+`ModelInvocationRecorded` alone, so the meter counts exactly the calls that could cost money
+(backlog E15-12 minor 7).
+
+**Consistency rules** (reason `schema` unless stated; the path is the member named):
+
+146. `ModelInvocationRecorded` on the agent stream: `model.content_hash` equals
+     `config_refs.model_version` (`payload.model.content_hash`), as rule 71 does on the control
+     stream. A missing ref is already `missing_config_ref`.
+147. `ModelInvocationRecorded` on the agent stream: the actor is an `agent` (`actor.kind`), the
+     runtime that owns the stream.
+148. `ModelInvocationRecorded` on the agent stream: when `outcome` is `input_rejected`,
+     `prompt_ref` and `request_digest` are `null` and `guard_rule` is not; for every other outcome,
+     `prompt_ref` and `request_digest` are not `null` and `guard_rule` is; each reported at itself,
+     the first that fails in that order. A prompt the guard refused is never stored, and neither is
+     the canonical request that holds it, so a planted credential or account identifier never
+     reaches the artifact store (inference INF-8, INF-14); the record names the rule, never the
+     content.
+149. `ModelInvocationRecorded` on the agent stream: `reservation` is `null` exactly when the call
+     reserved nothing: its `outcome` is a refusal (rule 73's six) or `cache_hit` is true
+     (`payload.reservation`).
+150. `ModelInvocationRecorded` on the agent stream: `observations` is strictly ascending by bytes
+     (`payload.observations`, reason `non_canonical`), so no item is listed twice.
+151. `ModelInvocationRecorded` on the agent stream: `verdicts` is empty unless `purpose` is
+     `research` and `outcome` is `ok` (`payload.verdicts`). Then, for each item *i* in order, the
+     first that fails: its `candidate` is *i* (`payload.verdicts[i].candidate`); no `thesis` item
+     follows an `invalidation` item (`payload.verdicts[i].kind`); and its `result` fits its
+     `kind` (`payload.verdicts[i].result`): `unknown_thesis` only for an invalidation, and
+     `unknown_instrument`, `unknown_evidence`, `duplicate_instrument`, and
+     `revisions_not_enabled` only for a thesis. So every candidate has exactly one verdict.
+152. `ModelInvocationRecorded` on the agent stream, a call that is neither a refusal nor a cache
+     hit: rule 74's `attempts` ≥ 1 holds except for a `deadline_exceeded` whose deadline passed, or
+     a `credential_invalid` whose key the vault did not hold, before the first attempt left, which
+     records `attempts` 0 (`payload.attempts`). A call with `attempts` 0 sent nothing:
+     `response_ref`, `reported_identity`, and `provider_request_id` are `null`, every `tokens`
+     member is 0 (reported at `payload.tokens`), and `cost_usd` is 0, the first that fails in that
+     order. The control stream's rule 74 is unchanged.
+153. Agent stream, one record per call: a `ModelInvocationRecorded` names a `call_id` that no
+     earlier `ModelInvocationRecorded` of the stream names (`payload.call_id`), so no second record
+     of a call, such as an `ok` after its `deadline_exceeded`, can bring a late or substituted output
+     into the stream (inference §3.4). It is a stream rule: `append` reads the stream's earlier
+     records, and a range judges it from the stream's start.
+154. Meter-stream `StreamOpened`: `stream_id` equals `meter:{workspace_id}` (`stream_id`, reason
+     `stream_mismatch`), as rule 25 does on the control stream.
+155. `MeterReserved` and `MeterSettled`: the actor is a `system` (`actor.kind`), the gateway's meter
+     writer.
+156. `MeterReserved`: `agent_id` is `null` exactly when `purpose` is `compiler`
+     (`payload.agent_id`), and `max_cost_usd` ≥ 0 (`payload.max_cost_usd`); the first that fails.
+     A local endpoint priced at zero reserves 0.
+157. `MeterSettled`: `cost_usd` ≥ 0 (`payload.cost_usd`); `attempts` is 0 only for a
+     `deadline_exceeded` or a `credential_invalid` (`payload.attempts`), as rule 152 allows; and a
+     settlement with `attempts` 0 has every `tokens` member 0 (`payload.tokens`) and `cost_usd` 0
+     (`payload.cost_usd`); the first that fails.
+158. Meter stream, one reservation and one settlement per call: a `MeterReserved` names a `call_id`
+     that no earlier `MeterReserved` of the stream names (`payload.call_id`); a `MeterSettled` names
+     as `reservation` the `event_id` of an earlier `MeterReserved` of the stream
+     (`payload.reservation`), with the same `call_id` (`payload.call_id`), that no earlier
+     `MeterSettled` names (`payload.reservation`); the first that fails. It is a stream rule:
+     `append` reads the stream's earlier records, and a range judges it from the stream's start.
+
+**Checked by no rule at append**, so the verifier owns them (a §11 check is a follow-up, DEC-998
+item 9): that a record's `reservation`, `call_id`, and cost agree with the meter stream's records of
+that call (they are on two streams); that a settlement's `cost_usd` is its tokens at its price table;
+and that every output event (`ModelOutputRecorded`, `ThesisProposed`) follows an `ok`
+`ModelInvocationRecorded` that names its model (INF-10).
+
+**No mapping to `JournaledFact`.** No risk state, limit, or order folds from these records. The
+gateway folds the meter stream for its caps; `mandate-research`'s check 7 reads the research agent's
+spend for the risk day from that fold (inference spec §7.3); the runtime folds
+`ModelInvocationRecorded` only to know which outputs are fresh, through the output events that
+follow an `ok`.
+
+### 9.20 Scheduler-stream records ([DEC-1010](../project/decisions/DEC-1010.md))
+
+The scheduler stream of §2, `clock:{workspace_id}`, and its five records: `StreamOpened`,
+`ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`, and `ClockToleranceExceeded`. Each is
+closed at schema version 1 on this stream as §9.15 closes its records: every listed member is
+present, `null` only where the type is nullable, and any other member is `schema` at that member.
+§9.1's types and report order apply, with §9.2's `date` and `risk_clock`: a member's type, a nested
+member's included, is checked before any numbered rule. The rules number on from §9.19's. None of
+the five names a configuration (`config_refs` is `{}`), none is an account-stream risk input, so
+none carries a `risk_clock` member of that name, and none holds free text but a time server's name.
+Offsets and delays are signed `decimal` seconds (§4.6), never integers, which §4.4 keeps
+non-negative.
+
+**Who writes them.** The workspace scheduler, the stream's single writer under §5.1's fencing, as a
+`system` actor with `clock_source` `scheduler`: rule 159. A second scheduler takes the stream by
+taking a newer writer epoch, and the older one's next append is `Fenced` before it writes anything
+(infrastructure design §3.4). Nothing else appends to this stream. `StreamOpened` is written once,
+at seq 1; a restarted scheduler continues the stream and writes none.
+
+**The account-stream copies.** The executor's copies of `ClockAdvanced` and `TradingDayStarted` on
+an account stream (§2) are not closed here: they keep §9's row until the story that writes them
+(E7-4 slice 5) closes them, and this section binds only the scheduler stream's records.
+
+**`StreamOpened`** on the scheduler stream. As on the agent stream (§9.1), the schema is chosen by the
+stream type of `stream_id`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `stream_type` | `scheduler` | |
+| `workspace_id` | `id` | The subject: rule 160 |
+
+**`ClockAdvanced`**: one tick of the risk clock (mandate spec §5.2).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `clock` | `risk_clock` | The tick |
+
+The scheduler writes one tick for each second that elapses on its own monotonic clock, and each
+tick's `clock` is the later of the previous tick plus one second and the host clock's UTC time
+truncated to the whole second. So the risk clock never runs backwards or repeats, and never stops:
+when the host clock steps back, or a restart lands within the last tick's second, the ticks go on
+one second at a time from the last one rather than waiting for the host clock to pass it, so no
+time-based exit or timer is held (`AGENTS.md` rules 3 and 13). When the host clock steps forward,
+the next tick follows it; that step is what the measurements below detect. The first tick of a
+stream is the host clock's second. `append` does not compare `clock` across records at this
+version; the writer holds it, and its tests show it.
+
+**`TradingDayStarted`**: a trading day began.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `date` | `date` | The America/New_York trading date |
+
+It is written in the same batch as, and right after, the first `ClockAdvanced` whose `clock` falls
+on a trading date (the trading calendar, [trading spec §2.2](trading-domain.md#22-time-and-calendars))
+later than the stream's last `TradingDayStarted`, so each trading date is written once and in
+order. `append` does not compare dates across records at this version.
+
+**`ClockOffsetRecorded`**: one measurement of the host clock against its time servers (§5.4).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `trigger` | `startup` \| `before_session` \| `periodic` | Why it was measured: at start, before the regular session, or the measurement at least every 10 minutes (§5.4) |
+| `samples` | `[clock_sample]` | The servers that answered, strictly ascending by `server`: rule 161. A server that did not answer, or answered unsynchronized (stratum 0 or 16), is not a sample |
+| `offset` | `decimal?` | The host clock minus the servers' time, in seconds: the sample offset rule 162 selects, `null` when there is no sample |
+| `tolerance` | `decimal` | The tolerance it was judged against, in seconds (default `0.05`, 50 ms): rule 161 |
+| `within_tolerance` | `boolean` | Rule 163: `true` only when `offset` is non-null and its magnitude is at most `tolerance`. A measurement no server answered is out of tolerance (`AGENTS.md` rule 3) |
+
+`clock_sample` is an object with exactly these members, each present:
+
+| Member | Type | Meaning |
+|---|---|---|
+| `server` | `text` | The time server's configured name; never a credential |
+| `stratum` | `integer` | Its NTP stratum, 1 to 15: rule 161 |
+| `offset` | `decimal` | Its offset: the host clock minus its time, in seconds |
+| `delay` | `decimal` | The round-trip delay in seconds, at least 0: rule 161 |
+
+**`ClockToleranceExceeded`**: the measurement it follows was out of tolerance (§5.4).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `offset` | `decimal?` | The measurement's `offset`, `null` when no server answered: rule 164 |
+| `tolerance` | `decimal` | The measurement's `tolerance`: rule 164 |
+
+The scheduler writes it in the same batch as, and right after, every `ClockOffsetRecorded` whose
+`within_tolerance` is `false`, with that record's `event_id` as its `causation_id` and the same two
+members, and writes it at no other time.
+
+**What reads the measurements.** Infrastructure design §3.4 makes the clock offset a start-up check
+whose failure refuses to start trading. Read the stricter way, which adds no risk (DEC-176): while
+the workspace's last `ClockOffsetRecorded` has `within_tolerance` `false`, none has been
+written, or the last is older than 15 minutes by the risk clock (§5.4's 10-minute cadence with
+slack, so a scheduler that stopped measuring is not read as a good clock), the workspace's long-running executor process (design §3.1) takes no new opening. The
+one-shot runs that read no scheduler stream are not changed by it. Risk exits, protective orders, the kill switch, and the
+ticks themselves are never held by a measurement (`AGENTS.md` rules 3 and 13), and broker
+`event_time` stays authoritative for executions (§5.4). The executor's reading is its own story's
+(E21-30); until it lands nothing reads these records.
+
+**Flagged records.** A record is flagged in an export (§5.4) when its `recorded_at` falls inside an
+out-of-tolerance interval of its workspace's scheduler stream: from the `recorded_at` of the last
+`ClockOffsetRecorded` with `within_tolerance` `true` before a `ClockToleranceExceeded`, or from the
+stream's `StreamOpened` when there is none, to the `recorded_at` of the next `ClockOffsetRecorded`
+with `within_tolerance` `true`, or without end while there is none. Intervals are over the stream,
+whatever writer epoch wrote them. The interval starts at the last good measurement rather than the
+bad one, because the clock may have drifted at any time between them, so it flags more records,
+never fewer. A flag is computed by the export from these records; no record is changed, and no risk
+input reads the flag.
+
+**Consistency rules** (reason `schema` unless named; the path is the member named), checked in
+number order after the members' types:
+
+159. Every §9.20 record: `actor.kind` is `system` (`actor.kind`), and `clock_source` is `scheduler`
+     (`clock_source`).
+160. Scheduler-stream `StreamOpened`: `stream_id` equals `clock:{workspace_id}` (`stream_mismatch` at
+     `stream_id`).
+161. `ClockOffsetRecorded`: `tolerance` is greater than 0 (`payload.tolerance`); each sample's
+     `stratum` is 1 to 15 (`payload.samples[i].stratum`) and its `delay` at least 0
+     (`payload.samples[i].delay`); and the samples are strictly ascending by the bytes of `server`,
+     so none is listed twice (`non_canonical` at `payload.samples`).
+162. `ClockOffsetRecorded`: `offset` is `null` exactly when `samples` is empty, and otherwise
+     equals the offset of the sample at index n / 2, rounded down, of the n samples sorted by the
+     magnitude of `offset` ascending, then by `offset` ascending (`payload.offset`). That is the
+     median by magnitude, and of two samples the larger, so one server that disagrees with a
+     second is never outvoted by it toward tolerance.
+163. `ClockOffsetRecorded`: `within_tolerance` is `true` exactly when `offset` is non-null and its
+     magnitude is at most `tolerance` (`payload.within_tolerance`).
+164. `ClockToleranceExceeded`: `tolerance` is greater than 0 (`payload.tolerance`); `offset` is
+     `null` or its magnitude exceeds `tolerance` (`payload.offset`); and `causation_id` is non-null
+     (`causation_id`), naming the measurement it follows. `append` does not check at this version
+     that it names a `ClockOffsetRecorded`; the writer does.
+
+**No vectors.** As for §9.15 and §9.16, `reference/journal` does not model the scheduler stream, and
+the test vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member
+type and rule above and valid drafts for the cases a rule might be misread to refuse, and the
+scheduler's own tests hold the writer's rules for `clock`, `date`, and the tolerance batch.
 
 ## 10. Anchoring
 

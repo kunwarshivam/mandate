@@ -316,7 +316,9 @@ describe("no order ticket (DEC-528)", () => {
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["createMockServer"],
     operations: ["WEB_OPERATIONS", "operationFor"],
-    reads: ["emptyWorkspace", "loadWorkspace"],
+    "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi"],
+    reads: ["emptyWorkspace"],
+    session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
   };
   const MODULES = Object.fromEntries(

@@ -1,0 +1,288 @@
+[
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "api_version v2",
+    "set": {
+      "/api_version": "v2"
+    }
+  },
+  {
+    "label": "a missing approval_id",
+    "remove": [
+      "/approval/approval_id"
+    ]
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/approval/agent_id"
+    ]
+  },
+  {
+    "label": "a missing state",
+    "remove": [
+      "/approval/state"
+    ]
+  },
+  {
+    "label": "a missing requested_at",
+    "remove": [
+      "/approval/requested_at"
+    ]
+  },
+  {
+    "label": "a missing deadline",
+    "remove": [
+      "/approval/deadline"
+    ]
+  },
+  {
+    "label": "a missing content_hash",
+    "remove": [
+      "/approval/content_hash"
+    ]
+  },
+  {
+    "label": "an approval id that is not a ULID",
+    "set": {
+      "/approval/approval_id": "apr_1"
+    }
+  },
+  {
+    "label": "an agent id with a space",
+    "set": {
+      "/approval/agent_id": "agt 1"
+    }
+  },
+  {
+    "label": "state approved",
+    "set": {
+      "/approval/state": "approved"
+    }
+  },
+  {
+    "label": "requested_at without nanoseconds",
+    "set": {
+      "/approval/requested_at": "2026-10-08T14:29:00Z"
+    }
+  },
+  {
+    "label": "a negative deadline",
+    "set": {
+      "/approval/deadline": -1
+    }
+  },
+  {
+    "label": "a deadline as a timestamp string",
+    "set": {
+      "/approval/deadline": "2026-10-08T14:34:00.000000000Z"
+    }
+  },
+  {
+    "label": "a content hash that is not a sha256 ref",
+    "set": {
+      "/approval/content_hash": "1212121212121212121212121212121212121212121212121212121212121212"
+    }
+  },
+  {
+    "label": "an unknown approval member",
+    "set": {
+      "/approval/score": "0.9"
+    }
+  },
+  {
+    "label": "a missing content",
+    "remove": [
+      "/approval/content"
+    ]
+  },
+  {
+    "label": "content as a string",
+    "set": {
+      "/approval/content": "x"
+    }
+  },
+  {
+    "label": "a missing approval",
+    "remove": [
+      "/approval"
+    ]
+  },
+  {
+    "label": "state outside the closed set",
+    "set": {
+      "/approval/state": "mutant_value"
+    }
+  },
+  {
+    "label": "a missing order",
+    "remove": [
+      "/approval/order"
+    ]
+  },
+  {
+    "label": "an order missing instrument",
+    "remove": [
+      "/approval/order/instrument"
+    ]
+  },
+  {
+    "label": "an order missing asset_class",
+    "remove": [
+      "/approval/order/asset_class"
+    ]
+  },
+  {
+    "label": "an order missing side",
+    "remove": [
+      "/approval/order/side"
+    ]
+  },
+  {
+    "label": "an order missing qty",
+    "remove": [
+      "/approval/order/qty"
+    ]
+  },
+  {
+    "label": "an order missing limit",
+    "remove": [
+      "/approval/order/limit"
+    ]
+  },
+  {
+    "label": "an order missing order_usd",
+    "remove": [
+      "/approval/order/order_usd"
+    ]
+  },
+  {
+    "label": "an order missing purpose",
+    "remove": [
+      "/approval/order/purpose"
+    ]
+  },
+  {
+    "label": "an order missing tif",
+    "remove": [
+      "/approval/order/tif"
+    ]
+  },
+  {
+    "label": "an order missing protection",
+    "remove": [
+      "/approval/order/protection"
+    ]
+  },
+  {
+    "label": "an unknown order member",
+    "set": {
+      "/approval/order/extra": 1
+    }
+  },
+  {
+    "label": "an order asset class outside the closed set",
+    "set": {
+      "/approval/order/asset_class": "mutant_value"
+    }
+  },
+  {
+    "label": "an order side outside the closed set",
+    "set": {
+      "/approval/order/side": "mutant_value"
+    }
+  },
+  {
+    "label": "a sell order",
+    "set": {
+      "/approval/order/side": "sell"
+    }
+  },
+  {
+    "label": "an order purpose outside the closed set",
+    "set": {
+      "/approval/order/purpose": "mutant_value"
+    }
+  },
+  {
+    "label": "a time in force outside the closed set",
+    "set": {
+      "/approval/order/tif": "mutant_value"
+    }
+  },
+  {
+    "label": "an order quantity that is a number",
+    "set": {
+      "/approval/order/qty": 3
+    }
+  },
+  {
+    "label": "an empty order instrument",
+    "set": {
+      "/approval/order/instrument": ""
+    }
+  },
+  {
+    "label": "an order instrument of 201 characters",
+    "set": {
+      "/approval/order/instrument": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "label": "an unknown protection member",
+    "set": {
+      "/approval/order/protection/extra": 1
+    }
+  },
+  {
+    "label": "protection without a stop",
+    "set": {
+      "/approval/order/protection": {
+        "take_profit": null
+      }
+    }
+  },
+  {
+    "label": "protection without a take profit",
+    "set": {
+      "/approval/order/protection": {
+        "stop": "95"
+      }
+    }
+  },
+  {
+    "label": "a take profit that is a number",
+    "set": {
+      "/approval/order/protection/take_profit": 110
+    }
+  },
+  {
+    "label": "protection that is a string",
+    "set": {
+      "/approval/order/protection": "none"
+    }
+  },
+  {
+    "label": "an order that is a string",
+    "set": {
+      "/approval/order": "x"
+    }
+  }
+]

@@ -1,0 +1,57 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+      "seq": 41,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:01JB3K6F0C9R2V7N4M8Q1T5W40",
+      "seq": 77,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:29:00.000000000Z"
+    }
+  ],
+  "agent": {
+    "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+    "environment": "paper",
+    "mandate_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "deployed_at": "2026-10-08T13:00:00.000000000Z",
+    "mode": "normal",
+    "pending_approvals": 1,
+    "label": "momentum-spy",
+    "mandate": {
+      "allocation_usd": "5000",
+      "max_loss_from_allocation": "0.2",
+      "goal": "continuous",
+      "goal_end_date": null,
+      "asset_classes": [
+        "us_equity"
+      ],
+      "max_position_usd": "2000",
+      "max_order_usd": "500",
+      "max_orders_per_day": 20,
+      "max_daily_loss": "0.03",
+      "max_drawdown": "0.1"
+    },
+    "account_positions": [
+      {
+        "instrument": "b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081",
+        "qty": "12",
+        "broker_qty": "12",
+        "mismatch": false,
+        "observed_at": "2026-10-08T14:29:00.000000000Z"
+      }
+    ]
+  }
+}
