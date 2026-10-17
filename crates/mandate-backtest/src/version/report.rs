@@ -86,6 +86,8 @@ pub enum Limitation {
     DailyDecisions,
     AsksUnansweredSkip,
     ParticipationFromBarVolume,
+    MarksAtBarClose,
+    TradingStatusAssumed,
     MechanicsNotThesisQuality,
 }
 
@@ -101,6 +103,8 @@ impl Limitation {
             Self::DailyDecisions => "daily_decisions",
             Self::AsksUnansweredSkip => "asks_unanswered_skip",
             Self::ParticipationFromBarVolume => "participation_from_bar_volume",
+            Self::MarksAtBarClose => "marks_at_bar_close",
+            Self::TradingStatusAssumed => "trading_status_assumed",
             Self::MechanicsNotThesisQuality => "mechanics_not_thesis_quality",
         }
     }
@@ -117,6 +121,8 @@ impl Limitation {
             Self::DailyDecisions,
             Self::AsksUnansweredSkip,
             Self::ParticipationFromBarVolume,
+            Self::MarksAtBarClose,
+            Self::TradingStatusAssumed,
         ];
         if research_agent {
             all.push(Self::AdmissionsReplayedNotRejudged);
