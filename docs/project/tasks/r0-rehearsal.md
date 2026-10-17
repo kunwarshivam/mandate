@@ -174,7 +174,8 @@ page is answered with the same two requests a browser makes when the founder pre
 
 **Why not a CI job.** The rehearsal runs a binary built with `live`, and DEC-529 item 3 (enforced
 by `cargo xtask live-feature`, X1) allows exactly one CI job to enable that feature, and only to
-compile it. So the script is the harness; CI only ShellChecks it (`cargo xtask ci fast`'s lint now
+compile it; DEC-964 adds one job that runs the runner's tests in the `live,rh-sim`
+build, never the rehearsal binary itself. So the script is the harness; CI only ShellChecks it (`cargo xtask ci fast`'s lint now
 covers `scripts/`). The whole run takes under a minute after the builds.
 
 ## The rehearsal mandate and script

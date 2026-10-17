@@ -19,6 +19,7 @@ use crate::protection::{
     reprotect_unpriced, rests,
 };
 use crate::session::{closed_hold, extended_hours};
+use crate::shape::offers_bracket;
 use crate::state::IntentOutcome;
 use crate::types::{
     AgentId, BracketLegs, BrokerRequest, EventId, GateVerdict, IntentBody, IntentHandoff,
@@ -403,9 +404,11 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
 /// bracket at exactly those prices, an add where protection already rests included, which is a new
 /// bracket beside it and never a replacement of it (DEC-346 item 1). An entry with no prices goes
 /// plain, and an exit never carries a bracket. A crypto entry is never a bracket (§5.4: simple
-/// orders only); its stop-limit is slice 5's. An equity entry with a stop and no take-profit has no
-/// bracket to go as, and answers slice 5's stub rather than going unprotected: an opening may
-/// always be refused (`AGENTS.md` rule 2; DEC-346 item 2).
+/// orders only); its stop-limit is slice 5's. On a profile that offers no bracket (§5.2's
+/// Robinhood table) the entry goes plain whatever its prices, and its stop-limit is placed once it
+/// has filled ([`crate::protection::settle`], DEC-966 item 2). On a profile that does, an equity
+/// entry with a stop and no take-profit has no bracket to go as, and answers slice 5's stub rather
+/// than going unprotected: an opening may always be refused (`AGENTS.md` rule 2; DEC-346 item 2).
 pub(crate) fn bracket_of(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -416,6 +419,9 @@ pub(crate) fn bracket_of(
     let Some(prices) = protection.filter(|_| purpose.adds_risk() && !crypto) else {
         return Ok(None);
     };
+    if !offers_bracket(batch.view.profile.as_ref()) {
+        return Ok(None);
+    }
     match prices.take_profit {
         Some(take_profit) => Ok(Some(BracketLegs {
             take_profit,

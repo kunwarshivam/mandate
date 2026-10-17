@@ -775,3 +775,82 @@ fn the_bridge_quotes_only_what_the_run_registered() {
     assert_eq!((quote.symbol, quote.ask), (spy, price("500")));
     assert_eq!(calls(&server), ["get_equity_quotes"]);
 }
+
+/// DEC-966 items 1 and 6: once the entry has filled at the broker, the protective stop the
+/// executor sends on Robinhood's profile goes through the shell's connector as one `gtc`
+/// `stop_limit` sell of the 2, stop 480 and limit 477.6, and rests: it does not fill while SPY
+/// quotes above 480, and fills once SPY reaches it. A take-profit sell beside it is refused by
+/// the broker, which has no OCO, so the two can never both sell the 2.
+#[test]
+fn the_protective_stop_rests_at_the_broker_and_fills_only_once_triggered() {
+    let server = server();
+    let mut shell = shell(&server);
+    let entry = submitted(shell.connector.call(&buy("01JSTOPENTRY")));
+    server
+        .drive(|sim| sim.fill(&entry.broker_order_id, qty("2"), price("499")))
+        .unwrap()
+        .unwrap();
+    let protective = |order_type, limit: &str, stop: Option<&str>, event: &str| SubmitOrder {
+        client_order_id: ClientOrderId::for_protection(
+            &key("01JSTOPENTRY"),
+            &EventId(event.to_owned()),
+        )
+        .unwrap(),
+        instrument: InstrumentId::new("SPY").unwrap(),
+        side: Way::Sell,
+        qty: qty("2"),
+        order_type,
+        tif: Tif::Gtc,
+        limit_price: Some(price(limit)),
+        stop_price: stop.map(price),
+        bracket: None,
+        oco: None,
+        extended_hours: false,
+        purpose: Purpose::Protective,
+    };
+    let stop = protective(Kind::StopLimit, "477.6", Some("480"), "01JSTOP");
+    let rests = submitted(shell.connector.call(&BrokerRequest::Submit(stop)));
+    let held = orders(&server)
+        .into_iter()
+        .find(|order| order.id == rests.broker_order_id)
+        .unwrap();
+    assert_eq!(
+        (
+            held.order_type,
+            held.time_in_force,
+            held.state,
+            held.stop_price,
+            held.limit_price,
+            held.quantity,
+        ),
+        (
+            mandate_rh_sim::OrderType::StopLimit,
+            mandate_rh_sim::TimeInForce::Gtc,
+            State::Confirmed,
+            Some(price("480")),
+            Some(price("477.6")),
+            qty("2"),
+        )
+    );
+    let take_profit = protective(Kind::Limit, "520", None, "01JTAKE");
+    let refused = shell.connector.call(&BrokerRequest::Submit(take_profit));
+    assert!(
+        !matches!(refused, Ok(BrokerOutcome::Submitted(_))),
+        "no OCO: a take-profit beside the whole-position stop is refused: {refused:?}"
+    );
+    assert_eq!(orders(&server).len(), 2, "the entry and the stop alone");
+    let early = server
+        .drive(|sim| sim.fill(&held.id, qty("2"), price("490")))
+        .unwrap();
+    assert_eq!(early, Err(mandate_rh_sim::SimError::NotTriggered));
+    let filled = server
+        .drive(|sim| {
+            sim.apply(Event::Quote("SPY".to_owned(), price("480")))?;
+            sim.fill(&held.id, qty("2"), price("478"))
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(filled.state, State::Filled);
+    let position = server.drive(|sim| sim.position(AGENTIC, "SPY")).unwrap();
+    assert_eq!(position, Ok(qty("0")));
+}

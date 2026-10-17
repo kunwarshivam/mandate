@@ -66,6 +66,10 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   DEC-104 item 5; DEC-129 items 25 to 27; DEC-250; DEC-265 item 1; DEC-266 item 4; DEC-285
   item 6; DEC-476 item 7 (which model reads the owner's words at `/agents/new`, through which
   route, its spend cap and data terms); DEC-480 (acting from a message).
+- **E21-2's long-running process** ([DEC-968](decisions/DEC-968.md), claim #1424): item 9, one
+  PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
+  production-cycle constructor that takes its journal stage) before the process can host a real
+  cycle.
 - **DEC-773** (causal trace authorship): (a) should an owner-selected signal model's output read
   `owner_selected`? (b) What does the label say? Meanwhile every quoted item is `platform_authored`.
 - **Decided, record still to land:** DEC-360 (option (c)), DEC-410 item 3, DEC-422 (#514 open).

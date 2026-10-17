@@ -65,7 +65,8 @@
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
-#   9  mandate-paper, the paper adapter (E7-19 slice 5, DEC-503 item 2): the only crate that sees
+#   9  mandate-agentd, the long-running agent process (E21-2, DEC-968), beside mandate-paper and
+#      kept from reaching it; mandate-paper, the paper adapter (E7-19 slice 5, DEC-503 item 2): the only crate that sees
 #      both the host and the shell, and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
 #      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
 #      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
@@ -378,6 +379,17 @@ layer = 8
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+# The long-running agent process (E21-2, DEC-968): one deployment's runtime and executor under
+# the journal's fencing lease, beside the paper adapter and above the shell whose stages it hosts.
+# It may never reach the paper adapter, the one crate that may declare `live`, so no live build of
+# it exists, nor the founder's CLI.
+[crates.mandate-agentd]
+layer = 9
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+forbidden_internal = ["mandate-cli", "mandate-paper"]
 
 # The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
 # output to the shell's production cycle and decides nothing itself. It is the runner: the only
