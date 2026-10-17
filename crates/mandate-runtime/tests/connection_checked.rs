@@ -16,7 +16,7 @@
 mod common;
 
 use common::escalation::{
-    ASKED_AT, Answer, asking_shell, next_account_seq, next_control_seq, tail,
+    ASKED_AT, Answer, Asked, asking_shell, mark, next_account_seq, next_control_seq, tail,
 };
 use common::{
     ACCOUNT_STREAM, AllowGate, CONNECTION, FixedPlan, Ran, Shell, TestIds, clock, event,
@@ -398,6 +398,8 @@ fn a_grant_after_a_failed_check_is_skipped_and_one_after_a_pass_acts() {
     }
 }
 
+/// A check at 100, an ask 30 seconds before it is a day old, and the owner's grant read 29 or 30
+/// seconds later: the first is under a day after the check, the second a day after it.
 #[test]
 fn a_grant_read_a_day_after_the_check_is_skipped() {
     let (ids, gate, plan, view) = (
@@ -407,17 +409,35 @@ fn a_grant_read_a_day_after_the_check_is_skipped() {
         universe(&["AAPL"]),
     );
     let ports = ports(&ids, &gate, &plan, &view);
-    for (checked_at, acts) in [(ASKED_AT + 21 - DAY, true), (ASKED_AT + 20 - DAY, false)] {
-        let (mut shell, asked) = asking_shell(&ports, Some("155"));
-        let stale = check(next_account_seq(&shell), true, checked_at);
-        tail(&mut shell, &stale, &ports);
-        let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
+    let asked_at = 100 + DAY - 30;
+    for (read_after, acts) in [(29, true), (30, false)] {
+        let mut shell = started_with(&[check(2, true, 100), mark(3, "155", 100)], &ports);
+        let batch = evaluated(&mut shell, &ports, asked_at);
+        let request = batch
+            .drafts
+            .iter()
+            .find(|d| d.event_type == "ApprovalRequested")
+            .cloned()
+            .unwrap_or_else(|| panic!("the opening is asked: {:?}", batch.draft_types()));
+        let content_hash = request
+            .payload
+            .get("content_hash")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| panic!("the request states its content hash"));
+        let asked = Asked {
+            approval: request.event_id.clone(),
+            content_hash,
+            request,
+            batch,
+        };
+        let grant = Answer::grant(next_control_seq(&shell), &asked, asked_at + read_after).event();
         let ran = tail(&mut shell, &grant, &ports);
         assert_eq!(
             proposed(&ran),
             acts,
-            "a grant read at {} after a check at {checked_at}: {:?}",
-            ASKED_AT + 20,
+            "a grant read {read_after} s after an ask made {} s after the check: {:?}",
+            DAY - 30,
             ran.draft_types()
         );
     }

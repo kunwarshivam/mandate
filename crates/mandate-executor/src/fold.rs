@@ -151,6 +151,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
+        "ConnectionChecked" => connection_checked(),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -196,6 +197,15 @@ fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorE
         Some(instrument) => net_unattributed(state, &instrument),
         None => Ok(()),
     }
+}
+
+/// The executor's own `ConnectionChecked` folds as a record only (journal spec §9.8): into
+/// `degraded` or `suspended`, the executor commits `AccountRestrictionChanged` and
+/// `AgentModeApplied` before the failed check, so the halt is never behind this record and a
+/// replay that reads it adds nothing to hold. Its risk clock is read like every account event's
+/// (DEC-969 item 5).
+fn connection_checked() -> Result<(), ExecutorError> {
+    Ok(())
 }
 
 /// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
@@ -245,7 +255,8 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "BrokerExchangeRecorded"
         | "ExternalActivityIngested"
         | "ConductBreachDetected"
-        | "KillSwitchActivated" => None,
+        | "KillSwitchActivated"
+        | "ConnectionChecked" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
         | "RiskLimitTriggered"
