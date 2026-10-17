@@ -1,0 +1,32 @@
+[package]
+name = "mandate-vault"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The SecretSource interface and its two backends, the local vault and OpenBao (E21-32, DEC-434 item 14, DEC-977)"
+
+[lints]
+workspace = true
+
+[features]
+# Lets a test reach an OpenBao dev server (in-memory storage). Only this crate's own tests turn it
+# on, through the dev-dependency below; no product build does (DEC-977 item 6).
+dev-server = []
+
+[dependencies]
+base64.workspace = true
+mandate-connections.workspace = true
+mandate-time.workspace = true
+mandate-vault-local.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+rustls.workspace = true
+secrecy.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-vault = { path = ".", features = ["dev-server"] }
+proptest.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync"] }

@@ -1,0 +1,216 @@
+//! The policy table, checked against a matrix written out by hand, and the OpenBao policies it
+//! generates: every path spelled out, no wildcard, a runtime's empty.
+
+use mandate_connections::record::ConnectionId;
+
+use crate::policy::{
+    Access, Identity, Mounts, SecretPath, allows, kv_path, openbao_policy, policy_name, role_name,
+};
+
+fn c(id: &str) -> ConnectionId {
+    ConnectionId::new(id).unwrap()
+}
+
+fn identities() -> Vec<Identity> {
+    vec![
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::TokenExchange(c("c1")),
+        Identity::Executor(c("c1")),
+        Identity::Runtime,
+        Identity::SecretImport,
+    ]
+}
+
+fn paths() -> Vec<SecretPath> {
+    vec![
+        SecretPath::Code(c("c1")),
+        SecretPath::Token(c("c1")),
+        SecretPath::Code(c("c2")),
+        SecretPath::Token(c("c2")),
+        SecretPath::ClientSecret,
+    ]
+}
+
+/// The oracle: every allowed triple, written out from infrastructure §5.2; anything else is
+/// refused.
+fn expected() -> Vec<(Identity, Access, SecretPath)> {
+    use Access::{Delete, Read, Write};
+    let mut out = Vec::new();
+    for id in ["c1", "c2"] {
+        out.push((Identity::Api, Write, SecretPath::Code(c(id))));
+        out.push((Identity::Api, Delete, SecretPath::Code(c(id))));
+        out.push((Identity::Api, Delete, SecretPath::Token(c(id))));
+        out.push((Identity::ConnectionManager, Delete, SecretPath::Code(c(id))));
+        out.push((
+            Identity::ConnectionManager,
+            Delete,
+            SecretPath::Token(c(id)),
+        ));
+    }
+    let exchange = Identity::TokenExchange(c("c1"));
+    out.push((exchange.clone(), Read, SecretPath::Code(c("c1"))));
+    out.push((exchange.clone(), Delete, SecretPath::Code(c("c1"))));
+    out.push((exchange.clone(), Write, SecretPath::Token(c("c1"))));
+    out.push((exchange, Read, SecretPath::ClientSecret));
+    out.push((
+        Identity::Executor(c("c1")),
+        Read,
+        SecretPath::Token(c("c1")),
+    ));
+    out.push((Identity::SecretImport, Write, SecretPath::ClientSecret));
+    out
+}
+
+#[test]
+fn the_table_allows_exactly_the_matrix() {
+    let expected = expected();
+    for identity in identities() {
+        for access in [Access::Read, Access::Write, Access::Delete] {
+            for path in paths() {
+                let want = expected
+                    .iter()
+                    .any(|(i, a, p)| i == &identity && *a == access && p == &path);
+                assert_eq!(
+                    allows(&identity, access, &path),
+                    want,
+                    "{identity:?} {access:?} {path:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_runtime_and_an_executor_read_nothing_else() {
+    for path in paths() {
+        assert!(!allows(&Identity::Runtime, Access::Read, &path));
+        assert_eq!(
+            allows(&Identity::Executor(c("c2")), Access::Read, &path),
+            path == SecretPath::Token(c("c2")),
+            "{path:?}"
+        );
+    }
+}
+
+#[test]
+fn names_and_paths_are_pinned() {
+    assert_eq!(role_name(&Identity::Api), "api");
+    assert_eq!(
+        role_name(&Identity::ConnectionManager),
+        "connection-manager"
+    );
+    assert_eq!(
+        role_name(&Identity::TokenExchange(c("c_1"))),
+        "exchange-c_1"
+    );
+    assert_eq!(role_name(&Identity::Executor(c("c-2"))), "executor-c-2");
+    assert_eq!(role_name(&Identity::Runtime), "runtime");
+    assert_eq!(role_name(&Identity::SecretImport), "secret-import");
+    assert_eq!(kv_path(&SecretPath::Code(c("c1"))), "connections/c1/code");
+    assert_eq!(kv_path(&SecretPath::Token(c("c1"))), "connections/c1/token");
+    assert_eq!(
+        kv_path(&SecretPath::ClientSecret),
+        "platform/alpaca-oauth-client-secret"
+    );
+    let other = Mounts {
+        kv: "kv9".to_owned(),
+        auth: "ar9".to_owned(),
+    };
+    assert_eq!(
+        policy_name(&Identity::Api, &Mounts::default()),
+        "mandate-api"
+    );
+    assert_eq!(
+        policy_name(&Identity::Executor(c("c1")), &other),
+        "kv9-executor-c1"
+    );
+    let hcl = openbao_policy(&Identity::ConnectionManager, &[c("c1")], &other);
+    assert!(
+        hcl.contains("path \"kv9/metadata/connections/c1/token\""),
+        "{hcl}"
+    );
+    assert!(
+        hcl.contains("path \"auth/ar9/role/exchange-c1/secret-id\""),
+        "{hcl}"
+    );
+    assert!(
+        !hcl.contains("mandate/") && !hcl.contains("approle/"),
+        "{hcl}"
+    );
+}
+
+/// The `path` blocks of an HCL policy, as (path, capabilities).
+fn blocks(hcl: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for block in hcl.split("path \"").skip(1) {
+        let (path, rest) = block.split_once('"').unwrap();
+        let caps = rest.split_once('[').unwrap().1.split_once(']').unwrap().0;
+        out.push((path.to_owned(), caps.replace([' ', '"'], "")));
+    }
+    out
+}
+
+#[test]
+fn each_policy_is_the_table_with_no_wildcard() {
+    let connections = [c("c1"), c("c2")];
+    for identity in identities() {
+        let hcl = openbao_policy(&identity, &connections, &Mounts::default());
+        assert!(
+            !hcl.contains('*') && !hcl.contains('+'),
+            "{identity:?}: {hcl}"
+        );
+        let got = blocks(&hcl);
+        for access in [Access::Read, Access::Write, Access::Delete] {
+            for path in paths() {
+                let (prefix, caps) = match access {
+                    Access::Read => ("data", "read"),
+                    Access::Write => ("data", "create,update"),
+                    Access::Delete => ("metadata", "delete"),
+                };
+                let want = format!("mandate/{prefix}/{}", kv_path(&path));
+                let present = got.iter().any(|(p, c)| p == &want && c == caps);
+                assert_eq!(
+                    present,
+                    allows(&identity, access, &path),
+                    "{identity:?} {access:?} {path:?}: {hcl}"
+                );
+            }
+        }
+    }
+    assert!(
+        blocks(&openbao_policy(
+            &Identity::Runtime,
+            &connections,
+            &Mounts::default()
+        ))
+        .is_empty()
+    );
+}
+
+#[test]
+fn the_manager_may_issue_and_revoke_only_exchange_grants() {
+    let hcl = openbao_policy(&Identity::ConnectionManager, &[c("c1")], &Mounts::default());
+    let got = blocks(&hcl);
+    for (path, caps) in [
+        ("auth/approle/role/exchange-c1/secret-id", "update"),
+        (
+            "auth/approle/role/exchange-c1/secret-id-accessor/destroy",
+            "update",
+        ),
+        ("auth/approle/role/exchange-c1/role-id", "read"),
+    ] {
+        assert!(
+            got.iter().any(|(p, c)| p == path && c == caps),
+            "{path}: {hcl}"
+        );
+    }
+    let grant_blocks = got.iter().filter(|(p, _)| p.starts_with("auth/")).count();
+    assert_eq!(grant_blocks, 3, "{hcl}");
+    for identity in identities() {
+        if identity != Identity::ConnectionManager {
+            let hcl = openbao_policy(&identity, &[c("c1")], &Mounts::default());
+            assert!(!hcl.contains("auth/"), "{identity:?}: {hcl}");
+        }
+    }
+}

@@ -57,6 +57,7 @@
 /crates/mandate-mcp/        @kunwarshivam
 /crates/mandate-robinhood/  @kunwarshivam
 /crates/mandate-connections/ @kunwarshivam
+/crates/mandate-vault/ @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-shell-rh-sim/ @kunwarshivam
