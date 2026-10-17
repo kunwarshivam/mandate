@@ -11935,6 +11935,2525 @@ approval_cancellations:
       value: 01J8Z3P2A000000000000000Q3
     expect:
       outcome: Valid
+control_plane:
+  spec: docs/specs/journal.md v0.44 §9.17 (DEC-981)
+  drafts:
+    ControlPlaneEnrolled:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP000000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ControlPlaneEnrolled
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        deployment_id: dep_01JCELL1
+        org_id: org_01JACME
+        mode: managed_cell
+        certificate_fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      artifact_refs: []
+      pii_refs: []
+    LicenseApplied:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: LicenseApplied
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        license_id: lic_0001
+        sequence: 3
+        org_id: org_01JACME
+        deployment_ids:
+        - dep_01JCELL1
+        max_workspaces: 5
+        max_agents_deployed: 20
+        features:
+        - connected_clients
+        not_before: '2026-10-01T00:00:00.000000000Z'
+        not_after: '2027-10-01T00:00:00.000000000Z'
+        grace_days: 30
+        key_id: license_key_1
+        document_digest: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      artifact_refs: []
+      pii_refs: []
+    LicenseStateChanged:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: LicenseStateChanged
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        license_id: lic_0001
+        from: null
+        to: valid
+        judged_at: '2026-10-17T13:05:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    ReleaseOffered:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ReleaseOffered
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        release_id: rel_2026_10_17
+        sequence: 12
+        manifest_digest: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        key_id: release_key_1
+      artifact_refs: []
+      pii_refs: []
+    ReleaseInstalled:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP040000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ReleaseInstalled
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        release_id: rel_2026_10_17
+        sequence: 12
+        manifest_digest: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        trigger: promotion
+      artifact_refs: []
+      pii_refs: []
+    ReleaseWithdrawnNoticed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP050000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ReleaseWithdrawnNoticed
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        release_id: rel_2026_10_10
+        reason: defect
+        key_id: release_key_1
+        document_digest: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      artifact_refs: []
+      pii_refs: []
+    CatalogEntryRegistered:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP060000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: CatalogEntryRegistered
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        kind: connector_package
+        entry_id: connector_robinhood
+        content_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        sequence: 4
+        key_id: release_key_1
+      artifact_refs: []
+      pii_refs: []
+    DataBundleImported:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP070000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: DataBundleImported
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        dataset: sec_filings
+        bundle_digest: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        sequence: 101
+        key_id: data_key_1
+      artifact_refs: []
+      pii_refs: []
+    UsageReportSealed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP080000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: UsageReportSealed
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        report_id: rpt_0042
+        deployment_id: dep_01JCELL1
+        org_id: org_01JACME
+        period_start: '2026-10-17T12:00:00.000000000Z'
+        period_end: '2026-10-17T13:00:00.000000000Z'
+        prev_report_hash: '1111111111111111111111111111111111111111111111111111111111111111'
+        report_digest: '2222222222222222222222222222222222222222222222222222222222222222'
+      artifact_refs: []
+      pii_refs: []
+    ControlPlaneMessageRefused:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CP090000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ControlPlaneMessageRefused
+      schema_version: 1
+      event_time: '2026-10-17T13:05:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        message: license
+        reason: replayed
+        sequence: 2
+        document_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: ControlPlaneEnrolled.deployment_id.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.deployment_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_id
+  - name: ControlPlaneEnrolled.deployment_id.form
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.deployment_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deployment_id
+  - name: ControlPlaneEnrolled.deployment_id.null
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.deployment_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_id
+  - name: ControlPlaneEnrolled.org_id.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.org_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.org_id
+  - name: ControlPlaneEnrolled.org_id.form
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.org_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.org_id
+  - name: ControlPlaneEnrolled.org_id.null
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.org_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.org_id
+  - name: ControlPlaneEnrolled.mode.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.mode
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mode
+  - name: ControlPlaneEnrolled.mode.form
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.mode
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.mode
+  - name: ControlPlaneEnrolled.mode.null
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.mode
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mode
+  - name: ControlPlaneEnrolled.certificate_fingerprint.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.certificate_fingerprint
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.certificate_fingerprint
+  - name: ControlPlaneEnrolled.certificate_fingerprint.form
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.certificate_fingerprint
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.certificate_fingerprint
+  - name: ControlPlaneEnrolled.certificate_fingerprint.null
+    clause: §9.17 types
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.certificate_fingerprint
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.certificate_fingerprint
+  - name: ControlPlaneEnrolled.missing
+    clause: §9.17 closed
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.deployment_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_id
+  - name: ControlPlaneEnrolled.extra
+    clause: §9.17 closed
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: LicenseApplied.license_id.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.license_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.license_id
+  - name: LicenseApplied.license_id.form
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.license_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.license_id
+  - name: LicenseApplied.license_id.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.license_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.license_id
+  - name: LicenseApplied.sequence.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.sequence
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: LicenseApplied.sequence.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: LicenseApplied.org_id.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.org_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.org_id
+  - name: LicenseApplied.org_id.form
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.org_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.org_id
+  - name: LicenseApplied.org_id.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.org_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.org_id
+  - name: LicenseApplied.deployment_ids.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.deployment_ids
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_ids
+  - name: LicenseApplied.deployment_ids.item
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.deployment_ids
+      value:
+      - not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deployment_ids[0]
+  - name: LicenseApplied.max_workspaces.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.max_workspaces
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_workspaces
+  - name: LicenseApplied.max_workspaces.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.max_workspaces
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_workspaces
+  - name: LicenseApplied.max_agents_deployed.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.max_agents_deployed
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_agents_deployed
+  - name: LicenseApplied.max_agents_deployed.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.max_agents_deployed
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.max_agents_deployed
+  - name: LicenseApplied.features.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.features
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.features
+  - name: LicenseApplied.features.item
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.features
+      value:
+      - not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.features[0]
+  - name: LicenseApplied.not_before.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_before
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.not_before
+  - name: LicenseApplied.not_before.form
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_before
+      value: '2026-10-17'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.not_before
+  - name: LicenseApplied.not_before.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_before
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.not_before
+  - name: LicenseApplied.not_after.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_after
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.not_after
+  - name: LicenseApplied.not_after.form
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_after
+      value: '2026-10-17'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.not_after
+  - name: LicenseApplied.not_after.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_after
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.not_after
+  - name: LicenseApplied.grace_days.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.grace_days
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.grace_days
+  - name: LicenseApplied.grace_days.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.grace_days
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.grace_days
+  - name: LicenseApplied.key_id.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.key_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: LicenseApplied.key_id.form
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.key_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.key_id
+  - name: LicenseApplied.key_id.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.key_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: LicenseApplied.document_digest.kind
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.document_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.document_digest
+  - name: LicenseApplied.document_digest.form
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.document_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.document_digest
+  - name: LicenseApplied.document_digest.null
+    clause: §9.17 types
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.document_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.document_digest
+  - name: LicenseApplied.missing
+    clause: §9.17 closed
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.license_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.license_id
+  - name: LicenseApplied.extra
+    clause: §9.17 closed
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: LicenseStateChanged.license_id.kind
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.license_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.license_id
+  - name: LicenseStateChanged.license_id.form
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.license_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.license_id
+  - name: LicenseStateChanged.license_id.null
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.license_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.license_id
+  - name: LicenseStateChanged.from.kind
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.from
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.from
+  - name: LicenseStateChanged.from.form
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.from
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.from
+  - name: LicenseStateChanged.to.kind
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.to
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.to
+  - name: LicenseStateChanged.to.form
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.to
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.to
+  - name: LicenseStateChanged.to.null
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.to
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.to
+  - name: LicenseStateChanged.judged_at.kind
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.judged_at
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.judged_at
+  - name: LicenseStateChanged.judged_at.form
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.judged_at
+      value: '2026-10-17'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.judged_at
+  - name: LicenseStateChanged.judged_at.null
+    clause: §9.17 types
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.judged_at
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.judged_at
+  - name: LicenseStateChanged.missing
+    clause: §9.17 closed
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.license_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.license_id
+  - name: LicenseStateChanged.extra
+    clause: §9.17 closed
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: ReleaseOffered.release_id.kind
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.release_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseOffered.release_id.form
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.release_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.release_id
+  - name: ReleaseOffered.release_id.null
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.release_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseOffered.sequence.kind
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.sequence
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ReleaseOffered.sequence.null
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ReleaseOffered.manifest_digest.kind
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.manifest_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_digest
+  - name: ReleaseOffered.manifest_digest.form
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.manifest_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.manifest_digest
+  - name: ReleaseOffered.manifest_digest.null
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.manifest_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_digest
+  - name: ReleaseOffered.key_id.kind
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.key_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: ReleaseOffered.key_id.form
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.key_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.key_id
+  - name: ReleaseOffered.key_id.null
+    clause: §9.17 types
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.key_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: ReleaseOffered.missing
+    clause: §9.17 closed
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.release_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseOffered.extra
+    clause: §9.17 closed
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: ReleaseInstalled.release_id.kind
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.release_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseInstalled.release_id.form
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.release_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.release_id
+  - name: ReleaseInstalled.release_id.null
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.release_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseInstalled.sequence.kind
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.sequence
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ReleaseInstalled.sequence.null
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ReleaseInstalled.manifest_digest.kind
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.manifest_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_digest
+  - name: ReleaseInstalled.manifest_digest.form
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.manifest_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.manifest_digest
+  - name: ReleaseInstalled.manifest_digest.null
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.manifest_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.manifest_digest
+  - name: ReleaseInstalled.trigger.kind
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.trigger
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.trigger
+  - name: ReleaseInstalled.trigger.form
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.trigger
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.trigger
+  - name: ReleaseInstalled.trigger.null
+    clause: §9.17 types
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.trigger
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.trigger
+  - name: ReleaseInstalled.missing
+    clause: §9.17 closed
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.release_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseInstalled.extra
+    clause: §9.17 closed
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: ReleaseWithdrawnNoticed.release_id.kind
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.release_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseWithdrawnNoticed.release_id.form
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.release_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.release_id
+  - name: ReleaseWithdrawnNoticed.release_id.null
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.release_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseWithdrawnNoticed.reason.kind
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.reason
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ReleaseWithdrawnNoticed.reason.form
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.reason
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: ReleaseWithdrawnNoticed.reason.null
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ReleaseWithdrawnNoticed.key_id.kind
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.key_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: ReleaseWithdrawnNoticed.key_id.form
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.key_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.key_id
+  - name: ReleaseWithdrawnNoticed.key_id.null
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.key_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: ReleaseWithdrawnNoticed.document_digest.kind
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.document_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.document_digest
+  - name: ReleaseWithdrawnNoticed.document_digest.form
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.document_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.document_digest
+  - name: ReleaseWithdrawnNoticed.document_digest.null
+    clause: §9.17 types
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.document_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.document_digest
+  - name: ReleaseWithdrawnNoticed.missing
+    clause: §9.17 closed
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.release_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.release_id
+  - name: ReleaseWithdrawnNoticed.extra
+    clause: §9.17 closed
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: CatalogEntryRegistered.kind.kind
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.kind
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.kind
+  - name: CatalogEntryRegistered.kind.form
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.kind
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.kind
+  - name: CatalogEntryRegistered.kind.null
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.kind
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.kind
+  - name: CatalogEntryRegistered.entry_id.kind
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.entry_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry_id
+  - name: CatalogEntryRegistered.entry_id.form
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.entry_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.entry_id
+  - name: CatalogEntryRegistered.entry_id.null
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.entry_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.entry_id
+  - name: CatalogEntryRegistered.content_hash.kind
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.content_hash
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content_hash
+  - name: CatalogEntryRegistered.content_hash.form
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.content_hash
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content_hash
+  - name: CatalogEntryRegistered.content_hash.null
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.content_hash
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content_hash
+  - name: CatalogEntryRegistered.sequence.kind
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.sequence
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: CatalogEntryRegistered.sequence.null
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: CatalogEntryRegistered.key_id.kind
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.key_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: CatalogEntryRegistered.key_id.form
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.key_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.key_id
+  - name: CatalogEntryRegistered.key_id.null
+    clause: §9.17 types
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.key_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: CatalogEntryRegistered.missing
+    clause: §9.17 closed
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.kind
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.kind
+  - name: CatalogEntryRegistered.extra
+    clause: §9.17 closed
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: DataBundleImported.dataset.kind
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.dataset
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.dataset
+  - name: DataBundleImported.dataset.form
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.dataset
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.dataset
+  - name: DataBundleImported.dataset.null
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.dataset
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.dataset
+  - name: DataBundleImported.bundle_digest.kind
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.bundle_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.bundle_digest
+  - name: DataBundleImported.bundle_digest.form
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.bundle_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.bundle_digest
+  - name: DataBundleImported.bundle_digest.null
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.bundle_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.bundle_digest
+  - name: DataBundleImported.sequence.kind
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.sequence
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: DataBundleImported.sequence.null
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: DataBundleImported.key_id.kind
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.key_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: DataBundleImported.key_id.form
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.key_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.key_id
+  - name: DataBundleImported.key_id.null
+    clause: §9.17 types
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.key_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.key_id
+  - name: DataBundleImported.missing
+    clause: §9.17 closed
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.dataset
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.dataset
+  - name: DataBundleImported.extra
+    clause: §9.17 closed
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: UsageReportSealed.report_id.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_id
+  - name: UsageReportSealed.report_id.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.report_id
+  - name: UsageReportSealed.report_id.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_id
+  - name: UsageReportSealed.deployment_id.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.deployment_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_id
+  - name: UsageReportSealed.deployment_id.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.deployment_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deployment_id
+  - name: UsageReportSealed.deployment_id.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.deployment_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_id
+  - name: UsageReportSealed.org_id.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.org_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.org_id
+  - name: UsageReportSealed.org_id.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.org_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.org_id
+  - name: UsageReportSealed.org_id.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.org_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.org_id
+  - name: UsageReportSealed.period_start.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_start
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period_start
+  - name: UsageReportSealed.period_start.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_start
+      value: '2026-10-17'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.period_start
+  - name: UsageReportSealed.period_start.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_start
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period_start
+  - name: UsageReportSealed.period_end.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_end
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period_end
+  - name: UsageReportSealed.period_end.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_end
+      value: '2026-10-17'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.period_end
+  - name: UsageReportSealed.period_end.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_end
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period_end
+  - name: UsageReportSealed.prev_report_hash.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.prev_report_hash
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.prev_report_hash
+  - name: UsageReportSealed.prev_report_hash.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.prev_report_hash
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.prev_report_hash
+  - name: UsageReportSealed.prev_report_hash.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.prev_report_hash
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.prev_report_hash
+  - name: UsageReportSealed.report_digest.kind
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_digest
+  - name: UsageReportSealed.report_digest.form
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.report_digest
+  - name: UsageReportSealed.report_digest.null
+    clause: §9.17 types
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_digest
+  - name: UsageReportSealed.missing
+    clause: §9.17 closed
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.report_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_id
+  - name: UsageReportSealed.extra
+    clause: §9.17 closed
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: ControlPlaneMessageRefused.message.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.message
+  - name: ControlPlaneMessageRefused.message.form
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.message
+  - name: ControlPlaneMessageRefused.message.null
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.message
+  - name: ControlPlaneMessageRefused.reason.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.reason
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ControlPlaneMessageRefused.reason.form
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.reason
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: ControlPlaneMessageRefused.reason.null
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ControlPlaneMessageRefused.sequence.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.sequence
+      value: '3'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ControlPlaneMessageRefused.document_digest.kind
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.document_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.document_digest
+  - name: ControlPlaneMessageRefused.document_digest.form
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.document_digest
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.document_digest
+  - name: ControlPlaneMessageRefused.document_digest.null
+    clause: §9.17 types
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.document_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.document_digest
+  - name: ControlPlaneMessageRefused.missing
+    clause: §9.17 closed
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.message
+  - name: ControlPlaneMessageRefused.extra
+    clause: §9.17 closed
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.note
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.note
+  - name: ControlPlaneEnrolled.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: actor
+      value: &id005
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ControlPlaneEnrolled.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ControlPlaneEnrolled.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: LicenseApplied.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: LicenseApplied
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: LicenseApplied.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: LicenseApplied
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: LicenseApplied.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: LicenseApplied
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: LicenseStateChanged.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: LicenseStateChanged.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: LicenseStateChanged.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ReleaseOffered.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: ReleaseOffered
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ReleaseOffered.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: ReleaseOffered
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ReleaseOffered.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: ReleaseOffered
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ReleaseInstalled.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: ReleaseInstalled
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ReleaseInstalled.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: ReleaseInstalled
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ReleaseInstalled.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: ReleaseInstalled
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ReleaseWithdrawnNoticed.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ReleaseWithdrawnNoticed.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ReleaseWithdrawnNoticed.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: ReleaseWithdrawnNoticed
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: CatalogEntryRegistered.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: CatalogEntryRegistered.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: CatalogEntryRegistered.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: DataBundleImported.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: DataBundleImported
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: DataBundleImported.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: DataBundleImported
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: DataBundleImported.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: DataBundleImported
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: UsageReportSealed.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: UsageReportSealed
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: UsageReportSealed.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: UsageReportSealed
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: UsageReportSealed.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: UsageReportSealed
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ControlPlaneMessageRefused.by_a_user
+    clause: 'rule 137: workspace control services write it as a system actor'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: actor
+      value: *id005
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ControlPlaneMessageRefused.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ControlPlaneMessageRefused.at_version_2
+    clause: '§9.17: closed at schema version 1 only'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: LicenseApplied.no_deployments
+    clause: 'rule 138: a license covers a deployment'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.deployment_ids
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deployment_ids
+  - name: LicenseApplied.deployments_descending
+    clause: 'rule 138: deployments strictly ascending'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.deployment_ids
+      value:
+      - dep_01JCELL2
+      - dep_01JCELL1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deployment_ids
+  - name: LicenseApplied.deployments_repeated
+    clause: 'rule 138: deployments strictly ascending, so a repeat is refused'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.deployment_ids
+      value:
+      - dep_01JCELL1
+      - dep_01JCELL1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deployment_ids
+  - name: LicenseApplied.features_descending
+    clause: 'rule 138: features strictly ascending'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.features
+      value:
+      - hybrid
+      - connected_clients
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.features
+  - name: LicenseApplied.validity_empty
+    clause: 'rule 138: not_before earlier than not_after'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_after
+      value: '2026-10-01T00:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.not_after
+  - name: LicenseApplied.validity_reversed
+    clause: 'rule 138: not_before earlier than not_after'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.not_before
+      value: '2027-10-01T00:00:00.000000000Z'
+    - path: payload.not_after
+      value: '2026-10-01T00:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.not_after
+  - name: LicenseApplied.sequence_zero
+    clause: 'rule 139: a sequence is at least 1'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.sequence
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ReleaseOffered.sequence_zero
+    clause: 'rule 139: a sequence is at least 1'
+    base_draft: ReleaseOffered
+    changes:
+    - path: payload.sequence
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ReleaseInstalled.sequence_zero
+    clause: 'rule 139: a sequence is at least 1'
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.sequence
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: CatalogEntryRegistered.sequence_zero
+    clause: 'rule 139: a sequence is at least 1'
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.sequence
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: DataBundleImported.sequence_zero
+    clause: 'rule 139: a sequence is at least 1'
+    base_draft: DataBundleImported
+    changes:
+    - path: payload.sequence
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ControlPlaneMessageRefused.sequence_zero
+    clause: 'rule 139: a sequence is at least 1'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.sequence
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: LicenseStateChanged.unchanged
+    clause: 'rule 140: a state change changes the state'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.from
+      value: valid
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.to
+  - name: UsageReportSealed.empty_period
+    clause: 'rule 141: period_start earlier than period_end'
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.period_end
+      value: '2026-10-17T12:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period_end
+  - name: ControlPlaneMessageRefused.unknown_with_sequence
+    clause: 'rule 142: a message outside the list has no sequence'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      value: unknown
+    - path: payload.reason
+      value: out_of_list
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  - name: ControlPlaneMessageRefused.unknown_unsigned
+    clause: 'rule 142: a message outside the list is refused only out_of_list or malformed'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      value: unknown
+    - path: payload.reason
+      value: unsigned
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ControlPlaneMessageRefused.replayed_without_sequence
+    clause: 'rule 142: a replay is judged by its sequence'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sequence
+  valid_drafts:
+  - name: ControlPlaneEnrolled.hybrid
+    clause: '§9.17: either mode'
+    base_draft: ControlPlaneEnrolled
+    changes:
+    - path: payload.mode
+      value: hybrid
+    expect:
+      outcome: Valid
+  - name: LicenseApplied.two_deployments
+    clause: 'rule 138: several deployments, ascending'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.deployment_ids
+      value:
+      - dep_01JCELL1
+      - dep_01JCELL2
+    expect:
+      outcome: Valid
+  - name: LicenseApplied.no_features
+    clause: 'rule 138: the feature set may be empty'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.features
+      value: []
+    expect:
+      outcome: Valid
+  - name: LicenseApplied.both_features
+    clause: 'rule 138: both features, ascending'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.features
+      value:
+      - connected_clients
+      - hybrid
+    expect:
+      outcome: Valid
+  - name: LicenseApplied.sequence_one
+    clause: 'rule 139: the first sequence is 1'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.sequence
+      value: 1
+    expect:
+      outcome: Valid
+  - name: LicenseApplied.zero_entitlements
+    clause: '§9.17: an entitlement may be zero'
+    base_draft: LicenseApplied
+    changes:
+    - path: payload.max_workspaces
+      value: 0
+    - path: payload.max_agents_deployed
+      value: 0
+    - path: payload.grace_days
+      value: 0
+    expect:
+      outcome: Valid
+  - name: LicenseStateChanged.lapsed
+    clause: 'rule 140: any move between states'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.from
+      value: grace
+    - path: payload.to
+      value: lapsed
+    expect:
+      outcome: Valid
+  - name: LicenseStateChanged.renewed
+    clause: 'rule 140: a lapse ends with a new license'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: payload.from
+      value: lapsed
+    - path: payload.to
+      value: valid
+    expect:
+      outcome: Valid
+  - name: ReleaseInstalled.rollback
+    clause: '§9.17: an operator rollback names an older release'
+    base_draft: ReleaseInstalled
+    changes:
+    - path: payload.trigger
+      value: rollback
+    - path: payload.sequence
+      value: 1
+    expect:
+      outcome: Valid
+  - name: CatalogEntryRegistered.registry_entry
+    clause: '§9.17: either catalog kind'
+    base_draft: CatalogEntryRegistered
+    changes:
+    - path: payload.kind
+      value: model_registry_entry
+    expect:
+      outcome: Valid
+  - name: UsageReportSealed.first_report
+    clause: '§9.17: a deployment''s first report chains from 64 zeros'
+    base_draft: UsageReportSealed
+    changes:
+    - path: payload.prev_report_hash
+      value: '0000000000000000000000000000000000000000000000000000000000000000'
+    expect:
+      outcome: Valid
+  - name: ControlPlaneMessageRefused.unreadable
+    clause: 'rule 142: a refusal with no readable sequence'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.sequence
+      value: null
+    - path: payload.reason
+      value: malformed
+    expect:
+      outcome: Valid
+  - name: ControlPlaneMessageRefused.unknown
+    clause: 'rule 142: a message outside the list'
+    base_draft: ControlPlaneMessageRefused
+    changes:
+    - path: payload.message
+      value: unknown
+    - path: payload.reason
+      value: out_of_list
+    - path: payload.sequence
+      value: null
+    expect:
+      outcome: Valid
+  - name: LicenseStateChanged.caused
+    clause: '§9.17: no rule reads the cause'
+    base_draft: LicenseStateChanged
+    changes:
+    - path: causation_id
+      value: 01J8Z3P2A000000000000000Q3
+    expect:
+      outcome: Valid
+  - name: ReleaseOffered.live
+    clause: '§9.17: either environment'
+    base_draft: ReleaseOffered
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
 broker_profile:
   spec: docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)
   artifacts:
@@ -11944,44 +14463,44 @@ broker_profile:
       kind: broker_profile
       profile_version: 1
       rows:
-      - &id005
+      - &id006
         asset_class: us_equity
         session: regular
-        cells: &id022
-        - &id006
-          order_type: limit
-          quantity_form: fractional
-          times_in_force: &id023
-          - day
-          protection_forms: &id018 []
+        cells: &id023
         - &id007
           order_type: limit
-          quantity_form: notional
-          times_in_force:
-          - day
-          protection_forms: []
-        - &id008
-          order_type: limit
-          quantity_form: whole
+          quantity_form: fractional
           times_in_force: &id024
           - day
-          - gtc
-          protection_forms: &id019
-          - bracket
-          - oco
-        - &id009
-          order_type: market
-          quantity_form: fractional
+          protection_forms: &id019 []
+        - &id008
+          order_type: limit
+          quantity_form: notional
           times_in_force:
           - day
           protection_forms: []
+        - &id009
+          order_type: limit
+          quantity_form: whole
+          times_in_force: &id025
+          - day
+          - gtc
+          protection_forms: &id020
+          - bracket
+          - oco
         - &id010
           order_type: market
-          quantity_form: notional
+          quantity_form: fractional
           times_in_force:
           - day
           protection_forms: []
         - &id011
+          order_type: market
+          quantity_form: notional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id012
           order_type: market
           quantity_form: whole
           times_in_force:
@@ -11989,38 +14508,38 @@ broker_profile:
           - gtc
           protection_forms:
           - bracket
-        - &id012
+        - &id013
           order_type: stop
           quantity_form: fractional
-          times_in_force: &id020
+          times_in_force: &id021
           - day
-          protection_forms: &id021 []
-        - &id013
+          protection_forms: &id022 []
+        - &id014
           order_type: stop
           quantity_form: notional
           times_in_force:
           - day
           protection_forms: []
-        - &id014
+        - &id015
           order_type: stop
           quantity_form: whole
           times_in_force:
           - day
           - gtc
           protection_forms: []
-        - &id015
+        - &id016
           order_type: stop_limit
           quantity_form: fractional
           times_in_force:
           - day
           protection_forms: []
-        - &id016
+        - &id017
           order_type: stop_limit
           quantity_form: notional
           times_in_force:
           - day
           protection_forms: []
-        - &id017
+        - &id018
           order_type: stop_limit
           quantity_form: whole
           times_in_force:
@@ -12136,8 +14655,8 @@ broker_profile:
     changes:
     - path: rows
       value:
-      - *id005
-      - *id005
+      - *id006
+      - *id006
     expect:
       reason: profile_duplicate_row
   - name: duplicate_cell
@@ -12148,8 +14667,7 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
-        - *id006
+        - *id007
         - *id007
         - *id008
         - *id009
@@ -12161,6 +14679,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: profile_duplicate_cell
   - name: no_time_in_force
@@ -12174,8 +14693,7 @@ broker_profile:
         - order_type: limit
           quantity_form: fractional
           times_in_force: []
-          protection_forms: *id018
-        - *id007
+          protection_forms: *id019
         - *id008
         - *id009
         - *id010
@@ -12186,6 +14704,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: profile_no_time_in_force
   - name: cells_out_of_order
@@ -12196,9 +14715,8 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id007
-        - *id006
         - *id008
+        - *id007
         - *id009
         - *id010
         - *id011
@@ -12208,6 +14726,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: non_canonical
   - name: times_in_force_out_of_order
@@ -12218,15 +14737,14 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
         - *id007
+        - *id008
         - order_type: limit
           quantity_form: whole
           times_in_force:
           - gtc
           - day
-          protection_forms: *id019
-        - *id009
+          protection_forms: *id020
         - *id010
         - *id011
         - *id012
@@ -12235,6 +14753,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: non_canonical
   - name: a_claim_without_a_client_order_id
@@ -12255,21 +14774,21 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
         - *id007
         - *id008
         - *id009
         - *id010
         - *id011
+        - *id012
         - order_type: stop_market
           quantity_form: fractional
-          times_in_force: *id020
-          protection_forms: *id021
-        - *id013
+          times_in_force: *id021
+          protection_forms: *id022
         - *id014
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: schema
   - name: a_gtc_expiry_member
@@ -12286,7 +14805,7 @@ broker_profile:
       value:
       - asset_class: us_equity
         session: regular
-        cells: *id022
+        cells: *id023
         venue: xnys
     expect:
       reason: schema
@@ -12300,10 +14819,9 @@ broker_profile:
         cells:
         - order_type: limit
           quantity_form: fractional
-          times_in_force: *id023
-          protection_forms: *id018
+          times_in_force: *id024
+          protection_forms: *id019
           min_qty: '1'
-        - *id007
         - *id008
         - *id009
         - *id010
@@ -12314,6 +14832,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: schema
   - name: a_wrong_kind
@@ -12331,15 +14850,14 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
         - *id007
+        - *id008
         - order_type: limit
           quantity_form: whole
-          times_in_force: *id024
+          times_in_force: *id025
           protection_forms:
           - oco
           - oco
-        - *id009
         - *id010
         - *id011
         - *id012
@@ -12348,6 +14866,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: non_canonical
   - name: protection_forms_out_of_order
@@ -12358,15 +14877,14 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
         - *id007
+        - *id008
         - order_type: limit
           quantity_form: whole
-          times_in_force: *id024
+          times_in_force: *id025
           protection_forms:
           - oco
           - bracket
-        - *id009
         - *id010
         - *id011
         - *id012
@@ -12375,6 +14893,7 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
     expect:
       reason: non_canonical
 connections:
@@ -12401,12 +14920,12 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id025
+        scopes: &id026
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id026
+        step_up: &id027
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -12434,10 +14953,10 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id025
+        scopes: *id026
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id026
+        step_up: *id027
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -12461,11 +14980,11 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id027
+        scopes: &id028
         - data
         - trading
         user: user_owner_01
-        step_up: *id026
+        step_up: *id027
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -12495,7 +15014,7 @@ connections:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id026
+        step_up: *id027
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -12517,9 +15036,9 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id027
+        scopes: *id028
         user: user_owner_01
-        step_up: *id026
+        step_up: *id027
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -14748,7 +17267,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - &id028
+      - &id029
         path: payload.scopes
         value:
         - trading
@@ -14756,7 +17275,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - *id028
+      - *id029
     expect:
       outcome: Valid
   - name: established_twice
@@ -14795,7 +17314,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id046
+      - &id047
         path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
@@ -14823,13 +17342,13 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id036
+      - &id037
         path: payload.environment
         value: live
-      - &id037
+      - &id038
         path: environment
         value: live
-      - &id038
+      - &id039
         path: payload.margin_attestation
         value: cash_account
     expect:
@@ -14871,19 +17390,19 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - &id029
+      - &id030
         path: schema_version
         value: 1
-      - &id030
+      - &id031
         path: payload.account_ref
         delete: true
-      - &id031
+      - &id032
         path: payload.user
         delete: true
-      - &id032
+      - &id033
         path: payload.step_up
         delete: true
-      - &id033
+      - &id034
         path: payload.margin_attestation
         delete: true
     - base_draft: rotated
@@ -14911,11 +17430,11 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - *id029
       - *id030
       - *id031
       - *id032
       - *id033
+      - *id034
     - base_draft: rotated
       changes:
       - path: event_id
@@ -14929,11 +17448,11 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - *id029
       - *id030
       - *id031
       - *id032
       - *id033
+      - *id034
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -15061,7 +17580,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - *id028
+      - *id029
     - base_draft: rotated
       changes:
       - path: event_id
@@ -15185,7 +17704,7 @@ connections:
   - name: degraded_cleared_acknowledged_then_suspended_and_reauthorized
     clause: 'rule 68: the B1 path: a reauthorize after the suspension, accepted by a rotation, then cleared'
     records:
-    - &id034
+    - &id035
       base_draft: checked_start
       changes:
       - path: event_id
@@ -15203,7 +17722,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id035
+    - &id036
       base_draft: established_copy
       changes:
       - path: event_id
@@ -15320,8 +17839,8 @@ connections:
   - name: executor_start_after_binding
     clause: 'rule 68: checks after the binding'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15387,12 +17906,12 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - &id039
+      - &id040
         path: payload.broker
         value: robinhood
-      - *id036
       - *id037
       - *id038
+      - *id039
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15444,10 +17963,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id039
-      - *id036
+      - *id040
       - *id037
       - *id038
+      - *id039
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15485,7 +18004,7 @@ connections:
   - name: two_account_streams_interleave
     clause: 'rule 68: each account stream is folded on its own, one connection each (DEC-696)'
     records:
-    - &id040
+    - &id041
       base_draft: checked_start
       changes:
       - path: event_id
@@ -15503,7 +18022,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id041
+    - &id042
       base_draft: checked_start
       changes:
       - path: event_id
@@ -15525,14 +18044,14 @@ connections:
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - &id042
+    - &id043
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-    - &id043
+    - &id044
       base_draft: established_copy
       changes:
       - path: event_id
@@ -15545,7 +18064,7 @@ connections:
         value: conn_alpaca_paper_2
       - path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
-    - &id044
+    - &id045
       base_draft: checked_start
       changes:
       - path: event_id
@@ -15563,7 +18082,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id045
+    - &id046
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -15585,12 +18104,12 @@ connections:
   - name: a_reauthorize_on_another_account_stream_admits_no_rotation
     clause: 'rule 68: the rotation''s reauthorize check is on its own stream (DEC-696)'
     records:
-    - *id040
     - *id041
     - *id042
     - *id043
     - *id044
     - *id045
+    - *id046
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -15735,7 +18254,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id046
+      - *id047
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -15767,10 +18286,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id039
-      - *id036
+      - *id040
       - *id037
       - *id038
+      - *id039
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -15805,10 +18324,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id039
-      - *id036
+      - *id040
       - *id037
       - *id038
+      - *id039
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15834,8 +18353,8 @@ connections:
   - name: rotation_copied_without_a_passing_reauthorize
     clause: 'rule 68: a rotation follows a passing reauthorize check'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15865,9 +18384,9 @@ connections:
   - name: suspension_cleared_without_a_rotation
     clause: 'rule 68: the clearing cause is the copied rotation'
     records:
-    - *id034
     - *id035
-    - &id047
+    - *id036
+    - &id048
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -15900,9 +18419,9 @@ connections:
   - name: refused_reauth_check_clears
     clause: 'rule 68: a passing reauthorize the control services refused never clears (no rotation names it)'
     records:
-    - *id034
     - *id035
-    - *id047
+    - *id036
+    - *id048
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15940,8 +18459,8 @@ connections:
   - name: stale_check_clears
     clause: 'rule 68: the reauthorize came after the suspension'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -15995,8 +18514,8 @@ connections:
   - name: stale_rotation_clears
     clause: 'rule 68: the rotation came after the suspension'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -16050,8 +18569,8 @@ connections:
   - name: two_connections_on_one_account_stream
     clause: 'rule 68: one account stream, one connection (CN-5)'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -16078,8 +18597,8 @@ connections:
   - name: first_change_not_from_active
     clause: rule 68
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -16100,8 +18619,8 @@ connections:
   - name: from_not_the_last_state
     clause: rule 68
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -16134,8 +18653,8 @@ connections:
   - name: acknowledged_before_cleared
     clause: 'rule 68: the acknowledgment never lifts a cause that has not cleared'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -16168,8 +18687,8 @@ connections:
   - name: acknowledged_after_the_cause_returned
     clause: rule 68
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -16226,10 +18745,10 @@ connections:
   - name: suspended_twice_cleared_after_the_second_entry
     clause: 'rule 68: a reauthorize after the latest entry into suspended, and its rotation, clear it (#1174)'
     records:
-    - *id034
     - *id035
-    - *id047
-    - &id048
+    - *id036
+    - *id048
+    - &id049
       base_draft: checked_start
       changes:
       - path: event_id
@@ -16247,12 +18766,12 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id049
+    - &id050
       base_draft: rotated_copy
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
-    - &id050
+    - &id051
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -16265,7 +18784,7 @@ connections:
         value: condition_cleared
       - path: causation_id
         value: 01J8Z4S05A0000000000000000
-    - &id051
+    - &id052
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -16278,7 +18797,7 @@ connections:
         value: acknowledged
       - path: causation_id
         value: 01J8Z4C0A000000000000000K9
-    - &id052
+    - &id053
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -16341,14 +18860,14 @@ connections:
   - name: suspended_twice_cleared_by_the_first_rotation
     clause: 'rule 68: the first suspension''s rotation does not clear the second (#1174)'
     records:
-    - *id034
     - *id035
-    - *id047
+    - *id036
     - *id048
     - *id049
     - *id050
     - *id051
     - *id052
+    - *id053
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -16369,14 +18888,14 @@ connections:
   - name: suspended_twice_cleared_on_the_first_check
     clause: 'rule 68: a rotation after the second entry that rests on the first suspension''s check (#1174)'
     records:
-    - *id034
     - *id035
-    - *id047
+    - *id036
     - *id048
     - *id049
     - *id050
     - *id051
     - *id052
+    - *id053
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -16402,7 +18921,7 @@ connections:
   - name: connect_then_reauthorize
     clause: '§11: every cause on its stream, for its connection, passing'
     records:
-    - &id058
+    - &id059
       base_draft: checked_start
       changes:
       - path: event_id
@@ -16420,30 +18939,30 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id053
+    - &id054
       base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - &id054
+    - &id055
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4S02A0000000000000000
-    - &id055
+    - &id056
       base_draft: checked_start
       changes:
-      - &id061
+      - &id062
         path: event_id
         value: 01J8Z4S04A0000000000000000
-      - &id062
+      - &id063
         path: payload.occasion
         value: reauthorize
-      - &id063
+      - &id064
         path: payload.results
         value:
         - check: account
@@ -16455,16 +18974,16 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id056
+    - &id057
       base_draft: rotated
       changes:
-      - &id059
+      - &id060
         path: event_id
         value: 01J8Z4S05A0000000000000000
-      - &id060
+      - &id061
         path: causation_id
         value: 01J8Z4S04A0000000000000000
-    - &id057
+    - &id058
       base_draft: rotated_copy
       changes:
       - path: event_id
@@ -16493,11 +19012,11 @@ connections:
         - check: scope
           result: failed
           reason: scope_mismatch
-    - *id053
     - *id054
     - *id055
     - *id056
     - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16522,11 +19041,11 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - *id053
     - *id054
     - *id055
     - *id056
     - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16553,11 +19072,11 @@ connections:
           reason: null
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - *id053
     - *id054
     - *id055
     - *id056
     - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16584,11 +19103,11 @@ connections:
           reason: null
       - path: stream_id
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
-    - *id053
     - *id054
     - *id055
     - *id056
     - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16634,17 +19153,17 @@ connections:
   - name: rotated_on_a_connect_check
     clause: '§11: occasion reauthorize'
     records:
-    - *id058
-    - *id053
+    - *id059
     - *id054
     - *id055
+    - *id056
     - base_draft: rotated
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16652,8 +19171,8 @@ connections:
   - name: copy_differs_from_its_original
     clause: '§11: a copy carries its original''s members'
     records:
-    - *id058
-    - *id053
+    - *id059
+    - *id054
     - base_draft: established_copy
       changes:
       - path: event_id
@@ -16663,9 +19182,9 @@ connections:
       - path: payload.scopes
         value:
         - trading
-    - *id055
     - *id056
     - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16673,11 +19192,11 @@ connections:
   - name: copy_of_nothing
     clause: '§11: a copy names its original'
     records:
-    - *id058
-    - *id053
+    - *id059
     - *id054
     - *id055
     - *id056
+    - *id057
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -16799,17 +19318,17 @@ connections:
   - name: rotated_on_another_control_stream
     clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
     records:
-    - *id058
-    - *id053
+    - *id059
     - *id054
     - *id055
+    - *id056
     - base_draft: rotated
       changes:
-      - *id059
       - *id060
+      - *id061
       - path: stream_id
         value: ctl:ws_01J8Z3
-    - *id057
+    - *id058
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -16817,20 +19336,20 @@ connections:
   - name: rotated_in_another_workspace_on_its_check
     clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
     records:
-    - *id058
-    - *id053
+    - *id059
     - *id054
+    - *id055
     - base_draft: checked_start
       changes:
-      - *id061
       - *id062
       - *id063
+      - *id064
       - path: stream_id
         value: acct:ws_01J8Z3:01J8Z2ACCT00000000000000A1
     - base_draft: rotated
       changes:
-      - *id059
       - *id060
+      - *id061
       - path: stream_id
         value: ctl:ws_01J8Z3
     expect:
@@ -16866,7 +19385,7 @@ connection_requests:
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id064
+        step_up: &id065
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -16899,7 +19418,7 @@ connection_requests:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id064
+        step_up: *id065
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -16925,7 +19444,7 @@ connection_requests:
         - data
         - trading
         user: user_owner_01
-        step_up: *id064
+        step_up: *id065
       artifact_refs: []
       pii_refs: []
     requested:
@@ -17205,7 +19724,7 @@ connection_requests:
   - name: requested_then_established
     clause: 'rule 131: the establishment closes its request'
     records:
-    - &id065
+    - &id066
       base_draft: established_v2
       changes:
       - path: event_id
@@ -17236,7 +19755,7 @@ connection_requests:
   - name: requested_then_refused_by_a_check
     clause: 'rule 131: a connect''s refusal closes its request'
     records:
-    - *id065
+    - *id066
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -17250,7 +19769,7 @@ connection_requests:
   - name: requested_then_torn_down
     clause: 'rule 131: the teardown closes its request (connections spec §5.2 step 6)'
     records:
-    - *id065
+    - *id066
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -17259,10 +19778,10 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - &id066
+      - &id067
         path: payload.check
         value: null
-      - &id067
+      - &id068
         path: payload.reason
         value: timeout
     expect:
@@ -17270,7 +19789,7 @@ connection_requests:
   - name: requested_and_still_connecting
     clause: 'rule 131: a connect in progress leaves its request open'
     records:
-    - *id065
+    - *id066
     expect:
       outcome: Valid
   - name: retried_on_a_new_account_ref
@@ -17305,9 +19824,9 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
       - *id067
-    - *id065
+      - *id068
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17338,7 +19857,7 @@ connection_requests:
             assertion_id: assert_owner_09
             authenticated_at: '2026-09-22T12:59:50.000000000Z'
             method: cli_confirm
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17356,7 +19875,7 @@ connection_requests:
   - name: reconnect_closes_nothing
     clause: 'rule 131: a reconnect and a reauthorize need no request'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17403,8 +19922,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-      - *id066
       - *id067
+      - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17456,8 +19975,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-      - *id066
       - *id067
+      - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17499,8 +20018,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
       - *id067
+      - *id068
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -17595,7 +20114,7 @@ connection_requests:
   - name: revoked_while_connecting
     clause: 'rule 131: a revocation closes the open request and is never refused'
     records:
-    - *id065
+    - *id066
     - base_draft: rotated
       changes:
       - path: event_id
@@ -17637,7 +20156,7 @@ connection_requests:
   - name: revoked_then_torn_down_on_a_retry
     clause: 'rules 67 and 131: a retry after a revocation is torn down'
     records:
-    - *id065
+    - *id066
     - base_draft: rotated
       changes:
       - path: event_id
@@ -17676,8 +20195,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
       - *id067
+      - *id068
     expect:
       outcome: Valid
   - name: version_1_after_the_first_request
@@ -17728,7 +20247,7 @@ connection_requests:
   - name: established_after_its_request_was_revoked
     clause: 'rule 131: nothing is established from a revoked request'
     records:
-    - *id065
+    - *id066
     - base_draft: rotated
       changes:
       - path: event_id
@@ -17750,7 +20269,7 @@ connection_requests:
   - name: teardown_after_its_request_was_revoked
     clause: 'rules 67 and 131: the teardown journals nothing after a revocation'
     records:
-    - *id065
+    - *id066
     - base_draft: rotated
       changes:
       - path: event_id
@@ -17768,8 +20287,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
       - *id067
+      - *id068
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -17778,7 +20297,7 @@ connection_requests:
   - name: reconnect_of_a_connection_never_established
     clause: 'rule 67: a revoked request leaves nothing to reconnect'
     records:
-    - *id065
+    - *id066
     - base_draft: rotated
       changes:
       - path: event_id
@@ -17804,7 +20323,7 @@ connection_requests:
   - name: request_closed_twice
     clause: 'rule 131: a request is closed once'
     records:
-    - *id065
+    - *id066
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -17813,8 +20332,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
       - *id067
+      - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17848,7 +20367,7 @@ connection_requests:
             assertion_id: assert_owner_09
             authenticated_at: '2026-09-22T12:59:50.000000000Z'
             method: cli_confirm
-    - *id065
+    - *id066
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -17857,7 +20376,7 @@ connection_requests:
   - name: requested_for_an_established_id
     clause: 'rule 131: a request names a new connection'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17929,8 +20448,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
       - *id067
+      - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17960,7 +20479,7 @@ connection_requests:
   - name: refused_with_another_step_up
     clause: 'rule 131: the refusal repeats its request''s step-up'
     records:
-    - *id065
+    - *id066
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -17969,7 +20488,7 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - &id068
+      - &id069
         path: payload.step_up
         value:
           assertion_id: assert_owner_10
@@ -17983,7 +20502,7 @@ connection_requests:
   - name: established_with_another_account_ref
     clause: 'rule 131: the establishment repeats its request''s account_ref'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -17998,7 +20517,7 @@ connection_requests:
   - name: established_with_another_broker
     clause: 'rule 131: the establishment repeats its request''s broker'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -18013,7 +20532,7 @@ connection_requests:
   - name: established_with_another_environment
     clause: 'rule 131: the establishment repeats its request''s environment'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -18032,7 +20551,7 @@ connection_requests:
   - name: established_with_another_user
     clause: 'rule 131: the establishment repeats its request''s user'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -18047,12 +20566,12 @@ connection_requests:
   - name: established_with_another_step_up
     clause: 'rule 131: the establishment repeats its request''s step_up'
     records:
-    - *id065
+    - *id066
     - base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - *id068
+      - *id069
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -18083,12 +20602,12 @@ connection_ranges:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id069
+        scopes: &id070
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id070
+        step_up: &id071
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -18116,10 +20635,10 @@ connection_ranges:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id069
+        scopes: *id070
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id070
+        step_up: *id071
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -18143,11 +20662,11 @@ connection_ranges:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id071
+        scopes: &id072
         - data
         - trading
         user: user_owner_01
-        step_up: *id070
+        step_up: *id071
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -18177,7 +20696,7 @@ connection_ranges:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id070
+        step_up: *id071
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -18199,9 +20718,9 @@ connection_ranges:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id071
+        scopes: *id072
         user: user_owner_01
-        step_up: *id070
+        step_up: *id071
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -19267,12 +21786,12 @@ connection_revocations:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id072
+        scopes: &id073
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id073
+        step_up: &id074
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -19300,10 +21819,10 @@ connection_revocations:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id072
+        scopes: *id073
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id073
+        step_up: *id074
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -19327,11 +21846,11 @@ connection_revocations:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id074
+        scopes: &id075
         - data
         - trading
         user: user_owner_01
-        step_up: *id073
+        step_up: *id074
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -19361,7 +21880,7 @@ connection_revocations:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id073
+        step_up: *id074
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -19383,9 +21902,9 @@ connection_revocations:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id074
+        scopes: *id075
         user: user_owner_01
-        step_up: *id073
+        step_up: *id074
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -19479,8 +21998,8 @@ connection_revocations:
   - name: account_stream_revocation
     clause: 'rule 68: a ConnectionRevoked belongs to the control stream (DEC-888)'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: rotated
       changes:
       - path: event_id
@@ -19536,8 +22055,8 @@ connection_revocations:
   - name: control_stream_revocation_beside_a_bound_stream
     clause: '§9.8: no rule refuses a control-stream ConnectionRevoked'
     records:
-    - *id034
     - *id035
+    - *id036
     - base_draft: rotated
       changes:
       - path: event_id
@@ -21795,7 +24314,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: &id075
+      value: &id076
         input: 0
         output: 0
         cached: 0
@@ -21829,7 +24348,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id076
     - path: payload.cost_usd
       value: '0'
     - path: payload.cost_usd
@@ -21860,7 +24379,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id076
     - path: payload.cost_usd
       value: '0'
     - path: payload.tokens.input
@@ -21891,7 +24410,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id076
     - path: payload.cost_usd
       value: '0'
     - path: payload.provider_request_id
@@ -21922,7 +24441,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id076
     - path: payload.cost_usd
       value: '0'
     - path: payload.response_ref
@@ -21976,7 +24495,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id076
     - path: payload.cost_usd
       value: '0'
     - path: payload.cache_hit
@@ -22332,7 +24851,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id076
     - path: payload.cost_usd
       value: '0'
     - path: artifact_refs
@@ -23720,7 +26239,7 @@ client_actor:
       changes:
       - path: causation_id
         value: 01J8Z5C2C000000000000000C7
-    expect: &id076
+    expect: &id077
       outcome: Invalid
       draft_index: 1
       reason: schema
@@ -23734,7 +26253,7 @@ client_actor:
         value: workspace
     - base_draft: revoked_compromised
       changes: []
-    expect: *id076
+    expect: *id077
   - name: a_revocation_after_another_connections_kill_switch
     clause: 'rule 84: the kill switch is this connection''s'
     drafts:
@@ -23744,7 +26263,7 @@ client_actor:
         value: conn_02
     - base_draft: revoked_compromised
       changes: []
-    expect: *id076
+    expect: *id077
   - name: a_revocation_after_a_pause
     clause: 'rule 84: the command is a kill switch'
     drafts:
@@ -23754,7 +26273,7 @@ client_actor:
         value: pause
     - base_draft: revoked_compromised
       changes: []
-    expect: *id076
+    expect: *id077
   - name: a_revocation_alone
     clause: 'rule 84: the kill switch is in the same batch'
     drafts:
@@ -24943,7 +27462,7 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - &id077
+    - &id078
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -24966,7 +27485,7 @@ hold:
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id085
+    - &id086
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -24975,7 +27494,7 @@ hold:
         reason: owner_resume
         lifecycle: normal
         held: true
-    - &id080
+    - &id081
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -24989,11 +27508,11 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
+    - *id078
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id081
+    - &id082
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -25008,7 +27527,7 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
+    - *id078
     - event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -25037,8 +27556,8 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - &id078
+    - *id078
+    - &id079
       event_type: AgentModeChanged
       schema_version: 1
       payload:
@@ -25052,14 +27571,14 @@ hold:
     from_seq: 1
     anchor: null
     events:
+    - *id079
     - *id078
-    - *id077
     expect: []
   - name: a_full_chain_opens_with_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
-    - &id079
+    - &id080
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -25073,24 +27592,24 @@ hold:
     from_seq: 1
     anchor: null
     events:
+    - *id080
     - *id079
-    - *id078
     expect:
     - 1
   - name: a_lift_then_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
-    - *id077
+    - *id078
+    - *id081
     - *id080
-    - *id079
     expect: []
   - name: a_lift_then_a_copy_that_keeps_the_hold
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - *id080
+    - *id078
+    - *id081
     - event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -25105,9 +27624,9 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - *id081
-    - &id082
+    - *id078
+    - *id082
+    - &id083
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -25122,9 +27641,9 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - *id081
-    - *id081
+    - *id078
+    - *id082
+    - *id082
     expect:
     - 1
     - 2
@@ -25140,30 +27659,30 @@ hold:
         reason: owner_hold
         lifecycle: normal
         held: false
-    - *id082
+    - *id083
     expect:
     - 0
   - name: a_later_range_launders_a_dropped_hold
     from_seq: 40
-    anchor: &id084
+    anchor: &id085
       v2_before: true
       held: true
     events:
-    - *id081
+    - *id082
     expect:
     - 0
   - name: a_later_range_starts_with_version_1_after_a_version_2
     from_seq: 40
-    anchor: &id083
+    anchor: &id084
       v2_before: true
       held: false
     events:
-    - *id078
+    - *id079
     expect:
     - 0
   - name: a_later_range_whose_predecessor_was_not_held
     from_seq: 40
-    anchor: *id083
+    anchor: *id084
     events:
     - event_type: AgentModeChanged
       schema_version: 2
@@ -25176,61 +27695,61 @@ hold:
     expect: []
   - name: a_later_range_carries_the_hold_of_a_copy
     from_seq: 40
-    anchor: *id084
+    anchor: *id085
     events:
-    - *id082
-    - *id085
+    - *id083
+    - *id086
     expect: []
   - name: a_later_range_with_no_version_2_before
     from_seq: 40
     anchor:
       v2_before: false
     events:
-    - *id078
     - *id079
+    - *id080
     expect: []
   - name: an_unanchored_range_opens_with_a_hold
     from_seq: 40
     anchor: null
     events:
-    - *id077
-    - *id082
+    - *id078
+    - *id083
     expect: []
   - name: an_unanchored_range_anchors_on_its_own_hold_then_drops_it
     from_seq: 40
     anchor: null
     events:
-    - *id077
-    - *id081
+    - *id078
+    - *id082
     expect:
     - 1
   - name: an_unanchored_range_opens_with_version_1
     from_seq: 40
     anchor: null
     events:
+    - *id079
     - *id078
-    - *id077
     expect: []
   - name: an_unanchored_range_opens_with_a_held_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id082
+    - *id083
     expect:
     - 0
   - name: an_unanchored_range_opens_with_a_clear_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id081
+    - *id082
     expect:
     - 0
   - name: an_unanchored_range_with_version_1_after_its_hold
     from_seq: 40
     anchor: null
     events:
-    - *id077
     - *id078
+    - *id079
     expect:
     - 1
 membership:
@@ -26701,7 +29220,7 @@ membership:
     base_draft: invited
     changes:
     - path: actor
-      value: &id086
+      value: &id087
         kind: system
         id: control_services
         version: 0.1.0
@@ -27364,7 +29883,7 @@ membership:
     base_draft: deactivated
     changes:
     - path: actor
-      value: *id086
+      value: *id087
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -27378,7 +29897,7 @@ membership:
     base_draft: deactivated
     changes:
     - path: actor
-      value: *id086
+      value: *id087
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -27392,7 +29911,7 @@ membership:
     base_draft: removed
     changes:
     - path: actor
-      value: *id086
+      value: *id087
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -28998,7 +31517,7 @@ membership_fold:
   - name: an_invitation_accepted_twice
     clause: '§9.12: an invitation activates at most once'
     records:
-    - &id087
+    - &id088
       event_type: MemberActivated
       event_time: '2026-10-05T14:00:00.000000000Z'
       actor:
@@ -29019,7 +31538,7 @@ membership_fold:
         independent_approval_required: true
         cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
         session_ref: null
-    - &id088
+    - &id089
       event_type: MemberInvited
       event_time: '2026-10-05T15:00:00.000000000Z'
       actor:
@@ -29039,7 +31558,7 @@ membership_fold:
         invited_at: '2026-10-05T15:00:00.000000000Z'
         expires_at: '2026-10-12T15:00:00.000000000Z'
         session_ref: session_00F1
-    - &id089
+    - &id090
       event_type: MemberActivated
       event_time: '2026-10-05T16:00:00.000000000Z'
       actor:
@@ -29086,9 +31605,9 @@ membership_fold:
   - name: a_second_activation
     clause: '§9.12: a member whose membership is not removed is not activated again'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberInvited
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29203,9 +31722,9 @@ membership_fold:
   - name: removed_while_active
     clause: '§9.12: only a deactivated member is removed'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberRemoved
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29228,9 +31747,9 @@ membership_fold:
   - name: removed_then_reactivated
     clause: '§9.12: removed is terminal'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29285,9 +31804,9 @@ membership_fold:
   - name: reactivated_with_other_roles
     clause: '§9.12: a reactivation restores exactly the kept roles'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29330,9 +31849,9 @@ membership_fold:
   - name: a_role_removed_that_is_not_held
     clause: §9.12
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberRoleChanged
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29360,9 +31879,9 @@ membership_fold:
   - name: a_role_added_that_is_held
     clause: §9.12
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberRoleChanged
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29394,9 +31913,9 @@ membership_fold:
   - name: a_role_change_while_deactivated
     clause: §9.12
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29440,9 +31959,9 @@ membership_fold:
   - name: a_role_granted_while_deactivated
     clause: '§9.12, DEC-654 item 7: a grant never reaches a deactivated member, even with a removal'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29487,9 +32006,9 @@ membership_fold:
   - name: reactivated_with_a_stripped_role
     clause: '§9.12: a kept role removed while deactivated is not restored'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29549,9 +32068,9 @@ membership_fold:
   - name: a_role_change_after_removal
     clause: '§9.12: removed is terminal'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29607,9 +32126,9 @@ membership_fold:
   - name: a_role_removed_that_is_not_kept_while_deactivated
     clause: '§9.12: a deactivated member''s removal names only roles it keeps'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29649,9 +32168,9 @@ membership_fold:
   - name: a_deactivated_member_activated_again
     clause: '§9.12: only a removed membership starts again by an invitation'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29803,9 +32322,9 @@ membership_fold:
   - name: deactivated_twice
     clause: §9.12
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -29956,9 +32475,9 @@ membership_fold:
   - name: a_revocation_of_an_accepted_invitation
     clause: '§9.12: only an `invited` invitation is revoked'
     records:
-    - *id087
     - *id088
     - *id089
+    - *id090
     - event_type: MemberInvitationRevoked
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -31514,13 +34033,13 @@ records_access:
     changes:
     - path: payload.ranges
       value:
-      - &id090
+      - &id091
         stream_id: agent:ws_01J8Z2:agent_a
         from_seq: 12
         to_seq: 30
         prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
         to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
-      - *id090
+      - *id091
     - path: artifact_refs
       value: []
     expect:
@@ -31585,7 +34104,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id094
+      value: &id095
         kind: agent
         id: agent_a
         version: 0.1.0
@@ -31640,7 +34159,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id091
+      value: &id092
         kind: client
         id: client_01
         version: '1'
@@ -31659,7 +34178,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id091
+      value: *id092
     - path: artifact_refs
       value: []
     expect:
@@ -31671,7 +34190,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id091
+      value: *id092
     - path: artifact_refs
       value: []
     expect:
@@ -31683,7 +34202,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id092
+      value: &id093
         kind: broker
         id: alpaca
         version: v2
@@ -31701,7 +34220,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id093
+      value: &id094
         kind: platform_operator
         id: operator_01
         version: '1'
@@ -31719,7 +34238,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id092
+      value: *id093
     - path: artifact_refs
       value: []
     expect:
@@ -31731,7 +34250,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id093
+      value: *id094
     - path: artifact_refs
       value: []
     expect:
@@ -31743,7 +34262,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id092
+      value: *id093
     - path: artifact_refs
       value: []
     expect:
@@ -31755,7 +34274,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id093
+      value: *id094
     - path: artifact_refs
       value: []
     expect:
@@ -31767,7 +34286,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id094
+      value: *id095
     - path: artifact_refs
       value: []
     expect:
@@ -31803,11 +34322,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: &id096
-        kind: user
-        id: user_owner_01
-        version: '1'
-        build: null
+      value: *id005
     - path: artifact_refs
       value: []
     expect:
@@ -31819,7 +34334,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id094
+      value: *id095
     - path: artifact_refs
       value: []
     expect:
@@ -32129,7 +34644,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id095
+      value: &id096
         kind: system
         id: control_services
         version: 0.1.0
@@ -32145,7 +34660,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: *id091
+      value: *id092
     - path: payload.accessor
       value: client_01
     - path: payload.operation
@@ -32159,7 +34674,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: *id093
+      value: *id094
     - path: payload.accessor
       value: operator_01
     - path: causation_id
@@ -32227,7 +34742,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id095
+      value: *id096
     - path: artifact_refs
       value: []
     expect:
@@ -32237,7 +34752,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id095
+      value: *id096
     - path: artifact_refs
       value: []
     expect:
@@ -32247,7 +34762,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id096
+      value: *id005
     - path: payload.trigger
       value: request
     - path: artifact_refs
@@ -32259,7 +34774,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id095
+      value: *id096
     - path: payload.trigger
       value: restore_drill
     - path: payload.ranges
@@ -33791,7 +36306,7 @@ cold_records:
     base_draft: anchor
     changes:
     - path: actor
-      value: *id096
+      value: *id005
     - path: artifact_refs
       value:
       - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -33898,7 +36413,7 @@ cold_records:
     base_draft: segment
     changes:
     - path: actor
-      value: *id096
+      value: *id005
     - path: artifact_refs
       value: []
     expect:
@@ -36352,7 +38867,7 @@ verification_runs:
     base_draft: run_passed
     changes:
     - path: actor
-      value: *id096
+      value: *id005
     - path: artifact_refs
       value: []
     expect:
@@ -36364,7 +38879,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id091
+      value: *id092
     - path: artifact_refs
       value: []
     expect:
@@ -36376,7 +38891,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id093
+      value: *id094
     - path: artifact_refs
       value: []
     expect:
@@ -37263,7 +39778,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id095
+      value: *id096
     - path: artifact_refs
       value: []
     expect:
@@ -37273,7 +39788,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id095
+      value: *id096
     - path: payload.trigger
       value: restore_drill
     - path: artifact_refs
@@ -37285,7 +39800,7 @@ verification_runs:
     base_draft: run_passed
     changes:
     - path: actor
-      value: *id095
+      value: *id096
     - path: payload.trigger
       value: restore_drill
     - path: payload.result
