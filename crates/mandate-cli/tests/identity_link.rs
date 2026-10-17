@@ -232,6 +232,7 @@ fn an_unsafe_or_malformed_file_is_never_extended() {
         format!("{digest} {FOUNDER}\n{digest} {OTHER}\n"),
         format!("sha256:abc {FOUNDER}\n"),
         "\n".to_owned(),
+        format!("{digest} {FOUNDER}\r\n"),
     ];
     for text in malformed {
         fs::write(&links, &text).unwrap();

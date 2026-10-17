@@ -99,7 +99,7 @@ pub fn parse_links(text: &str) -> Result<BTreeMap<String, PrincipalId>, ControlE
     if !text.is_empty() && !text.ends_with('\n') {
         return Err(refused("links_malformed"));
     }
-    for line in text.lines() {
+    for line in text.split_terminator('\n') {
         let (digest, member) = line
             .split_once(' ')
             .ok_or_else(|| refused("links_malformed"))?;
@@ -171,16 +171,16 @@ pub fn link(
         PrincipalId::from_ulid_text(&args.member).map_err(|_| refused("member_invalid"))?;
     let mut read = String::new();
     subject
-        .take(MAX_SUBJECT.saturating_add(1))
+        .take(MAX_SUBJECT.saturating_add(3))
         .read_to_string(&mut read)
         .map_err(|_| refused("subject_invalid"))?;
-    if u64::try_from(read.len()).map_or(true, |n| n > MAX_SUBJECT) {
-        return Err(refused("subject_invalid"));
-    }
     let line = read
         .strip_suffix('\n')
         .map(|s| s.strip_suffix('\r').unwrap_or(s))
         .unwrap_or(&read);
+    if u64::try_from(line.len()).map_or(true, |n| n > MAX_SUBJECT) {
+        return Err(refused("subject_invalid"));
+    }
     let digest = subject_digest(&args.issuer, line)?;
     let written = link_file(&args.links, &digest, member)?;
     let verb = if written { "linked" } else { "already linked" };
@@ -255,11 +255,13 @@ fn staged(
         .map_err(|e| io_error("write", &e))?;
     file.sync_all().map_err(|e| io_error("sync", &e))?;
     fs::rename(staging, path).map_err(|e| io_error("rename", &e))?;
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        File::open(dir)
-            .and_then(|d| d.sync_all())
-            .map_err(|e| io_error("sync the directory", &e))?;
-    }
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        Some(_) | None => Path::new("."),
+    };
+    File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(|e| io_error("sync the directory", &e))?;
     Ok(true)
 }
 
