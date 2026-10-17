@@ -112,7 +112,7 @@ export function UnreachableNotice() {
       <h1 className="text-h1">Cannot reach your deployment</h1>
       <div className="grid max-w-measure gap-3 text-base">
         <p>
-          It last answered at {clock(ws.health.deployment.as_of)}. No agent data is shown, and none is kept on this device, so nothing here can be out of date.
+          {ws.health.deployment.as_of === null ? "It has not answered." : `It last answered at ${clock(ws.health.deployment.as_of)}.`} No agent data is shown, and none is kept on this device, so nothing here can be out of date.
         </p>
         <p className="text-muted-foreground">
           Agents keep running on the deployment, and protective orders rest at the broker. The Stop control still opens; from here it cannot deliver a request, so it tells
@@ -161,6 +161,22 @@ export function MembershipNotice() {
   );
 }
 
+/**
+ * A screen the workspace API does not serve yet (DEC-1096): over the API it shows nothing rather than
+ * fixture figures. Home, the agents, an agent, the approvals and a request have screens of their own.
+ */
+export function ApiNotYetNotice() {
+  return (
+    <div role="status" data-slot="api-not-yet" className="reveal grid max-w-2xl gap-4 pt-6 text-foreground sm:pt-12">
+      <Plug aria-hidden className="-ml-2.5 size-12 text-muted-foreground" />
+      <h1 className="text-h1">Not available from your deployment yet</h1>
+      <p className="max-w-measure text-base text-muted-foreground">
+        Your deployment does not serve this screen yet, so it shows nothing rather than an example. Home, your agents and your approvals are served.
+      </p>
+    </div>
+  );
+}
+
 export function ScreenSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="grid gap-(--section-gap)" aria-busy="true" aria-label="Loading" data-slot="skeleton">
@@ -189,12 +205,16 @@ export function ScreenSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** Loading shows a skeleton and never earlier values; unreachable, signed out and an unread membership show no data at all. */
-export function WorkspaceGate({ children, skeleton }: { children: ReactNode; skeleton?: ReactNode }) {
-  const { ws } = useRuntime();
+/**
+ * Loading shows a skeleton and never earlier values; unreachable, signed out and an unread membership
+ * show no data at all. Over the workspace API only a screen marked `api` (DEC-1096) shows its children.
+ */
+export function WorkspaceGate({ children, skeleton, api = false }: { children: ReactNode; skeleton?: ReactNode; api?: boolean }) {
+  const { ws, source } = useRuntime();
   if (ws.status === "loading") return <>{skeleton ?? <ScreenSkeleton />}</>;
   if (ws.status === "unreachable") return <UnreachableNotice />;
   if (ws.status === "signed_out") return <SignedOutNotice />;
   if (ws.status === "membership_unavailable") return <MembershipNotice />;
+  if (source === "api" && !api) return <ApiNotYetNotice />;
   return <>{children}</>;
 }

@@ -113,7 +113,8 @@ export type CommandOutcome =
 /** Spec §5.4. `record` and `step_up` may be `null`: Stop works before anything has loaded. */
 export interface KillSwitchRequest {
   scope: { kind: "agent" | "connection"; id: string } | { kind: "workspace"; id: null };
-  environment_shown: "paper" | "live";
+  /** What the screen said; `null` when it named no environment (DEC-1096). A mismatch never refuses. */
+  environment_shown: "paper" | "live" | null;
   owner_exit: null;
   record: { artifact: ContentRef; ui_build: ContentRef } | null;
   step_up: null;

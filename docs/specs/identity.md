@@ -775,7 +775,12 @@ bound to the workspaces its credential covers. It is held server side; the brows
   workspace's own store, uncached, so the 5-minute token lifetime never extends access after a
   deactivation.
 - **Refresh tokens rotate** on use; reusing a rotated refresh token revokes the whole session
-  family (stolen-token detection).
+  family (stolen-token detection). The workspace API's browser cookie carries its session's refresh
+  secret ([workspace API spec](workspace-api.md) §3.11 item 6). For the 30 seconds after a granted
+  refresh, the secret it rotated away still serves pause and the kill switch, and any other call
+  with it is refused with the session kept, so a command in flight across the refresh is not lost.
+  After that, the rotated secret presented on any route revokes the session as here. This is
+  [DEC-1022](../project/decisions/DEC-1022.md), Proposed.
 - **Sign-out and revocation** end the session server side at once; the user can end any listed
   session.
 - **New device notice.** Every sign-in commits `SessionOpened` (§12.1), whose `first_seen_device`
