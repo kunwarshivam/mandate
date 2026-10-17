@@ -47182,3 +47182,2552 @@ model_gateway:
       research_daily: '0.12'
     admitted: 2282
     refused: 620
+thesis_invalidation:
+  spec: docs/specs/journal.md v0.48 §9.21 (DEC-2202)
+  drafts:
+    call:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX10A000000000000000V1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GX00A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: invalidation
+          result: judged
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    invalidated:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX20A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX10A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    revoked:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V3
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX00B000000000000000A1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: source_revoked
+        candidate: null
+        evidence: []
+        source: news_wire_a
+      artifact_refs: []
+      pii_refs: []
+    admitted:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTA0A000000000000000T1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisProposed
+      schema_version: 1
+      event_time: '2026-09-22T14:00:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        revision: 0
+        predecessor_thesis_id: null
+        autopsy_ref: null
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-22T14:00:00.000000000Z'
+        expires_at: '2026-09-27T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: market_data
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        admitted: true
+        reason: null
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+      pii_refs: []
+    revised:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTB0A000000000000000T4
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisRevised
+      schema_version: 1
+      event_time: '2026-09-28T14:00:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTB0
+        lineage_id: th_01J8ZTA0
+        revision: 1
+        predecessor_thesis_id: th_01J8ZTA0
+        autopsy_ref: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-28T14:00:00.000000000Z'
+        expires_at: '2026-10-03T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: independent_source
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+        response_ref: sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+        admitted: true
+        reason: null
+      artifact_refs:
+      - sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+      - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+      - sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+      pii_refs: []
+    refused:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTA1A000000000000000T2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisProposed
+      schema_version: 1
+      event_time: '2026-09-22T14:10:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTA1
+        lineage_id: th_01J8ZTA1
+        revision: 0
+        predecessor_thesis_id: null
+        autopsy_ref: null
+        instrument_id: 7b4a1c2e-3333-4a2b-9c3d-000000000003
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-22T14:00:00.000000000Z'
+        expires_at: '2026-09-27T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: independent_source
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+        response_ref: sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+        admitted: false
+        reason: eligibility_floor
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+      - sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+      - sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+      pii_refs: []
+  invalid_drafts:
+  - name: invalidated.thesis_id.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.thesis_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.thesis_id
+  - name: invalidated.thesis_id.form
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.thesis_id
+      value: th 01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.thesis_id
+  - name: invalidated.lineage_id.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.lineage_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.lineage_id
+  - name: invalidated.lineage_id.form
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.lineage_id
+      value: th 01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.lineage_id
+  - name: invalidated.instrument_id.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.instrument_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument_id
+  - name: invalidated.instrument_id.form
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.instrument_id
+      value: not-an-asset-id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument_id
+  - name: invalidated.cause.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.cause
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: invalidated.cause.form
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.cause
+      value: expired
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cause
+  - name: invalidated.candidate.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.candidate
+      value: '0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.candidate
+  - name: invalidated.evidence.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.evidence
+      value: item_filing_10q_q3
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evidence
+  - name: invalidated.source.kind
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.source
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.source
+  - name: invalidated.thesis_id.null
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.thesis_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.thesis_id
+  - name: invalidated.lineage_id.null
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.lineage_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.lineage_id
+  - name: invalidated.instrument_id.null
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.instrument_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument_id
+  - name: invalidated.cause.null
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.cause
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: invalidated.evidence.null
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.evidence
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evidence
+  - name: invalidated.evidence.item
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.evidence
+      value:
+      - 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evidence[0]
+  - name: invalidated.missing
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.source
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.source
+  - name: invalidated.extra
+    clause: §9.21 types
+    base_draft: invalidated
+    changes:
+    - path: payload.zz_extra
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.zz_extra
+  - name: invalidated.165.no_candidate
+    clause: 'rule 165: a model''s invalidation names its verdict'
+    base_draft: invalidated
+    changes:
+    - path: payload.candidate
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.candidate
+  - name: invalidated.165.source
+    clause: 'rule 165: a model''s invalidation names no source'
+    base_draft: invalidated
+    changes:
+    - path: payload.source
+      value: news_wire_a
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.source
+  - name: invalidated.165.no_cause
+    clause: 'rule 165: a model''s invalidation names its call'
+    base_draft: invalidated
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: revoked.165.candidate
+    clause: 'rule 165: a revoked source''s invalidation names no verdict'
+    base_draft: revoked
+    changes:
+    - path: payload.candidate
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.candidate
+  - name: revoked.165.evidence
+    clause: 'rule 165: a revoked source''s invalidation cites no items'
+    base_draft: revoked
+    changes:
+    - path: payload.evidence
+      value:
+      - item_filing_10q_q3
+      - item_bars_2026_09_22
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evidence
+  - name: revoked.165.no_source
+    clause: 'rule 165: a revoked source''s invalidation names the source'
+    base_draft: revoked
+    changes:
+    - path: payload.source
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.source
+  - name: revoked.165.no_cause
+    clause: 'rule 165: a revoked source''s invalidation names the allowlist that dropped it'
+    base_draft: revoked
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: invalidated.165.first
+    clause: 'rule 165: the first that fails, in order'
+    base_draft: invalidated
+    changes:
+    - path: payload.candidate
+      value: null
+    - path: payload.source
+      value: news_wire_a
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.candidate
+  - name: invalidated.166.actor
+    clause: rule 166
+    base_draft: invalidated
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: invalidated.without_mandate
+    clause: '§9 row: `man`'
+    base_draft: invalidated
+    changes:
+    - path: config_refs
+      value: {}
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+  - name: invalidated.on_the_control_stream
+    clause: '§9: an agent-stream record'
+    base_draft: invalidated
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: invalidated.at_version_2
+    clause: '§9.21: schema version 1 only'
+    base_draft: invalidated
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: invalidated.no_evidence
+    clause: 'rule 165: the output may cite no item'
+    base_draft: invalidated
+    changes:
+    - path: payload.evidence
+      value: []
+    expect:
+      outcome: Valid
+  - name: invalidated.evidence_as_given
+    clause: '§9.21: the items as the output gave them, unordered and repeated'
+    base_draft: invalidated
+    changes:
+    - path: payload.evidence
+      value:
+      - item_b
+      - item_a
+      - item_b
+    expect:
+      outcome: Valid
+  - name: invalidated.later_candidate
+    clause: 'rule 165: any candidate index'
+    base_draft: invalidated
+    changes:
+    - path: payload.candidate
+      value: 3
+    expect:
+      outcome: Valid
+  - name: invalidated.revision
+    clause: '§9.21: a revision''s thesis, in its lineage'
+    base_draft: invalidated
+    changes:
+    - path: payload.thesis_id
+      value: th_01J8ZTB0
+    expect:
+      outcome: Valid
+  - name: invalidated.no_run
+    clause: '§9.21: `correlation_id` is not read'
+    base_draft: invalidated
+    changes:
+    - path: correlation_id
+      value: null
+    expect:
+      outcome: Valid
+  batches:
+  - name: the_call_then_its_invalidation
+    clause: 'rule 167: one batch, the call first'
+    drafts:
+    - &id112
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX11A000000000000000V1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GX01A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: invalidation
+          result: judged
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect: &id110
+      outcome: Valid
+  - name: two_invalidations
+    clause: 'rule 167: each judged verdict its own record'
+    drafts:
+    - &id115
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX12A000000000000000V1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GX02A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - &id111
+          candidate: 0
+          kind: invalidation
+          result: judged
+        - candidate: 1
+          kind: invalidation
+          result: judged
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX12A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX22A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX12A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTB0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 1
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect: *id110
+  - name: a_refused_invalidation_has_no_record
+    clause: 'rule 167: only a judged verdict is handed on'
+    drafts:
+    - &id114
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX13A000000000000000V1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GX03A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - *id111
+        - candidate: 1
+          kind: invalidation
+          result: unknown_thesis
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX13A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect: *id110
+  - name: after_the_theses
+    clause: 'rule 167: a candidate counts the theses before it'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX14A000000000000000V1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GX04A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+        - candidate: 1
+          kind: invalidation
+          result: judged
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX14A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 1
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect: *id110
+  - name: a_call_with_theses_only
+    clause: 'rule 167: a call with no invalidation names none'
+    drafts:
+    - &id113
+      envelope_version: 1
+      environment: paper
+      event_id: 01J9GX15A000000000000000V1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GX05A000000000000000C1
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect: *id110
+  - name: a_revoked_source
+    clause: 'rule 167: a revoked source''s invalidation names no call'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX00B000000000000000A1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: source_revoked
+        candidate: null
+        evidence: []
+        source: news_wire_a
+      artifact_refs: []
+      pii_refs: []
+    expect: *id110
+  - name: alone
+    clause: 'rule 167: the call is in the same batch'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 0
+      reason: schema
+      path: causation_id
+  - name: before_its_call
+    clause: 'rule 167: the call is earlier in the batch'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    - *id112
+    expect:
+      outcome: Invalid
+      index: 0
+      reason: schema
+      path: causation_id
+  - name: names_another_event
+    clause: 'rule 167: the cause is the call, not another record of the batch'
+    drafts:
+    - *id113
+    - &id116
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZTA0A000000000000000T1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisProposed
+      schema_version: 1
+      event_time: '2026-09-22T14:00:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      payload:
+        model_id: llm.research_agent
+        model_version: 0.1.0
+        content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        revision: 0
+        predecessor_thesis_id: null
+        autopsy_ref: null
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        asset_class: us_equity
+        direction: long
+        as_of: '2026-09-22T14:00:00.000000000Z'
+        expires_at: '2026-09-27T14:00:00.000000000Z'
+        horizon_s: 432000
+        conviction: '0.62'
+        confidence: '0.7'
+        evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        evidence_sources:
+        - filings_sec_edgar
+        - news_wire_a
+        corroboration: market_data
+        invalidation: Guidance withdrawn, or a close below the prior quarter's low
+        allowlist_version: 7
+        prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        admitted: true
+        reason: null
+      artifact_refs:
+      - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+      - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+      - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+      - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J8ZTA0A000000000000000T1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: causation_id
+  - name: names_a_thesis_verdict
+    clause: 'rule 167: the verdict is an invalidation''s'
+    drafts:
+    - *id113
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX15A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.candidate
+  - name: names_a_refused_verdict
+    clause: 'rule 167: the verdict is judged'
+    drafts:
+    - *id114
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX13A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX22A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX13A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTB0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 1
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.candidate
+  - name: names_no_verdict
+    clause: 'rule 167: the call has a verdict at the candidate'
+    drafts:
+    - *id112
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX22A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTB0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 5
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.candidate
+  - name: one_verdict_twice
+    clause: 'rule 167: one record per verdict'
+    drafts:
+    - *id112
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX22A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX11A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTB0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.candidate
+  - name: a_judged_verdict_with_no_record
+    clause: 'rule 167: every judged verdict is handed on'
+    drafts:
+    - *id112
+    expect:
+      outcome: Invalid
+      index: 0
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: the_second_verdict_with_no_record
+    clause: 'rule 167: every judged verdict, in order'
+    drafts:
+    - *id115
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GX21A000000000000000V2
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ThesisInvalidated
+      schema_version: 1
+      event_time: '2026-09-23T14:00:41.250000000Z'
+      clock_source: local
+      causation_id: 01J9GX12A000000000000000V1
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+      payload:
+        thesis_id: th_01J8ZTA0
+        lineage_id: th_01J8ZTA0
+        instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+        cause: model
+        candidate: 0
+        evidence:
+        - item_filing_10q_q3
+        - item_bars_2026_09_22
+        source: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 0
+      reason: schema
+      path: payload.verdicts[1].result
+  streams:
+  - name: invalidated_after_admission
+    clause: 'rule 168: an admitted thesis'
+    batches:
+    - - *id116
+    - - &id117
+        envelope_version: 1
+        environment: paper
+        event_id: 01J9GX11A000000000000000V1
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ModelInvocationRecorded
+        schema_version: 1
+        event_time: '2026-10-16T14:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        payload:
+          call_id: 01J9GX01A000000000000000C1
+          purpose: research
+          model:
+            model_id: llm.research_agent
+            model_version: 0.1.0
+            content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+          endpoint: openrouter:anthropic
+          request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+          sampling:
+            temperature: '0'
+            seed: 7
+          prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+          guard_rule: null
+          response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+          reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+          provider_request_id: gen-01
+          outcome: ok
+          attempts: 1
+          tokens:
+            input: 1800
+            output: 420
+            cached: 0
+          cost_usd: '0.0117'
+          price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+          cache_hit: false
+          deadline: '2026-10-16T14:01:00.000000000Z'
+          completed_at: '2026-10-16T14:00:41.250000000Z'
+          reservation: 01J9GW21A000000000000000M3
+          observations:
+          - 01J9GV00A000000000000000B1
+          - 01J9GV00B000000000000000B2
+          verdicts:
+          - candidate: 0
+            kind: invalidation
+            result: judged
+        artifact_refs:
+        - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        pii_refs: []
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect: &id118
+      outcome: Valid
+  - name: a_revision_invalidated
+    clause: 'rule 168: the revision holds its instrument'
+    batches:
+    - - *id116
+    - - &id120
+        envelope_version: 1
+        environment: paper
+        event_id: 01J8ZTB0A000000000000000T4
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisRevised
+        schema_version: 1
+        event_time: '2026-09-28T14:00:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTB0
+          lineage_id: th_01J8ZTA0
+          revision: 1
+          predecessor_thesis_id: th_01J8ZTA0
+          autopsy_ref: sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-28T14:00:00.000000000Z'
+          expires_at: '2026-10-03T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: independent_source
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+          response_ref: sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+          admitted: true
+          reason: null
+        artifact_refs:
+        - sha256:14ef8daea12f0ab66ad8d5adac8658f275dba9a9088a29d8588de0f68b14aabb
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:40624ea491a5def5686f60323a7d9a51d95b358dbd81768c3a454e24be53fb57
+        - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
+        - sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
+        pii_refs: []
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTB0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect: *id118
+  - name: a_revoked_source
+    clause: 'rule 168: a revoked source''s invalidation too'
+    batches:
+    - - *id116
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX00B000000000000000A1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: source_revoked
+          candidate: null
+          evidence: []
+          source: news_wire_a
+        artifact_refs: []
+        pii_refs: []
+    expect: *id118
+  - name: a_renewal_invalidated
+    clause: 'rule 168: a renewal is a new thesis, invalidated once too'
+    batches:
+    - - *id116
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX30A000000000000000T1
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisProposed
+        schema_version: 1
+        event_time: '2026-09-22T14:00:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTA0
+          revision: 0
+          predecessor_thesis_id: null
+          autopsy_ref: null
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-22T14:00:00.000000000Z'
+          expires_at: '2026-09-27T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: market_data
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+          response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+          admitted: true
+          reason: null
+        artifact_refs:
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        pii_refs: []
+    - - &id119
+        envelope_version: 1
+        environment: paper
+        event_id: 01J9GX12A000000000000000V1
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ModelInvocationRecorded
+        schema_version: 1
+        event_time: '2026-10-16T14:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        payload:
+          call_id: 01J9GX02A000000000000000C1
+          purpose: research
+          model:
+            model_id: llm.research_agent
+            model_version: 0.1.0
+            content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+          endpoint: openrouter:anthropic
+          request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+          sampling:
+            temperature: '0'
+            seed: 7
+          prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+          guard_rule: null
+          response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+          reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+          provider_request_id: gen-01
+          outcome: ok
+          attempts: 1
+          tokens:
+            input: 1800
+            output: 420
+            cached: 0
+          cost_usd: '0.0117'
+          price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+          cache_hit: false
+          deadline: '2026-10-16T14:01:00.000000000Z'
+          completed_at: '2026-10-16T14:00:41.250000000Z'
+          reservation: 01J9GW21A000000000000000M3
+          observations:
+          - 01J9GV00A000000000000000B1
+          - 01J9GV00B000000000000000B2
+          verdicts:
+          - candidate: 0
+            kind: invalidation
+            result: judged
+        artifact_refs:
+        - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        pii_refs: []
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX22A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX12A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect: *id118
+  - name: in_one_batch
+    clause: 'rule 168: the admission is earlier in the batch'
+    batches:
+    - - *id116
+      - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect: *id118
+  - name: never_admitted
+    clause: 'rule 168: a thesis the stream admitted'
+    batches:
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.thesis_id
+  - name: before_its_admission
+    clause: 'rule 168: admitted earlier'
+    batches:
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+      - *id116
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.thesis_id
+  - name: a_refused_thesis
+    clause: 'rule 168: admitted, not only judged'
+    batches:
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J8ZTA1A000000000000000T2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisProposed
+        schema_version: 1
+        event_time: '2026-09-22T14:10:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTA1
+          lineage_id: th_01J8ZTA1
+          revision: 0
+          predecessor_thesis_id: null
+          autopsy_ref: null
+          instrument_id: 7b4a1c2e-3333-4a2b-9c3d-000000000003
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-22T14:00:00.000000000Z'
+          expires_at: '2026-09-27T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: independent_source
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+          response_ref: sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+          admitted: false
+          reason: eligibility_floor
+        artifact_refs:
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:c4d252caaea5004ce2af9e30492f52cbecec66d87d48bfc3dc6af2da59e17e4a
+        - sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
+        - sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
+        pii_refs: []
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA1
+          lineage_id: th_01J8ZTA1
+          instrument_id: 7b4a1c2e-3333-4a2b-9c3d-000000000003
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.thesis_id
+  - name: invalidated_twice
+    clause: 'rule 168: one invalidation per thesis'
+    batches:
+    - - *id116
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    - - *id119
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX22A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX12A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 4
+      reason: schema
+      path: payload.thesis_id
+  - name: revoked_after_its_invalidation
+    clause: 'rule 168: whatever the second''s cause'
+    batches:
+    - - *id116
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX22A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX00B000000000000000A1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: source_revoked
+          candidate: null
+          evidence: []
+          source: news_wire_a
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.thesis_id
+  - name: another_lineage
+    clause: 'rule 168: the thesis''s own lineage'
+    batches:
+    - - *id116
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTZZ
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.lineage_id
+  - name: a_substituted_instrument
+    clause: 'rule 168: the thesis''s own instrument'
+    batches:
+    - - *id116
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-3333-4a2b-9c3d-000000000003
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.instrument_id
+  - name: superseded_by_its_revision
+    clause: 'rule 168: the thesis that holds the instrument now'
+    batches:
+    - - *id116
+    - - *id120
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.thesis_id
+  - name: superseded_by_a_renewal
+    clause: 'rule 168: a renewal holds it now'
+    batches:
+    - - *id116
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX30A000000000000000T1
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisProposed
+        schema_version: 1
+        event_time: '2026-09-22T14:00:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTA0
+          revision: 0
+          predecessor_thesis_id: null
+          autopsy_ref: null
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-22T14:00:00.000000000Z'
+          expires_at: '2026-09-27T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: market_data
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+          response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+          admitted: true
+          reason: null
+        artifact_refs:
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        pii_refs: []
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.thesis_id
