@@ -28,6 +28,8 @@ use mandate_time::UtcNanos;
 const APP: &str = "https://app.owlhead.test";
 const T0: i64 = 1_791_000_000;
 const KEY: &str = "k1Z-9_aaaaaaaaaa";
+/// The largest body a command route reads, 64 KiB.
+const KIB_64: usize = 65_536;
 const OTHER_WORKSPACE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W40";
 const ALICE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Z";
 const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W41";
@@ -711,13 +713,14 @@ fn the_body_is_read_only_after_authentication_and_bounded() {
     let f = fixture();
     let cookie = signed_in(&f, alice());
     let path = ws("/agents/agt_a/pause");
-    let large = vec![b' '; mandate_api_server::writes::MAX_BODY + 1];
+    let large = vec![b' '; KIB_64 + 1];
     let anonymous = send(f.addr, "POST", &path, &[("Idempotency-Key", KEY)], &large);
     assert_eq!(anonymous.status, 401);
     let refused = post(&f, &path, &cookie, Some(KEY), &large);
     assert_eq!(code(&refused), (422, ProblemCode::Invalid, Effect::None));
     let mut padded = b"{}".to_vec();
-    padded.resize(mandate_api_server::writes::MAX_BODY, b' ');
+    padded.resize(KIB_64, b' ');
+    assert_eq!(mandate_api_server::writes::MAX_BODY, KIB_64);
     accepted(&post(&f, &path, &cookie, Some(KEY), &padded));
 }
 

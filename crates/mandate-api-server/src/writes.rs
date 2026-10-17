@@ -103,7 +103,7 @@ struct Gate {
 
 /// The largest body read, in bytes: a command's members and a record's two references fit many
 /// times over.
-pub const MAX_BODY: usize = 64 * 1024;
+pub const MAX_BODY: usize = 65_536;
 
 /// The session, the CSRF mark, the key, and the body, in that order: the body is read only once
 /// the call is authenticated, so an unauthenticated one gets the one 401 whatever it sends.
