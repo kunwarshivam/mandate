@@ -409,3 +409,62 @@ fn a_loop_that_falls_behind_writes_one_tick_per_second_and_never_runs_ahead() {
         "a stall of 20 seconds writes one tick at the host's second, not a burst"
     );
 }
+
+fn triggers(rows: &[StoredEvent]) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.event_type == "ClockOffsetRecorded")
+        .filter_map(|r| member(r, "trigger").as_str().map(str::to_owned))
+        .collect()
+}
+
+fn count(rows: &[StoredEvent], kind: &str) -> usize {
+    rows.iter().filter(|r| r.event_type == kind).count()
+}
+
+/// 09:20 in New York on the Friday, ten minutes before its regular session opens.
+const FRIDAY_0920: i64 = FRIDAY_0900 + 1_200;
+
+/// A restart replays the stream: the day it already started and the before-session measurement
+/// it already took are not written again.
+#[test]
+fn a_restarted_scheduler_starts_no_day_and_takes_no_before_session_measurement_twice() {
+    let store = MemoryStore::default();
+    let good = &mut Fixed(vec![0]);
+    let mut first = start(&store, FRIDAY_0920);
+    for second in 0..3 {
+        first.step_next(at(FRIDAY_0920 + second), good);
+    }
+    let mut restarted = start(&store, FRIDAY_0920 + 60);
+    for second in 60..63 {
+        restarted.step_next(at(FRIDAY_0920 + second), good);
+    }
+    let rows = rows(&store);
+    assert_eq!(
+        triggers(&rows),
+        ["startup", "before_session", "startup"],
+        "{:?}",
+        kinds(&rows)
+    );
+    assert_eq!(count(&rows, "TradingDayStarted"), 1, "{:?}", kinds(&rows));
+}
+
+/// A start-up measurement taken before the session window is not the before-session one, in the
+/// process that took it or in one that replays it.
+#[test]
+fn a_start_up_measurement_is_never_taken_for_the_before_session_one() {
+    let store = MemoryStore::default();
+    let good = &mut Fixed(vec![0]);
+    let friday_0800 = FRIDAY_0900 - 3_600;
+    let mut first = start(&store, friday_0800);
+    for second in 0..2 {
+        first.step_next(at(friday_0800 + second), good);
+    }
+    let mut restarted = start(&store, FRIDAY_0920);
+    for second in 0..3 {
+        restarted.step_next(at(FRIDAY_0920 + second), good);
+    }
+    assert_eq!(
+        triggers(&rows(&store)),
+        ["startup", "startup", "before_session"]
+    );
+}

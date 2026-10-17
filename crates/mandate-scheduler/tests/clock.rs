@@ -128,6 +128,13 @@ proptest! {
     }
 }
 
+/// Zero is `0`, never `-0`, which §4.6 does not normalize to.
+#[test]
+fn zero_seconds_carry_no_sign() {
+    assert_eq!(seconds(0), "0");
+    assert_eq!(seconds(-1), "-0.000000001");
+}
+
 #[test]
 fn a_measurement_no_server_answers_is_out_of_tolerance() {
     let none = Measurement::judge(Trigger::Startup, Vec::new(), measure::TOLERANCE_NS);

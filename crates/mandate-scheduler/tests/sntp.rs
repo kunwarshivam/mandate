@@ -146,3 +146,27 @@ fn a_measurement_never_waits_past_its_deadline() {
         .expect("five silent servers take one deadline, not five timeouts");
     assert!(answers.is_empty());
 }
+
+/// A request carries its send time as the NTP timestamp of that instant, fraction included, so
+/// the server's answer can be matched to it.
+#[test]
+fn a_request_carries_its_send_time_as_an_ntp_timestamp() {
+    assert_eq!(request(at(T, 250_000_000))[40..48], stamp(T, 250));
+    assert_eq!(request(at(T, 0))[40..48], stamp(T, 0));
+}
+
+/// A measurement every server has answered ends then, not at the deadline.
+#[test]
+fn a_measurement_every_server_answered_ends_without_waiting_for_the_deadline() {
+    use mandate_scheduler::TimeServers;
+    let mut servers = mandate_scheduler::sntp::Servers {
+        names: vec![fake_server(1, SERVER), fake_server(1, SERVER)],
+        now: || at(T, 0),
+    };
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || done.send(servers.ask()).ok());
+    let answers = finished
+        .recv_timeout(mandate_scheduler::sntp::DEADLINE / 2)
+        .expect("two answering servers end the measurement before its deadline");
+    assert_eq!(answers.len(), 2, "{answers:?}");
+}

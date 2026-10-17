@@ -2028,6 +2028,7 @@ dependencies = [
  "mandate-process",
  "mandate-time",
  "proptest",
+ "sqlx",
  "tokio",
 ]
 

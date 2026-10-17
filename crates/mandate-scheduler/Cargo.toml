@@ -19,3 +19,5 @@ tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
 proptest.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

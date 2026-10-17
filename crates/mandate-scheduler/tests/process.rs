@@ -73,6 +73,23 @@ fn without_a_probe_socket_or_a_workspace_the_process_refuses() {
     );
 }
 
+/// Without `--fixture` the process runs only on the journal `MANDATE_JOURNAL_DSN` names, and
+/// with none it refuses rather than running on a journal of its own.
+#[test]
+fn without_the_fixture_flag_or_a_journal_the_process_refuses() {
+    let path = socket("no-journal");
+    let child = Command::new(BIN)
+        .args(["run", "--workspace", "ws_1", "--probe"])
+        .arg(&path)
+        .env_remove("MANDATE_JOURNAL_DSN")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (status, stderr) = Guard(child).exited();
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(stderr, "scheduler_start_failed: journal_dsn_missing\n");
+}
+
 #[test]
 fn the_ready_scheduler_answers_its_probes_and_drains_on_sigterm() {
     let path = socket("drain");
