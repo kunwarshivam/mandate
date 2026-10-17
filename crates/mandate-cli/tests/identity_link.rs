@@ -12,7 +12,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, chown, symlink};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, Stdio};
 
@@ -245,6 +246,94 @@ fn an_unsafe_or_malformed_file_is_never_extended() {
         assert_eq!(fs::read_to_string(&links).unwrap(), text);
     }
     assert!(!dir.join("links.writing").exists());
+}
+
+/// A file owned by neither this process's user nor root is never extended. Run as root, where the
+/// two are one uid, the test hands the file to another uid; run as anyone else, the file this
+/// process writes is its own and the other tests extend it.
+#[test]
+fn a_file_owned_by_another_user_is_never_extended() {
+    let dir = scratch("owner");
+    let links = dir.join("links");
+    run(&links, FOUNDER, SUBJECT).0.unwrap();
+    if fs::metadata(&links).unwrap().uid() != 0 {
+        assert!(run(&links, OTHER, "second").0.unwrap().written);
+        return;
+    }
+    let before = fs::read_to_string(&links).unwrap();
+    chown(&links, Some(4242), None).unwrap();
+    assert_eq!(run(&links, OTHER, "second").0, Err(refused("links_unsafe")));
+    assert_eq!(fs::read_to_string(&links).unwrap(), before);
+    let theirs = scratch("owner-unprivileged");
+    fs::set_permissions(&theirs, fs::Permissions::from_mode(0o777)).unwrap();
+    let as_nobody = |subject: &str| {
+        let mut child = Process::new(env!("CARGO_BIN_EXE_mandate"))
+            .args([
+                "identity", "link", "--issuer", ISSUER, "--member", FOUNDER, "--links",
+            ])
+            .arg(theirs.join("links"))
+            .uid(65_534)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(subject.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    };
+    let first = as_nobody(SUBJECT);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = as_nobody("second");
+    assert!(
+        second.status.success(),
+        "a user extends its own file: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(theirs.join("links"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+}
+
+/// A file named by a bare relative path is written in the current directory.
+#[test]
+fn a_bare_relative_path_is_written_in_the_current_directory() {
+    let dir = scratch("relative");
+    let mut child = Process::new(env!("CARGO_BIN_EXE_mandate"))
+        .args([
+            "identity", "link", "--issuer", ISSUER, "--member", FOUNDER, "--links", "links",
+        ])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(SUBJECT.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("links").exists());
 }
 
 /// A link already being written is refused, and the other writer's staging file is left alone.

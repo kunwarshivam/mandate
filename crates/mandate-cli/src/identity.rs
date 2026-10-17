@@ -243,8 +243,10 @@ fn staged(
             }
             fs::read_to_string(path).map_err(|e| io_error("read", &e))?
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(io_error("inspect", &e)),
+        Err(e) => match e.kind() {
+            io::ErrorKind::NotFound => String::new(),
+            _ => return Err(io_error("inspect", &e)),
+        },
     };
     let Some(links) = with_link(parse_links(&existing)?, digest, member)? else {
         return Ok(false);
@@ -255,13 +257,12 @@ fn staged(
         .map_err(|e| io_error("write", &e))?;
     file.sync_all().map_err(|e| io_error("sync", &e))?;
     fs::rename(staging, path).map_err(|e| io_error("rename", &e))?;
-    let dir = match path.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        Some(_) | None => Path::new("."),
-    };
-    File::open(dir)
-        .and_then(|d| d.sync_all())
-        .map_err(|e| io_error("sync the directory", &e))?;
+    let renamed = fs::canonicalize(path).map_err(|e| io_error("resolve", &e))?;
+    if let Some(dir) = renamed.parent() {
+        File::open(dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| io_error("sync the directory", &e))?;
+    }
     Ok(true)
 }
 
