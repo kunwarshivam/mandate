@@ -1,0 +1,18 @@
+[package]
+name = "mandate-objectstore"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The object store behind a plain S3 endpoint, and the lock check that refuses any store weaker than journal spec section 6.2's write-once retention (E21-40, DEC-973)"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

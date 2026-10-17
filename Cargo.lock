@@ -1837,6 +1837,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-objectstore"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-paper"
 version = "0.0.0"
 dependencies = [
