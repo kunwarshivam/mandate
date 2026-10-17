@@ -6,10 +6,10 @@
 use mandate_canon::{Digest, Value};
 use mandate_domain::{AgentMode, AssetId};
 use mandate_num::{NumError, Price, Qty};
-use mandate_risk::{Decision, Purpose, Verdict};
+use mandate_risk::Purpose;
 use mandate_time::{Date, UtcNanos};
 
-use super::{Candidate, RecordedOutput, RecordedThesis, VersionInput};
+use super::{RecordedOutput, RecordedThesis, VersionInput};
 use crate::metrics::Metrics;
 use crate::report::{decimal, int, metrics, object, optional, text};
 use crate::{BacktestError, Observation};
@@ -72,83 +72,6 @@ pub struct DecisionRow {
     pub qty: Option<Qty>,
     pub limit: Option<Price>,
     pub outputs_used: u32,
-}
-
-impl DecisionRow {
-    pub(super) fn bare(at: UtcNanos, date: Date, outcome: DecisionOutcome) -> Self {
-        Self {
-            at,
-            date,
-            purpose: None,
-            outcome,
-            reason: None,
-            decided_by: None,
-            qty: None,
-            limit: None,
-            outputs_used: 0,
-        }
-    }
-
-    /// The row of a proposal the gate judged: its purpose, the gate's verdict and reason, and the
-    /// proposal's size.
-    pub(super) fn gated(
-        at: UtcNanos,
-        date: Date,
-        candidate: &Candidate,
-        decision: &Decision,
-    ) -> Self {
-        let outcome = match decision.verdict {
-            Verdict::Allow => DecisionOutcome::Submitted,
-            Verdict::Deny => DecisionOutcome::GateDeny,
-            Verdict::Defer => DecisionOutcome::GateDefer,
-            Verdict::Hold => DecisionOutcome::GateHold,
-        };
-        Self {
-            at,
-            date,
-            purpose: Some(decision.purpose),
-            outcome,
-            reason: decision.reason.map(|reason| reason.as_str().to_owned()),
-            decided_by: None,
-            qty: Some(candidate.qty),
-            limit: Some(candidate.limit),
-            outputs_used: candidate.outputs_used,
-        }
-    }
-
-    pub(super) fn at(self, at: UtcNanos, date: Date) -> Self {
-        Self { at, date, ..self }
-    }
-
-    pub(super) fn with_reason(self, reason: &str) -> Self {
-        Self {
-            reason: Some(reason.to_owned()),
-            ..self
-        }
-    }
-
-    pub(super) fn with_outcome(self, outcome: DecisionOutcome) -> Self {
-        Self { outcome, ..self }
-    }
-
-    pub(super) fn decided_by(self, decided_by: Option<String>) -> Self {
-        Self { decided_by, ..self }
-    }
-
-    pub(super) fn outputs(self, outputs_used: u32) -> Self {
-        Self {
-            outputs_used,
-            ..self
-        }
-    }
-
-    pub(super) fn sized(self, qty: Qty, limit: Price) -> Self {
-        Self {
-            qty: Some(qty),
-            limit: Some(limit),
-            ..self
-        }
-    }
 }
 
 /// What a run cannot know or does not model (DEC-1001 item 2): fixed codes, never prose.

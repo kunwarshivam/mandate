@@ -191,6 +191,39 @@ pub fn alpaca_equity_profile() -> CapabilityProfile {
     .unwrap_or_else(|e| panic!("the profile is valid: {}", e.code()))
 }
 
+/// A profile whose US-equity stop-limit cell offers the resting stop-limit protection (as
+/// Robinhood's does, trading spec §5.2), so a mandate with no take-profit is protected by one.
+pub fn stop_limit_profile() -> CapabilityProfile {
+    let rows = vec![Row {
+        asset_class: AssetClass::UsEquity,
+        session: MarketSession::Regular,
+        cells: vec![
+            Cell {
+                order_type: OrderType::Limit,
+                quantity_form: QuantityForm::Whole,
+                times_in_force: [TimeInForce::Day, TimeInForce::Gtc].into(),
+                protection_forms: BTreeSet::new(),
+            },
+            Cell {
+                order_type: OrderType::StopLimit,
+                quantity_form: QuantityForm::Whole,
+                times_in_force: [TimeInForce::Gtc].into(),
+                protection_forms: [ProtectionForm::StopLimit].into(),
+            },
+        ],
+    }];
+    CapabilityProfile::new(
+        1,
+        rows,
+        Idempotency {
+            client_order_id: true,
+            retry: Retry::Idempotent,
+            query_by_client_order_id: true,
+        },
+    )
+    .unwrap_or_else(|e| panic!("the profile is valid: {}", e.code()))
+}
+
 /// The reference cases' `us_2026` calendar.
 pub fn us_2026() -> TradingCalendar {
     TradingCalendar::new(

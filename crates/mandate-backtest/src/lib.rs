@@ -87,11 +87,13 @@ pub enum BacktestError {
     OutputNotPinned(usize),
     #[error("record {0} is for another instrument than the run's")]
     RecordOtherInstrument(usize),
+    #[error("thesis record {0} repeats an earlier record's thesis id")]
+    DuplicateThesis(usize),
     #[error(
         "the executor offers no protective order for this position under the connection's profile"
     )]
     ProtectionNotPlaceable,
-    #[error("bar {0} lies outside every regular session and has no next bar to close at")]
+    #[error("bar {0} is not a regular-session bar, which a version backtest's slice 1 requires")]
     BarOutsideRegularSession(usize),
     #[error("the agent-scoped flatten planned no sell for a held position")]
     FlattenWithoutSell,
@@ -138,6 +140,7 @@ impl BacktestError {
             Self::RecordBeforeItsData(_) => "record_before_its_data",
             Self::OutputNotPinned(_) => "output_not_pinned",
             Self::RecordOtherInstrument(_) => "record_other_instrument",
+            Self::DuplicateThesis(_) => "duplicate_thesis",
             Self::ProtectionNotPlaceable => "protection_not_placeable",
             Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
             Self::FlattenWithoutSell => "flatten_without_sell",

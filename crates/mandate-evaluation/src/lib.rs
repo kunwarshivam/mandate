@@ -57,6 +57,9 @@ pub enum EvaluationError {
     /// is not journal spec §9.4's shape (DEC-414 item 3). The index is the record's in the input.
     #[error("thesis record {index} does not pass the record check: {code}")]
     RecordRejected { index: usize, code: &'static str },
+    /// Two records at one stream position: the same journal record read twice.
+    #[error("thesis record {index} repeats an earlier record's stream position")]
+    DuplicateRecord { index: usize },
     /// A payload member the harness reads is missing or not of its §9.4 type.
     #[error("thesis record {index} has no well-typed `{member}`")]
     RecordMalformed { index: usize, member: &'static str },
@@ -86,6 +89,7 @@ impl EvaluationError {
         match self {
             Self::RecordRejected { .. } => "record_rejected",
             Self::RecordMalformed { .. } => "record_malformed",
+            Self::DuplicateRecord { .. } => "duplicate_record",
             Self::Accounting(code) => code,
             Self::BaselineWithoutCloses => "baseline_without_closes",
             Self::Research(code) => code,
@@ -105,7 +109,9 @@ pub struct ThesisRecord {
     pub payload: Value,
 }
 
-/// How a thesis's round trip is costed (DEC-1002 item 5): the fill model's slippage per leg, the
+/// How a thesis's round trip is costed (DEC-1002 item 5): the fill model's slippage per leg (its
+/// half spread plus its impact, as the caller configured the fill model; for a `sqrt` impact model
+/// the caller passes the impact at the reference notional, or more), the
 /// fee configuration the backtest charges, and the reference notional a thesis is costed at.
 #[derive(Debug, Clone)]
 pub struct CostModel {
@@ -179,7 +185,11 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<EvaluationReport, Eva
         .collect::<Result<Vec<_>, _>>()?;
     let index = baseline(request.baselines.index)?;
     let mut groups: BTreeMap<SignalModelKey, GroupTheses> = BTreeMap::new();
+    let mut positions = std::collections::BTreeSet::new();
     for (index, record) in request.records.iter().enumerate() {
+        if !positions.insert((record.stream_id.as_str(), record.seq)) {
+            return Err(EvaluationError::DuplicateRecord { index });
+        }
         mandate_spec::context::check_thesis_record(
             &record.payload,
             &record.mandate_version,
@@ -192,7 +202,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<EvaluationReport, Eva
         let read = read(index, record)?;
         let group = groups.entry(read.key).or_default();
         let window = request.decision.window;
-        if read.thesis.horizon_end > request.cut_off {
+        if read.thesis.horizon_end > request.cut_off || !resolved(&read.thesis, request) {
             group.open = group.open.checked_add(1).ok_or(NumError::Overflow)?;
         } else if read.thesis.horizon_end < window.from || read.thesis.horizon_end > window.to {
             group.outside_window = group
@@ -233,6 +243,24 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<EvaluationReport, Eva
         index: request.baselines.index.clone(),
         groups: scored,
     })
+}
+
+/// Whether every price a thesis is scored against has been observed: the thesis instrument's
+/// series, when the request has one, and each baseline's hold a close at or after the horizon end
+/// (DEC-1002 item 3). Until then the exit edge would read an earlier, stale close, so the thesis is
+/// still open. A thesis whose instrument has no series at all is the scorer's `no_series`.
+fn resolved(thesis: &ClosedThesis, request: &EvaluationRequest<'_>) -> bool {
+    let observed_past_horizon = |id: &AssetId| {
+        request
+            .closes
+            .get(id)
+            .is_some_and(|closes| closes.iter().any(|close| close.at >= thesis.horizon_end))
+    };
+    let instrument = !request.closes.contains_key(&thesis.instrument)
+        || observed_past_horizon(&thesis.instrument);
+    instrument
+        && request.baselines.basket.iter().all(observed_past_horizon)
+        && observed_past_horizon(request.baselines.index)
 }
 
 /// One signal model's theses, sorted as they resolved.

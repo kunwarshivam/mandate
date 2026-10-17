@@ -161,7 +161,8 @@ fn closes_of(points: &[(&str, &str)]) -> Vec<ObservedClose> {
 }
 
 /// The thesis instrument closes at 100 on Monday 2026-09-21 and 110 on Wednesday 2026-09-23, the
-/// basket member at 100 then 105, and the index at 100 then 102.
+/// basket member at 100 then 105, and the index at 100 then 102; each closes once more on Thursday,
+/// after the common horizon, so a thesis ending Wednesday has resolved.
 pub fn closes() -> Closes {
     BTreeMap::from([
         (
@@ -169,6 +170,7 @@ pub fn closes() -> Closes {
             closes_of(&[
                 ("2026-09-21T20:00:00Z", "100"),
                 ("2026-09-23T20:00:00Z", "110"),
+                ("2026-09-24T20:00:00Z", "111"),
             ]),
         ),
         (
@@ -176,6 +178,7 @@ pub fn closes() -> Closes {
             closes_of(&[
                 ("2026-09-21T20:00:00Z", "100"),
                 ("2026-09-23T20:00:00Z", "105"),
+                ("2026-09-24T20:00:00Z", "106"),
             ]),
         ),
         (
@@ -183,6 +186,7 @@ pub fn closes() -> Closes {
             closes_of(&[
                 ("2026-09-21T20:00:00Z", "100"),
                 ("2026-09-23T20:00:00Z", "102"),
+                ("2026-09-24T20:00:00Z", "103"),
             ]),
         ),
     ])

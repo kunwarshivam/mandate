@@ -194,3 +194,177 @@ fn the_report_is_reproducible_and_its_record_names_it() {
     );
     assert_eq!(payload.get("passed"), Some(&Value::Bool(first.passed())));
 }
+
+/// DEC-1002 item 3 at its edges: a horizon exactly at the cut-off has closed; one exactly at either
+/// end of the registered window is inside it, and one a second past its end is outside.
+#[test]
+fn the_cut_off_and_the_window_are_inclusive() {
+    let stored = stored_research();
+    let at_cut_off = records(stored.0, &[thesis("th_1", AS_OF, HORIZON)]);
+    let report = evaluate(&at_cut_off, &stored, &decision(0), HORIZON)
+        .unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!((report.groups[0].closed, report.groups[0].open), (1, 0));
+    let mut window = decision(0);
+    window.window.from = at(HORIZON);
+    window.window.to = at(HORIZON);
+    let report =
+        evaluate(&at_cut_off, &stored, &window, AFTER).unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!(
+        (report.groups[0].closed, report.groups[0].outside_window),
+        (1, 0)
+    );
+    window.window.to = at("2026-09-23T20:59:59Z");
+    let report =
+        evaluate(&at_cut_off, &stored, &window, AFTER).unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!(
+        (report.groups[0].closed, report.groups[0].outside_window),
+        (0, 1)
+    );
+    window.window.to = at(HORIZON);
+    window.window.from = at("2026-09-23T21:00:01Z");
+    let report =
+        evaluate(&at_cut_off, &stored, &window, AFTER).unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!(
+        (report.groups[0].closed, report.groups[0].outside_window),
+        (0, 1)
+    );
+}
+
+/// DEC-1002 item 3 (review, major 1): a horizon the closes have not reached yet is still open, so
+/// its exit is never read from an earlier, stale close; nor is it scored while a baseline's closes
+/// stop short of it.
+#[test]
+fn a_horizon_the_closes_have_not_reached_is_open() {
+    let stored = stored_research();
+    let late = thesis("th_1", AS_OF, "2026-09-24T21:00:00Z");
+    let report = evaluate(
+        &records(stored.0, &[late]),
+        &stored,
+        &decision(0),
+        "2026-09-25T00:00:00Z",
+    )
+    .unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!((report.groups[0].closed, report.groups[0].open), (0, 1));
+}
+
+/// The record's stream ranges come from the records' own positions, whatever order they arrive in.
+#[test]
+fn the_record_ranges_each_stream_by_its_lowest_and_highest_seq() {
+    let stored = stored_research();
+    let mut records = records(
+        stored.0,
+        &[
+            thesis("th_1", AS_OF, HORIZON),
+            thesis("th_2", AS_OF, HORIZON),
+            thesis("th_3", AS_OF, HORIZON),
+        ],
+    );
+    records[0].seq = 12;
+    records[1].seq = 10;
+    records[2].seq = 11;
+    let report =
+        evaluate(&records, &stored, &decision(0), AFTER).unwrap_or_else(|e| panic!("{}", e.code()));
+    let payload = mandate_evaluation::evaluation_run_recorded(&EvaluationRecord {
+        evaluation_id: "ev_01",
+        report: &report,
+        records: &records,
+        code_build: Digest::of(b"build"),
+    })
+    .unwrap_or_else(|e| panic!("{}", e.code()));
+    let one = |text: &str| Some(Value::Array(vec![Value::Str(text.to_owned())]));
+    assert_eq!(
+        payload.get("theses_from").cloned(),
+        one("agent:ws_internal:agt_research:10")
+    );
+    assert_eq!(
+        payload.get("theses_to").cloned(),
+        one("agent:ws_internal:agt_research:12")
+    );
+    assert_eq!(
+        payload.get("theses_head").cloned(),
+        one(&format!("sha256:{}", records[0].hash.to_hex()))
+    );
+}
+
+/// The same journal record read twice refuses the evaluation, naming the repeat.
+#[test]
+fn a_record_read_twice_refuses_the_evaluation() {
+    let stored = stored_research();
+    let mut records = records(
+        stored.0,
+        &[
+            thesis("th_1", AS_OF, HORIZON),
+            thesis("th_2", AS_OF, HORIZON),
+        ],
+    );
+    records[1].seq = records[0].seq;
+    match evaluate(&records, &stored, &decision(0), AFTER) {
+        Err(error @ mandate_evaluation::EvaluationError::DuplicateRecord { index: 1 }) => {
+            assert_eq!(error.code(), "duplicate_record");
+        }
+        other => panic!("expected a duplicate record, got {other:?}"),
+    }
+}
+
+/// Every refusal's stable code (ES-09).
+#[test]
+fn each_refusal_has_its_stable_code() {
+    use mandate_evaluation::EvaluationError;
+    let cases = [
+        (
+            EvaluationError::RecordRejected {
+                index: 0,
+                code: "invalid_input",
+            },
+            "record_rejected",
+        ),
+        (
+            EvaluationError::RecordMalformed {
+                index: 0,
+                member: "as_of",
+            },
+            "record_malformed",
+        ),
+        (
+            EvaluationError::DuplicateRecord { index: 0 },
+            "duplicate_record",
+        ),
+        (EvaluationError::Accounting("negative"), "negative"),
+        (
+            EvaluationError::BaselineWithoutCloses,
+            "baseline_without_closes",
+        ),
+        (EvaluationError::Research("empty_closes"), "empty_closes"),
+        (
+            EvaluationError::Num(mandate_num::NumError::Overflow),
+            "overflow",
+        ),
+    ];
+    for (error, code) in cases {
+        assert_eq!(error.code(), code, "{error}");
+    }
+}
+
+/// The artifact's bytes are the canonical form of the report object, and its reference their hash.
+#[test]
+fn the_artifact_bytes_are_the_canonical_report() {
+    let stored = stored_research();
+    let report = evaluate(
+        &records(stored.0, &[thesis("th_1", AS_OF, HORIZON)]),
+        &stored,
+        &decision(0),
+        AFTER,
+    )
+    .unwrap_or_else(|e| panic!("{}", e.code()));
+    let bytes = report
+        .canonical_bytes()
+        .unwrap_or_else(|e| panic!("{}", e.code()));
+    let canonical = report
+        .canonical()
+        .unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!(bytes, mandate_canon::to_canonical(&canonical));
+    assert_eq!(
+        report.digest().unwrap_or_else(|e| panic!("{}", e.code())),
+        Digest::of(&bytes)
+    );
+}

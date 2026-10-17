@@ -26,7 +26,17 @@ use version_common::*;
 /// slippage `s` (rules 4 and 6: a market or stop fill at `open × (1 ± s)` or `S × (1 − s)`), so a
 /// buy at most `high × (1 + s)` and a sell at least `low × (1 − s)` (DEC-1000 item 10).
 fn fills_inside_their_bars(run: &VersionRun, bars: &[SimBar]) -> Result<(), String> {
-    let slippage = mandate_num::Bps::parse("3").map_err(|e| e.to_string())?;
+    let slippage = match settings().sim.slippage {
+        mandate_sim::Slippage::Fixed {
+            half_spread_bps,
+            impact_bps,
+        } => half_spread_bps
+            .checked_add(impact_bps)
+            .map_err(|e| e.to_string())?,
+        mandate_sim::Slippage::Sqrt { .. } => {
+            return Err("the oracle reads a fixed slippage".to_owned());
+        }
+    };
     for fill in &run.fills {
         let bar = bars
             .get(fill.fill.bar)
@@ -88,6 +98,64 @@ fn nothing_before_its_information(
             .ok_or_else(|| format!("a fill names order {order_index}, which was never placed"))?;
         if fill.execution.executed_at < order.decided_at {
             return Err(format!("order {order_index} filled before it was decided"));
+        }
+    }
+    Ok(())
+}
+
+/// Each decision's combined outputs were all received by its instant: no row combines more models
+/// than had an output received at or before it, counted from the recorded outputs themselves.
+fn outputs_received_by_each_decision(
+    run: &VersionRun,
+    outputs: &[RecordedOutput],
+) -> Result<(), String> {
+    for row in &run.report.decisions {
+        let received: std::collections::BTreeSet<&str> = outputs
+            .iter()
+            .filter(|recorded| recorded.received_at <= row.at)
+            .map(|recorded| recorded.output.model_id.as_str())
+            .collect();
+        let seen = u32::try_from(received.len()).map_err(|e| e.to_string())?;
+        if row.outputs_used > seen {
+            return Err(format!(
+                "a decision at {} combined {} outputs with {seen} received",
+                row.at, row.outputs_used
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// No opening or increase of a research-agent version goes out unless the latest thesis record
+/// received by its instant is admitted, unexpired and not invalidated, recomputed from the records.
+fn openings_only_on_an_active_thesis(
+    run: &VersionRun,
+    theses: &[mandate_backtest::RecordedThesis],
+) -> Result<(), String> {
+    for row in &run.report.decisions {
+        let opening = matches!(row.purpose, Some(Purpose::Open | Purpose::Increase));
+        if !opening || row.outcome != DecisionOutcome::Submitted {
+            continue;
+        }
+        let mut latest: Option<&mandate_backtest::RecordedThesis> = None;
+        for thesis in theses.iter().filter(|thesis| thesis.received_at <= row.at) {
+            let later = latest.is_none_or(|kept| {
+                (thesis.received_at, &thesis.thesis_id) > (kept.received_at, &kept.thesis_id)
+            });
+            if later {
+                latest = Some(thesis);
+            }
+        }
+        let active = latest.is_some_and(|thesis| {
+            thesis.admitted
+                && row.at < thesis.expires_at
+                && thesis.invalidated_at.is_none_or(|at| row.at < at)
+        });
+        if !active {
+            return Err(format!(
+                "an opening at {} had no active admitted thesis",
+                row.at
+            ));
         }
     }
     Ok(())
@@ -224,6 +292,45 @@ proptest! {
     fn nothing_is_decided_or_filled_before_its_information((bars, recorded) in scenario()) {
         let run = run(&pinned(), &bars, &recorded, &[]).map_err(|e| TestCaseError::fail(e.code()))?;
         nothing_before_its_information(&run, &recorded).map_err(TestCaseError::fail)?;
+        outputs_received_by_each_decision(&run, &recorded).map_err(TestCaseError::fail)?;
+    }
+
+    #[test]
+    fn a_research_version_opens_only_on_an_active_thesis(
+        (bars, recorded) in scenario(),
+        records in prop::collection::vec(
+            (0usize..22, 2usize..14, prop::bool::weighted(0.8), prop::option::weighted(0.3, 1usize..12)),
+            0..4,
+        ),
+        anchor in prop::bool::weighted(0.8),
+    ) {
+        let days = trading_days(bars.len());
+        let theses: Vec<_> = records
+            .iter()
+            .enumerate()
+            .map(|(index, (from, length, admitted, invalidated))| {
+                let received = at(&format!("{}T13:{:02}:00Z", days[*from], 25 + index));
+                let until = days.get(from + length).copied().unwrap_or(days[days.len() - 1]);
+                mandate_backtest::RecordedThesis {
+                    thesis_id: format!("th_{index}"),
+                    invalidated_at: invalidated
+                        .and_then(|after| days.get(from + after))
+                        .map(|date| at(&format!("{date}T13:30:00Z")))
+                        .filter(|at| *at >= received),
+                    ..thesis(received, at(&format!("{until}T13:30:00Z")), *admitted)
+                }
+            })
+            .collect();
+        let mut theses = theses;
+        if anchor {
+            theses.insert(0, mandate_backtest::RecordedThesis {
+                thesis_id: "th_anchor".to_owned(),
+                ..thesis(at(&format!("{}T12:00:00Z", days[1])), at("2026-12-01T12:00:00Z"), true)
+            });
+        }
+        let run = run(&research(), &bars, &recorded, &theses).map_err(|e| TestCaseError::fail(e.code()))?;
+        openings_only_on_an_active_thesis(&run, &theses).map_err(TestCaseError::fail)?;
+        outputs_received_by_each_decision(&run, &recorded).map_err(TestCaseError::fail)?;
     }
 
     #[test]
@@ -327,6 +434,46 @@ fn the_lookahead_oracle_catches_an_early_order_and_an_early_fill() {
         .unwrap_or_else(|| panic!("a fill"));
     fill.execution.executed_at = at("2026-09-01T00:00:00Z");
     assert!(nothing_before_its_information(&early_fill, &recorded).is_err());
+}
+
+/// The per-decision oracle catches a row that combined outputs no one had received yet, and the
+/// thesis oracle an opening with no active thesis.
+#[test]
+fn the_visibility_oracles_catch_an_early_output_and_an_unheld_opening() {
+    let (mut run, _, recorded) = seeded_run();
+    assert!(outputs_received_by_each_decision(&run, &recorded).is_ok());
+    let row = run
+        .report
+        .decisions
+        .first_mut()
+        .unwrap_or_else(|| panic!("a row"));
+    row.at = at("2026-09-01T00:00:00Z");
+    row.outputs_used = 2;
+    assert!(outputs_received_by_each_decision(&run, &recorded).is_err());
+    let opening = run
+        .report
+        .decisions
+        .iter()
+        .position(|row| {
+            row.outcome == DecisionOutcome::Submitted && row.purpose == Some(Purpose::Open)
+        })
+        .unwrap_or_else(|| panic!("an opening"));
+    assert!(openings_only_on_an_active_thesis(&run, &[]).is_err());
+    let expired = [thesis(
+        at("2026-09-01T12:00:00Z"),
+        at("2026-09-02T12:00:00Z"),
+        true,
+    )];
+    assert!(openings_only_on_an_active_thesis(&run, &expired).is_err());
+    let live = [thesis(
+        at("2026-09-01T12:00:00Z"),
+        at("2026-12-01T12:00:00Z"),
+        true,
+    )];
+    assert!(
+        openings_only_on_an_active_thesis(&run, &live).is_ok(),
+        "{opening}"
+    );
 }
 
 /// The exit oracle catches a denied exit row.

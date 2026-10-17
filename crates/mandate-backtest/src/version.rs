@@ -250,6 +250,13 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), BacktestError> {
     let (Some(first), Some(last)) = (input.bars.first(), input.bars.last()) else {
         return Err(BacktestError::NoBars);
     };
+    if let Some(index) = input
+        .bars
+        .iter()
+        .position(|bar| !matches!(bar.session, Session::Regular))
+    {
+        return Err(BacktestError::BarOutsideRegularSession(index));
+    }
     if let Some(date) = input
         .corporate_actions
         .iter()
@@ -275,7 +282,11 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), BacktestError> {
             return Err(BacktestError::OutputNotPinned(index));
         }
     }
+    let mut thesis_ids = BTreeSet::new();
     for (index, thesis) in input.theses.iter().enumerate() {
+        if !thesis_ids.insert(thesis.thesis_id.as_str()) {
+            return Err(BacktestError::DuplicateThesis(index));
+        }
         if thesis.instrument != instrument.asset {
             return Err(BacktestError::RecordOtherInstrument(index));
         }
@@ -335,22 +346,13 @@ impl SessionClock for RegularSeconds<'_> {
                 }
                 let start = span.start().max(from);
                 let end = span.end().min(to);
-                if start < end {
-                    total = total.saturating_add(whole_seconds(start, end)?);
-                }
+                let inside = u64::try_from(end.secs().saturating_sub(start.secs())).unwrap_or(0);
+                total = total.saturating_add(inside);
             }
             date = date.next()?;
         }
         Ok(total)
     }
-}
-
-/// Whole seconds from `from` to `to`, never negative.
-fn whole_seconds(from: UtcNanos, to: UtcNanos) -> Result<u64, mandate_spec::SpecError> {
-    to.secs()
-        .checked_sub(from.secs())
-        .and_then(|seconds| u64::try_from(seconds).ok())
-        .ok_or(mandate_spec::SpecError::ClockWentBackwards)
 }
 
 /// One closed period's figures the gate's liquidity inputs read.
@@ -370,16 +372,48 @@ struct LastClose {
     regular_seconds: u64,
 }
 
-/// The day's conduct and day-trade inputs, reset at each New York midnight (trading spec §9.2,
-/// §9.6).
+/// The day's day-trade inputs, reset at each New York midnight (trading spec §9.2): the
+/// position held overnight and the day's fills. The day's order, fill and bought-dollar counts of
+/// §9.6 and §6.3 need no tracking: every decision is at the start of a trading day's first regular
+/// bar (DEC-1000 items 3 and 8), before any of that day's orders or fills, so each is zero there.
 #[derive(Debug, Clone)]
 struct Today {
-    orders: u32,
-    filled_orders: BTreeSet<u32>,
     fills: Vec<AccountFill>,
-    filled_qty: Qty,
-    bought_usd: Usd,
     held_overnight: Qty,
+}
+
+/// Why nothing reached the gate: the builder held, with its reason, or refused, with its code.
+struct Unproposed {
+    outcome: DecisionOutcome,
+    reason: &'static str,
+    outputs_used: u32,
+}
+
+/// The row of a proposal a gate pass judged: the gate's purpose, its verdict as the outcome, its
+/// reason, and the proposal's size and the outputs it combined.
+fn judged(
+    at: UtcNanos,
+    date: Date,
+    candidate: &Candidate,
+    decision: &Decision,
+    decided_by: Option<String>,
+) -> DecisionRow {
+    DecisionRow {
+        at,
+        date,
+        purpose: Some(decision.purpose),
+        outcome: match decision.verdict {
+            Verdict::Allow => DecisionOutcome::Submitted,
+            Verdict::Deny => DecisionOutcome::GateDeny,
+            Verdict::Defer => DecisionOutcome::GateDefer,
+            Verdict::Hold => DecisionOutcome::GateHold,
+        },
+        reason: decision.reason.map(|reason| reason.as_str().to_owned()),
+        decided_by,
+        qty: Some(candidate.qty),
+        limit: Some(candidate.limit),
+        outputs_used: candidate.outputs_used,
+    }
 }
 
 /// Why a proposal reached the gate: the origin the gate is told, and the order the run would send.
@@ -389,7 +423,6 @@ struct Candidate {
     qty: Qty,
     limit: Price,
     kind: ProposedKind,
-    sim_kind: Option<OrderKind>,
     buy_action: Option<mandate_builder::ActionContext>,
     outputs_used: u32,
 }
@@ -475,11 +508,7 @@ impl<'a, 'c> Run<'a, 'c> {
             prior_close_equity: starting_cash,
             today_date: None,
             today: Today {
-                orders: 0,
-                filled_orders: BTreeSet::new(),
                 fills: Vec::new(),
-                filled_qty: Qty::ZERO,
-                bought_usd: Usd::ZERO,
                 held_overnight: Qty::ZERO,
             },
             earlier_day_trades: Vec::new(),
@@ -551,26 +580,20 @@ impl<'a, 'c> Run<'a, 'c> {
         }
     }
 
-    /// Steps the risk state with `RiskDayStarted` at each New York midnight after the last step and
-    /// at or before `until`, and resets the day's conduct inputs.
+    /// Steps the risk state with `RiskDayStarted` at the New York midnight that opens each risk day
+    /// after the last step's and up to `until`'s, then starts the day's inputs when `until` opens a
+    /// new day (mandate spec §5.4).
     fn cross_midnights(&mut self, until: UtcNanos) -> Result<(), BacktestError> {
         let (mut day, _) = new_york_date_and_hour(self.last_step)?;
-        loop {
+        let (today, _) = new_york_date_and_hour(until)?;
+        while day < today {
             day = day.next()?;
-            let midnight = new_york_midnight(day)?;
-            if midnight > until {
-                break;
-            }
-            if midnight <= self.last_step {
-                continue;
-            }
             self.step(
-                midnight,
+                new_york_midnight(day)?,
                 MarketSession::Overnight,
                 risk::Input::RiskDayStarted,
             )?;
         }
-        let (today, _) = new_york_date_and_hour(until)?;
         if self.today_date != Some(today) {
             self.roll_day(today)?;
         }
@@ -585,11 +608,7 @@ impl<'a, 'c> Run<'a, 'c> {
             self.earlier_day_trades.extend(fold.today);
         }
         self.today = Today {
-            orders: 0,
-            filled_orders: BTreeSet::new(),
             fills: Vec::new(),
-            filled_qty: Qty::ZERO,
-            bought_usd: Usd::ZERO,
             held_overnight: self.position()?,
         };
         self.today_date = Some(today);
@@ -634,39 +653,41 @@ impl<'a, 'c> Run<'a, 'c> {
     }
 
     /// One decision at `t`, the start of the bar after a period's close (DEC-1000 item 1).
+    ///
+    /// No agent order works into a decision: every agent order is a day order, its remainder
+    /// canceled at its session's end (trading spec §6.4 rule 2), and decisions come one a trading
+    /// day, at its first regular bar. So the flatten that §6.2 step 1 puts first never waits on one.
     fn decide(&mut self, index: usize, bar: &SimBar) -> Result<(), BacktestError> {
         let t = bar.start;
         self.step(t, MarketSession::Regular, risk::Input::Clock)?;
         let date = bar.trade_date;
-        let order_working = self
-            .working
-            .as_ref()
-            .is_some_and(|order| !order.free_before(index));
-        if order_working {
-            self.rows
-                .push(DecisionRow::bare(t, date, DecisionOutcome::OrderWorking));
-            return Ok(());
-        }
         self.working = None;
-        let Some(last) = self.last_close else {
-            self.rows.push(
-                DecisionRow::bare(t, date, DecisionOutcome::BuilderHold)
-                    .with_reason("no_fresh_outputs"),
-            );
-            return Ok(());
-        };
+        let last = self.last_close.ok_or(BacktestError::NoBars)?;
         let (bid, ask) = self.quote(last.close)?;
         let candidate = match self.candidate(t, bid, ask)? {
             Ok(candidate) => candidate,
-            Err(row) => {
-                self.rows.push(row.at(t, date));
+            Err(Unproposed {
+                outcome,
+                reason,
+                outputs_used,
+            }) => {
+                self.rows.push(DecisionRow {
+                    at: t,
+                    date,
+                    purpose: None,
+                    outcome,
+                    reason: Some(reason.to_owned()),
+                    decided_by: None,
+                    qty: None,
+                    limit: None,
+                    outputs_used,
+                });
                 return Ok(());
             }
         };
         let first = self.gate(t, last, bid, ask, &candidate, GatePass::First)?;
         if first.verdict != Verdict::Allow {
-            self.rows
-                .push(DecisionRow::gated(t, date, &candidate, &first));
+            self.rows.push(judged(t, date, &candidate, &first, None));
             return Ok(());
         }
         let mut decided_by = None;
@@ -679,11 +700,10 @@ impl<'a, 'c> Run<'a, 'c> {
                 AutonomyDecision::Deny => Some(DecisionOutcome::AutonomyDeny),
             };
             if let Some(outcome) = outcome {
-                self.rows.push(
-                    DecisionRow::gated(t, date, &candidate, &first)
-                        .with_outcome(outcome)
-                        .decided_by(decided_by),
-                );
+                self.rows.push(DecisionRow {
+                    outcome,
+                    ..judged(t, date, &candidate, &first, decided_by)
+                });
                 return Ok(());
             }
         }
@@ -692,7 +712,7 @@ impl<'a, 'c> Run<'a, 'c> {
         if second.verdict != Verdict::Allow {
             self.protection = protection;
             self.rows
-                .push(DecisionRow::gated(t, date, &candidate, &second).decided_by(decided_by));
+                .push(judged(t, date, &candidate, &second, decided_by));
             return Ok(());
         }
         if let Some(protection) = protection {
@@ -704,13 +724,7 @@ impl<'a, 'c> Run<'a, 'c> {
             .map_or((candidate.qty, candidate.limit), |pacing| {
                 (pacing.qty, pacing.limit_price)
             });
-        let kind = match (candidate.sim_kind, &second.pacing) {
-            (Some(OrderKind::Market), Some(pacing)) if pacing.marketable_limit_required => {
-                OrderKind::Limit { limit }
-            }
-            (Some(kind), _) => kind,
-            (None, _) => OrderKind::Limit { limit },
-        };
+        let kind = OrderKind::Limit { limit };
         if second.purpose == mandate_risk::Purpose::RiskExit {
             self.risk_exits = self.risk_exits.checked_add(1).ok_or(NumError::Overflow)?;
         }
@@ -729,12 +743,17 @@ impl<'a, 'c> Run<'a, 'c> {
             },
         };
         self.working = Some(self.submit(t, order, false)?);
-        self.rows.push(
-            DecisionRow::gated(t, date, &candidate, &second)
-                .with_outcome(DecisionOutcome::Submitted)
-                .sized(qty, limit)
-                .decided_by(decided_by),
-        );
+        self.rows.push(DecisionRow {
+            at: t,
+            date,
+            purpose: Some(second.purpose),
+            outcome: DecisionOutcome::Submitted,
+            reason: None,
+            decided_by,
+            qty: Some(qty),
+            limit: Some(limit),
+            outputs_used: candidate.outputs_used,
+        });
         Ok(())
     }
 
@@ -745,7 +764,7 @@ impl<'a, 'c> Run<'a, 'c> {
         t: UtcNanos,
         bid: Price,
         ask: Price,
-    ) -> Result<Result<Candidate, DecisionRow>, BacktestError> {
+    ) -> Result<Result<Candidate, Unproposed>, BacktestError> {
         let snapshot = self.risk.snapshot();
         let position = self.position()?;
         if matches!(snapshot.agent_mode, AgentMode::Paused | AgentMode::Stopped)
@@ -757,7 +776,6 @@ impl<'a, 'c> Run<'a, 'c> {
             return Ok(Ok(trim));
         }
         let outputs = self.fresh_outputs(t);
-        let outputs_used = u32::try_from(outputs.len()).map_err(|_| NumError::Overflow)?;
         let market = self.market(t, bid, ask)?;
         let proposal = match propose(
             &self.builder,
@@ -769,23 +787,21 @@ impl<'a, 'c> Run<'a, 'c> {
         ) {
             Ok(proposal) => proposal,
             Err(error) => {
-                return Ok(Err(DecisionRow::bare(
-                    t,
-                    t.date(),
-                    DecisionOutcome::BuilderRefused,
-                )
-                .with_reason(error.code())
-                .outputs(outputs_used)));
+                return Ok(Err(Unproposed {
+                    outcome: DecisionOutcome::BuilderRefused,
+                    reason: error.code(),
+                    outputs_used: 0,
+                }));
             }
         };
         let used =
             u32::try_from(proposal.combined.outputs_used.len()).map_err(|_| NumError::Overflow)?;
         Ok(match proposal.action {
-            Action::Hold { reason } => {
-                Err(DecisionRow::bare(t, t.date(), DecisionOutcome::BuilderHold)
-                    .with_reason(reason.as_str())
-                    .outputs(used))
-            }
+            Action::Hold { reason } => Err(Unproposed {
+                outcome: DecisionOutcome::BuilderHold,
+                reason: reason.as_str(),
+                outputs_used: used,
+            }),
             Action::Buy {
                 purpose: _,
                 qty,
@@ -798,7 +814,6 @@ impl<'a, 'c> Run<'a, 'c> {
                 qty,
                 limit: limit_price,
                 kind: ProposedKind::Plain,
-                sim_kind: None,
                 buy_action: Some(action),
                 outputs_used: used,
             }),
@@ -813,7 +828,6 @@ impl<'a, 'c> Run<'a, 'c> {
                 qty,
                 limit: limit_price,
                 kind: ProposedKind::Plain,
-                sim_kind: None,
                 buy_action: None,
                 outputs_used: used,
             }),
@@ -821,7 +835,10 @@ impl<'a, 'c> Run<'a, 'c> {
     }
 
     /// The agent-scoped flatten plan's sell of the whole sub-ledger position (§5.5, DEC-1000 item
-    /// 1.2): a market order where the plan prices it so, else a limit at its floor. The flatten a
+    /// 1.2), proposed to the gate as the plan prices it: a market order in the regular session, else
+    /// a limit at its floor. The order sent is a limit at the gate's price either way: a backtest
+    /// has no current trading-status feed, so the gate re-prices a market exit as a marketable
+    /// limit (§4.4, §5.6), and the run sends exactly what the gate allowed. The flatten a
     /// `flatten_and_pause` rung or the floor starts is the automated kill switch, whose orders
     /// §5.5 exempts from the agent's mode, so the gate is told that origin, never `risk_engine`,
     /// which `paused` would hold.
@@ -847,12 +864,9 @@ impl<'a, 'c> Run<'a, 'c> {
             .sells
             .first()
             .ok_or(BacktestError::FlattenWithoutSell)?;
-        let (kind, sim_kind, limit) = match (sell.pricing, sell.floor_price) {
-            (FlattenPricing::MarketOrLadder, _) => {
-                (ProposedKind::Market, Some(OrderKind::Market), bid)
-            }
-            (FlattenPricing::ExitPriceLadder, Some(floor)) => (ProposedKind::Plain, None, floor),
-            (FlattenPricing::ExitPriceLadder, None) => (ProposedKind::Plain, None, bid),
+        let (kind, limit) = match (sell.pricing, sell.floor_price) {
+            (FlattenPricing::MarketOrLadder, _) => (ProposedKind::Market, bid),
+            (FlattenPricing::ExitPriceLadder, floor) => (ProposedKind::Plain, floor.unwrap_or(bid)),
         };
         Ok(Candidate {
             origin: Origin::AutomatedKillSwitch,
@@ -860,7 +874,6 @@ impl<'a, 'c> Run<'a, 'c> {
             qty: sell.qty,
             limit,
             kind,
-            sim_kind,
             buy_action: None,
             outputs_used: 0,
         })
@@ -886,7 +899,6 @@ impl<'a, 'c> Run<'a, 'c> {
             qty: trim.qty,
             limit: bid,
             kind: ProposedKind::Plain,
-            sim_kind: None,
             buy_action: None,
             outputs_used: 0,
         }))
@@ -903,19 +915,22 @@ impl<'a, 'c> Run<'a, 'c> {
             .collect()
     }
 
-    /// The active admitted thesis for the run's instrument at `t`, the latest received, for a
-    /// research-agent version (DEC-1000 item 5).
+    /// The thesis that holds the run's instrument in the universe at `t`, for a research-agent
+    /// version (DEC-1000 item 5): the latest record received at or before `t`, ties broken by
+    /// thesis id, and only while it is admitted, unexpired and not invalidated. A later refused
+    /// record ends an earlier admission, so a renewal the admission refused never keeps an
+    /// instrument in.
     fn active_thesis(&self, t: UtcNanos) -> Option<&RecordedThesis> {
         self.input
             .theses
             .iter()
+            .filter(|thesis| thesis.received_at <= t)
+            .max_by(|a, b| (a.received_at, &a.thesis_id).cmp(&(b.received_at, &b.thesis_id)))
             .filter(|thesis| {
                 thesis.admitted
-                    && thesis.received_at <= t
                     && t < thesis.expires_at
                     && thesis.invalidated_at.is_none_or(|at| t < at)
             })
-            .max_by_key(|thesis| thesis.received_at)
     }
 
     /// Whether the instrument is in the working universe at `t`: always for a pinned version, and
@@ -969,7 +984,7 @@ impl<'a, 'c> Run<'a, 'c> {
             .position(&self.input.instrument.ledger_id)
             .basis()
             .to_usd();
-        let position_pnl_fraction = if position.is_zero() || basis.is_zero() {
+        let position_pnl_fraction = if basis.is_zero() {
             Signed::ZERO
         } else {
             let gain = position.notional(bid)?.checked_sub(basis)?;
@@ -980,7 +995,7 @@ impl<'a, 'c> Run<'a, 'c> {
             drawdown: Unit::parse(&snapshot.drawdown.to_string())?,
             daily_pnl_fraction: Signed::parse(&snapshot.daily_pnl_fraction.to_string())?,
             position_pnl_fraction,
-            bought_today_usd: self.today.bought_usd,
+            bought_today_usd: Usd::ZERO,
             has_prior_fill: self.has_prior_fill,
             new_instrument: false,
             thesis_confidence: self
@@ -1155,33 +1170,27 @@ impl<'a, 'c> Run<'a, 'c> {
                 .last_exit_fill_at
                 .map(|at| BTreeMap::from([(self.risk_asset.clone(), at)]))
                 .unwrap_or_default(),
-            orders_today: self.today.orders,
+            orders_today: 0,
             day_trades: self.day_trades(self.last_step)?.ledger,
         })
     }
 
+    /// §9.6's inputs at a decision: no order of the day yet (DEC-1000 item 8), the latest fill on
+    /// each side, and the day's participation, which is the resting protection's open quantity.
     fn conduct(&self) -> Result<mandate_risk::ConductState, BacktestError> {
-        let filled =
-            u32::try_from(self.today.filled_orders.len()).map_err(|_| NumError::Overflow)?;
         let open_protective = self
             .protection
             .as_ref()
             .map_or(Ok(Qty::ZERO), |protection| protection.remaining())?;
         Ok(mandate_risk::ConductState {
-            filled_today: BTreeMap::from([(self.risk_asset.clone(), filled)]),
-            orders_today_per_instrument: BTreeMap::from([(
-                self.risk_asset.clone(),
-                self.today.orders,
-            )]),
+            filled_today: BTreeMap::new(),
+            orders_today_per_instrument: BTreeMap::new(),
             last_opposite_fill_at: self
                 .last_fill_by_side
                 .iter()
                 .map(|(side, at)| ((self.risk_asset.clone(), *side), *at))
                 .collect(),
-            participation_today: BTreeMap::from([(
-                self.risk_asset.clone(),
-                self.today.filled_qty.checked_add(open_protective)?,
-            )]),
+            participation_today: BTreeMap::from([(self.risk_asset.clone(), open_protective)]),
             resting_since: BTreeMap::new(),
         })
     }
@@ -1203,7 +1212,7 @@ impl<'a, 'c> Run<'a, 'c> {
             } else {
                 BTreeSet::new()
             },
-            pinned: !research_agent(self.input.mandate),
+            pinned: self.input.mandate.mandate().universe.pinned,
         };
         let fee_reservation = match candidate.side {
             Side::Buy => mandate_accounting::fee_reservation(
@@ -1294,7 +1303,6 @@ impl<'a, 'c> Run<'a, 'c> {
             protective,
             end,
         });
-        self.today.orders = self.today.orders.checked_add(1).ok_or(NumError::Overflow)?;
         Ok(Working {
             index,
             order,
@@ -1328,23 +1336,13 @@ impl<'a, 'c> Run<'a, 'c> {
     fn fold_fills(&mut self, index: usize, bar: &SimBar) -> Result<(), BacktestError> {
         let mut folded = Vec::new();
         if let Some(order) = self.working.as_mut() {
-            folded.extend(
-                order
-                    .fold_bar(index, bar.start, self.config)?
-                    .into_iter()
-                    .map(|fill| (fill, false)),
-            );
+            folded.extend(order.fold_bar(index, bar.start, self.config)?);
         }
         if let Some(protection) = self.protection.as_mut() {
-            folded.extend(
-                protection
-                    .fold_bar(index, bar.start, self.config)?
-                    .into_iter()
-                    .map(|fill| (fill, true)),
-            );
+            folded.extend(protection.fold_bar(index, bar.start, self.config)?);
         }
-        for (fill, protective) in folded {
-            self.apply_fill(fill, protective)?;
+        for fill in folded {
+            self.apply_fill(fill)?;
         }
         let agent_ended = self
             .working
@@ -1363,7 +1361,7 @@ impl<'a, 'c> Run<'a, 'c> {
         Ok(())
     }
 
-    fn apply_fill(&mut self, fill: RunFill, protective: bool) -> Result<(), BacktestError> {
+    fn apply_fill(&mut self, fill: RunFill) -> Result<(), BacktestError> {
         let execution: &Execution = &fill.execution;
         self.account = self
             .account
@@ -1379,24 +1377,14 @@ impl<'a, 'c> Run<'a, 'c> {
                 price: execution.price,
             },
         )?;
-        let notional = execution.qty_gross.notional(execution.price)?;
         match execution.side {
             Side::Buy => {
-                self.today.bought_usd = self.today.bought_usd.checked_add(notional)?;
+                let notional = execution.qty_gross.notional(execution.price)?;
                 self.goal_spent = self.goal_spent.checked_add(notional)?;
             }
             Side::Sell => self.last_exit_fill_at = Some(at),
         }
         self.has_prior_fill = true;
-        self.today.filled_qty = self.today.filled_qty.checked_add(execution.qty_gross)?;
-        let order_index = self
-            .orders
-            .iter()
-            .position(|order| Some(order.index) == fill_order_index(execution))
-            .and_then(|position| u32::try_from(position).ok());
-        if let Some(order_index) = order_index {
-            self.today.filled_orders.insert(order_index);
-        }
         self.today.fills.push(AccountFill {
             at,
             instrument: self.risk_asset.clone(),
@@ -1406,7 +1394,6 @@ impl<'a, 'c> Run<'a, 'c> {
         });
         self.last_fill_by_side
             .insert(mandate_risk::RestingSide::from(execution.side), at);
-        let _ = protective;
         self.fills.push(fill);
         Ok(())
     }
@@ -1491,24 +1478,22 @@ impl<'a, 'c> Run<'a, 'c> {
                 &self.config.fees,
             )?
             .account;
-        if matches!(bar.session, Session::Regular) {
-            let (bid, _) = self.quote(bar.close)?;
-            self.step(
-                close_at,
-                MarketSession::Regular,
-                risk::Input::Mark { bid, sane: true },
-            )?;
-            let regular_seconds = RegularSeconds {
-                calendar: self.calendar,
-            }
-            .seconds_between(bar.start, close_at)?;
-            self.last_close = Some(LastClose {
-                close: bar.close,
-                at: close_at,
-                volume: bar.volume,
-                regular_seconds,
-            });
+        let (bid, _) = self.quote(bar.close)?;
+        self.step(
+            close_at,
+            MarketSession::Regular,
+            risk::Input::Mark { bid, sane: true },
+        )?;
+        let regular_seconds = RegularSeconds {
+            calendar: self.calendar,
         }
+        .seconds_between(bar.start, close_at)?;
+        self.last_close = Some(LastClose {
+            close: bar.close,
+            at: close_at,
+            volume: bar.volume,
+            regular_seconds,
+        });
         for day in crate::charges_due(bar, &self.dates, &mut self.charged, AssetClass::UsEquity)? {
             self.account = self
                 .account
@@ -1538,9 +1523,7 @@ impl<'a, 'c> Run<'a, 'c> {
                 .input
                 .bars
                 .iter()
-                .filter(|other| {
-                    other.trade_date == bar.trade_date && matches!(other.session, Session::Regular)
-                })
+                .filter(|other| other.trade_date == bar.trade_date)
                 .try_fold(Qty::ZERO, |sum, other| sum.checked_add(other.volume))?;
             self.periods.push(ClosedPeriod {
                 close: bar.close,
@@ -1580,15 +1563,6 @@ impl<'a, 'c> Run<'a, 'c> {
             filled_qty,
         })
     }
-}
-
-/// The order index a run's execution names: `o<index>` (DEC-127 item 21).
-fn fill_order_index(execution: &Execution) -> Option<u32> {
-    execution
-        .client_order_id
-        .as_deref()
-        .and_then(|id| id.strip_prefix('o'))
-        .and_then(|digits| digits.parse().ok())
 }
 
 /// The fill model's half spread, the one spread the run's quotes and fills share.

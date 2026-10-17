@@ -87,6 +87,11 @@ fn an_opening_fills_then_rests_the_executors_oco() {
     );
     assert_eq!(protection.order.tif, mandate_sim::TimeInForce::Gtc);
     assert_eq!(
+        protection.decided_at,
+        at(&format!("{}T20:00:00Z", trading_days(DAYS)[20])),
+        "placed at the fill bar's regular-session close, 16:00 New York"
+    );
+    assert_eq!(
         run.fills.len(),
         1,
         "the protection never triggers on flat bars"
@@ -221,6 +226,18 @@ fn a_corporate_action_in_range_refuses_the_run() {
         &[day("2026-08-14")],
     );
     assert!(outside.is_ok());
+    for edge in [days[0], days[DAYS - 1]] {
+        let on_edge = run_with(
+            &pinned(),
+            &settings(),
+            &xyz(),
+            &bars,
+            &outputs,
+            &[],
+            &[edge],
+        );
+        assert_eq!(refusal(on_edge), "corporate_action_in_range", "{edge}");
+    }
 }
 
 /// DEC-1000 item 8: crypto is slice 2's.
@@ -312,6 +329,17 @@ fn the_protective_stop_fills_inside_its_bar() {
         .find(|fill| fill.execution.side == Side::Sell)
         .unwrap_or_else(|| panic!("the stop filled"));
     assert_eq!(stop_fill.fill.bar, 24);
+    let numbered: Vec<_> = run
+        .fills
+        .iter()
+        .take(2)
+        .map(|fill| fill.fill.order)
+        .collect();
+    assert_eq!(
+        numbered,
+        [mandate_sim::OrderRef::new(0), mandate_sim::OrderRef::new(1)],
+        "each fill names its own order's run-wide index"
+    );
     assert!(stop_fill.fill.price >= bars[24].low && stop_fill.fill.price <= bars[24].high);
 }
 
@@ -648,4 +676,311 @@ fn a_flatten_rung_sells_the_whole_position_as_the_automated_kill_switch() {
             Side::Sell => held - 6,
         });
     assert_eq!(position_after, 0);
+}
+
+fn set(document: &mut Json, pointer: &str, value: Json) {
+    *document
+        .pointer_mut(pointer)
+        .unwrap_or_else(|| panic!("the document has {pointer}")) = value;
+}
+
+/// Mandate spec §5.4: the daily loss resets at each New York midnight. A position of 6 shares that
+/// loses 2 a day loses 12 USD a day, below a 0.15% limit of 15 USD, so nothing latches; folded
+/// without the day's reset it would lose 108 in all and latch.
+#[test]
+fn the_daily_loss_resets_at_each_risk_day() {
+    let days = trading_days(DAYS);
+    let mut document = base("research_equity_pinned");
+    set(
+        &mut document,
+        "/risk/max_daily_loss",
+        Json::String("0.0015".to_owned()),
+    );
+    set(&mut document, "/risk/daily_breach_min_s", Json::from(0));
+    set(
+        &mut document,
+        "/protection/stop_distance",
+        Json::String("0.2".to_owned()),
+    );
+    let mut bars = flat_bars(DAYS);
+    for (step, index) in (21..DAYS).enumerate() {
+        let close = 98 - 2 * i64::try_from(step).unwrap_or_else(|e| panic!("{e}"));
+        let (close, low) = (close.to_string(), (close - 1).to_string());
+        bars[index] = daily_bar(days[index], &close, &close, &low, &close, "1000000");
+    }
+    let run = run(
+        &validate(&document),
+        &bars,
+        &daily_outputs(&days, "0.5"),
+        &[],
+    )
+    .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    assert!(!run.fills.is_empty());
+    assert!(
+        run.report.limits_latched.is_empty(),
+        "{:?}",
+        run.report.limits_latched
+    );
+    assert_eq!(
+        run.report.most_restrictive_mode,
+        mandate_domain::AgentMode::Normal
+    );
+}
+
+/// Mandate spec §5.5's `trim_to_target`: 9 shares bought at 100 fall to 96, the scale rung at
+/// 0.2% activates, and the trim sells 2 at the bid, a risk exit the gate allows.
+#[test]
+fn an_active_trim_rung_sells_down_to_its_target() {
+    let days = trading_days(DAYS);
+    let mut document = base("research_equity_pinned");
+    set(
+        &mut document,
+        "/risk/scale_action",
+        Json::String("trim_to_target".to_owned()),
+    );
+    set(
+        &mut document,
+        "/risk/drawdown_ladder",
+        serde_json::json!([
+            {"at": "0.002", "action": "scale_sizes", "factor": "0.5"},
+            {"at": "0.05", "action": "exits_only", "factor": null},
+            {"at": "0.06", "action": "flatten_and_pause", "factor": null}
+        ]),
+    );
+    set(
+        &mut document,
+        "/risk/max_drawdown",
+        Json::String("0.06".to_owned()),
+    );
+    set(
+        &mut document,
+        "/risk/hysteresis",
+        Json::String("0.001".to_owned()),
+    );
+    set(
+        &mut document,
+        "/risk/max_daily_loss",
+        Json::String("0.5".to_owned()),
+    );
+    set(
+        &mut document,
+        "/protection/stop_distance",
+        Json::String("0.2".to_owned()),
+    );
+    set(
+        &mut document,
+        "/autonomy/rules/0/when/value",
+        Json::String("2000".to_owned()),
+    );
+    let mut bars = flat_bars(DAYS);
+    for (index, date) in days.iter().enumerate().skip(22) {
+        bars[index] = daily_bar(*date, "96", "97", "95", "96", "1000000");
+    }
+    let run = run(
+        &validate(&document),
+        &bars,
+        &daily_outputs(&days, "0.8"),
+        &[],
+    )
+    .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    let trim = run
+        .report
+        .decisions
+        .iter()
+        .find(|row| row.purpose == Some(Purpose::RiskExit))
+        .unwrap_or_else(|| panic!("a trim was proposed"));
+    assert_eq!(trim.outcome, DecisionOutcome::Submitted);
+    assert_eq!(trim.qty, Some(qty("2")));
+    assert_eq!(trim.limit, Some(price("96")));
+    assert_eq!(run.report.risk_exits, 1);
+}
+
+/// DEC-1000 item 1.7: a profile whose equity stop-limit cell offers the resting stop-limit protects
+/// a mandate with no take-profit by one: stop 95.01, limit 95.01 × (1 − 0.005) = 94.53495.
+#[test]
+fn a_stop_limit_protects_when_the_profile_offers_one() {
+    let days = trading_days(DAYS);
+    let mut document = base("research_equity_pinned");
+    set(
+        &mut document,
+        "/protection/take_profit_distance",
+        Json::Null,
+    );
+    set(
+        &mut document,
+        "/protection/crypto_stop_limit_offset",
+        Json::String("0.005".to_owned()),
+    );
+    let mut settings = settings();
+    settings.profile = stop_limit_profile();
+    let run = run_with(
+        &validate(&document),
+        &settings,
+        &xyz(),
+        &flat_bars(DAYS),
+        &daily_outputs(&days, "0.5"),
+        &[],
+        &[],
+    )
+    .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    let protection = run
+        .orders
+        .iter()
+        .find(|order| order.protective)
+        .unwrap_or_else(|| panic!("protected"));
+    assert_eq!(
+        protection.order.kind,
+        OrderKind::StopLimit {
+            stop: price("95.01"),
+            limit: price("94.53495"),
+        }
+    );
+}
+
+/// Trading spec §9.6's opposite-fill interval, read from the run's own fills: after the stop sells
+/// on day 23, the six reopenings inside a ten-day interval are denied, and the first after it opens.
+#[test]
+fn the_opposite_fill_interval_is_read_from_the_runs_fills() {
+    let days = trading_days(DAYS);
+    let mut settings = settings();
+    settings.gate.opposite_fill_interval_s = 864_000;
+    let mut bars = flat_bars(DAYS);
+    bars[22] = daily_bar(days[22], "99", "99", "90", "91", "1000000");
+    let run = run_with(
+        &pinned(),
+        &settings,
+        &xyz(),
+        &bars,
+        &daily_outputs(&days, "0.5"),
+        &[],
+        &[],
+    )
+    .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    let denied = run
+        .report
+        .decisions
+        .iter()
+        .filter(|row| row.reason.as_deref() == Some("opposite_fill_interval"))
+        .count();
+    assert_eq!(denied, 6);
+    assert_eq!(
+        run.report.decisions.last().map(|row| row.outcome),
+        Some(DecisionOutcome::Submitted)
+    );
+}
+
+/// DEC-1000 item 5's visibility at its edges: a thesis received exactly at the 09:30 decision is
+/// seen by it; one expiring or invalidated exactly then is not; and a later refused record ends an
+/// earlier admission.
+#[test]
+fn thesis_visibility_holds_at_its_edges() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days, "0.5");
+    let bars = flat_bars(DAYS);
+    let decision = |index: usize| at(&format!("{}T13:30:00Z", days[index]));
+    let opened = |theses: &[mandate_backtest::RecordedThesis]| {
+        run(&research(), &bars, &outputs, theses)
+            .unwrap_or_else(|e| panic!("the run completes: {}", e.code()))
+            .report
+            .decisions
+            .iter()
+            .position(|row| row.outcome == DecisionOutcome::Submitted)
+    };
+    let late = thesis(decision(25), at("2026-10-30T12:00:00Z"), true);
+    assert_eq!(
+        opened(&[late]),
+        Some(24),
+        "received exactly at the day-26 decision"
+    );
+    let expiring = thesis(at("2026-09-02T12:00:00Z"), decision(20), true);
+    assert_eq!(
+        opened(&[expiring]),
+        None,
+        "expired exactly at the first open decision"
+    );
+    let invalidated = mandate_backtest::RecordedThesis {
+        invalidated_at: Some(decision(20)),
+        ..thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true)
+    };
+    assert_eq!(opened(&[invalidated]), None, "invalidated exactly then");
+    let admitted = thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true);
+    let refused_renewal = mandate_backtest::RecordedThesis {
+        thesis_id: "th_02".to_owned(),
+        ..thesis(
+            at("2026-09-03T12:00:00Z"),
+            at("2026-10-30T12:00:00Z"),
+            false,
+        )
+    };
+    assert_eq!(
+        opened(&[admitted, refused_renewal]),
+        None,
+        "the later refused record ends it"
+    );
+}
+
+/// DEC-1000 item 11: a classification made after the last decision (17:00 New York on the last
+/// day) is not seen by any; with none before them,
+/// the instrument is unclassified and every opening is denied.
+#[test]
+fn a_classification_made_after_the_decision_is_not_seen() {
+    let days = trading_days(DAYS);
+    let mut instrument = xyz();
+    instrument.etp_classifications = vec![mandate_backtest::EtpClassification {
+        at: at(&format!("{}T21:00:00Z", days[DAYS - 1])),
+        class: mandate_risk::EtpClass::Plain,
+    }];
+    let run = run_with(
+        &pinned(),
+        &settings(),
+        &instrument,
+        &flat_bars(DAYS),
+        &daily_outputs(&days, "0.5"),
+        &[],
+        &[],
+    )
+    .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    assert!(run.orders.is_empty());
+}
+
+/// The eligibility floor reads each period's dollar volume: 9,999 shares a day at 100 is 999,900,
+/// below the 1,000,000 floor, so no opening is ever allowed.
+#[test]
+fn a_thin_instrument_never_opens() {
+    let days = trading_days(DAYS);
+    let bars: Vec<_> = days
+        .iter()
+        .map(|date| daily_bar(*date, "100", "101", "99", "100", "9999"))
+        .collect();
+    let run = run(&pinned(), &bars, &daily_outputs(&days, "0.5"), &[])
+        .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    assert!(run.orders.is_empty());
+    assert!(
+        run.report
+            .decisions
+            .iter()
+            .all(|row| row.reason.as_deref() == Some("below_liquidity_floor"))
+    );
+}
+
+/// DEC-1000 items 5 and 8: two theses with one id, and a bar outside the regular session, refuse
+/// the run.
+#[test]
+fn a_repeated_thesis_or_an_extended_hours_bar_refuses_the_run() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days, "0.5");
+    let twice = [
+        thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true),
+        thesis(at("2026-09-03T12:00:00Z"), at("2026-10-30T12:00:00Z"), true),
+    ];
+    assert_eq!(
+        refusal(run(&research(), &flat_bars(DAYS), &outputs, &twice)),
+        "duplicate_thesis"
+    );
+    let mut bars = flat_bars(DAYS);
+    bars[3].session = mandate_sim::Session::AfterHours;
+    assert_eq!(
+        refusal(run(&pinned(), &bars, &outputs, &[])),
+        "bar_outside_regular_session"
+    );
 }
