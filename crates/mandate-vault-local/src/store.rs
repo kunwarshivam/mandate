@@ -19,14 +19,19 @@
 //! | Token, client secret | the executor user | any | `0100600` |
 
 use std::fmt;
-use std::fs::Metadata;
-use std::path::PathBuf;
+use std::fs::{self, File, Metadata, OpenOptions, Permissions};
+use std::io::{ErrorKind, Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 
-use secrecy::{SecretBox, SecretSlice};
+use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
+use ring::rand::{SecureRandom, SystemRandom};
+use secrecy::zeroize::Zeroize;
+use secrecy::{ExposeSecret, SecretBox, SecretSlice};
 
 use crate::VaultError;
-use crate::entry::{Entry, Kind, STORY};
-use crate::startup::{Ids, Inputs, KEY_LEN};
+use crate::entry::{Entry, Kind};
+use crate::startup::{self, Ids, Inputs, KEY_LEN, Keys, Role};
 
 /// The longest secret an entry holds, in bytes.
 pub const MAX_SECRET_LEN: usize = 8192;
@@ -36,12 +41,23 @@ pub const FORMAT_TAG: [u8; 4] = *b"MVL\x01";
 pub const NONCE_LEN: usize = 12;
 /// The authentication tag length of ChaCha20-Poly1305, in bytes.
 pub const TAG_LEN: usize = 16;
+/// The bytes before the ciphertext: the format tag and the nonce.
+const HEADER_LEN: usize = 16;
+/// The longest entry file: the header, the longest secret, and the tag.
+const MAX_FILE_LEN: usize = 8224;
+/// The shortest entry file: the header, a one-byte secret, and the tag.
+const MIN_FILE_LEN: usize = 33;
+const _: () = assert!(
+    HEADER_LEN == FORMAT_TAG.len() + NONCE_LEN
+        && MAX_FILE_LEN == HEADER_LEN + MAX_SECRET_LEN + TAG_LEN
+        && MIN_FILE_LEN == HEADER_LEN + 1 + TAG_LEN,
+    "the entry file lengths follow from the format"
+);
 
 /// The vault as the API process holds it: the pending key only. It writes codes and unlinks a
 /// code or a token by name; it reads nothing.
 pub struct ApiVault {
     vault_dir: PathBuf,
-    ids: Ids,
     pending_key: SecretBox<[u8; KEY_LEN]>,
 }
 
@@ -75,19 +91,42 @@ impl fmt::Debug for ExecutorVault {
 
 /// Runs [`crate::startup::check`] and returns the vault in the role `inputs` names.
 pub fn open(inputs: &Inputs<'_>) -> Result<Opened, VaultError> {
-    let _ = inputs;
-    Err(VaultError::Unimplemented { story: STORY })
+    let Keys { pending, token } = startup::check(inputs)?;
+    let vault_dir = inputs.vault_dir.to_path_buf();
+    let ids = inputs.ids;
+    match (inputs.role, token) {
+        (Role::Api, _) => Ok(Opened::Api(ApiVault {
+            vault_dir,
+            pending_key: pending,
+        })),
+        (Role::Executor, Some(token_key)) => Ok(Opened::Executor(ExecutorVault {
+            vault_dir,
+            ids,
+            pending_key: pending,
+            token_key,
+        })),
+        (Role::Executor, None) => Err(VaultError::KeyMissing),
+    }
 }
+
+/// The refusal for a vault held in the other role.
+const WRONG_VAULT: VaultError = VaultError::WrongRole { kind: "vault" };
 
 impl Opened {
     /// The executor's vault, or [`VaultError::WrongRole`] for the API's.
     pub fn into_executor(self) -> Result<ExecutorVault, VaultError> {
-        Err(VaultError::Unimplemented { story: STORY })
+        match self {
+            Self::Executor(vault) => Ok(vault),
+            Self::Api(_) => Err(WRONG_VAULT),
+        }
     }
 
     /// The API's vault, or [`VaultError::WrongRole`] for the executor's.
     pub fn into_api(self) -> Result<ApiVault, VaultError> {
-        Err(VaultError::Unimplemented { story: STORY })
+        match self {
+            Self::Api(vault) => Ok(vault),
+            Self::Executor(_) => Err(WRONG_VAULT),
+        }
     }
 }
 
@@ -95,15 +134,19 @@ impl ApiVault {
     /// Writes a code entry, replacing any earlier one. Any other kind is
     /// [`VaultError::WrongRole`].
     pub fn put_code(&self, entry: &Entry, secret: &SecretSlice<u8>) -> Result<(), VaultError> {
-        let _ = (entry, secret, &self.vault_dir, &self.ids, &self.pending_key);
-        Err(VaultError::Unimplemented { story: STORY })
+        if entry.kind() != Kind::Code {
+            return Err(wrong_role(entry));
+        }
+        write_entry(&self.vault_dir, &self.pending_key, entry, secret)
     }
 
     /// Unlinks a code or a token by name; an absent entry is already deleted. The client secret
     /// is [`VaultError::WrongRole`].
     pub fn delete(&self, entry: &Entry) -> Result<(), VaultError> {
-        let _ = entry;
-        Err(VaultError::Unimplemented { story: STORY })
+        if entry.kind() == Kind::ClientSecret {
+            return Err(wrong_role(entry));
+        }
+        unlink(&entry_path(&self.vault_dir, entry))
     }
 }
 
@@ -111,27 +154,69 @@ impl ExecutorVault {
     /// Writes a token or the client secret, replacing any earlier one. A code is
     /// [`VaultError::WrongRole`]: only the API writes codes, so only its files pass a code read.
     pub fn put(&self, entry: &Entry, secret: &SecretSlice<u8>) -> Result<(), VaultError> {
-        let _ = (
-            entry,
-            secret,
-            &self.vault_dir,
-            &self.ids,
-            &self.pending_key,
-            &self.token_key,
-        );
-        Err(VaultError::Unimplemented { story: STORY })
+        if entry.kind() == Kind::Code {
+            return Err(wrong_role(entry));
+        }
+        write_entry(&self.vault_dir, &self.token_key, entry, secret)
     }
 
     /// Reads and decrypts an entry of any kind; `None` when it is absent.
     pub fn read(&self, entry: &Entry) -> Result<Option<SecretSlice<u8>>, VaultError> {
-        let _ = entry;
-        Err(VaultError::Unimplemented { story: STORY })
+        let path = entry_path(&self.vault_dir, entry);
+        let Some(bytes) = read_checked(&path, entry.kind(), &self.ids)? else {
+            return Ok(None);
+        };
+        let key = match entry.kind() {
+            Kind::Code => &self.pending_key,
+            Kind::Token | Kind::ClientSecret => &self.token_key,
+        };
+        unseal(key, entry, bytes).map(Some)
     }
 
     /// Unlinks an entry of any kind; an absent entry is already deleted.
     pub fn delete(&self, entry: &Entry) -> Result<(), VaultError> {
-        let _ = entry;
-        Err(VaultError::Unimplemented { story: STORY })
+        unlink(&entry_path(&self.vault_dir, entry))
+    }
+}
+
+fn wrong_role(entry: &Entry) -> VaultError {
+    VaultError::WrongRole {
+        kind: entry.kind().as_str(),
+    }
+}
+
+fn entry_path(vault_dir: &Path, entry: &Entry) -> PathBuf {
+    vault_dir.join(entry.kind().dir()).join(entry.file_name())
+}
+
+/// The owner, group, and `st_mode` the open file of one kind must carry. `group` is `None`
+/// where the mode grants the group nothing.
+struct FileRule {
+    owner: u32,
+    group: Option<u32>,
+    st_mode: u32,
+}
+
+/// The permission bits a write gives an entry of `kind`: the bits of its rule's `st_mode`.
+fn create_mode(kind: Kind) -> u32 {
+    match kind {
+        Kind::Code => 0o640,
+        Kind::Token | Kind::ClientSecret => 0o600,
+    }
+}
+
+fn file_rule(kind: Kind, ids: &Ids) -> FileRule {
+    match kind {
+        Kind::Code => FileRule {
+            owner: ids.api_uid,
+            group: Some(ids.exec_gid),
+            st_mode: 0o100_640,
+        },
+        Kind::Token | Kind::ClientSecret => FileRule {
+            owner: ids.exec_uid,
+            group: None,
+            st_mode: 0o100_600,
+        },
     }
 }
 
@@ -144,6 +229,197 @@ pub(crate) fn check_open_file(
     named: &Metadata,
     opened: &Metadata,
 ) -> Result<(), VaultError> {
-    let _ = (kind, ids, named, opened);
-    Err(VaultError::Unimplemented { story: STORY })
+    let rule = file_rule(kind, ids);
+    let same_inode = named.dev() == opened.dev() && named.ino() == opened.ino();
+    let group_matches = rule.group.is_none_or(|gid| opened.gid() == gid);
+    if same_inode
+        && named.file_type().is_file()
+        && opened.nlink() == 1
+        && opened.uid() == rule.owner
+        && group_matches
+        && opened.mode() == rule.st_mode
+    {
+        Ok(())
+    } else {
+        Err(VaultError::FileMismatch { dir: kind.dir() })
+    }
+}
+
+/// Reads an entry's file through [`check_open_file`]; `None` when the name is absent. Only a
+/// regular file is opened, so a FIFO or device under the name is refused without blocking.
+fn read_checked(path: &Path, kind: Kind, ids: &Ids) -> Result<Option<Vec<u8>>, VaultError> {
+    let mismatch = VaultError::FileMismatch { dir: kind.dir() };
+    let named = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(VaultError::Io),
+    };
+    if !named.file_type().is_file() {
+        return Err(mismatch);
+    }
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(VaultError::Io),
+    };
+    let opened = file.metadata().map_err(|_| VaultError::Io)?;
+    check_open_file(kind, ids, &named, &opened)?;
+    let too_long = u64::try_from(MAX_FILE_LEN).map_or(true, |max| opened.len() > max);
+    if too_long {
+        return Err(VaultError::EntryMalformed);
+    }
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_FILE_LEN.saturating_add(1)).unwrap_or(u64::MAX);
+    file.take(limit)
+        .read_to_end(&mut bytes)
+        .map_err(|_| VaultError::Io)?;
+    Ok(Some(bytes))
+}
+
+/// An AEAD key built for one operation from the held key bytes.
+fn aead_key(key: &SecretBox<[u8; KEY_LEN]>) -> Result<LessSafeKey, VaultError> {
+    UnboundKey::new(&CHACHA20_POLY1305, key.expose_secret())
+        .map(LessSafeKey::new)
+        .map_err(|_| VaultError::KeyMalformed)
+}
+
+/// Encrypts `secret` for `entry` and writes it through a temporary file renamed over the entry.
+fn write_entry(
+    vault_dir: &Path,
+    key: &SecretBox<[u8; KEY_LEN]>,
+    entry: &Entry,
+    secret: &SecretSlice<u8>,
+) -> Result<(), VaultError> {
+    let bytes = seal(key, entry, secret.expose_secret())?;
+    let dir = vault_dir.join(entry.kind().dir());
+    let mode = create_mode(entry.kind());
+    let mut suffix = [0_u8; 8];
+    SystemRandom::new()
+        .fill(&mut suffix)
+        .map_err(|_| VaultError::Random)?;
+    let mut temp_name = format!(".{}.", entry.file_name());
+    for byte in suffix {
+        temp_name.push_str(&format!("{byte:02x}"));
+    }
+    temp_name.push_str(".tmp");
+    let temp = dir.join(temp_name);
+    let written = write_then_rename(&temp, &dir.join(entry.file_name()), mode, &bytes);
+    if written.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    written.and_then(|()| {
+        File::open(&dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|_| VaultError::Io)
+    })
+}
+
+fn write_then_rename(
+    temp: &Path,
+    target: &Path,
+    mode: u32,
+    bytes: &[u8],
+) -> Result<(), VaultError> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .open(temp)
+        .map_err(|_| VaultError::Io)?;
+    file.set_permissions(Permissions::from_mode(mode))
+        .and_then(|()| file.write_all(bytes))
+        .and_then(|()| file.sync_all())
+        .and_then(|()| fs::rename(temp, target))
+        .map_err(|_| VaultError::Io)
+}
+
+/// The entry file for `secret`: the format tag, a fresh nonce, the ciphertext and the tag. The
+/// plaintext is copied only into the buffer the cipher overwrites in place.
+fn seal(
+    key: &SecretBox<[u8; KEY_LEN]>,
+    entry: &Entry,
+    secret: &[u8],
+) -> Result<Vec<u8>, VaultError> {
+    if secret.is_empty() || secret.len() > MAX_SECRET_LEN {
+        return Err(VaultError::SecretSize);
+    }
+    let mut nonce = [0_u8; NONCE_LEN];
+    SystemRandom::new()
+        .fill(&mut nonce)
+        .map_err(|_| VaultError::Random)?;
+    let key = aead_key(key)?;
+    let mut out = Vec::with_capacity(MAX_FILE_LEN);
+    out.extend_from_slice(&FORMAT_TAG);
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(secret);
+    let sealed = match out.get_mut(HEADER_LEN..) {
+        Some(body) => key
+            .seal_in_place_separate_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(entry.associated_data()),
+                body,
+            )
+            .map_err(|_| VaultError::SecretSize),
+        None => Err(VaultError::SecretSize),
+    };
+    match sealed {
+        Ok(tag) => {
+            out.extend_from_slice(tag.as_ref());
+            Ok(out)
+        }
+        Err(e) => {
+            out.zeroize();
+            Err(e)
+        }
+    }
+}
+
+/// Decrypts an entry file for `entry`. The plaintext is copied once into an exact-size buffer the
+/// secret box owns, and the file buffer is zeroed whatever the outcome.
+fn unseal(
+    key: &SecretBox<[u8; KEY_LEN]>,
+    entry: &Entry,
+    mut bytes: Vec<u8>,
+) -> Result<SecretSlice<u8>, VaultError> {
+    let result = unseal_in_place(key, entry, &mut bytes);
+    bytes.zeroize();
+    result
+}
+
+fn unseal_in_place(
+    key: &SecretBox<[u8; KEY_LEN]>,
+    entry: &Entry,
+    bytes: &mut [u8],
+) -> Result<SecretSlice<u8>, VaultError> {
+    let well_formed = (MIN_FILE_LEN..=MAX_FILE_LEN).contains(&bytes.len())
+        && bytes.get(..FORMAT_TAG.len()) == Some(&FORMAT_TAG[..]);
+    let nonce: Option<[u8; NONCE_LEN]> = bytes
+        .get(FORMAT_TAG.len()..HEADER_LEN)
+        .and_then(|n| n.try_into().ok());
+    let (Some(nonce), true) = (nonce, well_formed) else {
+        return Err(VaultError::EntryMalformed);
+    };
+    let key = aead_key(key)?;
+    let body = bytes
+        .get_mut(HEADER_LEN..)
+        .ok_or(VaultError::EntryMalformed)?;
+    let plain = key
+        .open_in_place(
+            Nonce::assume_unique_for_key(nonce),
+            Aad::from(entry.associated_data()),
+            body,
+        )
+        .map_err(|_| VaultError::EntryRejected)?;
+    let mut owned = vec![0_u8; plain.len()];
+    owned.copy_from_slice(plain);
+    Ok(SecretSlice::from(owned))
+}
+
+/// Unlinks `path`; an absent one is already deleted.
+fn unlink(path: &Path) -> Result<(), VaultError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(VaultError::Io),
+    }
 }

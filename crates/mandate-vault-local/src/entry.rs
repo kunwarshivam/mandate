@@ -6,9 +6,6 @@ use mandate_connections::record::{ConnectionId, Environment};
 
 use crate::VaultError;
 
-/// The story every stub in this crate names until it lands.
-pub(crate) const STORY: &str = "E10-13 V1";
-
 /// The `key_ref` of the platform's Alpaca OAuth client secret (DEC-692 item 6).
 pub const ALPACA_CLIENT_SECRET_KEY_REF: &str = "platform/alpaca-oauth-client-secret";
 
@@ -53,8 +50,12 @@ pub struct KeyRef(String);
 
 impl KeyRef {
     pub fn new(text: &str) -> Result<Self, VaultError> {
-        let _ = text;
-        Err(VaultError::Unimplemented { story: STORY })
+        let allowed = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/');
+        if (1..=MAX_KEY_REF_LEN).contains(&text.len()) && text.bytes().all(allowed) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(VaultError::InvalidKeyRef)
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -130,12 +131,50 @@ impl Entry {
     /// The associated data its encryption binds: a version tag, then the kind, the `key_ref`, and
     /// the binding, each length-prefixed so no two entries share it.
     pub fn associated_data(&self) -> Vec<u8> {
-        Vec::new()
+        let mut out = ASSOCIATED_DATA_TAG.to_vec();
+        push_field(&mut out, self.kind.as_str());
+        push_field(&mut out, self.key_ref.as_str());
+        match &self.binding {
+            Binding::Connection {
+                connection_id,
+                environment,
+            } => {
+                push_field(&mut out, "connection");
+                push_field(&mut out, connection_id.as_str());
+                push_field(&mut out, environment.as_str());
+            }
+            Binding::Platform => push_field(&mut out, "platform"),
+        }
+        out
     }
 
     /// Its file name: the `key_ref` in lowercase hex, then a dot and the kind, so two kinds under
     /// one `key_ref` never share a file.
     pub fn file_name(&self) -> String {
-        String::new()
+        let mut name = String::with_capacity(self.key_ref.0.len().saturating_mul(2));
+        for byte in self.key_ref.0.bytes() {
+            name.push(hex_digit(byte >> 4));
+            name.push(hex_digit(byte & 0x0F));
+        }
+        name.push('.');
+        name.push_str(self.kind.as_str());
+        name
     }
+}
+
+/// The version tag the associated data starts with.
+const ASSOCIATED_DATA_TAG: &[u8] = b"mandate-vault-local/v1\0";
+
+/// Appends one field as a two-byte big-endian length and its bytes. Every field is a kind, a
+/// binding tag, an environment, a [`KeyRef`], or a connection id, so none is longer than
+/// [`MAX_KEY_REF_LEN`] and the length always fits.
+fn push_field(out: &mut Vec<u8>, field: &str) {
+    let len = u16::try_from(field.len()).unwrap_or(u16::MAX);
+    out.extend_from_slice(&len.to_be_bytes());
+    out.extend_from_slice(field.as_bytes());
+}
+
+/// One lowercase hex digit of a nibble.
+fn hex_digit(nibble: u8) -> char {
+    char::from_digit(u32::from(nibble), 16).unwrap_or('0')
 }
