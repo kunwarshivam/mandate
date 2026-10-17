@@ -39470,7 +39470,7 @@ segment_rows:
       reason: non_canonical
       path: payload.ranges[0].failure.check
 model_gateway:
-  spec: docs/specs/journal.md v0.45 §9.18 (DEC-996)
+  spec: docs/specs/journal.md v0.46 §9.19 (DEC-998)
   drafts:
     call:
       envelope_version: 1
@@ -39503,8 +39503,9 @@ model_gateway:
           temperature: '0'
           seed: 7
         prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
         response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
-        reported_identity: anthropic/claude-sonnet-4.5
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
         provider_request_id: gen-01
         outcome: ok
         attempts: 1
@@ -39523,8 +39524,10 @@ model_gateway:
         - 01J9GV00B000000000000000B2
         verdicts:
         - candidate: 0
+          kind: thesis
           result: judged
         - candidate: 1
+          kind: thesis
           result: unknown_evidence
       artifact_refs:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -39620,7 +39623,7 @@ model_gateway:
       pii_refs: []
   invalid_drafts:
   - name: call.call_id.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.call_id
@@ -39630,7 +39633,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: call.call_id.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.call_id
@@ -39640,7 +39643,7 @@ model_gateway:
       reason: non_canonical
       path: payload.call_id
   - name: call.purpose.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.purpose
@@ -39650,7 +39653,7 @@ model_gateway:
       reason: schema
       path: payload.purpose
   - name: call.purpose.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.purpose
@@ -39660,7 +39663,7 @@ model_gateway:
       reason: non_canonical
       path: payload.purpose
   - name: call.model.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.model
@@ -39676,7 +39679,7 @@ model_gateway:
       reason: schema
       path: payload.model
   - name: call.endpoint.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.endpoint
@@ -39686,7 +39689,7 @@ model_gateway:
       reason: schema
       path: payload.endpoint
   - name: call.request_digest.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.request_digest
@@ -39702,7 +39705,7 @@ model_gateway:
       reason: schema
       path: payload.request_digest
   - name: call.request_digest.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.request_digest
@@ -39718,7 +39721,7 @@ model_gateway:
       reason: non_canonical
       path: payload.request_digest
   - name: call.sampling.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.sampling
@@ -39728,7 +39731,7 @@ model_gateway:
       reason: schema
       path: payload.sampling
   - name: call.prompt_ref.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.prompt_ref
@@ -39744,7 +39747,7 @@ model_gateway:
       reason: schema
       path: payload.prompt_ref
   - name: call.prompt_ref.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.prompt_ref
@@ -39759,8 +39762,28 @@ model_gateway:
       outcome: Invalid
       reason: non_canonical
       path: payload.prompt_ref
+  - name: call.guard_rule.kind
+    clause: §9.19 types
+    base_draft: call
+    changes:
+    - path: payload.guard_rule
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.guard_rule
+  - name: call.guard_rule.form
+    clause: §9.19 types
+    base_draft: call
+    changes:
+    - path: payload.guard_rule
+      value: secret
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.guard_rule
   - name: call.response_ref.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.response_ref
@@ -39776,7 +39799,7 @@ model_gateway:
       reason: schema
       path: payload.response_ref
   - name: call.response_ref.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.response_ref
@@ -39792,7 +39815,7 @@ model_gateway:
       reason: non_canonical
       path: payload.response_ref
   - name: call.reported_identity.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.reported_identity
@@ -39802,7 +39825,7 @@ model_gateway:
       reason: schema
       path: payload.reported_identity
   - name: call.provider_request_id.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.provider_request_id
@@ -39812,7 +39835,7 @@ model_gateway:
       reason: schema
       path: payload.provider_request_id
   - name: call.outcome.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.outcome
@@ -39822,7 +39845,7 @@ model_gateway:
       reason: schema
       path: payload.outcome
   - name: call.outcome.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.outcome
@@ -39832,7 +39855,7 @@ model_gateway:
       reason: non_canonical
       path: payload.outcome
   - name: call.attempts.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.attempts
@@ -39842,7 +39865,7 @@ model_gateway:
       reason: schema
       path: payload.attempts
   - name: call.tokens.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.tokens
@@ -39852,7 +39875,7 @@ model_gateway:
       reason: schema
       path: payload.tokens
   - name: call.cost_usd.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.cost_usd
@@ -39862,7 +39885,7 @@ model_gateway:
       reason: schema
       path: payload.cost_usd
   - name: call.cost_usd.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.cost_usd
@@ -39872,7 +39895,7 @@ model_gateway:
       reason: non_canonical
       path: payload.cost_usd
   - name: call.price_table_ref.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.price_table_ref
@@ -39888,7 +39911,7 @@ model_gateway:
       reason: schema
       path: payload.price_table_ref
   - name: call.price_table_ref.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.price_table_ref
@@ -39904,7 +39927,7 @@ model_gateway:
       reason: non_canonical
       path: payload.price_table_ref
   - name: call.cache_hit.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.cache_hit
@@ -39914,7 +39937,7 @@ model_gateway:
       reason: schema
       path: payload.cache_hit
   - name: call.deadline.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.deadline
@@ -39924,7 +39947,7 @@ model_gateway:
       reason: schema
       path: payload.deadline
   - name: call.deadline.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.deadline
@@ -39934,7 +39957,7 @@ model_gateway:
       reason: non_canonical
       path: payload.deadline
   - name: call.completed_at.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.completed_at
@@ -39944,7 +39967,7 @@ model_gateway:
       reason: schema
       path: payload.completed_at
   - name: call.completed_at.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.completed_at
@@ -39954,7 +39977,7 @@ model_gateway:
       reason: non_canonical
       path: payload.completed_at
   - name: call.reservation.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.reservation
@@ -39964,7 +39987,7 @@ model_gateway:
       reason: schema
       path: payload.reservation
   - name: call.reservation.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.reservation
@@ -39974,7 +39997,7 @@ model_gateway:
       reason: non_canonical
       path: payload.reservation
   - name: call.observations.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.observations
@@ -39984,7 +40007,7 @@ model_gateway:
       reason: schema
       path: payload.observations
   - name: call.verdicts.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.verdicts
@@ -39995,7 +40018,7 @@ model_gateway:
       reason: schema
       path: payload.verdicts
   - name: call.call_id.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.call_id
@@ -40005,7 +40028,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: call.purpose.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.purpose
@@ -40015,7 +40038,7 @@ model_gateway:
       reason: schema
       path: payload.purpose
   - name: call.model.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.model
@@ -40031,7 +40054,7 @@ model_gateway:
       reason: schema
       path: payload.model
   - name: call.endpoint.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.endpoint
@@ -40040,24 +40063,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.endpoint
-  - name: call.request_digest.null
-    clause: §9.18 types
-    base_draft: call
-    changes:
-    - path: payload.request_digest
-      value: null
-    - path: artifact_refs
-      value:
-      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
-      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
-      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
-      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.request_digest
   - name: call.sampling.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.sampling
@@ -40067,7 +40074,7 @@ model_gateway:
       reason: schema
       path: payload.sampling
   - name: call.outcome.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.outcome
@@ -40077,7 +40084,7 @@ model_gateway:
       reason: schema
       path: payload.outcome
   - name: call.attempts.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.attempts
@@ -40087,7 +40094,7 @@ model_gateway:
       reason: schema
       path: payload.attempts
   - name: call.tokens.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.tokens
@@ -40097,7 +40104,7 @@ model_gateway:
       reason: schema
       path: payload.tokens
   - name: call.cost_usd.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.cost_usd
@@ -40107,7 +40114,7 @@ model_gateway:
       reason: schema
       path: payload.cost_usd
   - name: call.price_table_ref.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.price_table_ref
@@ -40123,7 +40130,7 @@ model_gateway:
       reason: schema
       path: payload.price_table_ref
   - name: call.cache_hit.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.cache_hit
@@ -40133,7 +40140,7 @@ model_gateway:
       reason: schema
       path: payload.cache_hit
   - name: call.deadline.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.deadline
@@ -40143,7 +40150,7 @@ model_gateway:
       reason: schema
       path: payload.deadline
   - name: call.completed_at.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.completed_at
@@ -40153,7 +40160,7 @@ model_gateway:
       reason: schema
       path: payload.completed_at
   - name: call.observations.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.observations
@@ -40163,7 +40170,7 @@ model_gateway:
       reason: schema
       path: payload.observations
   - name: call.verdicts.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.verdicts
@@ -40173,7 +40180,7 @@ model_gateway:
       reason: schema
       path: payload.verdicts
   - name: call.missing
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.verdicts
@@ -40183,7 +40190,7 @@ model_gateway:
       reason: schema
       path: payload.verdicts
   - name: call.extra
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: call
     changes:
     - path: payload.zz_extra
@@ -40192,8 +40199,59 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.zz_extra
+  - name: call.verdict.kind.kind
+    clause: §9.19 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: 7
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].kind
+  - name: call.verdict.kind.form
+    clause: §9.19 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: proposal
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.verdicts[0].kind
+  - name: call.verdict.result.form
+    clause: §9.19 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: thesis
+        result: admitted
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.verdicts[0].result
+  - name: call.verdict.missing
+    clause: §9.19 types
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].kind
   - name: reserved.call_id.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.call_id
@@ -40203,7 +40261,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: reserved.call_id.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.call_id
@@ -40213,7 +40271,7 @@ model_gateway:
       reason: non_canonical
       path: payload.call_id
   - name: reserved.agent_id.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.agent_id
@@ -40223,7 +40281,7 @@ model_gateway:
       reason: schema
       path: payload.agent_id
   - name: reserved.agent_id.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.agent_id
@@ -40233,7 +40291,7 @@ model_gateway:
       reason: non_canonical
       path: payload.agent_id
   - name: reserved.purpose.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.purpose
@@ -40243,7 +40301,7 @@ model_gateway:
       reason: schema
       path: payload.purpose
   - name: reserved.purpose.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.purpose
@@ -40253,7 +40311,7 @@ model_gateway:
       reason: non_canonical
       path: payload.purpose
   - name: reserved.model.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.model
@@ -40266,7 +40324,7 @@ model_gateway:
       reason: schema
       path: payload.model
   - name: reserved.endpoint.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.endpoint
@@ -40276,7 +40334,7 @@ model_gateway:
       reason: schema
       path: payload.endpoint
   - name: reserved.key_owner.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.key_owner
@@ -40286,7 +40344,7 @@ model_gateway:
       reason: schema
       path: payload.key_owner
   - name: reserved.key_owner.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.key_owner
@@ -40296,7 +40354,7 @@ model_gateway:
       reason: non_canonical
       path: payload.key_owner
   - name: reserved.price_table_ref.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.price_table_ref
@@ -40309,7 +40367,7 @@ model_gateway:
       reason: schema
       path: payload.price_table_ref
   - name: reserved.price_table_ref.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.price_table_ref
@@ -40322,7 +40380,7 @@ model_gateway:
       reason: non_canonical
       path: payload.price_table_ref
   - name: reserved.max_cost_usd.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.max_cost_usd
@@ -40332,7 +40390,7 @@ model_gateway:
       reason: schema
       path: payload.max_cost_usd
   - name: reserved.max_cost_usd.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.max_cost_usd
@@ -40342,7 +40400,7 @@ model_gateway:
       reason: non_canonical
       path: payload.max_cost_usd
   - name: reserved.risk_day.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.risk_day
@@ -40352,7 +40410,7 @@ model_gateway:
       reason: schema
       path: payload.risk_day
   - name: reserved.risk_day.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.risk_day
@@ -40362,7 +40420,7 @@ model_gateway:
       reason: non_canonical
       path: payload.risk_day
   - name: reserved.call_id.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.call_id
@@ -40372,7 +40430,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: reserved.purpose.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.purpose
@@ -40382,7 +40440,7 @@ model_gateway:
       reason: schema
       path: payload.purpose
   - name: reserved.model.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.model
@@ -40395,7 +40453,7 @@ model_gateway:
       reason: schema
       path: payload.model
   - name: reserved.endpoint.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.endpoint
@@ -40405,7 +40463,7 @@ model_gateway:
       reason: schema
       path: payload.endpoint
   - name: reserved.key_owner.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.key_owner
@@ -40415,7 +40473,7 @@ model_gateway:
       reason: schema
       path: payload.key_owner
   - name: reserved.price_table_ref.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.price_table_ref
@@ -40428,7 +40486,7 @@ model_gateway:
       reason: schema
       path: payload.price_table_ref
   - name: reserved.max_cost_usd.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.max_cost_usd
@@ -40438,7 +40496,7 @@ model_gateway:
       reason: schema
       path: payload.max_cost_usd
   - name: reserved.risk_day.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.risk_day
@@ -40448,7 +40506,7 @@ model_gateway:
       reason: schema
       path: payload.risk_day
   - name: reserved.missing
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.risk_day
@@ -40458,7 +40516,7 @@ model_gateway:
       reason: schema
       path: payload.risk_day
   - name: reserved.extra
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: reserved
     changes:
     - path: payload.zz_extra
@@ -40468,7 +40526,7 @@ model_gateway:
       reason: schema
       path: payload.zz_extra
   - name: settled.call_id.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.call_id
@@ -40478,7 +40536,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: settled.call_id.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.call_id
@@ -40488,7 +40546,7 @@ model_gateway:
       reason: non_canonical
       path: payload.call_id
   - name: settled.reservation.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.reservation
@@ -40498,7 +40556,7 @@ model_gateway:
       reason: schema
       path: payload.reservation
   - name: settled.reservation.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.reservation
@@ -40508,7 +40566,7 @@ model_gateway:
       reason: non_canonical
       path: payload.reservation
   - name: settled.outcome.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.outcome
@@ -40518,7 +40576,7 @@ model_gateway:
       reason: schema
       path: payload.outcome
   - name: settled.outcome.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.outcome
@@ -40528,7 +40586,7 @@ model_gateway:
       reason: non_canonical
       path: payload.outcome
   - name: settled.attempts.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.attempts
@@ -40538,7 +40596,7 @@ model_gateway:
       reason: schema
       path: payload.attempts
   - name: settled.tokens.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.tokens
@@ -40548,7 +40606,7 @@ model_gateway:
       reason: schema
       path: payload.tokens
   - name: settled.cost_usd.kind
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.cost_usd
@@ -40558,7 +40616,7 @@ model_gateway:
       reason: schema
       path: payload.cost_usd
   - name: settled.cost_usd.form
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.cost_usd
@@ -40568,7 +40626,7 @@ model_gateway:
       reason: non_canonical
       path: payload.cost_usd
   - name: settled.call_id.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.call_id
@@ -40578,7 +40636,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: settled.reservation.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.reservation
@@ -40588,7 +40646,7 @@ model_gateway:
       reason: schema
       path: payload.reservation
   - name: settled.outcome.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.outcome
@@ -40598,7 +40656,7 @@ model_gateway:
       reason: schema
       path: payload.outcome
   - name: settled.attempts.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.attempts
@@ -40608,7 +40666,7 @@ model_gateway:
       reason: schema
       path: payload.attempts
   - name: settled.tokens.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.tokens
@@ -40618,7 +40676,7 @@ model_gateway:
       reason: schema
       path: payload.tokens
   - name: settled.cost_usd.null
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.cost_usd
@@ -40628,7 +40686,7 @@ model_gateway:
       reason: schema
       path: payload.cost_usd
   - name: settled.missing
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.cost_usd
@@ -40638,7 +40696,7 @@ model_gateway:
       reason: schema
       path: payload.cost_usd
   - name: settled.extra
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: settled
     changes:
     - path: payload.zz_extra
@@ -40647,8 +40705,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.zz_extra
-  - name: call.143.model
-    clause: rule 143
+  - name: call.146.model
+    clause: rule 146
     base_draft: call
     changes:
     - path: payload.model.content_hash
@@ -40664,8 +40722,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.model.content_hash
-  - name: call.144.actor
-    clause: rule 144
+  - name: call.147.actor
+    clause: rule 147
     base_draft: call
     changes:
     - path: actor
@@ -40678,8 +40736,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: actor.kind
-  - name: call.145.rejected_kept
-    clause: 'rule 145: a refused prompt is never stored'
+  - name: call.148.prompt_kept
+    clause: 'rule 148: a refused prompt is never stored'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -40699,22 +40757,112 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: credential
+    - path: payload.prompt_ref
+      value: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
       - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
-      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
       - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
     expect:
       outcome: Invalid
       reason: schema
       path: payload.prompt_ref
-  - name: call.145.prompt_dropped
-    clause: 'rule 145: every other call names its prompt'
+  - name: call.148.request_kept
+    clause: 'rule 148: nor the canonical request that holds it'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: credential
+    - path: payload.request_digest
+      value: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.request_digest
+  - name: call.148.rule_missing
+    clause: 'rule 148: a refused prompt names its guard rule'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: credential
+    - path: payload.guard_rule
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.guard_rule
+  - name: call.148.prompt_dropped
+    clause: 'rule 148: every other call names its prompt'
     base_draft: call
     changes:
     - path: payload.prompt_ref
@@ -40729,8 +40877,34 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.prompt_ref
-  - name: call.146.refusal_reserved
-    clause: 'rule 146: a refusal reserved nothing'
+  - name: call.148.request_dropped
+    clause: 'rule 148: and its request'
+    base_draft: call
+    changes:
+    - path: payload.request_digest
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.request_digest
+  - name: call.148.rule_named
+    clause: 'rule 148: no guard rule on a prompt the guard passed'
+    base_draft: call
+    changes:
+    - path: payload.guard_rule
+      value: credential
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.guard_rule
+  - name: call.149.refusal_reserved
+    clause: 'rule 149: a refusal reserved nothing'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -40750,10 +40924,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: payload.reservation
       value: 01J9GW21A000000000000000M3
     - path: artifact_refs
@@ -40766,8 +40940,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.reservation
-  - name: call.146.hit_reserved
-    clause: 'rule 146: a cache hit reserved nothing'
+  - name: call.149.hit_reserved
+    clause: 'rule 149: a cache hit reserved nothing'
     base_draft: call
     changes:
     - path: payload.cache_hit
@@ -40786,8 +40960,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.reservation
-  - name: call.146.sent_unreserved
-    clause: 'rule 146: a call that reached a provider reserved first'
+  - name: call.149.sent_unreserved
+    clause: 'rule 149: a call that may cost reserved first'
     base_draft: call
     changes:
     - path: payload.reservation
@@ -40796,8 +40970,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.reservation
-  - name: call.147.descending
-    clause: rule 147
+  - name: call.150.descending
+    clause: rule 150
     base_draft: call
     changes:
     - path: payload.observations
@@ -40808,8 +40982,8 @@ model_gateway:
       outcome: Invalid
       reason: non_canonical
       path: payload.observations
-  - name: call.147.twice
-    clause: 'rule 147: no item listed twice'
+  - name: call.150.twice
+    clause: 'rule 150: no item listed twice'
     base_draft: call
     changes:
     - path: payload.observations
@@ -40820,8 +40994,8 @@ model_gateway:
       outcome: Invalid
       reason: non_canonical
       path: payload.observations
-  - name: call.148.signal_verdicts
-    clause: 'rule 148: only a research call has candidates'
+  - name: call.151.signal_verdicts
+    clause: 'rule 151: only a research call has candidates'
     base_draft: call
     changes:
     - path: payload.purpose
@@ -40830,8 +41004,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.verdicts
-  - name: call.148.failed_verdicts
-    clause: 'rule 148: a failed call has no candidates'
+  - name: call.151.failed_verdicts
+    clause: 'rule 151: a failed call has no candidates'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -40840,34 +41014,340 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.verdicts
-  - name: call.148.order
-    clause: 'rule 148: item i is candidate i'
+  - name: call.151.order
+    clause: 'rule 151: item i is candidate i'
     base_draft: call
     changes:
     - path: payload.verdicts
       value:
       - candidate: 0
+        kind: thesis
         result: judged
       - candidate: 2
+        kind: thesis
         result: judged
     expect:
       outcome: Invalid
       reason: schema
       path: payload.verdicts[1].candidate
-  - name: call.148.repeated
-    clause: 'rule 148: every candidate exactly once'
+  - name: call.151.repeated
+    clause: 'rule 151: every candidate exactly once'
     base_draft: call
     changes:
     - path: payload.verdicts
       value:
       - candidate: 0
+        kind: thesis
         result: judged
       - candidate: 0
+        kind: thesis
         result: judged
     expect:
       outcome: Invalid
       reason: schema
       path: payload.verdicts[1].candidate
+  - name: call.151.kind_order
+    clause: 'rule 151: theses first, then invalidations'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: invalidation
+        result: judged
+      - candidate: 1
+        kind: thesis
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[1].kind
+  - name: call.151.thesis_result
+    clause: 'rule 151: `unknown_thesis` only for an invalidation'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: thesis
+        result: unknown_thesis
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: call.151.invalidation_unknown_instrument
+    clause: 'rule 151: a thesis check only for a thesis'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: invalidation
+        result: unknown_instrument
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: call.151.invalidation_unknown_evidence
+    clause: 'rule 151: a thesis check only for a thesis'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: invalidation
+        result: unknown_evidence
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: call.151.invalidation_duplicate_instrument
+    clause: 'rule 151: a thesis check only for a thesis'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: invalidation
+        result: duplicate_instrument
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: call.151.invalidation_revisions_not_enabled
+    clause: 'rule 151: a thesis check only for a thesis'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: invalidation
+        result: revisions_not_enabled
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: call.151.first_failure
+    clause: 'rule 151: the first item that fails, then its first clause'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: thesis
+        result: unknown_thesis
+      - candidate: 2
+        kind: thesis
+        result: judged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.verdicts[0].result
+  - name: call.152.other_outcome
+    clause: 'rule 152: only an unsent deadline or key may record no attempt'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: provider_unavailable
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempts
+  - name: call.152.response
+    clause: 'rule 152: a call with no attempt kept no response'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.response_ref
+      value: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.response_ref
+  - name: call.152.identity
+    clause: rule 152
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: credential_invalid
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reported_identity
+      value: x@y
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reported_identity
+  - name: call.152.request_id
+    clause: rule 152
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.provider_request_id
+      value: gen-1
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.provider_request_id
+  - name: call.152.tokens
+    clause: rule 152
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.tokens
+      value:
+        input: 1
+        output: 0
+        cached: 0
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tokens
+  - name: call.152.cost
+    clause: rule 152
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: credential_invalid
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.cost_usd
+      value: '0.01'
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
   - name: call.72.no_response
     clause: rule 72 on the agent stream
     base_draft: call
@@ -40905,10 +41385,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: payload.attempts
       value: 1
     - path: artifact_refs
@@ -40942,7 +41422,7 @@ model_gateway:
       reason: schema
       path: payload.cost_usd
   - name: call.74.no_attempt
-    clause: rule 74 on the agent stream
+    clause: 'rules 74 and 152: an ok made an attempt'
     base_draft: call
     changes:
     - path: payload.attempts
@@ -40992,7 +41472,7 @@ model_gateway:
       reason: wrong_stream
       path: event_type
   - name: call.at_version_2
-    clause: '§9.18: schema version 1 only'
+    clause: '§9.19: schema version 1 only'
     base_draft: call
     changes:
     - path: schema_version
@@ -41001,8 +41481,8 @@ model_gateway:
       outcome: Invalid
       reason: unknown_schema
       path: payload
-  - name: opened.149
-    clause: rule 149
+  - name: opened.154
+    clause: rule 154
     base_draft: opened
     changes:
     - path: payload.workspace_id
@@ -41012,7 +41492,7 @@ model_gateway:
       reason: stream_mismatch
       path: stream_id
   - name: opened.type
-    clause: §9.18 types
+    clause: §9.19 types
     base_draft: opened
     changes:
     - path: payload.stream_type
@@ -41031,8 +41511,8 @@ model_gateway:
       outcome: Invalid
       reason: non_canonical
       path: stream_id
-  - name: reserved.150.actor
-    clause: rule 150
+  - name: reserved.155.actor
+    clause: rule 155
     base_draft: reserved
     changes:
     - path: actor
@@ -41045,8 +41525,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: actor.kind
-  - name: settled.150.actor
-    clause: rule 150
+  - name: settled.155.actor
+    clause: rule 155
     base_draft: settled
     changes:
     - path: actor
@@ -41059,8 +41539,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: actor.kind
-  - name: reserved.151.no_agent
-    clause: 'rule 151: an agent''s call names it'
+  - name: reserved.156.no_agent
+    clause: 'rule 156: an agent''s call names it'
     base_draft: reserved
     changes:
     - path: payload.agent_id
@@ -41069,8 +41549,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.agent_id
-  - name: reserved.151.compiler_agent
-    clause: 'rule 151: the compiler has no agent'
+  - name: reserved.156.compiler_agent
+    clause: 'rule 156: the compiler has no agent'
     base_draft: reserved
     changes:
     - path: payload.purpose
@@ -41079,8 +41559,8 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.agent_id
-  - name: reserved.151.cost
-    clause: rule 151
+  - name: reserved.156.cost
+    clause: rule 156
     base_draft: reserved
     changes:
     - path: payload.max_cost_usd
@@ -41089,8 +41569,20 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.max_cost_usd
-  - name: settled.152.cost
-    clause: rule 152
+  - name: reserved.156.both
+    clause: 'rule 156: the first that fails'
+    base_draft: reserved
+    changes:
+    - path: payload.agent_id
+      value: null
+    - path: payload.max_cost_usd
+      value: '-0.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent_id
+  - name: settled.157.cost
+    clause: rule 157
     base_draft: settled
     changes:
     - path: payload.cost_usd
@@ -41099,16 +41591,59 @@ model_gateway:
       outcome: Invalid
       reason: schema
       path: payload.cost_usd
-  - name: settled.152.attempts
-    clause: 'rule 152: an ok made an attempt'
+  - name: settled.157.ok_unsent
+    clause: 'rule 157: an ok made an attempt'
     base_draft: settled
     changes:
-    - path: payload.attempts
+    - &id106
+      path: payload.attempts
       value: 0
+    - &id107
+      path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - &id108
+      path: payload.cost_usd
+      value: '0'
     expect:
       outcome: Invalid
       reason: schema
       path: payload.attempts
+  - name: settled.157.tokens
+    clause: 'rule 157: no attempt, no tokens'
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - *id106
+    - *id107
+    - *id108
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 3
+        cached: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.tokens
+  - name: settled.157.free
+    clause: 'rule 157: no attempt, no cost'
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: credential_invalid
+    - *id106
+    - *id107
+    - *id108
+    - path: payload.cost_usd
+      value: '0.01'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_usd
   - name: reserved.on_the_agent_stream
     clause: '§9: a meter-stream record'
     base_draft: reserved
@@ -41120,7 +41655,7 @@ model_gateway:
       reason: wrong_stream
       path: event_type
   - name: settled.at_version_2
-    clause: '§9.18: schema version 1 only'
+    clause: '§9.19: schema version 1 only'
     base_draft: settled
     changes:
     - path: schema_version
@@ -41131,7 +41666,7 @@ model_gateway:
       path: payload
   valid_drafts:
   - name: call.purpose.llm_signal
-    clause: '§9.18: an LLM or fast signal model''s call'
+    clause: '§9.19: an LLM or fast signal model''s call'
     base_draft: call
     changes:
     - path: payload.purpose
@@ -41143,7 +41678,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.purpose.fast_signal
-    clause: '§9.18: an LLM or fast signal model''s call'
+    clause: '§9.19: an LLM or fast signal model''s call'
     base_draft: call
     changes:
     - path: payload.purpose
@@ -41155,7 +41690,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.refusal.policy_denied
-    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    clause: 'rules 73 and 149: a refusal names its prompt and reserves nothing'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41175,10 +41710,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -41188,7 +41723,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.refusal.budget_exhausted
-    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    clause: 'rules 73 and 149: a refusal names its prompt and reserves nothing'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41208,10 +41743,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -41221,7 +41756,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.refusal.rate_limited_local
-    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    clause: 'rules 73 and 149: a refusal names its prompt and reserves nothing'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41241,10 +41776,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -41254,7 +41789,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.refusal.meter_unavailable
-    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    clause: 'rules 73 and 149: a refusal names its prompt and reserves nothing'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41274,10 +41809,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -41287,7 +41822,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.refusal.model_withdrawn
-    clause: 'rules 73 and 146: a refusal names its prompt and reserves nothing'
+    clause: 'rules 73 and 149: a refusal names its prompt and reserves nothing'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41307,10 +41842,10 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -41319,8 +41854,8 @@ model_gateway:
       - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
     expect:
       outcome: Valid
-  - name: call.input_rejected
-    clause: 'rule 145: the refused prompt is not stored'
+  - name: call.input_rejected.credential
+    clause: 'rule 148: neither the prompt nor its request is stored'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41340,21 +41875,172 @@ model_gateway:
         cached: 0
     - path: payload.cost_usd
       value: '0'
-    - path: payload.reservation
-      value: null
     - path: payload.verdicts
       value: []
+    - path: payload.reservation
+      value: null
     - path: payload.prompt_ref
       value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: credential
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
-      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.input_rejected.account_identifier
+    clause: 'rule 148: neither the prompt nor its request is stored'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: account_identifier
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.input_rejected.personal_data
+    clause: 'rule 148: neither the prompt nor its request is stored'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: personal_data
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.input_rejected.foreign_workspace
+    clause: 'rule 148: neither the prompt nor its request is stored'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: foreign_workspace
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.input_rejected.input_contract
+    clause: 'rule 148: neither the prompt nor its request is stored'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: input_rejected
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: payload.reservation
+      value: null
+    - path: payload.prompt_ref
+      value: null
+    - path: payload.request_digest
+      value: null
+    - path: payload.guard_rule
+      value: input_contract
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
       - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
     expect:
       outcome: Valid
   - name: call.cache_hit
-    clause: 'rules 74 and 146: a hit costs nothing and reserves nothing'
+    clause: 'rules 74 and 149: a hit costs nothing and reserves nothing'
     base_draft: call
     changes:
     - path: payload.cache_hit
@@ -41370,7 +42056,69 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.deadline_before_first_attempt
-    clause: 'rules 74 and 146: reserved, then the deadline passed'
+    clause: 'rule 152: reserved, then the deadline passed before any attempt'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: deadline_exceeded
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.no_key
+    clause: 'rule 152: reserved, then the vault held no key'
+    base_draft: call
+    changes:
+    - path: payload.outcome
+      value: credential_invalid
+    - path: payload.response_ref
+      value: null
+    - path: payload.reported_identity
+      value: null
+    - path: payload.provider_request_id
+      value: null
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    - path: payload.verdicts
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    expect:
+      outcome: Valid
+  - name: call.deadline_after_attempts
+    clause: 'rule 74: a deadline passed after an attempt'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41379,12 +42127,8 @@ model_gateway:
       value: []
     - path: payload.response_ref
       value: null
-    - path: payload.reported_identity
-      value: null
     - path: payload.attempts
-      value: 1
-    - path: payload.cost_usd
-      value: '0'
+      value: 2
     - path: artifact_refs
       value:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -41394,7 +42138,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.identity_mismatch
-    clause: '§9.18: a mismatch keeps its response and is metered'
+    clause: '§9.19: a mismatch keeps its response and is metered'
     base_draft: call
     changes:
     - path: payload.outcome
@@ -41402,7 +42146,7 @@ model_gateway:
     - path: payload.verdicts
       value: []
     - path: payload.reported_identity
-      value: anthropic/claude-haiku
+      value: anthropic/claude-haiku@Anthropic
     expect:
       outcome: Valid
   - name: call.at_the_deadline
@@ -41414,7 +42158,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.no_candidates
-    clause: 'rule 148: a research call may return none'
+    clause: 'rule 151: a research call may return none'
     base_draft: call
     changes:
     - path: payload.verdicts
@@ -41422,7 +42166,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.no_retrieval
-    clause: 'rule 147: a call with no retrieval plan'
+    clause: 'rule 150: a call with no retrieval plan'
     base_draft: call
     changes:
     - path: payload.observations
@@ -41430,7 +42174,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.no_seed
-    clause: '§9.18: a provider that takes no seed'
+    clause: '§9.19: a provider that takes no seed'
     base_draft: call
     changes:
     - path: payload.sampling
@@ -41440,29 +42184,56 @@ model_gateway:
     expect:
       outcome: Valid
   - name: call.every_harness_result
-    clause: 'rule 148: each harness result'
+    clause: 'rule 151: each result with each kind it fits, theses first'
     base_draft: call
     changes:
     - path: payload.verdicts
       value:
       - candidate: 0
+        kind: thesis
         result: judged
       - candidate: 1
+        kind: thesis
         result: unknown_instrument
       - candidate: 2
+        kind: thesis
         result: unknown_evidence
       - candidate: 3
+        kind: thesis
         result: duplicate_instrument
       - candidate: 4
+        kind: thesis
         result: forbidden_language
       - candidate: 5
+        kind: thesis
         result: revisions_not_enabled
       - candidate: 6
+        kind: invalidation
+        result: judged
+      - candidate: 7
+        kind: invalidation
+        result: forbidden_language
+      - candidate: 8
+        kind: invalidation
+        result: unknown_thesis
+    expect:
+      outcome: Valid
+  - name: call.invalidations_only
+    clause: 'rule 151: a response of invalidations alone'
+    base_draft: call
+    changes:
+    - path: payload.verdicts
+      value:
+      - candidate: 0
+        kind: invalidation
+        result: judged
+      - candidate: 1
+        kind: invalidation
         result: unknown_thesis
     expect:
       outcome: Valid
   - name: reserved.compiler
-    clause: 'rule 151: the compiler''s call'
+    clause: 'rule 156: the compiler''s call'
     base_draft: reserved
     changes:
     - path: payload.agent_id
@@ -41472,7 +42243,7 @@ model_gateway:
     expect:
       outcome: Valid
   - name: reserved.free
-    clause: 'rule 151: a local endpoint priced at zero'
+    clause: 'rule 156: a local endpoint priced at zero'
     base_draft: reserved
     changes:
     - path: payload.max_cost_usd
@@ -41480,15 +42251,15 @@ model_gateway:
     expect:
       outcome: Valid
   - name: reserved.customer_key
-    clause: '§9.18: a customer''s key'
+    clause: '§9.19: a customer''s key'
     base_draft: reserved
     changes:
     - path: payload.key_owner
       value: customer
     expect:
       outcome: Valid
-  - name: settled.deadline_no_attempt
-    clause: 'rule 152: the deadline passed before the first attempt'
+  - name: settled.unsent.deadline_exceeded
+    clause: 'rule 157: no attempt left'
     base_draft: settled
     changes:
     - path: payload.outcome
@@ -41504,8 +42275,25 @@ model_gateway:
       value: '0'
     expect:
       outcome: Valid
+  - name: settled.unsent.credential_invalid
+    clause: 'rule 157: no attempt left'
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: credential_invalid
+    - path: payload.attempts
+      value: 0
+    - path: payload.tokens
+      value:
+        input: 0
+        output: 0
+        cached: 0
+    - path: payload.cost_usd
+      value: '0'
+    expect:
+      outcome: Valid
   - name: settled.over_reservation
-    clause: '§9.18: a settlement above its reservation is recorded as reported'
+    clause: '§9.19: a settlement above its reservation is recorded as reported'
     base_draft: settled
     changes:
     - path: payload.cost_usd
@@ -41513,16 +42301,473 @@ model_gateway:
     expect:
       outcome: Valid
   - name: settled.retried
-    clause: '§9.18: a call retried after a transport failure'
+    clause: '§9.19: a call retried after a transport failure'
     base_draft: settled
     changes:
     - path: payload.attempts
       value: 3
     expect:
       outcome: Valid
+  - name: settled.failed_with_cost
+    clause: 'rule 157: a failure that reached a provider may cost'
+    base_draft: settled
+    changes:
+    - path: payload.outcome
+      value: schema_invalid
+    expect:
+      outcome: Valid
+  agent_streams:
+  - name: two_calls
+    clause: 'rule 153: each call recorded once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000001
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+        - candidate: 1
+          kind: thesis
+          result: unknown_evidence
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000002
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000002
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: null
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: deadline_exceeded
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts: []
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: an_ok_after_its_deadline
+    clause: 'rule 153: no later record brings a late output in'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000001
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: null
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: deadline_exceeded
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts: []
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000002
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000001
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+        - candidate: 1
+          kind: thesis
+          result: unknown_evidence
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.call_id
+  - name: recorded_twice
+    clause: 'rule 153: the same call twice'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000001
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000003
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+        - candidate: 1
+          kind: thesis
+          result: unknown_evidence
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000002
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000004
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+        - candidate: 1
+          kind: thesis
+          result: unknown_evidence
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3M000000000000000003
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ModelInvocationRecorded
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: 01J9GT00A000000000000000R1
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      payload:
+        call_id: 01J9GW3C000000000000000003
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        sampling:
+          temperature: '0'
+          seed: 7
+        prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        guard_rule: null
+        response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+        provider_request_id: gen-01
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.0117'
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        cache_hit: false
+        deadline: '2026-10-16T14:01:00.000000000Z'
+        completed_at: '2026-10-16T14:00:41.250000000Z'
+        reservation: 01J9GW21A000000000000000M3
+        observations:
+        - 01J9GV00A000000000000000B1
+        - 01J9GV00B000000000000000B2
+        verdicts:
+        - candidate: 0
+          kind: thesis
+          result: judged
+        - candidate: 1
+          kind: thesis
+          result: unknown_evidence
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+      - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+      - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.call_id
   streams:
   - name: interleaved
-    clause: 'rule 153: settlements in any order'
+    clause: 'rule 158: settlements in any order'
     records:
     - envelope_version: 1
       environment: paper
@@ -41667,10 +42912,10 @@ model_gateway:
         cost_usd: '0.02'
       artifact_refs: []
       pii_refs: []
-    expect: &id106
+    expect: &id109
       outcome: Valid
   - name: open
-    clause: 'rule 153: a reservation never settled'
+    clause: 'rule 158: a reservation never settled'
     records:
     - envelope_version: 1
       environment: paper
@@ -41726,9 +42971,9 @@ model_gateway:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
       - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
       pii_refs: []
-    expect: *id106
+    expect: *id109
   - name: reserved_twice
-    clause: 'rule 153: one reservation per call'
+    clause: 'rule 158: one reservation per call'
     records:
     - envelope_version: 1
       environment: paper
@@ -41823,7 +43068,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: unreserved
-    clause: 'rule 153: a settlement names an earlier reservation'
+    clause: 'rule 158: a settlement names an earlier reservation'
     records:
     - envelope_version: 1
       environment: paper
@@ -41880,7 +43125,7 @@ model_gateway:
       reason: schema
       path: payload.reservation
   - name: names_the_opening
-    clause: 'rule 153: the reservation is a `MeterReserved`'
+    clause: 'rule 158: the reservation is a `MeterReserved`'
     records:
     - envelope_version: 1
       environment: paper
@@ -41970,7 +43215,7 @@ model_gateway:
       reason: schema
       path: payload.reservation
   - name: another_call
-    clause: 'rule 153: the same call'
+    clause: 'rule 158: the same call'
     records:
     - envelope_version: 1
       environment: paper
@@ -42093,7 +43338,7 @@ model_gateway:
       reason: schema
       path: payload.call_id
   - name: settled_twice
-    clause: 'rule 153: one settlement per reservation'
+    clause: 'rule 158: one settlement per reservation'
     records:
     - envelope_version: 1
       environment: paper
@@ -42211,7 +43456,7 @@ model_gateway:
       reason: schema
       path: payload.reservation
   - name: settled_before_reserved
-    clause: 'rule 153: the reservation is earlier'
+    clause: 'rule 158: the reservation is earlier'
     records:
     - envelope_version: 1
       environment: paper
@@ -42302,7 +43547,7 @@ model_gateway:
       path: payload.reservation
   folds:
   - name: a_month_of_calls
-    clause: '§9.18 spend: settled at cost, open at maximum, by scope and period'
+    clause: '§9.19 spend: settled at cost (above its reservation too), open at maximum, a customer''s key counted, by scope and period'
     records:
     - envelope_version: 1
       environment: paper
@@ -42602,10 +43847,71 @@ model_gateway:
         cost_usd: '0.06'
       artifact_refs: []
       pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3R000000000000000006
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterReserved
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000006
+        agent_id: agent_b
+        purpose: research
+        model:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        endpoint: openrouter:anthropic
+        key_owner: customer
+        price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        max_cost_usd: '0.1'
+        risk_day: '2026-10-17'
+      artifact_refs:
+      - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+      - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9GW3S000000000000000006
+      stream_id: meter:ws_01J8Z2
+      event_type: MeterSettled
+      schema_version: 1
+      event_time: '2026-10-16T14:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: model_gateway
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs: {}
+      payload:
+        call_id: 01J9GW3C000000000000000006
+        reservation: 01J9GW3R000000000000000006
+        outcome: ok
+        attempts: 1
+        tokens:
+          input: 1800
+          output: 420
+          cached: 0
+        cost_usd: '0.05'
+      artifact_refs: []
+      pii_refs: []
     expect:
     - scope: workspace
       period: month:2026-10
-      spend_usd: '0.599'
+      spend_usd: '0.649'
     - scope: workspace
       period: month:2026-09
       spend_usd: '0.02'
@@ -42619,18 +43925,21 @@ model_gateway:
       period: day:2026-10-16
       spend_usd: '0.5'
     - scope: agent_b
+      period: month:2026-10
+      spend_usd: '0.55'
+    - scope: agent_b
       period: month:2026-09
       spend_usd: '0'
     admissions:
     - scope: workspace
       period: month:2026-10
       cap_usd: '50'
-      max_cost_usd: '49.401'
+      max_cost_usd: '49.351'
       admitted: true
     - scope: workspace
       period: month:2026-10
       cap_usd: '50'
-      max_cost_usd: '49.4011'
+      max_cost_usd: '49.3511'
       admitted: false
     - scope: agent_b
       period: day:2026-10-16
@@ -43296,3 +44605,13 @@ model_gateway:
       cap_usd: '50'
       max_cost_usd: '1.0001'
       admitted: true
+  fuzz:
+    seed: 20261017
+    runs: 120
+    steps: 40
+    caps:
+      workspace_monthly: '0.6'
+      agent_monthly: '0.35'
+      research_daily: '0.12'
+    admitted: 2282
+    refused: 620
