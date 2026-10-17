@@ -24,7 +24,7 @@ const TICK: Duration = Duration::from_millis(10);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if !args.is_empty() || args.is_empty() {
+    if !args.iter().any(|arg| arg == "--fixture") {
         eprintln!("deployment_host_not_wired");
         return ExitCode::from(2);
     }
@@ -37,6 +37,10 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the binary's edge reads a monotonic clock only to pace its schedule; the supervisor takes time as an input (ES-05)"
+)]
 fn run() -> std::io::Result<u8> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate))?;

@@ -42,7 +42,10 @@ impl Epochs for MemoryStore {
 
 impl JournalWriter for MemoryStore {
     fn take_ownership(&mut self, stream: &str) -> Result<u64, Cause> {
-        Ok(self.journal.borrow_mut().take_ownership(&stream_id(stream)?))
+        Ok(self
+            .journal
+            .borrow_mut()
+            .take_ownership(&stream_id(stream)?))
     }
 
     fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, Cause> {

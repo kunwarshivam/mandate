@@ -36,20 +36,26 @@ impl<S: JournalWriter + Epochs> Lease<S> {
     /// # Errors
     /// The store's refusal to hand over a stream; nothing is held then.
     pub fn acquire(mut store: S, streams: &[String]) -> Result<Self, Cause> {
-        let _ = (&mut store, streams);
-        Err(Cause::Unimplemented { story: "E21-2" })
+        let mut epochs = BTreeMap::new();
+        for stream in streams {
+            let epoch = store.take_ownership(stream)?;
+            epochs.insert(stream.clone(), epoch);
+        }
+        Ok(Self { store, epochs })
     }
 
     /// Whether every leased stream's current writer epoch is still the lease's own. A store that
     /// cannot answer counts as not held.
     pub fn held(&self) -> bool {
-        false
+        self.epochs
+            .iter()
+            .all(|(stream, epoch)| self.store.writer_epoch(stream).ok() == Some(*epoch))
     }
 
     /// The epoch the lease holds for `stream`, while it is still the stream's current one.
     fn current(&self, stream: &str) -> Option<u64> {
-        let _ = (&self.epochs, stream);
-        None
+        let epoch = *self.epochs.get(stream)?;
+        (self.store.writer_epoch(stream).ok() == Some(epoch)).then_some(epoch)
     }
 
     /// Gives the lease up. The journal has no unlock: the epochs stay where they are, and the next
@@ -65,8 +71,7 @@ impl<S: JournalWriter + Epochs> JournalWriter for Lease<S> {
     }
 
     fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, Cause> {
-        let _ = stream;
-        Err(Cause::Unimplemented { story: "E21-2" })
+        self.store.read(stream)
     }
 
     fn append(
@@ -76,7 +81,11 @@ impl<S: JournalWriter + Epochs> JournalWriter for Lease<S> {
         _writer_epoch: u64,
         drafts: &[Vec<u8>],
     ) -> AppendOutcome {
-        let _ = (stream, expected_head, drafts);
-        AppendOutcome::Unavailable
+        match self.epochs.get(stream) {
+            Some(epoch) => self.store.append(stream, expected_head, *epoch, drafts),
+            None => AppendOutcome::Fenced {
+                current_epoch: self.store.writer_epoch(stream).unwrap_or(u64::MAX),
+            },
+        }
     }
 }

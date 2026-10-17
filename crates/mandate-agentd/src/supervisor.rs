@@ -44,8 +44,9 @@ pub struct IdleHost {
 
 impl IdleHost {
     fn read_all(&self, journal: &dyn JournalWriter) -> Result<(), Cause> {
-        let _ = (journal, &self.streams);
-        Err(Cause::Unimplemented { story: "E21-2" })
+        self.streams
+            .iter()
+            .try_for_each(|stream| journal.read(stream).map(drop))
     }
 }
 
@@ -185,8 +186,20 @@ impl<S: JournalWriter + Epochs, H: Host> Supervisor<S, H> {
             period_ns: config.period_ns,
             next_cycle_ns: now_ns,
         };
-        let _ = (store, Environment::Paper);
-        this.stop(Stop::Refused);
+        if config.environment != Environment::Paper {
+            this.stop(Stop::Refused);
+            return this;
+        }
+        let Ok(mut lease) = Lease::acquire(store, &config.streams) else {
+            this.stop(Stop::Refused);
+            return this;
+        };
+        if this.host.reconcile(&mut lease).is_err() {
+            this.stop(Stop::Refused);
+            return this;
+        }
+        this.lease = Some(lease);
+        this.status.set(Phase::Ready);
         this
     }
 
@@ -197,12 +210,37 @@ impl<S: JournalWriter + Epochs, H: Host> Supervisor<S, H> {
     /// Runs one cycle if one is due at `now_ns` and the process is ready. The lease is asked
     /// first; once it no longer holds, the process stops `Fenced` and the host is not called.
     pub fn tick(&mut self, now_ns: u64) {
-        let _ = now_ns;
+        if self.phase() != Phase::Ready || now_ns < self.next_cycle_ns {
+            return;
+        }
+        let Some(lease) = self.lease.as_mut().filter(|lease| lease.held()) else {
+            self.stop(Stop::Fenced);
+            return;
+        };
+        self.next_cycle_ns = now_ns.saturating_add(self.period_ns);
+        if self.host.cycle(lease).is_err() {
+            let stop = if lease.held() {
+                Stop::CycleFailed
+            } else {
+                Stop::Fenced
+            };
+            self.stop(stop);
+        }
     }
 
     /// Drains: no new cycle starts; while the lease holds, the host settles what is in flight;
     /// then the lease is released. A supervisor that already stopped is left as it is.
     pub fn drain(&mut self) {
+        if matches!(self.phase(), Phase::Stopped(_)) {
+            return;
+        }
+        self.status.set(Phase::Draining);
+        let Some(lease) = self.lease.as_mut().filter(|lease| lease.held()) else {
+            self.stop(Stop::Fenced);
+            return;
+        };
+        let _settled = self.host.settle(lease);
+        self.stop(Stop::Drained);
     }
 
     fn stop(&mut self, stop: Stop) {

@@ -14,8 +14,13 @@ use crate::supervisor::{Phase, Status};
 ///   is not ready.
 /// - anything else: `404 not_found`.
 pub fn answer(path: &str, phase: Phase) -> (u16, &'static str) {
-    let _ = (path, phase);
-    (404, "not_found")
+    match (path, phase) {
+        ("/livez", Phase::Stopped(_)) => (503, "stopped"),
+        ("/livez", _) => (200, "live"),
+        ("/readyz", Phase::Ready) => (200, "ready"),
+        ("/readyz", _) => (503, "not_ready"),
+        _ => (404, "not_found"),
+    }
 }
 
 /// Binds `addr`, which must be a loopback address, and answers from `status` on a thread of its
@@ -24,8 +29,20 @@ pub fn answer(path: &str, phase: Phase) -> (u16, &'static str) {
 /// # Errors
 /// A non-loopback address, refused as `InvalidInput` before anything is bound, or the bind's own.
 pub fn serve(addr: SocketAddr, status: Status) -> io::Result<SocketAddr> {
-    let _ = (addr, status, respond);
-    Err(io::Error::new(io::ErrorKind::Unsupported, "pending E21-2"))
+    if !addr.ip().is_loopback() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "health listens on loopback only",
+        ));
+    }
+    let listener = TcpListener::bind(addr)?;
+    let bound = listener.local_addr()?;
+    thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let _answered = respond(stream, &status);
+        }
+    });
+    Ok(bound)
 }
 
 fn respond(stream: TcpStream, status: &Status) -> io::Result<()> {
