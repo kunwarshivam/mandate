@@ -55,6 +55,19 @@ describe("the two origins (DEC-2405)", () => {
     }
   });
 
+  it("pending E21-38: never redirects off the two origins, whatever the path", () => {
+    for (const signedIn of [false, true]) {
+      for (const host of ["owlhead.ai", "www.owlhead.ai"]) {
+        for (const path of ["//evil.com/login", "/\\evil.com", "///evil.com/x?a=1", "/%2f%2fevil.com", "//evil.com", "/.//evil.com"]) {
+          const route = decide(`https://${host}${path}`, signedIn);
+          expect(route.kind, `${host} ${path}`).toBe("redirect");
+          const to = new URL((route as { to: string }).to);
+          expect(["https://owlhead.ai", "https://app.owlhead.ai"], `${host} ${path} -> ${to.href}`).toContain(to.origin);
+        }
+      }
+    }
+  });
+
   it("pending E21-38: leaves the app to the sign-in rules, signed in or not", () => {
     expect(decide("https://app.owlhead.ai/agents", false)).toEqual({ kind: "redirect", to: "/login?next=/agents" });
     expect(decide("https://app.owlhead.ai/agents", true)).toEqual({ kind: "pass" });
