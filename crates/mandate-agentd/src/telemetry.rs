@@ -22,14 +22,15 @@ impl<H> Instrumented<H> {
     }
 
     fn record(&self, metric: &Metric, outcome: &Result<(), Cause>) {
-        let _ = (
-            &self.metrics,
-            metric,
-            outcome,
-            reason::COMPLETED,
-            Labels::new,
-            ProcessType::AgentProcess,
-        );
+        let code = if outcome.is_ok() {
+            reason::COMPLETED
+        } else {
+            reason::FAILED
+        };
+        let labels = Labels::new()
+            .process(ProcessType::AgentProcess)
+            .reason(code);
+        self.metrics.count(metric, &labels);
     }
 }
 

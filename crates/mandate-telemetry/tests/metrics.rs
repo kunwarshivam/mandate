@@ -1,8 +1,6 @@
 //! Recording (E21-3): what is recorded is what a scrape shows, a record outside its metric's
 //! declared labels or kind is refused and counted, and `off` records and serves nothing.
 
-use std::time::Duration;
-
 use mandate_telemetry::catalog::{BUILD, CATALOG, CYCLES, Metric, RECONCILIATIONS, REFUSED};
 use mandate_telemetry::{
     Kind, Labels, Metrics, OpaqueId, ProcessType, Release, TelemetryError, lint, reason,
@@ -54,6 +52,10 @@ fn counts_add_up_per_label_set() {
         r#"mandate_process_reconciliations_total{process_type="executor",reason_code="completed"} 1"#
     ));
     assert!(sample(&text, REFUSED.name()).is_none(), "{text}");
+    assert!(
+        text.contains("# HELP mandate_process_cycles_total Decision cycles run, by outcome.\n"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -83,7 +85,6 @@ fn a_record_offered_to_a_metric_of_another_kind_is_refused() {
         .process(ProcessType::Executor)
         .release(&Release::parse("0.4.1").unwrap());
     m.count(&BUILD, &labels);
-    m.duration(&BUILD, &labels, Duration::from_millis(3));
     m.state(
         &CYCLES,
         &outcome(ProcessType::Executor, reason::COMPLETED),
@@ -92,7 +93,7 @@ fn a_record_offered_to_a_metric_of_another_kind_is_refused() {
     let text = m.encode().unwrap();
     assert_eq!(
         sample(&text, REFUSED.name()).as_deref(),
-        Some(r#"mandate_telemetry_refused_total{reason_code="kind_mismatch"} 3"#),
+        Some(r#"mandate_telemetry_refused_total{reason_code="kind_mismatch"} 2"#),
         "{text}"
     );
     assert!(text.contains(r#"release="0.4.1"} 1"#), "{text}");
@@ -187,12 +188,16 @@ fn labels_hold_one_value_per_key_in_key_order() {
         .reason(reason::FAILED)
         .agent(&a)
         .process(ProcessType::Scheduler)
-        .agent(&b);
+        .agent(&b)
+        .account(&OpaqueId::parse("paper_a").unwrap())
+        .workspace(&OpaqueId::parse("ws_a").unwrap());
     let pairs: Vec<(&str, &str)> = labels.pairs().collect();
     assert_eq!(
         pairs,
         vec![
+            ("workspace", "ws_a"),
             ("agent", "agent_b"),
+            ("account_ref", "paper_a"),
             ("process_type", "scheduler"),
             ("reason_code", "failed")
         ]

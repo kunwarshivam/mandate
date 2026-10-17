@@ -7,7 +7,7 @@
 - **Code:** `crates/mandate-telemetry`. `src/catalog.rs` (the closed metric set: `Metric` with
   private fields, `CATALOG`), `src/label.rs` (the six label keys and their typed values:
   `OpaqueId`, `ProcessType`, `ReasonCode`, `Release`; `Labels`), `src/lint.rs` (`catalog`,
-  `metric`, `exposition`, `own`), `src/metrics.rs` (`Metrics`: OpenTelemetry instruments over a
+  `metric`, `reasons`, `exposition`), `src/metrics.rs` (`Metrics`: OpenTelemetry instruments over a
   Prometheus registry; refused records counted; `off`), `src/exporter.rs` (`serve`: `GET /metrics`
   on `std::net`, every scrape linted before it is sent, `503` otherwise). In `crates/mandate-agentd`,
   `src/telemetry.rs` (`Instrumented`: the host's calls counted by outcome after each returns) and

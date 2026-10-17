@@ -22,7 +22,7 @@ fn full_scrape() -> String {
                 m.count(metric, &Labels::new().reason(reason::COMPLETED));
             }
             Kind::Counter => m.count(metric, &labels),
-            Kind::State | Kind::Duration => {}
+            Kind::State => {}
         }
     }
     m.encode().unwrap()
@@ -30,7 +30,8 @@ fn full_scrape() -> String {
 
 #[test]
 fn the_crates_own_catalog_and_reason_codes_pass() {
-    assert_eq!(lint::own(), Vec::new());
+    assert_eq!(lint::catalog(&CATALOG), Vec::new());
+    assert_eq!(lint::reasons(&reason::ALL), Vec::new());
     assert!(!CATALOG.is_empty());
 }
 
@@ -82,9 +83,7 @@ fn every_forbidden_word_in_a_name_or_its_help_is_a_finding() {
 fn a_suffix_that_does_not_match_the_kind_is_a_finding() {
     let cases = [
         ("mandate_cycles", Kind::Counter),
-        ("mandate_cycle_total", Kind::Duration),
         ("mandate_ready_total", Kind::State),
-        ("mandate_ready_seconds", Kind::State),
     ];
     for (name, kind) in cases {
         assert_eq!(
@@ -97,7 +96,6 @@ fn a_suffix_that_does_not_match_the_kind_is_a_finding() {
     }
     for (name, kind) in [
         ("mandate_cycles_total", Kind::Counter),
-        ("mandate_cycle_seconds", Kind::Duration),
         ("mandate_ready", Kind::State),
     ] {
         assert_eq!(
@@ -138,6 +136,12 @@ fn a_name_used_twice_in_a_catalog_is_a_finding() {
 fn a_full_scrape_passes_the_exposition_lint() {
     let text = full_scrape();
     assert!(text.contains("mandate_process_cycles_total{"), "{text}");
+    for metric in &CATALOG {
+        if metric.kind() == Kind::Counter {
+            let help = format!("# HELP {} {}\n", metric.name(), metric.help());
+            assert!(text.contains(&help), "{help} in {text}");
+        }
+    }
     assert_eq!(lint::exposition(&text), Vec::new());
 }
 

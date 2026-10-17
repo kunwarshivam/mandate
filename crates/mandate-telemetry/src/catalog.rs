@@ -3,23 +3,15 @@
 
 use crate::label::LabelKey;
 
-/// What an instrument records. Every value is a count, a 0-or-1 state, or a duration: none can
-/// carry a quantity, a price, or a position.
+/// What an instrument records. Every value is a count or a 0-or-1 state: none can carry a
+/// quantity, a price, or a position. A duration kind joins with the first metric that needs one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     /// A monotonic count of events; its name ends `_total`.
     Counter,
-    /// A state that is 0 or 1 (ready, a build's info); its name ends neither `_total` nor
-    /// `_seconds`.
+    /// A state that is 0 or 1 (ready, a build's info); its name does not end `_total`.
     State,
-    /// A duration in seconds, as a histogram over [`DURATION_BOUNDS_S`]; its name ends `_seconds`.
-    Duration,
 }
-
-/// The histogram bucket bounds of every [`Kind::Duration`] metric, in seconds: from the journal
-/// append's 5 ms target (journal spec §5.3) to a cycle's period.
-pub const DURATION_BOUNDS_S: [f64; 10] =
-    [0.001, 0.0025, 0.005, 0.01, 0.025, 0.1, 0.25, 1.0, 2.5, 10.0];
 
 /// One metric: its exported name, its fixed help text, its kind, and the exact label keys every
 /// record of it carries, in [`LabelKey`] order.

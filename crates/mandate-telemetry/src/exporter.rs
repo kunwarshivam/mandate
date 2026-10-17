@@ -31,8 +31,13 @@ impl Exporter {
 /// `200` with the exposition text, or `503 telemetry_unavailable` when [`Metrics::encode`]
 /// refuses; anything else is `404 not_found`.
 pub fn answer(method: &str, path: &str, metrics: &Metrics) -> (u16, &'static str, String) {
-    let _ = (method, path, metrics);
-    (404, "text/plain", "not_found".to_owned())
+    if (method, path) != ("GET", "/metrics") {
+        return (404, "text/plain", "not_found".to_owned());
+    }
+    match metrics.encode() {
+        Ok(text) => (200, "text/plain; version=0.0.4; charset=utf-8", text),
+        Err(_) => (503, "text/plain", "telemetry_unavailable".to_owned()),
+    }
 }
 
 /// Binds `addr` and serves `metrics` until the process exits.
@@ -41,6 +46,39 @@ pub fn answer(method: &str, path: &str, metrics: &Metrics) -> (u16, &'static str
 /// [`TelemetryError::Start`] with the bind's or the thread's own error kind. The caller carries
 /// on without an exporter: nothing else depends on it (OPS-11).
 pub fn serve(addr: SocketAddr, metrics: Metrics) -> Result<Exporter, TelemetryError> {
-    let _ = (addr, metrics, IO_BOUND, LINE_BOUND);
-    Err(TelemetryError::Unimplemented { story: "E21-3" })
+    let start = |e: std::io::Error| TelemetryError::Start(e.kind());
+    let listener = TcpListener::bind(addr).map_err(start)?;
+    let bound = listener.local_addr().map_err(start)?;
+    thread::Builder::new()
+        .name("metrics-exporter".to_owned())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let _answered = respond(&stream, &metrics);
+            }
+        })
+        .map_err(start)?;
+    Ok(Exporter { addr: bound })
+}
+
+fn respond(stream: &TcpStream, metrics: &Metrics) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(IO_BOUND))?;
+    stream.set_write_timeout(Some(IO_BOUND))?;
+    let mut line = String::new();
+    BufReader::new(stream.take(LINE_BOUND)).read_line(&mut line)?;
+    let mut words = line.split_whitespace();
+    let method = words.next().unwrap_or("");
+    let path = words.next().unwrap_or("");
+    let (code, content_type, body) = answer(method, path, metrics);
+    let reason = match code {
+        200 => "OK",
+        404 => "Not Found",
+        _ => "Service Unavailable",
+    };
+    let mut writer = stream;
+    write!(
+        writer,
+        "HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )?;
+    writer.flush()
 }
