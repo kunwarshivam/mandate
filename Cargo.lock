@@ -1866,14 +1866,17 @@ dependencies = [
 name = "mandate-daemon"
 version = "0.0.0"
 dependencies = [
+ "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-process",
  "mandate-runtime",
+ "mandate-spec",
  "mandate-store",
  "mandate-time",
  "proptest",
+ "serde_json",
  "sqlx",
  "tokio",
 ]
