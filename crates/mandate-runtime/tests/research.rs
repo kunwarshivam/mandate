@@ -84,7 +84,7 @@ fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
     world.preconditions = production_preconditions();
     assert!(
         !world.preconditions.hold(),
-        "mandate-journal registers neither record yet"
+        "mandate-journal registers no invalidation verdict yet (E19-5)"
     );
     let step = lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
     assert!(
@@ -92,6 +92,24 @@ fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
         "§6.2 preconditions: no run starts"
     );
     assert!(step.effects.is_empty());
+}
+
+/// The shell's catalogue reads `mandate-journal`'s own registration, never a constant: §9.19 closes
+/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2200), and no
+/// invalidation verdict is registered until E19-5.
+#[test]
+fn the_journal_catalog_reads_mandate_journal_s_registration() {
+    use mandate_runtime::{JournalCatalog, RecordCatalog, ResearchRecord};
+    assert_eq!(
+        JournalCatalog.registers(ResearchRecord::CandidateVerdicts),
+        mandate_journal::closes(
+            "ModelInvocationRecorded",
+            1,
+            mandate_journal::StreamType::Agent
+        )
+    );
+    assert!(JournalCatalog.registers(ResearchRecord::CandidateVerdicts));
+    assert!(!JournalCatalog.registers(ResearchRecord::InvalidationVerdict));
 }
 
 #[test]
