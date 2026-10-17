@@ -123,10 +123,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
-  /** `read-models/agent`: the row with the account's positions at its last reconciliation. */
+  /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`). */
   function agentDetail(agent: Agent) {
     const positions = agent.positions.map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
-    return { ...agentRow(agent), positions };
+    return { ...agentRow(agent), account_positions: positions };
   }
 
   const STATE: Record<ApprovalStatus, string> = { delivered: "pending", acted: "acted", gate_skipped: "canceled", rejected: "skipped", expired: "timed_out", superseded: "canceled" };

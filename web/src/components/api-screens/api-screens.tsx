@@ -165,8 +165,8 @@ function MandateFacts({ mandate }: { mandate: MandateSummary }) {
 }
 
 function Positions({ agent }: { agent: AgentDetail }) {
-  if (agent.positions === null) return <p className={NOT_REPORTED}>Positions not reported</p>;
-  if (agent.positions.length === 0) return <p className="text-muted-foreground">The account held nothing at its last reconciliation.</p>;
+  if (agent.account_positions === null) return <p className={NOT_REPORTED}>Account positions not reported</p>;
+  if (agent.account_positions.length === 0) return <p className="text-muted-foreground">The account held nothing at its last reconciliation.</p>;
   return (
     <table className="w-full text-left text-sm">
       <thead className="text-muted-foreground">
@@ -178,7 +178,7 @@ function Positions({ agent }: { agent: AgentDetail }) {
         </tr>
       </thead>
       <tbody>
-        {agent.positions.map((p) => (
+        {agent.account_positions.map((p) => (
           <tr key={p.instrument} className="border-t border-border/70">
             <td className="py-2.5 font-medium">{p.instrument}</td>
             <td className="py-2.5 font-mono tabular">{quantity(p.qty)}</td>
@@ -233,7 +233,8 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <PauseControl agent={agent} />
           </header>
           <Section title="Mandate">{agent.mandate ? <MandateFacts mandate={agent.mandate} /> : <p className={NOT_REPORTED}>Mandate not reported</p>}</Section>
-          <Section title="Positions">
+          <Section title="Account positions">
+            <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />
           </Section>
           <Section title="Limit usage">

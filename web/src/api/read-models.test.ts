@@ -43,8 +43,8 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
       ok: true,
       value: { agents: [ROW, { ...ROW, agent_id: "agt_2", mode: null, label: null, mandate: null }] },
     });
-    expect(agentRead({ agent: { ...ROW, positions: [POSITION] } }, "")).toEqual({ ok: true, value: { agent: { ...ROW, positions: [POSITION] } } });
-    expect(ok(agentRead({ agent: { ...ROW, positions: null } }, ""))).toBe(true);
+    expect(agentRead({ agent: { ...ROW, account_positions: [POSITION] } }, "")).toEqual({ ok: true, value: { agent: { ...ROW, account_positions: [POSITION] } } });
+    expect(ok(agentRead({ agent: { ...ROW, account_positions: null } }, ""))).toBe(true);
     expect(approvalsRead({ approvals: [APPROVAL] }, "")).toEqual({ ok: true, value: { approvals: [APPROVAL] } });
     const protectedOrder = { ...ORDER, tif: "day", protection: { stop: "54000", take_profit: null } };
     expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } } } }, ""))).toBe(true);
@@ -52,7 +52,7 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
 
   it("refuses a decimal sent as a JSON number, and a count that is not one", () => {
     expect(problem(agentsRead({ agents: [{ ...ROW, mandate: { ...ROW.mandate, max_order_usd: 1000 } }] }, ""))).toBe("decimal_number /agents/0/mandate/max_order_usd");
-    expect(problem(agentRead({ agent: { ...ROW, positions: [{ ...POSITION, qty: 0.015 }] } }, ""))).toBe("decimal_number /agent/positions/0/qty");
+    expect(problem(agentRead({ agent: { ...ROW, account_positions: [{ ...POSITION, qty: 0.015 }] } }, ""))).toBe("decimal_number /agent/account_positions/0/qty");
     expect(problem(approvalsRead({ approvals: [{ ...APPROVAL, order: { ...ORDER, limit: 56700 } }] }, ""))).toBe("decimal_number /approvals/0/order/limit");
     expect(problem(agentsRead({ agents: [{ ...ROW, pending_approvals: -1 }] }, ""))).toBe("wrong_type /agents/0/pending_approvals");
     expect(problem(approvalsRead({ approvals: [{ ...APPROVAL, deadline: "1791476040" }] }, ""))).toBe("wrong_type /approvals/0/deadline");
@@ -74,7 +74,7 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
     const noHash: Record<string, unknown> = { ...APPROVAL };
     delete noHash.content_hash;
     expect(problem(approvalsRead({ approvals: [noHash] }, ""))).toBe("missing /approvals/0/content_hash");
-    expect(problem(agentRead({ agent: ROW }, ""))).toBe("missing /agent/positions");
+    expect(problem(agentRead({ agent: ROW }, ""))).toBe("missing /agent/account_positions");
   });
 
   it("shows a deadline as the UTC time its risk-clock seconds name", () => {
@@ -112,7 +112,7 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
         expect(read.mode, scenario).toBe(agent.mode);
         expect(read.mandate?.allocation_usd).toBe(agent.mandate.capital.allocation_usd);
         expect(read.mandate?.max_order_usd).toBe(agent.mandate.risk.max_order_usd);
-        expect(read.positions?.map((p) => p.instrument)).toEqual(agent.positions.map((p) => p.instrument.symbol));
+        expect(read.account_positions?.map((p) => p.instrument)).toEqual(agent.positions.map((p) => p.instrument.symbol));
         expect(read.pending_approvals).toBe(fixture.approvals.filter((a) => a.agent_id === agent.agent_id && a.status === "delivered").length);
       }
       expect(view.approvals.map((a) => a.approval_id).sort(), scenario).toEqual(fixture.approvals.map((a) => a.approval_id).sort());

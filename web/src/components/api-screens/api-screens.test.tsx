@@ -60,7 +60,7 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
   it("names what the API does not report as not reported, and never fills it in", async () => {
     const blank: Tamper = (route, body) => {
       if (route === "/agents") return { ...body, agents: (body.agents as object[]).map((a) => ({ ...a, label: null, mode: null })) };
-      if (/^\/agents\/[^/]+$/.test(route)) return { ...body, agent: { ...(body.agent as object), label: null, mode: null, mandate: null, positions: null } };
+      if (/^\/agents\/[^/]+$/.test(route)) return { ...body, agent: { ...(body.agent as object), label: null, mode: null, mandate: null, account_positions: null } };
       return body;
     };
     mount(<ApiHome />, "approvals", blank);
@@ -70,7 +70,7 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     cleanup();
     mount(<ApiAgent agentId={fixture.agents[0].agent_id} />, "approvals", blank);
     expect(await screen.findByText("Mandate not reported")).toBeTruthy();
-    expect(screen.getByText("Positions not reported")).toBeTruthy();
+    expect(screen.getByText("Account positions not reported")).toBeTruthy();
     expect(screen.queryByText(/\$10,000/)).toBeNull();
   });
 
@@ -80,7 +80,7 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: agent.mandate.name })).toBeTruthy();
     const mandate = screen.getByRole("region", { name: "Mandate" });
     expect(within(mandate).getByText("$10,000.00")).toBeTruthy();
-    const positions = screen.getByRole("region", { name: "Positions" });
+    const positions = screen.getByRole("region", { name: "Account positions" });
     for (const p of agent.positions) expect(within(positions).getByText(p.instrument.symbol)).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Limit usage" })).getByText(/not reported/i)).toBeTruthy();
     expect(screen.queryByText(/[+−]\$/)).toBeNull();

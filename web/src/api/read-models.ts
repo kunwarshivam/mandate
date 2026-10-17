@@ -45,8 +45,12 @@ export interface ReadPosition {
 }
 
 export interface AgentDetail extends AgentRow {
-  /** `null`: the document or the account stream was not found. */
-  positions: ReadPosition[] | null;
+  /**
+   * The account's holdings at its last reconciliation (#1499's `account_positions`): account-wide, so
+   * an account two agents share shows both agents' holdings. `null`: the document or the account
+   * stream was not found.
+   */
+  account_positions: ReadPosition[] | null;
 }
 
 export type ApprovalState = "pending" | "acted" | "skipped" | "timed_out" | "canceled";
@@ -137,7 +141,7 @@ const agentMembers = {
 };
 const agentRow = object<AgentRow>(agentMembers);
 const position = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
-const agentDetail = object<AgentDetail>({ ...agentMembers, positions: nullable(array(position)) });
+const agentDetail = object<AgentDetail>({ ...agentMembers, account_positions: nullable(array(position)) });
 
 const boundOrder = object<BoundOrder>({
   instrument,
