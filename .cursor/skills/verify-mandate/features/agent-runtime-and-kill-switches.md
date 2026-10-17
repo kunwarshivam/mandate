@@ -34,6 +34,11 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   `crates/mandate-runtime/tests/observation.rs` (`ObservationRecorded` as journal spec §9.1 closes
   it, checked against `mandate-journal`'s registered schema: E15-13, slice R0 of the
   [first paper trade brief](../../../../docs/project/tasks/first-paper-trade.md)),
+  `crates/mandate-runtime/tests/connection_checked.rs` (the fold of `ConnectionChecked`, R0's R14:
+  a failed or day-old check of the deployment's connection refuses an opening and a grant as
+  `account_restricted` and never an exit, malformed checks refuse, a replay folds the same state,
+  and a property over check sequences against an oracle that reads the generated sequence;
+  [DEC-969](../../../../docs/project/decisions/DEC-969.md)),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
   fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
   committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.
