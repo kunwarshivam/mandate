@@ -21,6 +21,7 @@ test("Home reads the workspace through documented operations and labels nothing 
   await page.goto("/?scenario=approvals");
   await expect(page.getByRole("heading", { name: /^Needs you/ })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Agents" }).getByRole("link")).not.toHaveCount(0);
   expect(calls.length).toBeGreaterThan(3);
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });
@@ -30,7 +31,7 @@ test("Skip on a request goes to the approval's responses route once, and shows o
   await page.goto("/?scenario=approvals");
   await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "You chose Skip" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Recorded in the journal: you skipped" })).toBeVisible();
   await expect.poll(() => calls.filter((c) => c.method() === "POST").map((c) => new URL(c.url()).pathname)).toEqual([expect.stringMatching(new RegExp(`^/v1/workspaces/${WS}/approvals/[^/]+/responses$`))]);
   const [post] = calls.filter((c) => c.method() === "POST");
   expect(post.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
@@ -41,5 +42,11 @@ test("Skip on a request goes to the approval's responses route once, and shows o
 test("a deployment that does not answer shows unreachable, not the fixtures", async ({ page }) => {
   await page.goto("/?scenario=unreachable");
   await expect(page.getByRole("heading", { name: "Cannot reach your deployment" })).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
+test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
+  await page.goto("/positions?scenario=approvals");
+  await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });

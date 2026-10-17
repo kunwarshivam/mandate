@@ -2097,8 +2097,11 @@ fn unexpected_snapshot(outcome: BrokerOutcome, what: &'static str) -> Cause {
 
 impl ExecutorReconciler {
     /// A startup snapshot of a broker that publishes no account activity (DEC-933 item 1): the
-    /// broker's open orders, positions and account, no fill, the executor's own cursor unmoved,
-    /// taken at the executor's head of the account stream.
+    /// broker's open orders, positions and account, the executor's own cursor unmoved, taken at
+    /// the executor's head of the account stream. Its fills are the ones the broker's order
+    /// records and positions imply on a ledger flat in the instrument, and no other
+    /// (`mandate_executor::recorded_fills`, DEC-1151): the reconciliation books them before it
+    /// compares positions, and with none the position stays unexplained.
     pub(crate) fn without_activities(
         &self,
         open_orders: Vec<mandate_executor::BrokerOrder>,
@@ -2109,10 +2112,10 @@ impl ExecutorReconciler {
         let scope = state.scope();
         let stream = account_stream(&scope.workspace.0, &scope.account.0);
         mandate_executor::BrokerSnapshot {
+            fills: mandate_executor::recorded_fills(&state, &positions),
             open_orders,
             positions,
             account,
-            fills: Vec::new(),
             cursor: match state.checkpoint() {
                 Some(cursor) => cursor.clone(),
                 None => mandate_executor::ActivityCursor(String::new()),

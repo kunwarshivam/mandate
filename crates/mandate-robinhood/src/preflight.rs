@@ -55,8 +55,9 @@ impl<T: Tools> RobinhoodConnector<T> {
     /// read is the snapshot's refusal, unchanged; a record that is not exactly its assumed shape is
     /// [`RobinhoodError::Unreadable`] with the read's code (DEC-902). A position or an order in a
     /// registered ticker names the instrument by its asset id; one in any other ticker stays as
-    /// the broker spelled it (DEC-956 item 1). No order, cancel or exit waits on it (`AGENTS.md`
-    /// rule 13).
+    /// the broker spelled it (DEC-956 item 1). A working order names our key only as
+    /// [`Self::key_named`] reads it, so the reconciliation finds the orders this connector placed
+    /// as ours (DEC-1151 item 6). No order, cancel or exit waits on it (`AGENTS.md` rule 13).
     pub async fn account_snapshot(&self) -> Result<AccountSnapshot, RobinhoodError> {
         let empty = Map::new();
         let portfolio = self
@@ -77,6 +78,7 @@ impl<T: Tools> RobinhoodConnector<T> {
             let mut order =
                 order_record(record).ok_or(RobinhoodError::Unreadable { code: "orders" })?;
             order.instrument = self.tickers.platform(order.instrument);
+            order.client_order_id = self.key_named(record, &order.broker_order_id);
             if matches!(order.status.as_str(), "accepted" | "partially_filled") {
                 open_orders.push(order);
             }

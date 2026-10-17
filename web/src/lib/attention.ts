@@ -23,7 +23,7 @@ export interface AlertLine {
 export function alertLines(ws: Workspace): AlertLine[] {
   const feeds = (Object.keys(HEALTH_WORD) as Array<keyof typeof HEALTH_WORD>)
     .filter((k) => ws.health[k].state !== "ok")
-    .map((k) => ({ key: `feed-${k}`, text: `${HEALTH_WORD[k]} ${ws.health[k].state === "down" ? "down" : "stale"}`, href: "/alerts", source: "feed" as const }));
+    .map((k) => ({ key: `feed-${k}`, text: `${HEALTH_WORD[k]} ${ws.health[k].state === "down" ? "down" : ws.health[k].as_of === null ? "not reported" : "stale"}`, href: "/alerts", source: "feed" as const }));
   const agents = ws.agents.flatMap((a) =>
     a.restrictions.map((r) => ({
       key: `${a.agent_id}-${r.code}-${r.symbol ?? ""}`,
