@@ -1582,6 +1582,14 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "mandate-api",
+ "mandate-authn",
+ "mandate-canon",
+ "mandate-identity",
+ "mandate-time",
+ "reqwest",
+ "ring",
+ "rustix",
+ "rustls",
  "tokio",
 ]
 

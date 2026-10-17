@@ -402,7 +402,7 @@ forbidden_internal = ["mandate-cli", "mandate-paper"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["axum", "tokio"]
+allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
 forbidden_internal = [
     "mandate-alpaca",
     "mandate-cli",

@@ -4,6 +4,7 @@
 //! headers only for the configured app origin. The probes' router answers `/livez` and `/readyz`
 //! and a bodiless 404 for anything else.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -15,7 +16,10 @@ use axum::response::{IntoResponse, Response};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::encode;
 
+use crate::clock::Clock;
 use crate::lifecycle::{Drain, Lifecycle};
+use crate::session::Sessions;
+use crate::token::TokenCheck;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
 pub const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, PATCH";
@@ -39,9 +43,24 @@ pub struct Settings {
     pub app_origin: String,
 }
 
+/// The custom header a cross-site form cannot set (§3.3 item 1).
+pub const CSRF_HEADER: &str = "x-mandate-request";
+
+/// Everything the API router serves from.
+#[derive(Clone)]
+pub struct App {
+    pub settings: Settings,
+    pub sessions: Arc<Sessions>,
+    pub tokens: Arc<dyn TokenCheck>,
+    /// The subject-link file (§3.11 item 7).
+    pub links: PathBuf,
+    pub clock: Arc<dyn Clock>,
+}
+
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
 /// Each request is counted in flight on `drain` until its response is ready.
-pub fn api(settings: Settings, drain: Arc<Drain>) -> Router {
+pub fn api(app: App, drain: Arc<Drain>) -> Router {
+    let settings = app.settings.clone();
     let unauthenticated = problem_body(ProblemCode::Unauthenticated);
     let routes = Router::new()
         .fallback(move || {

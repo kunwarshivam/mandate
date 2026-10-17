@@ -12,8 +12,20 @@ workspace = true
 [dependencies]
 axum.workspace = true
 mandate-api.workspace = true
+mandate-authn.workspace = true
+mandate-canon.workspace = true
+mandate-identity.workspace = true
+mandate-time.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+rustls.workspace = true
+rustix.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "signal", "sync", "time"] }
 
 [dev-dependencies]
 axum.workspace = true
+mandate-authn.workspace = true
+mandate-identity.workspace = true
+mandate-time.workspace = true
+ring.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "sync", "time"] }

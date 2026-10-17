@@ -142,3 +142,118 @@ fn dechunk(mut raw: &[u8]) -> Vec<u8> {
         raw = &raw[end + 4 + size..];
     }
 }
+
+/// base64url without padding (RFC 4648 §5), written out so the tests check the server with an
+/// encoder of their own.
+pub fn b64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        let take = chunk.len() + 1;
+        for i in 0..take {
+            out.push(char::from(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize]));
+        }
+    }
+    out
+}
+
+/// A software ES256 issuer: its key set as JSON, and tokens it signs.
+pub struct TestIssuer {
+    pair: ring::signature::EcdsaKeyPair,
+    rng: ring::rand::SystemRandom,
+    pub issuer: String,
+    pub kid: String,
+}
+
+impl TestIssuer {
+    pub fn new(kid: &str) -> Self {
+        let rng = ring::rand::SystemRandom::new();
+        let alg = &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING;
+        let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(alg, &rng).expect("a key");
+        let pair = ring::signature::EcdsaKeyPair::from_pkcs8(alg, pkcs8.as_ref(), &rng)
+            .expect("the key pair");
+        Self {
+            pair,
+            rng,
+            issuer: "https://issuer.test/auth/v1".to_owned(),
+            kid: kid.to_owned(),
+        }
+    }
+
+    pub fn jwks_json(&self) -> String {
+        use ring::signature::KeyPair;
+        let point = self.pair.public_key().as_ref();
+        format!(
+            r#"{{"keys":[{{"kty":"EC","crv":"P-256","kid":"{}","use":"sig","x":"{}","y":"{}"}}]}}"#,
+            self.kid,
+            b64url(&point[1..33]),
+            b64url(&point[33..65])
+        )
+    }
+
+    pub fn jwks(&self) -> mandate_authn::Jwks {
+        mandate_authn::Jwks::parse(&self.jwks_json()).expect("the key set")
+    }
+
+    /// An access token for `subject` from `issuer`, for audience `authenticated`, expiring at the
+    /// Unix second `exp`.
+    pub fn token_from(&self, issuer: &str, subject: &str, exp: i64) -> String {
+        let header = format!(r#"{{"alg":"ES256","typ":"JWT","kid":"{}"}}"#, self.kid);
+        let payload = format!(
+            r#"{{"iss":"{issuer}","sub":"{subject}","aud":"authenticated","exp":{exp},"role":"authenticated"}}"#
+        );
+        let input = format!(
+            "{}.{}",
+            b64url(header.as_bytes()),
+            b64url(payload.as_bytes())
+        );
+        let signature = self
+            .pair
+            .sign(&self.rng, input.as_bytes())
+            .expect("a signature");
+        format!("{input}.{}", b64url(signature.as_ref()))
+    }
+
+    pub fn token(&self, subject: &str, exp: i64) -> String {
+        self.token_from(&self.issuer.clone(), subject, exp)
+    }
+}
+
+/// A clock the test moves.
+pub struct ManualClock(pub std::sync::Mutex<i64>);
+
+impl ManualClock {
+    pub fn at(secs: i64) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self(std::sync::Mutex::new(secs)))
+    }
+
+    pub fn set(&self, secs: i64) {
+        *self.0.lock().expect("unpoisoned") = secs;
+    }
+
+    pub fn secs(&self) -> i64 {
+        *self.0.lock().expect("unpoisoned")
+    }
+}
+
+impl mandate_api_server::clock::Clock for ManualClock {
+    fn now(&self) -> Option<mandate_time::UtcNanos> {
+        mandate_time::UtcNanos::from_parts(self.secs(), 0).ok()
+    }
+}
+
+/// `UtcNanos` at the Unix second `secs`.
+pub fn at(secs: i64) -> mandate_time::UtcNanos {
+    mandate_time::UtcNanos::from_parts(secs, 0).expect("a time")
+}
+
+/// Lowercase hex of `bytes`.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}

@@ -42,6 +42,10 @@ fn command(args: &[&str], extra: &[(&str, &str)]) -> Command {
         .env_clear()
         .env("CREDENTIALS_DIRECTORY", credentials())
         .env("MANDATE_API_APP_ORIGIN", APP)
+        .env("MANDATE_API_ISSUER", "https://issuer.test/auth/v1")
+        .env("MANDATE_API_AUDIENCE", "authenticated")
+        .env("MANDATE_API_JWKS_URL", "http://127.0.0.1:9/jwks")
+        .env("MANDATE_API_SUBJECT_LINKS", "/nonexistent/subject-links")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
