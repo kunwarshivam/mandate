@@ -41,7 +41,9 @@
 #   3  mandate-spec, and mandate-push-relay, the web-push relay's pure core (E8-14 S8b, DEC-724):
 #      above mandate-webpush, whose endpoint parser it shares, and mandate-notify, whose canary scan
 #      its tests use, and kept off the journal and every trading crate (NT-3, NT-9; raised from
-#      layer 2 by DEC-713)
+#      layer 2 by DEC-713); and mandate-process, the lifecycle every long-running process shares
+#      (E21-28, DEC-994): above mandate-journal, whose `Fenced` outcome it reads, and below every
+#      process crate that imports it
 #   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
 #      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
 #      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
@@ -196,6 +198,15 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-risk", "mandate-approval"]
+
+# The process lifecycle core (E21-28, DEC-994): a pure fold over injected inputs and time, and the
+# probe answers. Its one I/O is the probe socket, std only, reading no clock. Layer 3 keeps it below
+# every process crate and every trading crate.
+[crates.mandate-process]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = []
 
 # The notification dispatcher (E8-10, E8-14, DEC-701): a process crate, above mandate-journal. It
 # may never reach a crate that writes an agent, account, or control stream: the runtime, the

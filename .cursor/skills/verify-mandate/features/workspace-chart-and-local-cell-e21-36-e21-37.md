@@ -5,7 +5,7 @@
 - **Code:** `deploy/cell/charts/workspace/` (the chart, rendered from
   `deploy/cell/charts/workspace/processes.json`), `deploy/cell/charts/journal-db/` (the journal's
   Postgres under CloudNativePG), `deploy/cell/compose/compose.json` (generated), and
-  `xtask/src/cell.rs` (`cargo xtask cell up`, `drill`, `down`, `generate`; `cargo xtask ci cell`).
+  `xtask/src/cell.rs` (`cargo xtask cell up`, `drill`, `demo`, `down`, `generate`; `cargo xtask ci cell`).
 - **Tests:** `deploy/tests/test_cell.py` (each chart and Compose invariant, each shown failing on a
   seeded bug); the drills `boot`, `journal` and `egress`, each also run with its bug planted
   (`cargo xtask cell drill --seeded`).

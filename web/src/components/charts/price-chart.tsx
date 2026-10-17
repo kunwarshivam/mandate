@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { type Bar, type DailyBar, etParts, unixOf } from "@/fixtures/market";
+import { type Bar, type DailyBar, type Market, etParts, unixOf } from "@/fixtures/market";
 import type { Agent, Approval, Position } from "@/fixtures/types";
 import { PRICE_RANGES, type PriceRange, closes, drawable, priceWindow } from "@/lib/chart-data";
 import { price } from "@/lib/format";
@@ -46,6 +46,10 @@ function markerTime(fillAt: string, range: PriceRange, bars: Array<Bar | DailyBa
 
 export function PositionChart({ agent, position }: { agent: Agent; position: Position }) {
   const market = useMarket();
+  return market ? <PositionChartDrawn agent={agent} position={position} market={market} /> : null;
+}
+
+function PositionChartDrawn({ agent, position, market }: { agent: Agent; position: Position; market: Market }) {
   const [range, setRange] = useState<PriceRange>("1D");
   const symbol = market.symbols[position.instrument.symbol];
   const bars = useMemo(() => (symbol ? priceWindow(symbol.minute, symbol.daily, range) : []), [symbol, range]);
@@ -85,6 +89,10 @@ export function PositionChart({ agent, position }: { agent: Agent; position: Pos
 /** Small and neutral: the instrument today and the limit the agent proposes, nothing that steers. */
 export function ApprovalChart({ approval, className }: { approval: Pick<Approval, "bound" | "requested_at">; className?: string }) {
   const market = useMarket();
+  return market ? <ApprovalChartDrawn approval={approval} className={className} market={market} /> : null;
+}
+
+function ApprovalChartDrawn({ approval, className, market }: { approval: Pick<Approval, "bound" | "requested_at">; className?: string; market: Market }) {
   const symbol = market.symbols[approval.bound.symbol];
   const points = useMemo(() => {
     if (!symbol) return [];

@@ -70,6 +70,8 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real
   cycle.
+- **E21-28's lifecycle core** ([DEC-994](decisions/DEC-994.md), claim #1433): item 8, one PR
+  over ES-13's 400 lines, as DEC-968 item 9.
 - **DEC-1003** (lane I4): the disclosure placeholder names a backtest or evaluation report
   carries (`LEGEND-HYPOTHETICAL`, `NOTE-BACKTEST-MECHANICS`, `NOTE-BACKTEST-LIMITS`,
   `NOTE-FORWARD-PAPER-INTERNAL`) and, with counsel, their text. Meanwhile the names show as
