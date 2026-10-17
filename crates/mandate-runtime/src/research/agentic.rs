@@ -401,7 +401,7 @@ pub(super) fn replied(
     for (call, code) in &reply.refused {
         let content = to_canonical(&payload::object(vec![(
             "error",
-            payload::text(code_name(*code)),
+            payload::text(code.as_str()),
         )])?);
         let digest = Digest::of(&content);
         journal_result(
@@ -660,7 +660,7 @@ fn journal_result(
         ("result", payload::text(outcome_name(outcome))),
         (
             "code",
-            code.map_or(Value::Null, |code| payload::text(code_name(code))),
+            code.map_or(Value::Null, |code| payload::text(code.as_str())),
         ),
         ("untrusted", Value::Bool(untrusted)),
         ("content_ref", payload::text(&content.to_string())),
@@ -808,35 +808,5 @@ fn bound_name(bound: Bound) -> &'static str {
         Bound::MaxToolCalls => "max_tool_calls",
         Bound::MaxRepeatDenials => "max_repeat_denials",
         Bound::MaxTheses => "max_theses",
-    }
-}
-
-/// Journal spec §9.22's spelling of each code.
-fn code_name(code: Code) -> &'static str {
-    match code {
-        Code::Admissible => "admissible",
-        Code::Removed => "removed",
-        Code::ExitRequested => "exit_requested",
-        Code::NotHeld => "not_held",
-        Code::UnknownInstrument => "unknown_instrument",
-        Code::UnknownEvidence => "unknown_evidence",
-        Code::DuplicateInstrument => "duplicate_instrument",
-        Code::ForbiddenLanguage => "forbidden_language",
-        Code::RevisionsNotEnabled => "revisions_not_enabled",
-        Code::UnknownThesis => "unknown_thesis",
-        Code::DirectionNotAllowed => "direction_not_allowed",
-        Code::AssetClassNotAllowed => "asset_class_not_allowed",
-        Code::NotEligible => "not_eligible",
-        Code::SourceNotAllowed => "source_not_allowed",
-        Code::NotCorroborated => "not_corroborated",
-        Code::UniverseFull => "universe_full",
-        Code::NotAdmitted => "not_admitted",
-        Code::OutOfUniverse => "out_of_universe",
-        Code::UnknownItem => "unknown_item",
-        Code::Unavailable => "unavailable",
-        Code::CallBudget => "call_budget",
-        Code::MaxTheses => "max_theses",
-        Code::MaxRepeatDenials => "max_repeat_denials",
-        Code::RunEnded => "run_ended",
     }
 }
