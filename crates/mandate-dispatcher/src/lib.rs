@@ -29,13 +29,22 @@
 //! [`due`] reads from the notice stream alone which sends are due again on §5.3's schedule, which
 //! are abandoned at their window's end, and which wait (E8-10 slice D4, DEC-707).
 //!
+//! The process's edges (E8-10 slice D10, DEC-2500): [`OsRandom`] is the operating system's random
+//! source behind both random traits, and [`PgNotices`] the [`Journal`] over the Postgres journal,
+//! holding its notice stream's writer epoch. They are the crate's only I/O, so it is `pure = false`
+//! in `xtask/layers.toml`, and nothing may depend on it (NT-9).
+//!
 //! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
 //! (DEC-77).
 
 mod due;
+mod os;
+mod pg;
 mod step;
 
 pub use due::{Due, Next, due};
+pub use os::{Entropy, EntropyUnavailable, OsRandom, System};
+pub use pg::{PgNotices, READ_DEADLINE};
 pub use step::{Config, Journal, NoticeWriter, step};
 
 use mandate_notify::{NotifyError, Outcome, Reason};
@@ -68,6 +77,11 @@ pub enum DispatchError {
     /// An append did not commit, so nothing after it is sent; only the outcome's name is kept.
     #[error("the notice-stream append returned {outcome}")]
     NotCommitted { outcome: &'static str },
+    /// A journal read failed, so the step issued, sent, and appended nothing more; it is never read
+    /// as an empty stream (DEC-2500 item 3). Closed: it holds no input, not even the store's own
+    /// error, which could name a host or a role.
+    #[error("the journal could not be read")]
+    JournalUnavailable,
     /// The closed notice could not be formed, or the random source failed.
     #[error("the notice could not be formed: {0}")]
     Notify(#[from] NotifyError),

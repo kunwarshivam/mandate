@@ -19,6 +19,7 @@ use std::rc::Rc;
 mod approval;
 mod crash;
 mod retry;
+mod unread;
 mod verdict;
 
 type Checked = Result<(), Box<dyn Error>>;
@@ -41,9 +42,17 @@ const MARK: &str = r#"{"instrument_id":"inst","price":"1","source":"quote","feed
 #[derive(Clone, Default)]
 struct Shared(Rc<RefCell<MemoryJournal>>);
 
-impl Journal for Shared {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
+impl Shared {
+    /// The committed rows of `stream`, as an oracle reads them: the in-memory journal always
+    /// answers, so the oracle never goes through the step's fallible read.
+    fn rows(&self, stream: &StreamId) -> Vec<StoredEvent> {
         self.0.borrow().rows(stream).to_vec()
+    }
+}
+
+impl Journal for Shared {
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+        Ok(self.rows(stream))
     }
     fn append_notices(
         &mut self,
@@ -68,7 +77,7 @@ struct Gate {
 }
 
 impl Journal for Gate {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
         self.journal.committed(stream)
     }
     fn append_notices(
@@ -226,7 +235,7 @@ fn now() -> Result<UtcNanos, Box<dyn Error>> {
 
 /// The payloads of the notice stream's committed `event_type` rows, in `seq` order.
 fn payloads(journal: &Shared, event_type: &str) -> Vec<Value> {
-    let ntf = StreamId::parse(NTF).map(|ntf| journal.committed(&ntf));
+    let ntf = StreamId::parse(NTF).map(|ntf| journal.rows(&ntf));
     let of = |r: &StoredEvent| r.event_type == event_type;
     let rows = ntf.into_iter().flatten().filter(of);
     let payload = |r: StoredEvent| parse(&r.body).ok()?.get("payload").cloned();
@@ -315,13 +324,13 @@ fn only_committed_alerts_are_causes_and_each_send_follows_its_notice() -> Checke
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit"), (2, "agent_held")])?;
     alerts(&journal, A1, 9, &[(3, "risk_limit")])?;
-    let subject = journal.committed(&StreamId::parse(A1).ok_or(A1)?);
+    let subject = journal.rows(&StreamId::parse(A1).ok_or(A1)?);
     let (writer, mut sends) = (writer(&journal)?, provider(&journal)?);
     run(&journal, &writer, &[A1], &mut sends)??;
     let issued = payloads(&journal, "NoticeIssued");
     let causes: Vec<String> = issued.iter().map(|p| text(p, "cause")).collect();
     assert_eq!(causes, [id(1, 1), id(2, 1)], "the fenced alert is no cause");
-    assert_eq!(journal.committed(&StreamId::parse(A1).ok_or(A1)?), subject);
+    assert_eq!(journal.rows(&StreamId::parse(A1).ok_or(A1)?), subject);
     let streams: Vec<String> = journal.0.borrow().stream_ids().map(str::to_owned).collect();
     assert_eq!(streams, [A1, A2, NTF], "only the notice stream is new");
     assert_eq!(sends.seen.len(), 4, "two notices on two channels");

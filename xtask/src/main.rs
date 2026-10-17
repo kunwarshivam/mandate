@@ -588,8 +588,9 @@ fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<
     Ok(args)
 }
 
-/// The Postgres journal tests against a real database (ADR-0001 ES-08), `mandate-journal-pg`'s and
-/// the CLI's control journal's (P0, DEC-520). `test` runs them too, but they skip there unless
+/// The Postgres journal tests against a real database (ADR-0001 ES-08), `mandate-journal-pg`'s,
+/// the CLI's control journal's (P0, DEC-520), and the dispatcher's (DEC-2500 item 8). `test` runs
+/// them too, but they skip there unless
 /// `MANDATE_PG_URL` is set; here they must run.
 fn postgres() -> Result<()> {
     if env::var_os(PG_URL).is_none() {
@@ -731,9 +732,10 @@ const BINARY_COUPLINGS: [(&str, &str); 1] = [(RH_SIM_BIN_ENV, "mandate-rh-sim")]
 /// path, so no path matches it.
 const BINARY_REFERENCE: &str = "bin:";
 
-/// The packages whose tests need the database (ADR-0001 ES-08, DEC-520): `cargo xtask ci postgres`
-/// runs those of them the selection holds.
-const PG_TESTED: [&str; 2] = ["mandate-journal-pg", "mandate-cli"];
+/// The packages whose tests need the database (ADR-0001 ES-08, DEC-520), the dispatcher's journal
+/// adapter among them (E8-10 slice D10a, DEC-2500 item 8): `cargo xtask ci postgres` runs those of
+/// them the selection holds.
+const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
