@@ -2641,7 +2641,7 @@ enables `live` (ES-23, OPS-5).
   run` with only the journal's role; a local-cell test with the API, the deployment manager, the
   metrics exporter, the model gateway and the control plane all unreachable shows each scope's
   `KillSwitchActivated` in every stream owner; and the runbook RB-03 names the command.
-- **E21-35 (Proposed, M8 then M11; SC; lane R2)** As the founder, I want the cell's images built
+- **E21-35 (Proposed, M8 then M11; SC; lane RL2)** As the founder, I want the cell's images built
   from `main` by digest, signed, and checked at start, so that only a release I can identify runs
   against a broker (design §7.1, OPS-15, ES-17). *Accepted when:* images hold E21-8's static
   binaries on an empty base, run as non-root with a read-only root filesystem and no shell; each is
@@ -2789,7 +2789,7 @@ enables `live` (ES-23, OPS-5).
   leaves the deployment `closing_only` with resting protection untouched (as E7-24 does for the
   runner); the terms hash is journaled through `DisclosureAccepted` (connections spec §4); and
   every test runs against `mandate-rh-sim`, never a Robinhood host (rule 8).
-- **E21-48 (Proposed, M8; SC; lane B3; after E21-40, E21-41, E21-46, E21-47, E21-35 and E5-7)** As the
+- **E21-48 (Proposed, M8; SC; lane B3; after E21-40, E21-41, E21-46, E21-47, E21-35, E5-7 and E9-4)** As the
   founder, I want my agent to place real orders through my Robinhood agentic account from cell #1,
   on the same path every broker uses, so that the first hosted version trades for real (DEC-967
   item 15). *Accepted when:* the cell's Robinhood executor image is the only image built with
@@ -2803,7 +2803,13 @@ enables `live` (ES-23, OPS-5).
   locked store and its second-region copy (journal §6.2, before live capital);
   backups hold no secret outside the vault (DEC-822 item 4's condition); the token arrives only
   through E21-47's hosted login into the vault; the mandate's envelope starts from DEC-529's allocation and `max_order_usd`, with `ask` for
-  openings; a stream's environment is fixed at open and a live stream refuses a paper credential
+  openings; the founder builds the live image from a commit on `main` and signs it, and no CI job
+  or agent builds it; the live equity quote source is the `sip` profile or DEC-529 item 12's
+  cross-checked Robinhood quote once trading spec §4.2 extends it to a standing deployment, and
+  without either the deployment refuses openings; DEC-529 item 11's account conditions hold (not
+  shared, cash or margin disabled by attestation, buying power the lower of cash and the broker's
+  figure, flat when first deployed); the confirmation, deployment and every grant use E9-4's
+  step-up, never `cli_confirm`; a stream's environment is fixed at open and a live stream refuses a paper credential
   and the reverse (ES-23); no code differs from the drilled path; and the first real order is
   placed by the founder's confirmation, never by a test, a CI job or an agent (rule 8). It also
   waits for the M13 penetration test and counsel's review until the founder decides otherwise

@@ -160,7 +160,11 @@ special work", then "real trade through robinhood", not the simulator (DEC-967 i
   capital); backups with no secret outside the vault (DEC-822 item 4's condition); the hosted login
   (E21-47) and the vault (E21-32) in place, so the token never sits on a disk outside the vault;
   `cargo xtask live-feature` changed to allow `mandate-daemon` as well as the runner, with CI still
-  only compiling `live` (DEC-967 item 15 narrows DEC-529 item 3 for this); and, until the founder
+  only compiling `live` (DEC-967 item 15 narrows DEC-529 item 3 for this), and the image built
+  and signed by the founder, never by CI or an agent; a live quote source, either the `sip`
+  profile or DEC-529 item 12's cross-checked Robinhood quote once trading spec §4.2 extends it to a
+  standing deployment (H11); DEC-529 item 11's account conditions; E9-4's step-up for the
+  confirmation, deployment and grants, since `cli_confirm` is paper-only; and, until the founder
   decides otherwise, the M13 penetration test and counsel's review (DEC-967 item 15, Proposed).
 
 ## The rule that makes the lanes parallel
@@ -177,8 +181,10 @@ No lane edits these files until R0 closes (DEC-967 item 2):
 A lane uses `mandate-shell` and `mandate-paper` only through what they already make public, and
 puts new code in new crates. A slice that finds it needs one of these files changed stops and
 queues that change behind R0 as its own slice (marked **after R0** below); it does not work around
-it with a copy. Other `mandate-shell` files (`tail.rs`, `watch.rs`, `lt10.rs`) are also live R0
-territory: a lane that needs them asks the R0 lane's claim holder first.
+it with a copy. Every other file R0's lanes touch is also live R0 territory, and a lane that needs
+one asks the R0 lane's claim holder first: in `mandate-shell`, `tail.rs`, `watch.rs`, `lt10.rs`,
+`tracer.rs`, `envelope.rs` and `robinhood.rs`; in `mandate-paper`, `door.rs`, `wiring.rs` and
+`robinhood.rs`.
 
 Every new crate gets its `xtask/layers.toml` entry, and a safety-critical one its CODEOWNERS line
 and lint header, in the same change (`AGENTS.md` Conventions). Every new dependency is a
@@ -242,12 +248,12 @@ the journal spec's catalogue has none, a journal spec change with test vectors c
 | O3 | **E21-39** | The cell's own alert path: Prometheus and Alertmanager in the chart, the metric-sourced §8.2 rules as code, an alert sink with no paging vendor until the founder picks one (DEC-434 item 20, H6) | O1, O2, K1 | — |
 | O4 | **E21-34** (SC) | The kill-switch surface in the cell: `mandate agent pause` and `kill` in the binary (deploy/README *Deferred*: `agent.rs` has the code, the binary offers only `deploy`), runnable as a one-off Kubernetes Job or `docker compose run` that needs only Postgres; and the OPS-4 test in the local cell with the exporter, the API, the deployment manager and the control plane down | `mandate-cli`, `mandate-runtime`, `mandate-executor` (`kill.rs`, read-only) | — |
 
-### Lane R: release builds, signing and promotion
+### Lane R: release builds, signing and promotion (slices RL1, RL2, named apart from Cloudflare R2)
 
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
-| R1 | E21-8 (exists) | Reproducible static builds from `main`, SBOM, the build digest journaled | the binaries' crates | — |
-| R2 | **E21-35** (SC) | Images by digest from those builds (static binaries on an empty base: no shell, non-root, read-only root), signed with cosign; the start-up signature check (OPS-15) that refuses an unsigned binary outside dev and CI; promotion `main` → the local cell's CI run → staging, once staging exists. CI signs with an ephemeral test key; the founder's hardware key (ES-17) signs only what goes to a hosted cell | `mandate-process` (the start-up check's hook) | — |
+| RL1 | E21-8 (exists) | Reproducible static builds from `main`, SBOM, the build digest journaled | the binaries' crates | — |
+| RL2 | **E21-35** (SC) | Images by digest from those builds (static binaries on an empty base: no shell, non-root, read-only root), signed with cosign; the start-up signature check (OPS-15) that refuses an unsigned binary outside dev and CI; promotion `main` → the local cell's CI run → staging, once staging exists. CI signs with an ephemeral test key; the founder's hardware key (ES-17) signs only what goes to a hosted cell | `mandate-process` (the start-up check's hook) | — |
 
 ### Lane K: packaging (Helm and Compose, per M11)
 
@@ -276,6 +282,7 @@ images, all built without `live`; the one live image of E21-48 is never started 
 | S1 | **E21-40** (SC; first) | The object-store compatibility check and its interface: can R2 give journal spec §6.2's write-once retention and its start-up lock check, by per-object S3 Object Lock headers or by R2's bucket lock rules? A plain S3 endpoint and a `LockCheck` that reads the provider's real retention setting and refuses anything weaker. If R2 has bucket-level locks only, either the check reads R2's bucket-lock rule and accepts nothing weaker, or the cold store alone goes to a provider with standard Object Lock in compliance mode (for example Backblaze B2), recorded as a DEC. The check runs against an S3 test store in CI and, once H3 is approved, against R2 itself | `mandate-journal-cold` (what the cold store needs), `mandate-artifacts-fs` (the artifact layout to keep) | `mandate-objectstore` (SC) |
 | S2 | **E21-41** (SC) | The journal's Postgres in the cell under CloudNativePG: two instances with `synchronous_commit = on` and one synchronous standby, the journal's roles and `migrations/` applied by the migration Job (OPS-13), WAL archived to the S1 endpoint, point-in-time recovery restored and verified (OPS-8). On one node the standby shares the node, disclosed as no second failure domain; the second VM gives it one | `mandate-journal-pg`, `mandate-cli` (`db migrate`, `journal verify`), S1 | — |
 | S3 | E21-5 (SC, exists) | The backup drill and restore procedure, on S2's archive | S2, E21-25 | — |
+| S4 | E5-7 (SC, exists) | The cold exporter as a process in the chart: segments shipped within a minute of closing to S1's locked store and its second-region copy (L-2), retention and holds; B3 needs it before live capital (journal §6.2) | `mandate-journal-cold`, S1, K1 | — |
 
 MinIO is not in this lane. It may come later only as an optional in-cell cache, never the only
 copy or the backup, and only after the founder and counsel decide its AGPL-3.0 licence (DEC-967
@@ -304,7 +311,7 @@ item 10, DEC-434 item 16).
 |---|---|---|---|---|
 | B1 | **E21-46** (SC) | Both connectors in the cell's executor process: Alpaca against paper and recorded fixtures, Robinhood against `mandate-rh-sim` as a pod sidecar; capability profiles only | `mandate-alpaca`, `mandate-robinhood`, `mandate-mcp` (`rh-sim` feature), `mandate-rh-sim`, `mandate-executor`, `mandate-daemon` (P3) | — |
 | B2 | **E21-47** (SC; connections spec first) | Hosted Robinhood login: the OAuth callback through the API server, the token into the vault, leased to that one executor, tested against the simulator | `mandate-connections`, `mandate-vault` (V2), `mandate-api-server` (A1), `mandate-robinhood` | — |
-| B3 | **E21-48** (SC; after E5-7, and the penetration test and counsel until the founder decides otherwise) | Real Robinhood trades from cell #1: the signed live executor image, the `live-feature` check allowing `mandate-daemon`, its egress, the standby on the second node, the storage conditions, the founder's first live order from the cell | B1, B2, R2, K1, S1, S2 | — |
+| B3 | **E21-48** (SC; after E5-7 and E9-4, and the penetration test and counsel until the founder decides otherwise) | Real Robinhood trades from cell #1: the signed live executor image, the `live-feature` check allowing `mandate-daemon`, its egress, the standby on the second node, the storage conditions, the founder's first live order from the cell | B1, B2, RL2, K1, S1, S2 | — |
 
 B1 and B2 must not edit the R0 files; where the R0 runner's own Robinhood wiring sits in
 `crates/mandate-paper` or `crates/mandate-shell/src/paper/`, B1 reuses the connector crates
@@ -325,11 +332,13 @@ flowchart LR
         P1["P1 E21-28 lifecycle core"]
         V1["V1 local vault"]
         O1["O1 E21-3 exporter"]
-        R1["R1 E21-8 builds"]
+        RL1["RL1 E21-8 builds"]
         K1["K1 E21-36 chart skeleton"]
         C1a["C1 E21-37 cell boots"]
         W1["W1 E21-38 Workers"]
         S1["S1 E21-40 object store check"]
+        K0["K0 E21-50 db migrate"]
+        M2["M2 E2-6 data service"]
         M1["M1 E21-42 internal interfaces"]
         G0["G0 E20-3 message set"]
     end
@@ -340,9 +349,8 @@ flowchart LR
         V2["V2 E21-32 SecretSource + OpenBao"]
         D1["D1 E21-33 deployment manager"]
         O2["O2 E21-4 alerts"]
-        R2["R2 E21-35 images, signing"]
+        RL2["RL2 E21-35 images, signing"]
         S2["S2 E21-41 CloudNativePG"]
-        M2["M2 E2-6 data service"]
         G1["G1 E21-43 directory, routing, fleet"]
         B1["B1 E21-46 both brokers in the cell"]
     end
@@ -361,8 +369,9 @@ flowchart LR
     V1 --> V2 --> V3
     P3 --> V3
     O1 --> O2 --> O3
-    R1 --> R2
+    RL1 --> RL2
     K1 --> C1a
+    K0 --> K1
     K1 --> D1
     S1 --> S2
     K1 --> S2
@@ -376,26 +385,26 @@ flowchart LR
     P3 --> P4
     D1 --> P4
     P3 --> O4
-    P3 & A1 & V2 & D1 & R2 --> C1b
+    P3 & A1 & V2 & D1 & RL2 --> C1b
     P4 & V3 & O3 & O4 & C1b --> G --> H
 ```
 
-- **Wave 0** (start now, in parallel): K0 first, then P1, V1, O1, R1, K1 and C1's first slice, W1,
+- **Wave 0** (start now, in parallel): K0 first, then P1, V1, O1, RL1, K1 and C1's first slice, W1,
   S1's interface and its CI half, M2, and G0's journal spec change. M1 starts as the rules for the
   crates that exist and gains one rule as each lane's crate lands.
 - **Wave 1**: P2 and P3 after P1; A1 once the HTTP dependency (D-1) is approved and E10-10's first
-  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1, K0
+  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; RL2 after RL1; S2 after S1, K0
   and K1; M3 after M2 and K1; G1 after G0 and K1; B1 after P3.
 - **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; B2 after
   B1, A1 and V2; A3 after A1; A4 after A3; C1's drills as each process image lands.
-- **Wave 3**: B3, once B1, B2, R2, S1, S2 and E5-7 are green, H1 (both VMs) and H3 are bought,
+- **Wave 3**: B3, once B1, B2, RL2, S1, S2 and E5-7 are green, H1 (both VMs) and H3 are bought,
   and the penetration test and counsel have answered, unless the founder decides they are not
   needed for the founder's own account (DEC-967 item 15).
 - **After R0 closes**: P5, and any queued change to the R0 files.
-- **The local-cell gate**: every C1 drill passes in CI on `main` for a week of merges (DEC-967
-  item 16). Then the founder buys H1 (the VMs) and H3 (R2), and S1's check against R2 itself runs
+- **The local-cell gate**: every C1 drill passes in CI on `main` (DEC-967 item 16), and, as this
+  plan's own tightening, keeps passing for a week of merges. Then the founder buys H1 (the VMs) and H3 (R2), and S1's check against R2 itself runs
   before anything is stored there. **If the founder confirms [DEC-990](../decisions/DEC-990.md)
-  item 2** (rush the hosted cell for the 2026-10-26 demo), the week is dropped: H1 and H3 are
+  item 2** (rush the hosted cell for the 2026-10-26 demo), the plan's week is dropped: H1 and H3 are
   bought when every C1 drill has first passed in CI on `main`; the cell carries paper and demo data
   only; S1's check still runs first; and B3 keeps its own conditions above. Whether cell #1 also
   counts as DEC-434 item 19's minimal staging cell is asked with H1.
@@ -426,6 +435,7 @@ cost model (§10) is the formula; these are its first inputs.
 | H8 | A hardware signing key for ES-17, if the founder holds none | Lane R's E21-35 reaches a hosted cell | One-off, about $50 to $90 |
 | L-1 | Live for anyone but the founder's own Robinhood account (other users; Alpaca live) | The Phase 2 gate, counsel and the penetration test | No hosting cost of its own. The founder's own account is decided (DEC-967 item 15) |
 | L-2 | **Approved at the gate (item 16):** the second-region copy of the cold store that journal §6.2 requires before live capital | Before B3 | At cell #1's scale about $0 to $1: a second R2 bucket in another location hint, or B2 |
+| H11 | The live equity quote source for E21-48 (trading spec §4.2, DEC-529 item 12) | Before B3 | Either the `sip` profile from a paid market-data plan, roughly $100 a month at retail list price; or $0, by extending DEC-529 item 12's cross-checked Robinhood quote to a standing deployment, which needs a trading spec change the founder approves |
 | H10 | Where the control plane's first slice runs (DEC-440 item 16) | G1 reaches a hosted cell | On cell #1's VMs as a separate release, namespace, database and keys: no extra cost, but not the separate accounts item 16 recommends. On its own small VM: about $8 to $20 |
 | H9 | The production cells, a second region, a standby in a second failure domain, the global control plane | The Phase 2 gate, counsel and the penetration test | Not estimated here; roughly double H1 to H3 per region, plus the control plane (DEC-440 item 16) |
 
@@ -455,7 +465,7 @@ founder.
 | D-4 | K1, C1 | CI tools: `kind` or `k3d`, `helm`, `kubeconform`; pinned in `.github/workflows/ci.yml` and `.cursor/install.sh` together (`AGENTS.md` Setup), downloaded from GitHub releases only | Tools, not crates, but pinned and reviewed the same way |
 | D-5 | K1, S2, V2, C1 | The CloudNativePG operator and its chart; container images for PostgreSQL 18, OpenBao, Prometheus, Alertmanager and `cloudflared`, each pinned by digest; k3s itself for cell #1 | Our own images need none: static binaries on an empty base |
 | D-6 | W1 | The Workers adapter for Next.js and its CLI (npm) | Each an npm row |
-| D-7 | R1, R2 | `cosign`, an SBOM generator, `cargo-auditable` (ES-14, ES-17) | Tools, pinned as D-4 |
+| D-7 | RL1, RL2 | `cosign`, an SBOM generator, `cargo-auditable` (ES-14, ES-17) | Tools, pinned as D-4 |
 
 ## What each lane may assume, and where it stops
 
