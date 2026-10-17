@@ -22473,6 +22473,1178 @@
    }
   ]
  },
+ "deployment_manager": {
+  "spec": "docs/specs/journal.md v0.48 §9.21 (DEC-1170)",
+  "drafts": {
+   "process_start_issued": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4DM000000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ProcessStartIssued",
+    "schema_version": 1,
+    "event_time": "2026-10-17T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "process": "runtime",
+     "subject": "agent_a",
+     "generation": 1,
+     "cause": "deployed"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "process_stop_issued": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4DM010000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ProcessStopIssued",
+    "schema_version": 1,
+    "event_time": "2026-10-17T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "process": "runtime",
+     "subject": "agent_a",
+     "generation": 3,
+     "cause": "agent_stopped"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "process_crash_looped": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4DM020000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ProcessCrashLooped",
+    "schema_version": 1,
+    "event_time": "2026-10-17T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "process": "executor",
+     "subject": "01J8Z2ACCT00000000000000A1",
+     "generation": 6,
+     "restarts": 5,
+     "window_seconds": 600
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "ProcessStartIssued.process.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.process.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.process.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.subject.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.subject.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.subject.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.generation.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.generation.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.cause.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.cause.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.cause.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.missing",
+    "clause": "§9.21 closed",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.extra",
+    "clause": "§9.21 closed",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.process.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.process.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.process.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.subject.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.subject.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.subject.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.generation.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.generation.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.cause.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.cause.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.cause.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.missing",
+    "clause": "§9.21 closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.extra",
+    "clause": "§9.21 closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.process.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.process.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.process.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.subject.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.subject.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.subject.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.generation.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.generation.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.restarts.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restarts"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.restarts.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restarts"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.window_seconds.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.window_seconds"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.window_seconds.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.window_seconds"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.missing",
+    "clause": "§9.21 closed",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.extra",
+    "clause": "§9.21 closed",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.by_a_user",
+    "clause": "rule 165: workspace control services write it as a system actor",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.at_version_2",
+    "clause": "§9.21: closed at schema version 1 only",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.generation_zero",
+    "clause": "rule 166: a generation is at least 1",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 0
+     },
+     {
+      "path": "payload.cause",
+      "value": "restart"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.by_a_user",
+    "clause": "rule 165: workspace control services write it as a system actor",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.at_version_2",
+    "clause": "§9.21: closed at schema version 1 only",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.generation_zero",
+    "clause": "rule 166: a generation is at least 1",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.by_a_user",
+    "clause": "rule 165: workspace control services write it as a system actor",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.at_version_2",
+    "clause": "§9.21: closed at schema version 1 only",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.generation_zero",
+    "clause": "rule 166: a generation is at least 1",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.first_start_as_restart",
+    "clause": "rule 167: generation 1 is the deployed start",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "restart"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.first_start_for_kill_switch",
+    "clause": "rule 167: generation 1 is the deployed start",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "kill_switch"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.deployed_twice",
+    "clause": "rule 167: only generation 1 is deployed",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.no_restarts",
+    "clause": "rule 168: a crash loop counted a restart",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restarts"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.no_window",
+    "clause": "rule 168: the window is at least a second",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.window_seconds"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "ProcessStartIssued.executor",
+    "clause": "§9.21: an executor, named by its account",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.restart",
+    "clause": "rule 167: a later generation restarts",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 2
+     },
+     {
+      "path": "payload.cause",
+      "value": "restart"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.kill_switch",
+    "clause": "rule 167: a kill switch starts a later generation",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 7
+     },
+     {
+      "path": "payload.cause",
+      "value": "kill_switch"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8Z3P2A000000000000000Q3"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.first_stopped",
+    "clause": "rule 166: generation 1 may be stopped",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.executor_stopped",
+    "clause": "§9.21: an executor stopped with its last agent",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.one_restart",
+    "clause": "rule 168: one restart is enough to record",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.one_second_window",
+    "clause": "rule 168: a window of one second is enough",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.runtime",
+    "clause": "§9.21: a runtime's crash loop",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "runtime"
+     },
+     {
+      "path": "payload.subject",
+      "value": "agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.live",
+    "clause": "§9.21: either environment",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
  "broker_profile": {
   "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
   "artifacts": [
