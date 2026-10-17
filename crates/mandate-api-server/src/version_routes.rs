@@ -9,6 +9,7 @@
 //! it, step-up last, through the port that verifies nothing until E9-4 (DEC-2100 item 2). Its
 //! record is in the store and its event on the control stream before the answer (rule 5).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
@@ -635,10 +636,9 @@ async fn confirmed(
     )
     .map_err(Answer::of)?;
     instruments(control, objects, &document).map_err(Answer::of)?;
-    if warnings
-        .iter()
-        .any(|warning| !acknowledged.iter().any(|a| a == warning))
-    {
+    let shown: BTreeSet<&str> = warnings.iter().copied().collect();
+    let owned: BTreeSet<&str> = acknowledged.iter().map(String::as_str).collect();
+    if shown != owned || owned.len() != acknowledged.len() {
         return Err(Answer::schema("/warnings_acknowledged", "unacknowledged"));
     }
     if screen(version, required, warnings).digest != shown_digest {
