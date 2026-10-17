@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mandate-workspace values (E21-36)",
+  "description": "Settings only: no key may hold a secret (DEC-822 item 4), and no key outside this schema is accepted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace",
+    "environment",
+    "images",
+    "journal",
+    "rolePrefix",
+    "egress",
+    "run",
+    "verify",
+    "localImages",
+    "ingress"
+  ],
+  "properties": {
+    "workspace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,39}$"
+    },
+    "environment": {
+      "description": "paper or backtest only (DEC-967 item 15); the live Robinhood connection of E21-48 is not in this chart",
+      "enum": [
+        "paper",
+        "backtest"
+      ]
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "postgres",
+        "mandate",
+        "runtime",
+        "executor",
+        "token-exchange",
+        "scheduler",
+        "model-gateway",
+        "exporter",
+        "data"
+      ],
+      "properties": {
+        "postgres": {
+          "type": "string",
+          "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+        },
+        "mandate": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "runtime": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "executor": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "token-exchange": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "scheduler": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "model-gateway": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "exporter": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "data": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "port",
+        "database",
+        "ca",
+        "podSelector"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ca": {
+          "type": "string",
+          "minLength": 1
+        },
+        "podSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1
+        }
+      }
+    },
+    "rolePrefix": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker",
+        "token-host",
+        "time",
+        "model-providers",
+        "object-storage",
+        "timestamping",
+        "market-data",
+        "artifact-store",
+        "identity-provider",
+        "dns"
+      ],
+      "properties": {
+        "broker": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "token-host": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/32$"
+          }
+        },
+        "time": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "model-providers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "object-storage": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "timestamping": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "market-data": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "namespace",
+            "podSelector"
+          ],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "podSelector": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "minProperties": 1
+            }
+          }
+        },
+        "artifact-store": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        },
+        "identity-provider": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+          }
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "args"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]{0,20}$"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "streams"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]{0,20}$"
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(acct|agent|ctl|clock|meter):[A-Za-z0-9:_.-]+$"
+          }
+        }
+      }
+    },
+    "localImages": {
+      "type": "boolean",
+      "description": "true only in the local cell's values: allows mandate.local/ images"
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cloudflared"
+      ],
+      "properties": {
+        "cloudflared": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "image",
+            "tokenFrom",
+            "edge"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string",
+              "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+            },
+            "tokenFrom": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+            },
+            "edge": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(2[4-9]|3[0-2])$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
