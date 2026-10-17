@@ -183,12 +183,12 @@ prompt, sampling parameters (temperature, seed where supported), the output sche
 | `input_rejected` | The prompt guard found forbidden content (§8.3) | No | No |
 | `model_withdrawn` | The entry is withdrawn (INF-15) | No | No |
 | `deadline_exceeded` | No complete response before the deadline | No further attempts | Maybe |
-| `provider_unavailable` | Connection failure, 5xx, or no endpoint healthy | Yes, within the deadline | Maybe |
-| `rate_limited_provider` | Provider 429 | Yes, after the provider's wait, within the deadline | No |
+| `provider_unavailable` | Connection failure, 5xx, or no endpoint healthy | Yes, within the deadline, unless the attempt's reply was billed or may have been (§3.4) | Maybe |
+| `rate_limited_provider` | Provider 429 | Yes, after the provider's wait, within the deadline, unless its reply reported usage (§3.4) | No |
 | `credential_invalid` | Provider 401 or 403, or the vault holds no key for the provider (then nothing is sent: journal spec §9.19 rule 152) | No | No |
 | `content_refused` | The provider declined to answer | No | Maybe |
 | `schema_invalid` | Response does not parse, or fails the output schema | No | Yes |
-| `identity_mismatch` | Reported identity differs from the pin | No | Yes |
+| `identity_mismatch` | Reported identity differs from the pin, or is missing from a `200` | No | Yes |
 
 The first six are refusals: nothing leaves the deployment.
 
@@ -200,11 +200,13 @@ The first six are refusals: nothing leaves the deployment.
 - **Retries.** Only transport failures retry (`provider_unavailable`, `rate_limited_provider`),
   only to endpoints serving the same identity, and only while the deadline leaves time. A content
   failure (`schema_invalid`, `identity_mismatch`, `content_refused`) never retries: sampling again
-  until something parses would select outputs (DEC-432 item 3). An attempt the provider billed, or
-  may have (its usage reported or unreadable), is never retried either, whatever its status: the
-  reservation holds one attempt's maximum (DEC-998 item 12). A `200` whose reported model or
+  until something parses would select outputs (DEC-432 item 3). A transport failure is not retried
+  either when the attempt may have been billed: a reply arrived and reported usage, or reported
+  usage that cannot be read, or the attempt timed out. The reservation holds one attempt's maximum,
+  so a second billed attempt could settle above it (DEC-998 item 12). A connection failure, or a
+  `5xx` or `429` whose body reports no usage, still retries. A `200` whose reported model or
   provider is missing or is not the pin's is `identity_mismatch` whatever the rest of its shape:
-  the identity is read before the output (INF-2). Each attempt is metered: at the
+  the identity is read before the output, and the endpoint is benched (INF-2). Each attempt is metered: at the
   tokens its reply reports, or, for a `200` reply whose usage cannot be read, at the reservation's
   maximum, so a cost the gateway cannot read is never counted as less than it could be.
 - **Streaming.** The gateway may stream from the provider to enforce the deadline and to stop at

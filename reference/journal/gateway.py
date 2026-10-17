@@ -425,6 +425,7 @@ def valid_drafts() -> list[dict]:
         valid("call.no_key", "rule 152: reserved, then the vault held no key", c, never_sent("credential_invalid")),
         valid("call.deadline_after_attempts", "rule 74: a deadline passed after an attempt", c, [*failed("deadline_exceeded"), change("payload.response_ref", None), change("payload.attempts", 2)]),
         valid("call.identity_mismatch", "§9.19: a mismatch keeps its response and is metered", c, [*failed("identity_mismatch"), change("payload.reported_identity", "anthropic/claude-haiku@Anthropic")]),
+        valid("call.identity_missing", "rule 72 asks an identity only of an ok: a 200 that reports none is a metered mismatch", c, [*failed("identity_mismatch"), change("payload.reported_identity", None)]),
         valid("call.at_the_deadline", "rule 75: completed exactly at the deadline", c, [change("payload.completed_at", DEADLINE)]),
         valid("call.no_candidates", "rule 151: a research call may return none", c, [change("payload.verdicts", [])]),
         valid("call.no_retrieval", "rule 150: a call with no retrieval plan", c, [change("payload.observations", [])]),

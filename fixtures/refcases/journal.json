@@ -75230,6 +75230,28 @@
     }
    },
    {
+    "name": "call.identity_missing",
+    "clause": "rule 72 asks an identity only of an ok: a 200 that reports none is a metered mismatch",
+    "base_draft": "call",
+    "changes": [
+     {
+      "path": "payload.outcome",
+      "value": "identity_mismatch"
+     },
+     {
+      "path": "payload.verdicts",
+      "value": []
+     },
+     {
+      "path": "payload.reported_identity",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "call.at_the_deadline",
     "clause": "rule 75: completed exactly at the deadline",
     "base_draft": "call",
