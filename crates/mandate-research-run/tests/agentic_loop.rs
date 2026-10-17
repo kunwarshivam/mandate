@@ -953,3 +953,178 @@ proptest! {
         prop_assert_eq!(folded, driven);
     }
 }
+
+#[test]
+fn a_seed_after_the_first_turn_or_the_end_is_refused() {
+    let mut state = final_output_run(LoopBounds::v0_2());
+    state
+        .on_reply(&reply(
+            1,
+            10,
+            vec![call(0, Tool::MarketBars, &bars("AAPL"))],
+        ))
+        .expect("turn 1");
+    assert!(matches!(
+        state.on_seed(&[(ItemKind::News, item("news-1"))]),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+    let mut ended = final_output_run(LoopBounds::v0_2());
+    ended.end(EndReason::Mode).expect("a cancelled run");
+    assert!(matches!(
+        ended.on_seed(&[]),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+}
+
+#[test]
+fn only_propose_thesis_counts_toward_max_theses() {
+    let bounds = LoopBounds {
+        max_theses: 1,
+        ..LoopBounds::v0_2()
+    };
+    let mut state = RunState::start(start_with(OutputMode::ActionTools, action_menu(), bounds));
+    let invalidation = r#"{"evidence":[],"reason":"r","thesis_id":"t"}"#;
+    let step = state
+        .on_reply(&reply(
+            1,
+            10,
+            vec![
+                call(0, Tool::Invalidate, invalidation),
+                call(1, Tool::Invalidate, invalidation),
+                call(2, Tool::ProposeThesis, r#"{"instrument":"AAPL"}"#),
+            ],
+        ))
+        .expect("turn 1");
+    assert_eq!(step.ends, None);
+    assert!(step.refused.is_empty());
+}
+
+#[test]
+fn exit_requests_are_taken_after_invalidations_and_before_theses() {
+    let mut menu = action_menu();
+    menu.insert(Tool::ProposeExit);
+    let mut state = RunState::start(start_with(
+        OutputMode::ActionTools,
+        menu,
+        LoopBounds::v0_2(),
+    ));
+    let step = state
+        .on_reply(&reply(
+            1,
+            10,
+            vec![
+                call(0, Tool::ProposeThesis, r#"{"instrument":"AAPL"}"#),
+                call(
+                    1,
+                    Tool::ProposeExit,
+                    r#"{"instrument":"MSFT","reason":"r"}"#,
+                ),
+                call(
+                    2,
+                    Tool::Invalidate,
+                    r#"{"evidence":[],"reason":"r","thesis_id":"t"}"#,
+                ),
+            ],
+        ))
+        .expect("turn 1");
+    assert_eq!(indexes(&step.ordered), vec![2, 1, 0]);
+}
+
+#[test]
+fn results_with_no_dispatch_out_or_after_the_end_are_refused() {
+    let mut state = final_output_run(LoopBounds::v0_2());
+    assert!(matches!(
+        state.on_results(&[]),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+    state
+        .on_reply(&reply(
+            1,
+            10,
+            vec![call(0, Tool::MarketBars, &bars("AAPL"))],
+        ))
+        .expect("turn 1");
+    state.end(EndReason::Deadline).expect("a cancelled run");
+    assert!(matches!(
+        state.on_results(&[ok_result(1, 0, 10, Vec::new())]),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+}
+
+#[test]
+fn a_second_start_folded_after_a_turn_or_the_end_is_refused() {
+    let start = start_with(
+        OutputMode::FinalOutput,
+        final_output_menu(),
+        LoopBounds::v0_2(),
+    );
+    let mut fresh = RunState::start(start.clone());
+    fresh
+        .fold(&FoldedEvent::Started(start.clone()))
+        .expect("a start before anything else folds");
+    let mut turned = RunState::start(start.clone());
+    turned
+        .fold(&FoldedEvent::Turn(reply(
+            1,
+            10,
+            vec![call(0, Tool::Note, r#"{"text":"x"}"#)],
+        )))
+        .expect("turn 1");
+    assert!(matches!(
+        turned.fold(&FoldedEvent::Started(start.clone())),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+    let mut ended = RunState::start(start.clone());
+    ended
+        .fold(&FoldedEvent::Ended(EndReason::Mode))
+        .expect("an end");
+    assert!(matches!(
+        ended.fold(&FoldedEvent::Started(start)),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+}
+
+#[test]
+fn a_folded_refusal_must_be_the_one_the_reply_produced() {
+    let mut state = final_output_run(LoopBounds::v0_2());
+    state
+        .fold(&FoldedEvent::Turn(reply(
+            1,
+            10,
+            vec![
+                call(0, Tool::MarketBars, &bars("TSLA")),
+                call(1, Tool::Note, r#"{"text":"x"}"#),
+            ],
+        )))
+        .expect("turn 1");
+    let refusal = |outcome, code| {
+        FoldedEvent::Result(ToolResult {
+            call: ToolCallId { turn: 1, index: 0 },
+            outcome,
+            code: Some(code),
+            bytes: 16,
+            truncated: false,
+            untrusted: false,
+            items: Vec::new(),
+        })
+    };
+    for wrong in [
+        refusal(ToolOutcome::Refused, Code::UnknownItem),
+        refusal(ToolOutcome::Failed, Code::OutOfUniverse),
+    ] {
+        assert!(matches!(
+            state.clone().fold(&wrong),
+            Err(ResearchRunError::LoopOrder { .. })
+        ));
+    }
+    state
+        .fold(&refusal(ToolOutcome::Refused, Code::OutOfUniverse))
+        .expect("the reply's own refusal");
+    assert!(
+        matches!(
+            state.fold(&FoldedEvent::Result(ok_result(1, 5, 4, Vec::new()))),
+            Err(ResearchRunError::LoopOrder { .. })
+        ),
+        "a result for a call that was never out"
+    );
+}
