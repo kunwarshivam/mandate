@@ -58,9 +58,10 @@ impl<T: Tools> RobinhoodConnector<T> {
         filters.insert("created_at_gte".to_owned(), text(since.to_string()));
         let records = self.read_pages(&filters).await?;
         let ours = ref_id(&listing.client_order_id).map_err(|_| UNREAD)?;
+        let held = self.placed_id(&listing.client_order_id);
         let mut orders = Vec::with_capacity(records.len());
         for record in &records {
-            let read = listed(record, &listing.client_order_id, &ours, ticker);
+            let read = listed(record, &listing.client_order_id, &ours, held, ticker);
             let mut order = read.ok_or(UNREAD)?;
             order.order.instrument = listing.instrument.clone();
             orders.push(order);
@@ -98,13 +99,16 @@ impl<T: Tools> RobinhoodConnector<T> {
 
 /// One `orders[]` record as the executor matches it (DEC-941 item 4). A record carrying our
 /// `ref_id` names our key; one carrying another `ref_id` names that text behind
-/// [`FOREIGN_REF_ID`], which no key of ours can equal, so it is never adopted; one carrying none
-/// names nothing, and the executor's look-alike rule decides (DEC-863). A record naming another
-/// ticker than the one listed for is `None` (DEC-956 item 1).
+/// [`FOREIGN_REF_ID`], which no key of ours can equal, so it is never adopted. One carrying none
+/// names our key when its order id is `held`, the id this connector's own place answered for the
+/// key (DEC-1150 item 7: a broker that does not echo `ref_id` still lists the order by the id it
+/// gave), and otherwise names nothing, and the executor's look-alike rule decides (DEC-863). A
+/// record naming another ticker than the one listed for is `None` (DEC-956 item 1).
 fn listed(
     record: &Map<String, Value>,
     key: &ClientOrderId,
     ours: &str,
+    held: Option<&str>,
     ticker: &InstrumentId,
 ) -> Option<ListedOrder> {
     let mut order = order_record(record)?;
@@ -125,6 +129,7 @@ fn listed(
     order.client_order_id = match record.get("ref_id").and_then(Value::as_str) {
         Some(theirs) if theirs == ours => Some(key.as_str().to_owned()),
         Some(theirs) => Some(format!("{FOREIGN_REF_ID}{theirs}")),
+        None if held == Some(order.broker_order_id.as_str()) => Some(key.as_str().to_owned()),
         None => None,
     };
     Some(ListedOrder {

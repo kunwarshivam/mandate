@@ -855,3 +855,48 @@ fn the_protective_stop_rests_at_the_broker_and_fills_only_once_triggered() {
     let position = server.drive(|sim| sim.position(AGENTIC, "SPY")).unwrap();
     assert_eq!(position, Ok(qty("0")));
 }
+
+/// R0's R18 (DEC-1150 item 7): a broker that does not echo our `ref_id` lists our order with no
+/// client order id, so the connector names the record by the broker's own id for it, the one its
+/// place answered (journal spec §9.16: the connector reads that id, the executor's fold never
+/// does). A connector that never placed the order, and so holds no id for it, names nothing.
+#[test]
+fn a_listing_names_our_order_by_the_broker_id_its_place_answered() {
+    let server = read_server_echoing(false);
+    let opened = UtcNanos::parse("2026-10-20T15:00:00.000000000Z").unwrap();
+    server
+        .drive(|sim| sim.apply(Event::Clock(opened)))
+        .unwrap()
+        .unwrap();
+    let mut placing = shell(&server);
+    let order = submitted(placing.connector.call(&buy("01JOPEN")));
+    server
+        .drive(|sim| sim.fill(&order.broker_order_id, qty("2"), price("499")))
+        .unwrap()
+        .unwrap();
+    let listing = BrokerRequest::ListOrders(mandate_executor::OrderListing {
+        client_order_id: key("01JOPEN"),
+        instrument: InstrumentId::new("SPY").unwrap(),
+        origin: mandate_executor::OrderOrigin::Agentic,
+        created_since: mandate_executor::RiskClock::from_secs(opened.secs() - 300),
+    });
+    let named = |outcome: Result<BrokerOutcome, ConnectorError>| match outcome {
+        Ok(BrokerOutcome::Listed { orders, .. }) => orders
+            .into_iter()
+            .map(|record| (record.order.client_order_id, record.order.status))
+            .collect::<Vec<_>>(),
+        other => panic!("a listing: {other:?}"),
+    };
+    let ours = Some(key("01JOPEN").as_str().to_owned());
+    assert_eq!(
+        named(placing.connector.call(&listing)),
+        vec![(ours, "filled".to_owned())],
+        "the one record is ours, by the order id the place answered"
+    );
+    let mut stranger = shell(&server);
+    assert_eq!(
+        named(stranger.connector.call(&listing)),
+        vec![(None, "filled".to_owned())],
+        "a connector that holds no id for the key names nothing"
+    );
+}
