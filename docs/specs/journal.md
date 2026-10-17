@@ -18,17 +18,23 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `ClockToleranceExceeded`, with rules 143 to 148. §5.4 named the measurements but not their
   members; until this version a scheduler-stream record's payload was not checked. It binds the
   scheduler stream only: the executor's account-stream copies keep §9's row (E7-4 slice 5).
-  Agent-accepted under DEC-176: it closes a gap that nothing wrote into, and changes no other
-  record, rule, or reading.
-  - **The measurement.** `offset_ns` is the lower median of the answering servers' offsets, and a
-    measurement no server answers has none and is out of tolerance, so an unknown clock is never
-    read as a good one (`AGENTS.md` rule 3).
+  Agent-accepted under DEC-176: it closes a gap that nothing wrote into, and every reading is the
+  one that adds no risk.
+  - **The measurement.** Offsets are signed `decimal` seconds (§4.4 keeps integers non-negative).
+    The measured `offset` is the median by magnitude of the answering servers', the larger of two;
+    a measurement no server answers has none and is out of tolerance (`AGENTS.md` rule 3).
+  - **What reads it.** Design §3.4's start-up check, read the stricter way: while the last
+    measurement is out of tolerance, or before the first, an executor takes no new opening (its
+    story, E21-30); exits, protection, the kill switch, and the ticks are never held. Design §3.4
+    says so in the same change.
   - **The flagged interval.** Records are flagged from the last in-tolerance measurement before a
     `ClockToleranceExceeded` to the next in-tolerance one: the earlier start flags more, never
     fewer. Flags are computed by exports and read by no risk input.
-  - **The ticks.** `ClockAdvanced` carries its tick as `clock`, a whole-second `risk_clock`. The
-    scheduler keeps ticking out of tolerance and never writes a tick at or before the last one;
-    `append` does not compare ticks or dates across records at this version.
+  - **The ticks.** `ClockAdvanced` carries its tick as `clock`, a whole-second `risk_clock`: one
+    tick per elapsed second, each the later of the previous plus one second and the host clock's
+    second, so a host clock that steps back never freezes or reverses the risk clock.
+    `TradingDayStarted` follows the first tick of each new trading date in its batch. `append` does
+    not compare ticks or dates across records at this version.
   - **Versions.** v0.45 and v0.46 are held by open changes (the backtest and gateway lanes); this
     change takes v0.47 and lists no change for them.
 
@@ -938,7 +944,7 @@ A new writer takes ownership by incrementing `writer_epoch`; the previous writer
 startup, before the regular session, and at least every 10 minutes, recording sources and stratum in
 `ClockOffsetRecorded`. If the offset exceeds the tolerance (default 50 ms), it journals
 `ClockToleranceExceeded`, and events recorded while out of tolerance are flagged in exports. Broker
-`event_time` remains authoritative for executions. §9.18 closes these records, defines the measured offset and the
+`event_time` remains authoritative for executions. §9.18 closes these records, defines the measured offset, what reads it, and the
 flagged interval, and holds that a measurement no server answers is out of tolerance.
 
 ## 6. Storage
@@ -3751,15 +3757,18 @@ The scheduler stream of §2, `clock:{workspace_id}`, and its five records: `Stre
 `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`, and `ClockToleranceExceeded`. Each is
 closed at schema version 1 on this stream as §9.15 closes its records: every listed member is
 present, `null` only where the type is nullable, and any other member is `schema` at that member.
-§9.1's types and report order apply, with §9.2's `date` and `risk_clock`. The rules number on from
-§9.17's. None of the five names a configuration (`config_refs` is `{}`), none is an account-stream
-risk input, so none carries a `risk_clock` member of that name, and none holds free text but a time
-server's name.
+§9.1's types and report order apply, with §9.2's `date` and `risk_clock`: a member's type, a nested
+member's included, is checked before any numbered rule. The rules number on from §9.17's. None of
+the five names a configuration (`config_refs` is `{}`), none is an account-stream risk input, so
+none carries a `risk_clock` member of that name, and none holds free text but a time server's name.
+Offsets and delays are signed `decimal` seconds (§4.6), never integers, which §4.4 keeps
+non-negative.
 
 **Who writes them.** The workspace scheduler, the stream's single writer under §5.1's fencing, as a
 `system` actor with `clock_source` `scheduler`: rule 143. A second scheduler takes the stream by
 taking a newer writer epoch, and the older one's next append is `Fenced` before it writes anything
-(infrastructure design §3.4). Nothing else appends to this stream.
+(infrastructure design §3.4). Nothing else appends to this stream. `StreamOpened` is written once,
+at seq 1; a restarted scheduler continues the stream and writes none.
 
 **The account-stream copies.** The executor's copies of `ClockAdvanced` and `TradingDayStarted` on
 an account stream (§2) are not closed here: they keep §9's row until the story that writes them
@@ -3777,15 +3786,17 @@ stream type of `stream_id`.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `clock` | `risk_clock` | The tick: the host clock's UTC time, truncated to the whole second |
+| `clock` | `risk_clock` | The tick |
 
-The scheduler ticks once a second. Each `clock` is later than the stream's previous one; when the
-host clock reads a second at or before the last tick (a step back, or a restart within the same
-second), the scheduler writes no tick until the host clock passes it, so the risk clock never runs
-backwards and never repeats. `append` does not compare `clock` across records at this version; the
-writer holds it, and its tests show it. The scheduler keeps ticking while its clock is out of
-tolerance: the tick is the clock the executor's time-based exits run on, and an offset only flags
-records (below), never stops them (`AGENTS.md` rules 3 and 13, design OPS-14).
+The scheduler writes one tick for each second that elapses on its own monotonic clock, and each
+tick's `clock` is the later of the previous tick plus one second and the host clock's UTC time
+truncated to the whole second. So the risk clock never runs backwards or repeats, and never stops:
+when the host clock steps back, or a restart lands within the last tick's second, the ticks go on
+one second at a time from the last one rather than waiting for the host clock to pass it, so no
+time-based exit or timer is held (`AGENTS.md` rules 3 and 13). When the host clock steps forward,
+the next tick follows it; that step is what the measurements below detect. The first tick of a
+stream is the host clock's second. `append` does not compare `clock` across records at this
+version; the writer holds it, and its tests show it.
 
 **`TradingDayStarted`**: a trading day began.
 
@@ -3793,9 +3804,10 @@ records (below), never stops them (`AGENTS.md` rules 3 and 13, design OPS-14).
 |---|---|---|
 | `date` | `date` | The America/New_York trading date |
 
-Each `date` is later than the stream's previous one, and each trading date is written at most once.
-When in the day it is written follows the trading calendar ([trading spec §2.2](trading-domain.md#22-time-and-calendars)) and is the scheduler's
-own; `append` does not compare dates across records at this version.
+It is written in the same batch as, and right after, the first `ClockAdvanced` whose `clock` falls
+on a trading date (the trading calendar, [trading spec §2.2](trading-domain.md#22-time-and-calendars))
+later than the stream's last `TradingDayStarted`, so each trading date is written once and in
+order. `append` does not compare dates across records at this version.
 
 **`ClockOffsetRecorded`**: one measurement of the host clock against its time servers (§5.4).
 
@@ -3803,9 +3815,9 @@ own; `append` does not compare dates across records at this version.
 |---|---|---|
 | `trigger` | `startup` \| `before_session` \| `periodic` | Why it was measured: at start, before the regular session, or the measurement at least every 10 minutes (§5.4) |
 | `samples` | `[clock_sample]` | The servers that answered, strictly ascending by `server`: rule 145. A server that did not answer, or answered unsynchronized (stratum 0 or 16), is not a sample |
-| `offset_ns` | `integer?` | The host clock minus the servers' time, in nanoseconds: the lower median of the samples' `offset_ns`, `null` when there is no sample: rule 146 |
-| `tolerance_ns` | `integer` | The tolerance it was judged against, in nanoseconds (default 50 ms, 50000000): rule 145 |
-| `within_tolerance` | `boolean` | Rule 147: `true` only when `offset_ns` is non-null and its magnitude is at most `tolerance_ns`. A measurement no server answered is out of tolerance (`AGENTS.md` rule 3) |
+| `offset` | `decimal?` | The host clock minus the servers' time, in seconds: the sample offset rule 146 selects, `null` when there is no sample |
+| `tolerance` | `decimal` | The tolerance it was judged against, in seconds (default `0.05`, 50 ms): rule 145 |
+| `within_tolerance` | `boolean` | Rule 147: `true` only when `offset` is non-null and its magnitude is at most `tolerance`. A measurement no server answered is out of tolerance (`AGENTS.md` rule 3) |
 
 `clock_sample` is an object with exactly these members, each present:
 
@@ -3813,29 +3825,38 @@ own; `append` does not compare dates across records at this version.
 |---|---|---|
 | `server` | `text` | The time server's configured name; never a credential |
 | `stratum` | `integer` | Its NTP stratum, 1 to 15: rule 145 |
-| `offset_ns` | `integer` | Its offset: the host clock minus its time, in nanoseconds |
-| `delay_ns` | `integer` | The round-trip delay, at least 0: rule 145 |
+| `offset` | `decimal` | Its offset: the host clock minus its time, in seconds |
+| `delay` | `decimal` | The round-trip delay in seconds, at least 0: rule 145 |
 
 **`ClockToleranceExceeded`**: the measurement it follows was out of tolerance (§5.4).
 
 | Member | Type | Meaning |
 |---|---|---|
-| `offset_ns` | `integer?` | The measurement's `offset_ns`, `null` when no server answered: rule 148 |
-| `tolerance_ns` | `integer` | The measurement's `tolerance_ns`: rule 148 |
+| `offset` | `decimal?` | The measurement's `offset`, `null` when no server answered: rule 148 |
+| `tolerance` | `decimal` | The measurement's `tolerance`: rule 148 |
 
 The scheduler writes it in the same batch as, and right after, every `ClockOffsetRecorded` whose
 `within_tolerance` is `false`, with that record's `event_id` as its `causation_id` and the same two
 members, and writes it at no other time.
 
+**What reads the measurements.** Infrastructure design §3.4 makes the clock offset a start-up check
+whose failure refuses to start trading. Read the stricter way, which adds no risk (DEC-176): while
+the workspace's last `ClockOffsetRecorded` has `within_tolerance` `false`, or none has been
+written, the workspace's long-running executor process (design §3.1) takes no new opening. The
+one-shot runs that read no scheduler stream are not changed by it. Risk exits, protective orders, the kill switch, and the
+ticks themselves are never held by a measurement (`AGENTS.md` rules 3 and 13), and broker
+`event_time` stays authoritative for executions (§5.4). The executor's reading is its own story's
+(E21-30); until it lands nothing reads these records.
+
 **Flagged records.** A record is flagged in an export (§5.4) when its `recorded_at` falls inside an
 out-of-tolerance interval of its workspace's scheduler stream: from the `recorded_at` of the last
 `ClockOffsetRecorded` with `within_tolerance` `true` before a `ClockToleranceExceeded`, or from the
-stream's first record when there is none, to the `recorded_at` of the next `ClockOffsetRecorded`
-with `within_tolerance` `true`, or without end while there is none. The interval starts at the last
-good measurement rather than the bad one, because the clock may have drifted at any time between
-them, so it flags more records, never fewer. A flag is computed by the export from these records;
-no record is changed, and no risk input reads it: the risk clock is the scheduler's tick, and broker
-`event_time` stays authoritative for executions (§5.4).
+stream's `StreamOpened` when there is none, to the `recorded_at` of the next `ClockOffsetRecorded`
+with `within_tolerance` `true`, or without end while there is none. Intervals are over the stream,
+whatever writer epoch wrote them. The interval starts at the last good measurement rather than the
+bad one, because the clock may have drifted at any time between them, so it flags more records,
+never fewer. A flag is computed by the export from these records; no record is changed, and no risk
+input reads the flag.
 
 **Consistency rules** (reason `schema` unless named; the path is the member named), checked in
 number order after the members' types:
@@ -3844,18 +3865,21 @@ number order after the members' types:
      (`clock_source`).
 144. Scheduler-stream `StreamOpened`: `stream_id` equals `clock:{workspace_id}` (`stream_mismatch` at
      `stream_id`).
-145. `ClockOffsetRecorded`: `tolerance_ns` is at least 1 (`payload.tolerance_ns`); each sample's
-     `stratum` is 1 to 15 (`payload.samples[i].stratum`) and its `delay_ns` at least 0
-     (`payload.samples[i].delay_ns`); and the samples are strictly ascending by the bytes of
-     `server`, so none is listed twice (`non_canonical` at `payload.samples`).
-146. `ClockOffsetRecorded`: `offset_ns` is `null` exactly when `samples` is empty, and otherwise
-     equals the lower median of the samples' `offset_ns`, the value at index (n - 1) / 2, rounded
-     down, of the n offsets sorted ascending (`payload.offset_ns`).
-147. `ClockOffsetRecorded`: `within_tolerance` is `true` exactly when `offset_ns` is non-null and
-     its magnitude is at most `tolerance_ns` (`payload.within_tolerance`).
-148. `ClockToleranceExceeded`: `tolerance_ns` is at least 1 (`payload.tolerance_ns`); `offset_ns`
-     is `null` or its magnitude exceeds `tolerance_ns` (`payload.offset_ns`); and `causation_id` is
-     non-null (`causation_id`), naming the measurement it follows.
+145. `ClockOffsetRecorded`: `tolerance` is greater than 0 (`payload.tolerance`); each sample's
+     `stratum` is 1 to 15 (`payload.samples[i].stratum`) and its `delay` at least 0
+     (`payload.samples[i].delay`); and the samples are strictly ascending by the bytes of `server`,
+     so none is listed twice (`non_canonical` at `payload.samples`).
+146. `ClockOffsetRecorded`: `offset` is `null` exactly when `samples` is empty, and otherwise
+     equals the offset of the sample at index n / 2, rounded down, of the n samples sorted by the
+     magnitude of `offset` ascending, then by `offset` ascending (`payload.offset`). That is the
+     median by magnitude, and of two samples the larger, so one server that disagrees with a
+     second is never outvoted by it toward tolerance.
+147. `ClockOffsetRecorded`: `within_tolerance` is `true` exactly when `offset` is non-null and its
+     magnitude is at most `tolerance` (`payload.within_tolerance`).
+148. `ClockToleranceExceeded`: `tolerance` is greater than 0 (`payload.tolerance`); `offset` is
+     `null` or its magnitude exceeds `tolerance` (`payload.offset`); and `causation_id` is non-null
+     (`causation_id`), naming the measurement it follows. `append` does not check at this version
+     that it names a `ClockOffsetRecorded`; the writer does.
 
 **No vectors.** As for §9.15 and §9.16, `reference/journal` does not model the scheduler stream, and
 the test vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member
