@@ -3,12 +3,12 @@
 
 use std::collections::BTreeMap;
 
-use mandate_canon::{Value, parse};
+use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
 use mandate_domain::AssetClass;
 use mandate_gateway::meter::MeterStore;
 use mandate_gateway::provider::{Clock, Transport};
 use mandate_gateway::registry::ModelRef as ModelPin;
-use mandate_gateway::{CallRecord, CallRequest, Gateway, Outcome, RequestError};
+use mandate_gateway::{CallRecord, CallRequest, Gateway, KeyOwner, Outcome, Purpose, RequestError};
 use mandate_time::UtcNanos;
 
 use crate::error::ResearchRunError;
@@ -164,7 +164,23 @@ impl ResearchCall {
     /// # Errors
     /// [`ResearchRunError::InvalidId`] when an input cannot be written as canonical text.
     pub fn request(&self) -> Result<CallRequest, ResearchRunError> {
-        Err(ResearchRunError::Unimplemented { story: "E19-3" })
+        Ok(CallRequest {
+            call_id: self.call_id.clone(),
+            workspace_id: self.workspace_id.clone(),
+            agent_id: Some(self.agent_id.clone()),
+            purpose: Purpose::Research,
+            model: self.model.clone(),
+            inputs: render_inputs(&self.inputs)?,
+            as_of: self.as_of,
+            deadline: self.deadline,
+            observations: self
+                .inputs
+                .items
+                .iter()
+                .map(|item| item.observation.clone())
+                .collect(),
+            key_owner: KeyOwner::Platform,
+        })
     }
 }
 
@@ -172,8 +188,84 @@ impl ResearchCall {
 ///
 /// # Errors
 /// [`ResearchRunError::InvalidId`] when an input cannot be written as canonical text.
-pub fn render_inputs(_inputs: &CallInputs) -> Result<BTreeMap<String, String>, ResearchRunError> {
-    Err(ResearchRunError::Unimplemented { story: "E19-3" })
+pub fn render_inputs(inputs: &CallInputs) -> Result<BTreeMap<String, String>, ResearchRunError> {
+    let symbols = |list: &[Symbol]| {
+        Value::Array(
+            list.iter()
+                .map(|symbol| Value::Str(symbol.as_str().to_owned()))
+                .collect(),
+        )
+    };
+    let context = object(vec![
+        (
+            "asset_classes",
+            Value::Array(
+                inputs
+                    .asset_classes
+                    .iter()
+                    .map(|class| Value::Str(class.as_str().to_owned()))
+                    .collect(),
+            ),
+        ),
+        ("cut_off", Value::Str(inputs.cut_off.to_string())),
+        ("data_universe", symbols(&inputs.data_universe)),
+        ("description", Value::Str(inputs.description.clone())),
+        ("held", symbols(&inputs.held)),
+        (
+            "max_instruments",
+            Value::Int(
+                Int::new(u64::from(inputs.max_instruments))
+                    .ok_or(ResearchRunError::InvalidId { what: "inputs" })?,
+            ),
+        ),
+        ("working_universe", symbols(&inputs.working_universe)),
+    ])?;
+    let items = inputs
+        .items
+        .iter()
+        .map(|item| {
+            object(vec![
+                ("body", item.body.clone()),
+                ("item_id", Value::Str(item.item_id.as_str().to_owned())),
+                ("kind", Value::Str(item.kind.as_str().to_owned())),
+                ("observation", Value::Str(item.observation.clone())),
+                ("source", Value::Str(item.source.as_str().to_owned())),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let memory = inputs
+        .theses
+        .iter()
+        .map(|thesis| {
+            object(vec![
+                ("expires_at", Value::Str(thesis.expires_at.to_string())),
+                ("symbol", Value::Str(thesis.symbol.as_str().to_owned())),
+                ("thesis_id", Value::Str(thesis.thesis_id.clone())),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    [
+        ("context", context),
+        ("items", Value::Array(items)),
+        ("memory", Value::Array(memory)),
+    ]
+    .into_iter()
+    .map(|(name, value)| {
+        String::from_utf8(to_canonical(&value))
+            .map(|text| (name.to_owned(), text))
+            .map_err(|_| ResearchRunError::InvalidId { what: "inputs" })
+    })
+    .collect()
+}
+
+/// A canonical object of `members`.
+fn object(members: Vec<(&str, Value)>) -> Result<Value, ResearchRunError> {
+    let mut out = Object::new();
+    for (name, value) in members {
+        let key = Key::new(name).map_err(|_| ResearchRunError::InvalidId { what: "inputs" })?;
+        out.insert(key, value);
+    }
+    Ok(Value::Object(out))
 }
 
 /// What the harness does about one call besides treating a failed call's output as missing, which
@@ -191,11 +283,17 @@ pub struct Treatment {
 /// §7.3's table over the gateway's outcomes. `ok` has no treatment. No outcome is ever retried
 /// within the run: the gateway has already retried what it may, and sampling again until something
 /// parses would select outputs (DEC-432 item 3).
-pub fn treatment(_outcome: Outcome) -> Treatment {
+pub fn treatment(outcome: Outcome) -> Treatment {
     Treatment {
-        alert_operator: false,
-        disable_research: false,
-        deadline_streak: false,
+        alert_operator: matches!(
+            outcome,
+            Outcome::PolicyDenied
+                | Outcome::CredentialInvalid
+                | Outcome::MeterUnavailable
+                | Outcome::InputRejected
+        ),
+        disable_research: outcome == Outcome::ModelWithdrawn,
+        deadline_streak: outcome == Outcome::DeadlineExceeded,
     }
 }
 
@@ -219,12 +317,19 @@ pub enum Answer {
 /// # Errors
 /// [`ResearchRunError`] when the call cannot be built; nothing is then sent.
 pub fn call<T: Transport, S: MeterStore, C: Clock>(
-    _gateway: &mut Gateway<T, S, C>,
-    _plan: &CallPlan,
-    _retrieval: &Retrieval,
-    _context: CallContext,
+    gateway: &mut Gateway<T, S, C>,
+    plan: &CallPlan,
+    retrieval: &Retrieval,
+    context: CallContext,
 ) -> Result<(ResearchCall, Answer), ResearchRunError> {
-    Err(ResearchRunError::Unimplemented { story: "E19-3" })
+    let dispatched_at = gateway.clock_mut().now();
+    let built = ResearchCall::build(plan, retrieval, context, dispatched_at)?;
+    let request = built.request()?;
+    let answer = match gateway.call(&request) {
+        Ok(record) => Answer::Recorded(record),
+        Err(error) => Answer::Refused(error),
+    };
+    Ok((built, answer))
 }
 
 /// `at` plus `ms` milliseconds, exactly.

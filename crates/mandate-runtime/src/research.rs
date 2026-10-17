@@ -22,12 +22,14 @@
 //! thesis's `ModelOutputRecorded`, which the existing order builder, the gate's dry run, and the
 //! autonomy rules then judge like any model output (HI-1, HI-10).
 //!
-//! # Records that do not exist yet
+//! # The call record
 //!
-//! `ModelInvocationRecorded` on the agent stream is not closed (E15-8), and neither the candidates'
-//! verdict record (E15-8) nor the invalidation verdict (E19-5) is in the journal spec. The drafts
-//! here are DEC-996's provisional shapes, and [`Preconditions`] keeps every run from starting until
-//! the journal registers both records, so no provisional draft reaches a production journal.
+//! The worker calls through `mandate-gateway` (DEC-1120), and the core journals the gateway's own
+//! [`CallRecord`] as journal spec §9.19's agent-stream `ModelInvocationRecorded`, whatever its
+//! outcome. An `ok` record is judged in the step it arrives, and its verdicts go in the record,
+//! which heads the judging batch (rule 151, INF-10). `mandate-journal` does not register that
+//! record or the invalidation verdict (E19-5) yet, so [`Preconditions`] keeps every run from
+//! starting until it does.
 
 mod judge;
 
@@ -35,7 +37,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Value};
-use mandate_gateway::{CallRecord, RequestError};
+use mandate_gateway::{CallRecord, Outcome, Purpose, RequestError, Verdict};
 use mandate_research::drift::{DriftState, InputClass, InputObservation};
 use mandate_research::{
     AdmissionFacts, ContentHash, LineageState, PolicyOverlay, SourceId as ResearchSource,
@@ -43,7 +45,7 @@ use mandate_research::{
 };
 use mandate_research_run::{
     CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
-    RetrievedItem, SourceId, Symbol,
+    RetrievedItem, SourceId, Symbol, treatment,
 };
 use mandate_time::UtcNanos;
 
@@ -55,6 +57,7 @@ use crate::step::{Batch, observed};
 use crate::types::{
     Effect, EventId, FoldedEvent, Input, Mode, NotificationRef, Observation, RiskClock,
 };
+use judge::Judged;
 
 /// The research entry's pinned configuration (§1.3, inference spec §4.1): the identity, the call's
 /// deadline and token bound, the retrieval plan, the output bounds, and the owner's description.
@@ -369,7 +372,11 @@ impl ResearchState {
         {
             return Ok(());
         }
-        let _ = event;
+        let completed = payload::str_of(&event.payload, "completed_at")
+            .and_then(|text| UtcNanos::parse(text).ok())
+            .ok_or_else(|| payload::non_canonical("completed_at"))?;
+        let completed = RiskClock::from_secs(completed.secs());
+        self.last_call = Some(self.last_call.map_or(completed, |last| last.max(completed)));
         Ok(())
     }
 
@@ -433,7 +440,7 @@ pub fn handle_research(
         }
         ResearchInput::Called { run_id, at, record } => {
             not_behind(state, *at)?;
-            called(state, research, run_id, *at, record, context, &mut batch)?;
+            called(state, research, run_id, record, context, &mut batch)?;
         }
         ResearchInput::Refused { run_id, at, error } => {
             not_behind(state, *at)?;
@@ -717,20 +724,119 @@ fn fold_drift(research: &mut ResearchState, items: &[RetrievedObservation]) {
 }
 
 /// The gateway's record of a call: always journaled as `ModelInvocationRecorded`, whatever the
-/// outcome and whether or not its run was cancelled (§5.3, §6.6).
+/// outcome and whether or not its run was cancelled (§5.3, §6.6). An `ok` record of the run in
+/// flight, on time, under the pin research still runs, is judged in the same step, and its
+/// verdicts go in the record, which heads the batch (§6.2 steps 4 and 5, journal spec §9.19). A
+/// record of another call, pin, purpose, agent, or retrieved context is refused and never
+/// journaled as this run's (INF-2, caller side).
 fn called(
-    _state: &RuntimeState,
-    _research: &mut ResearchState,
-    _run_id: &str,
-    _at: RiskClock,
-    _record: &CallRecord,
-    _context: &ResearchContext<'_>,
-    _batch: &mut Batch<'_>,
+    state: &RuntimeState,
+    research: &mut ResearchState,
+    run_id: &str,
+    record: &CallRecord,
+    context: &ResearchContext<'_>,
+    batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
-    Err(RuntimeError::NotInterpreted {
-        what: "a call record".to_owned(),
-        story: "E19-3",
-    })
+    let agent = state.deployment().agent.0.as_str();
+    let in_flight = research
+        .run
+        .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
+    let Some(run) = in_flight else {
+        let owned = research
+            .cancelled
+            .get(run_id)
+            .and_then(Option::as_ref)
+            .is_some_and(|call| owns(record, &call.call_id, &call.pin, &call.observations, agent));
+        let cancelled = if owned {
+            research.cancelled.remove(run_id).flatten()
+        } else {
+            None
+        };
+        let Some(cancelled) = cancelled else {
+            return Err(RuntimeError::NotInterpreted {
+                what: "a call record for a run that never called, or of another call".to_owned(),
+                story: "E19-3",
+            });
+        };
+        let id = batch.journal("ModelInvocationRecorded", None, invocation(record, &[])?)?;
+        note_call(research, record);
+        treat(research, &cancelled.pin, record.outcome, id, batch);
+        return Ok(());
+    };
+    let Phase::Calling {
+        observations,
+        items,
+    } = &run.phase
+    else {
+        research.run = Some(run);
+        return Ok(());
+    };
+    if !owns(record, &run.call_id, &run.pin, observations, agent) {
+        research.run = Some(run);
+        return Err(RuntimeError::NotInterpreted {
+            what: "a call record of another call, pin, agent, or retrieved context".to_owned(),
+            story: "E19-3",
+        });
+    }
+    let judged = match context.config {
+        Some(config)
+            if record.outcome == Outcome::Ok
+                && record.completed_at <= record.deadline
+                && research_allowed(state, research, context).as_ref() == Some(&run.pin) =>
+        {
+            let called = Called {
+                observations,
+                items,
+            };
+            judge::judge(&run, &called, record, config, context, batch)?
+        }
+        _ => Judged::default(),
+    };
+    let id = batch.journal(
+        "ModelInvocationRecorded",
+        None,
+        invocation(record, &judged.verdicts)?,
+    )?;
+    for thesis in judged.theses {
+        let thesis_record = batch.journal(thesis.event_type, Some(id.clone()), thesis.body)?;
+        if let Some(output) = thesis.output {
+            batch.journal("ModelOutputRecorded", Some(thesis_record), output)?;
+        }
+    }
+    note_call(research, record);
+    treat(research, &run.pin, record.outcome, id, batch);
+    Ok(())
+}
+
+/// Whether `record` is the record of this call: its id, pin, purpose, agent, and exactly the
+/// journaled observations it was planned with, in order.
+fn owns(
+    record: &CallRecord,
+    call_id: &str,
+    pin: &ModelPin,
+    observations: &[EventId],
+    agent: &str,
+) -> bool {
+    record.call_id == call_id
+        && record.model == *pin
+        && record.purpose == Purpose::Research
+        && record.agent_id.as_deref() == Some(agent)
+        && record
+            .observations
+            .iter()
+            .map(String::as_str)
+            .eq(observations.iter().map(|id| id.0.as_str()))
+}
+
+/// The schedule counts from the call's completion, the instant the record carries, so a restart
+/// folds back the same anchor (HI-8).
+fn note_call(research: &mut ResearchState, record: &CallRecord) {
+    let completed = RiskClock::from_secs(record.completed_at.secs());
+    research.last_call = Some(
+        research
+            .last_call
+            .map_or(completed, |last| last.max(completed)),
+    );
 }
 
 /// The journaled context of the call being judged: its run's observations and their items' facts.
@@ -739,16 +845,72 @@ struct Called<'a> {
     items: &'a [ItemFacts],
 }
 
-/// A call the gateway could not make: the run ends with no output (HI-6).
+/// A call the gateway could not make (another workspace's, a malformed call id, an agent and
+/// purpose that disagree, or a pin the registry does not hold): the run ends with no output and no
+/// record (HI-6, inference spec §3.1), and research waits for a new version of the pin, since the
+/// same request would be refused again. A refusal for a cancelled run's call ends that run too.
 fn refused(
-    _research: &mut ResearchState,
-    _run_id: &str,
+    research: &mut ResearchState,
+    run_id: &str,
     _error: RequestError,
 ) -> Result<(), RuntimeError> {
-    Err(RuntimeError::NotInterpreted {
-        what: "a refused call".to_owned(),
-        story: "E19-3",
-    })
+    let in_flight = research
+        .run
+        .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
+    let Some(run) = in_flight else {
+        if research.cancelled.get(run_id).is_some_and(Option::is_some) {
+            research.cancelled.remove(run_id);
+            return Ok(());
+        }
+        return Err(RuntimeError::NotInterpreted {
+            what: "a refused call for a run that never called".to_owned(),
+            story: "E19-3",
+        });
+    };
+    research.withdrawn.insert(run.pin);
+    research.last_attempt = Some(run.cut_off);
+    Ok(())
+}
+
+/// §7.3's treatment beyond "missing": an opaque operator alert, research disabled for a withdrawn
+/// pin, and the three-in-a-row `deadline_exceeded` alert. Every notice carries only the call
+/// record's id and a fixed key (`AGENTS.md` rule 6).
+fn treat(
+    research: &mut ResearchState,
+    pin: &ModelPin,
+    outcome: Outcome,
+    record: EventId,
+    batch: &mut Batch<'_>,
+) {
+    let treatment = treatment(outcome);
+    if treatment.disable_research {
+        research.withdrawn.insert(pin.clone());
+    }
+    if treatment.alert_operator {
+        batch.notify(NotificationRef {
+            subject_event: record.clone(),
+            message_key: "research_call_refused",
+        });
+    }
+    if !treatment.deadline_streak {
+        research.deadline_streak = 0;
+        return;
+    }
+    research.deadline_streak = research.deadline_streak.saturating_add(1);
+    if research.deadline_streak >= 3 {
+        research.deadline_streak = 0;
+        batch.notify(NotificationRef {
+            subject_event: record,
+            message_key: "research_deadline_streak",
+        });
+    }
+}
+
+/// `ModelInvocationRecorded`'s agent-stream payload (journal spec §9.19), with the verdicts.
+fn invocation(record: &CallRecord, verdicts: &[Verdict]) -> Result<Value, RuntimeError> {
+    record
+        .agent_payload(verdicts)
+        .map_err(|_| payload::non_canonical("model_invocation"))
 }
 
 /// The worker's acknowledgment of a cancellation, its own or the core's. One that never

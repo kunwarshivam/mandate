@@ -4,9 +4,11 @@
 //! routing lock, the guard, the meter, and the caps are the same, so the recorded run shows what a
 //! hosted run would send. The selection says which it used and why, and never names the key.
 
+use mandate_canon::{Int, Key, Object, Value, to_canonical};
 use mandate_gateway::fake::RecordedTransport;
 use mandate_gateway::meter::{Meter, MeterStore};
 use mandate_gateway::money::Usage;
+use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::provider::{
     Clock, Delivery, HttpRequest, IdSource, ProviderKey, SecretError, SecretSource, Transport,
 };
@@ -45,15 +47,33 @@ pub struct Selection {
 impl Selection {
     /// One line naming the transport and the reason; it never names or shows the key.
     pub fn describe(&self) -> String {
-        String::new()
+        let upstream = &self.upstream;
+        match self.reason {
+            Reason::VaultedKey => format!(
+                "research model gateway: OpenRouter, routed to {upstream} only, with the vaulted key"
+            ),
+            Reason::NoVaultedKey => format!(
+                "research model gateway: the recorded fake (no vaulted key for {upstream}; no \
+                 provider is called)"
+            ),
+            Reason::NoHostedTransport => format!(
+                "research model gateway: the recorded fake (a key for {upstream} is vaulted, but \
+                 this process has no hosted transport; no provider is called)"
+            ),
+        }
     }
 }
 
 /// The selection for `upstream`: OpenRouter only when `vault` holds its key and `hosted` is true.
-pub fn select(_vault: &dyn SecretSource, upstream: &str, _hosted: bool) -> Selection {
+pub fn select(vault: &dyn SecretSource, upstream: &str, hosted: bool) -> Selection {
+    let (backend, reason) = match (vault.provider_key(upstream).is_ok(), hosted) {
+        (false, _) => (Backend::RecordedFake, Reason::NoVaultedKey),
+        (true, false) => (Backend::RecordedFake, Reason::NoHostedTransport),
+        (true, true) => (Backend::OpenRouter, Reason::VaultedKey),
+    };
     Selection {
-        backend: Backend::RecordedFake,
-        reason: Reason::NoVaultedKey,
+        backend,
+        reason,
         upstream: upstream.to_owned(),
     }
 }
@@ -85,23 +105,32 @@ pub enum ResearchTransport<H> {
 impl<H> ResearchTransport<H> {
     /// The recorded fake, when that is the transport.
     pub fn recorded(&self) -> Option<&RecordedTransport> {
-        None
+        match self {
+            Self::Recorded(fake) => Some(fake),
+            Self::Hosted(_) => None,
+        }
     }
 
     pub fn recorded_mut(&mut self) -> Option<&mut RecordedTransport> {
-        None
+        match self {
+            Self::Recorded(fake) => Some(fake),
+            Self::Hosted(_) => None,
+        }
     }
 }
 
 impl<H: Transport> Transport for ResearchTransport<H> {
     fn send(
         &mut self,
-        _request: &HttpRequest,
-        _key: Option<&ProviderKey>,
-        _deadline: UtcNanos,
-        _clock: &mut dyn Clock,
+        request: &HttpRequest,
+        key: Option<&ProviderKey>,
+        deadline: UtcNanos,
+        clock: &mut dyn Clock,
     ) -> Delivery {
-        Delivery::ConnectFailed
+        match self {
+            Self::Hosted(hosted) => hosted.send(request, key, deadline, clock),
+            Self::Recorded(fake) => fake.send(request, key, deadline, clock),
+        }
     }
 }
 
@@ -115,7 +144,7 @@ pub struct RecordedKey;
 
 impl SecretSource for RecordedKey {
     fn provider_key(&self, _upstream: &str) -> Result<ProviderKey, SecretError> {
-        Err(SecretError::Missing)
+        Ok(ProviderKey::new(RECORDED_KEY.to_owned()))
     }
 }
 
@@ -123,8 +152,46 @@ impl SecretSource for RecordedKey {
 /// `provider`, and `usage`: what the recorded fake replays, so a recorded run's reply is the shape
 /// a hosted one would read (inference spec §3.2).
 pub fn recorded_reply(content: &str, model: &str, provider: &str, usage: Usage) -> Vec<u8> {
-    let _ = (content, model, provider, usage);
-    Vec::new()
+    let count = |n: u64| Int::new(n).map_or(Value::Null, Value::Int);
+    let message = object(vec![
+        ("content", Value::Str(content.to_owned())),
+        ("role", Value::Str("assistant".to_owned())),
+    ]);
+    let choice = object(vec![
+        ("finish_reason", Value::Str("stop".to_owned())),
+        ("index", count(0)),
+        ("message", message),
+    ]);
+    let body = object(vec![
+        ("choices", Value::Array(vec![choice])),
+        ("id", Value::Str("gen-recorded".to_owned())),
+        ("model", Value::Str(model.to_owned())),
+        ("object", Value::Str("chat.completion".to_owned())),
+        ("provider", Value::Str(provider.to_owned())),
+        (
+            "usage",
+            object(vec![
+                ("completion_tokens", count(usage.output)),
+                (
+                    "prompt_tokens_details",
+                    object(vec![("cached_tokens", count(usage.cached))]),
+                ),
+                ("prompt_tokens", count(usage.input)),
+            ]),
+        ),
+    ]);
+    to_canonical(&body)
+}
+
+/// The names are fixed words, each a valid key.
+fn object(members: Vec<(&str, Value)>) -> Value {
+    let mut out = Object::new();
+    for (name, value) in members {
+        if let Ok(key) = Key::new(name) {
+            out.insert(key, value);
+        }
+    }
+    Value::Object(out)
 }
 
 /// Everything a research gateway is built from besides its transport and key source.
@@ -142,17 +209,21 @@ pub struct GatewayParts<S, C> {
 pub fn research_gateway<H: Transport, S: MeterStore, C: Clock>(
     parts: GatewayParts<S, C>,
     vault: Box<dyn SecretSource>,
-    _hosted: Option<H>,
+    hosted: Option<H>,
     recorded: RecordedTransport,
     upstream: &str,
 ) -> (Gateway<ResearchTransport<H>, S, C>, Selection) {
-    let selection = select(vault.as_ref(), upstream, false);
+    let selection = select(vault.as_ref(), upstream, hosted.is_some());
+    let (transport, secrets): (_, Box<dyn SecretSource>) = match (selection.backend, hosted) {
+        (Backend::OpenRouter, Some(hosted)) => (ResearchTransport::Hosted(hosted), vault),
+        _ => (ResearchTransport::Recorded(recorded), Box::new(RecordedKey)),
+    };
     let gateway = Gateway::new(
         parts.settings,
         parts.registry,
-        Box::new(mandate_gateway::openrouter::OpenRouter),
-        ResearchTransport::Recorded(recorded),
-        vault,
+        Box::new(OpenRouter),
+        transport,
+        secrets,
         parts.meter,
         parts.clock,
         parts.ids,

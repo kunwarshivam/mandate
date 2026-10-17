@@ -570,7 +570,7 @@ fn three_deadline_misses_in_a_row_alert_the_operator_once() {
     let gateway = failing(Outcome::DeadlineExceeded);
     let mut alerts = Vec::new();
     for run in 0..4 {
-        let now = CUT_OFF + run * (i64::from(INTERVAL_S) + 100);
+        let now = CUT_OFF + run * (i64::from(INTERVAL_S) + 300);
         full_run(&mut lp, clock(now), &ports, &world, &plane, &gateway);
         let called = &lp.steps[lp.steps.len() - 2];
         alerts.push(
@@ -1368,10 +1368,48 @@ fn a_restart_restores_the_schedule_and_never_judges_the_lost_run() {
         starts(&polled).is_empty(),
         "the interval still counts from the call"
     );
-    assert!(
-        restarted.events("ThesisProposed").is_empty(),
-        "§5.4: not judged after the restart"
+    assert_eq!(
+        restarted.events("ThesisProposed").len(),
+        1,
+        "judged once, in the call's own step, and never again after the restart"
     );
+}
+
+#[test]
+fn a_run_lost_to_a_restart_never_takes_its_late_answer() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let (run_id, plan, retrieval) = until_call(&mut lp, &ports, &world);
+    let (shell, _) = lp.shell.restart(&ports);
+    let mut restarted = Loop {
+        shell,
+        research: mandate_runtime::ResearchState::new(),
+        steps: Vec::new(),
+    };
+    let record = record_for(
+        &recorded(RESPONSE_AAPL),
+        &plan,
+        &retrieval,
+        &world,
+        common::research::instant(CUT_OFF),
+    );
+    let late = restarted.step(
+        ResearchInput::Called {
+            run_id,
+            at: clock(CUT_OFF + 30),
+            record,
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(late, Err(RuntimeError::NotInterpreted { .. })),
+        "§5.4: a run in flight is lost with its process"
+    );
+    assert!(restarted.events("ModelInvocationRecorded").is_empty());
 }
 
 #[test]

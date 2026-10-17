@@ -70,7 +70,6 @@ struct Cited<'a> {
 
 /// One thesis candidate that passed the harness checks, with everything the platform filled.
 struct Passed<'a> {
-    index: usize,
     candidate: &'a CandidateThesis,
     proposal: ProposedThesis,
     evidence: Vec<EventId>,
@@ -141,9 +140,8 @@ pub(super) fn judge(
             (None, Some(fact)) => {
                 let ordinal = THESIS_ORDINALS.saturating_add(u32::try_from(index).unwrap_or(0));
                 let thesis_id = batch.id_at(ordinal);
-                let Ok(filled) = fill(
-                    index, candidate, fact, &cited, &thesis_id, run, config, context,
-                ) else {
+                let Ok(filled) = fill(candidate, fact, &cited, &thesis_id, run, config, context)
+                else {
                     return Ok(Judged::default());
                 };
                 passed.push(filled);
@@ -293,7 +291,6 @@ fn not_canonical(field: &str) -> impl Fn(mandate_research::ResearchError) -> Run
     reason = "one thesis's fill reads the candidate, the snapshot fact, the cited items, its id, the run, the pin, and the context"
 )]
 fn fill<'a>(
-    index: usize,
     candidate: &'a CandidateThesis,
     fact: &InstrumentFact,
     cited: &BTreeMap<&str, Cited<'_>>,
@@ -380,7 +377,6 @@ fn fill<'a>(
             .map_err(not_canonical("invalidation"))?,
     };
     Ok(Passed {
-        index,
         candidate,
         proposal: ProposedThesis {
             thesis,
