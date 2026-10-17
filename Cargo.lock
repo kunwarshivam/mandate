@@ -1917,6 +1917,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-release"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "proptest",
+ "sha2 0.11.0",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-research"
 version = "0.0.0"
 dependencies = [

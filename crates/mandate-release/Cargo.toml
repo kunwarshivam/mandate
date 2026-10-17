@@ -1,0 +1,18 @@
+[package]
+name = "mandate-release"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The release a process runs: the build digest of its own executable, which it journals as actor.build (E21-8, DEC-970; infrastructure design §7.1, OPS-15)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+sha2.workspace = true
