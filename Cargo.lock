@@ -1624,6 +1624,7 @@ dependencies = [
  "mandate-num",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault-local",
  "proptest",
  "secrecy",
  "serde",
@@ -2082,6 +2083,9 @@ dependencies = [
 name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [
+ "mandate-connections",
+ "proptest",
+ "ring",
  "secrecy",
  "thiserror",
 ]

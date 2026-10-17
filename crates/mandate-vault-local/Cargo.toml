@@ -10,5 +10,10 @@ description = "The demo host's local vault for broker credentials, until the ful
 workspace = true
 
 [dependencies]
+mandate-connections.workspace = true
+ring.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

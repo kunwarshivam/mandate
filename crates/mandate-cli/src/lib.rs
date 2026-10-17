@@ -17,7 +17,8 @@
 //! `agent` are M7's owner control: the inbox, the owner's answers, and the owner's commands, each
 //! committed to the workspace control stream (E8-1 to E8-3). Their `clap` commands land once
 //! `mandate-journal` registers the control stream's schemas, without which a real journal refuses
-//! every event they commit (DEC-257 item 17, DEC-279 item 10).
+//! every event they commit (DEC-257 item 17, DEC-279 item 10). `vault import` stores the
+//! platform's OAuth client secret in the demo host's local vault, from stdin (E10-13 V1).
 
 use clap::{Parser, Subcommand};
 
@@ -37,6 +38,7 @@ pub mod postgres;
 pub mod register;
 #[cfg(any(test, feature = "rh-sim"))]
 pub mod sim_clock;
+pub mod vault;
 pub mod version;
 pub mod workspace;
 
@@ -84,4 +86,7 @@ pub enum Command {
     /// Show an agent's deployment code, or deploy it with a confirmed version, in paper.
     #[command(subcommand)]
     Agent(gestures::AgentCommand),
+    /// Import a platform secret into the demo host's local vault, from stdin only.
+    #[command(subcommand)]
+    Vault(vault::VaultCommand),
 }
