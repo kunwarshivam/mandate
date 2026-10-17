@@ -2304,8 +2304,20 @@ fn archived(path: &str, url: &str) -> Result<Verdict> {
     let backup_id = match backup_id? {
         Ok(backup_id) => backup_id,
         Err(phase) => {
+            let sidecars = kubectl(&[
+                "get",
+                "pod",
+                "--namespace",
+                NAMESPACE,
+                "--selector",
+                "cnpg.io/cluster=journal",
+                "-o",
+                "jsonpath={range .items[*]}{.metadata.name}: {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].lastState.terminated.reason} {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].restartCount} restarts; {end}",
+            ])
+            .unwrap_or_default();
             return Ok(Verdict::Broken(format!(
-                "the base backup {backup} did not complete (phase `{phase}`)"
+                "the base backup {backup} did not complete (phase `{phase}`); the plugin's sidecars: {}",
+                sidecars.trim()
             )));
         }
     };

@@ -30,11 +30,11 @@ spec:
   instanceSidecarConfiguration:
     resources:
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 250m
+        memory: 512Mi
       limits:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 250m
+        memory: 512Mi
 {{- end -}}
 {{- define "journal.baseBackup" -}}
 apiVersion: postgresql.cnpg.io/v1
