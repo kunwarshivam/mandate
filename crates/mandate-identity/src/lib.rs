@@ -182,11 +182,17 @@ use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 
 pub mod demand;
+mod founding;
 mod matrix;
 mod membership;
 mod permission;
+mod record;
 mod writer;
 
+pub use founding::{
+    Founded, FoundingError, FoundingRefusal, OWNER_BUNDLE, found_workspace, founding_decision,
+    founding_grant,
+};
 pub use mandate_tenant::{
     OrgId, PrincipalId, PrincipalKind, SessionRef, Tenant, UlidTextError, WorkspaceId,
 };
@@ -196,6 +202,7 @@ pub use membership::{
     RecordRefusal, check_independence, check_order,
 };
 pub use permission::Permission;
+pub use record::{MEMBERSHIP_TYPES, UnreadableRecord, control_entry};
 pub use writer::{
     ATTEMPTS, Appended, ControlEntry, ControlStream, ControlView, WriteError, write_membership,
 };
@@ -279,6 +286,23 @@ impl Role {
         matches!(self, Self::OrgOwner | Self::OrgAdmin | Self::BillingAdmin)
     }
 
+    /// Its value in journal spec §9.12's `role` type, which names the workspace roles only: `None`
+    /// for an org role, which no workspace membership record carries.
+    pub fn code(self) -> Option<&'static str> {
+        WORKSPACE_ROLE_CODES
+            .iter()
+            .find(|(role, _)| *role == self)
+            .map(|(_, code)| *code)
+    }
+
+    /// The workspace role §9.12's `role` type names by `code`, or `None` for any other text.
+    pub fn from_code(code: &str) -> Option<Self> {
+        WORKSPACE_ROLE_CODES
+            .iter()
+            .find(|(_, named)| *named == code)
+            .map(|(role, _)| *role)
+    }
+
     /// Every role, in §4.2's column order.
     pub const ALL: [Self; 8] = [
         Self::OrgOwner,
@@ -291,6 +315,15 @@ impl Role {
         Self::Auditor,
     ];
 }
+
+/// Journal spec §9.12's `role` values, each with the workspace role it names.
+const WORKSPACE_ROLE_CODES: [(Role, &str); 5] = [
+    (Role::Approver, "approver"),
+    (Role::Auditor, "auditor"),
+    (Role::Operator, "operator"),
+    (Role::Viewer, "viewer"),
+    (Role::WorkspaceAdmin, "workspace_admin"),
+];
 
 /// What a row's **S** cell asks of step-up (§4.2, DEC-641 item 1). Verifying evidence is §7's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

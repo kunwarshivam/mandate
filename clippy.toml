@@ -3,6 +3,13 @@
 disallowed-methods = [
     { path = "std::time::SystemTime::now", reason = "time arrives as an input; use the injected WallClock (ES-05)" },
     { path = "std::time::Instant::now", reason = "time arrives as an input; use the injected WallClock (ES-05)" },
+    # ADR-0001 ES-08, OPS-13, E21-50: only `mandate db migrate` migrates the journal schema, as its own
+    # deploy step; no process migrates at start. The command allows it at its one call site.
+    { path = "mandate_journal_pg::migrate::migrate", reason = "only `mandate db migrate` applies migrations, never a process at start (ES-08, OPS-13)" },
+    { path = "mandate_journal_pg::migrate::migrate_dsn", reason = "only `mandate db migrate` applies migrations, never a process at start (ES-08, OPS-13)" },
+    { path = "mandate_journal_pg::migrate::migrate_known", reason = "only `mandate db migrate` applies migrations, never a process at start (ES-08, OPS-13)" },
+    { path = "sqlx::migrate::Migrator::run", reason = "the journal's one ledger is `mandate db migrate`'s; no sqlx migrator runs beside it (E21-50)" },
+    { path = "sqlx::migrate::Migrator::run_direct", reason = "the journal's one ledger is `mandate db migrate`'s; no sqlx migrator runs beside it (E21-50)" },
 ]
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "iteration order breaks replay; use BTreeMap (ES-21)" },

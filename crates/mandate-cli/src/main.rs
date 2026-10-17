@@ -6,6 +6,7 @@ use clap::Parser;
 use mandate_cli::artifact::ArtifactCommand;
 use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
+use mandate_cli::db::DbCommand;
 use mandate_cli::gestures::{AgentCommand, VersionCommand};
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
@@ -14,7 +15,7 @@ use mandate_cli::register::{ConfigCommand, ModelCommand};
 use mandate_cli::sim_clock::from_env;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, connection, download, gestures, inbox, inspect, journal, register,
+    Cli, Command, artifact, connection, db, download, gestures, inbox, inspect, journal, register,
     workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
@@ -111,6 +112,14 @@ fn main() -> anyhow::Result<()> {
             workspace::open(&args, now()?, &mut io::stdout().lock())?;
             Ok(())
         }
+        Command::Workspace(WorkspaceCommand::Found(args)) => {
+            let mut last = now()?.at;
+            let mut clock = move || {
+                last = now().map_or(last, |n| n.at);
+                last
+            };
+            workspace::found(&args, &mut clock, &mut io::stdout().lock()).map(drop)
+        }
         Command::Connection(ConnectionCommand::Record(args)) => {
             connection::run(&args, now()?, &mut io::stdout().lock()).map(drop)
         }
@@ -124,6 +133,10 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Agent(AgentCommand::Deploy(args)) => {
             gestures::deploy(&args, now()?, &mut io::stdout().lock())?;
+            Ok(())
+        }
+        Command::Db(DbCommand::Migrate(args)) => {
+            db::migrate(&args, &mut io::stdout().lock())?;
             Ok(())
         }
     }

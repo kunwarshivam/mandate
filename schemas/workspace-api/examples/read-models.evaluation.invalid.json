@@ -1,0 +1,552 @@
+[
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing evaluation",
+    "remove": [
+      "/evaluation"
+    ]
+  },
+  {
+    "label": "an unknown evaluation member",
+    "set": {
+      "/evaluation/extra": 1
+    }
+  },
+  {
+    "label": "another kind",
+    "set": {
+      "/evaluation/report/kind": "forward_paper_evaluation_mutant"
+    }
+  },
+  {
+    "label": "report_version 2",
+    "set": {
+      "/evaluation/report/report_version": 2
+    }
+  },
+  {
+    "label": "an unknown report member",
+    "set": {
+      "/evaluation/report/extra": 1
+    }
+  },
+  {
+    "label": "an unknown decision member",
+    "set": {
+      "/evaluation/report/decision/extra": 1
+    }
+  },
+  {
+    "label": "a malformed decision id",
+    "set": {
+      "/evaluation/report/decision/decision_id": "DEC-"
+    }
+  },
+  {
+    "label": "a negative minimum",
+    "set": {
+      "/evaluation/report/decision/minimum_scoreable": -1
+    }
+  },
+  {
+    "label": "an unknown input",
+    "set": {
+      "/evaluation/report/inputs/extra": "sha256:0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
+    }
+  },
+  {
+    "label": "an unknown baseline member",
+    "set": {
+      "/evaluation/report/baselines/extra": 1
+    }
+  },
+  {
+    "label": "an empty basket",
+    "set": {
+      "/evaluation/report/baselines/basket": []
+    }
+  },
+  {
+    "label": "a repeated basket member",
+    "set": {
+      "/evaluation/report/baselines/basket": [
+        "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
+        "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4"
+      ]
+    }
+  },
+  {
+    "label": "an unknown group member",
+    "set": {
+      "/evaluation/report/groups/0/extra": 1
+    }
+  },
+  {
+    "label": "an unknown signal model member",
+    "set": {
+      "/evaluation/report/groups/0/signal_model/extra": 1
+    }
+  },
+  {
+    "label": "a malformed model id",
+    "set": {
+      "/evaluation/report/groups/0/signal_model/model_id": "Research"
+    }
+  },
+  {
+    "label": "a malformed model version",
+    "set": {
+      "/evaluation/report/groups/0/signal_model/model_version": "1 0"
+    }
+  },
+  {
+    "label": "a group with both refusal and scorecard",
+    "set": {
+      "/evaluation/report/groups/0/refusal": "window_not_closed"
+    }
+  },
+  {
+    "label": "a group with neither",
+    "set": {
+      "/evaluation/report/groups/0/scorecard": null
+    }
+  },
+  {
+    "label": "a malformed group refusal",
+    "set": {
+      "/evaluation/report/groups/1/refusal": "Empty Set"
+    }
+  },
+  {
+    "label": "a negative open count",
+    "set": {
+      "/evaluation/report/groups/0/open": -1
+    }
+  },
+  {
+    "label": "a count past the safe integer",
+    "set": {
+      "/evaluation/report/groups/0/closed": 9007199254740992
+    }
+  },
+  {
+    "label": "an unknown disclosure name",
+    "set": {
+      "/evaluation/report/disclosures": [
+        "mutant_value"
+      ]
+    }
+  },
+  {
+    "label": "an unknown scorecard member",
+    "set": {
+      "/evaluation/report/groups/0/scorecard/extra": 1
+    }
+  },
+  {
+    "label": "an unknown scored row member",
+    "set": {
+      "/evaluation/report/groups/0/scorecard/theses/0/extra": 1
+    }
+  },
+  {
+    "label": "an unknown unscoreable member",
+    "set": {
+      "/evaluation/report/groups/0/scorecard/unscoreable/0/extra": 1
+    }
+  },
+  {
+    "label": "an unknown unscoreable reason",
+    "set": {
+      "/evaluation/report/groups/0/scorecard/unscoreable/0/reason": "mutant_value"
+    }
+  },
+  {
+    "label": "no disclosures",
+    "set": {
+      "/evaluation/report/disclosures": []
+    }
+  },
+  {
+    "label": "a drafted disclosure",
+    "set": {
+      "/evaluation/report/disclosures": [
+        "Results are hypothetical"
+      ]
+    }
+  },
+  {
+    "label": "a repeated disclosure",
+    "set": {
+      "/evaluation/report/disclosures": [
+        "NOTE-FORWARD-PAPER-INTERNAL",
+        "NOTE-FORWARD-PAPER-INTERNAL"
+      ]
+    }
+  },
+  {
+    "label": "a missing evaluation evaluation_id",
+    "remove": [
+      "/evaluation/evaluation_id"
+    ]
+  },
+  {
+    "label": "a missing evaluation report_ref",
+    "remove": [
+      "/evaluation/report_ref"
+    ]
+  },
+  {
+    "label": "a missing evaluation report",
+    "remove": [
+      "/evaluation/report"
+    ]
+  },
+  {
+    "label": "a missing report kind",
+    "remove": [
+      "/evaluation/report/kind"
+    ]
+  },
+  {
+    "label": "a missing report report_version",
+    "remove": [
+      "/evaluation/report/report_version"
+    ]
+  },
+  {
+    "label": "a missing report decision",
+    "remove": [
+      "/evaluation/report/decision"
+    ]
+  },
+  {
+    "label": "a missing report cut_off",
+    "remove": [
+      "/evaluation/report/cut_off"
+    ]
+  },
+  {
+    "label": "a missing report inputs",
+    "remove": [
+      "/evaluation/report/inputs"
+    ]
+  },
+  {
+    "label": "a missing report baselines",
+    "remove": [
+      "/evaluation/report/baselines"
+    ]
+  },
+  {
+    "label": "a missing report groups",
+    "remove": [
+      "/evaluation/report/groups"
+    ]
+  },
+  {
+    "label": "a missing report passed",
+    "remove": [
+      "/evaluation/report/passed"
+    ]
+  },
+  {
+    "label": "a missing report disclosures",
+    "remove": [
+      "/evaluation/report/disclosures"
+    ]
+  },
+  {
+    "label": "a missing decision decision_id",
+    "remove": [
+      "/evaluation/report/decision/decision_id"
+    ]
+  },
+  {
+    "label": "a missing decision window_from",
+    "remove": [
+      "/evaluation/report/decision/window_from"
+    ]
+  },
+  {
+    "label": "a missing decision window_to",
+    "remove": [
+      "/evaluation/report/decision/window_to"
+    ]
+  },
+  {
+    "label": "a missing decision minimum_scoreable",
+    "remove": [
+      "/evaluation/report/decision/minimum_scoreable"
+    ]
+  },
+  {
+    "label": "a missing decision z",
+    "remove": [
+      "/evaluation/report/decision/z"
+    ]
+  },
+  {
+    "label": "a missing input theses",
+    "remove": [
+      "/evaluation/report/inputs/theses"
+    ]
+  },
+  {
+    "label": "a missing input closes",
+    "remove": [
+      "/evaluation/report/inputs/closes"
+    ]
+  },
+  {
+    "label": "a missing input cost_model",
+    "remove": [
+      "/evaluation/report/inputs/cost_model"
+    ]
+  },
+  {
+    "label": "a missing baseline basket",
+    "remove": [
+      "/evaluation/report/baselines/basket"
+    ]
+  },
+  {
+    "label": "a missing baseline index",
+    "remove": [
+      "/evaluation/report/baselines/index"
+    ]
+  },
+  {
+    "label": "a missing group signal_model",
+    "remove": [
+      "/evaluation/report/groups/0/signal_model"
+    ]
+  },
+  {
+    "label": "a missing group closed",
+    "remove": [
+      "/evaluation/report/groups/0/closed"
+    ]
+  },
+  {
+    "label": "a missing group open",
+    "remove": [
+      "/evaluation/report/groups/0/open"
+    ]
+  },
+  {
+    "label": "a missing group outside_window",
+    "remove": [
+      "/evaluation/report/groups/0/outside_window"
+    ]
+  },
+  {
+    "label": "a missing group refusal",
+    "remove": [
+      "/evaluation/report/groups/0/refusal"
+    ]
+  },
+  {
+    "label": "a missing group scorecard",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard"
+    ]
+  },
+  {
+    "label": "a missing signal model model_id",
+    "remove": [
+      "/evaluation/report/groups/0/signal_model/model_id"
+    ]
+  },
+  {
+    "label": "a missing signal model model_version",
+    "remove": [
+      "/evaluation/report/groups/0/signal_model/model_version"
+    ]
+  },
+  {
+    "label": "a missing signal model content_hash",
+    "remove": [
+      "/evaluation/report/groups/0/signal_model/content_hash"
+    ]
+  },
+  {
+    "label": "a missing scorecard theses",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses"
+    ]
+  },
+  {
+    "label": "a missing scorecard unscoreable",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/unscoreable"
+    ]
+  },
+  {
+    "label": "a missing scorecard scoreable_count",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/scoreable_count"
+    ]
+  },
+  {
+    "label": "a missing scorecard z",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/z"
+    ]
+  },
+  {
+    "label": "a missing scorecard excess_sum_basket",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/excess_sum_basket"
+    ]
+  },
+  {
+    "label": "a missing scorecard excess_sum_index",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/excess_sum_index"
+    ]
+  },
+  {
+    "label": "a missing scorecard mean_excess_basket",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/mean_excess_basket"
+    ]
+  },
+  {
+    "label": "a missing scorecard mean_excess_index",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/mean_excess_index"
+    ]
+  },
+  {
+    "label": "a missing scorecard sample_variance_basket",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/sample_variance_basket"
+    ]
+  },
+  {
+    "label": "a missing scorecard sample_variance_index",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/sample_variance_index"
+    ]
+  },
+  {
+    "label": "a missing scorecard margin_basket",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/margin_basket"
+    ]
+  },
+  {
+    "label": "a missing scorecard margin_index",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/margin_index"
+    ]
+  },
+  {
+    "label": "a missing scorecard lower_bound_basket",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/lower_bound_basket"
+    ]
+  },
+  {
+    "label": "a missing scorecard lower_bound_index",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/lower_bound_index"
+    ]
+  },
+  {
+    "label": "a missing scorecard passed",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/passed"
+    ]
+  },
+  {
+    "label": "a missing scored row thesis_id",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/thesis_id"
+    ]
+  },
+  {
+    "label": "a missing scored row lineage_id",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/lineage_id"
+    ]
+  },
+  {
+    "label": "a missing scored row revision",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/revision"
+    ]
+  },
+  {
+    "label": "a missing scored row instrument",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/instrument"
+    ]
+  },
+  {
+    "label": "a missing scored row entry",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/entry"
+    ]
+  },
+  {
+    "label": "a missing scored row exit",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/exit"
+    ]
+  },
+  {
+    "label": "a missing scored row round_trip_cost",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/round_trip_cost"
+    ]
+  },
+  {
+    "label": "a missing scored row net_return",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/net_return"
+    ]
+  },
+  {
+    "label": "a missing scored row excess_over_basket",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/excess_over_basket"
+    ]
+  },
+  {
+    "label": "a missing scored row excess_over_index",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/theses/0/excess_over_index"
+    ]
+  },
+  {
+    "label": "a missing unscoreable thesis_id",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/unscoreable/0/thesis_id"
+    ]
+  },
+  {
+    "label": "a missing unscoreable reason",
+    "remove": [
+      "/evaluation/report/groups/0/scorecard/unscoreable/0/reason"
+    ]
+  }
+]
