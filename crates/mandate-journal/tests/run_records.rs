@@ -309,8 +309,12 @@ fn accepted(stream: &[Vec<Value>]) -> Result<(), String> {
 
 type Edit = fn(&mut Vec<Vec<Value>>);
 
+/// A case: its name, its edit to the honest run, and the draft (by `event_id`), reason, and path
+/// it is refused with, or `None` when it is accepted.
+type Case<'a> = (&'a str, Edit, Option<(&'a str, &'a str, &'a str)>);
+
 /// Runs every case and reports all that fail.
-fn cases(cases: &[(&str, Edit, Option<(&str, &str, &str)>)]) {
+fn cases(cases: &[Case]) {
     let mut failed = Vec::new();
     for (name, edit, expect) in cases {
         let mut stream = run();
