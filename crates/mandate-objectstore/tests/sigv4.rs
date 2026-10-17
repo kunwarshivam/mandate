@@ -222,6 +222,7 @@ fn a_session_token_is_kept_and_never_printed() {
     assert_eq!(key.session_token(), Some("token-value"));
     assert_eq!(example_key().session_token(), None);
     let printed = format!("{key:?}");
+    assert_eq!(printed, "Credentials { .. }");
     assert!(
         !printed.contains("secret-value")
             && !printed.contains("token-value")

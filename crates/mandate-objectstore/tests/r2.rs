@@ -164,4 +164,11 @@ fn the_api_base_is_https_or_loopback() {
     }
     let printed = format!("{:?}", api("https://api.cloudflare.com/client/v4"));
     assert!(!printed.contains("read-token"), "{printed}");
+    assert!(
+        printed.starts_with("R2LockApi")
+            && printed.contains(
+                "https://api.cloudflare.com/client/v4/accounts/acct123/r2/buckets/journal-cold/lock"
+            ),
+        "{printed}"
+    );
 }

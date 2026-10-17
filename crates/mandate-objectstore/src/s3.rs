@@ -327,7 +327,7 @@ impl S3 {
     ) -> Result<Option<(LockMode, Timestamp)>, S3Error> {
         let query = [("retention", ""), ("versionId", version_id)];
         let answer = self.send(Method::GET, Some(key), &query, &[], &[]).await?;
-        if !answer.status.is_success() && rejection(&answer).is_some() {
+        if rejection(&answer).is_some() {
             return Ok(None);
         }
         let answer = read_ok(answer, "GetObjectRetention")?;
@@ -388,7 +388,7 @@ impl S3 {
         let answer = self
             .send(Method::GET, None, &[("versioning", "")], &[], &[])
             .await?;
-        if !answer.status.is_success() && rejection(&answer).is_some() {
+        if rejection(&answer).is_some() {
             return Ok(false);
         }
         let answer = read_ok(answer, "GetBucketVersioning")?;
@@ -404,7 +404,7 @@ impl S3 {
         let answer = self
             .send(Method::GET, None, &[("object-lock", "")], &[], &[])
             .await?;
-        if !answer.status.is_success() && rejection(&answer).is_some() {
+        if rejection(&answer).is_some() {
             return Ok(None);
         }
         let answer = read_ok(answer, "GetObjectLockConfiguration")?;
@@ -499,10 +499,8 @@ impl S3 {
             ("host", &self.endpoint.host),
             ("x-amz-date", &date),
             ("x-amz-content-sha256", &payload),
+            ("x-amz-checksum-sha256", &checksum),
         ];
-        if !body.is_empty() {
-            headers.push(("x-amz-checksum-sha256", &checksum));
-        }
         if let Some(token) = self.credentials.session_token() {
             headers.push(("x-amz-security-token", token));
         }
@@ -620,4 +618,65 @@ fn parse_mode(text: &str) -> Option<LockMode> {
 /// `2032-10-17T04:45:26Z`: whole seconds, which every provider accepts.
 fn rfc3339(at: Timestamp) -> String {
     format!("{:.0}", at)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn answer(status: u16, body: &str) -> Answer {
+        Answer {
+            status: StatusCode::from_u16(status).unwrap_or(StatusCode::IM_A_TEAPOT),
+            headers: reqwest::header::HeaderMap::new(),
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_4xx_or_a_501_is_a_rejection_and_anything_else_is_not() {
+        let denied = "<Error><Code>AccessDenied</Code><Message>no</Message></Error>";
+        assert_eq!(
+            rejection(&answer(403, denied)),
+            Some(Rejected {
+                status: 403,
+                code: "AccessDenied".to_owned()
+            })
+        );
+        assert_eq!(
+            rejection(&answer(501, "<Error><Code>NotImplemented</Code></Error>")),
+            Some(Rejected {
+                status: 501,
+                code: "NotImplemented".to_owned()
+            })
+        );
+        assert_eq!(
+            rejection(&answer(404, "")).map(|r| r.code),
+            Some(String::new())
+        );
+        for status in [200, 204, 301, 500, 502, 503] {
+            assert_eq!(rejection(&answer(status, denied)), None, "{status}");
+        }
+        assert_eq!(outcome(answer(204, "")), Ok(Outcome::Done));
+        assert_eq!(
+            outcome(answer(503, "")),
+            Err(S3Error::Server { status: 503 })
+        );
+        assert_eq!(
+            read_ok(answer(501, ""), "GetBucketVersioning").map(|_| ()),
+            Err(S3Error::Rejected {
+                call: "GetBucketVersioning",
+                status: 501,
+                code: String::new()
+            })
+        );
+    }
+
+    #[test]
+    fn element_reads_the_first_flat_element() {
+        let xml = "<a><Mode>COMPLIANCE</Mode><Mode>GOVERNANCE</Mode><Empty></Empty></a>";
+        assert_eq!(element(xml, "Mode"), Some("COMPLIANCE"));
+        assert_eq!(element(xml, "Empty"), Some(""));
+        assert_eq!(element(xml, "Days"), None);
+        assert_eq!(element("<Days>7", "Days"), None);
+    }
 }

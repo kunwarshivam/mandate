@@ -223,6 +223,31 @@ async fn a_bucket_without_object_lock_is_refused() {
 }
 
 #[tokio::test]
+async fn a_writer_that_cannot_read_the_settings_is_refused() {
+    let Some(root) = common::root("blind") else {
+        return;
+    };
+    common::create(&root, Some(SIX_YEARS)).await;
+    let blind: Vec<&str> = common::WRITER_ACTIONS
+        .iter()
+        .copied()
+        .filter(|action| {
+            !matches!(
+                *action,
+                "s3:GetBucketVersioning"
+                    | "s3:GetBucketObjectLockConfiguration"
+                    | "s3:GetObjectRetention"
+            )
+        })
+        .collect();
+    let writer = common::narrowed(&root, &blind).await;
+    assert_eq!(
+        refusals(check_s3(&writer, PREFIX).await),
+        set(&[Refusal::NoLock, Refusal::VersioningOff])
+    );
+}
+
+#[tokio::test]
 async fn a_certificate_writes_only_to_its_own_store() {
     let Some(first) = common::root("certa") else {
         return;

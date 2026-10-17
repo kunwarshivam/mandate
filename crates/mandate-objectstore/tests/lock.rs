@@ -52,6 +52,11 @@ fn six_years_is_counted_with_both_leap_days() {
     assert_eq!(REQUIRED_RETENTION_DAYS, 6 * 365 + 2);
     assert_eq!(REQUIRED_RETENTION_SECS, 2192 * DAY_SECS);
     assert_eq!(REQUIRED_RETENTION_YEARS, 6);
+    assert_eq!(
+        mandate_objectstore::check::WRITE_RETENTION_DAYS,
+        2193,
+        "the writer keeps one day more than the check requires"
+    );
 }
 
 #[test]

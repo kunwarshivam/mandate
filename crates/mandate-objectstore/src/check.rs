@@ -45,18 +45,12 @@ pub struct LockCertificate {
     base: String,
     bucket: String,
     prefix: String,
-    checked_at: Timestamp,
 }
 
 impl LockCertificate {
     /// The prefix the check covered.
     pub fn prefix(&self) -> &str {
         &self.prefix
-    }
-
-    /// When the check passed.
-    pub fn checked_at(&self) -> Timestamp {
-        self.checked_at
     }
 }
 
@@ -67,13 +61,7 @@ pub async fn gather_s3(store: &S3, prefix: &str) -> Result<S3Evidence, S3Error> 
     let now = store.now();
     let existing = store.head_object(&key, None).await?;
     let head = match existing {
-        Some(head)
-            if head
-                .retention
-                .is_some_and(|(mode, until)| mode == LockMode::Compliance && until > now) =>
-        {
-            head
-        }
+        Some(head) if still_locked(head.retention, now) => head,
         _ => {
             write_probe(store, &key, now).await?;
             store
@@ -111,6 +99,11 @@ pub async fn gather_s3(store: &S3, prefix: &str) -> Result<S3Evidence, S3Error> 
             rule_write_refused: rule_write != Outcome::Done,
         },
     })
+}
+
+/// Whether a probe version's retention still holds: compliance mode, until a time after `now`.
+fn still_locked(retention: Option<(LockMode, Timestamp)>, now: Timestamp) -> bool {
+    retention.is_some_and(|(mode, until)| mode == LockMode::Compliance && until > now)
 }
 
 /// Writes a new probe version with compliance retention, or, on a store that refuses the lock
@@ -153,7 +146,6 @@ pub(crate) fn certify(store: &S3, prefix: &str) -> LockCertificate {
         base: store.endpoint().base().to_owned(),
         bucket: store.endpoint().bucket().to_owned(),
         prefix: prefix.to_owned(),
-        checked_at: store.now(),
     }
 }
 
@@ -197,5 +189,22 @@ impl LockedWriter {
             .put_object(&full_key, body, Some((LockMode::Compliance, until)))
             .await?
             .map_err(WriteError::Rejected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_probe_is_reused_only_while_its_compliance_retention_holds() {
+        let now = Timestamp::from_second(1_800_000_000).unwrap_or(Timestamp::UNIX_EPOCH);
+        let after = Timestamp::from_second(1_800_000_001).unwrap_or(Timestamp::UNIX_EPOCH);
+        let before = Timestamp::from_second(1_799_999_999).unwrap_or(Timestamp::UNIX_EPOCH);
+        assert!(still_locked(Some((LockMode::Compliance, after)), now));
+        assert!(!still_locked(Some((LockMode::Compliance, now)), now));
+        assert!(!still_locked(Some((LockMode::Compliance, before)), now));
+        assert!(!still_locked(Some((LockMode::Governance, after)), now));
+        assert!(!still_locked(None, now));
     }
 }
