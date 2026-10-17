@@ -1498,6 +1498,7 @@ name = "mandate-agentd"
 version = "0.0.0"
 dependencies = [
  "mandate-journal",
+ "mandate-process",
  "mandate-shell",
  "mandate-telemetry",
  "mandate-time",
@@ -1911,6 +1912,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-process"
+version = "0.0.0"
+dependencies = [
+ "mandate-journal",
+ "mandate-time",
+ "proptest",
 ]
 
 [[package]]

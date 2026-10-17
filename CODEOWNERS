@@ -63,6 +63,7 @@
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-agentd/     @kunwarshivam
+/crates/mandate-process/    @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-alerts/     @kunwarshivam

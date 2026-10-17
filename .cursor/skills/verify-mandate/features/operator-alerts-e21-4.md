@@ -2,7 +2,7 @@
 
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §8.2 (the alert
   table: source, severity, runbook), §2 OPS-10 (operator alerts carry opaque IDs and generic text
-  only); [notifications spec](../../../../docs/specs/notifications.md) NT-1, NT-4; DEC-988.
+  only); [notifications spec](../../../../docs/specs/notifications.md) NT-1, NT-4; DEC-1070.
 - **Code:** `mandate-alerts` (`crates/mandate-alerts`). `src/kind.rs` (`AlertKind`, one per §8.2 row, with its reason
   code, `Severity`, runbook and fixed text), `src/event.rs` (`from_event`: the journal-sourced
   rows from a `StoredEvent`'s payload), `src/signal.rs` (`Signal`, `from_signal`: the rows sourced

@@ -7,7 +7,7 @@ use crate::AlertKind;
 /// p99 journal append latency above which appends are degraded (journal spec §5.3: 5 ms).
 pub const APPEND_P99_LIMIT_US: u64 = 5_000;
 /// Stale feeds at or above which a stale feed is SEV-2 "at scale" (§8.2 names no number; two is
-/// the conservative reading, DEC-988 item 4).
+/// the conservative reading, DEC-1070 item 4).
 pub const STALE_FEEDS_AT_SCALE: u64 = 2;
 /// Cold export lag above which it alerts (journal spec §6.2: 1 minute, before live capital).
 pub const COLD_EXPORT_LAG_LIMIT_S: u64 = 60;
@@ -63,7 +63,7 @@ pub enum Signal {
 }
 
 /// The alert a signal raises, if any. Where §8.2 names no threshold, any nonzero count alerts:
-/// the conservative reading until O3's rules are tuned (DEC-988 item 4).
+/// the conservative reading until O3's rules are tuned (DEC-1070 item 4).
 pub fn from_signal(signal: Signal) -> Option<AlertKind> {
     let raised = |fires: bool, kind: AlertKind| fires.then_some(kind);
     match signal {

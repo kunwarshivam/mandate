@@ -10,7 +10,7 @@
 )]
 //! The safety alerts of the [infrastructure design](../../../docs/design/infrastructure.md) §8.2,
 //! raised from journal events and from signals, with opaque payloads (backlog E21-4, OPS-10,
-//! DEC-988).
+//! DEC-1070).
 //!
 //! **One kind per row.** [`AlertKind`] is closed: every row of §8.2 is a kind, with its reason
 //! code, severity, and runbook, and a row naming two conditions of different severity is two
