@@ -7,7 +7,13 @@
 //! run fails here first; `MANDATE_BLESS_RUNNER=1 cargo nextest run -p mandate-backtest-runner`
 //! rewrites the file, which a reviewer then reads as the run's change.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+use mandate_accounting::AccountType;
+use mandate_num::{Bps, Price, Qty, TickRule, Usd};
+use mandate_risk::DayTradeRegime;
+use mandate_sim::{FirstBarVolumes, Session, Slippage};
+use mandate_time::UtcNanos;
 
 use mandate_backtest_runner::{InputFiles, Inputs, Ran, RunnerError, decode, run};
 use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
@@ -333,7 +339,7 @@ fn a_malformed_input_refuses_naming_its_member() {
     }
 }
 
-/// DEC-1144 item 4: the id, the version, and the stored mandate are checked before anything is
+/// DEC-1144 items 2 and 4: the id, the version, and the stored mandate are checked before anything is
 /// stored; a refusal leaves the store as it was.
 #[test]
 fn a_bad_id_or_mandate_stores_nothing() {
@@ -416,8 +422,13 @@ fn the_binary_reads_the_directory_and_prints_the_references() {
     let canonical = to_canonical(&parse(MANDATE.as_bytes()).unwrap());
     let version = fs_store.put_artifact(&canonical).unwrap().to_string();
     let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/demo");
+    let runner = || {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_mandate-backtest-runner"));
+        command.env_remove("MANDATE_ARTIFACTS");
+        command
+    };
     let invoke = |inputs: &str| {
-        std::process::Command::new(env!("CARGO_BIN_EXE_mandate-backtest-runner"))
+        runner()
             .args(["run", "--inputs", inputs, "--store"])
             .arg(&root)
             .args(["--mandate-version", &version, "--backtest-id", "bt-demo-01"])
@@ -451,4 +462,217 @@ fn reading_the_directory_decodes_the_files() {
     let (mut store, version) = store();
     let from_dir = run(&mut store, "bt-demo-01", &version, &read).unwrap();
     assert_eq!(from_dir, ran(None).1);
+}
+
+/// DEC-1144 item 3: each spelling the format admits decodes to its own variant, read back from the
+/// decoded inputs rather than through a run, so a reader that dropped an arm or swapped two
+/// variants fails here.
+#[test]
+fn each_spelling_decodes_to_its_variant() {
+    let edited = |file, from, to| decoded(Some((file, from, to))).unwrap();
+    let base = decoded(None).unwrap();
+    assert_eq!(base.instrument.tick, TickRule::RegNmsEquity);
+    let tick = edited(
+        "instrument.json",
+        "\"rule\": \"reg_nms_equity\"",
+        "\"rule\": \"increment\", \"increment\": \"0.05\"",
+    );
+    assert_eq!(
+        tick.instrument.tick,
+        TickRule::Increment(Price::parse("0.05").unwrap())
+    );
+    assert_eq!(
+        base.settings.sim.slippage,
+        Slippage::Fixed {
+            half_spread_bps: Bps::parse("1").unwrap(),
+            impact_bps: Bps::parse("2").unwrap(),
+        }
+    );
+    let sqrt = edited(
+        "settings.json",
+        "\"model\": \"fixed\",\n   \"half_spread_bps\": \"1\",\n   \"impact_bps\": \"2\"",
+        "\"model\": \"sqrt\", \"half_spread_bps\": \"1\", \"coefficient_bps\": \"3\"",
+    );
+    assert_eq!(
+        sqrt.settings.sim.slippage,
+        Slippage::Sqrt {
+            half_spread_bps: Bps::parse("1").unwrap(),
+            coefficient_bps: Bps::parse("3").unwrap(),
+        }
+    );
+    assert_eq!(
+        base.settings.regime,
+        DayTradeRegime::IntradayMargin {
+            maintenance_excess: Usd::parse("100000").unwrap()
+        }
+    );
+    let legacy = edited(
+        "settings.json",
+        "\"kind\": \"intraday_margin\",\n  \"maintenance_excess\": \"100000\"",
+        "\"kind\": \"legacy_pdt\"",
+    );
+    assert_eq!(legacy.settings.regime, DayTradeRegime::LegacyPdt);
+    assert_eq!(base.settings.account_type, AccountType::Margin);
+    let cash = edited(
+        "settings.json",
+        "\"account_type\": \"margin\"",
+        "\"account_type\": \"cash\"",
+    );
+    assert_eq!(cash.settings.account_type, AccountType::Cash);
+    assert!(base.stop_limit_classes.is_empty());
+    let stop_limit = edited(
+        "settings.json",
+        "\"order_type\": \"stop_limit\",\n      \"quantity_form\": \"whole\",\n      \"times_in_force\": [\n       \"day\",\n       \"gtc\"\n      ],\n      \"protection_forms\": []",
+        "\"order_type\": \"stop_limit\", \"quantity_form\": \"whole\", \"times_in_force\": [\"gtc\"], \"protection_forms\": [\"stop_limit\"]",
+    );
+    assert_eq!(
+        stop_limit.stop_limit_classes,
+        BTreeSet::from([mandate_accounting::AssetClass::UsEquity])
+    );
+    let first = base.bars[0].start;
+    assert_eq!(
+        base.medians.median_at(first),
+        Some(Qty::parse("1500000").unwrap())
+    );
+    let unknown = edited(
+        "bars.json",
+        "\"first_bar_median\": \"1500000\"",
+        "\"first_bar_median\": null",
+    );
+    assert_eq!(unknown.medians.median_at(first), None);
+    assert_eq!(
+        unknown.medians.median_at(base.bars[1].start),
+        base.medians.median_at(base.bars[1].start)
+    );
+    assert_eq!(base.coverage_start, first);
+    assert!(base.corporate_actions.is_empty() && base.theses.is_empty());
+    assert_eq!(base.outputs.len(), 25);
+    assert!(
+        base.bars
+            .iter()
+            .all(|bar| bar.auction && bar.session == Session::Regular)
+    );
+}
+
+/// DEC-1144 item 3: a member the format types as one thing refuses another, and a variant that
+/// takes no member refuses one.
+#[test]
+fn a_member_of_another_type_refuses() {
+    let cases = [
+        (
+            "instrument.json",
+            "\"rule\": \"reg_nms_equity\"",
+            "\"rule\": \"reg_nms_equity\", \"increment\": \"0.01\"",
+            "instrument.json/tick/increment",
+        ),
+        (
+            "settings.json",
+            "\"kind\": \"intraday_margin\",\n  \"maintenance_excess\": \"100000\"",
+            "\"kind\": \"legacy_pdt\", \"maintenance_excess\": \"1\"",
+            "settings.json/regime/maintenance_excess",
+        ),
+        (
+            "settings.json",
+            "\"mark_max_age_s\": 3600",
+            "\"mark_max_age_s\": 4294967296",
+            "settings.json/mark_max_age_s",
+        ),
+        (
+            "settings.json",
+            "\"mark_max_age_s\": 3600",
+            "\"mark_max_age_s\": \"3600\"",
+            "settings.json/mark_max_age_s",
+        ),
+        (
+            "bars.json",
+            "\"auction\": true",
+            "\"auction\": \"true\"",
+            "bars.json/bars/0/auction",
+        ),
+        (
+            "bars.json",
+            "\"session\": \"regular\"",
+            "\"session\": \"Regular\"",
+            "bars.json/bars/0/session",
+        ),
+        (
+            "bars.json",
+            "\"corporate_actions\": []",
+            "\"corporate_actions\": {}",
+            "bars.json/corporate_actions",
+        ),
+        (
+            "outputs.json",
+            "\"content_hash\": \"sha256:",
+            "\"content_hash\": \"sha512:",
+            "outputs.json/outputs/0/content_hash",
+        ),
+        (
+            "settings.json",
+            "\"decision_latency_ms\": 0",
+            "\"decision_latency_ms\": \"0\"",
+            "settings.json/sim/decision_latency_ms",
+        ),
+        (
+            "settings.json",
+            "\"valid_from\": \"2026-09-01\"",
+            "\"valid_from\": \"2027-09-01\"",
+            "settings.json/fees/calendar",
+        ),
+        (
+            "settings.json",
+            "\"profile_version\": 1",
+            "\"profile_version\": 0",
+            "settings.json/profile",
+        ),
+    ];
+    for (file, from, to, path) in cases {
+        let error = decoded(Some((file, from, to))).unwrap_err();
+        assert_eq!(error, RunnerError::Input(path.to_owned()), "{file}: {to}");
+    }
+    let thesis = r#""theses": [{"thesis_id": "", "received_at": "2026-09-01T13:00:00Z", "instrument": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415", "as_of": "2026-09-01T13:00:00Z", "expires_at": "2026-12-01T00:00:00Z", "admitted": true, "confidence": "0.8", "invalidated_at": null}]"#;
+    let error = decoded(Some(("theses.json", "\"theses\": []", thesis))).unwrap_err();
+    assert_eq!(
+        error,
+        RunnerError::Input("theses.json/theses/0/thesis_id".to_owned())
+    );
+    let named = thesis
+        .replace("\"thesis_id\": \"\"", "\"thesis_id\": \"th-1\"")
+        .replace(
+            "\"invalidated_at\": null",
+            "\"invalidated_at\": \"2026-09-02T13:00:00Z\"",
+        );
+    let read = decoded(Some(("theses.json", "\"theses\": []", &named))).unwrap();
+    let [thesis] = read.theses.as_slice() else {
+        panic!("one thesis")
+    };
+    assert_eq!(thesis.thesis_id, "th-1");
+    assert!(thesis.admitted);
+    assert_eq!(
+        thesis.invalidated_at,
+        Some(UtcNanos::parse_rfc3339("2026-09-02T13:00:00Z").unwrap())
+    );
+}
+
+/// #1578's shared store: the flag wins, else a non-empty `MANDATE_ARTIFACTS`, else the run refuses
+/// `artifacts_unset` (fail closed).
+#[test]
+fn the_store_is_the_flag_or_the_cells_variable() {
+    use mandate_backtest_runner::store_root;
+    use std::path::PathBuf;
+    let flag = Some(PathBuf::from("/flag"));
+    let env = Some(std::ffi::OsString::from("/env"));
+    assert_eq!(
+        store_root(flag.clone(), env.clone()),
+        Ok(PathBuf::from("/flag"))
+    );
+    assert_eq!(store_root(flag, None), Ok(PathBuf::from("/flag")));
+    assert_eq!(store_root(None, env), Ok(PathBuf::from("/env")));
+    assert_eq!(
+        store_root(None, Some("".into())),
+        Err(RunnerError::StoreUnset)
+    );
+    assert_eq!(store_root(None, None), Err(RunnerError::StoreUnset));
+    assert_eq!(RunnerError::StoreUnset.code(), "artifacts_unset");
+    assert_eq!(mandate_backtest_runner::ARTIFACTS_VAR, "MANDATE_ARTIFACTS");
 }

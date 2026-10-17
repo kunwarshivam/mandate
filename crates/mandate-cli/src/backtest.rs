@@ -10,11 +10,14 @@
 //! registered rule set. Any mismatch refuses before anything is appended.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 use mandate_canon::{Value, parse};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, Environment, get_artifact};
+use secrecy::SecretString;
 
 use crate::control::{
     BACKTEST_TYPE, Confirmation, ControlError, ControlJournal, Decision, Now, Owner, Repeat, Shape,
@@ -46,8 +49,28 @@ pub struct RecordArgs {
     /// The payload's reference, `sha256:` and 64 hex digits, as the runner printed it.
     #[arg(long, value_name = "REF")]
     pub payload: String,
-    #[command(flatten)]
-    pub target: JournalArgs,
+    /// The workspace journal's Postgres DSN, without a password (set PGPASSWORD or ~/.pgpass).
+    #[arg(long, value_name = "DSN")]
+    pub journal: SecretString,
+    /// The artifact store's root, where the runner stored the payload; `MANDATE_ARTIFACTS` when
+    /// not given, the cell's shared store (#1578). Neither refuses `artifacts_unset`.
+    #[arg(long, value_name = "DIR", visible_alias = "artifacts")]
+    pub store: Option<PathBuf>,
+}
+
+/// The variable that names the cell's shared artifact store (#1578), which `--store` overrides.
+pub const ARTIFACTS_VAR: &str = "MANDATE_ARTIFACTS";
+
+/// The store root: the flag, else a non-empty `env` (the value of [`ARTIFACTS_VAR`]).
+///
+/// # Errors
+/// [`ControlError::Refused`] with `artifacts_unset` when neither names one.
+pub fn store_root(flag: Option<&Path>, env: Option<OsString>) -> Result<PathBuf, ControlError> {
+    match (flag, env) {
+        (Some(flag), _) => Ok(flag.to_path_buf()),
+        (None, Some(env)) if !env.is_empty() => Ok(PathBuf::from(env)),
+        (None, _) => Err(refused("artifacts_unset")),
+    }
 }
 
 /// What `record` committed or found: the backtest, its report or refusal, and the event.
@@ -292,17 +315,35 @@ pub fn record(
 /// id, the report or the refusal, and the event.
 ///
 /// # Errors
-/// `environment_invalid` or `owner_workspace_invalid` before the journal is opened, then
+/// `environment_invalid`, `owner_workspace_invalid` or `artifacts_unset` before the journal is
+/// opened, then
 /// [`record`]'s; no message names the DSN.
 pub fn run_record(
     args: &RecordArgs,
     now: Now,
     report: &mut impl Write,
 ) -> anyhow::Result<Recorded> {
+    let owner = runner_owner(args)?;
+    let target = JournalArgs {
+        journal: args.journal.clone(),
+        store: store_root(args.store.as_deref(), std::env::var_os(ARTIFACTS_VAR))?,
+    };
+    let (mut journal, store) = open(&target)?;
+    let recorded = record(&mut journal, &store, &owner, &args.payload, now)?;
+    print_recorded(report, &recorded)?;
+    Ok(recorded)
+}
+
+/// The workspace and environment `args` name, with no user: the record's actor is the runner.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `environment_invalid` for any environment but `paper` or
+/// `live`, then `owner_workspace_invalid` for a workspace id that is not a stream id's.
+pub fn runner_owner(args: &RecordArgs) -> Result<Owner, ControlError> {
     let environment = match args.environment.as_str() {
         "paper" => Environment::Paper,
         "live" => Environment::Live,
-        _ => return Err(refused("environment_invalid").into()),
+        _ => return Err(refused("environment_invalid")),
     };
     let owner = Owner {
         workspace: args.workspace.clone(),
@@ -310,10 +351,7 @@ pub fn run_record(
         environment,
     };
     control_stream(&owner).map_err(|_| refused("owner_workspace_invalid"))?;
-    let (mut journal, store) = open(&args.target)?;
-    let recorded = record(&mut journal, &store, &owner, &args.payload, now)?;
-    print_recorded(report, &recorded)?;
-    Ok(recorded)
+    Ok(owner)
 }
 
 /// `backtest_id=`, then `report=` or `refused=`, then the event's id and `seq`.

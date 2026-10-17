@@ -274,7 +274,7 @@ pub(crate) fn same_environment(
 
 const OPENER_ID: &str = "control_services";
 
-/// The backtest runner's system id and its one event type (DEC-1144 item 5).
+/// The backtest runner's system id and its one event type (DEC-1144 item 7).
 const RUNNER_ID: &str = "backtest_runner";
 pub(crate) const BACKTEST_TYPE: &str = "BacktestRunRecorded";
 
@@ -877,7 +877,7 @@ pub(crate) fn commit_choice(
 }
 
 /// [`commit_choice`] for a `BacktestRunRecorded` whose payload is exactly the runner's, written by
-/// the `backtest_runner` system (DEC-1141, DEC-1144 item 5).
+/// the `backtest_runner` system (DEC-1141, DEC-1144 item 7).
 ///
 /// # Errors
 /// As [`commit`]; [`ControlError::Journal`] for any other event type.

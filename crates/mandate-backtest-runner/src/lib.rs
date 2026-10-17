@@ -25,9 +25,10 @@
 
 pub mod inputs;
 
+use std::ffi::OsString;
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactStore, get_artifact};
@@ -62,6 +63,8 @@ pub enum RunnerError {
     Encode(&'static str),
     #[error("the artifact store: {0}")]
     Store(&'static str),
+    #[error("no artifact store: neither `--store` nor MANDATE_ARTIFACTS names one")]
+    StoreUnset,
 }
 
 impl RunnerError {
@@ -75,6 +78,7 @@ impl RunnerError {
             Self::MandateRejected => "mandate_rejected",
             Self::Input(_) => "input_invalid",
             Self::Encode(code) | Self::Store(code) => code,
+            Self::StoreUnset => "artifacts_unset",
         }
     }
 }
@@ -96,6 +100,21 @@ impl fmt::Display for Ran {
             Ok(report) => writeln!(f, "report={report}"),
             Err(code) => writeln!(f, "refused={code}"),
         }
+    }
+}
+
+/// The variable that names the cell's shared artifact store (#1578), which `--store` overrides.
+pub const ARTIFACTS_VAR: &str = "MANDATE_ARTIFACTS";
+
+/// The store root: the flag, else a non-empty `env` (the value of [`ARTIFACTS_VAR`]).
+///
+/// # Errors
+/// [`RunnerError::StoreUnset`] when neither names one.
+pub fn store_root(flag: Option<PathBuf>, env: Option<OsString>) -> Result<PathBuf, RunnerError> {
+    match (flag, env) {
+        (Some(flag), _) => Ok(flag),
+        (None, Some(env)) if !env.is_empty() => Ok(PathBuf::from(env)),
+        (None, _) => Err(RunnerError::StoreUnset),
     }
 }
 

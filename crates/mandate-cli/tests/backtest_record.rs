@@ -165,7 +165,7 @@ fn refused(reason: &'static str) -> Result<Recorded, ControlError> {
     Err(ControlError::Refused { reason })
 }
 
-/// DEC-1144 items 2 and 5: the demo run's payload is appended exactly, as the `backtest_runner`
+/// DEC-1144 items 5 and 7: the demo run's payload is appended exactly, as the `backtest_runner`
 /// system, binding the version and the stream's rule set, listing every reference it names; the
 /// journal admits the draft (rules 143 and 144, DEC-1141's writer). A re-run finds it.
 #[test]
@@ -416,4 +416,117 @@ fn a_record_in_another_environment_refuses() {
         refused("paper_only")
     );
     assert_eq!(world.rows(), rows);
+}
+
+/// The read treats two records with one id as unreadable, so `backtest_id_taken` is checked for
+/// that id alone: a second backtest under another id is its own record.
+#[test]
+fn two_backtests_are_two_records() {
+    let mut world = World::new();
+    let payload_ref = world.payload_ref.clone();
+    world.record(&payload_ref).unwrap();
+    let rows = world.rows();
+    let other = world.refused_payload("bt-demo-02");
+    let other_ref = world.store_payload(&other);
+    let second = world.record(&other_ref).unwrap();
+    assert_eq!(second.backtest_id, "bt-demo-02");
+    assert_eq!(world.rows(), rows + 1);
+    assert_eq!(member(&world.last(), "payload"), &other);
+}
+
+/// The record binds the stream's latest `rule_set` registration, not an earlier one and not the
+/// latest registration of another kind.
+#[test]
+fn the_latest_rule_set_is_bound() {
+    let mut world = World::new();
+    let newer = format!("sha256:{}", "2".repeat(64));
+    world.rule_set(&newer);
+    world.seed(
+        "ConfigSnapshotRegistered",
+        &format!(
+            r#"{{"admits_instruments":null,"content_hash":"sha256:{}","kind":"fee_config","model_id":null,"model_version":null,"params":[]}}"#,
+            "3".repeat(64)
+        ),
+    );
+    let payload_ref = world.payload_ref.clone();
+    world.record(&payload_ref).unwrap();
+    let envelope = world.last();
+    assert_eq!(
+        member_text(member(&envelope, "config_refs"), "rule_set"),
+        newer
+    );
+}
+
+/// A refusal code the read can serve: a lower-case letter, then lower-case letters, digits or
+/// `_`, at most 64 in all; anything else refuses `payload_invalid`.
+#[test]
+fn only_a_servable_refusal_code_is_recorded() {
+    for (code, served) in [
+        ("a1_b", true),
+        (&*"a".repeat(64), true),
+        (&*"a".repeat(65), false),
+        ("a-b", false),
+        ("Abc", false),
+        ("1ab", false),
+        ("", false),
+    ] {
+        let mut world = World::new();
+        let payload = edited(&world.refused_payload("bt-x"), "refusal", Some(text(code)));
+        let payload_ref = world.store_payload(&payload);
+        let recorded = world.record(&payload_ref);
+        if served {
+            assert_eq!(recorded.unwrap().outcome, Err(code.to_owned()));
+        } else {
+            assert_eq!(recorded, refused("payload_invalid"), "{code}");
+        }
+    }
+}
+
+/// #1578's shared store: `--store` wins, else a non-empty `MANDATE_ARTIFACTS`, else
+/// `artifacts_unset`; the record's owner is the workspace in `paper` or `live` and no user.
+#[test]
+fn the_store_and_the_owner_come_from_the_flags_or_fail_closed() {
+    use mandate_cli::backtest::{ARTIFACTS_VAR, RecordArgs, runner_owner, store_root};
+    use std::path::{Path, PathBuf};
+    let env = Some(std::ffi::OsString::from("/env"));
+    let flag = Some(Path::new("/flag"));
+    assert_eq!(store_root(flag, env.clone()), Ok(PathBuf::from("/flag")));
+    assert_eq!(store_root(flag, None), Ok(PathBuf::from("/flag")));
+    assert_eq!(store_root(None, env), Ok(PathBuf::from("/env")));
+    for unset in [None, Some(std::ffi::OsString::new())] {
+        assert_eq!(
+            store_root(None, unset),
+            Err(ControlError::Refused {
+                reason: "artifacts_unset"
+            })
+        );
+    }
+    assert_eq!(ARTIFACTS_VAR, "MANDATE_ARTIFACTS");
+    let args = |workspace: &str, environment: &str| RecordArgs {
+        workspace: workspace.to_owned(),
+        environment: environment.to_owned(),
+        payload: String::new(),
+        journal: "postgres://journal.invalid/j".to_owned().into(),
+        store: None,
+    };
+    let paper = runner_owner(&args("ws1", "paper")).unwrap();
+    assert_eq!(
+        (paper.environment, paper.user.as_str()),
+        (Environment::Paper, "")
+    );
+    assert_eq!(
+        runner_owner(&args("ws1", "live")).unwrap().environment,
+        Environment::Live
+    );
+    for (workspace, environment, code) in [
+        ("ws1", "backtest", "environment_invalid"),
+        ("ws1", "Paper", "environment_invalid"),
+        ("ws 1", "paper", "owner_workspace_invalid"),
+    ] {
+        assert_eq!(
+            runner_owner(&args(workspace, environment)),
+            Err(ControlError::Refused { reason: code }),
+            "{workspace} {environment}"
+        );
+    }
 }

@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_backtest_runner::{RunnerError, read_dir, run};
+use mandate_backtest_runner::{ARTIFACTS_VAR, RunnerError, read_dir, run, store_root};
 
 /// Runs a mandate version's backtest and stores its report and record payload as artifacts.
 #[derive(Debug, Parser)]
@@ -34,9 +34,11 @@ enum Command {
         /// The directory holding the five input files.
         #[arg(long, value_name = "DIR")]
         inputs: PathBuf,
-        /// The artifact store's root, which holds the mandate document and takes the outputs.
-        #[arg(long, value_name = "DIR")]
-        store: PathBuf,
+        /// The artifact store's root, which holds the mandate document and takes the outputs;
+        /// `MANDATE_ARTIFACTS` when not given, the cell's shared store (#1578). Neither refuses
+        /// `artifacts_unset`.
+        #[arg(long, value_name = "DIR", visible_alias = "artifacts")]
+        store: Option<PathBuf>,
         /// The confirmed mandate version to backtest, `sha256:` and 64 hex digits.
         #[arg(long, value_name = "REF")]
         mandate_version: String,
@@ -54,7 +56,8 @@ fn main() -> ExitCode {
         backtest_id,
     } = Cli::parse().command;
     let ran = read_dir(&inputs).and_then(|decoded| {
-        let mut store = FsArtifactStore::open(&store).map_err(|e| RunnerError::Store(e.code()))?;
+        let root = store_root(store, std::env::var_os(ARTIFACTS_VAR))?;
+        let mut store = FsArtifactStore::open(&root).map_err(|e| RunnerError::Store(e.code()))?;
         run(&mut store, &backtest_id, &mandate_version, &decoded)
     });
     match ran {
