@@ -59,7 +59,10 @@ fn instant(text: &str) -> UtcNanos {
 }
 
 fn vars(value: Option<&str>) -> Vec<(String, String)> {
-    let mut vars = vec![("MANDATE_RH_SIM_ENDPOINT".to_owned(), "http://127.0.0.1:1/mcp".to_owned())];
+    let mut vars = vec![(
+        "MANDATE_RH_SIM_ENDPOINT".to_owned(),
+        "http://127.0.0.1:1/mcp".to_owned(),
+    )];
     if let Some(value) = value {
         vars.push((SIM_CLOCK_VAR.to_owned(), value.to_owned()));
     }
@@ -137,8 +140,14 @@ fn without_the_variable_the_run_clock_is_the_base() {
 fn a_variable_of_another_name_is_not_read() {
     let base = Manual::at("2026-10-17T12:00:00Z");
     let vars = vec![
-        (format!("{SIM_CLOCK_VAR}_X"), "2026-10-19T15:00:00Z".to_owned()),
-        ("MANDATE_RH_SIM".to_owned(), "2026-10-19T15:00:00Z".to_owned()),
+        (
+            format!("{SIM_CLOCK_VAR}_X"),
+            "2026-10-19T15:00:00Z".to_owned(),
+        ),
+        (
+            "MANDATE_RH_SIM".to_owned(),
+            "2026-10-19T15:00:00Z".to_owned(),
+        ),
     ];
     let clock = sim_clock(&vars, base).expect("no clock variable");
     assert_eq!(clock.now(), instant("2026-10-17T12:00:00Z"));
@@ -157,7 +166,10 @@ fn an_unreadable_variable_refuses_the_run_and_never_falls_back_to_the_base() {
     ] {
         let base = Manual::at("2026-10-17T12:00:00Z");
         let refused = sim_clock(&vars(Some(text)), base).map(|clock| clock.now());
-        assert_eq!(refused, Err(PaperError::SimClock), "{text:?}");
+        assert!(
+            matches!(refused, Err(PaperError::SimClock)),
+            "{text:?}: {refused:?}"
+        );
     }
     assert_eq!(
         PaperError::SimClock.to_string(),

@@ -43,7 +43,11 @@ fn set_it_is_the_instant_and_its_second() {
 #[test]
 fn an_unreadable_value_refuses_and_never_falls_back_to_the_system_clock() {
     for text in ["", "next monday", "2026-10-19", "2026-10-19T15:00:00"] {
-        assert_eq!(owner_now(Some(text), system()), Err(SimClockError), "{text:?}");
+        assert_eq!(
+            owner_now(Some(text), system()),
+            Err(SimClockError),
+            "{text:?}"
+        );
     }
     assert_eq!(
         SimClockError.to_string(),

@@ -3,11 +3,12 @@
 //! rehearsal against `mandate-rh-sim` needs no market-data key (`AGENTS.md` rules 7 and 8).
 //!
 //! ```text
-//! cargo run -p mandate-paper --example rehearsal_bars -- <out> <symbol> <last close>
+//! cargo run -p mandate-paper --example rehearsal_bars -- <out> <symbol> <last close> [<at>]
 //! ```
 //!
-//! Writes the last [`SESSIONS`] regular sessions up to the last one completed at the system
-//! clock, one bar each, the closes rising by [`STEP`] to `<last close>` so the moving-average
+//! Writes the last [`SESSIONS`] regular sessions up to the last one completed at `<at>`, an RFC
+//! 3339 instant, the run clock the rehearsal sets (DEC-962 item 4), or at the system clock without
+//! it, one bar each, the closes rising by [`STEP`] to `<last close>` so the moving-average
 //! crossover's fast mean is above its slow one, with [`VOLUME`] shares a session, and prints the
 //! dataset's directory, which the run's `--bars` takes. An example, built only from the crate's
 //! dev-dependencies, so no product binary holds it; the shell judges the dataset exactly as it
@@ -32,8 +33,11 @@ const VOLUME: &str = "50000000";
 /// [`SESSIONS`] sessions.
 const LOOKBACK_DAYS: i64 = 60;
 
-fn write(out: &str, symbol: &str, last_close: &str) -> Result<String, String> {
-    let now = TokioPause.now();
+fn write(out: &str, symbol: &str, last_close: &str, at: Option<&str>) -> Result<String, String> {
+    let now = match at {
+        Some(at) => UtcNanos::parse_rfc3339(at).map_err(|_| "<at> is not an RFC 3339 instant")?,
+        None => TokioPause.now(),
+    };
     let calendar = ExchangeCalendar::us_equities().map_err(|e| e.to_string())?;
     let latest = calendar
         .last_completed_regular_session(now)
@@ -92,11 +96,15 @@ fn write(out: &str, symbol: &str, last_close: &str) -> Result<String, String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [out, symbol, last_close] = args.as_slice() else {
-        eprintln!("usage: rehearsal_bars <out> <symbol> <last close>");
-        return ExitCode::from(2);
+    let (out, symbol, last_close, at) = match args.as_slice() {
+        [out, symbol, last_close] => (out, symbol, last_close, None),
+        [out, symbol, last_close, at] => (out, symbol, last_close, Some(at.as_str())),
+        _ => {
+            eprintln!("usage: rehearsal_bars <out> <symbol> <last close> [<at>]");
+            return ExitCode::from(2);
+        }
     };
-    match write(out, symbol, last_close) {
+    match write(out, symbol, last_close, at) {
         Ok(dir) => {
             println!("{dir}");
             ExitCode::SUCCESS

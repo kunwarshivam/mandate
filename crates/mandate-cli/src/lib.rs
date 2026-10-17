@@ -35,6 +35,8 @@ pub mod inspect;
 pub mod journal;
 pub mod postgres;
 pub mod register;
+#[cfg(any(test, feature = "rh-sim"))]
+pub mod sim_clock;
 pub mod version;
 pub mod workspace;
 

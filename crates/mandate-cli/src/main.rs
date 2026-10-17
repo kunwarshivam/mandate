@@ -10,6 +10,8 @@ use mandate_cli::gestures::{AgentCommand, VersionCommand};
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
+#[cfg(feature = "rh-sim")]
+use mandate_cli::sim_clock::{SIM_CLOCK_VAR, owner_now};
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
     Cli, Command, artifact, connection, download, gestures, inbox, inspect, journal, register,
@@ -34,7 +36,26 @@ fn now() -> anyhow::Result<Now> {
         .context("the system clock is before 1970")?;
     let secs = i64::try_from(since_epoch.as_secs()).context("the system clock is out of range")?;
     let at = UtcNanos::from_parts(secs, since_epoch.subsec_nanos())?;
-    Ok(Now { at, secs })
+    rehearsal_clock(Now { at, secs })
+}
+
+/// The founder's CLI: the system clock.
+#[cfg(not(feature = "rh-sim"))]
+fn rehearsal_clock(system: Now) -> anyhow::Result<Now> {
+    Ok(system)
+}
+
+/// The rehearsal's CLI (DEC-962 item 2): the instant `MANDATE_RH_SIM_CLOCK` names, when set. A
+/// value that is not Unicode is read as empty, so it refuses rather than falling back.
+#[cfg(feature = "rh-sim")]
+fn rehearsal_clock(system: Now) -> anyhow::Result<Now> {
+    let value = std::env::var_os(SIM_CLOCK_VAR);
+    Ok(owner_now(
+        value
+            .as_ref()
+            .map(|value| value.to_str().unwrap_or_default()),
+        system,
+    )?)
 }
 
 /// Synchronous, so a command that blocks on its journal's own runtime never runs inside another

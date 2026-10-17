@@ -16,7 +16,7 @@ use mandate_domain::Environment;
 use mandate_paper::{
     ACCOUNT_NUMBER_VAR, Args, Broker, Build, Connection, Dial, EndpointRefusal, PaperError, Ports,
     Production, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST, RobinhoodEndpoint, SystemClock,
-    acknowledge, dial, disable_core_dumps, endpoint, parse, pinned_host,
+    acknowledge, dial, disable_core_dumps, endpoint, parse, pinned_host, run_clock,
 };
 use mandate_shell::control::ControlRecord;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -193,7 +193,10 @@ fn hardening_turns_the_core_dumps_off() {
 /// the kernel. Each test runs in its own process under nextest, so neither reads the other's.
 #[test]
 fn the_binarys_ports_harden_the_process() {
-    let mut ports = Production { journal: None };
+    let mut ports = Production {
+        journal: None,
+        clock: run_clock(&[]).expect("no clock variable"),
+    };
     ports.harden().expect("the kernel takes both settings");
     assert_no_core_dumps();
 }

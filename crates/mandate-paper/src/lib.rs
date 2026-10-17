@@ -33,6 +33,7 @@ mod harden;
 mod lt10;
 mod quote;
 mod robinhood;
+mod run_clock;
 #[cfg(any(test, feature = "rh-sim"))]
 mod sim_market;
 mod snapshot;
@@ -99,6 +100,9 @@ pub use robinhood::{
     Build, Dial, EndpointRefusal, Linked, LoggedIn, Market, MarketUnread, REHEARSAL_ENDPOINT_VAR,
     REHEARSAL_HOST, RobinhoodEndpoint, SessionMarket, dial, endpoint, pinned_host, robinhood_reads,
 };
+pub use run_clock::{RunClock, run_clock};
+#[cfg(feature = "rh-sim")]
+pub use run_clock::{SIM_CLOCK_VAR, SimClock};
 pub use snapshot::LapseSnapshot;
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
@@ -325,6 +329,11 @@ pub enum PaperError {
     /// (LT-9).
     #[error("core dumps could not be turned off")]
     Harden,
+    /// The rehearsal build's run clock variable is set and is not an RFC 3339 instant (DEC-962
+    /// item 1), before anything is read; the run never falls back to the system clock for it.
+    #[cfg(any(test, feature = "rh-sim"))]
+    #[error("the rehearsal's run clock is not an RFC 3339 instant")]
+    SimClock,
     /// The build has no Robinhood endpoint to dial (LT-1, DEC-922), before anything is sent.
     #[error(transparent)]
     Endpoint(EndpointRefusal),
@@ -1112,16 +1121,17 @@ fn closes_object(closes: &[(Date, Price)], asset_id: &str) -> Result<Vec<u8>, Pa
 /// The binary's ports (DEC-846 item 1, DEC-937 item 1): the control stream read from the
 /// Postgres journal at `journal`, the session of the broker the connection chose — the paper
 /// credentials from the environment with the Alpaca paper client, or the Robinhood login only a
-/// `live` build can make — and the system clock. Without a journal there is no control stream to
-/// read.
+/// `live` build can make — and this build's [`RunClock`] (DEC-962). Without a journal there is no
+/// control stream to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Production {
     pub journal: Option<String>,
+    pub clock: RunClock,
 }
 
 impl Ports for Production {
     type Session = Connected;
-    type Pause = SystemClock;
+    type Pause = RunClock;
 
     /// `ctl:{workspace}`'s records from the journal, read once, or [`PaperError::Control`] when
     /// there is no journal or it cannot be read. The error never names the DSN (rule 7).
@@ -1156,7 +1166,7 @@ impl Ports for Production {
             }
             Broker::Robinhood => {
                 let dial = dial.ok_or(PaperError::Endpoint(EndpointRefusal::NotBuilt))?;
-                robinhood::connect(dial).map(Connected::Robinhood)
+                robinhood::connect(dial, self.clock).map(Connected::Robinhood)
             }
         }
     }
@@ -1166,8 +1176,8 @@ impl Ports for Production {
         disable_core_dumps()
     }
 
-    fn pause(&self) -> SystemClock {
-        SystemClock
+    fn pause(&self) -> RunClock {
+        self.clock
     }
 }
 
@@ -1274,10 +1284,12 @@ where
             (name, value.to_string_lossy().into_owned())
         })
         .collect();
+    let clock = run_clock(&vars)?;
     if check {
         let args = parse_check(args)?;
         let mut ports = ProductionCheck {
             journal: args.journal.clone(),
+            clock,
         };
         let checked = connect_check(&args, &vars, &mut ports)?;
         return Ok(vec![format!("checked {}", checked.event_id)]);
@@ -1285,6 +1297,7 @@ where
     let args = parse(args)?;
     let mut ports = Production {
         journal: args.journal.clone(),
+        clock,
     };
     lines(&run(&args, &vars, &mut ports)?)
 }
@@ -1294,11 +1307,12 @@ pub const CONNECT_CHECK: &str = "--connect-check";
 
 /// The connect check's ports in the binary (DEC-946): core dumps off, the founder's login at the
 /// endpoint this build pins and the reads over its session ([`robinhood::login_from_env`],
-/// [`Linked::observe`]), the system clock, and the account stream in the Postgres journal at
-/// `journal`. No error names the DSN, the token or the account number (rule 7).
+/// [`Linked::observe`]), this build's [`RunClock`], and the account stream in the Postgres journal
+/// at `journal`. No error names the DSN, the token or the account number (rule 7).
 #[derive(Clone, PartialEq, Eq)]
 pub struct ProductionCheck {
     pub journal: String,
+    pub clock: RunClock,
 }
 
 /// The DSN may hold a password, so `Debug` never prints it (rule 7).
@@ -1338,7 +1352,7 @@ impl CheckPorts for ProductionCheck {
     }
 
     fn now(&self) -> UtcNanos {
-        SystemClock.now()
+        self.clock.now()
     }
 
     fn own(&mut self, stream: &StreamId) -> Result<(u64, u64), PaperError> {
