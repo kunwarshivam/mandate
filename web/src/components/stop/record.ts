@@ -1,5 +1,5 @@
 import { orderPriceText, protectionText } from "@/components/domain/positions";
-import type { Agent, AgentMode, Environment, ExternalPosition, Position, WorkingOrder, Workspace } from "@/fixtures/types";
+import type { Agent, AgentMode, ExternalPosition, Position, ShownEnvironment, WorkingOrder, Workspace } from "@/fixtures/types";
 import { quantity } from "@/lib/format";
 import { MODE_LABEL, ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
 import type { CommandRecord } from "@/lib/mock-runtime";
@@ -19,7 +19,7 @@ export interface RecordList {
  */
 export interface StopRecord {
   kind: RecordKind;
-  environment: Environment;
+  environment: ShownEnvironment;
   title: string;
   /** The agent's label, or "Account" for the whole account; used in the status lines. */
   label: string;

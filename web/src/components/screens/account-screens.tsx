@@ -45,9 +45,15 @@ function Alerts() {
               <span className="font-semibold">{HEALTH_LABEL[h.key]}</span>
               <span className="ml-auto flex flex-wrap items-baseline justify-end gap-x-2 gap-y-1 text-sm">
                 {h.state === "ok" ? null : <span className="rounded-sm border border-foreground px-1.5 text-label">{STATE_WORD[h.state]}</span>}
-                <span data-slot="as-of" className="whitespace-nowrap text-muted-foreground">
-                  as of <span className="font-mono tabular">{clock(h.as_of)}</span>, <Age at={h.as_of} now={now} />
-                </span>
+                {h.as_of === null ? (
+                  <span data-slot="as-of" className="whitespace-nowrap text-muted-foreground">
+                    not reported
+                  </span>
+                ) : (
+                  <span data-slot="as-of" className="whitespace-nowrap text-muted-foreground">
+                    as of <span className="font-mono tabular">{clock(h.as_of)}</span>, <Age at={h.as_of} now={now} />
+                  </span>
+                )}
               </span>
             </li>
           ))}
