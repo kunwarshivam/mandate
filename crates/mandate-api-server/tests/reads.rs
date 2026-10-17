@@ -596,6 +596,28 @@ fn a_connection_binds_the_account_its_latest_version_two_establishment_names() {
         later(r#"{"connection_id":"conn_1","account_ref":"acct-3_x"}"#).as_deref(),
         Some("acct-3_x")
     );
+
+    let mut v1_last = control.clone();
+    v1_last.push(row(
+        &ctl(),
+        9,
+        "ConnectionEstablished",
+        r#"{"connection_id":"conn_1","account_ref":"acct_v1_late"}"#,
+    ));
+    v1_last.push(versioned(
+        row(
+            &ctl(),
+            10,
+            "ConnectionRequested",
+            r#"{"connection_id":"conn_1","account_ref":"acct_req_v2"}"#,
+        ),
+        2,
+    ));
+    assert_eq!(
+        mandate_api_server::reads::account_ref(&v1_last, "conn_1").as_deref(),
+        Some("acct_two"),
+        "a later version-1 establishment, or a request at another version, never binds"
+    );
 }
 
 #[test]
