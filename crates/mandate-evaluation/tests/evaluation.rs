@@ -329,7 +329,7 @@ fn the_record_ranges_each_stream_by_its_lowest_and_highest_seq() {
     );
     assert_eq!(
         payload.get("theses_head").cloned(),
-        one(&format!("sha256:{}", records[0].hash.to_hex()))
+        one(&records[0].hash.to_hex())
     );
 }
 

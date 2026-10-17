@@ -22,7 +22,8 @@ pub struct EvaluationRecord<'a> {
 
 /// The payload at `schema_version` 1. `theses_from`, `theses_to` and `theses_head` hold one entry
 /// per agent stream read, in stream order (rule 145): the first and the last record's
-/// `stream_id:seq`, and the last record's hash.
+/// `stream_id:seq`, and the last record's hash as a bare `digest`: it names a journal record, not a
+/// stored artifact, so it is not a `ref` (journal spec §9, DEC-1142).
 pub fn evaluation_run_recorded(record: &EvaluationRecord<'_>) -> Result<Value, EvaluationError> {
     let mut streams: BTreeMap<&str, Vec<&ThesisRecord>> = BTreeMap::new();
     for thesis in record.records {
@@ -59,7 +60,7 @@ pub fn evaluation_run_recorded(record: &EvaluationRecord<'_>) -> Result<Value, E
             Value::Array(
                 ranges
                     .iter()
-                    .map(|(_, last)| reference(&last.hash))
+                    .map(|(_, last)| text(&last.hash.to_hex()))
                     .collect(),
             ),
         ),
