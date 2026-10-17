@@ -101,6 +101,7 @@ When blocked, ask the builder to fix the PR body, or tell the founder.
   | I2 | 184–189 |
   | EX | 190–199 |
   | D1 | 200–209 |
+  | L3 | 210–219 |
 
   Others ask the coordinator. The version and section go to whichever PR lands first; the later
   lander bumps only the version and section header, never rule numbers.
@@ -168,3 +169,12 @@ Message a builder with `send_message` and its session id.
 - 2026-10-17 18:15: handoff file created. Merged today in this stretch: #1518, #1524, #1517, #1520
   (founder), #1503, #1529, #1525, #1535, #1541, #1457. New lanes dispatched: H, E2E, O4, A2, X, SU,
   AH, EX. The agentic harness design and research are on this branch.
+- 2026-10-17 19:05:
+  - Merged #1538? no; merged #1548, #1541, #1535, #1529, #1525.
+  - L3 rule block 210–219 assigned.
+  - Blocked on the founder's own words in their sessions:
+    - SU: session_017FkrnmyddDKcSaUKDePmcx
+    - X: session_01JC6qC93xZiVhnLq1mgtfXo
+    - CI-R optional CI: session_016Q1bgmGnbpc8oAhaKVRAsX
+  - Founder chose "Optional CI for everything" at 18:33. The DEC is pending in CI-R. After it merges, the founder removes `fast` and `full` from ruleset 24010826.
+  - Sign-in fix #1556: the founder sets Supabase Site URL https://app.owlhead.ai and adds redirect https://app.owlhead.ai/auth/callback**.
