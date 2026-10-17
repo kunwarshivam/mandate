@@ -79,6 +79,9 @@ fn the_probes_listener_serves_nothing_else() {
         ("DELETE", "/readyz"),
         ("GET", "/livez/x"),
         ("GET", "/metrics"),
+        ("HEAD", "/livez"),
+        ("HEAD", "/readyz"),
+        ("OPTIONS", "/livez"),
     ] {
         let reply = send(probes, method, path, &[], b"");
         assert_eq!(reply.status, 404, "{method} {path}");
@@ -311,4 +314,30 @@ fn a_drain_settles_when_nothing_is_in_flight_and_not_before() {
     assert!(runtime.block_on(drain.settled(std::time::Duration::from_secs(10))));
     releaser.join().expect("the releaser");
     assert_eq!(drain.in_flight(), 0);
+}
+
+#[test]
+fn two_origins_or_an_empty_one_get_no_cors_header() {
+    let addr = api();
+    for origins in [
+        vec![("Origin", APP), ("Origin", "https://evil.test")],
+        vec![("Origin", "https://evil.test"), ("Origin", APP)],
+        vec![("Origin", APP), ("Origin", APP)],
+        vec![("Origin", "")],
+    ] {
+        let reply = send(addr, "GET", "/v1/workspaces/ws_1/agents", &origins, b"");
+        assert_eq!(reply.status, 401, "{origins:?}");
+        assert!(!reply.has_cors(), "{origins:?}: {:?}", reply.headers);
+        let mut preflight = origins.clone();
+        preflight.push(("Access-Control-Request-Method", "POST"));
+        let reply = send(
+            addr,
+            "OPTIONS",
+            "/v1/workspaces/ws_1/kill-switch",
+            &preflight,
+            b"",
+        );
+        assert_eq!(reply.status, 204, "{origins:?}");
+        assert!(!reply.has_cors(), "{origins:?}: {:?}", reply.headers);
+    }
 }

@@ -14,8 +14,9 @@
 //! It makes every start check before it listens, and refuses with exit status 2 and one line on
 //! stderr naming the check. Once both listeners are bound it prints
 //! `listening api=<addr> probes=<addr>` and nothing else. SIGTERM starts the drain: readiness
-//! turns `not_ready` while both listeners still accept, and once no API request is in flight, or
-//! at [`DRAIN_BOUND`], the listeners close and the process exits 0.
+//! turns `not_ready` while both listeners still accept, and once no API request is in flight the
+//! listeners close and the process exits 0. At [`DRAIN_BOUND`] with requests still in flight, or
+//! when a listener stops before any SIGTERM, it exits 1 with one line on stderr.
 
 use std::env;
 use std::ffi::OsString;
@@ -33,6 +34,8 @@ use mandate_api_server::http::{self, Settings};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 /// What the arguments name.
 struct Args {
@@ -70,15 +73,33 @@ fn args(mut raw: impl Iterator<Item = OsString>) -> Result<Args, StartRefusal> {
     })
 }
 
-/// The app origin: `https://` and a host, with no path, query, or trailing slash (§3.3 item 5).
+/// The app origin exactly as a browser serializes it (§3.3 item 5), so CORS can match it byte for
+/// byte: `https://`, a lowercase ASCII host of letters, digits, dots, and hyphens, and an optional
+/// port that is not the default 443. No user information, path, query, or trailing slash.
 fn app_origin() -> Result<String, StartRefusal> {
     let refused = StartRefusal::Setting {
         name: "MANDATE_API_APP_ORIGIN",
     };
     let origin = env::var("MANDATE_API_APP_ORIGIN").map_err(|_| refused.clone())?;
-    match origin.strip_prefix("https://") {
-        Some(host) if !host.is_empty() && !host.contains(['/', '?', '#', ' ']) => Ok(origin),
-        _ => Err(refused),
+    let rest = origin.strip_prefix("https://").ok_or(refused.clone())?;
+    let (host, port) = rest
+        .split_once(':')
+        .map_or((rest, None), |(h, p)| (h, Some(p)));
+    let host_ok = !host.is_empty()
+        && !host.starts_with(['.', '-'])
+        && !host.ends_with(['.', '-'])
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+    let port_ok = port.is_none_or(|port| {
+        port != "443"
+            && !port.starts_with('0')
+            && port.parse::<u16>().is_ok_and(|number| number > 0)
+    });
+    if host_ok && port_ok {
+        Ok(origin)
+    } else {
+        Err(refused)
     }
 }
 
@@ -115,6 +136,12 @@ async fn serve(
         .await
 }
 
+/// What ends the wait for SIGTERM: the signal, or a listener that stopped on its own.
+enum Wake {
+    Terminate,
+    ListenerEnded,
+}
+
 async fn run(args: Args, settings: Settings) -> io::Result<()> {
     let drain = Drain::new();
     let api = TcpListener::bind(args.bind).await?;
@@ -125,33 +152,59 @@ async fn run(args: Args, settings: Settings) -> io::Result<()> {
         api.local_addr()?,
         probes.local_addr()?
     );
-    let (stopped, stop) = tokio::sync::watch::channel(false);
-    let api_stop = wait_for(stop.clone());
-    let probe_stop = wait_for(stop);
-    let api = tokio::spawn(serve(
-        api,
-        http::api(settings, Arc::clone(&drain)),
-        api_stop,
-    ));
-    let probes = tokio::spawn(serve(
-        probes,
-        http::probes(Arc::new(Local::new(Arc::clone(&drain)))),
-        probe_stop,
-    ));
-    term.recv().await;
+    let (stopped, stop) = watch::channel(false);
+    let (wake, mut woken) = mpsc::unbounded_channel();
+    let api = spawn_listener(
+        serve(
+            api,
+            http::api(settings, Arc::clone(&drain)),
+            wait_for(stop.clone()),
+        ),
+        wake.clone(),
+    );
+    let probes = spawn_listener(
+        serve(
+            probes,
+            http::probes(Arc::new(Local::new(Arc::clone(&drain)))),
+            wait_for(stop),
+        ),
+        wake.clone(),
+    );
+    tokio::spawn(async move {
+        term.recv().await;
+        let _ = wake.send(Wake::Terminate);
+    });
+    match woken.recv().await {
+        Some(Wake::Terminate) => {}
+        Some(Wake::ListenerEnded) | None => {
+            return Err(io::Error::other("a listener stopped before any drain"));
+        }
+    }
     drain.begin();
     let settled = drain.settled(DRAIN_BOUND).await;
     let _ = stopped.send(true);
     if !settled {
-        eprintln!("drain bound reached; exiting with requests in flight");
-        return Ok(());
+        return Err(io::Error::other(
+            "the drain bound was reached with requests in flight",
+        ));
     }
     let _ = api.await;
     let _ = probes.await;
     Ok(())
 }
 
-async fn wait_for(mut stop: tokio::sync::watch::Receiver<bool>) {
+/// Runs one listener, and wakes the main task if it ends.
+fn spawn_listener(
+    listener: impl Future<Output = io::Result<()>> + Send + 'static,
+    wake: mpsc::UnboundedSender<Wake>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let _ = listener.await;
+        let _ = wake.send(Wake::ListenerEnded);
+    })
+}
+
+async fn wait_for(mut stop: watch::Receiver<bool>) {
     let _ = stop.wait_for(|stopped| *stopped).await;
 }
 

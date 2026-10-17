@@ -216,3 +216,70 @@ fn a_short_key_is_refused() {
         Err(StartRefusal::SessionKeyTooShort)
     );
 }
+
+#[test]
+fn an_ipv4_mapped_address_is_judged_as_the_ipv4_address_it_maps() {
+    let mapped = |text: &str| IpAddr::V6(text.parse().expect("an address"));
+    assert_eq!(
+        check_bind(at(mapped("::ffff:127.0.0.1")), None),
+        Ok(at(mapped("::ffff:127.0.0.1")))
+    );
+    let all = mapped("::ffff:0.0.0.0");
+    assert_eq!(
+        check_bind(at(all), Some(all)),
+        Err(StartRefusal::BindNotLocal)
+    );
+    assert_eq!(
+        check_bind(at(all), Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED))),
+        Err(StartRefusal::BindNotLocal)
+    );
+    let pod = mapped("::ffff:10.42.0.7");
+    assert_eq!(check_bind(at(pod), Some(POD)), Ok(at(pod)));
+    assert_eq!(check_bind(at(POD), Some(pod)), Ok(at(POD)));
+}
+
+#[test]
+fn a_password_hidden_by_encoding_or_by_the_keyword_form_is_refused() {
+    for url in [
+        "postgresql://owlhead_api@localhost/owlhead?%70assword=hunter2",
+        "postgresql://owlhead_api@localhost/owlhead?PassWord%3Dhunter2",
+        "postgresql://owlhead_api%3Ahunter2@localhost/owlhead",
+        "POSTGRESQL://owlhead_api:hunter2@localhost/owlhead",
+        "host=/var/run/postgresql user=owlhead_api password=hunter2",
+        "host=/var/run/postgresql password = 'hunter2' dbname=owlhead",
+        "dbname=owlhead\tPASSWORD=hunter2",
+    ] {
+        assert_eq!(
+            check_database_url(url),
+            Err(StartRefusal::PasswordInDatabaseUrl),
+            "{url}"
+        );
+    }
+    assert_eq!(
+        check_database_url("host=/var/run/postgresql user=owlhead_api dbname=owlhead"),
+        Ok(())
+    );
+    assert_eq!(
+        check_database_url("postgresql://owlhead_api@localhost/owlhead?application_name=a%2"),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_key_that_is_not_a_regular_file_is_refused_as_missing_and_never_opened() {
+    let dir = credentials(None, 0o600);
+    fs::create_dir(dir.join(SESSION_KEY_FILE)).expect("a directory where the key should be");
+    assert_eq!(read_session_key(&dir), Err(StartRefusal::SessionKeyMissing));
+    let dir = credentials(None, 0o600);
+    let made = std::process::Command::new("mkfifo")
+        .arg(dir.join(SESSION_KEY_FILE))
+        .status()
+        .expect("mkfifo runs");
+    assert!(made.success());
+    fs::set_permissions(
+        dir.join(SESSION_KEY_FILE),
+        fs::Permissions::from_mode(0o600),
+    )
+    .expect("its mode");
+    assert_eq!(read_session_key(&dir), Err(StartRefusal::SessionKeyMissing));
+}

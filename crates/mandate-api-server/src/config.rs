@@ -4,7 +4,8 @@
 
 use std::ffi::OsStr;
 use std::fmt;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -88,8 +89,9 @@ pub fn check_bind(
     bind: SocketAddr,
     pod_address: Option<IpAddr>,
 ) -> Result<SocketAddr, StartRefusal> {
-    let ip = bind.ip();
-    let local = ip.is_loopback() || (!ip.is_unspecified() && Some(ip) == pod_address);
+    let ip = bind.ip().to_canonical();
+    let pod = pod_address.map(|pod| pod.to_canonical());
+    let local = ip.is_loopback() || (!ip.is_unspecified() && Some(ip) == pod);
     if local {
         Ok(bind)
     } else {
@@ -119,45 +121,92 @@ where
     Ok(())
 }
 
-/// Refuses a database URL that carries a password, in its user information or as a `password`
-/// parameter; the deployment's URL authenticates over the local socket by peer authentication.
+/// Refuses a database connection string that carries a password, in a URL's user information or
+/// as a `password` keyword, in either libpq form (a URL or `key=value` pairs). The string is read
+/// percent-decoded, ASCII case-insensitively, and without whitespace, as libpq would read it; a
+/// string that only looks like a password, such as a database named `password=`, is refused too,
+/// which fails safe. The deployment's string authenticates over the local socket by peer
+/// authentication.
 ///
 /// # Errors
 /// [`StartRefusal::PasswordInDatabaseUrl`].
 pub fn check_database_url(url: &str) -> Result<(), StartRefusal> {
-    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let (authority_and_path, query) = after_scheme.split_once('?').unwrap_or((after_scheme, ""));
-    let authority = authority_and_path
-        .split_once('/')
-        .map_or(authority_and_path, |(authority, _)| authority);
-    let userinfo_has_password = authority
-        .rsplit_once('@')
-        .is_some_and(|(userinfo, _)| userinfo.contains(':'));
-    let query_has_password = query.split('&').any(|pair| {
-        pair.split_once('=')
-            .map_or(pair, |(key, _)| key)
-            .eq_ignore_ascii_case("password")
+    let read: String = percent_decoded(url)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let keyword = read.contains("password=");
+    let userinfo = read.split_once("://").is_some_and(|(_, rest)| {
+        let authority = rest.split(['/', '?']).next().unwrap_or_default();
+        authority
+            .rsplit_once('@')
+            .is_some_and(|(userinfo, _)| userinfo.contains(':'))
     });
-    if userinfo_has_password || query_has_password {
+    if keyword || userinfo {
         Err(StartRefusal::PasswordInDatabaseUrl)
     } else {
         Ok(())
     }
 }
 
-/// Reads [`SESSION_KEY_FILE`] from `credentials_dir`: at least [`MIN_SESSION_KEY_BYTES`], and
-/// readable by its owner only.
+/// `text` with each `%XX` escape decoded, lossily; an escape that is not two hex digits stays.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while let Some((&first, tail)) = rest.split_first() {
+        let escaped = match (first, tail) {
+            (b'%', [high, low, ..]) => hex(*high).zip(hex(*low)),
+            _ => None,
+        };
+        match (escaped, tail.get(2..)) {
+            (Some((high, low)), Some(after)) => {
+                out.push(high.wrapping_shl(4) | low);
+                rest = after;
+            }
+            _ => {
+                out.push(first);
+                rest = tail;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex(digit: u8) -> Option<u8> {
+    char::from(digit)
+        .to_digit(16)
+        .and_then(|value| u8::try_from(value).ok())
+}
+
+/// Reads [`SESSION_KEY_FILE`] from `credentials_dir`: a regular file (a FIFO or directory is refused
+/// as missing before it is opened, and the opened file is checked again, so its permissions and
+/// bytes come from the one open), readable by its owner only, and at least
+/// [`MIN_SESSION_KEY_BYTES`].
 ///
 /// # Errors
 /// [`StartRefusal::SessionKeyMissing`], [`StartRefusal::SessionKeyExposed`], or
 /// [`StartRefusal::SessionKeyTooShort`], in that order.
 pub fn read_session_key(credentials_dir: &Path) -> Result<SessionKey, StartRefusal> {
     let path = credentials_dir.join(SESSION_KEY_FILE);
-    let metadata = fs::metadata(&path).map_err(|_| StartRefusal::SessionKeyMissing)?;
+    let regular = fs::metadata(&path).is_ok_and(|metadata| metadata.is_file());
+    if !regular {
+        return Err(StartRefusal::SessionKeyMissing);
+    }
+    let mut file = File::open(&path).map_err(|_| StartRefusal::SessionKeyMissing)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| StartRefusal::SessionKeyMissing)?;
+    if !metadata.is_file() {
+        return Err(StartRefusal::SessionKeyMissing);
+    }
     if metadata.permissions().mode() & OTHERS_AND_GROUP != 0 {
         return Err(StartRefusal::SessionKeyExposed);
     }
-    let bytes = fs::read(&path).map_err(|_| StartRefusal::SessionKeyMissing)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|_| StartRefusal::SessionKeyMissing)?;
     if bytes.len() < MIN_SESSION_KEY_BYTES {
         return Err(StartRefusal::SessionKeyTooShort);
     }

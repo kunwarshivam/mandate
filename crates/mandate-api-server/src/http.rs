@@ -9,10 +9,9 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
-use axum::response::Response;
-use axum::routing::{MethodRouter, get};
+use axum::response::{IntoResponse, Response};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::encode;
 
@@ -64,32 +63,18 @@ async fn count(State(drain): State<Arc<Drain>>, request: Request, next: Next) ->
     next.run(request).await
 }
 
-/// The probes' listener's router: `/livez`, `/readyz`, and a bodiless 404 for anything else.
+/// The probes' listener's router: `GET /livez`, `GET /readyz`, and a bodiless 404 for anything
+/// else, `HEAD` included.
 pub fn probes(lifecycle: Arc<dyn Lifecycle>) -> Router {
-    Router::new()
-        .route(
-            "/livez",
-            only_get(get(|| async { status(StatusCode::OK, "live") })),
-        )
-        .route("/readyz", only_get(get(readyz)))
-        .fallback(not_found)
-        .with_state(lifecycle)
+    Router::new().fallback(probe).with_state(lifecycle)
 }
 
-/// A route answering only GET (and HEAD), with the probes' bodiless 404 for any other method.
-fn only_get(route: MethodRouter<Arc<dyn Lifecycle>>) -> MethodRouter<Arc<dyn Lifecycle>> {
-    route.fallback(not_found)
-}
-
-async fn not_found() -> StatusCode {
-    StatusCode::NOT_FOUND
-}
-
-async fn readyz(State(lifecycle): State<Arc<dyn Lifecycle>>) -> Response {
-    if lifecycle.ready() {
-        status(StatusCode::OK, "ready")
-    } else {
-        status(StatusCode::SERVICE_UNAVAILABLE, "not_ready")
+async fn probe(State(lifecycle): State<Arc<dyn Lifecycle>>, method: Method, uri: Uri) -> Response {
+    match (method == Method::GET, uri.path()) {
+        (true, "/livez") => status(StatusCode::OK, "live"),
+        (true, "/readyz") if lifecycle.ready() => status(StatusCode::OK, "ready"),
+        (true, "/readyz") => status(StatusCode::SERVICE_UNAVAILABLE, "not_ready"),
+        _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
 

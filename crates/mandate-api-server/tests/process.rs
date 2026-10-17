@@ -138,6 +138,17 @@ fn a_missing_key_or_origin_or_bind_is_refused() {
         &LOCAL,
         &[("MANDATE_API_APP_ORIGIN", "https://app.owlhead.test/")],
     );
+    let malformed_origins = [
+        "https://APP.owlhead.test",
+        "https://user@app.owlhead.test",
+        "https://app.owlhead.test:443",
+        "https://app.owlhead.test:0",
+        "https://app.owlhead.test:08443",
+        "https://app.owlhead.test.",
+        "https://app_owlhead.test",
+        "https://",
+    ]
+    .map(|origin| command(&LOCAL, &[("MANDATE_API_APP_ORIGIN", origin)]));
     let no_probes = command(&["--bind", "127.0.0.1:0"], &[]);
     let unknown = command(
         &[
@@ -149,20 +160,39 @@ fn a_missing_key_or_origin_or_bind_is_refused() {
         ],
         &[],
     );
-    for command in [no_key, no_origin, plain_http, with_path, no_probes, unknown] {
+    for command in [no_key, no_origin, plain_http, with_path, no_probes, unknown]
+        .into_iter()
+        .chain(malformed_origins)
+    {
         let (code, text) = refused(command);
         assert_eq!(code, Some(2), "{text}");
         assert!(text.starts_with("refused: "), "{text}");
     }
 }
 
-fn start() -> (Child, SocketAddr, SocketAddr) {
-    let mut child = command(&LOCAL, &[]).spawn().expect("the binary starts");
-    let stdout = child.stdout.take().expect("its stdout");
-    let mut line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut line)
-        .expect("a first line");
+/// A running binary, killed when dropped so a failing test leaks no process.
+struct Running(Child);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Starts the binary and reads its `listening` line, for at most ten seconds.
+fn start(extra: &[(&str, &str)]) -> (Running, SocketAddr, SocketAddr) {
+    let mut child = Running(command(&LOCAL, extra).spawn().expect("the binary starts"));
+    let stdout = child.0.stdout.take().expect("its stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    let line = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("a listening line within ten seconds");
     let rest = line
         .trim()
         .strip_prefix("listening api=")
@@ -198,7 +228,7 @@ fn wait(child: &mut Child, bound: Duration) -> Option<i32> {
 
 #[test]
 fn it_serves_both_listeners_and_exits_0_on_sigterm() {
-    let (mut child, api, probes) = start();
+    let (mut child, api, probes) = start(&[]);
     assert_eq!(get(probes, "/livez").status, 200);
     assert_eq!(get(probes, "/readyz").status, 200);
     let reply = send(api, "GET", "/v1/workspaces/ws_1/agents", &[], b"");
@@ -208,14 +238,24 @@ fn it_serves_both_listeners_and_exits_0_on_sigterm() {
         401,
         "no probe on the API listener"
     );
-    terminate(&child);
-    assert_eq!(wait(&mut child, Duration::from_secs(10)), Some(0));
+    terminate(&child.0);
+    assert_eq!(wait(&mut child.0, Duration::from_secs(10)), Some(0));
     let mut stderr = String::new();
     child
+        .0
         .stderr
         .take()
         .expect("its stderr")
         .read_to_string(&mut stderr)
         .expect("read");
     assert!(stderr.is_empty(), "{stderr}");
+}
+
+#[test]
+fn a_port_other_than_443_is_a_valid_app_origin() {
+    let (mut child, _, probes) =
+        start(&[("MANDATE_API_APP_ORIGIN", "https://app.owlhead.test:8443")]);
+    assert_eq!(get(probes, "/livez").status, 200);
+    terminate(&child.0);
+    assert_eq!(wait(&mut child.0, Duration::from_secs(10)), Some(0));
 }
