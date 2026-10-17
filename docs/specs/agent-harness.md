@@ -1033,19 +1033,25 @@ One record is new, on the control stream ([journal spec §9.23](journal.md#923-d
 |---|---|
 | `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies it at most once and starts an `owner` run with it as the cause, as it copies `OwnerRequestSubmitted` |
 
-**What this section asks of E19-13's records**, for its spec change:
+**What this section asks of E19-13's records**, for its spec change ([#1540](https://github.com/kunwarshivam/mandate/pull/1540); lane AH agreed to items 1 to 4 on 2026-10-17, and items 5 to 7 are raised there):
 
 1. `RunStarted.kind` includes `owner` and `explain`, and its trigger names the cause: the copied
    `OwnerQuestionSubmitted`'s event id, or the `ApprovalRequested`'s. The `RunStarted` is the
    question's copy, so journal spec §2's list of copies names it.
 2. At most one `owner` run per question and one `explain` run per approval, as stream rules.
 3. A terminal `answer` tool whose result is one of §15.5's check results, and `RunEnded`'s reason
-   distinguishes a shown answer from the rest. Each tool result records whether it is untrusted, so
-   `written_after_reading` folds from the records (§15.4).
+   distinguishes a shown answer from the rest.
 4. Tool requests use whatever request shape E19-13 pins, with DEC-997 item 2 amended there if
    that shape is a provider's native tool call.
 5. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
    DEC-2243 once the founder decides it.
+6. `ToolCallRecorded`'s closed `tool` member lists the desk's tools that E19-13 does not define:
+   `records.decisions`, `records.decision`, `records.approvals`, `records.approval`,
+   `records.orders`, `memory.universe`, `memory.thesis`, `mode.read`, and `answer`. The desk reuses
+   E19-13's `memory.positions`, `memory.theses`, `memory.runs`, `mandate.read`, and `note`, its menus
+   only narrowing their projection.
+7. Each tool result records whether it is untrusted, so `written_after_reading` folds from the
+   records (ADR-0005 §16 item 3).
 
 ### 15.7 Bounds and spend
 
