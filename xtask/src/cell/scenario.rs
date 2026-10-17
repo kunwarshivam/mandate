@@ -2,8 +2,9 @@
 //! order, on the local cell, with paper and demo data only and no credential. Every gesture whose
 //! pieces are on `main` runs for real, in one Job of the cell's own `control` process, so the
 //! artifact store its gestures share lives as long as they do; every link that is not on `main` is
-//! printed as a gap naming the PR or story that closes it, never faked. The scenario ends by
-//! exporting the workspace's control stream and verifying it by journal spec §11.
+//! printed as a gap naming the PR or story that closes it, never faked. The scenario ends, in the
+//! same pod, by exporting the workspace's control stream and verifying it by journal spec §11
+//! against the artifact store its gestures wrote, so every artifact a record names is checked.
 //!
 //! Each run takes a fresh workspace, `demo<run id>`, because a confirmed version is refused a
 //! second confirmation (`version_invalid`), so a run never depends on what an earlier one left.
@@ -25,6 +26,11 @@ pub const SCENARIOS: &[&str] = &["demo"];
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
 const INPUTS: &str = "/in";
+/// The journal and the artifact store every gesture names: the `control` process's DSN, expanded
+/// by Kubernetes from its environment, and the pod's own `/work`, which all its containers share.
+const JOURNAL: &str = "$(MANDATE_JOURNAL_DSN)";
+const STORE: &str = "/work/store";
+const SEGMENT: &str = "/work/segment.jsonl";
 /// The founding member: an opaque ULID (identity spec §3.1), never a name. The CLI's owner
 /// gestures take the lower-case form, which is all `--user` accepts (DEC-527 item 3).
 pub const FOUNDER: &str = "01K7DEM00000000000000F0VND";
@@ -95,11 +101,17 @@ fn deploy_code(agent: &str, version: &str) -> String {
 pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
     let version = reference(mandate);
     let user = FOUNDER.to_ascii_lowercase();
-    let owner = |args: &[&str]| -> Vec<String> {
-        let mut all: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        all.extend(["--workspace", workspace, "--user", &user].map(String::from));
-        all
+    let with = |args: &[&str], extra: &[&str]| -> Vec<String> {
+        args.iter().chain(extra).map(|a| a.to_string()).collect()
     };
+    let target = ["--journal", JOURNAL, "--store", STORE];
+    let owner = |args: &[&str]| {
+        with(
+            args,
+            &[&["--workspace", workspace, "--user", &user][..], &target].concat(),
+        )
+    };
+    let stream = format!("ctl:{workspace}");
     let mut index = 0;
     let mut gesture = |shows: &'static str, args: Vec<String>, expect: String| {
         index += 1;
@@ -120,32 +132,32 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 gesture(
                     "the workspace's paper control stream, opened",
-                    [
-                        "workspace",
-                        "open",
-                        "--workspace",
-                        workspace,
-                        "--environment",
-                        "paper",
-                    ]
-                    .map(String::from)
-                    .to_vec(),
+                    with(
+                        &[
+                            "workspace",
+                            "open",
+                            "--workspace",
+                            workspace,
+                            "--environment",
+                            "paper",
+                        ],
+                        &target,
+                    ),
                     format!("opened ctl:{workspace}"),
                 ),
                 gesture(
                     "the founder's membership, the owner bundle (the founding grant)",
-                    [
-                        "workspace",
-                        "found",
-                        "--workspace",
-                        workspace,
-                        "--member",
-                        FOUNDER,
-                    ]
-                    .into_iter()
-                    .chain(["--method", "oidc"])
-                    .map(String::from)
-                    .collect(),
+                    with(
+                        &[
+                            "workspace",
+                            "found",
+                            "--workspace",
+                            workspace,
+                            "--member",
+                            FOUNDER,
+                        ],
+                        &[&["--method", "oidc"][..], &target].concat(),
+                    ),
                     format!("founded ctl:{workspace} for member {FOUNDER}"),
                 ),
                 Part::Gap {
@@ -277,6 +289,26 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 },
             ],
         },
+        Step {
+            number: 7,
+            title: "the record: the workspace's control stream, exported and verified \
+                    (journal spec §11)",
+            parts: vec![
+                gesture(
+                    "the control stream, exported",
+                    with(
+                        &["journal", "export", &stream, SEGMENT],
+                        &["--journal", JOURNAL],
+                    ),
+                    format!("exported: stream {stream}"),
+                ),
+                gesture(
+                    "the export, verified against the artifacts its records name",
+                    with(&["journal", "verify", SEGMENT], &["--store", STORE]),
+                    format!("result: verified, stream {stream}"),
+                ),
+            ],
+        },
     ];
     steps
 }
@@ -297,7 +329,8 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
 /// repeated for each gesture in order as init containers after the chart's own, the last one as
 /// the pod's container, with the demo's files mounted read-only from a ConfigMap at [`INPUTS`].
 /// One pod, so the artifact store `version create` writes is the one `version confirm` and
-/// `agent deploy` read.
+/// `agent deploy` read, and the one the closing `journal verify` checks every record's artifact
+/// against.
 pub fn gestures_job(
     rendered: Vec<Value>,
     all: &[&Gesture],
@@ -321,17 +354,7 @@ pub fn gestures_job(
     for gesture in all {
         let mut container = template.clone();
         container["name"] = json!(gesture.container);
-        let mut args = gesture.args.clone();
-        args.extend(
-            [
-                "--journal",
-                "$(MANDATE_JOURNAL_DSN)",
-                "--store",
-                "/work/store",
-            ]
-            .map(String::from),
-        );
-        container["args"] = json!(args);
+        container["args"] = json!(gesture.args);
         container["volumeMounts"]
             .as_array_mut()
             .context("the run container has no mounts")?
@@ -461,7 +484,12 @@ pub fn run(name: &str) -> Result<()> {
                     let lines = lines_of(&logs, &g.container);
                     let said = lines.iter().any(|l| l.contains(&g.expect))
                         && codes.get(&g.container) == Some(&0);
-                    let last = lines.last().copied().unwrap_or("(no output)");
+                    let last = lines
+                        .iter()
+                        .find(|l| l.contains(&g.expect))
+                        .or(lines.last())
+                        .copied()
+                        .unwrap_or("(no output)");
                     if failed.is_some() {
                         eprintln!("    not run  {}", g.shows);
                     } else if said {
@@ -488,19 +516,6 @@ pub fn run(name: &str) -> Result<()> {
     if !succeeded {
         bail!("the demo's gestures Job failed:\n{logs}");
     }
-    let streams = json!([format!("ctl:{workspace}")]);
-    let verify = render(
-        &[
-            format!("verify.id=\"{id}\""),
-            format!("verify.streams={streams}"),
-        ],
-        Some("templates/run.yaml"),
-    )?;
-    let (verified, logs) = run_job(verify)?;
-    if !verified {
-        bail!("the demo workspace's control stream did not verify:\n{logs}");
-    }
-    eprintln!("  the record  ctl:{workspace} exported and verified (journal spec §11)");
     eprintln!(
         "==> {} gestures ran, {gaps} gaps named; kubectl: docker exec {} kubectl --namespace \
          {NAMESPACE} get jobs",
@@ -587,7 +602,11 @@ mod tests {
     fn the_plan_runs_the_six_steps_and_types_the_codes_it_shows() {
         let steps = plan("demo1", &mandate());
         let numbers: Vec<u8> = steps.iter().map(|s| s.number).collect();
-        assert_eq!(numbers, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            numbers,
+            [1, 2, 3, 4, 5, 6, 7],
+            "the six steps, then the record"
+        );
         let all = gestures(&steps);
         let mut names: Vec<&str> = all.iter().map(|g| g.container.as_str()).collect();
         for name in &names {
@@ -620,20 +639,38 @@ mod tests {
         );
     }
 
-    /// Every gesture states the workspace it acts on, and never the live environment.
+    /// Every gesture states the workspace it acts on, or its control stream, never the live
+    /// environment, and names the pod's own journal and store; the record is exported last and
+    /// verified against that store, so a record's missing artifact fails the run.
     #[test]
     fn every_gesture_is_in_the_demo_workspace_and_never_live() {
         let steps = plan("demo7", &mandate());
-        for g in gestures(&steps) {
-            let at = g.args.iter().position(|a| a == "--workspace");
-            assert_eq!(
-                at.map(|i| g.args[i + 1].as_str()),
-                Some("demo7"),
-                "{:?}",
-                g.args
-            );
-            assert!(!g.args.iter().any(|a| a == "live"), "{:?}", g.args);
+        let all = gestures(&steps);
+        fn value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+            let at = args.iter().position(|a| a == flag);
+            at.and_then(|i| args.get(i + 1)).map(String::as_str)
         }
+        for g in &all {
+            let (export, verify) = (
+                g.args[..2] == ["journal", "export"],
+                g.args[..2] == ["journal", "verify"],
+            );
+            let scoped = value(&g.args, "--workspace") == Some("demo7")
+                || (export && g.args[2] == "ctl:demo7")
+                || verify;
+            assert!(scoped, "{:?}", g.args);
+            assert!(!g.args.iter().any(|a| a == "live"), "{:?}", g.args);
+            if !verify {
+                assert_eq!(value(&g.args, "--journal"), Some(JOURNAL), "{:?}", g.args);
+            }
+            if !export {
+                assert_eq!(value(&g.args, "--store"), Some(STORE), "{:?}", g.args);
+            }
+        }
+        let tail: Vec<&[String]> = all[all.len() - 2..].iter().map(|g| &g.args[..2]).collect();
+        assert_eq!(tail, [["journal", "export"], ["journal", "verify"]]);
+        assert_eq!(all[all.len() - 2].args[3], SEGMENT);
+        assert_eq!(all[all.len() - 1].args[2], SEGMENT);
     }
 
     /// A gap is named, never faked: each names a PR (`#n`) or a story (`E<epic>-<n>`) that closes
@@ -707,20 +744,10 @@ mod tests {
         expected.extend(all.iter().map(|g| g.container.as_str()));
         assert_eq!(names, expected);
         let last = &spec["containers"][0];
-        let args: Vec<&str> = last["args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|a| a.as_str().unwrap())
-            .collect();
         assert_eq!(
-            &args[args.len() - 4..],
-            [
-                "--journal",
-                "$(MANDATE_JOURNAL_DSN)",
-                "--store",
-                "/work/store"
-            ]
+            last["args"],
+            json!(all[all.len() - 1].args),
+            "each gesture's own args"
         );
         assert_eq!(
             last["volumeMounts"][1],

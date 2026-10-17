@@ -111,8 +111,10 @@ release in `web/.nvmrc` and npm; the first run does `npm ci`.
 six steps in order, with paper and demo data only and no credential. Each gesture whose pieces are
 on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
 what its success prints. Each missing link prints as `gap` with the PR or story that closes it; a
-gap never fails the run and is never faked. The run ends by exporting the workspace's control
-stream and verifying it by journal spec §11. Each run uses a fresh workspace, `demo<run id>`.
+gap never fails the run and is never faked. The run ends, in the same pod, by exporting the
+workspace's control stream and verifying it by journal spec §11 against the artifact store its
+gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
+`demo<run id>`.
 
 | Step | Runs today | Gaps, and what closes each |
 |---|---|---|
