@@ -29,6 +29,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **Versions.** v0.48, §9.21, and rules 165 to 168 are DEC-1170's deployment manager records. This
     change takes v0.49, §9.22, and rules 171 to 183; lane I2's E19-5 change (DEC-2202) and lane EX's
     explainer change (rules from 190) follow it, renumbered at merge to follow whatever lands first.
+    Rules 169 and 170 are left free for lane I2's change.
 
 - **v0.48 ([DEC-1170](../project/decisions/DEC-1170.md); E21-33):** §9.21 registers the deployment
   manager's three records on the workspace control stream, closed at schema version 1:
