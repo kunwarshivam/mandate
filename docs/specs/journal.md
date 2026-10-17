@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.47 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.51 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.51 adds the deployment meter stream, [DEC-2204](../project/decisions/DEC-2204.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, and `model_gateway` section of §9.19; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -11,6 +11,19 @@ The journal is the append-only, hash-chained record of everything the platform d
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
+
+- **v0.51 ([DEC-2204](../project/decisions/DEC-2204.md); E19-13, delivery slice 2 of ADR-0005):**
+  §2 and §9.19 add the deployment meter stream, `dmeter:{deployment_id}`, so the deployment's
+  model-spend cap (a deployment setting, the founder's clarification of DEC-997 item 3) folds across
+  every workspace. It holds a copy of every workspace's `MeterReserved` and `MeterSettled`, with the
+  same members, so no record schema changes; rule 154 names its `StreamOpened`, and rules 155 to 158
+  bind it unchanged, a copy's settlement naming the copy of its reservation. A reservation is
+  appended to it before the workspace's own stream, so a failure between them leaves an orphan
+  that only over-counts; inference spec §3.3 and §3.6 say so in the same change. Agent-accepted
+  under DEC-176: it only refuses more.
+  - **Versions.** v0.48 to v0.50 are held by open changes (v0.49 by lane AH's DEC-2203, v0.50 by
+    lane EX's #1545); this change takes v0.51 and adds no rule number, and is renumbered at merge
+    if that changes.
 
 - **v0.47 ([DEC-1010](../project/decisions/DEC-1010.md); E21-29):** §9.20 closes the scheduler
   stream's five records at schema version 1 before the scheduler process writes them: its
@@ -816,6 +829,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 | Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export, and the control-plane link's records (§9.17) |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
 | Meter | `meter:{workspace_id}` | The workspace's model-gateway meter writer, one replica at a time, fenced by epoch ([inference spec §3.6](inference.md#36-journaling)) | Model-call cost reservations and settlements (§9.19). Never a risk input; spend for caps folds from it |
+| Deployment meter | `dmeter:{deployment_id}` | The deployment's model-gateway meter writer, one replica at a time, fenced by epoch ([DEC-2204](../project/decisions/DEC-2204.md)) | A copy of every workspace's meter records (§9.19), for the deployment's cap. The platform operator's: no workspace member reads it. Never a risk input |
 | Notice | `ntf:{workspace_id}` | The workspace's notification dispatcher ([notifications spec §5.1](notifications.md#51-the-dispatcher)) | Notices issued and every delivery attempt. Never a risk input; no other stream's owner copies from it |
 
 - **Identifier grammar:** every `{…}` segment matches `[A-Za-z0-9_-]+`. `account_ref` is an opaque
@@ -994,7 +1008,7 @@ flagged interval, and holds that a measurement no server answers is out of toler
 
 | Table | Columns |
 |---|---|
-| `events` | `stream_id`, `seq` (primary key), `event_id`, `event_type`, `schema_version`, `environment`, `recorded_at`, `prev_hash bytea`, `hash bytea`, **`body bytea`** (exactly the canonical body bytes); `CHECK (octet_length(hash) = 32 AND hash = sha256(body))`; `workspace_id` with row-level security in multi-tenant deployments |
+| `events` | `stream_id`, `seq` (primary key), `event_id`, `event_type`, `schema_version`, `environment`, `recorded_at`, `prev_hash bytea`, `hash bytea`, **`body bytea`** (exactly the canonical body bytes); `CHECK (octet_length(hash) = 32 AND hash = sha256(body))`; `workspace_id` with row-level security in multi-tenant deployments (`null` for the deployment meter stream, §9.19) |
 | `event_ids` | `event_id` (primary key), `stream_id`, `seq` — written in the same transaction (global uniqueness under partitioning) |
 | `stream_heads` | `stream_id` (primary key), `seq`, `hash`, `writer_epoch` |
 
@@ -1232,6 +1246,13 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 | `StreamOpened` | — | stream type, workspace; closed in §9.19 |
 | `MeterReserved` | — | A call's reservation of its maximum cost before its first attempt: call, agent, purpose, model, endpoint, key owner, price table, maximum cost, risk day; closed in §9.19 |
 | `MeterSettled` | — | The call's settlement: call, reservation, outcome, attempts, tokens, cost; closed in §9.19 |
+
+**Deployment meter stream** (owner: the deployment's model-gateway meter writer; [DEC-2204](../project/decisions/DEC-2204.md))
+
+| Event type | Required refs | Key payload fields |
+|---|---|---|
+| `StreamOpened` | — | stream type, deployment; closed in §9.19 |
+| `MeterReserved`, `MeterSettled` | — | Copies of every workspace's meter records, the meter stream's schemas; closed in §9.19 |
 
 **Notice stream** (owner: the workspace's notification dispatcher; [notifications spec §5.5](notifications.md#55-records))
 
@@ -3207,7 +3228,7 @@ and journals nothing about that stream.
 
 | Type | Values | Refused as |
 |---|---|---|
-| `stream_id` | §2's form: `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`, `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}` (§9.19), each segment `[A-Za-z0-9_-]+` | As `id` |
+| `stream_id` | §2's form: `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`, `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`, or `dmeter:{deployment_id}` (§9.19), each segment `[A-Za-z0-9_-]+` | As `id` |
 | `digest` | 64 lowercase hex SHA-256: an event's `hash` or `prev_hash` (§3), or a digest of bytes the journal does not store, such as §12's verifier digest. It is not a `ref`: it names no stored artifact, so it is not listed in `artifact_refs` and §11 check 6 does not read it | As `id` |
 
 **`range`**, the unit every record covers: one stream's events from `from_seq` to `to_seq`, both
@@ -3448,7 +3469,7 @@ stream owner copies a fact from it and the dispatcher writes nothing else.
 | Type | Values | Refused as |
 |---|---|---|
 | `notice_id` | Exactly 32 lowercase hexadecimal digits: notifications spec §4.2's random notice id. Never an event id, which is a `ulid` and carries its creation time | As `id` |
-| `stream_id` | A stream id in §2's grammar, of one of the six stream types (the meter stream's since v0.46, §9.19) | As `id` |
+| `stream_id` | A stream id in §2's grammar, of one of the seven stream types (the meter stream's since v0.46, the deployment meter stream's since v0.51, §9.19) | As `id` |
 | `opaque` | 1 to 256 characters, each U+0021 to U+007E: a provider's message id, which has no space and so cannot carry a sentence | As `id` |
 | `kind` | Notifications spec §3.2's closed set of 33 kinds, below | As `id` |
 
@@ -3863,7 +3884,8 @@ numbers follow §9.17's rule 142.
 
 The model gateway ([inference spec](inference.md)) is the one component that calls a model. It
 writes none of the existing streams: the caller appends each call's `ModelInvocationRecorded` to its
-own stream (inference spec §3.6), and the gateway's meter writer owns the meter stream. §9.2's
+own stream (inference spec §3.6), each workspace's meter writer owns that workspace's meter stream,
+and the deployment's meter writer owns the deployment meter stream ([DEC-2204](../project/decisions/DEC-2204.md)). §9.2's
 conventions apply unchanged: every member is present on every record (§4.2), `null` only where the
 type is nullable, any other member refused, and opaque text non-empty. Each schema is
 `schema_version` 1.
@@ -3905,11 +3927,47 @@ rule 152 says. Rules 71 and 76 are the control stream's alone.
 
 **`StreamOpened`** on the meter stream: `{stream_type: "meter", workspace_id: id}`.
 
+**The deployment meter stream** ([DEC-2204](../project/decisions/DEC-2204.md)),
+`dmeter:{deployment_id}`, where `deployment_id` is the deployment's enrolled id (§9.17's
+`ControlPlaneEnrolled`). It opens with `StreamOpened`:
+`{stream_type: "deployment_meter", deployment_id: id}`, and its one writer is the deployment's meter
+writer, fenced by epoch like every writer. It holds a copy of every workspace's `MeterReserved` and
+`MeterSettled`, so the deployment's cap counts every workspace's calls:
+
+- **A copy is its own record.** It has its own `event_id` (§3), and every member equal to the
+  workspace record's except a settlement's `reservation`, which names the `event_id` of the
+  deployment stream's copy of its `MeterReserved`. So rule 158 holds on this stream as written, and
+  call ids, which are ULIDs, never repeat across workspaces. That a copy agrees with its workspace
+  record is checked by no rule at append; the verifier owns it, as for the cross-stream links below.
+- **The order.** The workspace's writer checks every workspace cap against its own stream and
+  appends nothing; then the deployment's writer checks the deployment cap and appends the copy, its
+  check and append one step; then the workspace's writer appends its reservation, and only then may
+  the first attempt leave. The workspace's writer admits one reservation at a time, from its check to
+  its own append, so no two calls are admitted against the same headroom on either stream. A
+  settlement is appended to the workspace's stream and then copied here.
+- **What a failure leaves.** A refusal at either check, or a deployment writer that cannot be
+  reached or is fenced, appends nothing to either stream (`meter_unavailable`), or leaves an orphan if
+  its append was in fact committed. A workspace append
+  that fails after the copy leaves an **orphan**: a reservation on this stream with no workspace
+  record and no `ModelInvocationRecorded` naming it, open and counted at its maximum, never settled;
+  the call is `meter_unavailable` and sends nothing, and the operator is alerted. A settlement copy
+  that fails leaves its reservation open at its maximum, as a crash does. So this stream never
+  counts a call below its reserved maximum, nor below the workspace stream's count of it, except
+  for a settlement above its reservation that the workspace stream holds and this stream does not.
+- **Who reads it.** It holds other workspaces' call, agent, and model ids, so it is the platform
+  operator's: its hot-store rows carry no `workspace_id` (§6.1), no workspace member's read, range,
+  or export (§9.13) includes it, and no workspace's stream copies from it. A workspace's offboarding
+  or erasure leaves its ids here, as ids and costs only, for the records retention period (§6.2).
+  Rules 155 to 158 bind it as they bind a workspace's meter stream; rule 154 names its id. Its
+  reference vectors follow with the meter streams' registration in `mandate-journal` (DEC-998
+  item 8), before any live call.
+
 **`MeterReserved`** on the meter stream: a call's reservation of its maximum cost (inference spec
 §7.2), appended by the workspace's one meter writer before the call's first attempt leaves the
 deployment, after every cap that applies admitted it (inference spec §7.3). A refusal reserves
-nothing and has no meter record, `meter_unavailable` included (inference spec §3.3), and neither
-does a cache hit, which reaches no provider and costs nothing.
+nothing and has no record on the workspace's meter stream, `meter_unavailable` included (inference
+spec §3.3), and neither does a cache hit, which reaches no provider and costs nothing. The one
+refusal that leaves a record anywhere is the deployment meter stream's orphan above.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -3936,8 +3994,8 @@ done with the call.
 | `cost_usd` | `decimal` | From the reservation's price table and the reported tokens, or the reservation's maximum when the reply's cost cannot be read (inference §3.4); `append` checks only that it is not negative (rule 157) |
 
 **Spend** folds from the meter stream alone (inference spec §7.3). For a scope (the workspace, or
-one `agent_id`) and a period (one risk day, or every risk day of one calendar month; no other period
-exists at this version, so the license's cycle allotment of inference §7.3 is not yet folded), spend
+one `agent_id`, on the workspace's stream; the deployment, on the deployment meter stream) and a
+period (one risk day, or every risk day of one calendar month; no other period exists at this version, so the license's cycle allotment of inference §7.3 is not yet folded), spend
 is the sum, over the scope's `MeterReserved` records in the period, of the settlement's `cost_usd`
 for a settled reservation and the reservation's `max_cost_usd` for an open one. An open reservation
 is one with no `MeterSettled`: a call still in flight, or one whose process died. It stays counted at
@@ -3990,7 +4048,8 @@ next call is then refused sooner. Every refusal and cache hit is on the caller's
      into the stream (inference §3.4). It is a stream rule: `append` reads the stream's earlier
      records, and a range judges it from the stream's start.
 154. Meter-stream `StreamOpened`: `stream_id` equals `meter:{workspace_id}` (`stream_id`, reason
-     `stream_mismatch`), as rule 25 does on the control stream.
+     `stream_mismatch`), as rule 25 does on the control stream; on the deployment meter stream,
+     `stream_id` equals `dmeter:{deployment_id}` (the same path and reason).
 155. `MeterReserved` and `MeterSettled`: the actor is a `system` (`actor.kind`), the gateway's meter
      writer.
 156. `MeterReserved`: `agent_id` is `null` exactly when `purpose` is `compiler`

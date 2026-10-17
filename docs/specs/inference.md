@@ -179,7 +179,7 @@ prompt, sampling parameters (temperature, seed where supported), the output sche
 | `policy_denied` | Endpoint, provider, or model type not allowed by policy, or local-only (INF-12) | No | No |
 | `budget_exhausted` | A spend cap would be exceeded by the reservation (§7.3) | No | No |
 | `rate_limited_local` | The gateway's own per-agent or per-workspace rate cap | No | No |
-| `meter_unavailable` | The reservation could not be appended: the meter writer is unreachable, or this replica is fenced (§3.6) | No | No |
+| `meter_unavailable` | The reservation could not be appended: the workspace's or the deployment's meter writer is unreachable, or this replica or that writer is fenced (§3.6) | No | No |
 | `input_rejected` | The prompt guard found forbidden content (§8.3) | No | No |
 | `model_withdrawn` | The entry is withdrawn (INF-15) | No | No |
 | `deadline_exceeded` | No complete response before the deadline | No further attempts | Maybe |
@@ -270,16 +270,30 @@ existing ones. So:
   stream (`meter:{workspace_id}`, journal spec §9.19: `MeterReserved` and `MeterSettled`). The
   reservation is appended before the first attempt leaves the deployment, so a crash cannot lose a
   cost, and spend per agent and per workspace folds from that stream.
+- **The deployment's cap folds from the deployment meter stream** (`dmeter:{deployment_id}`,
+  [DEC-2204](../project/decisions/DEC-2204.md), journal spec §9.19), written by the deployment's one
+  meter writer: a copy of every workspace's reservations and settlements. The workspace's holder
+  checks its own caps and then asks the deployment's writer to reserve; that writer checks the
+  deployment cap and appends in one step, and only then does the holder append to the workspace
+  stream. A deployment writer that is unreachable inside the call's deadline, or fenced, ends the
+  call `meter_unavailable`, with nothing appended to either stream, or an orphan (below) if its
+  append was in fact committed.
 - **One meter writer per workspace** (DEC-432 item 20). The gateway may run as several replicas, but
   a stream has one writer, fenced by epoch (journal spec §2, §5). So exactly one replica holds the
-  meter writer role for a workspace, and it alone checks caps and appends. Any other replica asks
-  the holder to reserve before it sends anything. A cap is therefore checked against one ordered
-  stream, never against two replicas' separate views.
+  meter writer role for a workspace, and it alone checks the workspace's caps and appends. Any other
+  replica asks the holder to reserve before it sends anything. The holder admits one reservation at
+  a time, from its check to its own append, the deployment's reservation included, and the
+  deployment's writer likewise. Each cap is therefore checked against one ordered stream, never
+  against two replicas' separate views.
 - **A replica that cannot reserve refuses.** If the holder is unreachable inside the call's
   deadline, or the replica's own append is fenced, the call ends `meter_unavailable` (§3.3):
   nothing is sent and the output is missing (INF-4). Each such refusal is counted and alerts the
-  operator, so it is never a silent partial outage. It has no meter-stream entry and costs nothing;
-  the caller's `ModelInvocationRecorded` records the outcome.
+  operator, so it is never a silent partial outage. It has no workspace meter-stream entry and costs
+  nothing; the caller's `ModelInvocationRecorded` records the outcome. One case leaves a deployment
+  entry: a workspace append that fails after the deployment's reservation was appended. That
+  reservation is an **orphan**: it stays open, counted at its maximum against the deployment's cap
+  and never settled, so the deployment over-counts and never under-counts, and the operator is
+  alerted (DEC-2204 item 4).
 - **Hand-over.** A new holder takes the next epoch and folds the stream before it reserves. A
   reservation the old holder left unsettled stays counted (§7.3).
 - **A caller can read its own reservations** in the meter stream (agent harness spec §10.1 ask 2),
