@@ -42,7 +42,7 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   cell's own `mandate.local/` build;
 - `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
   `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
-  (DEC-971 item 2, [DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6);
+  (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
 - the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and

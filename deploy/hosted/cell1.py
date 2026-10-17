@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stand up cell #1 on two DigitalOcean droplets behind Cloudflare Tunnel and Access (E21-51, DEC-2000).
+"""Stand up cell #1 on two DigitalOcean droplets behind Cloudflare Tunnel and Access (E21-51, DEC-2001).
 
 The founder runs this from their own machine with their own tokens (deploy/hosted/RUNBOOK.md); agents
 never do. Every step prints each command and each Cloudflare API request before it runs, and
@@ -810,7 +810,7 @@ def step_cluster(plan: Plan, args) -> None:
     hosted = args.target == "hosted"
     if hosted and not args.accept_dev_tier and not plan.dry_run:
         raise Refused(
-            "--accept-dev-tier is required: cell #1 runs unsigned builds as `dev` (DEC-2000 item 6), "
+            "--accept-dev-tier is required: cell #1 runs unsigned builds as `dev` (DEC-2001 item 6), "
             "only once the founder has answered DEC-971 item 7(b)"
         )
     kubeconfig = STATE / ("kubeconfig" if hosted else "kubeconfig-k3d")

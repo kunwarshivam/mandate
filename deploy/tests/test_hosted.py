@@ -1,4 +1,4 @@
-"""Invariants of cell #1's hosted bring-up (E21-51, DEC-2000), on the committed files and on what
+"""Invariants of cell #1's hosted bring-up (E21-51, DEC-2001), on the committed files and on what
 deploy/hosted/cell1.py would run.
 
 Each property is one function returning the problems it finds, asserted empty on the real files and

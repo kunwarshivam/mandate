@@ -1,4 +1,4 @@
-# The ops tunnel `cell1-ops` (DEC-2000 item 3): the founder's SSH and kubectl reach cell1-a only
+# The ops tunnel `cell1-ops` (DEC-2001 item 3): the founder's SSH and kubectl reach cell1-a only
 # through it, behind Cloudflare Access, so the droplets open no inbound port. The token is a
 # systemd credential, /etc/cell1/credentials/ops-tunnel-token, root:root 0600, handed to this
 # service alone in $CREDENTIALS_DIRECTORY, never in this unit, the environment or a command line.

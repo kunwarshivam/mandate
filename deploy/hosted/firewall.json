@@ -1,5 +1,5 @@
 {
-  "about": "The cloud firewall of cell #1's two droplets, by tag (E21-51, DEC-2000 item 2). Nothing on the internet reaches either droplet: the only inbound sources are the cell's own droplets, for k3s, its WireGuard pod network and SSH from cell1-a to cell1-b. Ingress is the two Cloudflare tunnels, which dial out. Outbound is narrowed by port; each pod's own egress is narrowed again by the chart's network policies. `cell1.py` turns these rules into doctl's flags; tests/test_hosted.py checks them.",
+  "about": "The cloud firewall of cell #1's two droplets, by tag (E21-51, DEC-2001 item 2). Nothing on the internet reaches either droplet: the only inbound sources are the cell's own droplets, for k3s, its WireGuard pod network and SSH from cell1-a to cell1-b. Ingress is the two Cloudflare tunnels, which dial out. Outbound is narrowed by port; each pod's own egress is narrowed again by the chart's network policies. `cell1.py` turns these rules into doctl's flags; tests/test_hosted.py checks them.",
   "inbound": [
     {"protocol": "tcp", "ports": "1-65535", "sources": {"tags": ["mandate-cell1"]}},
     {"protocol": "udp", "ports": "1-65535", "sources": {"tags": ["mandate-cell1"]}},

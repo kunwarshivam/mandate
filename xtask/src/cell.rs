@@ -484,7 +484,7 @@ pub fn up() -> Result<()> {
 }
 
 /// `cargo xtask cell hosted`: cell #1's own `cluster` step (`deploy/hosted/cell1.py`, E21-51,
-/// DEC-2000 item 11) against a two-node k3d cluster of its own, the proof before the droplets are
+/// DEC-2001 item 11) against a two-node k3d cluster of its own, the proof before the droplets are
 /// bought: the same secrets, service-account patch, operator, journal-db and workspace chart with
 /// cell #1's values, the tunnel off.
 pub fn hosted() -> Result<()> {

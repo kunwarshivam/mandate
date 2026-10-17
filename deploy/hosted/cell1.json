@@ -1,5 +1,5 @@
 {
-  "about": "Cell #1's settings for deploy/hosted/cell1.py (E21-51, DEC-2000). Settings only: no token, key, password or account id is ever a value here; those are the founder's, given as file paths or flags when the runbook runs.",
+  "about": "Cell #1's settings for deploy/hosted/cell1.py (E21-51, DEC-2001). Settings only: no token, key, password or account id is ever a value here; those are the founder's, given as file paths or flags when the runbook runs.",
   "tag": "mandate-cell1",
   "region": "nyc3",
   "image": "ubuntu-24-04-x64",

@@ -19,7 +19,7 @@ case "$role" in
     cat >/etc/rancher/k3s/config.yaml <<CONFIG
 node-ip: "$ip"
 flannel-iface: eth1
-# Pod traffic between the droplets is encrypted, though the VPC is private (DEC-2000 item 5).
+# Pod traffic between the droplets is encrypted, though the VPC is private (DEC-2001 item 5).
 flannel-backend: wireguard-native
 disable: [traefik, servicelb]
 secrets-encryption: true

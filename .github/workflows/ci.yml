@@ -459,7 +459,7 @@ jobs:
       - run: cargo xtask ci cell
         if: steps.change.outputs.docs_only != 'true'
 
-  # E21-51, DEC-2000 item 11. Cell #1's `cluster` step, the same code the founder runs against the
+  # E21-51, DEC-2001 item 11. Cell #1's `cluster` step, the same code the founder runs against the
   # droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the
   # default service account, the CloudNativePG operator, journal-db and the workspace chart with
   # cell #1's values, the tunnel off. Not a required check; skipped for a documentation-only

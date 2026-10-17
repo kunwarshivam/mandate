@@ -1,6 +1,6 @@
 # Cell #1 hosted bring-up (E21-51)
 
-- **Spec:** DEC-2000; DEC-995 (two DigitalOcean droplets, `nyc3`); DEC-967 items 6 to 9; DEC-990
+- **Spec:** DEC-2001; DEC-995 (two DigitalOcean droplets, `nyc3`); DEC-967 items 6 to 9; DEC-990
   item 2; DEC-971 item 7; the managed-cells plan, H1 and H3.
 - **Code:** `deploy/hosted/cell1.py` (the bring-up: `cloudflare`, `droplets`, `nodes`, `cluster`,
   `check`; `--dry-run`; `--target k3d`; `cargo xtask cell hosted` in `xtask/src/cell.rs`), `deploy/hosted/cell1.json` and `deploy/hosted/firewall.json`

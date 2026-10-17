@@ -598,7 +598,7 @@ def test_deployment_tier_is_set_from_values():
     assert tiers(render(*every_image())) == {"production"}, "unset is production"
     assert tiers(render_all()) == {"ci"}, "the local cell runs its own unsigned build as ci"
     k3s = ("-f", str(CELL / "values" / "k3s.yaml"))
-    assert tiers(render(*k3s, "-f", str(hosted), *every_image())) == {"dev"}, "cell #1 is dev (DEC-2000)"
+    assert tiers(render(*k3s, "-f", str(hosted), *every_image())) == {"dev"}, "cell #1 is dev (DEC-2001)"
     for refused in ("live", "prod", ""):
         assert helm(CHART, "--set", f"deploymentTier={refused}").returncode != 0, refused
 

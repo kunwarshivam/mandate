@@ -1,4 +1,4 @@
-# k3s, the server on cell1-a and the agent on cell1-b (E21-51, DEC-2000). Installed by cloud-init,
+# k3s, the server on cell1-a and the agent on cell1-b (E21-51, DEC-2001). Installed by cloud-init,
 # never enabled by it: `cell1-k3s-start` enables it once the node's config and, on the agent, the
 # join token are in place. The role is the unit's one argument, written in by cloud-init.
 [Unit]

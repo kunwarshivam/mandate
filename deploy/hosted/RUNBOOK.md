@@ -3,7 +3,7 @@
 For the founder, or the coordinator on the founder's behalf, with the founder's own tokens. Run
 from a checkout of `main` on your Mac. Every command is exact; no value in this file is a secret.
 Each token goes into a file only you can read, by pasting it at a prompt that does not echo; no
-step prints one. Paper and demo data only (DEC-995, DEC-2000).
+step prints one. Paper and demo data only (DEC-995, DEC-2001).
 
 Replace `owlhead.ai` below if the zone differs, and `you@example.com` with each operator's email
 (repeat `--access-email` for each).
@@ -16,8 +16,8 @@ Replace `owlhead.ai` below if the zone differs, and `you@example.com` with each 
 2. **DEC-995 is Accepted**: you have posted its approval on its PR. It approves the spend.
 3. **DEC-971 item 7(b) is answered** in your own words: may hosted cell #1, paper and demo only,
    run unsigned builds before the hardware key is wired? `cluster` installs with
-   `deploymentTier: dev` (DEC-2000 item 6); if the answer is no, stop before step 6.
-4. **DEC-2000 item 7**: you accept `doctl` (or do step 4 by hand in the DigitalOcean console from
+   `deploymentTier: dev` (DEC-2001 item 6); if the answer is no, stop before step 6.
+4. **DEC-2001 item 7**: you accept `doctl` (or do step 4 by hand in the DigitalOcean console from
    the dry run's plan).
 
 ## 1. Tools, each checked

@@ -1,7 +1,7 @@
 # deploy/hosted/: cell #1 on two DigitalOcean droplets
 
 Everything that stands up cell #1 from a clean account in one scripted run (E21-51,
-[DEC-2000](../../docs/project/decisions/DEC-2000.md)): k3s on two droplets in `nyc3`
+[DEC-2001](../../docs/project/decisions/DEC-2001.md)): k3s on two droplets in `nyc3`
 ([DEC-995](../../docs/project/decisions/DEC-995.md)), the workspace chart of `../cell/` with cell
 #1's values, ingress only through Cloudflare Tunnel, Cloudflare Access in front of every public
 hostname, and the journal's cold store bound for R2. Paper and demo data only; no live connection.
@@ -34,12 +34,12 @@ Each is a test in `deploy/tests/test_hosted.py` (or `test_cell.py` for the chart
   to cell1-b over SSH, and starts the agent.
 - **The ops tunnel's first token is the only secret in user data,** on cell1-a only, as a
   root-only 0600 file loaded by its unit as a systemd credential. No pod can read the metadata
-  service that serves it (DEC-2000 item 4 has the residuals).
+  service that serves it (DEC-2001 item 4 has the residuals).
 - **Secrets travel on stdin only.** The GHCR pull secret, the app tunnel's token and the R2 key
   pair reach their Secrets on kubectl's stdin; the join token on SSH's. A recorded run plants each
   value and finds it in no argv and no output; a command line carrying one is refused.
 - **`MANDATE_DEPLOYMENT_TIER` comes from the chart's `deploymentTier`**: `production` unless
-  values say otherwise, `ci` in the local cell, `dev` on cell #1 (DEC-2000 item 6, Proposed).
+  values say otherwise, `ci` in the local cell, `dev` on cell #1 (DEC-2001 item 6, Proposed).
 - **The pins match the local cell's:** k3s and the CloudNativePG chart and operator are the
   versions `xtask/src/cell.rs` runs the drills on.
 
@@ -66,4 +66,4 @@ renders only the migration Job. `python3 deploy/hosted/cell1.py --dry-run all ..
 - A server-side caller of the API (the `web/` Worker) needs an Access service token (lane W2).
 - R2: the Secret and the ConfigMap exist; no process ships segments until E5-7's shipper or
   E21-41's backups, which also set the `object-storage` egress CIDRs.
-- Rotating the ops tunnel's first token (DEC-2000 item 4).
+- Rotating the ops tunnel's first token (DEC-2001 item 4).
