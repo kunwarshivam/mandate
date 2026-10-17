@@ -54,8 +54,6 @@ pub(super) struct Agentic {
     transcript: Vec<TurnRef>,
     counts: Counts,
     instruments_read: BTreeSet<String>,
-    /// The run's read-result bytes left, as the loop last counted them (§6.9 step 5).
-    result_bytes_left: u32,
 }
 
 impl Agentic {
@@ -206,7 +204,6 @@ pub(super) fn start(
             transcript: Vec::new(),
             counts: Counts::default(),
             instruments_read: BTreeSet::new(),
-            result_bytes_left: agentic.bounds.max_run_result_bytes,
         },
         universe_bytes,
     ))
@@ -449,7 +446,7 @@ pub(super) fn replied(
             run_id: run.run_id.clone(),
             turn,
             calls: reply.dispatch.clone(),
-            result_bytes_left: agentic.result_bytes_left,
+            result_bytes_left: agentic.state.result_bytes_left(),
             cut_off: run.cut_off,
             allowlist_version: started.allowlist_version,
         }));
@@ -638,8 +635,7 @@ pub(super) fn dispatched(
         .on_results(&loop_results)
         .map_err(loop_error)?
     {
-        mandate_research_run::agentic::Next::Turn { result_bytes_left } => {
-            agentic.result_bytes_left = result_bytes_left;
+        mandate_research_run::agentic::Next::Turn { .. } => {
             next_turn(run, agentic, config, state, at, batch, &mut out)?;
         }
         mandate_research_run::agentic::Next::End(reason) => {
