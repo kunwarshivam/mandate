@@ -16,7 +16,7 @@ use mandate_mcp::{CallClass, McpError, Tools};
 use mandate_num::{Fraction, Price, Qty, ShareIncrement};
 use serde_json::{Map, Value};
 
-use crate::Tickers;
+use crate::{Tickers, ref_id};
 
 const REVIEW: &str = "review_equity_order";
 const PLACE: &str = "place_equity_order";
@@ -70,6 +70,26 @@ impl<T: Tools> RobinhoodConnector<T> {
         self.placed
             .get(key)
             .map(|order| order.broker_order_id.as_str())
+    }
+
+    /// Our key an order record of the account names, as our client order id (DEC-1150 item 7,
+    /// DEC-1151 item 6): the key whose derived `ref_id` the record echoes, or, for a record
+    /// echoing none, the key whose place answered the record's order id, or whose journal restored
+    /// it. A record with another `ref_id`, or with none and an order id this connector never
+    /// placed, names none, so the reconciliation reads it as the broker's alone.
+    pub(crate) fn key_named(
+        &self,
+        record: &Map<String, Value>,
+        broker_order_id: &str,
+    ) -> Option<String> {
+        let echoed = record.get("ref_id").and_then(Value::as_str);
+        self.placed
+            .iter()
+            .find(|(key, placed)| match echoed {
+                Some(echoed) => ref_id(key).is_ok_and(|ours| ours == echoed),
+                None => placed.broker_order_id == broker_order_id,
+            })
+            .map(|(key, _)| key.as_str().to_owned())
     }
 
     /// Replaces the registered tickers with `tickers` (DEC-956 item 1): a session opened before

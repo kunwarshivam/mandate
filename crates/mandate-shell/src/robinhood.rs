@@ -252,9 +252,10 @@ pub fn robinhood_account(snapshot: &AccountSnapshot) -> BrokerAccount {
 impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
     /// The run's connector and the executor's requests are not used: the Robinhood connector
     /// offers none of the four reads they name, and the bridge's connector is the run's own.
-    /// Robinhood publishes no account activity, so the snapshot carries no fill and leaves the
-    /// executor's cursor where it was; the live run starts only on a flat, unspent account
-    /// (DEC-529 item 3), so no fill is outstanding when it does.
+    /// Robinhood publishes no account activity, so the snapshot leaves the executor's cursor
+    /// where it was, and its only fills are the ones an order record and the position imply on a
+    /// ledger flat in the instrument (DEC-1151, connections spec U-R8); the live run starts only
+    /// on a flat, unspent account (DEC-529 item 3), so none is outstanding when it does.
     fn snapshot(
         &mut self,
         connector: &mut dyn Connector,
