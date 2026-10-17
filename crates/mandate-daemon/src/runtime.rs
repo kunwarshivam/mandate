@@ -81,8 +81,6 @@ pub struct RuntimeProcess<S> {
     epoch: u64,
     /// The control stream's head when it was last handed whole while ready.
     control_handed: Option<u64>,
-    /// The clock stream's head when its last tick was handed.
-    clock_handed: u64,
     /// The input whose drafts' append is in doubt, with the time they were first written at: the
     /// core takes no other input until it is handed again, and the retry offers the journal the same
     /// bytes (journal spec §5.1).
@@ -110,7 +108,6 @@ impl<S: Store> RuntimeProcess<S> {
             clock: stream("clock", workspace),
             epoch: 0,
             control_handed: None,
-            clock_handed: 0,
             pending: None,
             written_at: now,
         };
@@ -257,7 +254,9 @@ impl<S: Store> RuntimeProcess<S> {
         true
     }
 
-    /// The scheduler's latest tick since the last one handed, as the core's risk clock. A clock
+    /// The scheduler's latest tick, as the core's risk clock. It is handed on every pass: the core
+    /// evaluates each risk-clock second once and takes a tick it has seen as no input at all, so a
+    /// repeat costs nothing and no bookkeeping of what was handed can drift from the journal. A clock
     /// stream that cannot be read hands no tick and holds nothing else.
     fn clock_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
         let Some(clock) = self.clock.clone() else {
@@ -266,23 +265,19 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.store.rows(&clock) else {
             return;
         };
-        let head = rows.last().map_or(0, |r| r.seq);
         let latest = rows
             .iter()
-            .filter(|r| r.seq > self.clock_handed && r.event_type == "ClockAdvanced")
+            .filter(|r| r.event_type == "ClockAdvanced")
             .filter_map(tick_of)
             .max();
-        if let Some(tick) = latest
-            && !self.hand(
+        if let Some(tick) = latest {
+            self.hand(
                 now,
                 now,
                 Input::Tick(RiskClock::from_secs(tick.secs())),
                 alerts,
-            )
-        {
-            return;
+            );
         }
-        self.clock_handed = head;
     }
 
     /// Hands `input` to the core and runs its effects; whether they all committed. An input whose

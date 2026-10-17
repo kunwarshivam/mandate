@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use mandate_canon::{Digest, Key, Object, Value, parse};
-use mandate_daemon::{Config, Refs, RuntimeProcess, Wiring};
+use mandate_daemon::{Config, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Exit, State};
 use mandate_runtime::{
@@ -400,6 +400,77 @@ fn a_draft_the_wiring_has_no_references_for_stops_the_process_rather_than_being_
         State::Exited(Exit::CycleFailed)
     );
     assert_eq!(count(&rig, "KillSwitchActivated"), 0);
+}
+
+/// A row on the clock stream that is not a tick: the trading day the scheduler starts.
+fn day_started(rig: &Rig) {
+    let seq = u64::try_from(rig.clock.borrow().len()).unwrap() + 1;
+    rig.clock.borrow_mut().push(row(
+        CLOCK,
+        seq,
+        "TradingDayStarted",
+        "system",
+        r#"{"date":"2026-10-16"}"#,
+    ));
+}
+
+fn risk_clock(process: &RuntimeProcess<Rig>) -> Option<i64> {
+    process.state().risk_clock().map(|clock| clock.secs())
+}
+
+/// The scheduler's latest `ClockAdvanced` is the core's risk clock on the pass that reads it, and
+/// a later tick moves it on; a clock-stream record that is not a tick is no tick.
+#[test]
+fn the_scheduler_s_latest_tick_is_the_runtime_s_risk_clock() {
+    let rig = Rig::default();
+    let mut process = start(&rig, NOW);
+    day_started(&rig);
+    process.step(at(NOW + 1));
+    assert_eq!(risk_clock(&process), None, "a day started is no tick");
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(risk_clock(&process), Some(NOW + 5));
+    tick(&rig, NOW + 6);
+    tick(&rig, NOW + 7);
+    day_started(&rig);
+    process.step(at(NOW + 8));
+    assert_eq!(risk_clock(&process), Some(NOW + 7));
+    process.step(at(NOW + 9));
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 7),
+        "a tick handed again moves nothing"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// The binary's fixture wiring carries the references every draft needs, so the owner's kill
+/// switch is journaled through it rather than stopping the process.
+#[test]
+fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
+    let rig = Rig::default();
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner"),
+        &config(),
+        at(NOW),
+    );
+    kill_switch(&rig);
+    process.step(at(NOW + 1));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1);
+    let refs = parse(&agent_rows(&rig)[1].body)
+        .unwrap()
+        .get("config_refs")
+        .and_then(|r| r.get("mandate_version"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    assert!(refs.is_some_and(|v| v.starts_with("sha256:")));
 }
 
 #[derive(Debug, Clone, Copy)]
