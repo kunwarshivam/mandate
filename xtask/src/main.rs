@@ -2696,7 +2696,8 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// world's program list ([`closed_world`]) refuses them (DEC-873 item 4). A line not listed is
 /// refused until a person adds it in a change a reviewer sees, as [`PARSER_LIMITED_LINES`] works:
 /// `web-e2e.yml`'s `node -p` probe prints the Playwright version from a `package.json`, and its
-/// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists.
+/// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists; `web.yml` and
+/// `web-deploy.yml` measure the Worker's dry run with `web/scripts/workers.mjs` (DEC-731 item 6).
 const READ_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/web-e2e.yml",
@@ -2705,6 +2706,14 @@ const READ_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/web-e2e.yml",
         r##"grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
+        ".github/workflows/web.yml",
+        "node scripts/workers.mjs size .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node scripts/workers.mjs size .wrangler/dry-run",
     ),
 ];
 
@@ -2741,10 +2750,13 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// so `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and `NODE_OPTIONS`, in any
 /// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums and the
 /// `MANDATE_*` and `*_RESULT` names, `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
-/// the telemetry switches, and `nightly.yml`'s service `POSTGRES_PASSWORD`.
+/// the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and `web-deploy.yml` the
+/// build's public Supabase values and the deploy step's Cloudflare token and account (DEC-1005).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -2773,6 +2785,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
     "PENDING_RESULT",
     "PLANNED_MUTANTS",
@@ -2784,6 +2798,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "RUN_PRS",
     "SCHEMA_MUTANTS_RESULT",
     "TEST_RESULT",
+    "WRANGLER_SEND_METRICS",
 ];
 
 /// Whether `name` may be an `env:` key or a command-prefix assignment: exactly one of
@@ -2853,7 +2868,8 @@ const READ_IMAGES: &[&str] =
     &["postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f"];
 
 /// The `npx` commands a `web` job may run, by their exact arguments (B7): `web-e2e.yml`'s two
-/// Playwright installs and `web.yml`'s pinned Impeccable detector. `npx` runs any package, so no
+/// Playwright installs, `web.yml`'s pinned Impeccable detector, and the Worker's dry run and
+/// `web-deploy.yml`'s deploy, both through the `wrangler` the lockfile pins (DEC-731, DEC-1005). `npx` runs any package, so no
 /// other form is read.
 const READ_NPX: &[&[&str]] = &[
     &[
@@ -2865,6 +2881,14 @@ const READ_NPX: &[&[&str]] = &[
     ],
     &["playwright", "install-deps", "chromium"],
     &["--yes", "impeccable@4.1.0", "detect", "src/"],
+    &[
+        "wrangler",
+        "deploy",
+        "--dry-run",
+        "--outdir",
+        ".wrangler/dry-run",
+    ],
+    &["wrangler", "deploy"],
 ];
 
 /// The lines of the [`READ_SCRIPTS`] that run an interpreter a person has read and found to run
