@@ -697,6 +697,18 @@ def test_deployment_tier_is_set_from_values():
     )
     k3s = ("-f", str(CELL / "values" / "k3s.yaml"))
     assert tiers(render(*k3s, "-f", str(hosted), *without_api)) == {"dev"}, "cell #1 is dev (DEC-2001)"
+    api_block = [
+        "api.org=01KDEM0000000000000000000R",
+        "api.workspace=01KDEM0000000000000000000W",
+        "api.issuer=https://issuer.example",
+        "api.audience=authenticated",
+        "api.jwksUrl=https://issuer.example/jwks",
+        "api.appOrigin=https://app.example",
+    ]
+    with_api = [arg for s in api_block for arg in ("--set", s)]
+    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api)) == {"dev"}, (
+        "cell #1's API server takes the one tier too"
+    )
     for refused in ("live", "prod", ""):
         assert helm(CHART, "--set", f"deploymentTier={refused}").returncode != 0, refused
 
