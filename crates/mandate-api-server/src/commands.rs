@@ -190,32 +190,73 @@ pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
     let payload = issued
         .command
         .payload(issued.workspace, issued.principal, second)?;
+    let event = Event {
+        event_type: issued.command.event_type(),
+        payload,
+        artifact_refs: issued.command.artifact_refs(),
+        config_refs: Vec::new(),
+    };
+    envelope(&Writer::of(issued), &event)
+}
+
+/// Who writes an event, where, under which id, and when.
+#[derive(Debug, Clone, Copy)]
+pub struct Writer<'a> {
+    pub workspace: &'a str,
+    pub principal: &'a str,
+    pub event_id: &'a str,
+    pub environment: &'a str,
+    pub now: UtcNanos,
+}
+
+impl<'a> Writer<'a> {
+    fn of(issued: &Issued<'a>) -> Self {
+        Self {
+            workspace: issued.workspace,
+            principal: issued.principal,
+            event_id: issued.event_id,
+            environment: issued.environment,
+            now: issued.now,
+        }
+    }
+}
+
+/// One control-stream event's own members: its type, payload, the digest references the payload
+/// names (journal spec §3), and its config references.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Event {
+    pub event_type: &'static str,
+    pub payload: Value,
+    pub artifact_refs: Vec<Value>,
+    pub config_refs: Vec<(&'static str, Value)>,
+}
+
+/// The canonical draft of `event`, written by the user `writer` names on the workspace's control
+/// stream; `None` only for a value the canonical form cannot hold.
+pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
     let actor = object(vec![
         ("build", text(BUILD)),
-        ("id", text(issued.principal)),
+        ("id", text(writer.principal)),
         ("kind", text("user")),
         ("version", text(env!("CARGO_PKG_VERSION"))),
     ])?;
     let one = Value::Int(Int::new(1)?);
     let envelope = object(vec![
         ("actor", actor),
-        (
-            "artifact_refs",
-            Value::Array(issued.command.artifact_refs()),
-        ),
+        ("artifact_refs", Value::Array(event.artifact_refs.clone())),
         ("causation_id", Value::Null),
         ("clock_source", text("local")),
-        ("config_refs", Value::Object(Object::new())),
+        ("config_refs", object(event.config_refs.clone())?),
         ("correlation_id", Value::Null),
-        ("environment", text(issued.environment)),
+        ("environment", text(writer.environment)),
         ("envelope_version", one.clone()),
-        ("event_id", text(issued.event_id)),
-        ("event_time", text(&issued.now.to_string())),
-        ("event_type", text(issued.command.event_type())),
-        ("payload", payload),
+        ("event_id", text(writer.event_id)),
+        ("event_time", text(&writer.now.to_string())),
+        ("event_type", text(event.event_type)),
+        ("payload", event.payload.clone()),
         ("pii_refs", Value::Array(Vec::new())),
         ("schema_version", one),
-        ("stream_id", text(&format!("ctl:{}", issued.workspace))),
+        ("stream_id", text(&format!("ctl:{}", writer.workspace))),
     ])?;
     Some(to_canonical(&envelope))
 }
