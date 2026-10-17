@@ -30,7 +30,7 @@ else.
     configuration, never a figure in this spec.
   - **Context and permissions** (§6.12, §6.13): a stable prompt order, typed run summaries read back
     as untrusted, autonomy as the permission mode, truthful feedback, platform-computed corroboration.
-  - **Records** (journal spec v0.49 §9.22): `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`,
+  - **Records** (journal spec v0.50 §9.23): `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`,
     `RunSummaryRecorded`, and `RunEnded`, beside one `ModelInvocationRecorded` per turn.
   - **Invariants.** HI-1, HI-3, HI-4, and HI-8 change; HI-2, HI-11, HI-22, and HI-23 are restated
     for turns; HI-24 to HI-28 are new.
@@ -540,11 +540,11 @@ corroboration, the lineage cap, and a full universe.
 | `ObservationRecorded` | agent | Every retrieved item, before the call effect (§6.2 step 2), and every item a tool call returns that the agent stream does not already hold, before the next turn's call effect (§6.9 step 5) | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177). The duty is the [data-plane spec's §4.6](data-plane.md#46-the-research-query-interface) (DP-3) |
 | Meter reservation and settlement | `meter:{workspace_id}` (gateway) | Before the call leaves, and on completion | Closed in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (`MeterReserved`, `MeterSettled`; DEC-998) |
 | `ModelInvocationRecorded` | agent | After every call, whatever the outcome, including a late one; in an agentic run, one per turn | Closed in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) with DEC-432 item 11's members and this spec's two: the run id as `correlation_id`, and the retrieved context as `observations`, the event ids of the run's `ObservationRecorded` the turn's prompt holds |
-| `RunStarted` | agent | When an agentic run starts, before its seed's observations | Closed in [journal spec §9.22](journal.md#922-run-records-dec-2203): kind, trigger, output, menu, the frozen scope, the cost ceiling, the deadline, and the memory in the prompt's prefix |
-| `ToolCallRecorded` | agent | Every tool call of a committed reply, in the batch its turn's record heads (§6.9 step 4) | Closed in journal spec §9.22: the turn, its index in the reply, the tool and its class, the arguments as an artifact, and an action's provenance |
-| `ToolResultRecorded` | agent | Every tool call's result, refused ones included: an action's in the turn's batch, a read's or a think's with the items it returned, before the next turn's call effect (HI-24) | Closed in journal spec §9.22: the result and its code, the content as an artifact, bytes, `truncated`, and the observations |
-| `RunSummaryRecorded` | agent | When an agentic run ends, but for a crash, cancelled runs included (with an empty `watch`), just before its `RunEnded` | Closed in journal spec §9.22: the typed summary of §6.12 |
-| `RunEnded` | agent | After the summary, in the batch that ends the run, or in a batch of the two when the core cancels it | Closed in journal spec §9.22: why it ended, and its counts |
+| `RunStarted` | agent | When an agentic run starts, before its seed's observations | Closed in [journal spec §9.23](journal.md#923-run-records-dec-2203): kind, trigger, output, menu, the frozen scope, the cost ceiling, the deadline, and the memory in the prompt's prefix |
+| `ToolCallRecorded` | agent | Every tool call of a committed reply, in the batch its turn's record heads (§6.9 step 4) | Closed in journal spec §9.23: the turn, its index in the reply, the tool and its class, the arguments as an artifact, and an action's provenance |
+| `ToolResultRecorded` | agent | Every tool call's result, refused ones included: an action's in the turn's batch, a read's or a think's with the items it returned, before the next turn's call effect (HI-24) | Closed in journal spec §9.23: the result and its code, the content as an artifact, bytes, `truncated`, and the observations |
+| `RunSummaryRecorded` | agent | When an agentic run ends, but for a crash, cancelled runs included (with an empty `watch`), just before its `RunEnded` | Closed in journal spec §9.23: the typed summary of §6.12 |
+| `RunEnded` | agent | After the summary, in the batch that ends the run, or in a batch of the two when the core cancels it | Closed in journal spec §9.23: why it ended, and its counts |
 | Candidate verdicts | agent | With the judging batch; in an agentic run, on the record of the turn that holds the candidates: the final reply's for `final_output`, each action turn's for `action_tools` | The `verdicts` member of `ModelInvocationRecorded` (journal spec §9.19 rule 151, DEC-998 item 1). Until `mandate-journal` registers it, no run is judged (§6.2 preconditions, HI-22) |
 | `ThesisProposed`, `ThesisRevised` | agent | Every thesis admission judged | Closed in [journal spec §9.4](journal.md#94-research-agent-thesis-records-dec-413) |
 | `ModelOutputRecorded` | agent | Each judged thesis, `ignored` null only when admitted | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177) |
@@ -680,7 +680,7 @@ One run, in order:
    scope (the cut-off, the allowlist version, and the data universe as of the start, so a run reads
    one consistent snapshot); its deadline (the cut-off plus `max_run_s` on the risk clock); and its
    cost ceiling (the workspace's `research_run_cost_cap_usd`, §6.11). It journals `RunStarted`
-   (journal spec §9.22). A source revoked mid-run is still served by the run's later reads, for at
+   (journal spec §9.23). A source revoked mid-run is still served by the run's later reads, for at
    most `max_run_s` (a disclosed residual: §8.5's allowlist check refuses any thesis that cites
    it), and a universe changed mid-run never widens a read; what
    the run produces is judged under the version in effect when it is judged (HI-17), and §8.5's
@@ -1316,7 +1316,7 @@ the identical weights) and item 10 (a reported identity that differs from the pi
   verdicts (E19-5). It is unchanged otherwise.
 - **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8, closed in
   journal spec v0.46 §9.19, registration in `mandate-journal` pending) and an
-  invalidation verdict (E19-5), and the run records (journal spec v0.49 §9.22, registration in
+  invalidation verdict (E19-5), and the run records (journal spec v0.50 §9.23, registration in
   `mandate-journal` pending, E19-13). `ObservationRecorded` exists and is closed (journal spec §9.1); it
   needs no new member, because the drift detector's typed observation is the artifact it names
   (§6.3).

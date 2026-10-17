@@ -294,7 +294,7 @@ existing ones. So:
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
   `ThesisProposed`), which carries the content hash the call used, or, for a tool-call reply, by
   one `ToolCallRecorded` per tool call and, later, its `ToolResultRecorded` ([journal spec
-  §9.22](journal.md#922-run-records-dec-2203)).
+  §9.23](journal.md#923-run-records-dec-2203)).
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
   simply has no fresh output.
 - **The agent-stream record is closed** in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998)

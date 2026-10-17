@@ -2288,7 +2288,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   want the research run to be a bounded agent loop, "like Claude Code for trading", so that the
   product is an agent harness for trading ([ADR-0005](../adr/0005-agentic-harness.md),
   [DEC-2203](decisions/DEC-2203.md); agent harness spec v0.2 §6.9 to §6.13, inference spec v0.4,
-  journal spec v0.49 §9.22; claim [#1534](https://github.com/kunwarshivam/mandate/issues/1534)).
+  journal spec v0.50 §9.23; claim [#1534](https://github.com/kunwarshivam/mandate/issues/1534)).
   *Accepted when:*
   - `mandate-gateway` takes `turns`, the run's menu as `tools`, and `spend_ceiling_usd`, sends only
     the pinned declarations, keeps every `single_call` hash and request digest unchanged, pins the
@@ -2301,7 +2301,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   - the `final_output` path runs end to end: the runtime core (lane I2's E19-3 side) judges the final
     output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
     feedback, theses committed only at a normal end, DEC-2203 item 25) follows in its own slice;
-  - `mandate-journal` registers the five §9.22 records with a draft for every rule 171 to 183;
+  - `mandate-journal` registers the five §9.23 records with a draft for every rule 171 to 183;
   - HI-1, HI-2, HI-3, HI-4, HI-8, HI-9, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25 (its action half once `action_tools` is declared), and HI-28 hold as
     property tests with independent oracles, each shown to catch a seeded bug, against an adaptive
     compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling; HI-26

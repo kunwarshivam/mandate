@@ -8,7 +8,7 @@
 
 Every ADR has a decision behind it; this one's is [DEC-2203](../project/decisions/DEC-2203.md). The
 normative text is the [agent harness spec](../specs/agent-harness.md) v0.2 §6.9 to §6.13 and §10.4,
-the [inference spec](../specs/inference.md) v0.4, [journal spec](../specs/journal.md) v0.49 §9.22,
+the [inference spec](../specs/inference.md) v0.4, [journal spec](../specs/journal.md) v0.50 §9.23,
 [mandate spec](../specs/mandate.md) §8.4, the [data-plane spec](../specs/data-plane.md) v0.3 §4.6,
 and the [workspace API spec](../specs/workspace-api.md) §4.7. The research behind it is in
 [the memo beside this file](0005-agentic-harness-research-memo.md).
@@ -45,7 +45,7 @@ is recorded and can be replayed. **Agentic where it thinks, deterministic where 
    | Denied, told why, tries again | A verdict returned as the tool result, as a typed code (HI-25) |
    | CLAUDE.md | The owner's brief, `behavior.description` (§6.12) |
    | settings.json, which the agent can't edit | The envelope (rule 11) |
-   | Transcript | The journal: every turn, tool call, and result (journal spec §9.22) |
+   | Transcript | The journal: every turn, tool call, and result (journal spec §9.23) |
    | Esc | Pause, Stop, and the kill switch, never dependent on the model |
    | Chat | The desk, `owner` and `explain` runs (spec §15) |
    | MCP | Owner-connected agents use the same reads as owner input (DEC-141) |
