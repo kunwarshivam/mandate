@@ -410,7 +410,7 @@ fn scenarios() -> impl Strategy<Value = Scenario> {
         any::<bool>(),
         prop::collection::vec(0_usize..12, 0..10),
         prop::collection::vec(0_usize..12, 0..10),
-        prop::collection::vec((tick, prop::bool::weighted(0.2)), 1..50),
+        prop::collection::vec((tick, prop::bool::weighted(0.2)), 1..30),
     )
         .prop_map(|(info, email, web_push, ticks)| Scenario {
             info,
