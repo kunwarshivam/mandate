@@ -676,7 +676,10 @@ per workspace deployment (item 6).
 12. **Resume, Stop, owner exit, acknowledgment, and command status**
     ([DEC-2101](../project/decisions/DEC-2101.md), E10-12). `POST /agents/{agent_id}/resume`
     (`resume`), `…/stop` (`stop`), `…/exits` (`owner_exit`), `…/acknowledgments`
-    (`acknowledge`), and `GET /commands/{event_id}`. Each command is checked as item 10 orders, the
+    (`acknowledge`), and `GET /commands/{event_id}`. The acknowledgment route is mounted only once
+    `mandate-journal` registers `OwnerAcknowledged`'s payload on the control stream (journal spec
+    §9.2's members): until then the journal refuses its draft, so the route answers the one 401
+    of a route not landed, and the CLI's acknowledgment stays the path. Each command is checked as item 10 orders, the
     agent found as item 10 finds it, and recorded as the CLI records it (`mandate agent resume`,
     `stop`, `exit`, `acknowledge`).
     - **Resume and Stop** commit `OwnerCommandIssued` with §9.11's members. A Stop with `release`
