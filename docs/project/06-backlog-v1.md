@@ -4934,8 +4934,13 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   deployed agent's stream on each request, which is unbounded. Project them per stream with
   watermarks, woken by `LISTEN`/`NOTIFY` (workspace API spec §6.1), before an agent's stream grows
   past what one request can read.
-- **A roles snapshot on each API session (DEC-1007 item 8).** The API refuses pause, a hold, and
-  the kill switch with `membership_unavailable` when the membership read fails, because its
+- **The runtime folds the owner's hold, then the API serves it (DEC-191, DEC-1007 item 1).**
+  Journal spec §9.11 closes `hold_openings` and `lift_hold`, but the runtime's command fold refuses
+  any command it does not know, so a hold would stop it at that event. Fold both into
+  `AgentModeChanged` version 2 (`held`, rules 93 to 95), with tests, then mount the API's
+  `POST /agents/{id}/hold`.
+- **A roles snapshot on each API session (DEC-1007 item 8, before the demo).** The API refuses
+  pause and the kill switch with `membership_unavailable` when the membership read fails, because its
   sessions keep no roles snapshot. Take the snapshot at sign-in and at each granted refresh, cleared
   in the same step as a deactivation, so these calls are authorized from it as API-7 and identity
   spec §4.5 require.
