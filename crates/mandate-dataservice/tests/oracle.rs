@@ -66,9 +66,14 @@ fn message() -> impl Strategy<Value = Message> {
     )
 }
 
+/// A receive delay, biased to exactly the skew limit and one millisecond past it.
+fn delay() -> impl Strategy<Value = i64> {
+    prop_oneof![4 => -2_500i64..4_000, 1 => Just(-SKEW_MS), 1 => Just(-SKEW_MS - 1)]
+}
+
 fn event(pool: usize) -> impl Strategy<Value = Event> {
     prop_oneof![
-        8 => (0..pool, prop_oneof![4 => -2_500i64..4_000, 1 => Just(-SKEW_MS), 1 => Just(-SKEW_MS - 1)])
+        8 => (0..pool, delay())
             .prop_map(|(message, delay_ms)| Event::Arrive { message, delay_ms }),
         1 => (-3_000i64..24_000).prop_map(|at_ms| Event::Lost { at_ms }),
         2 => any::<bool>().prop_map(Event::Clock),
@@ -275,7 +280,10 @@ proptest! {
                             && basis <= now_ms
                             && now_ms - basis <= MAX_AGE_MS
                     });
-                    prop_assert!(live, "instrument {} at {} ms after event {}: {:?}", instrument, now_ms, n, q);
+                    prop_assert!(
+                        live,
+                        "instrument {} at {} ms after event {}: {:?}", instrument, now_ms, n, q
+                    );
                 }
             }
         }

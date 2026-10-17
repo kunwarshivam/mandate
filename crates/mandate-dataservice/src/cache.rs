@@ -120,7 +120,8 @@ impl HotCache {
     /// Adds `instrument` on `feed` to the subscription set at `at`, the host clock's time of the
     /// subscription: only a quote received after `at` can mark it (spec §3.2, `resyncing`).
     /// Subscribing it again on the same feed changes nothing; on another feed it starts over with
-    /// no quote, still taking nothing received at or before an earlier connection loss. [`CacheFull`] when a new instrument would exceed the capacity.
+    /// no quote, still taking nothing received at or before an earlier connection loss.
+    /// [`CacheFull`] when a new instrument would exceed the capacity.
     pub fn subscribe(
         &mut self,
         instrument: AssetId,
