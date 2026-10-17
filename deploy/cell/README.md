@@ -105,7 +105,8 @@ upgrades every release in place.
 The API server listens only on its pod's loopback, so nothing in the cluster reaches it until the
 tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
 or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
-the one 401. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
+the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
+reuses one that still answers. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
 in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
 start. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
 skips the API's parts.

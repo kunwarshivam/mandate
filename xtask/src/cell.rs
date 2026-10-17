@@ -2146,7 +2146,8 @@ const API_PART: &str = "the workspace API server, through a port-forward";
 
 /// Forwards [`API_LOCAL_PORT`] on this machine to the API server's listener, with the host's own
 /// `kubectl` (the cell's nodes publish no port), and checks that `/v1` answers: with no session,
-/// the one 401 (API-1). The forward keeps running after the demo returns, until `cell down`.
+/// the one 401 (API-1). The forward keeps running after the demo returns, until its pod goes or it
+/// is stopped; a later demo whose port still answers that way reuses it rather than starting one.
 fn api_port_forward() -> Result<()> {
     let config = kubeconfig()?;
     let target = format!("127.0.0.1:{API_LOCAL_PORT}:8080");
@@ -2173,6 +2174,10 @@ fn api_port_forward() -> Result<()> {
         .spawn()
         .context("starting `kubectl port-forward` to the API server")?;
     let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
+    if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
+        eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
+        return Ok(());
+    }
     for _ in 0..30 {
         if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
             if status == 401 {
@@ -2186,7 +2191,11 @@ fn api_port_forward() -> Result<()> {
         }
         sleep(Duration::from_secs(1));
     }
-    bail!("the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s")
+    bail!(
+        "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s; a stale \
+         `kubectl port-forward` holding that port is stopped with \
+         `pkill -f 'port-forward deployment/api'`"
+    )
 }
 
 /// The status code of an HTTP/1.1 `GET path` to 127.0.0.1:`port`.
