@@ -2267,13 +2267,7 @@ pub fn demo(web: bool) -> Result<()> {
     .context("reading the CLI's commands from the image it built")?;
     let mut parts = demo_parts(&processes()?, &help, stub_ready(Path::new(".")));
     if api_image_tag()?.is_none() {
-        for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
-            if part.name.contains("API") {
-                part.skipped = Some(format!(
-                    "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
-                ));
-            }
-        }
+        skip_without_api_image(&mut parts);
     }
     let api_ready = parts
         .iter()
@@ -2289,9 +2283,10 @@ pub fn demo(web: bool) -> Result<()> {
         "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
          stop: cargo xtask cell down"
     );
-    let signin_ready = parts
-        .iter()
-        .any(|p| p.name == SIGNIN_PART && p.skipped.is_none());
+    let signin_ready = api_ready
+        && parts
+            .iter()
+            .any(|p| p.name == SIGNIN_PART && p.skipped.is_none());
     if api_ready {
         api_port_forward(signin_ready)?;
     }
@@ -2330,6 +2325,18 @@ pub fn demo(web: bool) -> Result<()> {
     }
 }
 
+/// Names every part that needs this checkout's API image as skipped, sign-in among them, for a
+/// cell that pulls its `mandate` image and so has no API image.
+pub fn skip_without_api_image(parts: &mut [DemoPart]) {
+    for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
+        if part.name.contains("API") || part.name == SIGNIN_PART {
+            part.skipped = Some(format!(
+                "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
+            ));
+        }
+    }
+}
+
 /// The local port the demo forwards to the API server's listener on its pod's loopback.
 const API_LOCAL_PORT: u16 = 8787;
 
@@ -2350,8 +2357,14 @@ fn api_port_forward(stub: bool) -> Result<()> {
     let shown = forward.join(" ");
     let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
     if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
-        eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
-        return Ok(());
+        if !stub || stub_answers() {
+            eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
+            return Ok(());
+        }
+        bail!(
+            "an earlier forward holds 127.0.0.1:{API_LOCAL_PORT} without the stub issuer's port \
+             {STUB_PORT}; stop it with `pkill -f 'port-forward deployment/api'` and run the demo again"
+        );
     }
     if output("kubectl", &["version", "--client"]).is_err() {
         eprintln!("    api: no kubectl on this machine; forward it with `kubectl {shown}`");
@@ -2372,15 +2385,17 @@ fn api_port_forward(stub: bool) -> Result<()> {
             bail!("`kubectl {shown}` exited with {status}:\n{}", said());
         }
         if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
-            if status == 401 {
+            if status == 401 && (!stub || stub_answers()) {
                 eprintln!(
                     "    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (GET {path} is 401 \
                      with no session, API-1)"
                 );
                 return Ok(());
             }
-            let _ = child.kill();
-            bail!("the API server answered GET {path} with {status}, not the one 401");
+            if status != 401 {
+                let _ = child.kill();
+                bail!("the API server answered GET {path} with {status}, not the one 401");
+            }
         }
         sleep(Duration::from_secs(1));
     }
@@ -2413,6 +2428,11 @@ pub fn port_forward_args(kubeconfig: &str, stub: bool) -> Vec<String> {
         args.push(format!("{STUB_PORT}:{STUB_PORT}"));
     }
     args
+}
+
+/// Whether the stub issuer answers through the forward: its key set, with the `Host` it requires.
+fn stub_answers() -> bool {
+    http(STUB_PORT, "GET", STUB_KEY_SET, &[], "").is_ok_and(|(status, _)| status == 200)
 }
 
 /// Signs in as the demo owner the way `web/` does: a token for [`DEMO_SUBJECT`] from the stub
@@ -2548,7 +2568,11 @@ fn demo_links(image: &str) -> Result<()> {
         .write_all(DEMO_SUBJECT.as_bytes())?;
     let status = child.wait()?;
     if !status.success() {
-        bail!("`mandate identity link` for the demo owner failed with {status}");
+        bail!(
+            "`mandate identity link` for the demo owner failed with {status}; it runs as this \
+             user ({user}) writing into {}, which rootless docker maps to another owner",
+            dir.display()
+        );
     }
     let links = fs::read_to_string(dir.join("subject-links"))
         .context("reading the demo's subject-link file")?;
@@ -2993,6 +3017,29 @@ mod tests {
         assert_eq!(
             map.as_object().map(|o| o.contains_key("binaryData")),
             Some(false)
+        );
+    }
+
+    #[test]
+    fn a_pulled_image_skips_sign_in_with_the_api() {
+        let later = [
+            process("api", true),
+            process("runtime", true),
+            process("executor", true),
+        ];
+        let mut parts = demo_parts(&later, "", true);
+        skip_without_api_image(&mut parts);
+        for name in [API_PART, SIGNIN_PART] {
+            assert!(
+                parts.iter().any(|p| p.name == name && p.skipped.is_some()),
+                "{name} is skipped without an API image"
+            );
+        }
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.name.starts_with("a paper agent") && p.skipped.is_none()),
+            "parts that need no API image stay ready"
         );
     }
 
