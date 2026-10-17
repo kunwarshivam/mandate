@@ -1,0 +1,95 @@
+{{- define "journal.cluster" -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: journal
+  labels:
+    {{- include "journal.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.instances }}
+  imageName: {{ .Values.image | quote }}
+  enableSuperuserAccess: false
+  storage:
+    size: {{ .Values.storage.size | quote }}
+    {{- with .Values.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  resources:
+    requests:
+      cpu: {{ .Values.resources.cpu | quote }}
+      memory: {{ .Values.resources.memory | quote }}
+    limits:
+      cpu: {{ .Values.resources.cpu | quote }}
+      memory: {{ .Values.resources.memory | quote }}
+  postgresql:
+    parameters:
+      synchronous_commit: "on"
+      fsync: "on"
+      full_page_writes: "on"
+  bootstrap:
+    initdb:
+      database: mandate
+      owner: mandate_migrator
+      secret:
+        name: journal-role-mandate-migrator
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: journal-roles
+            key: roles.sql
+  managed:
+    roles:
+      {{- range (include "journal.roles" . | fromJsonArray) }}
+      - name: {{ . | quote }}
+        ensure: present
+        login: true
+        inherit: true
+        inRoles: ["mandate_journal_app"]
+        passwordSecret:
+          name: {{ printf "journal-role-%s" (. | replace "_" "-") | quote }}
+      {{- end }}
+{{- end -}}
+{{- /*
+The journal's pods accept only the processes the workspace chart labels as Postgres clients, the
+operator, and each other. Their egress stays open in this slice (the API server, peers, and later
+the S1 archive endpoint); lane S2 narrows it.
+*/ -}}
+{{- define "journal.policy" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: journal
+  labels:
+    {{- include "journal.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: journal
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              mandate.dev/egress-postgres: "true"
+      ports:
+        - {protocol: TCP, port: 5432}
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: journal
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.operatorNamespace | quote }}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+  egress:
+    - {}
+{{- end -}}
+---
+{{ include "journal.emit" (include "journal.cluster" .) }}
+---
+{{ include "journal.emit" (include "journal.policy" .) }}

@@ -141,7 +141,7 @@ export function StatusStrip({
             </span>
           );
         })}
-        {banner ? null : <FixtureTag className="ml-auto" />}
+        {banner ? null : <FixtureTag scope="workspace" className="ml-auto" />}
       </div>
       {hidden > 0 ? (
         <button

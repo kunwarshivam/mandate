@@ -237,6 +237,9 @@ enum Writer {
     /// The vectors' `control_services` opener, as a `system`, for `StreamOpened` alone (DEC-527
     /// item 7).
     Opener,
+    /// The same `control_services` system, for the founding grant's `MemberActivated` alone
+    /// (journal spec §9.12 rule 98, ID-13; DEC-991 item 2).
+    Founder,
 }
 
 /// DEC-952: paper and live never share a stream. An owner's event is appended only to a control
@@ -266,6 +269,48 @@ pub(crate) fn same_environment(
 }
 
 const OPENER_ID: &str = "control_services";
+
+/// The founding grant's event type (journal spec §9.12).
+const FOUNDING_TYPE: &str = "MemberActivated";
+
+/// The canonical bytes of the founding grant's `MemberActivated` on `ctl:{workspace}`, in the
+/// stream's environment, written by the `control_services` system at `at`, its event id derived
+/// from the member at `head`, the head it is appended at (DEC-290, DEC-991 item 2). Returns the id
+/// and the bytes.
+///
+/// # Errors
+/// As [`draft`].
+pub(crate) fn founding_draft(
+    owner: &Owner,
+    member: &str,
+    payload: Value,
+    at: UtcNanos,
+    head: u64,
+) -> Result<(String, Vec<u8>), ControlError> {
+    let stream = control_stream(owner)?;
+    let chosen = object(vec![("member", text(member))])?;
+    let event_id = derive(&stream, FOUNDING_TYPE, &chosen, false, head)?;
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    let now = Now {
+        at,
+        secs: at.secs(),
+    };
+    let bytes = draft(
+        Writer::Founder,
+        owner,
+        &stream,
+        &event_id,
+        FOUNDING_TYPE,
+        shape,
+        payload,
+        now,
+    )?;
+    Ok((event_id, bytes))
+}
 
 /// Commits `ctl:{workspace}`'s `StreamOpened` in the owner's environment, as the vectors'
 /// `control_services` opener (DEC-527 item 7), its id derived at head 0 (DEC-290).
@@ -362,9 +407,11 @@ fn draft_caused(
     let (kind, id) = match writer {
         Writer::Owner => ("user", owner.user.as_str()),
         Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
-        Writer::Opener => {
+        Writer::Founder if event_type == FOUNDING_TYPE => ("system", OPENER_ID),
+        Writer::Opener | Writer::Founder => {
             return Err(ControlError::Journal(format!(
-                "only the stream's opening is written as {OPENER_ID}, not {event_type}"
+                "only the stream's opening and its founding grant are written as {OPENER_ID}, \
+                 not {event_type}"
             )));
         }
     };
@@ -942,6 +989,20 @@ mod tests {
             assert!(
                 matches!(actor(Writer::Opener, other), Err(ControlError::Journal(_))),
                 "{other}"
+            );
+        }
+        assert_eq!(
+            actor(Writer::Founder, "MemberActivated")?,
+            pair("system", "control_services")
+        );
+        for (writer, other) in [
+            (Writer::Founder, "StreamOpened"),
+            (Writer::Founder, "MemberRoleChanged"),
+            (Writer::Opener, "MemberActivated"),
+        ] {
+            assert!(
+                matches!(actor(writer, other), Err(ControlError::Journal(_))),
+                "{writer:?} {other}"
             );
         }
         Ok(())

@@ -122,7 +122,8 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "OwnerRequestSubmitted"
         | "ClientConnected"
         | "ClientRevoked"
-        | "OwnerCommandIssued" => entry(CONTROL, NONE),
+        | "OwnerCommandIssued"
+        | "MemberActivated" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

@@ -53,7 +53,7 @@ describe("the colour-blind friendly preference is dev only, and there is one pal
   });
 
   it("takes ?cvd only in development, and no ?palette at all", () => {
-    const proxy = readFileSync(web("src/proxy.ts"), "utf8");
+    const proxy = readFileSync(web("src/middleware.ts"), "utf8");
     expect(proxy).toContain("const cvd = colourBlindEnabled ? params.get(CVD_PARAM) : null;");
     expect(proxy).not.toMatch(/palette/i);
   });
