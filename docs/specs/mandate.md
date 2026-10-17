@@ -878,7 +878,7 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
 | Purpose | Origin | Approval | Market-conduct controls |
 |---|---|---|---|
 | `open`, `increase` | Order builder | Autonomy rules (§6.2) | Apply (trading spec §9.6) |
-| `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments (§2.3, including an expired or invalidated thesis) | Built-in AUTO; never denied | **Paced, never denied:** price collar and participation caps; in the close window, marketable limit orders only (DEC-70); equities in the regular session only (verdict `defer` outside it) |
+| `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments (§2.3, including an expired or invalidated thesis), and a research exit request: the research agent's `propose_exit`, which the order builder honours at its next scheduled evaluation by exiting the agent's whole position in that instrument ([agent harness spec §6.10](agent-harness.md#610-tools); [DEC-2203](../project/decisions/DEC-2203.md) item 14, the founder's, 2026-10-17) | Built-in AUTO; never denied | **Paced, never denied:** price collar and participation caps; in the close window, marketable limit orders only (DEC-70); equities in the regular session only (verdict `defer` outside it) |
 | `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction, with step-up judged as the owner committed it; never denied (without valid step-up it loses only the owner-exit privilege, below) | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid and bid size and a **floor price** (default: the confirmed bid × (1 − the exit ladder's maximum offset)); the ladder never prices below the floor, any remainder rests at the floor and then waits for the session, and the owner is alerted (DEC-66) |
 | `risk_exit` | Risk engine: limits, flatten, `trim_to_target`, stop watchdog (trading spec §5.4) | Built-in AUTO; never denied | Exempt |
 | `protective` | Executor: placing and re-placing protection | Built-in AUTO; never denied | Exempt |
@@ -1453,8 +1453,9 @@ until the owner confirms them, §7), because they only reduce risk.
   semantic version, and a **content hash** of its code, prompt, parameter schema, and underlying
   model identity (provider, model name, and version, or weights hash); the mandate pins all three
   (V-007). For a model called through the model gateway, the hash also covers the rest of the
-  registry entry's pinned content: the retrieval plan, the output schema and validation bounds, the
-  call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
+  registry entry's pinned content: the research mode, the retrieval plan, the tool declarations
+  and loop bounds of an agentic research entry ([DEC-2203](../project/decisions/DEC-2203.md)), the
+  output schema and validation bounds, the call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
   the methodology text, and the authorship label
   ([inference spec §4.1](inference.md#41-registry-entry), DEC-432 items 17 and 18). The entry's
   endpoints and status are **not** in the hash: a routing or status change never changes a pin.
@@ -1561,6 +1562,18 @@ theses and their outcomes). The allowlist version in effect is recorded in every
 agent acts on them; prompt injection through news and filings is the top technical risk (RAID R-05),
 and the allowlist, corroboration, the eligibility floor, `max_instruments`, and `autonomy.admission`
 are the defenses.
+
+**Agentic runs** ([ADR-0005](../adr/0005-agentic-harness.md), [DEC-2203](../project/decisions/DEC-2203.md);
+[agent harness spec §6.9](agent-harness.md#69-the-agentic-loop)). A research entry may pin `mode:
+agentic`: the model then chooses further reads, during a bounded run, from tools its entry pins,
+over the same allowlisted sources and the eligible universe, at one cut-off. That widens what the
+model may read, never what it may do: a thesis it gives is judged by §8.5 exactly as before, the
+order builder sizes it (§8.3), and its first order is decided by §6.2 with the admission ceiling.
+**Corroboration is the platform's**: it is computed from the platform's own reads, never from the
+reads the model chose (MI-16). The tools, the run's bounds, and the mode are inside the content
+hash (§8.1), so moving to an agentic entry is a new version the owner confirms. Budgets are
+configuration: `behavior.research.cost_cap_usd_per_day` still caps each risk day, and a workspace
+setting caps each run.
 
 **A thesis** names one instrument and carries:
 

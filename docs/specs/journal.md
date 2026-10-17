@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.47 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.49 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.49 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, and `model_gateway` section of §9.19; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -11,6 +11,22 @@ The journal is the append-only, hash-chained record of everything the platform d
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
+
+- **v0.49 ([DEC-2203](../project/decisions/DEC-2203.md); E19-13):** §9.22 closes the agentic
+  research run's five records at schema version 1, with rules 171 to 183, before anything writes
+  them: `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`, `RunSummaryRecorded`, and `RunEnded`
+  ([agent harness spec](agent-harness.md) v0.2 §6.9, [ADR-0005](../adr/0005-agentic-harness.md)).
+  Each turn stays one `ModelInvocationRecorded`, unchanged, its place in the run given by its order;
+  rule 183 only places it inside its run. It adds records and loosens nothing: every other record,
+  rule, and reading is unchanged (DEC-176).
+  - **What `append` checks.** A run starts once and ends once, and nothing of it follows its end; an
+    approval is explained once; a tool call names an `ok` research turn of its run and a tool in the
+    run's menu; indexes run from 0; each call has one result, coded as its class allows; a reply over
+    the run's tool calls runs none of them.
+  - **No vectors**, as for §9.15, §9.16, and §9.20.
+  - **Versions.** v0.48 and the rules from 165 are lane I2's E19-5 change (DEC-2202), and lane EX's
+    explainer change takes v0.50 and rules from 190; this change takes v0.49, §9.22, and rules 171 to
+    183, and is renumbered at merge to follow whatever lands first.
 
 - **v0.47 ([DEC-1010](../project/decisions/DEC-1010.md); E21-29):** §9.20 closes the scheduler
   stream's five records at schema version 1 before the scheduler process writes them: its
@@ -1160,6 +1176,9 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `StreamOpened` | — | stream type, subject, environment |
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
 | `ModelInvocationRecorded` | mod | A gateway call's record (fast model, LLM signal model, research; the compiler's is on the control stream, §9.9): model, endpoint, request digest, sampling, prompt and response (artifacts), reported identity, provider request ID, outcome, attempts, tokens, cost, price table, cache hit, deadline, completion, the meter reservation, the retrieved context, and the candidates' verdicts; closed in §9.19 |
+| `RunStarted`, `RunEnded` | mod | An agentic research run's start, with its kind, trigger, menu, and frozen scope, ceiling, and deadline, and its end, with the reason and counts ([agent harness spec §6.9](agent-harness.md#69-the-agentic-loop)); closed in §9.22 |
+| `ToolCallRecorded`, `ToolResultRecorded` | mod | One tool call a turn asked for (the turn, its index, the tool and class, the arguments, an action's provenance) and its result (the result and code, content, bytes, `truncated`, observations); closed in §9.22 |
+| `RunSummaryRecorded` | mod | A run's typed summary, the memory the next run reads as untrusted input; closed in §9.22 |
 | `ModelOutputRecorded` | v1: man; v2: man, reg | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
 | `DecisionMade` | v1: man; v2: man, pol, reg | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
@@ -3898,7 +3917,7 @@ names the model called (§9's `mod`).
 | `completed_at` | `timestamp` | When the gateway finished with it |
 | `reservation` | `ulid?` | The `event_id` of the call's `MeterReserved`, or `null` when it reserved nothing: rule 149. The link crosses streams, so `append` does not resolve it |
 | `observations` | `[ulid]` | The retrieved context: the `event_id`s of the `ObservationRecorded` records whose items the prompt holds, strictly ascending: rule 150. Empty for a call with no retrieval plan |
-| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (E19-5, not yet catalogued); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22) |
+| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (E19-5, not yet catalogued); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22). For an agentic run's turns, which calls are the candidates is §9.22's |
 
 Rules 72, 73 and 75 apply to this record as to the control stream's, and rule 74 does except where
 rule 152 says. Rules 71 and 76 are the control stream's alone.
@@ -4154,6 +4173,165 @@ number order after the members' types:
 the test vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member
 type and rule above and valid drafts for the cases a rule might be misread to refuse, and the
 scheduler's own tests hold the writer's rules for `clock`, `date`, and the tolerance batch.
+
+### 9.22 Run records ([DEC-2203](../project/decisions/DEC-2203.md))
+
+An agentic research run ([agent harness spec §6.9](agent-harness.md#69-the-agentic-loop),
+[ADR-0005](../adr/0005-agentic-harness.md)) is a session of model turns and tool calls. Each turn is
+one gateway call with its own `ModelInvocationRecorded` (§9.19), unchanged: its position in the run
+is its order among the run's records, so it needs no turn member. A turn's rule 151 candidates are
+the final output's theses and invalidations, or, for an entry with action tools, the reply's
+`propose_thesis` and `invalidate` calls that were mediated (a thesis's `judged` verdict hands it to
+a provisional admission; a provisional refusal's thesis record is written in that batch, an
+`admissible` one's only when the run ends `done`; not
+refused `call_budget`,
+`max_theses`, `max_repeat_denials`, or `run_ended`), mapped to the verdict list in reply order
+within each kind; their verdicts sort theses first, each kind in reply order.
+Five records carry the rest, all on the agent stream at `schema_version` 1 and closed as §9.2's
+conventions say (every member present, `null` only where the type is nullable, any other member
+refused, opaque text non-empty). Each has the run id as `correlation_id`, as the run's turn records
+do, and `config_refs.model_version` naming the research entry (§9's `mod`).
+
+**`RunStarted`**: the run's start, before its seed's `ObservationRecorded`, with what the run froze.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `kind` | `ideate` \| `monitor` \| `owner` \| `explain` | The run kind ([agent harness spec §6.9](agent-harness.md#69-the-agentic-loop); `owner` and `explain` are its §15's): rule 172 |
+| `trigger` | `{kind: schedule \| event \| owner_question \| approval, cause: ulid?}` | What started it, and the `event_id` of the record that did (the copied owner question, or the `ApprovalRequested`), `null` for a schedule: rule 172 |
+| `output` | `final_output` \| `action_tools` | How the run gives its opinion (agent harness spec §6.9) |
+| `menu` | `[text]` | The tool names the run may call, fixed at its start, strictly ascending: rule 172 |
+| `cut_off` | `timestamp` | The run's cut-off (`as_of`) |
+| `allowlist_version` | `integer` | The source allowlist version every read uses |
+| `data_universe_ref` | `ref` | The data universe as of the start, as an artifact |
+| `cost_ceiling_usd` | `decimal` | The run's cost ceiling from workspace configuration (agent harness spec §6.11) |
+| `deadline` | `timestamp` | The cut-off plus the entry's `max_run_s`, on the risk clock |
+| `memory` | `[ulid]` | The `event_id`s of the agent's own thesis records and earlier `RunSummaryRecorded` records placed in the prompt's prefix, strictly ascending: rule 172. An action's provenance includes them by reference (agent harness spec §6.12) |
+
+**`ToolCallRecorded`**: one tool call a committed reply asked for, refused ones included, in the
+batch its turn's record heads, in reply order.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `call_id` | `ulid` | The turn: the gateway call whose reply asked for it: rule 175 |
+| `index` | `integer` | Its position among that reply's tool calls, from 0: rule 176 |
+| `tool` | `text` | A name in the run's `menu`: rule 175 |
+| `class` | `read` \| `think` \| `action` | The tool's class ([agent harness spec §6.10](agent-harness.md#610-tools)) |
+| `arguments_ref` | `ref` | The arguments as the reply gave them, as canonical JSON (§4), stored as an artifact |
+| `provenance` | `[ulid]` | For an action, the `event_id`s of the run's `ToolResultRecorded` records with `untrusted` true that the prompt it was written from held, strictly ascending; empty otherwise: rule 177. The seed's items are named by the turn's `ModelInvocationRecorded.observations` |
+
+**`ToolResultRecorded`**: a tool call's result, exactly once: an action's, and a refused read's or
+think's, in its turn's batch; a dispatched read's or think's in a later batch with the `ObservationRecorded` of the items it returned, before
+the next turn's call is sent (agent harness spec HI-24).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `tool_call` | `ulid` | The `event_id` of its `ToolCallRecorded`: rule 178 |
+| `result` | `ok` \| `refused` \| `failed` | `ok`: the read or think ran, or the action was mediated, whatever its verdict. `refused`: the call returned nothing, refused by the harness or by the reader. `failed`: a read did not answer, or found only an excerpt: rule 179 |
+| `code` | `admissible` \| `removed` \| `exit_requested` \| `not_held` \| `unknown_instrument` \| `unknown_evidence` \| `duplicate_instrument` \| `forbidden_language` \| `revisions_not_enabled` \| `unknown_thesis` \| `direction_not_allowed` \| `asset_class_not_allowed` \| `not_eligible` \| `source_not_allowed` \| `not_corroborated` \| `universe_full` \| `not_admitted` \| `out_of_universe` \| `unknown_item` \| `unavailable` \| `call_budget` \| `max_theses` \| `max_repeat_denials` \| `run_ended` \| `null` | The model-visible code it was told (agent harness spec §6.13 item 5): an action's verdict, or a refusal's or failure's reason. `null` only for an `ok` read or think: rule 179. Lane EX's change adds its `answer` checks to this list |
+| `untrusted` | `boolean` | The result holds third-party or model-written text (news, filings, theses, run summaries), so an action written after it records it as provenance (agent harness spec §6.12) |
+| `content_ref` | `ref` | The result as the model was given it, stored as an artifact, with licensed text replaced by its digest once licensed sources are read (agent harness spec §6.6); for a refusal or failure, the `{"error": code}` object |
+| `bytes` | `integer` | The byte length of the result as the model was given it |
+| `truncated` | `boolean` | A harness cap removed something from a read's result; the model's own `limit` or `count` is not a cap: rule 179 |
+| `observations` | `[ulid]` | The `event_id`s of the `ObservationRecorded` records of every item a read's result holds, earlier ones of this run or an earlier run included, strictly ascending; empty unless the call is a read and `result` is `ok`: rule 179 |
+
+**`RunSummaryRecorded`**: the run's typed summary, the memory the next run reads as untrusted
+input (agent harness spec §6.12), once per run that ends.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `instruments_read` | `[id]` | The asset ids the run's reads returned items about, strictly ascending |
+| `watch` | `[{instrument_id: id, reason: earnings \| filing_pending \| price_band \| thesis_expiry \| news_flow}]` | At most 10 entries, as the model gave them, with instruments outside the run's scope dropped: rule 181 |
+| `proposed`, `admitted`, `invalidated` | `integer` | The run's theses proposed, theses admitted, and invalidations accepted |
+
+**`RunEnded`**: why the run ended, once, after every other record of the run except a late turn
+record (rule 183).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `reason` | `done` \| `bound` \| `deadline` \| `cost` \| `mode` \| `error` \| `answered` | The model ended it; a bound the core counts ended it; the risk clock passed its deadline, or a turn ended `deadline_exceeded` on a deadline the run's time left had cut; a turn ended `budget_exhausted` under the run's ceiling or any other cap; a mode change, a version change, a withdrawn model or disabled research, Stop, or the kill switch cancelled it; a turn ended with any other error outcome; or an `answer` was shown (§15) |
+| `bound` | `max_turns` \| `max_tool_calls` \| `max_repeat_denials` \| `max_theses` \| `null` | For `reason` `bound`, the bound that cut the run off (never `max_turns`); for `done`, `max_turns` or `max_tool_calls` when the run's announced shape ran out rather than the model ending it, else `null`: rule 182 |
+| `turns`, `tool_calls`, `result_bytes` | `integer` | The run's `ModelInvocationRecorded` records committed before this record, its `ToolCallRecorded` records, and its read results' bytes |
+| `discarded` | `[ulid]` | The `event_id`s of the `ToolCallRecorded` records of the run's pending `propose_thesis` calls that this end discards, strictly ascending; empty for `done`, which commits them: rule 182 (agent harness spec §6.9) |
+
+A run whose process crashed has no `RunSummaryRecorded` and no `RunEnded`; replay reads it as
+ended at the crash.
+
+**Consistency rules** (reason `schema` unless named; the path is the member named), checked in
+number order after the members' types:
+
+171. Every §9.22 record: the actor is an `agent` (`actor.kind`), the runtime that owns the stream,
+     and `correlation_id` is not `null` (`correlation_id`).
+172. `RunStarted`: `menu` and `memory` are strictly ascending by bytes (`payload.menu`,
+     `payload.memory`, reason `non_canonical`);
+     `trigger.cause` is `null` exactly when `trigger.kind` is `schedule` (`payload.trigger.cause`);
+     and `kind` fits `trigger.kind`: `ideate` a schedule, `monitor` a schedule or an event, `owner`
+     an owner question, `explain` an approval (`payload.trigger.kind`); the first that fails.
+173. Agent stream: no earlier `RunStarted` has the same `correlation_id` (`correlation_id`), and an
+     `explain` or `owner` run's `trigger.cause` names no earlier run's of the same kind
+     (`payload.trigger.cause`), so an approval is explained once and an owner question answered by
+     one run. A stream rule: `append` reads the stream's earlier records, and
+     a range judges it from the stream's start; rules 174 to 183 are stream rules too.
+174. Agent stream: a `ToolCallRecorded`, `ToolResultRecorded`, `RunSummaryRecorded`, or `RunEnded`
+     has the `correlation_id` of an earlier `RunStarted` (`correlation_id`), and no `RunEnded` of
+     that run precedes it (`correlation_id`); a second `RunSummaryRecorded` of a run is refused
+     (`correlation_id`), and a `RunEnded` follows its run's `RunSummaryRecorded` (`correlation_id`).
+175. `ToolCallRecorded`: `call_id` names an earlier `ModelInvocationRecorded` of the stream whose
+     `purpose` is `research` and whose `outcome` is `ok` (`payload.call_id`), with the same
+     `correlation_id` (`correlation_id`) and `config_refs.model_version`
+     (`config_refs.model_version`); and `tool` is in the run's `RunStarted.menu` (`payload.tool`);
+     the first that fails.
+176. `ToolCallRecorded`: `index` equals the number of earlier `ToolCallRecorded` records naming the
+     same `call_id` (`payload.index`), so a reply's tool calls are recorded in reply order from 0,
+     each once.
+177. `ToolCallRecorded`: `provenance` is strictly ascending by bytes (`payload.provenance`, reason
+     `non_canonical`) and empty unless `class` is `action` (`payload.provenance`).
+178. `ToolResultRecorded`: `tool_call` names an earlier `ToolCallRecorded` of the stream with the same
+     `correlation_id`, and no earlier `ToolResultRecorded` names it (`payload.tool_call`).
+179. `ToolResultRecorded`, read against its `ToolCallRecorded`'s `class`: `code` is `null` exactly
+     when `result` is `ok` and the class is `read` or `think` (`payload.code`); a `failed` result is
+     only a read's, and its `code` is `unavailable`; a `refused` result's `code` is one of
+     `out_of_universe`, `unknown_item`, `call_budget`, `max_theses`, `max_repeat_denials`, or
+     `run_ended`; and an `ok` action's `code` is a verdict: not `unknown_item`, `call_budget`, `max_theses`,
+     `max_repeat_denials`, `run_ended`, or `unavailable` (`out_of_universe` may be a mediated
+     thesis's, from §8.5 check 8) (`payload.result`);
+     `observations` strictly ascending by bytes (`payload.observations`, reason `non_canonical`), and
+     empty and `truncated` `false` unless the class is `read` and `result` is `ok`
+     (`payload.observations`, `payload.truncated`); the first that fails.
+180. `ToolResultRecorded`: among the results of one reply's tool calls (the same `call_id`), either
+     every `code` is `call_budget` or none is (`payload.code`): a reply that asked for more tool calls
+     than its run had left runs none of them.
+181. `RunSummaryRecorded`: `instruments_read` strictly ascending by bytes
+     (`payload.instruments_read`, reason `non_canonical`); `watch` has at most 10 entries, no
+     instrument twice (`payload.watch`).
+182. `RunEnded`: `bound` is not `null` when `reason` is `bound`, and is then not `max_turns`; it
+     may be `max_turns` or `max_tool_calls` when `reason` is `done`; and it is `null` for every other
+     reason (`payload.bound`); and
+     `discarded` is strictly ascending by bytes (`payload.discarded`, reason `non_canonical`) and
+     empty when `reason` is `done` (`payload.discarded`); the first that fails. That each entry
+     names a pending `propose_thesis` call of the run (one whose provisional result is `admissible`),
+     and that every pending one is named, is the writer's.
+183. Agent stream, a `ModelInvocationRecorded` with `purpose` `research` whose `correlation_id` is
+     that of an earlier `RunStarted` (a `single_call` run has none, so this rule does not reach it;
+     that an agentic turn's record follows its `RunStarted` at all is the writer's): no `RunEnded` of
+     the run precedes it unless that `RunEnded`'s `reason` is `deadline` or `mode` and the record's
+     `verdicts` is empty (`correlation_id`). A late reply to a cancelled run is so still journaled,
+     and rule 175 keeps any tool call of it out (no tool call follows a `RunEnded`, rule 174), as
+     agent harness spec §5.3 says. Every other §9.19 rule is unchanged.
+
+**Checked by no rule at append**, so the writer and its tests own them: that a reply has exactly as
+many `ToolCallRecorded` records as tool calls, which needs the response artifact; that every listed
+observation names an `ObservationRecorded` of the agent stream (an item first observed by an
+earlier run is named, never journaled again) and every provenance entry a record of the run; that `bytes` is the artifact's length;
+that the arguments satisfy the tool's pinned schema, which the gateway checked; that the next turn's
+record follows every result of the turn before it (agent harness spec HI-24); that an action's `code`
+equals its journaled verdict (HI-25); and that `RunEnded`'s counts match the run's records.
+
+**No vectors.** As for §9.15, §9.16, and §9.20, the test vectors stay version 3:
+`mandate-journal`'s tests hold an invalid draft for every member type and rule above, and valid
+drafts for the cases a rule might be misread to refuse (a refusal with no observations, an `ok` read
+with none, a think result with no code, an index after a refused call of the same reply, a turn
+record with verdicts and action calls, an `explain` run per approval, a late turn record after a
+`deadline` end).
 
 ## 10. Anchoring
 
