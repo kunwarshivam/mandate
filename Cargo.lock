@@ -2019,6 +2019,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-scheduler"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-shell"
 version = "0.0.0"
 dependencies = [

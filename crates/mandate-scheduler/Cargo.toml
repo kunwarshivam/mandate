@@ -1,0 +1,21 @@
+[package]
+name = "mandate-scheduler"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The workspace scheduler process: the clock stream's single writer, its ticks, trading days, and clock-offset measurements (E21-29, DEC-1010)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-journal-pg.workspace = true
+mandate-process.workspace = true
+mandate-time.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
+
+[dev-dependencies]
+proptest.workspace = true

@@ -36,6 +36,7 @@ mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
 mandate-process = { path = "crates/mandate-process", version = "0.0.0" }
 mandate-push-relay = { path = "crates/mandate-push-relay", version = "0.0.0" }
+mandate-scheduler = { path = "crates/mandate-scheduler", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
 mandate-rh-sim = { path = "crates/mandate-rh-sim", version = "0.0.0" }
