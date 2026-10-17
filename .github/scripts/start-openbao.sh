@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts the OpenBao dev server that CI's `full-checks` job and every `mutants` shard run
 # `mandate-vault`'s conformance suite against (E21-32, DEC-977 item 6): the pinned image (D-5,
-# DEC-969), in dev mode with TLS, holding fake secrets only. It writes the server's CA certificate
+# DEC-990), in dev mode with TLS, holding fake secrets only. It writes the server's CA certificate
 # and its fake root token to the files MANDATE_OPENBAO_CA and MANDATE_OPENBAO_OPERATOR_TOKEN_FILE
 # name, which the job's env sets beside MANDATE_OPENBAO_ADDR; the token itself is never in the
 # environment.

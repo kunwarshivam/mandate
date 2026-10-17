@@ -233,3 +233,40 @@ async fn an_expired_or_foreign_grant_is_refused() {
     );
     assert!(h.exchange(&grant, now).await.is_ok());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_tampered_token_is_an_integrity_refusal_that_drops_the_lease() {
+    let h = Local::new();
+    let now = conformance::at(1_000_000);
+    let manager = h.source(Identity::ConnectionManager, now).await;
+    let grant =
+        mandate_vault::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
+            .await
+            .unwrap();
+    let exchange = h.exchange(&grant, now).await.unwrap();
+    mandate_vault::source::SecretSource::put(
+        &exchange,
+        &mandate_vault::policy::SecretPath::Token(conformance::c("c1")),
+        &conformance::secret("token-1"),
+    )
+    .await
+    .unwrap();
+    let executor = h
+        .source(Identity::Executor(conformance::c("c1")), now)
+        .await;
+    let lease = mandate_vault::source::SecretSource::lease(&executor, &conformance::c("c1"), now)
+        .await
+        .unwrap();
+    for entry in fs::read_dir(h.root.join("vault/tokens")).unwrap() {
+        let path = entry.unwrap().path();
+        let mut bytes = fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        fs::write(&path, bytes).unwrap();
+    }
+    let renewed = mandate_vault::source::SecretSource::renew(&executor, &lease, now).await;
+    assert_eq!(renewed.as_ref().map(drop), Err(&SourceError::Integrity));
+    let mut keeper = mandate_vault::lease::LeaseKeeper::new(lease);
+    keeper.apply(renewed, now);
+    assert!(keeper.secret(now).is_none());
+}

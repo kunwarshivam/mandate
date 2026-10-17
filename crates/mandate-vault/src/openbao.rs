@@ -138,15 +138,18 @@ impl Http {
     }
 }
 
-/// The refusal a status means, if any.
-fn refusal(status: StatusCode) -> Result<(), SourceError> {
+/// The refusal a status means, if any. Only a refusal the vault itself states is one: 400, 401
+/// and 403 are [`SourceError::Denied`], 404 [`SourceError::Missing`], 503 (sealed or standby)
+/// [`SourceError::Sealed`]. Every other status, a redirect from an HA standby, a 429 quota, a
+/// 408, or a 5xx, is [`SourceError::Unavailable`]: an outage, which keeps a running executor's
+/// lease (E21-9), never a revocation.
+pub(crate) fn refusal(status: StatusCode) -> Result<(), SourceError> {
     match status.as_u16() {
         200..=299 => Ok(()),
         400 | 401 | 403 => Err(SourceError::Denied),
         404 => Err(SourceError::Missing),
         503 => Err(SourceError::Sealed),
-        500..=599 => Err(SourceError::Unavailable),
-        _ => Err(SourceError::Malformed),
+        _ => Err(SourceError::Unavailable),
     }
 }
 

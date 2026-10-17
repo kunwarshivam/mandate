@@ -169,6 +169,7 @@ fn from_vault(error: VaultError) -> SourceError {
     match error {
         VaultError::Io => SourceError::Unavailable,
         VaultError::FileMismatch { .. }
+        | VaultError::DirectoryMismatch { .. }
         | VaultError::EntryMalformed
         | VaultError::EntryRejected => SourceError::Integrity,
         VaultError::WrongRole { .. } => SourceError::Denied,

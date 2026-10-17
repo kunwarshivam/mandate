@@ -161,6 +161,27 @@ fn each_policy_is_the_table_with_no_wildcard() {
             "{identity:?}: {hcl}"
         );
         let got = blocks(&hcl);
+        let data_blocks = got
+            .iter()
+            .filter(|(p, _)| p.starts_with("mandate/"))
+            .count();
+        let allowed = [Access::Read, Access::Write, Access::Delete]
+            .iter()
+            .flat_map(|a| paths().into_iter().map(move |p| (*a, p)))
+            .filter(|(a, p)| allows(&identity, *a, p))
+            .count();
+        assert_eq!(
+            data_blocks, allowed,
+            "no block beyond the table: {identity:?}: {hcl}"
+        );
+        let auth_blocks = got.iter().filter(|(p, _)| p.starts_with("auth/")).count();
+        let want_auth = if identity == Identity::ConnectionManager {
+            8
+        } else {
+            0
+        };
+        assert_eq!(auth_blocks, want_auth, "{identity:?}: {hcl}");
+        assert_eq!(got.len(), data_blocks + auth_blocks, "{identity:?}: {hcl}");
         for access in [Access::Read, Access::Write, Access::Delete] {
             for path in paths() {
                 let (prefix, caps) = match access {

@@ -225,7 +225,8 @@ pub async fn leases_and_grants_are_held_to_their_owners<H: Harness>(h: &H) {
     }
 }
 
-/// A grant is single-use, bound to its connection, and dead once revoked or expired.
+/// A grant is single-use, bound to its connection, and dead once revoked. Expiry is each
+/// harness file's own case, since only it controls the clock the grant is checked at.
 pub async fn a_grant_is_single_use_and_revocable<H: Harness>(h: &H) {
     let now = at(1_000_000);
     let manager = h.source(Identity::ConnectionManager, now).await;

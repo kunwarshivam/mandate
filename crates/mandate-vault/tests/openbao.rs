@@ -281,3 +281,24 @@ async fn a_wrong_secret_id_or_role_is_refused() {
         "a login whose role is not the claimed identity's"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_expired_grant_is_refused_before_any_login() {
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let manager = bao.source(Identity::ConnectionManager, now).await;
+    let grant = mandate_vault::source::SecretSource::issue_grant(&manager, &c("c1"), now)
+        .await
+        .unwrap();
+    let late = at(1_000_000 + mandate_vault::source::GRANT_SECS);
+    assert_eq!(
+        bao.exchange(&grant, late).await.map(drop),
+        Err(SourceError::GrantInvalid)
+    );
+    assert!(
+        bao.exchange(&grant, now).await.is_ok(),
+        "the refusal spent nothing"
+    );
+}

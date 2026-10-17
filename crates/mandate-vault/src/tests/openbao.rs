@@ -1,7 +1,9 @@
 //! A sealed vault or a dev server is refused before any login (DEC-977 items 5 and 6).
 
 use crate::SourceError;
-use crate::openbao::seal_verdict;
+use reqwest::StatusCode;
+
+use crate::openbao::{refusal, seal_verdict};
 
 const UNSEALED_RAFT: &[u8] =
     br#"{"type":"shamir","initialized":true,"sealed":false,"t":3,"n":5,"storage_type":"raft"}"#;
@@ -48,5 +50,41 @@ fn a_sealed_or_unreadable_status_is_refused() {
                 String::from_utf8_lossy(bad)
             );
         }
+    }
+}
+
+#[test]
+fn only_the_vaults_own_refusals_are_refusals_and_the_rest_are_outages() {
+    for code in [200_u16, 204, 299] {
+        assert_eq!(
+            refusal(StatusCode::from_u16(code).unwrap()),
+            Ok(()),
+            "{code}"
+        );
+    }
+    for (code, want) in [
+        (400_u16, SourceError::Denied),
+        (401, SourceError::Denied),
+        (403, SourceError::Denied),
+        (404, SourceError::Missing),
+        (503, SourceError::Sealed),
+        (100, SourceError::Unavailable),
+        (301, SourceError::Unavailable),
+        (307, SourceError::Unavailable),
+        (405, SourceError::Unavailable),
+        (408, SourceError::Unavailable),
+        (412, SourceError::Unavailable),
+        (429, SourceError::Unavailable),
+        (500, SourceError::Unavailable),
+        (502, SourceError::Unavailable),
+        (504, SourceError::Unavailable),
+    ] {
+        let got = refusal(StatusCode::from_u16(code).unwrap());
+        assert_eq!(got, Err(want.clone()), "{code}");
+        assert_eq!(
+            got.is_err_and(|e| e.is_outage()),
+            !matches!(want, SourceError::Denied | SourceError::Missing),
+            "{code}"
+        );
     }
 }
