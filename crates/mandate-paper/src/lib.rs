@@ -33,6 +33,8 @@ mod harden;
 mod lt10;
 mod quote;
 mod robinhood;
+#[cfg(any(test, feature = "rh-sim"))]
+mod sim_market;
 mod snapshot;
 mod wiring;
 
