@@ -330,7 +330,6 @@ fn one_notice_per_cause(journal: &Shared, sent: &[Sent]) -> Result<(), String> {
 /// agent stream, which `MemoryJournal` admits; a second step issues nothing more, and the alert
 /// beside the requests keeps its one notice.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_approval_request_is_one_action_notice_naming_it_on_its_agent_stream() -> Checked {
     let journal = world()?;
     agent(&journal)?;
@@ -361,7 +360,6 @@ fn an_approval_request_is_one_action_notice_naming_it_on_its_agent_stream() -> C
 /// before each of its sends, there is one send and one `NoticeAttempted` per audience channel, and
 /// each send carries the digest of its own `(notice, recipient, channel)`.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_approval_notice_is_issued_before_any_send_with_one_attempt_and_key_per_channel() -> Checked {
     let journal = world()?;
     agent(&journal)?;
@@ -413,7 +411,6 @@ fn an_approval_notice_is_issued_before_any_send_with_one_attempt_and_key_per_cha
 /// no canary or content string reaches a capture or any notice-stream record, and no capture holds
 /// the request's event id.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_approval_notice_carries_none_of_its_requests_content() -> Checked {
     let journal = world()?;
     agent(&journal)?;
@@ -476,7 +473,6 @@ fn an_approval_notice_carries_none_of_its_requests_content() -> Checked {
 /// 25 hours, and 25 hours and 61 s make attempts 1, 2, and 3 of the approval notice on each channel,
 /// none abandoned, while the alert beside it makes attempts 1 and 2 and is abandoned at 3.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_approval_notice_retries_with_no_window_while_an_alert_is_abandoned_at_its_end() -> Checked {
     let journal = world()?;
     agent(&journal)?;
@@ -595,7 +591,6 @@ fn interleave(ops: &[Op]) -> Result<(), String> {
 /// agent stream and alerts exactly as without them. A proptest `TestRunner` in a plain function,
 /// as a macro-generated pending test is refused by `cargo xtask markers`.
 #[test]
-#[ignore = "pending E8-10"]
 fn approvals_and_alerts_interleave_into_one_notice_per_cause_across_steps_and_restarts() {
     let config = RunnerConfig {
         failure_persistence: None,
