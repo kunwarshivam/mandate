@@ -198,6 +198,9 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(deployWith((y) => y.replace(BUILD_ENV, `${BUILD_ENV}          ACCOUNT: \${{ vars.CLOUDFLARE_ACCOUNT_ID }}\n`))).toEqual(only("the build may read only"));
     expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          R2: \${{ secrets.R2_SECRET_ACCESS_KEY }}\n`))).toEqual(only("only the deploy step may read a secret"));
     expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          ALL: \${{ toJSON(secrets) }}\n`))).toEqual(only("only the deploy step may read a secret"));
+    for (const leak of ["Secrets.CLOUDFLARE_API_TOKEN", "SECRETS.CLOUDFLARE_API_TOKEN", "secrets['CLOUDFLARE_API_TOKEN']"]) {
+      expect(deployWith((y) => y.replace(BUILD_ENV, `${BUILD_ENV}          LEAK: \${{ ${leak} }}\n`)), leak).toEqual(only("only the deploy step may read a secret"));
+    }
     expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          KEY: \${{ vars.R2_ACCESS_KEY_ID }}\n`))).toEqual(only("the build may read only"));
     expect(deployWith((y) => y.replace('      WRANGLER_SEND_METRICS: "false"\n', '      WRANGLER_SEND_METRICS: "false"\n      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n'))).toEqual(only("never the whole job"));
     expect(deployWith((y) => y.replace("      - run: npm ci\n", "      - run: npm ci\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("Cloudflare command"));
@@ -247,6 +250,7 @@ describe("only the deploy job deploys, from main, through the production environ
     const yml = real(ci);
     expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment: production\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
     expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment:\n      name: production\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
+    expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment:\n      name: 'Production'\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
     expect(hostingProblems(tree({ [ci]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual(only("ci.yml: holds a CLOUDFLARE_"));
   });
 });

@@ -216,9 +216,9 @@ function splitAt(lines, starts) {
   return parts;
 }
 
-/** The names each `secrets` and `vars` reference in `text` reads; a bare `secrets` or `vars` (as in `toJSON(secrets)`) reads `*`. */
+/** The names each `secrets` and `vars` reference in `text` reads; a bare `secrets` or `vars` (as in `toJSON(secrets)`) reads `*`. GitHub's contexts ignore case, and so does this. */
 function references(text, context) {
-  return [...text.matchAll(new RegExp(`\\b${context}\\b(?:\\.([A-Za-z0-9_]+))?`, "g"))].map((match) => match[1] ?? "*");
+  return [...text.matchAll(new RegExp(`\\b${context}\\b(?:\\s*(?:\\.\\s*|\\[\\s*["'])([A-Za-z0-9_]+))?`, "gi"))].map((match) => match[1] ?? "*");
 }
 
 function deployWorkflowProblems(tree) {
@@ -267,7 +267,7 @@ function workflowProblems(tree) {
     if (path === DEPLOY_WORKFLOW || !tree.exists(path)) continue;
     const text = tree.read(path);
     problems.push(...deployProblems(path, text.split("\n")));
-    if (/^\s*environment:.*\bproduction\b|^\s*name:\s*production\b/m.test(text)) problems.push(`${path}: names the production environment; only the deploy job of ${DEPLOY_WORKFLOW} may (ES-12, DEC-986 item 2)`);
+    if (/^\s*environment:.*\bproduction\b|^\s*name:\s*["']?production\b/im.test(text)) problems.push(`${path}: names the production environment; only the deploy job of ${DEPLOY_WORKFLOW} may (ES-12, DEC-986 item 2)`);
     if (/CLOUDFLARE_/.test(text)) problems.push(`${path}: holds a CLOUDFLARE_ value; only the deploy step of ${DEPLOY_WORKFLOW} reads the token and the account (DEC-986 item 2)`);
   }
   problems.push(...deployWorkflowProblems(tree));
