@@ -1065,7 +1065,24 @@ struct Layers {
     /// (DEC-525).
     #[serde(default)]
     planned: Vec<String>,
+    /// The two process groups of a workspace deployment, which meet only in the journal (E21-42,
+    /// DEC-986).
+    #[serde(default)]
+    process_groups: ProcessGroups,
     crates: BTreeMap<String, CratePolicy>,
+}
+
+/// The crates of each side of a workspace deployment: the workspace services (the API, the
+/// control services, the dispatcher, `cp-agent`) and the agent processes (the runtime's host, the
+/// executor and its connectors). No crate of one side may reach a crate of the other through any
+/// chain of path dependencies, so the two can meet only in the journal (E21-42, DEC-986). A crate
+/// in neither list is a shared library or a tool.
+#[derive(Deserialize, Default)]
+struct ProcessGroups {
+    #[serde(default)]
+    workspace_services: Vec<String>,
+    #[serde(default)]
+    agent_process: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -1153,6 +1170,7 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             )
         }));
     }
+    problems.extend(process_group_problems(policy, &names, &closure));
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
@@ -1261,6 +1279,68 @@ fn forbidden_reached(name: &str, forbidden: &[String], reached: &BTreeSet<String
             )
         })
         .collect()
+}
+
+/// A problem for each workspace-services crate that reaches an agent-process crate, and each
+/// agent-process crate that reaches a workspace-services crate, through path dependencies of any
+/// kind (`closure`); for each group name that is neither a member of `names` nor planned; and for
+/// each crate named in both groups (E21-42, DEC-986).
+fn process_group_problems(
+    policy: &Layers,
+    names: &BTreeSet<&str>,
+    closure: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<String> {
+    let groups = &policy.process_groups;
+    let services = ("workspace services", &groups.workspace_services);
+    let agents = ("agent process", &groups.agent_process);
+    let mut problems = Vec::new();
+    for (key, own) in [
+        ("workspace_services", services.1),
+        ("agent_process", agents.1),
+    ] {
+        problems.extend(
+            own.iter()
+                .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name))
+                .map(|name| {
+                    format!(
+                        "`{name}` is in process group `{key}` but is neither a workspace member \
+                         nor in `planned` (DEC-986)"
+                    )
+                }),
+        );
+    }
+    problems.extend(
+        groups
+            .workspace_services
+            .iter()
+            .filter(|name| groups.agent_process.contains(name))
+            .map(|name| {
+                format!(
+                    "`{name}` is in both process groups, so it would sit on both sides of the \
+                     boundary (DEC-986)"
+                )
+            }),
+    );
+    for ((own_label, own), (other_label, other)) in [(services, agents), (agents, services)] {
+        for name in own {
+            let Some(reached) = closure.get(name) else {
+                continue;
+            };
+            problems.extend(
+                other
+                    .iter()
+                    .filter(|crossed| *crossed != name && reached.contains(*crossed))
+                    .map(|crossed| {
+                        format!(
+                            "`{name}` ({own_label}) reaches `{crossed}` ({other_label}); \
+                             workspace services and agent processes meet only in the journal \
+                             (E21-42, DEC-986)"
+                        )
+                    }),
+            );
+        }
+    }
+    problems
 }
 
 /// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
@@ -8133,6 +8213,7 @@ mod tests {
         workspace_closure, workspace_packages,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
+    use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{unoptimised_config, unoptimised_packages};
 
@@ -8301,6 +8382,7 @@ mod tests {
         Layers {
             impure_crates: Vec::new(),
             planned: owned(planned),
+            process_groups: ProcessGroups::default(),
             crates,
         }
     }
@@ -8452,6 +8534,210 @@ mod tests {
             typo.iter()
                 .any(|p| p.starts_with("`seal` allows `stor` as a dependent")),
             "{typo:?}"
+        );
+        Ok(())
+    }
+
+    /// A policy over `shared`, `api`, `audit`, `exec` and `shell`, with `api`, `audit` and the
+    /// planned `cp-agent` the workspace services and `exec` and `shell` the agent processes
+    /// (DEC-986).
+    fn grouped() -> Layers {
+        let layers = [
+            ("shared", 2),
+            ("api", 4),
+            ("audit", 4),
+            ("exec", 6),
+            ("shell", 8),
+        ];
+        let mut p = policy(&layers, &[], &["cp-agent"]);
+        p.process_groups = ProcessGroups {
+            workspace_services: ["api", "audit", "cp-agent"].map(str::to_owned).to_vec(),
+            agent_process: ["exec", "shell"].map(str::to_owned).to_vec(),
+        };
+        p
+    }
+
+    fn crossings(problems: &[String]) -> Vec<&String> {
+        problems
+            .iter()
+            .filter(|p| p.contains("meet only in the journal"))
+            .collect()
+    }
+
+    /// Both sides may build on a shared crate, by any kind of dependency, and a workspace that
+    /// does nothing else has no problem (E21-42, DEC-986).
+    #[test]
+    fn both_process_groups_may_share_a_library() -> Result<()> {
+        let meta = workspace(vec![
+            member("shared", &[]),
+            member("api", &[("shared", None)]),
+            member("audit", &[("shared", Some("dev"))]),
+            member("exec", &[("shared", None)]),
+            member("shell", &[("exec", None), ("shared", Some("build"))]),
+        ]);
+        assert_eq!(layer_problems(&grouped(), &meta)?, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A workspace-services crate that reaches an agent-process crate, directly or through a
+    /// shared crate, by a normal, dev or build dependency, is a problem naming both, and so is the
+    /// reverse (E21-42, DEC-986).
+    #[test]
+    fn a_crate_of_one_process_group_that_reaches_the_other_is_a_problem() -> Result<()> {
+        for kind in [None, Some("dev"), Some("build")] {
+            let direct = workspace(vec![
+                member("shared", &[]),
+                member("api", &[("exec", kind)]),
+                member("audit", &[]),
+                member("exec", &[]),
+                member("shell", &[]),
+            ]);
+            let problems = layer_problems(&grouped(), &direct)?;
+            assert_eq!(
+                crossings(&problems),
+                [
+                    "`api` (workspace services) reaches `exec` (agent process); workspace services \
+                     and agent processes meet only in the journal (E21-42, DEC-986)"
+                ],
+                "{kind:?}: {problems:?}"
+            );
+            let chained = workspace(vec![
+                member("shared", &[("shell", kind)]),
+                member("api", &[]),
+                member("audit", &[("shared", None)]),
+                member("exec", &[]),
+                member("shell", &[]),
+            ]);
+            let problems = layer_problems(&grouped(), &chained)?;
+            assert_eq!(
+                crossings(&problems),
+                [
+                    "`audit` (workspace services) reaches `shell` (agent process); workspace \
+                     services and agent processes meet only in the journal (E21-42, DEC-986)"
+                ],
+                "{kind:?}: a crossing through a shared crate is a crossing: {problems:?}"
+            );
+            let reverse = workspace(vec![
+                member("shared", &[("api", kind)]),
+                member("api", &[]),
+                member("audit", &[]),
+                member("exec", &[]),
+                member("shell", &[("shared", None)]),
+            ]);
+            let problems = layer_problems(&grouped(), &reverse)?;
+            assert_eq!(
+                crossings(&problems),
+                [
+                    "`shell` (agent process) reaches `api` (workspace services); workspace services \
+                     and agent processes meet only in the journal (E21-42, DEC-986)"
+                ],
+                "{kind:?}: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A group name that is neither a member nor planned is a problem, so a typo cannot leave a
+    /// crate unguarded, and a crate in both groups is a problem, since it would sit on both sides
+    /// of the boundary (DEC-986).
+    #[test]
+    fn a_process_group_names_only_members_or_planned_crates_and_each_once() -> Result<()> {
+        let meta = || {
+            workspace(vec![
+                member("shared", &[]),
+                member("api", &[]),
+                member("audit", &[]),
+                member("exec", &[]),
+                member("shell", &[]),
+            ])
+        };
+        let mut typo = grouped();
+        typo.process_groups.agent_process.push("exce".to_owned());
+        assert_eq!(
+            layer_problems(&typo, &meta())?,
+            [
+                "`exce` is in process group `agent_process` but is neither a workspace member nor \
+                 in `planned` (DEC-986)"
+            ]
+        );
+        let mut typo = grouped();
+        typo.process_groups
+            .workspace_services
+            .push("apy".to_owned());
+        assert_eq!(
+            layer_problems(&typo, &meta())?,
+            [
+                "`apy` is in process group `workspace_services` but is neither a workspace member \
+                 nor in `planned` (DEC-986)"
+            ]
+        );
+        let mut both = grouped();
+        both.process_groups.agent_process.push("api".to_owned());
+        let problems = layer_problems(&both, &meta())?;
+        assert!(
+            problems.contains(
+                &"`api` is in both process groups, so it would sit on both sides of the boundary \
+                  (DEC-986)"
+                    .to_owned()
+            ),
+            "{problems:?}"
+        );
+        Ok(())
+    }
+
+    /// The policy as written puts the API contract, the audit reads, the dispatcher, the
+    /// founder's CLI (Phase 1's control services) and the planned `cp-agent` on the workspace
+    /// side, and the agent process, the shell, the paper runner, the executor and its connectors
+    /// on the agent side; the workspace as built respects it, and a crossing added to it is found
+    /// (E21-42, DEC-986).
+    #[test]
+    fn workspace_services_reach_no_agent_process_crate() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        assert_eq!(
+            policy.process_groups.workspace_services,
+            [
+                "mandate-api",
+                "mandate-audit",
+                "mandate-cli",
+                "mandate-cp-agent",
+                "mandate-cp-site",
+                "mandate-dispatcher"
+            ]
+        );
+        assert_eq!(
+            policy.process_groups.agent_process,
+            [
+                "mandate-agentd",
+                "mandate-alpaca",
+                "mandate-executor",
+                "mandate-mcp",
+                "mandate-paper",
+                "mandate-robinhood",
+                "mandate-shell"
+            ]
+        );
+        let meta = metadata_in(&root)?;
+        let names: BTreeSet<&str> = workspace_packages(&meta)
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        let closure = workspace_closure(&meta);
+        assert_eq!(
+            process_group_problems(&policy, &names, &closure),
+            Vec::<String>::new()
+        );
+        let mut crossed = closure;
+        crossed
+            .get_mut("mandate-api")
+            .context("mandate-api is a member")?
+            .insert("mandate-executor".to_owned());
+        assert_eq!(
+            process_group_problems(&policy, &names, &crossed),
+            [
+                "`mandate-api` (workspace services) reaches `mandate-executor` (agent process); \
+                 workspace services and agent processes meet only in the journal (E21-42, DEC-986)"
+            ]
         );
         Ok(())
     }
