@@ -1,12 +1,12 @@
 //! The version and deployment routes (§3.11 item 11, §4.1, §4.2, §5.1,
-//! [DEC-2100](../../../docs/project/decisions/DEC-2100.md)): `POST
+//! [DEC-2101](../../../docs/project/decisions/DEC-2101.md)): `POST
 //! /v1/workspaces/{ws}/mandate-versions`, `GET …/mandate-versions/{v}/confirmation`, `POST
 //! …/mandate-versions/{v}/confirm`, `POST …/agents`, and `POST …/agents/{id}/go-live`.
 //!
 //! Each command is checked in §3.3 item 1's order (the session, the CSRF mark, the key, then the
 //! body, decoded strictly), authorized for a user by its matrix row, compared with the event its
 //! key already holds before anything is judged again (§3.4 step 1), then judged as the CLI judges
-//! it, step-up last, through the port that verifies nothing until E9-4 (DEC-2100 item 2). Its
+//! it, step-up last, through the port that verifies nothing until E9-4 (DEC-2101 item 2). Its
 //! record is in the store and its event on the control stream before the answer (rule 5).
 
 use std::collections::BTreeSet;
@@ -334,7 +334,7 @@ fn document(admitted: &Admitted, version: &str) -> Result<(Value, Mandate), Answ
     Ok(stored(admitted.objects.as_ref(), version).ok_or(Refused::NotFound)?)
 }
 
-/// `POST /v1/workspaces/{ws}/mandate-versions` (§3.11 item 11, DEC-2100 item 3).
+/// `POST /v1/workspaces/{ws}/mandate-versions` (§3.11 item 11, DEC-2101 item 3).
 pub async fn create_version(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -459,7 +459,7 @@ fn version_created(
     )
 }
 
-/// `GET /v1/workspaces/{ws}/mandate-versions/{v}/confirmation` (§3.11 item 11, DEC-2100 item 4).
+/// `GET /v1/workspaces/{ws}/mandate-versions/{v}/confirmation` (§3.11 item 11, DEC-2101 item 4).
 pub async fn confirmation(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -524,7 +524,7 @@ async fn screened(
     Ok(enveloped(StatusCode::OK, now, members))
 }
 
-/// `POST /v1/workspaces/{ws}/mandate-versions/{v}/confirm` (§5.1, DEC-2100 item 5).
+/// `POST /v1/workspaces/{ws}/mandate-versions/{v}/confirm` (§5.1, DEC-2101 item 5).
 pub async fn confirm(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -677,7 +677,7 @@ fn confirm_accepted(status: StatusCode, admitted: &Admitted, row: &StoredEvent) 
     )
 }
 
-/// The deploy body (DEC-2100 item 6), decoded strictly by the server until its schema and its
+/// The deploy body (DEC-2101 item 6), decoded strictly by the server until its schema and its
 /// `mandate-api` type land together.
 struct DeployBody {
     agent_id: String,
@@ -755,7 +755,7 @@ fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
     })
 }
 
-/// `POST /v1/workspaces/{ws}/agents` (§4.2, DEC-2100 item 6).
+/// `POST /v1/workspaces/{ws}/agents` (§4.2, DEC-2101 item 6).
 pub async fn deploy(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -882,7 +882,7 @@ fn command_accepted(status: StatusCode, admitted: &Admitted, row: &StoredEvent) 
     )
 }
 
-/// `POST /v1/workspaces/{ws}/agents/{id}/go-live` (§4.2, DEC-2100 item 7): `live_unavailable`
+/// `POST /v1/workspaces/{ws}/agents/{id}/go-live` (§4.2, DEC-2101 item 7): `live_unavailable`
 /// once §3.3's checks and the deploy row pass, before the body is read.
 pub async fn go_live(
     State(app): State<Arc<App>>,

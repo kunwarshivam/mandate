@@ -1,6 +1,6 @@
 //! The content-addressed store (§3.11 item 2): read by the agent reads (DEC-1020), and written by
 //! the version routes only by adding an object under its own digest, never replacing one
-//! ([DEC-2100](../../../docs/project/decisions/DEC-2100.md) item 8).
+//! ([DEC-2101](../../../docs/project/decisions/DEC-2101.md) item 8).
 
 use std::sync::Mutex;
 

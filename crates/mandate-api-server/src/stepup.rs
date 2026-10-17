@@ -1,4 +1,4 @@
-//! The step-up port (§3.6, §3.11 items 11 and 12, [DEC-2100](../../../docs/project/decisions/DEC-2100.md)
+//! The step-up port (§3.6, §3.11 items 11 and 12, [DEC-2101](../../../docs/project/decisions/DEC-2101.md)
 //! item 2): the one place the server judges an assertion bound to an action's kind and digest.
 //!
 //! Until E9-4 binds a verifier, [`Unbound`] verifies nothing, so every call that needs step-up is
@@ -38,7 +38,7 @@ pub trait StepUp: Send + Sync {
     ) -> Result<(), ProblemCode>;
 }
 
-/// The port before E9-4 binds it: no evidence counts (DEC-2100 item 2).
+/// The port before E9-4 binds it: no evidence counts (DEC-2101 item 2).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Unbound;
 

@@ -209,7 +209,7 @@ pub fn read_session_key(credentials_dir: &Path) -> Result<SessionKey, StartRefus
 }
 
 /// The content-addressed store at `root`, which the agent reads take mandate documents from
-/// (DEC-1020 item 1) and the version routes add objects to (DEC-2100 item 8), or none when `root`
+/// (DEC-1020 item 1) and the version routes add objects to (DEC-2101 item 8), or none when `root`
 /// is absent or empty. A root that is not already a store (its `sha256` directory) is refused
 /// rather than created.
 ///

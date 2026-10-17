@@ -1,5 +1,5 @@
 //! Versions, the confirmation screen, confirm, deploy, and go-live over HTTP (§3.11 item 11, §4.1,
-//! §4.2, §5.1, API-3, API-4, API-5, API-13, API-17, API-19; DEC-2100): checked in §3.3's order,
+//! §4.2, §5.1, API-3, API-4, API-5, API-13, API-17, API-19; DEC-2101): checked in §3.3's order,
 //! judged as the CLI judges them, step-up through the port last, and recorded on the control
 //! stream, with the record in the store, before the answer. Every expected id, version, digest,
 //! and member below is computed here from the spec's own definitions, not by the server's code.
@@ -429,7 +429,7 @@ fn confirm_body(digest: &str, step_up: &str) -> String {
 }
 
 /// The screen digest of a new mandate's version, which warns W-002 (its one warning): the SHA-256 of the canonical
-/// object of the seven members DEC-2100 item 4 names.
+/// object of the seven members DEC-2101 item 4 names.
 fn screen_digest(name: &str) -> String {
     let paths: Vec<String> = PATHS.iter().map(|p| format!("\"{p}\"")).collect();
     reference(&format!(

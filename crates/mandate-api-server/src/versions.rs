@@ -1,5 +1,5 @@
 //! Versions, confirmation, and deployment as the CLI judges and records them (§3.11 item 11,
-//! [DEC-2100](../../../docs/project/decisions/DEC-2100.md); `mandate version create`, `version
+//! [DEC-2101](../../../docs/project/decisions/DEC-2101.md); `mandate version create`, `version
 //! confirm`, `agent deploy`, DEC-530): the control-stream folds, the V-rule check, the records, the
 //! confirmation screen, and the step-up digests. Pure: the routes in [`crate::version_routes`] read
 //! the journal and the store and hand their rows here.
@@ -24,7 +24,7 @@ const STOPPED: &str = "AgentStopped";
 /// The document's members that are not envelope paths (mandate spec §4.1 V-020).
 const SYSTEM_FIELDS: [&str; 2] = ["mandate_schema_version", "source_text_ref"];
 
-/// A first version's classification: no earlier version bounds any path (DEC-2100 item 4).
+/// A first version's classification: no earlier version bounds any path (DEC-2101 item 4).
 pub const FIRST_VERSION: &str = "risk_increasing";
 
 /// Why a version cannot be recorded, confirmed, or deployed.
@@ -165,7 +165,7 @@ pub struct Pending<'a> {
 /// connection, fold to on `date`, as the CLI checks (DEC-530 items 5 and 9): the warnings' codes,
 /// ascending. A version not yet deployed (`agent` empty) is checked without V-002, as the CLI
 /// checks it; a deployment checks V-002 against the account's latest equity snapshot, 0 without
-/// one (DEC-2100 item 6).
+/// one (DEC-2101 item 6).
 ///
 /// # Errors
 /// [`Refusal::Rules`] with every failing V-code, or [`Refusal::Unreadable`].
@@ -287,7 +287,7 @@ pub fn texts(values: &[&str]) -> Value {
     Value::Array(values.iter().map(|v| text(v)).collect())
 }
 
-/// What the confirmation screen shows of a new mandate (DEC-2100 item 4).
+/// What the confirmation screen shows of a new mandate (DEC-2101 item 4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Screen {
     pub required_paths: Vec<String>,
@@ -328,7 +328,7 @@ pub fn confirm_digest(version: &str) -> Option<Digest> {
     Some(Digest::of(&to_canonical(&bound)))
 }
 
-/// A deployment's step-up digest: the SHA-256 of `{agent_id, mandate_version}` (DEC-2100 item 6).
+/// A deployment's step-up digest: the SHA-256 of `{agent_id, mandate_version}` (DEC-2101 item 6).
 pub fn deploy_digest(agent: &str, version: &str) -> Option<Digest> {
     let bound = object(vec![
         ("agent_id", text(agent)),
