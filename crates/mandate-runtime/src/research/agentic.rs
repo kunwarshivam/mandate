@@ -168,10 +168,7 @@ pub(super) fn start(
             "allowlist_version",
             payload::count(u64::from(allowlist_version), "allowlist_version")?,
         ),
-        (
-            "data_universe_ref",
-            payload::text(&Digest::of(&universe_bytes).to_string()),
-        ),
+        ("data_universe_ref", reference(&Digest::of(&universe_bytes))),
         (
             "cost_ceiling_usd",
             payload::text(&agentic.cost_ceiling.to_string()),
@@ -387,10 +384,7 @@ pub(super) fn replied(
             ("index", payload::count(u64::from(call.index), "index")?),
             ("tool", payload::text(call.tool.name())),
             ("class", payload::text(class_name(call.tool.class()))),
-            (
-                "arguments_ref",
-                payload::text(&Digest::of(&arguments).to_string()),
-            ),
+            ("arguments_ref", reference(&Digest::of(&arguments))),
             ("provenance", Value::Array(Vec::new())),
         ])?;
         out.artifacts.push(arguments);
@@ -711,7 +705,7 @@ fn journal_result(
             code.map_or(Value::Null, |code| payload::text(code.as_str())),
         ),
         ("untrusted", Value::Bool(untrusted)),
-        ("content_ref", payload::text(&content.to_string())),
+        ("content_ref", reference(content)),
         ("bytes", payload::count(u64::from(bytes), "bytes")?),
         ("truncated", Value::Bool(truncated)),
         (
@@ -807,6 +801,11 @@ fn loop_error(error: mandate_research_run::ResearchRunError) -> RuntimeError {
             story: "E19-13",
         },
     }
+}
+
+/// An artifact's reference as a record names it: `sha256:` and the digest's hex (journal spec §3).
+fn reference(digest: &Digest) -> Value {
+    payload::text(&format!("sha256:{digest}"))
 }
 
 fn kind_name(kind: RunKind) -> &'static str {
