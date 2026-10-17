@@ -3,7 +3,7 @@
 - **Spec:** [data-plane spec](../../../../docs/specs/data-plane.md) v0.2 §3.1 (normalized types,
   `vendor_time` and `received_at`), §3.3 (order and duplicates), §3.4 (quote age, future stamps,
   the host clock), §5.1 (the hot cache); [trading spec](../../../../docs/specs/trading-domain.md)
-  §8.2 (the sane quote); DEC-433 items 5 to 8; DEC-1008.
+  §8.2 (the sane quote); DEC-433 items 5 to 8; DEC-1200.
 - **Code:** `mandate-dataservice` (`crates/mandate-dataservice`). `src/quote.rs` (`Quote`, `Feed`,
   and `Freshness`: the age basis, the future-stamp, sanity and freshness bounds) and
   `src/cache.rs` (`HotCache`: the subscription set and its capacity, `intake` and its `Intake`

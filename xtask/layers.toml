@@ -63,7 +63,7 @@
 #   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
 #      deleted with the tracer's signal path, DEC-475 item 6): the lowest layer that sees the
 #      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
-#      mandate-dataservice, the workspace data service (E2-6, DEC-1008): above mandate-alpaca, whose
+#      mandate-dataservice, the workspace data service (E2-6, DEC-1200): above mandate-alpaca, whose
 #      stream messages it normalizes in a later slice, and above mandate-risk, whose `SaneQuote` it
 #      hands the gate; runtimes and executors are to read it over the host-local channel (E21-44),
 #      not link it; and mandate-modelhost, the
@@ -399,7 +399,7 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
 
-# The workspace data service (E2-6, DEC-1008): normalized quotes with receive times and the bounded
+# The workspace data service (E2-6, DEC-1200): normalized quotes with receive times and the bounded
 # hot cache. Pure in its first slice; its Alpaca stream normalization (slice 4) reads
 # mandate-alpaca's wire forms.
 [crates.mandate-dataservice]

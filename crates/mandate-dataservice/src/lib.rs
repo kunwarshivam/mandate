@@ -9,7 +9,7 @@
     clippy::as_conversions
 )]
 //! The workspace data service (backlog E2-6, [data-plane spec](../../../docs/specs/data-plane.md)
-//! v0.2 §3, DEC-433, DEC-1008): one place per workspace that holds normalized market records, each
+//! v0.2 §3, DEC-433, DEC-1200): one place per workspace that holds normalized market records, each
 //! stamped with the vendor's time and its own receive time, in a bounded hot cache, so every
 //! runtime and the executor read the same current prices.
 //!

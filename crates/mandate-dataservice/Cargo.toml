@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "The workspace data service: normalized market records with receive times and a bounded hot cache (E2-6, DEC-1008)"
+description = "The workspace data service: normalized market records with receive times and a bounded hot cache (E2-6, DEC-1200)"
 
 [lints]
 workspace = true
