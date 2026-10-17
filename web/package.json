@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pending": "node scripts/pending.mjs",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test && npm run test:e2e:api",
     "test:e2e:auth": "playwright test -c playwright.auth.config.ts",
     "test:e2e:api": "playwright test -c playwright.api.config.ts",
     "brand": "node scripts/brand-assets.mjs",

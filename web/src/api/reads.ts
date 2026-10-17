@@ -176,9 +176,10 @@ const externalPosition = typed<ExternalPosition>({ qty: string });
 
 interface ServedComponent {
   state: HealthState;
-  freshness: { observed_at: string };
+  freshness: { observed_at: string; stale: boolean };
 }
-const component = object<ServedComponent>({ state: healthState, freshness: object({ observed_at: timestamp }) });
+const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : { ok: false, issue: issue(path, "wrong_type") });
+const component = object<ServedComponent>({ state: healthState, freshness: object({ observed_at: timestamp, stale: flag }) });
 const health = object<{ served_at: string } & Record<keyof Health, ServedComponent>>({ served_at: timestamp, market_data: component, broker: component, deployment: component, relay: component });
 
 const connection = typed<Connection & { environment: Environment }>({ connection_id: string, broker: closedEnum(["Alpaca paper"]), environment });
@@ -209,6 +210,11 @@ function newest(marks: Watermark[]): Watermark[] {
   return [...by.values()];
 }
 
+/** A read that answered for another id than the one asked: the pairing cannot be trusted, so nothing is shown. */
+function mismatch(path: string): Loaded {
+  return { ok: false, error: { code: "invalid_response", effect: "none", status: 200, event_id: null, retryable: true, violations: [], decode: issue(path, "wrong_type") } };
+}
+
 export async function loadWorkspace(client: WorkspaceClient): Promise<Loaded> {
   const first = await all<[
     { served_at: string } & Record<keyof Health, ServedComponent>,
@@ -232,7 +238,7 @@ export async function loadWorkspace(client: WorkspaceClient): Promise<Loaded> {
 
   const enc = encodeURIComponent;
   const agentIds = agentList.agents.map((a) => a.agent_id);
-  const approvalIds = [...pending.approvals, ...resolved.approvals].map((a) => a.approval_id);
+  const approvalIds = [...new Set([...pending.approvals, ...resolved.approvals].map((a) => a.approval_id))];
   const second = await all<unknown[]>([
     ...agentIds.flatMap((id) => [
       client.read(`/agents/${enc(id)}`, object({ agent: agentCore })),
@@ -253,11 +259,15 @@ export async function loadWorkspace(client: WorkspaceClient): Promise<Loaded> {
       { orders: WorkingOrder[]; past_orders: PastOrder[]; fills: Fill[] },
       { events: TimelineEvent[] },
     ];
+    if (core.agent.agent_id !== agentIds[i]) return mismatch(`/agents/${i}`);
     agents.push({ ...core.agent, positions: positions.positions, orders: orders.orders, past_orders: orders.past_orders, fills: orders.fills } as Agent);
     timeline[core.agent.agent_id] = events.events;
   }
   const approvals = (second.values.slice(agentIds.length * 4) as Array<{ approval: Approval }>).map((a) => a.approval);
-  const at = (c: ServedComponent) => ({ state: c.state, as_of: c.freshness.observed_at });
+  const wrong = approvals.findIndex((a, i) => a.approval_id !== approvalIds[i]);
+  if (wrong >= 0) return mismatch(`/approvals/${wrong}`);
+  /** A component marked stale in its freshness is stale, whatever its state says (API-14). */
+  const at = (c: ServedComponent) => ({ state: c.state === "ok" && c.freshness.stale ? ("stale" as const) : c.state, as_of: c.freshness.observed_at });
   const { environment: env, ...conn } = held;
   const ws: Workspace = {
     scenario: "normal",

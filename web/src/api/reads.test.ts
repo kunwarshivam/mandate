@@ -117,6 +117,25 @@ describe("the workspace from the workspace API (E11-9, DEC-970)", () => {
     expect((await refusal(connection)).decode?.problem).toBe("unknown_enum_value");
   });
 
+  it("refuses a read that answers for another id than the one asked, and lists a request in both inbox halves once", async () => {
+    const swapped: Tamper = (route, body) => (/^\/agents\/[^/]+$/.test(route) ? { ...body, agent: { ...(body.agent as object), agent_id: "agt_someone_else" } } : body);
+    expect((await refusal(swapped)).code).toBe("invalid_response");
+    const doubled = served("approvals");
+    const listed = await loadWorkspace({
+      ...doubled.client,
+      read: (route, decoder) => doubled.client.read(route === "/approvals?state=resolved" ? "/approvals?state=pending" : route, decoder),
+    });
+    expect(listed.ok).toBe(true);
+    if (listed.ok) expect(new Set(listed.ws.approvals.map((a) => a.approval_id)).size).toBe(listed.ws.approvals.length);
+  });
+
+  it("reads a component its freshness marks stale as stale, whatever its state says", async () => {
+    const tamper: Tamper = (route, body) => (route === "/health" ? { ...body, broker: { ...(body.broker as Record<string, unknown>), state: "ok", freshness: { ...((body.broker as Record<string, unknown>).freshness as object), stale: true } } } : body);
+    const loaded = await loadWorkspace(served("normal", tamper).client);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(loaded.ws.health.broker.state).toBe("stale");
+  });
+
   it("refuses an approval without the content hash an answer must bind (API-12)", async () => {
     const tamper: Tamper = (route, body) => {
       if (/^\/approvals\/[^/]+$/.test(route)) delete (body.approval as Record<string, unknown>).content_hash;

@@ -50,7 +50,7 @@ export function PositionChart({ agent, position }: { agent: Agent; position: Pos
 }
 
 function PositionChartDrawn({ agent, position, market }: { agent: Agent; position: Position; market: Market }) {
-    const [range, setRange] = useState<PriceRange>("1D");
+  const [range, setRange] = useState<PriceRange>("1D");
   const symbol = market.symbols[position.instrument.symbol];
   const bars = useMemo(() => (symbol ? priceWindow(symbol.minute, symbol.daily, range) : []), [symbol, range]);
   const levels = useMemo(() => positionLevels(position), [position]);
@@ -93,7 +93,7 @@ export function ApprovalChart({ approval, className }: { approval: Pick<Approval
 }
 
 function ApprovalChartDrawn({ approval, className, market }: { approval: Pick<Approval, "bound" | "requested_at">; className?: string; market: Market }) {
-    const symbol = market.symbols[approval.bound.symbol];
+  const symbol = market.symbols[approval.bound.symbol];
   const points = useMemo(() => {
     if (!symbol) return [];
     const day = priceWindow(symbol.minute, symbol.daily, "1D") as Bar[];

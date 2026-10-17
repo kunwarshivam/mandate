@@ -1,8 +1,9 @@
 /**
  * Every workspace API operation the web app calls, each with the spec section that documents it
- * (DEC-970, E21-45). The app is one client of the published API and has no route of its own: a call
- * outside this table is refused by `operationFor`, and `contract.test.ts` fails any entry the spec does
- * not list. Commands are `client.ts`'s `OPERATIONS`; there is no order ticket (DEC-528).
+ * (DEC-970, E21-45). The app is one client of the published API and has no route of its own:
+ * `contract.test.ts` fails any entry whose method and path the spec does not document, and any request
+ * the app makes that `operationFor` matches to no entry. Commands are `client.ts`'s `OPERATIONS`; there
+ * is no order ticket (DEC-528).
  */
 import { OPERATIONS } from "./client";
 import type { Operation } from "./types";

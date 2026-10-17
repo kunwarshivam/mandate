@@ -181,6 +181,26 @@ describe("the runtime over the workspace API (E11-9, DEC-970)", () => {
     expect(server.recorded()).toHaveLength(1);
   });
 
+  it("still pauses every agent last seen, and stops its connection, when the reads stop answering (API-8, rule 13)", async () => {
+    let readsDown = false;
+    const { posts } = mount("normal", (inner) => (input, init) => (readsDown && (init.method ?? "GET") === "GET" ? Promise.reject(new TypeError("reads are down")) : inner(input, init)));
+    await ready();
+    const fixture = buildWorkspace("normal");
+    const live = fixture.agents.filter((a) => a.mode !== "stopped").map((a) => a.agent_id);
+    readsDown = true;
+    act(() => {
+      current().send("stop_all", null);
+    });
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("unreachable"));
+    expect(current().ws.agents).toEqual([]);
+    act(() => {
+      current().send("pause_all", null);
+    });
+    await waitFor(() => expect(posts()).toHaveLength(live.length + 1));
+    expect(JSON.parse(posts()[0].body ?? "{}")).toMatchObject({ scope: { kind: "connection", id: fixture.connection.connection_id } });
+    expect(posts().slice(1).map((p) => new URL(p.url).pathname)).toEqual(live.map((a) => `/v1/workspaces/${WS}/agents/${a}/pause`));
+  });
+
   it("shows the deployment unreachable, with no figure, when the reads do not answer", async () => {
     mount("unreachable");
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("unreachable"));

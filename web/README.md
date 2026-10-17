@@ -30,7 +30,7 @@ npm run shots      # every screen as PNG files with a contact sheet in .shots/, 
 npx playwright install --with-deps --only-shell chromium   # once
 npm run test:e2e
 npm run test:e2e:auth   # sign-in on, against a stub Supabase
-npm run test:e2e:api    # the workspace API as the data source (DEC-970)
+npm run test:e2e:api    # the workspace API as the data source (DEC-970); npm run test:e2e runs it too
 ```
 
 The e2e suite (`e2e/`, Playwright, Chromium only, in light and dark) builds the app into `.next-e2e/`

@@ -217,7 +217,7 @@ export function AccountEquityChart() {
 
 function AccountEquityChartDrawn({ market }: { market: Market }) {
   const { ws } = useRuntime();
-    const { stale, asOf, now } = useStale();
+  const { stale, asOf, now } = useStale();
   const [range, setRange] = useState<EquityRange>(ACCOUNT_RANGE);
   const unmanaged = unmanagedEquity(ws);
   const all = useMemo(() => {
@@ -262,7 +262,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
 }
 
 function AgentEquityChartDrawn({ agent, market }: { agent: Agent; market: Market }) {
-    const { stale, asOf, now } = useStale();
+  const { stale, asOf, now } = useStale();
   const [range, setRange] = useState<EquityRange>("1D");
   const all = useMemo(() => market.equity[agent.agent_id] ?? [], [market.equity, agent.agent_id]);
   const points = useMemo(() => equityWindow(all, range, market.end), [all, range, market.end]);

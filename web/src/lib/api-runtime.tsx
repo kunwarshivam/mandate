@@ -64,6 +64,13 @@ export function ApiRuntimeProvider({
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const wsRef = useRef(ws);
+  /**
+   * The last workspace the reads gave. Commands are prepared from it while the reads fail, so pause-all
+   * still reaches every agent last seen and stop-all its connection (API-8, rule 13); nothing is shown from it.
+   */
+  const lastRead = useRef<Workspace | null>(null);
+  /** Each refresh's number: an answer to an older one never overwrites a newer one. */
+  const reads = useRef(0);
   const nowRef = useRef(now);
   /** The server's clock as of the last read, against this device's, so the clock runs on the deployment's time. */
   const served = useRef<{ at: Iso; local: number } | null>(null);
@@ -71,10 +78,13 @@ export function ApiRuntimeProvider({
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
+    reads.current += 1;
+    const read = reads.current;
     const loaded = await loadWorkspace(client);
-    if (!mounted.current) return;
+    if (!mounted.current || read !== reads.current) return;
     if (loaded.ok) {
       served.current = { at: loaded.ws.now, local: Date.now() };
+      lastRead.current = loaded.ws;
       wsRef.current = loaded.ws;
     } else {
       const last = wsRef.current;
@@ -87,7 +97,7 @@ export function ApiRuntimeProvider({
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const reads = window.setInterval(() => void refresh(), refreshMs);
+    const poll = window.setInterval(() => void refresh(), refreshMs);
     const clock = window.setInterval(() => {
       const base = served.current;
       const next = base ? later(Date.now() - base.local, base.at) : new Date().toISOString();
@@ -96,7 +106,7 @@ export function ApiRuntimeProvider({
     }, 1000);
     return () => {
       mounted.current = false;
-      window.clearInterval(reads);
+      window.clearInterval(poll);
       window.clearInterval(clock);
     };
   }, [refresh, refreshMs]);
@@ -143,7 +153,7 @@ export function ApiRuntimeProvider({
       const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
-      const prepared = prepareOwnerCommand(client, wsRef.current, kind, agentId, record);
+      const prepared = prepareOwnerCommand(client, wsRef.current.status === "ready" ? wsRef.current : (lastRead.current ?? wsRef.current), kind, agentId, record);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered" });
         const delivered = await Promise.all(prepared.commands.map(deliver));
