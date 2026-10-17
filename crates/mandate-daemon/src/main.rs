@@ -18,6 +18,10 @@
 //! DEC-1013). Without `--fixture` and without a journal it refuses. `mandate-daemon probe
 //! livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5). This is the one place the
 //! host clock is read (ES-05).
+//!
+//! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
+//! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
+//! owner are read from the agent's deployment, such a launch refuses `deployment_unresolved`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,7 +31,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_daemon::wake::Sleep;
-use mandate_daemon::{Config, RuntimeProcess, Wake, fixture};
+use mandate_daemon::{Config, RuntimeProcess, Wake, fixture, launch};
 use mandate_journal::Environment;
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
@@ -59,9 +63,22 @@ fn main() -> ExitCode {
             ExitCode::from(probe::query(&socket, asked).map_or(1, |a| a.exit_status()))
         }
         Some("run") => {
-            let named = ["--workspace", "--agent", "--connection", "--owner"].map(flag);
-            let [Some(workspace), Some(agent), Some(connection), Some(owner)] = named else {
-                eprintln!("deployment_missing");
+            let var = |name: &str| std::env::var(name).ok();
+            let named = match launch::named(&flag, &var) {
+                Ok(named) => named,
+                Err(code) => {
+                    eprintln!("{code}");
+                    return ExitCode::from(2);
+                }
+            };
+            let launch::Named {
+                workspace,
+                agent,
+                connection: Some(connection),
+                owner: Some(owner),
+            } = named
+            else {
+                eprintln!("deployment_unresolved");
                 return ExitCode::from(2);
             };
             let fixture = args.iter().any(|a| a == "--fixture");

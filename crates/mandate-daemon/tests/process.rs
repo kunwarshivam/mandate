@@ -123,11 +123,22 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
             .unwrap();
         child.wait().unwrap();
         let mut stderr = String::new();
-        child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
         (child.wait().unwrap().code(), stderr)
     };
-    assert_eq!(launch("runtime"), (Some(2), "deployment_unresolved\n".to_owned()));
-    assert_eq!(launch("executor"), (Some(2), "process_not_runtime\n".to_owned()));
+    assert_eq!(
+        launch("runtime"),
+        (Some(2), "deployment_unresolved\n".to_owned())
+    );
+    assert_eq!(
+        launch("executor"),
+        (Some(2), "process_not_runtime\n".to_owned())
+    );
     assert!(!path.exists(), "a refused process serves no probe");
 }
 

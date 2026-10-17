@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use mandate_daemon::launch::{Named, named};
 
-fn flags(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+fn flags(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let map: BTreeMap<String, String> = pairs
         .iter()
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -13,7 +13,7 @@ fn flags(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
     move |name| map.get(name).cloned()
 }
 
-fn manager(process: &str) -> impl Fn(&str) -> Option<String> {
+fn manager(process: &str) -> impl Fn(&str) -> Option<String> + use<> {
     flags(&[
         ("MANDATE_WORKSPACE", "ws1"),
         ("MANDATE_PROCESS", process),
@@ -93,7 +93,10 @@ fn a_pod_started_for_another_process_is_refused() {
 fn a_manager_launch_missing_a_variable_is_refused() {
     let no_subject = flags(&[("MANDATE_WORKSPACE", "ws1"), ("MANDATE_PROCESS", "runtime")]);
     assert_eq!(named(&none(), &no_subject), Err("deployment_missing"));
-    let no_workspace = flags(&[("MANDATE_SUBJECT", "agent-a"), ("MANDATE_PROCESS", "runtime")]);
+    let no_workspace = flags(&[
+        ("MANDATE_SUBJECT", "agent-a"),
+        ("MANDATE_PROCESS", "runtime"),
+    ]);
     assert_eq!(named(&none(), &no_workspace), Err("deployment_missing"));
     let blank = flags(&[
         ("MANDATE_WORKSPACE", "ws1"),
@@ -108,7 +111,10 @@ fn a_manager_launch_missing_a_variable_is_refused() {
 #[test]
 fn a_flag_that_disagrees_with_the_manager_is_refused() {
     let agent = flags(&[("--agent", "agent-b")]);
-    assert_eq!(named(&agent, &manager("runtime")), Err("deployment_conflict"));
+    assert_eq!(
+        named(&agent, &manager("runtime")),
+        Err("deployment_conflict")
+    );
     let workspace = flags(&[("--workspace", "ws2")]);
     assert_eq!(
         named(&workspace, &manager("runtime")),
