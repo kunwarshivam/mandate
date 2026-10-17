@@ -120,7 +120,7 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
                             i,
                             Invalid::new(
                                 InvalidReason::Schema,
-                                &format!("payload.verdicts[{index}].result"),
+                                format!("payload.verdicts[{index}].result"),
                             ),
                         ));
                     }

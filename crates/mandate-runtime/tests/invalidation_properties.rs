@@ -155,7 +155,7 @@ fn breach(case: &Case, journal: &[FoldedEvent]) -> Option<String> {
     if got != accepted.iter().map(String::as_str).collect::<Vec<_>>() {
         return Some(format!("accepted {accepted:?}, journaled {got:?}"));
     }
-    let position = |pred: &dyn Fn(&FoldedEvent) -> bool| journal.iter().position(|e| pred(e));
+    let position = |pred: &dyn Fn(&FoldedEvent) -> bool| journal.iter().position(pred);
     if !invalidated.is_empty() {
         let call = position(&|e| e.event_type == "ModelInvocationRecorded");
         let first_invalidation = position(&|e| e.event_type == "ThesisInvalidated");
