@@ -100,8 +100,9 @@ impl ProcessType {
 
 /// An opaque identifier: 1 to 64 characters of `[a-z0-9_]` starting with a letter, the shape of
 /// the journal's workspace, agent and account references and of DEC-710 item 4's recipient. A
-/// value that is all digits, or holds a `.`, `-`, or capital letter, is never one, so no price,
-/// quantity, or ticker as brokers print it fits.
+/// value that is all digits, or holds a `.`, `-`, or capital letter, is never one, so no price or
+/// quantity fits, nor a ticker as brokers print it. The shape cannot tell a lowercase word from
+/// an ID: which values are opaque is the caller's, who passes the platform's own references.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OpaqueId(String);
 

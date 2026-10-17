@@ -196,6 +196,30 @@ fn a_scrape_with_anything_outside_the_allowed_set_fails() {
             vec![value("reason_code")],
         ),
         (
+            cycles_line(r#"reason_code="a\nb""#),
+            vec![value("reason_code")],
+        ),
+        (
+            cycles_line(r#"reason_code="a\\b""#),
+            vec![value("reason_code")],
+        ),
+        (
+            cycles_line(r#"reason_code="a\tb""#),
+            vec![Finding::Malformed { line: 1 }],
+        ),
+        (
+            cycles_line(r#"process_type="executor"reason_code="failed""#),
+            vec![Finding::Malformed { line: 1 }],
+        ),
+        (
+            cycles_line(r#"Reason_code="failed""#),
+            vec![Finding::Malformed { line: 1 }],
+        ),
+        (
+            cycles_line(r#"="failed""#),
+            vec![Finding::Malformed { line: 1 }],
+        ),
+        (
             "target_info{service_name=\"x\"} 1\n".to_owned(),
             vec![unknown("target_info")],
         ),
@@ -259,8 +283,13 @@ fn opaque(value: &str) -> bool {
 
 proptest! {
     #[test]
-    fn a_reason_value_passes_exactly_when_it_is_opaque(value in "[ -~]{0,70}") {
-        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    fn a_reason_value_passes_exactly_when_it_is_opaque(
+        value in prop_oneof!["[ -~]{0,70}", "[a-z_\\\\\"\n\r\té€0-9]{0,70}"]
+    ) {
+        let escaped = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n");
         let text = cycles_line(&format!(r#"reason_code="{escaped}""#));
         prop_assert_eq!(lint::exposition(&text).is_empty(), opaque(&value), "{}", text);
     }

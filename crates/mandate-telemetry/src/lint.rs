@@ -208,7 +208,9 @@ fn sample(line: &str, number: usize, findings: &mut Vec<Finding>) {
     }
 }
 
-/// Parses `k="v",...}` and returns the pairs, unescaped, and the text after the `}`.
+/// Parses `k="v",...}` and returns the pairs, unescaped as the text format escapes them (`\\`,
+/// `\"`, `\n`), and the text after the `}`. Any other escape, a key outside `[a-z_]`, or a pair
+/// not followed by `,` or `}` does not parse.
 fn label_pairs(body: &str) -> Option<(Vec<(String, String)>, &str)> {
     let mut pairs = Vec::new();
     let mut rest = body;
@@ -217,18 +219,29 @@ fn label_pairs(body: &str) -> Option<(Vec<(String, String)>, &str)> {
             return Some((pairs, after));
         }
         let (key, after_key) = rest.split_once("=\"")?;
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+            return None;
+        }
         let mut value = String::new();
         let mut chars = after_key.char_indices();
         let end = loop {
             match chars.next()? {
-                (_, '\\') => value.push(chars.next()?.1),
+                (_, '\\') => match chars.next()?.1 {
+                    'n' => value.push('\n'),
+                    c @ ('\\' | '"') => value.push(c),
+                    _ => return None,
+                },
                 (i, '"') => break i,
                 (_, c) => value.push(c),
             }
         };
         pairs.push((key.to_owned(), value));
-        rest = after_key.get(end.saturating_add(1)..)?;
-        rest = rest.strip_prefix(',').unwrap_or(rest);
+        let after_value = after_key.get(end.saturating_add(1)..)?;
+        rest = match after_value.strip_prefix(',') {
+            Some(next) => next,
+            None if after_value.starts_with('}') => after_value,
+            None => return None,
+        };
     }
 }
 

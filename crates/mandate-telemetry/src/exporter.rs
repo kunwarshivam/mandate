@@ -13,6 +13,9 @@ use crate::{Metrics, TelemetryError};
 /// stalled scraper delays later scrapes by at most this and never reaches a record.
 const LINE_BOUND: u64 = 1024;
 const IO_BOUND: Duration = Duration::from_secs(1);
+/// The pause after a failed accept (descriptors exhausted, say), so the thread never spins beside
+/// the decision cycle.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
 /// The running exporter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,8 +55,13 @@ pub fn serve(addr: SocketAddr, metrics: Metrics) -> Result<Exporter, TelemetryEr
     thread::Builder::new()
         .name("metrics-exporter".to_owned())
         .spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let _answered = respond(&stream, &metrics);
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        let _answered = respond(&stream, &metrics);
+                    }
+                    Err(_) => thread::sleep(ACCEPT_BACKOFF),
+                }
             }
         })
         .map_err(start)?;
