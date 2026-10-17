@@ -182,7 +182,14 @@ impl Drop for Running {
 
 /// Starts the binary and reads its `listening` line, for at most ten seconds.
 fn start(extra: &[(&str, &str)]) -> (Running, SocketAddr, SocketAddr) {
-    let mut child = Running(command(&LOCAL, extra).spawn().expect("the binary starts"));
+    start_with(&[], extra)
+}
+
+/// [`start`] with `more` arguments after the two local binds.
+fn start_with(more: &[&str], extra: &[(&str, &str)]) -> (Running, SocketAddr, SocketAddr) {
+    let mut args = LOCAL.to_vec();
+    args.extend_from_slice(more);
+    let mut child = Running(command(&args, extra).spawn().expect("the binary starts"));
     let stdout = child.0.stdout.take().expect("its stdout");
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -258,4 +265,38 @@ fn a_port_other_than_443_is_a_valid_app_origin() {
     assert_eq!(get(probes, "/livez").status, 200);
     terminate(&child.0);
     assert_eq!(wait(&mut child.0, Duration::from_secs(10)), Some(0));
+}
+
+#[test]
+fn a_connection_that_never_finishes_its_request_cannot_hold_the_drain_past_its_bound() {
+    let (mut child, api, _) = start_with(&["--drain-bound-s", "1"], &[]);
+    let mut stalled = std::net::TcpStream::connect(api).expect("connect");
+    std::io::Write::write_all(
+        &mut stalled,
+        b"GET /v1/workspaces/ws_1/agents HTTP/1.1\r\nHost: a",
+    )
+    .expect("half a request");
+    std::thread::sleep(Duration::from_millis(100));
+    terminate(&child.0);
+    assert_eq!(wait(&mut child.0, Duration::from_secs(10)), Some(1));
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .expect("its stderr")
+        .read_to_string(&mut stderr)
+        .expect("read");
+    assert!(stderr.contains("drain bound"), "{stderr}");
+    drop(stalled);
+}
+
+#[test]
+fn the_drain_bound_may_only_be_shortened() {
+    for bound in ["0", "91", "3600", "-1", "x"] {
+        let mut args = LOCAL.to_vec();
+        args.extend(["--drain-bound-s", bound]);
+        let (code, text) = refused(command(&args, &[]));
+        assert_eq!(code, Some(2), "{bound}: {text}");
+    }
 }

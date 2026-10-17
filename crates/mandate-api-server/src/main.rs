@@ -8,15 +8,22 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! `mandate-api-server --bind <ip>:<port> --probe-bind <ip>:<port> [--pod-address <ip>]`: the
-//! workspace API process (§3.11, E21-31, DEC-978).
+//! `mandate-api-server --bind <ip>:<port> --probe-bind <ip>:<port> [--pod-address <ip>]
+//! [--drain-bound-s <1 to 90>]`: the workspace API process (§3.11, E21-31, DEC-978). The drain
+//! bound may only be shortened from [`DRAIN_BOUND`].
 //!
 //! It makes every start check before it listens, and refuses with exit status 2 and one line on
 //! stderr naming the check. Once both listeners are bound it prints
 //! `listening api=<addr> probes=<addr>` and nothing else. SIGTERM starts the drain: readiness
 //! turns `not_ready` while both listeners still accept, and once no API request is in flight the
-//! listeners close and the process exits 0. At [`DRAIN_BOUND`] with requests still in flight, or
-//! when a listener stops before any SIGTERM, it exits 1 with one line on stderr.
+//! listeners close and the process exits 0. One bound covers the whole drain, the listeners'
+//! closing included, so a connection that never finishes its request cannot hold the process: at
+//! the bound, or when a listener stops before any SIGTERM, it exits 1 with one line on stderr.
+//!
+//! Not yet: an idle process settles at once, so `/readyz` reports `not_ready` only while an API
+//! request is in flight; holding the probes up for a grace period comes with `mandate-process`
+//! (E21-28). During that window new API requests are served as before; answering ordinary calls
+//! `busy` and keeping API-7 operations served (§3.11 item 4) arrive with those routes.
 
 use std::env;
 use std::ffi::OsString;
@@ -26,6 +33,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mandate_api_server::config::{
     StartRefusal, check_bind, check_database_url, check_environment, read_session_key,
@@ -42,12 +50,14 @@ struct Args {
     bind: SocketAddr,
     probe_bind: SocketAddr,
     pod_address: Option<IpAddr>,
+    drain_bound: Duration,
 }
 
 fn args(mut raw: impl Iterator<Item = OsString>) -> Result<Args, StartRefusal> {
     let mut bind = None;
     let mut probe_bind = None;
     let mut pod_address = None;
+    let mut drain_bound = DRAIN_BOUND;
     while let Some(flag) = raw.next() {
         let value = raw.next().and_then(|v| v.into_string().ok());
         let parsed = match flag.to_str() {
@@ -58,6 +68,11 @@ fn args(mut raw: impl Iterator<Item = OsString>) -> Result<Args, StartRefusal> {
             Some("--pod-address") => value
                 .and_then(|v| v.parse().ok())
                 .map(|a| pod_address = Some(a)),
+            Some("--drain-bound-s") => value
+                .and_then(|v| v.parse().ok())
+                .map(Duration::from_secs)
+                .filter(|bound| !bound.is_zero() && *bound <= DRAIN_BOUND)
+                .map(|bound| drain_bound = bound),
             _ => None,
         };
         if parsed.is_none() {
@@ -70,6 +85,7 @@ fn args(mut raw: impl Iterator<Item = OsString>) -> Result<Args, StartRefusal> {
             name: "--probe-bind",
         })?,
         pod_address,
+        drain_bound,
     })
 }
 
@@ -181,16 +197,16 @@ async fn run(args: Args, settings: Settings) -> io::Result<()> {
         }
     }
     drain.begin();
-    let settled = drain.settled(DRAIN_BOUND).await;
-    let _ = stopped.send(true);
-    if !settled {
-        return Err(io::Error::other(
-            "the drain bound was reached with requests in flight",
-        ));
-    }
-    let _ = api.await;
-    let _ = probes.await;
-    Ok(())
+    let drained = tokio::time::timeout(args.drain_bound, async {
+        drain.settled(args.drain_bound).await;
+        let _ = stopped.send(true);
+        let _ = api.await;
+        let _ = probes.await;
+    })
+    .await;
+    drained.map_err(|_| {
+        io::Error::other("the drain bound was reached with requests or connections open")
+    })
 }
 
 /// Runs one listener, and wakes the main task if it ends.
