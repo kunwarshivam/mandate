@@ -5,6 +5,7 @@ import { ArrowRight } from "pixelarticons/react/ArrowRight.js";
 import { ChevronRight } from "pixelarticons/react/ChevronRight.js";
 import { Inbox } from "pixelarticons/react/Inbox.js";
 import { Deadline } from "@/components/approvals/deadline";
+import { AgentBacktests } from "@/components/backtest/backtest-report";
 import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { Envelope, Headroom, MandateCard } from "@/components/domain/envelope";
@@ -344,6 +345,11 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
         </Section>
       );
     case "prove/backtests":
+      return (
+        <Section title="Backtests">
+          <AgentBacktests agentId={agent.agent_id} />
+        </Section>
+      );
     case "prove/paper":
     case "prove/live":
       return null;
