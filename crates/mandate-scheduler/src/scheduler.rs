@@ -10,8 +10,8 @@ use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_date_and_hour};
 
 use crate::measure::{self, Measurement, Sample, Schedule, Trigger};
 use crate::records::{Record, Writer};
-use crate::store::ClockStore;
 use crate::tick;
+use mandate_store::Store;
 
 /// The workspace's time servers, asked once per measurement.
 pub trait TimeServers {
@@ -54,7 +54,7 @@ pub struct Scheduler<S> {
     ticked_at: Option<u64>,
 }
 
-impl<S: ClockStore> Scheduler<S> {
+impl<S: Store> Scheduler<S> {
     /// Starts at `now`: refuses any environment but paper before taking anything, takes a newer
     /// writer epoch (fencing every earlier scheduler), replays the stream, and opens it if it is
     /// empty. A store that cannot answer leaves the scheduler exited `Refused`.

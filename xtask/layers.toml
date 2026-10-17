@@ -121,6 +121,7 @@ workspace_services = [
 agent_process = [
     "mandate-agentd",
     "mandate-alpaca",
+    "mandate-daemon",
     "mandate-executor",
     "mandate-mcp",
     "mandate-paper",
@@ -589,12 +590,32 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
 
-# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over the
-# Postgres journal, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
+# The journal port a long-running process writes and follows through (E21-29, E21-30, DEC-1012):
+# the in-memory journal and Postgres, with tokio driving the Postgres client. Below every process
+# crate that uses it, and above mandate-journal-pg.
+[crates.mandate-store]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+
+# The agent runtime as a long-running process (E21-30, DEC-1012): one deployment's runtime core
+# over mandate-store, with mandate-process's lifecycle and probes; tokio for the SIGTERM listener.
+# Its forbidden_internal list is what makes "the runtime has no route to a broker" hold by
+# construction: it can never reach the shell, the executor, a connector, the runner, or the CLI.
+[crates.mandate-daemon]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
+
+# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
+# mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker
 # connector: it holds nothing secret and places nothing.
 [crates.mandate-scheduler]
-layer = 7
+layer = 8
 safety_critical = true
 pure = false
 allowed_external = ["tokio"]
