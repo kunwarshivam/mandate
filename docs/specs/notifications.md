@@ -1,10 +1,10 @@
-# Notifications and Approval Channels Spec (v0.7, draft)
+# Notifications and Approval Channels Spec (v0.8, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.7: a failed attempt's record carries the provider's verdict, and §7's provider-down row ends `abandoned` ([DEC-706](../project/decisions/DEC-706.md), §5.1, §5.5, §7); v0.6: what a relay refusal means to the deployment ([DEC-728](../project/decisions/DEC-728.md), §4.6, §5.2); v0.5: a relayed send's VAPID `sub` is a role mailbox, never a person's address ([DEC-727](../project/decisions/DEC-727.md), §4.6); v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
+| **Status** | Draft v0.8: the dispatcher as a process of the managed cell ([DEC-2500](../project/decisions/DEC-2500.md), §5.9), web-push address resolution, one send and one record per address, and marking one address ([DEC-2502](../project/decisions/DEC-2502.md), §4.6, §5.1 to §5.6), VAPID key custody ([DEC-2503](../project/decisions/DEC-2503.md), §4.6), and the managed cell's push-service egress, Proposed for the founder with web push off meanwhile ([DEC-2504](../project/decisions/DEC-2504.md), §4.6, §12 item 7); v0.7: a failed attempt's record carries the provider's verdict, and §7's provider-down row ends `abandoned` ([DEC-706](../project/decisions/DEC-706.md), §5.1, §5.5, §7); v0.6: what a relay refusal means to the deployment ([DEC-728](../project/decisions/DEC-728.md), §4.6, §5.2); v0.5: a relayed send's VAPID `sub` is a role mailbox, never a person's address ([DEC-727](../project/decisions/DEC-727.md), §4.6); v0.4: the relay carries the deployment's VAPID header, the founder's choice on DEC-724 item 9 ([DEC-726](../project/decisions/DEC-726.md), §4.6, §9); v0.3: wording and consistency only (DEC-712, DEC-722, and [#763](https://github.com/kunwarshivam/mandate/pull/763)'s review minors; freeze rule); v0.2 fixed round 1's minors (E8-16); v0.1 was reviewed in [#558](https://github.com/kunwarshivam/mandate/pull/558) |
 | **Owner** | Engineering |
-| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent); v0.5's relayed subject, [DEC-727](../project/decisions/DEC-727.md) (Accepted, agent); v0.6's relay refusals, [DEC-728](../project/decisions/DEC-728.md) (Accepted, agent); v0.7's verdict on a failed attempt, [DEC-706](../project/decisions/DEC-706.md) (Accepted, agent) |
+| **Decisions** | [DEC-438](../project/decisions/DEC-438.md) (items 1 to 18 and 27 to 29 Accepted; items 21, 23, and 24 for mail to the founder's own address decided by the founder in [DEC-820](../project/decisions/DEC-820.md); items 19, 20, 22, and 25 decided by the founder, 2026-10-08 (DEC-824); item 26 and item 24 for any other recipient Proposed for the founder); v0.2's readings [DEC-700](../project/decisions/DEC-700.md), the code layout [DEC-701](../project/decisions/DEC-701.md), and the notice id's source [DEC-702](../project/decisions/DEC-702.md) (Accepted, agent); v0.3's readings DEC-712 (who dereferences the address, and `send` renders) and DEC-722 (allowlist labels) (Accepted, agent); v0.4's relay request, [DEC-726](../project/decisions/DEC-726.md) (item 1 decided by the founder; items 2 to 8 Accepted, agent); v0.5's relayed subject, [DEC-727](../project/decisions/DEC-727.md) (Accepted, agent); v0.6's relay refusals, [DEC-728](../project/decisions/DEC-728.md) (Accepted, agent); v0.7's verdict on a failed attempt, [DEC-706](../project/decisions/DEC-706.md) (Accepted, agent); v0.8's dispatcher process [DEC-2500](../project/decisions/DEC-2500.md), address resolution [DEC-2502](../project/decisions/DEC-2502.md), and key custody [DEC-2503](../project/decisions/DEC-2503.md) (Accepted, agent), and the push-service egress [DEC-2504](../project/decisions/DEC-2504.md) (Proposed for the founder) |
 | **Backlog** | E8-4, E8-5, E8-7, E8-9 to E8-14, and E8-16 ([backlog](../project/06-backlog-v1.md#e8-escalation-and-approvals)) |
 | **Safety-critical** | Yes: notification payloads and the approval flow (`AGENTS.md`, "Safety-critical paths") |
 
@@ -77,8 +77,8 @@ cross-plane attacker list. §8 lists the contracts this spec needs from each.
 | **Pull channel** | A list the recipient reads inside the workspace: `cli_inbox` (the founder's CLI) and `web_inbox` (the web app's inbox and alerts center). The list is the journal itself, so it is delivered when the subject event commits |
 | **Push channel** | Anything that sends a message out of the workspace deployment: email, chat, web push, SMS, phone |
 | **Payload** | The bytes a push channel carries to a provider, relay, or device |
-| **Address** | Where a push channel sends: an email address, a chat destination, a push subscription. Personal data, held in the vault ([journal spec §6.4](journal.md#64-personal-data-and-identity)) |
-| **Dispatcher** | The workspace service that turns committed causes into sends, and the single writer of the workspace's notice stream `ntf:{workspace_id}` (§5.1) |
+| **Address** | Where a push channel sends: an email address, a chat destination, a push subscription. Personal data, held in the vault ([journal spec §6.4](journal.md#64-personal-data-and-identity)). A web-push address is named by its `address_ref`, and a member may hold several (§4.6) |
+| **Dispatcher** | The workspace service that turns committed causes into sends, and the single writer of the workspace's notice stream `ntf:{workspace_id}` (§5.1); a process of its own (§5.9) |
 
 ---
 
@@ -91,14 +91,14 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 | ID | Invariant | How it is tested |
 |---|---|---|
 | NT-1 | **Payloads are opaque.** Anything that leaves the workspace deployment as a notice carries exactly a notice id (random, never a journal event id) and one text key from a closed set (§4.2), rendered through fixed templates. Never an instrument, side, quantity, price, order value, P&L, score, thesis, rule, deadline, agent name, mandate content, broker account, or personal data, the recipient's name included (`AGENTS.md` rule 6, [DEC-11](../project/04-decision-log.md#decisions), PX-6). The payload type has no field and no constructor that takes free text from domain data (rung 1). A web push also travels in an envelope the relay and the push service read (§4.6): its `urgency` and TTL are fixed per class, never taken from a deadline or any subject's time, so they reveal at most the class; the push endpoint is an address, under NT-2 | Type test: the payload and every channel's rendered message are built only from `Notification`, whose id type has no constructor from an event id; a captured-payload test seeds a workspace whose instruments, agent names, rule ids, prices, and user names are unique canary strings, drives every notice kind through every channel adapter and the relay, and scans every captured byte for every canary (E8-5's acceptance); an envelope test that every relayed and direct request's `urgency` and TTL equal its class's fixed pair whatever the subject's deadline, against the three pairs written into the test from DEC-700 item 3, not read from §4.6's table or the code's |
-| NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel. The address is read from the vault at send time, passed to the one provider that needs it, and never journaled, logged, or put in a metric | Log, metric, and journal scans for canary addresses after a full run; a test that the only path to an address is the vault client, called by the channel adapter (§5.2), and that the dispatcher holds only the handle |
+| NT-2 | **Addresses stay minimal and private.** A recipient is journaled and logged only as an opaque user id and a channel, and on web push the address's opaque `address_ref`. The address is read from the vault at send time, passed to the one provider that needs it, held only for that send, and never journaled, logged, or put in a metric, a metric label (a push service's name included), an error, or a panic message. No type that holds an endpoint, a subscription key, or the VAPID private key has a `Debug` or `Display` that prints it, and an HTTP client's error, which can carry the request's URL, is mapped to §5.2's closed reasons without being formatted (DEC-2502 item 8, DEC-2503 item 4) | Log, metric, and journal scans for canary addresses after a full run; a test that the only path to an address is the vault client, called by the channel adapter (§5.2), and that the dispatcher holds only the handle; a canary endpoint, canary keys, and a canary VAPID key driven through every failure of the web-push adapter (a refused connection, a timeout, a redirect, an oversized answer) and every start-up refusal of the process, with every log line, metric, record, `Debug` output, and exit message scanned for them |
 | NT-3 | **Approval happens only inside the workspace.** A grant, a skip, an acknowledgment, or any owner command reaches the runtime only as a control-stream event that workspace services write after authenticating the user in the workspace deployment ([mandate spec §6.4](mandate.md#64-approvals) "Responses"). No channel adapter, relay, provider webhook, email reply, or chat message can write one | Layering: the notification crates cannot depend on the control-stream writer (`xtask/layers.toml`); a fuzz test feeds every inbound path (replies, chat messages, button callbacks, provider webhooks) and asserts the control stream is unchanged |
 | NT-4 | **Links carry no authority.** A link holds the workspace app's fixed origin and the notice id, nothing else, so it reveals neither an event reference nor a creation time: no session, token, one-time code, or sign-in. Opening it requires sign-in; a grant requires step-up as mandate spec §6.1 and §6.4 require | Template test: every link matches `<origin>/n/<notice id>`; a property test that two notices about one cause get different ids and no id parses as a ULID of any journaled event; an end-to-end test opens a captured link with no session and reaches only the sign-in screen |
 | NT-5 | **Delivery never adds risk** (rule 3). Failure, delay, duplication, or loss of any notice changes no order, intent, limit, or mode. Its only effect on trading state is check 4 (`not_delivered`), which can only refuse a response. An approval nobody could see times out to `skip`. Check 4 is the only effect because only an approval reads delivery, and an approval gates only a risk-adding action: no exit, protective order, risk exit, owner exit, or kill switch is ever gated by an approval (`AGENTS.md` rules 2 and 13). So the claim holds under any later autonomy change that keeps those rules, and one that gated a risk-reducing action on an approval would break rule 13 first | Fault injection: with every push channel failing, hung, or duplicating, a soak run's intents, gate decisions, and modes are identical to a run with perfect delivery, except asks that time out to `skip` |
-| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6) and an entry in the pull channels. A notice coalesced with others (§5.4) meets the bound too: a cause not in a window's first message, including one that commits while that message's send is still in flight, either goes at once in its own message or joins a window that ends within 60 seconds of its own commit | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound; the storms include causes that commit while a first message's send hangs at the provider, which must not be dropped or held past their own 60 seconds |
+| NT-6 | **Nothing suppresses a safety notice.** Retry de-duplication, rate limits, coalescing, quiet hours, unsubscribe, and provider quotas never drop a `safety` notice. Every `safety` cause (§3.4) produces, within 60 seconds of its commit while the dispatcher runs, a send attempt on every configured push channel the recipient has not lost (§5.6), on web push to each of the recipient's active addresses not marked `unreachable` (§4.6), and an entry in the pull channels. A notice coalesced with others (§5.4) meets the bound too: a cause not in a window's first message, including one that commits while that message's send is still in flight, either goes at once in its own message or joins a window that ends within 60 seconds of its own commit | Property test: random storms of safety events across quiet hours, rate limits, and provider 429s; an oracle that derives the causes from the subject streams on its own (one per `OwnerAlertSent`, one per kill-switch command however many streams journal `KillSwitchActivated`) counts the attempts per cause, recipient, and channel and requires every one within the bound; the storms include causes that commit while a first message's send hangs at the provider, which must not be dropped or held past their own 60 seconds |
 | NT-7 | **Quiet hours never delay a safety notice.** Quiet hours apply only to `action` push sends (suppressed, as mandate spec §6.4 says) and `info` push sends (deferred to the window's end). Pull channels are never affected, so a request stays listed and grantable | Property test over random quiet-hour windows, including ones spanning midnight and the DST changes (`mandate_approval::deliver_now`'s DST cases extended per class) |
-| NT-8 | **Every send is journaled, and only after its cause.** The dispatcher sends nothing about an event that is not committed, journals `NoticeIssued` before the first send, and journals every attempt's outcome as `NoticeAttempted` (recipient (opaque), channel, attempt, status, provider message id, time), all on the notice stream, of which it is the only writer (journal spec §2). A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send, and a second dispatcher started for the same workspace (the older is `Fenced`, journal spec §5.1, and the newer re-sends); an oracle that reads only the journal finds, for every cause, a terminal outcome per recipient and channel |
-| NT-9 | **The notification path is never in the trade path.** No exit, protective order, risk exit, kill switch, owner exit, or gate decision waits on, is ordered after, or fails because of the dispatcher, a provider, or the relay (rule 13; [OPS-4](../design/infrastructure.md), [OPS-12](../design/infrastructure.md)) | Fault injection: the kill-switch and exit suites pass with the dispatcher hung and the relay unreachable |
+| NT-8 | **Every send is journaled, and only after its cause.** The dispatcher sends nothing about an event that is not committed, journals `NoticeIssued` before the first send, and journals every attempt's outcome as `NoticeAttempted` (recipient (opaque), channel, on web push the `address_ref`, attempt, status, provider message id, time), all on the notice stream, of which it is the only writer (journal spec §2). A crash between a send and its record re-sends the notice (at least once); it never loses one | Crash injection at every step of a send, and a second dispatcher started for the same workspace (the older is `Fenced`, journal spec §5.1, and the newer re-sends); an oracle that reads only the journal finds, for every cause, a terminal outcome per recipient and channel, and on web push per address the control stream's `NotificationAddressChanged` fold makes active (§4.6) |
+| NT-9 | **The notification path is never in the trade path.** No exit, protective order, risk exit, kill switch, owner exit, or gate decision waits on, is ordered after, or fails because of the dispatcher, a provider, or the relay (rule 13; [OPS-4](../design/infrastructure.md), [OPS-12](../design/infrastructure.md)) | Fault injection: the kill-switch and exit suites pass with the dispatcher hung and the relay unreachable. Layering (rung 1): nothing may depend on `mandate-dispatcher` (`allowed_dependents = []`), and the `[process_groups]` rule keeps it apart from every agent-process crate (§5.9, DEC-2500 item 2) |
 | NT-10 | **Notices stay in their workspace.** A notice goes only to users of the cause's workspace whose roles may receive its class under the identity spec's **receive** column (§3.3); its link resolves only for such a user, and to anyone else it looks the same as a missing notice | Two-workspace test: a user of workspace B opening workspace A's link gets the same response as for a random notice id; a role test drives every class to a workspace holding every role and checks the recipients against the receive column, read as data, not through the dispatcher's own routing |
 | NT-11 | **Being notified is not being allowed.** Receiving a notice gives no right to act. A response is still judged by checks 1 to 7 (mandate spec §6.4): a notice sent to someone outside `autonomy.approval.approvers` changes nothing, and a removed approver is refused `not_an_approver` | Admission test: responses from every recipient class that is not a current approver are refused |
 | NT-12 | **Notices never advise or persuade.** The text set has no trade, no urgency beyond "needs your approval", no outcome, and no count of profit or loss (rule 6; mandate spec §6.4 "Never persuasive language") | A wording test over the closed text set, against the advice-wording list `the_content_never_carries_advice_wording` uses |
@@ -106,6 +106,13 @@ the dispatcher's own predicate (`AGENTS.md`, "Getting it right the first time").
 **Claims not made.** Push delivery is best effort: no invariant promises a person *read* a notice.
 Safety does not depend on it: limits are enforced by the gate whether or not anyone is told (rule 1),
 and an unanswered approval is a skip.
+
+**Web push is off in the managed cell until DEC-2504 is decided** (§4.6, §12 item 7). Until then the
+dispatcher makes no web-push attempt, and NT-6's push half does not hold for a recipient whose only
+configured push channel is web push; the pull channels' half does. For the 2026-10-26 demo an
+approval ask reaches the founder through the web app's live Approvals screen (`web_inbox`), not
+phone push. This adds no risk: the pull channels list every notice when its cause commits (§3.1,
+§5.1), check 4 is met by them (NT-5), and an ask nobody answers is a skip.
 
 ---
 
@@ -224,7 +231,7 @@ user with no address on any push channel still has the pull channels.
 | `web_inbox` | Pull | The web app's inbox and alerts center (G5) | M9 | Same rule as `cli_inbox`: the list is the journal, read through the workspace API |
 | `email` | Push | From the workspace deployment to a mail provider | M7 | §4.4 |
 | `slack` or `telegram` | Push | From the workspace deployment to the chat provider | Not in v1: DEC-438 item 20 is not taken (the founder, 2026-10-08 (DEC-824)); chat is in the backlog, Telegram at M10 a later option | §4.5. Outbound only |
-| `web_push` | Push | The workspace deployment, directly or through the relay, to the browser's push service | M10 (DEC-438 item 19, the founder, 2026-10-08 (DEC-824)) | §4.6. Our own self-hosted relay and VAPID keys, no vendor (DEC-438 item 22); the VAPID subject is `mailto:push@notify.owlhead.ai` |
+| `web_push` | Push | The workspace deployment, directly or through the relay, to the browser's push service | M10 (DEC-438 item 19, the founder, 2026-10-08 (DEC-824)) | §4.6. Our own self-hosted relay and VAPID keys, no vendor (DEC-438 item 22); the VAPID subject is `mailto:push@notify.owlhead.ai`. Off in the managed cell until the push-service egress is decided (DEC-2504) |
 | `sms`, `phone` | Push | A messaging provider | E8-7 (P1) | Same payload rule; phone reads the text aloud |
 | Native mobile push | Push | The relay to Apple's and Google's push services | After v1 (DEC-19) | Needs the relay's app credentials |
 
@@ -363,6 +370,48 @@ as the design for when chat is taken up.
 - **Direct or relayed.** A managed workspace deployment sends to the push service directly. A hybrid
   deployment whose egress allows only the global control plane sends through the relay over its
   existing outbound mutual-TLS link ([HLD §4](../HLD.md#workspace-deployment)).
+- **How the managed cell reaches the push services is open** ([DEC-2504](../project/decisions/DEC-2504.md),
+  Proposed for the founder; §12 item 7). The cell's network policies take only CIDRs of /24 or
+  narrower ([DEC-993](../project/decisions/DEC-993.md) item 8), and the push services answer from
+  large, rotating ranges. The recommended option is a host-checking egress forward proxy that
+  admits only this section's allowlist by name; the alternatives are pinned /24s and wider CIDRs.
+  **Until the founder decides,** the chart's push-services egress is a value that is off by default,
+  the dispatcher's configuration has web push off, and the dispatcher makes no web-push attempt and
+  journals none (§5.9). The pull channels carry every notice meanwhile (§2, "Claims not made").
+  Web push turns on only once this is decided and the journal records one attempt per address
+  (below).
+- **Addresses** ([DEC-2502](../project/decisions/DEC-2502.md)). A member holds up to 10 active
+  web-push addresses in a workspace (workspace API spec §4.11). Each is an `address_ref`, the
+  `added` event's own id, naming one entry in the workspace's vault namespace that holds
+  `{member, endpoint, p256dh, auth, key_id}` and the workspace API's bookkeeping (§5.7 there);
+  `key_id` names the VAPID key the browser subscribed under (below). The dispatcher derives the
+  active set by folding `NotificationAddressChanged` on its workspace's control stream, never by
+  listing the vault, and each address's marks from its own notice stream (§5.6). The member in that
+  event is a principal's ULID; the recipient in the dispatcher's records is the same principal
+  written `p_` and the ULID in lowercase (28 characters, DEC-2502 item 3), so the two join with no
+  table, and no recipient parses as a notice id or a ULID.
+- **One handle, every address.** A notice's send on `(recipient, web_push)` goes to each of the
+  recipient's addresses that is active, not `unreachable`, and on the allowlist: one send, one
+  idempotency key (§5.1), one retry schedule (§5.3), and one `NoticeAttempted` per address, which
+  names its `address_ref`. The addresses are those active at the step that makes the channel's
+  first attempt for the notice: one added later gets nothing for an earlier notice, and one removed
+  later gets nothing more but DEC-795's one last send (§5.1). A
+  `notification_address_changed` notice reaches the address its `added` event names. Sending to the
+  most recently added address alone is not a permitted reading: it would tell an attacker's newly
+  added browser, and none of the member's own, that an address was added (DEC-2502 item 10).
+- **The VAPID key** ([DEC-2503](../project/decisions/DEC-2503.md)). Each workspace has its own VAPID
+  key set in its vault namespace. A key is made only by a keygen command under a write-only vault
+  identity, which draws it from the operating system's source, writes it put-if-absent, and prints
+  only its id and public key; no key is imported. The workspace's dispatcher, the only identity that
+  may read it, reads every key once at start, keeps each in its own memory (OPS-1), and signs in
+  process (ES256, `r || s`), so the key reaches no log, metric, record, error, environment
+  variable, file, or `Debug` output. Each address is signed for with the key it was made under; an
+  address whose key the dispatcher does not hold is the deployment's fault,
+  `permanent { provider_error }`, which marks nothing. A planned rotation adds a key, serves it to
+  browsers as current, and deletes the old one only when no active address names it; a rotation
+  after a compromise deletes the key at once, and the addresses still on it reach the member only
+  through the pull channels until the browser subscribes again (DEC-2503 item 7, DEC-729 item 4).
+  Signing inside OpenBao's transit engine is the stricter alternative, deferred (DEC-2503 item 8).
 - **The relay** accepts `{relay_id, endpoint, urgency, ttl_s, authorization, ciphertext}`, every
   field required ([DEC-724](../project/decisions/DEC-724.md),
   [DEC-726](../project/decisions/DEC-726.md)). It checks, in this order, the relay id, the
@@ -382,7 +431,7 @@ as the design for when chat is taken up.
 - **The VAPID header goes through the relay unopened** (the founder, DEC-726). `authorization` is
   the deployment's own RFC 8292 header, `vapid t=<JWT>, k=<public key>`, built for each request
   with that attempt's time and never reused, journaled, or logged by the deployment; the private
-  key never leaves the deployment. The relay treats the field as opaque: it checks only that it is
+  key never leaves the vault and the dispatcher's memory (DEC-2503). The relay treats the field as opaque: it checks only that it is
   exactly the form `mandate_webpush` writes (`vapid t=<a>.<b>.<c>, k=<d>`, unpadded base64url,
   `<c>` 86 characters and `<d>` 87) and at most 1 024 octets, and refuses anything else, an absent
   or empty field included, as `invalid_authorization` without posting. It never decodes the token
@@ -397,7 +446,7 @@ as the design for when chat is taken up.
   digits, dots, and hyphens with nothing after it; an `https:` subject is refused
   ([DEC-727](../project/decisions/DEC-727.md)). The deployment checks it before it builds any
   relayed header and sends nothing through the relay with a subject that fails; the relay reads no
-  claim (DEC-726 item 2). A direct send keeps DEC-790 item 4's rule. So NT-1's captured-payload
+  claim (DEC-726 item 2). A direct send is held to the same role-mailbox rule (DEC-2503 item 6, a tightening of DEC-790 item 4), so no push service on either route is given a person's address. So NT-1's captured-payload
   scan, and control plane design CP-1's canary scan, decode the claims segment and scan it as well
   as the raw bytes.
 - **The envelope is fixed per class** (NT-1, DEC-700 item 3). `urgency` and `ttl_s` are a pair per
@@ -449,7 +498,9 @@ The dispatcher **tails the journal**, which is its outbox:
 3. For each recipient and push channel it calls the channel's adapter (§5.2) with the closed notice
    and the address handle, never the address; the adapter renders the message itself and
    dereferences the handle through the vault client (DEC-712). The dispatcher then journals the
-   outcome as `NoticeAttempted`.
+   outcome as `NoticeAttempted`. On web push the handle names one `address_ref` as well, and a
+   recipient's send fans out to each of their active addresses, one call and one record each
+   (§4.6, DEC-2502 item 4).
    **An address is sent to only while it is active**, that is, while its last
    `NotificationAddressChanged` is `added` (workspace API spec §4.11), and only while its host is on
    the allowlist (§4.6). The single exception is the one last send of a
@@ -465,7 +516,8 @@ The dispatcher **tails the journal**, which is its outbox:
    `permanent { address_missing }` (§5.2), and the dispatcher journals a terminal `failed` with
    that reason: it does not mark the address `unreachable`, and it raises `channel_lost` once
    (§5.6).
-4. On restart it replays its own stream and the subject streams: a cause with no `NoticeIssued` is
+4. On restart it replays its own stream and the subject streams, the control stream's
+   `NotificationAddressChanged` fold included: a cause with no `NoticeIssued` is
    issued, a notice with no terminal attempt is due again, as are reminders whose time has passed
    while the approval is still pending. A `failed` attempt is terminal only when its verdict is
    `permanent`; a `retryable` one leaves that channel due on §5.3's schedule (journal spec §9.15,
@@ -474,10 +526,12 @@ The dispatcher **tails the journal**, which is its outbox:
 **A process of its own, from M7.** The dispatcher runs in its own process, not inside the runtime or
 the executor, so no trading process does provider I/O or waits on it (NT-9). At M7 that is one more
 process on the founder's host; from M8 it runs beside workspace control services, still with its own
-stream. The runtime's `Effect::NotifyApproval` and the executor's `Effect::Notify` become the
+stream. In the managed cell it is its own binary and image, with the shared process lifecycle (§5.9,
+DEC-2500). The runtime's `Effect::NotifyApproval` and the executor's `Effect::Notify` become the
 `OwnerAlertSent` drafts above (E8-9); the shell no longer delivers anything itself.
 
-**Idempotency key:** `(notice id, recipient, channel)`. A retry reuses it; a provider that supports
+**Idempotency key:** `(notice id, recipient, channel)`, and on web push the `address_ref` too, so two
+browsers of one member never share one (DEC-2502 item 5). A retry reuses it; a provider that supports
 idempotency keys is given it, so a resend after a crash is a duplicate at most once per channel. A
 cause is issued once: `NoticeIssued` names its cause, and a cause that already has one is skipped.
 
@@ -502,7 +556,16 @@ Every channel is one adapter behind one interface:
 - `address_missing` is the platform's own finding, not a provider verdict: the address is active,
   so the dispatcher sent to it, but the adapter finds no vault entry for its handle, answers
   `permanent { address_missing }`, and the dispatcher journals it (§5.1, DEC-712). It is
-  `permanent`, marks no address `unreachable`, and raises `channel_lost` once (§5.6).
+  `permanent`, marks no address `unreachable`, and raises `channel_lost` once (§5.6). It is only
+  the vault's definite answer that no entry exists: a vault that is unreachable, sealed, or refuses
+  the dispatcher's identity is `retryable { provider_error }`, which marks nothing and raises no
+  `channel_lost` (DEC-2502 item 7), so a vault outage cannot raise one for every address.
+- **A push service's answer is read, not trusted.** The client follows no redirect (§4.6), reads at
+  most a small fixed number of octets of a body and discards them, never reads the `Location` header
+  into a record (it names a resource under the endpoint), and gives up after the request's deadline
+  (§5.9) with `retryable { timeout }`; the status alone decides the outcome (DEC-729). The
+  `provider_message_id` journaled for a web push is a fresh random id per attempt (DEC-2500
+  item 9).
 - `recipient_not_permitted` is the platform's own refusal (§4.4: a recipient the founder-only mail
   transport may not address), not the provider's verdict on the address. It is `permanent` for that
   notice and channel, is not retried, marks no address `unreachable`, and raises no `channel_lost`
@@ -526,6 +589,11 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 `bounced`, `complained`, or `unsubscribed` also does (§5.2); `recipient_not_permitted` and
 `address_missing` mark nothing (§5.2).
 `not_pending` is for `action` only and `retry_window_ended` for `safety` and `info` only.
+
+On web push each address is its own send on this schedule, numbered from attempt 1 (§4.6). A send
+whose address is removed, or marked `unreachable` by another attempt (§5.6), before its next
+attempt is journaled `abandoned` with reason `address_retired` at the next step, except DEC-795's
+one last send (§5.1); its other addresses go on (DEC-2502 item 5).
 
 ### 5.4 Coalescing and rate limits
 
@@ -561,7 +629,7 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 | `ApprovalDelivered` | Agent (the runtime) | The pull channels' `delivered`, in the request's own batch, at every stage. Push outcomes are not copied here: check 4 is met by the pull channel | As journal spec §9: approval, channel, status, message id |
 | `OwnerAlertSent` | The subject's own stream (its owner) | With the subject, in the same batch | Subject event, kind, and for a kill switch the owner command it carries out (journal spec v0.12) |
 | `NoticeIssued` | Notice (the dispatcher) | Before the first send | Notice id, kind, class, cause and its stream, recipients (opaque) |
-| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, plus the dispatcher's own `not_pending` for `action` and `retry_window_ended` for `safety` and `info`, both only with `abandoned`), `provider_message_id`, `coalesced_into`, and `verdict` (`retryable` or `permanent`, the outcome §5.2's `send` returned, only with `failed`; journal spec v0.40, [DEC-706](../project/decisions/DEC-706.md)) |
+| `NoticeAttempted` | Notice (the dispatcher) | Each attempt's outcome | Notice id, recipient (opaque), channel, attempt, `status` (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), `reason` (§5.2's closed enum, plus the dispatcher's own `not_pending` for `action` and `retry_window_ended` for `safety` and `info`, both only with `abandoned`), `provider_message_id`, `coalesced_into`, and `verdict` (`retryable` or `permanent`, the outcome §5.2's `send` returned, only with `failed`; journal spec v0.40, [DEC-706](../project/decisions/DEC-706.md)). For web push, the `address_ref` the attempt went to, and the dispatcher's `address_retired` stop (§5.3): owed by a journal spec change, `NoticeAttempted` version 3 (DEC-2502 item 5); until it merges, no web-push attempt is made |
 
 `delivered` means the provider accepted the message, not that a person read it. A later bounce is a
 new record for the same provider message id with `failed` and reason `bounced`; it never retracts an
@@ -586,9 +654,11 @@ The reference cases and the code change to `kind` in E8-9 (slice S4); until then
 ### 5.6 Bounces, complaints, and lost addresses
 
 - Exactly five reasons mark that user's address on that channel `unreachable` on its
-  `NoticeAttempted`: `address_rejected`, `auth_failed`, `bounced` (a hard bounce), `complained`,
+  `NoticeAttempted`, and on web push only the one address its `address_ref` names, never the
+  member's other browsers (DEC-2502 item 6): `address_rejected`, `auth_failed`, `bounced` (a hard bounce), `complained`,
   and `unsubscribed` (a provider-level unsubscribe or suppression, from a provider receipt). The dispatcher stops sending to the address and issues a `channel_lost` notice, whose
-  cause is that record on its own stream, to the user's other channels and the pull channels. No
+  cause is that record on its own stream, to the user's other channels, their other active
+  web-push addresses included, and the pull channels. No
   other reason marks an address; `recipient_not_permitted` and `address_missing` in particular mark nothing (§5.2).
 - `auth_failed` (a revoked Slack webhook, a removed Telegram bot) also raises an operator alert
   when the credential is the platform's (the Telegram bot token).
@@ -599,6 +669,10 @@ The reference cases and the code change to `kind` in E8-9 (slice S4); until then
   still counts toward the member's limit, and shows its status in the workspace until the member
   removes it or sets the same endpoint again, which replaces it with a new address in one batch
   (workspace API spec §4.11, §5.7).
+- **A deployment-side fault marks nothing.** A `401` or `403` (DEC-729 item 4's interim), an
+  address whose VAPID key the dispatcher no longer holds (§4.6, DEC-2503 item 5), and a vault that
+  does not answer (§5.2) are `provider_error`: no address is marked, so one signing bug, rotated
+  key, or vault outage can never mark a workspace's addresses all at once.
 - **A missing entry is reported once.** The first `address_missing` attempt on an address raises
   `channel_lost`; later attempts on it are `failed` `address_missing` with no new `channel_lost`.
   The report resets on the next `delivered` attempt on that address, and a new `address_ref` (the
@@ -635,6 +709,47 @@ configured; whether it still works is §5.6's question.
 
 A request is grantable once delivered on any channel, and the pull channel always is, so quiet hours
 never make a request ungrantable; they only mean nobody was interrupted.
+
+### 5.9 The dispatcher process
+
+[DEC-2500](../project/decisions/DEC-2500.md) gives the dispatcher its shape in the managed cell
+(E8-10 slice D10). In short:
+
+- **Its own binary and image.** `mandate-dispatcher` is a binary of its own, run from its own
+  image: the one statically linked binary on an empty base, non-root, with no shell
+  ([DEC-993](../project/decisions/DEC-993.md) item 9's shape). It is not a subcommand of the
+  `mandate` CLI, whose image carries the control-stream writer (NT-3). Its subcommands are
+  `run --config <path>` and `probe live|ready`.
+- **Where it sits.** `pure = false` at layer 9 in `xtask/layers.toml`, with the fewest external
+  dependencies the process needs; DEC-701 item 3's `forbidden_internal` list plus `mandate-agentd`
+  and `mandate-api`; and `allowed_dependents = []`. With the `[process_groups]` rule, no trading
+  crate reaches it and it reaches none (NT-9). It logs in to Postgres as its own role, appends only
+  through its `NoticeWriter` (DEC-704 item 1), reads in short read-only transactions, and holds no
+  lock but its own stream's writer epoch.
+- **Its reads can fail.** `Journal::committed` returns a `Result`. A read that fails ends the step
+  before it issues, sends, or appends anything, and is never read as an empty stream, which would
+  re-issue every cause.
+- **Lifecycle.** `mandate_process::Lifecycle` with `Kind::Writer`: `StartupPassed` (its start-up
+  checks: the configuration, the vault, and, while web push is on, the VAPID keys of §4.6),
+  `EpochTaken` on the notice stream, `Replayed` to its head, then ready. `Fenced` sends nothing more and exits
+  (§7). SIGTERM is `DrainRequested`: no new send starts, the one in flight is finished and
+  journaled (`Settled`), within `DRAIN_BOUND` (90 seconds; each push request has a 10-second
+  deadline); past it the drain is abandoned, and the next dispatcher re-sends what has no record
+  (NT-8). A failed start-up check, or an append the journal refuses as `Invalid`, is `Failed`: the
+  process exits rather than loop. Only a step whose reads succeeded is a heartbeat, so a
+  dispatcher that cannot read for its liveness bound (60 seconds) is restarted.
+- **Probes** are `exec` probes running `probe live` and `probe ready` against the
+  `mandate-process` Unix socket. The dispatcher listens on no network port.
+- **Configuration** is one read-only JSON file holding no secret and no address: the workspace,
+  the subject streams, the audience (until roles exist, E9-2 and NT-10; recipients in §4.6's
+  `p_` form), the app origin, the environment, the build digest, whether web push is on (off, §4.6),
+  the push-service allowlist, and the VAPID subject. It is read at start only. The configured
+  subject streams are a floor: the process also reads the journal store's list of its workspace's
+  agent, account, and control streams, so a stream the file misses is still read (NT-6).
+- **Telemetry** carries counts by channel, class, status, and closed reason, and the lag of its
+  oldest unread cause; never a recipient, an address, a host, or a push service's name (NT-2).
+- **Open:** the operator alert for a refused append ([DEC-707](../project/decisions/DEC-707.md),
+  DEC-2500 item 11; §12 item 8).
 
 ---
 
@@ -696,6 +811,14 @@ stateDiagram-v2
 | **The dispatcher is down** | Nothing is sent; on restart it replays from the journal and sends what is still due; an operator alert fires when its lag passes 60 seconds | None. Approvals stay listed in the pull channels; any that expire meanwhile are skipped | Outcomes appear late; the lag is an operator metric |
 | **A crash between send and record** | The notice is re-sent with the same idempotency key | None | Two attempts, one possibly a duplicate the recipient sees |
 | **Two dispatchers for one workspace** (a slow termination, an orchestrator restart) | The older is `Fenced` at its next append (journal spec §5.1); the newer replays and re-sends what has no record | None: no other stream is written by either, so no trading writer is fenced (NT-9) | `NoticeAttempted` from the live dispatcher only |
+| **The dispatcher is told to stop** (SIGTERM: an upgrade, a node drain) | No new send starts; the send in flight finishes and is journaled; it exits `drained` within 90 seconds, or the drain is abandoned and the next dispatcher re-sends what has no record (§5.9) | None (NT-9) | The attempts it made; at most one duplicate |
+| **A journal read fails** | The step ends before it issues, sends, or appends anything; the next tick tries again; past the liveness bound the process is restarted (§5.9) | None | Nothing; the lag alert fires past 60 seconds |
+| **An append is refused as `Invalid`** | The process exits instead of looping, and shows as a crash loop and as lag; the operator alert for it is open (§12 item 8) | None | Nothing for that step |
+| **The vault is unreachable** | At start: the dispatcher does not become ready and the orchestrator retries it. Running: an address read is `retryable { provider_error }`, retried in the class's window, marking nothing (§5.2); the VAPID keys are already in memory | None | `failed` with verdict `retryable` |
+| **A member adds or removes a web-push address while a notice is being sent** | An address added after a notice's first web-push step gets nothing for that notice; one removed is sent nothing more but DEC-795's last send, its pending send journaled `abandoned` `address_retired` (§4.6, §5.3) | None | `abandoned`, `address_retired` |
+| **One browser's subscription expires** (`404`, `410`) | That address only is marked `unreachable`; `channel_lost` goes to the member's other channels and browsers and the pull channels (§5.6) | None | `failed`, `address_rejected`, on that `address_ref` |
+| **The VAPID key is rotated** | Planned: both keys are held until no active address names the old one. After a compromise: the old key is deleted at once, and its addresses are `provider_error` until the browser subscribes again (§4.6, DEC-2503 item 7) | None | `failed`, `provider_error`, marking nothing |
+| **Web push is off** (DEC-2504's interim) | No web-push attempt; every notice is in the pull channels when its cause commits | None (NT-5) | Nothing on web push |
 | **A stream owner commits an alert while the dispatcher lags** | `OwnerAlertSent` waits in the subject stream until the dispatcher reads it | None | `NoticeIssued` late; the lag alert fires past 60 seconds |
 | **A user's kill switch reaches two stream owners** | One notice for the command (§3.4); each `KillSwitchActivated` is an effect, not a cause | None | One `NoticeIssued`, cause the `OwnerCommandIssued` |
 | **The user is unreachable on every push channel** | Pull channels only; §5.6 alerts on any channel still working | None. Asks time out to `skip`; limits hold regardless | `failed` and the lost-address alert |
@@ -720,11 +843,11 @@ stateDiagram-v2
 |---|---|---|
 | Mandate spec §6.4 | Payload is exactly a random notice id and one generic text; quiet hours suppress push only; a request is grantable once delivered on one channel; risk-limit alerts ignore quiet hours | Amended in this change (notice id for approval id, DEC-438 item 10, a tightening under DEC-176). This spec adds `web_inbox` as a second pull channel under the same reading as `cli_inbox` (DEC-438 item 3) |
 | Mandate spec §6.5, §6.7 | Delegation ends and fired tripwires produce `OwnerAlertSent` (written by the stream owner) with opaque text; a fired tripwire is a risk-limit alert | Consistent: `delegation_ended` is `info`, a tripwire is `risk_limit` (`safety`); §6.7's sentence amended for the notice id |
-| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); journal spec v0.28 §9.15 closes the payload schemas (DEC-720), and v0.40 adds `NoticeAttempted` version 2 with a failed attempt's verdict (DEC-706) |
+| Journal spec §2, §9 | One writer per stream; the notice stream `ntf:{workspace_id}` with `NoticeIssued` and `NoticeAttempted`; `OwnerAlertSent` written by the subject stream's owner | Amended in this change (journal v0.12); journal spec v0.28 §9.15 closes the payload schemas (DEC-720), and v0.40 adds `NoticeAttempted` version 2 with a failed attempt's verdict (DEC-706). **Owed:** `NoticeAttempted` version 3 with the web-push `address_ref` and the `address_retired` stop (DEC-2502 item 5); no web-push attempt is made until it merges |
 | Identity spec (DEC-437) | Sign-in from a deep link; step-up per grant within 300 seconds for live; **account recovery for an approver never relies on email or chat alone** (identity spec §10.1 meets it with passkeys, OIDC, recovery codes, and a 24-hour enrolment cool-off); the **receive** column of the roles table (§4.1, settlement X1); the membership and credential events §3.2's account-security rows read (§12.1) | The receive column is owed by #556 under X1; §3.3's interim reading holds until it merges |
-| Workspace API spec (DEC-436) | Resolve a notice id across the user's workspaces with no existence oracle (§3.9, `GET /notices/{notice_id}`); serve approval content; commit `ApprovalResponseSubmitted`; write `OwnerAlertSent` with an owner kill-switch command (§3.4); list the pull channels | Consistent with #560 §3.9 (settlement X3) |
+| Workspace API spec (DEC-436) | Resolve a notice id across the user's workspaces with no existence oracle (§3.9, `GET /notices/{notice_id}`); serve approval content; commit `ApprovalResponseSubmitted`; write `OwnerAlertSent` with an owner kill-switch command (§3.4); list the pull channels; set and remove push addresses, each `NotificationAddressChanged` with its `OwnerAlertSent` in one batch, the endpoint and keys in the vault, the status shown per address (§4.11, §5.7) | Consistent with #560 §3.9 (settlement X3), and with §4.11's per-address status, which §5.6 now marks per address (DEC-2502). **Owed** (lane A1): the address entry's `key_id`, a route serving the workspace's current VAPID public key and its id, and replacing an address subscribed under a retired key (DEC-2503 items 5 and 7) |
 | Threat model (DEC-439) | Includes §9's attackers; item 5's out-of-band notices for a risk-increasing version, a new connection, going live, a new delegation, and a newly connected client are §3.2's rows | §3.2 now carries the list (settlement X4) |
-| Infrastructure design | OPS-10 opaque operator alerts; the "approval notification delivered, p95 under 30 seconds" SLO; vault for addresses and webhook URLs | Consistent |
+| Infrastructure design | OPS-1 (a credential in plaintext only in the vault and the memory of the one process that uses it); OPS-10 opaque operator alerts; the "approval notification delivered, p95 under 30 seconds" SLO; vault for addresses and webhook URLs; the process table (§3.1), probes (§3.4), and secrets (§5.1, §5.2) | Consistent. **Owed** (follow-ups, not edited here): a §3.1 row for the dispatcher (writes the notice stream; holds its workspace's VAPID keys in memory and one address per send; network Postgres, the vault, and the push services per DEC-2504; one per workspace); a §5.1 row for the VAPID private key and §5.2's dispatcher and keygen identities (DEC-2503); §8.2 rows for dispatcher lag and a refused append (§12 item 8). DEC-993 item 8's egress rule is not changed: DEC-2504 is Proposed for the founder |
 | 09-product-experience | P5, PX-6 (b), PX-7 (b), PX-16 (b), G4, G5, X3, D13 | Consistent. The HLD's flow C example that names an agent is corrected in this change |
 
 ---
@@ -744,6 +867,10 @@ stateDiagram-v2
 | **Link replay or forwarding** | Replays a captured link, or forwards a notice to someone else | The link carries no authority; the receiver must sign in as a member of the workspace and pass check 3 and step-up; a replayed submission re-uses a step-up assertion and is refused `step_up_reused` | None beyond showing a sign-in page |
 | **Forged provider webhook** | Fakes bounces to silence a channel | Webhooks are signature-verified; even a forged one only marks an address lost, which alerts the user on other channels | A silenced channel until the user re-verifies |
 | **Bad model or prompt injection** | Gets model text into a notice | No free-text path into a payload (NT-1); model outputs reach only the content object, inside the workspace | None |
+| **A compromised dispatcher process** | Reads its workspace's addresses and VAPID keys, sends what it likes to members' browsers, or exfiltrates through a push service | It reads only its own workspace's entries (DEC-2502, DEC-2503 item 1); its egress reaches only the push services (DEC-2504); the service worker shows only the closed texts and opens only the fixed origin (§4.6), so a forged push can only show our generic text | It can carry data out to a subscription of its own on an allowed push service; a compromised process has the workspace's data anyway (the threat model's compromised-deployment row). A stolen key is rotated at once (DEC-2503 item 7) |
+| **Someone who steals the VAPID private key** (a backup, a memory dump) | Sends pushes to subscriptions whose endpoints they know | The key is never written outside the vault and the dispatcher's memory, core dumps are off, and backups of the vault are its own encrypted snapshots (OPS-1). Without a subscription's `p256dh` and `auth` they can send only a push the browser cannot decrypt | Empty or undecryptable pushes until the key is rotated |
+| **A platform insider with cell access** | Reads an endpoint or the key; edits the dispatcher's configuration to drop a recipient or a stream | No operator identity reads the key or an address entry (§4.6, infrastructure §5.2); the file holds neither. The file's subject streams are a floor the dispatcher widens from the journal, so a stream cannot be dropped (§5.9); a recipient dropped from the audience still has the pull channels, and the file changes only through a reviewed chart release | A dropped recipient misses push until the file is fixed |
+| **A misbehaving push service** | Answers slowly, with a huge body, a redirect, a `Location` naming the endpoint, `2xx` for nothing delivered, or `404` for every subscription | Deadline per request, a bounded read, no redirect, no `Location` in any record, a random message id of our own (§5.2); `404` and `410` mark only that service's addresses, and their members are told on their other channels (§5.6) | A push service can silence its own subscribers, as in the relay row above |
 | **Careless user** | Sets quiet hours to the whole day, or keeps one dead channel | Approvals are still grantable from the pull channels and otherwise skip; `safety` ignores quiet hours; a dead channel raises §5.6's alert | They may miss alerts; limits hold regardless |
 | **Bad market tick** | Triggers a burst of alerts | Alerts follow committed events only; coalescing bounds the messages | None |
 
@@ -784,10 +911,10 @@ deterministic fixture, so every id-dependent test replays.
 | Quiet hours | `mandate_approval::deliver_now` (push vs `cli_inbox`, DST-tested) | E8-10 judges by class (§5.8) |
 | Pull channel | `cli_inbox`: `ApprovalDelivered` in the request's own batch; `mandate approvals list` and `show` | `web_inbox` with the web app (E8-13) |
 | Delivery records | `ApprovalDelivered` written by the runtime; `OwnerAlertSent` catalogued but **not written by anything**: executor alerts reach only the tracer's report today; no notice stream | E8-9 has each stream owner write `OwnerAlertSent`; E8-10 adds the notice stream and writes every outcome (NT-8) |
-| Dispatcher | None. The shell collects alerts into the tracer report | E8-10: `mandate-dispatcher`, its own process with its own stream, over `mandate-notify`'s pure core |
+| Dispatcher | `mandate-dispatcher`'s pure step (DEC-704) and retry read (DEC-707), `pure = true` behind the `Journal` trait; no process | E8-10 slice D10: its own binary and image, `pure = false` at layer 9, `committed` returning a `Result`, the shared lifecycle and probes, and a configuration file (§5.9, DEC-2500) |
 | Identity and account-security notices | None; the identity events are proposed in #556 | E8-10 issues them once E9-7 journals the events |
 | Email, chat | None | E8-11 (M7); E8-12, chat, is deferred: v1 has no chat channel (the founder, 2026-10-08 (DEC-824)). Email has only the recorded-fixture transport and the founder-only SMTP transport, bound to the one founder address in the deployment's configuration, until counsel's general footer (§4.4, DEC-820) |
-| Web push, relay | None; the relay is an HLD box | E8-14 (M10) |
+| Web push, relay | `mandate-webpush` (encryption, VAPID through `VapidSigner`) and the dispatcher's `prepare`; the relay's checks in `mandate-push-relay`; no key custody, no address resolution, no egress | E8-14 (M10): address resolution and fan-out (DEC-2502), key custody (DEC-2503), and the egress, off until DEC-2504 is decided |
 | Deep-link landing | None; the web app renders fixtures (DEC-200) | E8-13 (M9/M10), with the workspace API and identity specs |
 | SMS, phone, escalation chain | None | E8-7 |
 | Captured-payload test | None | E8-5's acceptance, run for each channel as it lands |
@@ -824,7 +951,16 @@ permanent `provider_error` that marks no address), a gap closed by the reading t
 `failed` attempt's record carries §5.2's verdict, so a reader of the notice stream tells a retry
 from a stop), which adds information and changes no send, mark, or `channel_lost` (DEC-176); it
 also corrects §7's provider-down row, which said `failed` where §5.3 and journal spec rule 127 say
-`abandoned` with `retry_window_ended`.
+`abandoned` with `retry_window_ended`. v0.8 records [DEC-2500](../project/decisions/DEC-2500.md)
+(the dispatcher's process), [DEC-2502](../project/decisions/DEC-2502.md) (web-push addresses: the
+active set from the journal, the `p_` recipient form, one send and one record per address, one
+address marked), and [DEC-2503](../project/decisions/DEC-2503.md) (the VAPID key: per workspace,
+generated in the vault, read once by the dispatcher, signed with in its memory; the role-mailbox
+subject on every route). Each only narrows what may be reached, read, or shown, or fills a gap with
+the reading that drops no notice (DEC-176); DEC-2502 item 10 rejects sending to the most recent
+address alone, which would drop safety delivery. [DEC-2504](../project/decisions/DEC-2504.md), the
+managed cell's push-service egress, is Proposed for the founder: it would widen a process's egress
+(DEC-79), so web push stays off meanwhile and the pull channels carry every notice.
 
 ---
 
@@ -843,3 +979,13 @@ also corrects §7's provider-down row, which said `failed` where §5.3 and journ
    which is a schema change.
 6. **The brief's send time.** D13 says one a day; §3.1 assumes the end of quiet hours, or 08:00
    America/New_York without them. The product brief should fix it.
+7. **The managed cell's egress to the push services** ([DEC-2504](../project/decisions/DEC-2504.md),
+   Proposed for the founder). DEC-993 item 8 takes only /24 or narrower CIDRs, and the push
+   services answer from large, rotating ranges. Recommended: a host-checking egress forward proxy;
+   alternatives: pinned /24s, or wider CIDRs. Until decided, web push is off (§4.6).
+8. **The operator alert for a dispatcher append refused as `Invalid`** ([DEC-707](../project/decisions/DEC-707.md),
+   DEC-2500 item 11). The cell's alert path (E21-39) does not exist yet; meanwhile the process exits,
+   which shows as a crash loop and as lag.
+9. **A subscription stranded by a compromise rotation, and a `401` or `403`.** Whether either marks
+   the address and raises `channel_lost` is [DEC-729](../project/decisions/DEC-729.md) item 4's
+   founder question; its interim marks nothing (DEC-2503 item 7).
