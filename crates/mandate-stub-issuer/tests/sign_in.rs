@@ -115,6 +115,8 @@ fn api(
             workspace: WorkspaceId::from_ulid_text(ALICE_ID).expect("a ULID"),
         },
         artifacts: None,
+        objects: None,
+        step_up: Arc::new(mandate_api_server::stepup::Unbound),
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let addr = listener.local_addr().expect("its address");
