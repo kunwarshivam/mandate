@@ -439,7 +439,7 @@ How the API's operations map onto those rows:
 | One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
 | One's own notification channels: list | List one's own notification addresses |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
-| The desk: send, read one's own thread, an owner run's transcript (§4.6.1) | Chat thread with the agent. A cited record, a research or explain run's transcript, and an approval's explanation: View agents, positions, decisions |
+| The desk: send; read one's own thread, its cited and fallback records, and an owner run's transcript (§4.6.1) | Chat thread with the agent, the asking member only. An approval's explanation, its cited records, and an explain run's transcript: View agents, positions, decisions. An ideation or monitoring run's transcript: Read records, verification; export |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
 (check 7) and by the executor at acknowledgment (mandate spec §5.8), with a client counted as its
@@ -760,30 +760,37 @@ pattern); the answer is the runtime's, from the agent stream.
   state, the run's ref, and for `answered` the answer: each segment as `{"text": quoted model
   text, "author": "agent", "cites": [ref]}`, the `not_recorded` codes with their template text, `written_after_reading` (the refs of the untrusted results in the run's context when it was written, each a link; agent harness spec §15.4), and `disclaimer`
   (`NOTE-EXPLAINER-NOT-ADVICE`, a named placeholder, DEC-2241). `records` lists each cited ref, or
-  for `unavailable` the fallback records of agent harness spec §15.5, each with its record type
-  and the path of the cited-record read below. No member holds an action (API-18). `as_of` names
+  for `unavailable` holds the fallback records of agent harness spec §15.5 inline, in the
+  projections below; a cited ref carries its record type and the path of the cited-record read
+  below. No member holds an action (API-18). `as_of` names
   the control and agent streams' watermarks (API-14).
 - **Read a cited record.** `GET /agents/{id}/runs/{run_id}/records/{ref}` serves a record a run
-  returned, authorized by the *View agents, positions, decisions* row, through one projection per
-  citable type (agent harness spec §15.4), figures included:
+  returned, through one projection per citable type (agent harness spec §15.4): exactly the fields
+  that tool returns, plus the figures the redacted projection kept from the model.
 
-  | Type | Projection |
+  | Type | Fields |
   |---|---|
-  | Decision | `DecisionMade`'s time, instrument, side, purpose, quantity and limit as decided, combined conviction, autonomy outcome and its rule or delegation, the dry run's verdict and reason code, `requested_by` |
-  | Approval | As §4.3's single read serves it |
-  | Order | §4.7's order row, and for a refused order the binding gate's verdict and first reason code; never the gate view's checks, rule-set version, quotes, or marks (§4.8, J6) |
-  | Position, universe entry, thesis, mode | As §4.7's positions, universe and theses, and agent reads serve them |
-  | Run | The run's kind, trigger, start, end reason, and structured summary |
-  | Mandate | The structural fields of §4.7's agent read: goal type, asset classes, `max_instruments`, autonomy rules, limits |
+  | Decision | Time, instrument, side, purpose, autonomy outcome and its rule or delegation, the dry run's verdict and reason code, `requested_by`, whether an owner request caused it, the refs of its thesis, approval, and order; figures: quantity, limit, combined conviction |
+  | Approval | Instrument, asset class, side, purpose, `decided_by`, deadline, state, the refs of its decision and thesis; figures: §4.3's `order` (quantity, limit, order dollars) |
+  | Order | Time, instrument, side, state, fill time, and for a refused one the binding gate's verdict and first reason code; figures: quantity, limit, fill price. Never the gate view's checks, rule-set version, quotes, or marks (§4.8, J6) |
+  | Position | Instrument, removed or not; figures: ledger quantity, cost basis, risk mark |
+  | Universe entry | Instrument, state, reason, the thesis's ref |
+  | Thesis | Instrument, direction, conviction and confidence (labelled self-reported and uncalibrated), `as_of`, `expires_at`, state, admission verdict, text and invalidation as quoted research-agent text, its run's ref |
+  | Run | Kind, trigger, start, end reason, structured summary |
+  | Mode | Effective mode; each restriction that binds the agent, what it blocks, and how it lifts |
+  | Mandate | Version, goal type, asset classes, `max_instruments`, autonomy rules by name, limit kinds; figures: each limit's value, allocation, floor |
 
-  A ref the run did not return is the same `not_found`, and so is any ref of an `owner` run to
-  anyone but the member who asked. It never serves the raw journal event, which stays *Read
-  records* (§4.8). The same projections serve the desk's fallback records.
+  Who may read it follows the run (agent harness spec §15.3): an `owner` run's records only the
+  member who asked, under the chat row; an `explain` run's under *View agents, positions,
+  decisions*, whose menu holds only approval, thesis, universe-entry, and mode rows, all fields
+  §4.3's and §4.7's reads already serve. Any other ref, and any ref to anyone else, is the same
+  `not_found`. It never serves the raw journal event, which stays *Read records* (§4.8).
 - **Transcript view.** `GET /agents/{id}/runs` and `GET /agents/{id}/runs/{run_id}`: every turn,
-  tool call, tool result, and verdict of a run as E19-13's records hold them, model text quoted and
-  attributed (API-18), tool results through the same projections. Research and explain runs under
-  the *View agents, positions, decisions* row; an `owner` run only to the member who asked, under
-  the chat row. A client's `read` scope (§3.8) does not include transcripts.
+  tool call, result, and verdict of a run as E19-13's records hold them, model text quoted and
+  attributed (API-18), tool results through the projections above. An `owner` run only to the
+  member who asked, under the chat row; an `explain` run under *View agents, positions, decisions*;
+  an ideation or monitoring run under *Read records* in slice 1, since its results hold news,
+  filings, and quotes, and licensed text stays where DEC-431 item 17 keeps it.
 - **The approval's explanation.** `GET /approvals/{id}` (§4.3) gains `explanation`: its state
   (`none`, `running`, `shown`, `unavailable`) and, when `shown`, the answer in the shape above,
   under the approval's own row, never through a client's `read` scope (§3.8). The read starts nothing and never waits (agent harness spec EX-9);

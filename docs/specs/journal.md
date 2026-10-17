@@ -856,8 +856,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   event addressed to its agent at most once, with `causation_id` pointing to it (`ApprovalResponded`,
   `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`, or, for a resume, Stop, or lift
 of a hold its step-up does not count, `OwnerCommandRefused`; a hold and a lift are copied at
-schema version 2, §9.11), and copies an `OwnerQuestionSubmitted` (§9.23) as the `RunStarted` of an
-  `owner` run whose trigger names it (E19-13); the control stream's `event_id`
+schema version 2, §9.11), and copies an accepted `OwnerQuestionSubmitted` (§9.23) as the first record of an
+  `owner` run that names it (E19-13); the control stream's `event_id`
   is the idempotency key. A user's kill switch is therefore a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and

@@ -2309,7 +2309,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
     are byte-identical with the explain run absent, stalled, or failing (EX-9);
   - CI and the demo use recorded fakes only; the disclaimer is the placeholder until DEC-2241, and
-    approval explanations stay behind `desk.approval_explanations` until its item 3 is decided.
+    approval explanations stay behind both `desk.model_answers` and `desk.approval_explanations` until its item 3 is decided.
   *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
   through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
   its own spec change and DEC first.

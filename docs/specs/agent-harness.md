@@ -864,8 +864,9 @@ recorded". §15.5 says which part of that the checks enforce and which part is d
 - **What it shares with the agent's other runs** (disclosed). Owner and explain runs draw on the
   agent's daily model budget, so members' questions can spend it and leave fewer research and
   monitoring runs that day, the safe direction (HI-9). Under one run in flight per agent, a desk run
-  of up to 60 s delays a queued monitoring or invalidation run by as much; risk exits, protection,
-  and kill switches never wait for any run (HI-14).
+  of up to 60 s delays a queued monitoring run by as much, and with it any invalidation or
+  discretionary exit that run would propose; at most one desk run goes ahead of a queued monitoring
+  run (§15.7). Risk exits, protection, and kill switches never wait for any run (HI-14).
 
 ### 15.2 Invariants
 
@@ -888,58 +889,56 @@ amends them) hold for these runs as for any; these add what is particular to the
 | EX-10 | **Nothing in notifications.** No notice, push payload, page title, or URL carries answer text, a question, or a cited record's content (rule 6, API-10) | Payload capture on every notice; a URL lint over the desk routes |
 | EX-11 | **Replay without a model.** Every shown answer, its checks, and its outcome are rebuilt from the journal (HI-3, INF-10) | Replay with a gateway that fails on any call |
 | EX-12 | **Provenance is complete.** Every shown answer's `written_after_reading` equals the set of untrusted results returned before its `answer` call, and the menu offered at each turn equals the trigger's menu (ADR-0005 §16 items 2 and 3) | Property with an adaptive compromised model (it picks its calls from the run so far, §16 item 9): an oracle that re-folds the run's tool results recomputes the set and the menu; seeded bugs (a result dropped, a tool added mid-run) are caught |
-| EX-13 | **Nothing beyond the reader's row.** Every field a desk or explain run's tools return is a field the cited-record read serves to every principal who may read the answer (*View agents, positions, decisions*), for one of the citable types of §15.4; so neither an answer's text nor its records can carry what the reader's row does not cover (ADR-0005 §11's role half) | Property: for every tool and every row it returns, an oracle built from the projections workspace API §4.6.1 defines, one per citable type, serves every returned field; a seeded bug (a tool returning a gate check's rule-set version) is caught |
+| EX-13 | **Nothing beyond the reader's row.** Every field a run's tools return is in the cited-record projection for its type (§15.4, workspace API §4.6.1), and reaches only that run's readers (§15.3): an owner run's only the asking operator, under the chat row; an explain run's the view row's holders, and then only fields §4.3's and §4.7's reads already serve | Property: for every tool, menu, and returned row, an oracle built from §4.6.1's projection table and §15.3's reader table, written apart from the tools, accepts every returned field and every route serving it; seeded bugs (a tool returning a gate check's rule-set version, the explain menu gaining `records.decisions`, an owner run's record served to another member) are caught |
 
 ### 15.3 Who asks, and who reads
 
 | Surface | Authorized by (workspace API §3.7) | Notes |
 |---|---|---|
 | Send a desk message | *Chat thread with the agent* | A client has no chat. Other members do not see the question at the desk; the journal's *Read records* holders (workspace admin, auditor, service account) can, as they can every record (workspace API §4.8, journal spec §7) |
-| Read one's own desk thread and its answers | *Chat thread with the agent* | Only the asking member's messages and the runs they triggered |
-| Read a cited record | *View agents, positions, decisions* | Only a ref the run returned, through the projection the product read models already serve for that record type (§15.5); never the raw journal event, which stays *Read records* |
-| Read an approval's explanation | *View agents, positions, decisions* | With the approval, as the approval itself is read (workspace API §4.3). Never through a client's `read` scope, which excludes approvals' content (workspace API §3.8) |
-| Transcript view of a research or explain run | *View agents, positions, decisions* | Every turn, tool call, result, and verdict as E19-13 records them, model text quoted and attributed (API-18). A client's `read` scope does not include transcripts |
-| Transcript view of an owner run | *Chat thread with the agent*, the asking member only | It holds the member's question |
+| Read one's own thread, its answers, the cited records, the fallback records, and the owner run's transcript | *Chat thread with the agent*, the asking member only | The decision and order fields an owner run returns (the autonomy outcome and its rule, the dry run's verdict and reason code, a refused order's binding-gate verdict and first reason code) reach only this member, under the chat row: [DEC-192](../project/04-decision-log.md#decisions) (Accepted) already assembles chat answers from "the decision's `DecisionMade`, its thesis, the rule or delegation that decided it, and the gate's result" |
+| Read an approval's explanation, its cited records, and the explain run's transcript | *View agents, positions, decisions* | With the approval (workspace API §4.3). The explain menu (below) returns only fields §4.3's approval read and §4.7's universe and theses (D4) and agent (D2) reads already serve, so nothing beyond that row reaches its readers. Never through a client's `read` scope (workspace API §3.8) |
+| Transcript of a research run (ideation, monitoring) | *Read records* in slice 1 | Its tool results hold news, filings, and quotes, and licensed text must stay where DEC-431 item 17 keeps it (HI-23); the model-output trace (J2) is already *Read records*. A redacted research transcript under the view row is a later change |
 
-No permission row is added or widened: the desk sends under the chat row, and every read serves only
-what the view row already serves.
+No permission row is added or widened: what reaches a member beyond the view row's existing reads
+reaches only the asking operator, under the chat row, as DEC-192 already decided.
 
 ### 15.4 Tools
 
 Each tool is read-only, typed, and pinned with its argument schema in the run kind's entry (inside
 its content hash, ADR-0005 §5). Every returned row carries a `ref`, the opaque handle
-`ev:<event_id>` or `art:<sha256>`; only a returned ref may be cited. The tools are E19-13's read
-tools where one exists (`memory.positions`, `memory.theses`, `memory.runs`, `mandate.read`,
-`note`), narrowed to these shapes for the desk:
+`ev:<event_id>` or `art:<sha256>`; only a returned ref may be cited. A fold's row takes the ref of
+the event that last changed it: a position its last fill's, a universe entry its `UniverseChanged`'s,
+the mode its last `AgentModeChanged`'s or restriction's, a run its first record's; the mandate's is
+`art:` and its document's hash. Where E19-13's final tool set (#1540) defines a read of the same
+meaning, the desk uses that tool under that name with the projection below; every other tool here
+is the desk's own (§15.6 item 6). These are the fields each returns, and the cited-record
+projections of workspace API §4.6.1 are exactly these fields plus the figures:
 
 | Tool | Arguments | Returns (redacted projection) | Caps |
 |---|---|---|---|
 | `records.decisions` | `instrument?` (symbol), `from?`, `to?` | `DecisionMade` records, newest first: ref, time, symbol, side, purpose, autonomy outcome and its rule or delegation name, the dry run's verdict and reason code, `requested_by` | 25 rows |
-| `records.decision` | `ref` | One decision, with the refs of its thesis and of what followed (approval, order), and whether an owner request caused it | 1 |
+| `records.decision` | `ref` | One decision: `records.decisions`'s fields, the refs of its thesis and of what followed (approval, order), and whether an owner request caused it | 1 |
 | `records.approvals` | `state?` | Approvals: ref, time, symbol, side, purpose, state, outcome, the rule that asked | 25 rows |
-| `records.approval` | `ref` | One approval: why it asked, its deadline, its state, every answer's result | 1 |
+| `records.approval` | `ref` | One approval, as §4.3's single read serves it without figures: symbol, asset class, side, purpose, `decided_by` (the rule or default that asked), deadline, state, and the refs of its decision and thesis | 1 |
 | `records.orders` | `instrument?` | Orders and fills: ref, time, symbol, side, state, fill time, and for a refused one the binding gate's verdict and first reason code, as the orders read model shows them | 25 rows |
-| `memory.positions` | — | Instruments held, held since, removed or not | 50 rows |
+| `memory.positions` | — | Instruments held and whether each is removed | 50 rows |
 | `memory.universe` | — | The working universe: symbol, state (active, removed, refused), reason, thesis ref | 50 rows |
 | `memory.theses` | `state?` | Theses: ref, symbol, direction, conviction and confidence (labelled self-reported and uncalibrated, DEC-126), `as_of`, `expires_at`, state, admission verdict | 25 rows |
-| `memory.thesis` | `ref` | One thesis: its text and invalidation (quoted research-agent text), its evidence refs and sources, its verdict, and its run's ref | 1; 4,000 bytes |
-| `memory.runs` | `kind?` | Past research, monitoring, and explain runs, never an owner run: ref, kind, trigger, start, end reason, and their structured summaries (typed fields, never prose; ADR-0005 §16 item 8), marked untrusted | 10 rows |
+| `memory.thesis` | `ref` | One thesis: `memory.theses`'s fields, its text and invalidation (quoted research-agent text), and its run's ref | 1; 4,000 bytes |
+| `memory.runs` | `kind?` | Past ideation, monitoring, and explain runs, never an owner run: ref, kind, trigger, start, end reason, and their structured summaries (typed fields, never prose; ADR-0005 §16 item 8), marked untrusted | 10 rows |
 | `mandate.read` | — | The deployed version's structural fields: version ref, goal type, asset classes, `max_instruments`, autonomy rules by name, limit kinds by name | 1 |
 | `mode.read` | — | This agent's effective mode and each restriction that binds it, by name, with what it blocks and how it lifts | 1 |
 
 **Citable types**, the closed list every returned row is one of: decision, approval, order, position,
-universe entry, thesis, run, mode, and the mandate's structural fields. Each has its
-projection defined once, in the cited-record read of workspace API §4.6.1, served under the *View
-agents, positions, decisions* row: the decisions that row names, with their autonomy outcome and the
-dry-run's verdict and reason code, and an order's binding-gate verdict with its first reason code,
-which is the product's answer to "why was this refused". The gate view's every check, rule-set
-version, quotes, and marks stay *Read records* (workspace API §4.8, J6), and an owner request's
-body and a signal output are not citable (EX-13).
+universe entry, thesis, run, mode, and the mandate's structural fields. A gate view's checks,
+rule-set version, quotes, and marks stay *Read records* (workspace API §4.8, J6), and an owner
+request's body and a signal output are not citable (EX-13).
 
 **The redacted projection.** Results carry identifiers, times, symbols, sides, reason codes, rule
 and limit names, states, and the agent's own model text. Never a quantity, price, limit value,
 dollar figure, P&L, account reference, broker number, or another agent's id. The web app renders a
-cited record with its figures from the product read models (§15.3), so the owner sees the numbers
+cited record with its figures through the cited-record read (workspace API §4.6.1), so the owner sees the numbers
 and the provider does not.
 
 **The numeric scrub.** Before the question, thesis text, or a headline enters a prompt, a
@@ -959,7 +958,7 @@ Tools outside a run's menu are left out of its schema:
 | Run | Menu |
 |---|---|
 | `owner`, slice 1 | Every read tool above, `note`, and `answer`. No action tool |
-| `explain` | `records.approval`, `records.decision`, `records.orders`, `memory.thesis`, `memory.theses`, `mandate.read`, `mode.read`, `note`, and `answer`; the list tools filtered by code to the approval's instrument |
+| `explain` | `records.approval`, `memory.thesis`, `memory.universe`, `mode.read`, `note`, and `answer`; `memory.universe` filtered by code to the approval's instrument. Every field is one the view row's existing reads serve (§15.3) |
 | `owner`, slice 2 | The slice-1 menu, plus the action tools only when the owner chose to make a request (a control the web app shows, journaled with the message), never because the model or a result asked; §15.12 |
 
 **Provenance** (ADR-0005 §16 item 3). Every shown answer and explanation records which untrusted
@@ -1003,9 +1002,9 @@ question (no run started, as in a customer workspace before §15.1's decisions, 
 without one: a bound, the deadline, a model error, a spent budget, a mode change), the question's
 state is `unavailable` and the desk shows generic text that no explanation could be written, with
 the deterministic fallback records: computed at read time from the agent's folds, independent of any
-run, by the cited-record read's own projections (workspace API §4.6.1), namely the agent's latest
-10 decisions and its current mode, newest first, each with its link, stamped with the watermarks
-read (API-14). No model text. A lost or failed run is never re-run by
+run, through the cited-record projections (workspace API §4.6.1), namely the agent's latest 10
+decisions and its current mode, newest first, served inline with the message under the asker's chat
+row (no run, so no run-scoped link), stamped with the watermarks read (API-14). No model text. A lost or failed run is never re-run by
 the platform; the owner may ask again, which is a new run and a new cost.
 
 **Every state to its exit.** The run's own lifecycle (crash, restart, version change, mode change,
@@ -1018,40 +1017,46 @@ deadline) is E19-13's. For the desk:
 | The process restarts during a run | E19-13 ends it; the desk shows the fallback. Its reservations stay counted (inference §7.3) |
 | The agent is paused, stopped, or killed | No owner or explain run starts; one in flight is cancelled at its next step (ADR-0005 §4). The desk serves the fallback for each later question |
 | The approval an explain run explains resolves | The explanation, if already shown, stays with the resolved approval; a run still in flight ends, and the card is left without one. No second explain run starts for that approval |
-| A question waits behind a run in flight | It runs next (owner and explain runs pre-empt queued runs); it ends at its deadline if it cannot start, with the fallback |
+| A question waits behind a run in flight | It runs next, ahead of queued runs, unless a monitoring run has already waited behind one desk run (§15.7); if it cannot start within 60 s of its `recorded_at`, it is `unavailable` with the fallback |
 | The asking member loses the chat role | The run completes and is journaled; reading it needs the role again (API-2) |
 
 ### 15.6 Records
 
-E19-13's run records carry the runs: `RunStarted` (kind `owner` or `explain`), one
-`ModelInvocationRecorded` per turn, `ToolCallRecorded` and `ToolResultRecorded`, and `RunEnded`, on
-the agent stream, written by the runtime core. The `answer` tool's call and result are its
-`ToolCallRecorded` and `ToolResultRecorded`, so the check outcome is journaled like any tool result.
-One record is new, on the control stream ([journal spec §9.23](journal.md#923-desk-question-records-dec-2240)):
+E19-13's records carry the runs. As #1540 stands (head a0111b82): one `ModelInvocationRecorded` per
+turn, one `ToolCallRecorded` per tool call with its result, and one `ResearchRunEnded` per run, on
+the agent stream, written by the runtime core; it has no start record, and its run kinds are
+`ideate` and `monitor`. The asks below add what the desk needs; whatever names #1540 merges with,
+§15 means those records. The `answer` tool's call is a `ToolCallRecorded` whose result is the check
+outcome, so the check is journaled like any tool result. One record is new, on the control stream
+([journal spec §9.23](journal.md#923-desk-question-records-dec-2240)):
 
 | Event | When |
 |---|---|
-| `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies it at most once and starts an `owner` run with it as the cause, as it copies `OwnerRequestSubmitted` |
+| `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies an accepted one at most once, as the start of an `owner` run that names it, as it copies `OwnerRequestSubmitted`; a refused one is not copied |
 
-**What this section asks of E19-13's records**, for its spec change ([#1540](https://github.com/kunwarshivam/mandate/pull/1540); lane AH agreed to items 1 to 4 on 2026-10-17, and items 5 to 7 are raised there):
+**What this section asks of E19-13's records**, for #1540 (raised there on 2026-10-17; lane AH
+agreed to items 1 to 4 in session messages, against ADR-0005's names):
 
-1. `RunStarted.kind` includes `owner` and `explain`, and its trigger names the cause: the copied
-   `OwnerQuestionSubmitted`'s event id, or the `ApprovalRequested`'s. The `RunStarted` is the
-   question's copy, so journal spec §2's list of copies names it.
+1. The run kinds gain `owner` and `explain`, and the run's records name its cause from its first
+   record on: the copied `OwnerQuestionSubmitted`'s event id, or the `ApprovalRequested`'s. That
+   first record is the question's copy, so journal spec §2's list of copies names it.
 2. At most one `owner` run per question and one `explain` run per approval, as stream rules.
-3. A terminal `answer` tool whose result is one of §15.5's check results, and `RunEnded`'s reason
-   distinguishes a shown answer from the rest.
-4. Tool requests use whatever request shape E19-13 pins, with DEC-997 item 2 amended there if
-   that shape is a provider's native tool call.
+3. The `answer` tool's result is one of §15.5's check results, and the run's end record says
+   whether an answer was shown.
+4. Tool calls use whatever request shape E19-13 pins, with DEC-997 item 2 amended there (DEC-2203)
+   if that shape is a provider's native tool call.
 5. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
    DEC-2243 once the founder decides it.
-6. `ToolCallRecorded`'s closed `tool` member lists the desk's tools that E19-13 does not define:
-   `records.decisions`, `records.decision`, `records.approvals`, `records.approval`,
-   `records.orders`, `memory.universe`, `memory.thesis`, `mode.read`, and `answer`. The desk reuses
-   E19-13's `memory.positions`, `memory.theses`, `memory.runs`, `mandate.read`, and `note`, its menus
-   only narrowing their projection.
+6. `ToolCallRecorded`'s closed `tool` member lists every desk tool #1540 does not itself define,
+   from §15.4's table: `records.decisions`, `records.decision`, `records.approvals`,
+   `records.approval`, `records.orders`, `memory.positions`, `memory.universe`, `memory.theses`,
+   `memory.thesis`, `memory.runs`, `mandate.read`, `mode.read`, and `answer` (#1540's `note` is
+   reused).
 7. Each tool result records whether it is untrusted, so `written_after_reading` folds from the
    records (ADR-0005 §16 item 3).
+
+The invariant names HI-24 to HI-28 cited here are ADR-0005 §10's; where #1540 numbers them
+differently, its numbers win and §15 is renumbered when it merges.
 
 ### 15.7 Bounds and spend
 
@@ -1062,7 +1067,7 @@ One record is new, on the control stream ([journal spec §9.23](journal.md#923-d
 | Tool calls per turn; per run | 4; 16 | 4; 8 |
 | `answer` calls | 3 | 2 |
 | Result size | §15.4's caps; 16 KiB per result | The same |
-| Deadline | 60 s from the copy | 60 s, or the approval's deadline if sooner |
+| Deadline | 60 s from the question's `recorded_at` | 60 s from the ask, or the approval's deadline if sooner |
 | Rate | 30 questions per member per risk day; 1 waiting or in flight per member (a second is `rate_limited`); at most one desk run ahead of a queued monitoring run, so invalidations never starve | 1 per approval |
 
 **Spend is settings, never constants** (DEC-2240 item 9). Every turn is reserved through the
