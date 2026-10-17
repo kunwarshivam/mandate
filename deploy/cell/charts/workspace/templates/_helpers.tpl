@@ -76,19 +76,72 @@ capabilities:
 {{ .root.Values.rolePrefix }}{{ .p.db_role | replace "_" "-" }}
 {{- end -}}
 
-{{/* The journal DSN carries no password: libpq and sqlx read it from PGPASSFILE (DEC-822 item 4). */}}
 {{/*
 The workspace's shared artifact store (mandate documents, backtest reports): one claim, at one
 fixed path. Who may write it is fixed here, by process type, not a value, so no value widens it:
 the API server and the control runs write, the runtime and the deployment manager read, and every
-other process has no store at all. Empty for a process that has none.
+other process has no store at all.
 */}}
-{{- define "mandate.artifactsAccess" -}}
+{{- define "mandate.artifactsRole" -}}
 {{- $access := dict "api" "rw" "control" "rw" "runtime" "ro" "deploy-manager" "ro" -}}
 {{- get $access .p.name -}}
 {{- end -}}
 
+{{/*
+Whether the claim renders: only with a long-running process that mounts it, since a claim on a
+class that binds on first use (local-path does) binds only when a pod uses it, and `helm --wait`
+waits for it to. "true" or empty.
+*/}}
+{{- define "mandate.artifactsClaimed" -}}
+{{- $root := . -}}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
+{{- if include "mandate.artifactsRole" (dict "root" $root "p" .) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Process `p`'s access to the store, "rw" or "ro", or empty when it has none or no claim renders, so
+no pod ever names a claim that is not there.
+*/}}
+{{- define "mandate.artifactsAccess" -}}
+{{- if include "mandate.artifactsClaimed" .root -}}
+{{- include "mandate.artifactsRole" . -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mandate.artifactsPath" -}}/var/lib/mandate/artifacts{{- end -}}
+
+{{/*
+The store's layout, before the process starts: the API server refuses a root without `sha256/`,
+and the readers need `sha256/` and `tmp/` to exist. A writer's pod makes both; a reader's pod,
+mounted read-only, waits for a writer to have made them, and after two minutes fails rather than
+start without them (AGENTS.md rule 3).
+*/}}
+{{- define "mandate.artifactsLayout" -}}
+{{- $path := include "mandate.artifactsPath" . -}}
+- name: artifacts-layout
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - bash
+    - -c
+    {{- if eq (include "mandate.artifactsAccess" .) "rw" }}
+    - {{ printf "mkdir -p %s/sha256 %s/tmp" $path $path | quote }}
+    {{- else }}
+    - {{ printf "for _ in $(seq 1 120); do [ -d %s/sha256 ] && [ -d %s/tmp ] && exit 0; sleep 1; done; echo 'the artifact store has no sha256/ and tmp/ after two minutes: refusing to start' >&2; exit 1" $path $path | quote }}
+    {{- end }}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - name: artifacts
+      mountPath: {{ $path | quote }}
+      readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
+{{- end -}}
+
+{{/* The journal DSN carries no password: libpq and sqlx read it from PGPASSFILE (DEC-822 item 4). */}}
 
 {{- define "mandate.env" -}}
 {{- $j := .root.Values.journal -}}
@@ -208,6 +261,9 @@ spec:
         - name: journal-role
           mountPath: /run/secrets/journal-role
           readOnly: true
+    {{- end }}
+    {{- if include "mandate.artifactsAccess" . }}
+    {{- include "mandate.artifactsLayout" . | nindent 4 }}
     {{- end }}
     {{- with .initContainers }}
     {{- . | nindent 4 }}
