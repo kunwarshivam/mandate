@@ -311,7 +311,9 @@ pub(super) fn protection_prices(
 /// build compiles (LT-14), so it reads Alpaca's row of the table. A live connection reads none: the
 /// profile absent counts every class, which fails closed and is Robinhood's row for the classes v1
 /// trades.
-fn run_stop_limit_classes(connection: Environment) -> Option<BTreeSet<DomainAssetClass>> {
+pub(super) fn run_stop_limit_classes(
+    connection: Environment,
+) -> Option<BTreeSet<DomainAssetClass>> {
     match connection {
         Environment::Paper => stop_limit_asset_classes("alpaca"),
         Environment::Live => None,

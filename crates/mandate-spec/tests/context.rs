@@ -13,7 +13,10 @@ use common::{b, base, s, with, with_all};
 use mandate_canon::Digest;
 use mandate_domain::{AssetClass, AssetId, Environment};
 use mandate_num::{NumError, Usd};
-use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, LOSS_CARRY_DAYS, Membership};
+use mandate_spec::context::{
+    AgentId, ContextArgs, JournaledFact, LOSS_CARRY_DAYS, Membership,
+    unrecorded_stop_limit_asset_classes,
+};
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, Source};
 use mandate_spec::validate::{GroupId, PreviousVersion, RegisteredModel, validate};
 use mandate_spec::{Mandate, MandateVersion, SpecError, ValidationContext, Violation};
@@ -283,6 +286,21 @@ fn the_connections_broker_names_the_classes_a_stop_limit_protects() {
     for (name, facts, expected) in cases {
         assert_eq!(fold(&facts).stop_limit_asset_classes, expected, "{name}");
     }
+}
+
+/// A connection the control stream records nothing about (DEC-1152 item 2): a paper mandate's is
+/// Alpaca's, the only paper broker, and reads Alpaca's row; a live mandate's cannot exist without
+/// its record, so it reads the profile absent, which fails closed.
+#[test]
+fn an_unrecorded_connection_is_alpacas_on_paper_and_absent_live() {
+    let mut mandate = draft();
+    mandate.environment = Environment::Paper;
+    assert_eq!(
+        unrecorded_stop_limit_asset_classes(&mandate),
+        Some(BTreeSet::from([AssetClass::Crypto]))
+    );
+    mandate.environment = Environment::Live;
+    assert_eq!(unrecorded_stop_limit_asset_classes(&mandate), None);
 }
 
 #[test]

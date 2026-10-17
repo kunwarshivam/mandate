@@ -367,6 +367,24 @@ fn live_deployment() -> Stream {
     Stream::of(&live, &envelope()).then("ConnectionEstablished", &established)
 }
 
+/// DEC-1152 item 2: a live mandate whose connection the stream does not record reads the profile
+/// absent, so with no stop-limit offset the admitted fold refuses it V-008 beside V-001, never
+/// reading it as Alpaca's paper row; with the offset, V-001 alone.
+#[test]
+fn a_live_mandate_on_an_unrecorded_connection_needs_the_stop_limit_offset() {
+    let without = MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#);
+    let stream = Stream::of(&json(&without), &envelope());
+    assert_eq!(
+        stream.read_admitting(admitted()).err(),
+        violations(&[Violation::V001, Violation::V008])
+    );
+    let with = Stream::of(&json(&live_document()), &envelope());
+    assert_eq!(
+        with.read_admitting(admitted()).err(),
+        violations(&[Violation::V001])
+    );
+}
+
 /// DEC-924 item 1: a live deployment whose run holds all four conditions is admitted to the fold,
 /// which confirms it on its live connection; the default every caller passes still refuses `Live`.
 #[test]
