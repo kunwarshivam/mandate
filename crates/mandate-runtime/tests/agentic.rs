@@ -3,9 +3,6 @@
 //! before the seed, each turn's record heading its tool calls, reads dispatched only after their
 //! records, results journaled before the next turn, a final output judged once, and the run's end.
 //! Each case names the rule it holds.
-//!
-//! Pending until E19-13's loop bodies (lane AH, `mandate_research_run::agentic`) and the core's
-//! paths (DEC-2206) land: the core answers an agentic entry with `Unimplemented`.
 
 mod common;
 
@@ -220,7 +217,6 @@ fn fixture() -> (TestIds, FixedPlan, mandate_runtime::MandateView) {
 /// HI-4, §6.9 step 1: the kind and menu are fixed from the trigger and folded state before the
 /// seed is read, and `RunStarted` is journaled before any observation, naming the run.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_due_agentic_run_journals_run_started_with_its_kind_and_menu_before_its_seed() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -276,7 +272,6 @@ fn a_due_agentic_run_journals_run_started_with_its_kind_and_menu_before_its_seed
 /// §6.9's run kinds: `monitor` in `exits_only` while a thesis is active, with its own menu; nothing
 /// at all in `exits_only` with no active thesis.
 #[test]
-#[ignore = "pending E19-13"]
 fn exits_only_runs_a_monitor_with_its_menu_only_while_a_thesis_is_active() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -325,7 +320,6 @@ fn exits_only_runs_a_monitor_with_its_menu_only_while_a_thesis_is_active() {
 
 /// §6.9: with the universe full only a `monitor` run is due.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_full_universe_runs_a_monitor() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -362,7 +356,6 @@ fn a_full_universe_runs_a_monitor() {
 /// HI-2, §6.9 steps 2 and 3: the seed's observations are journaled before turn 1 is asked for, and
 /// the turn carries the run's menu, its ceiling, and its time left.
 #[test]
-#[ignore = "pending E19-13"]
 fn turn_one_follows_the_seed_s_observations_with_the_menu_and_the_run_s_ceiling() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -389,7 +382,6 @@ fn turn_one_follows_the_seed_s_observations_with_the_menu_and_the_run_s_ceiling(
 /// §6.9 step 4, rules 175 and 176: the turn's record heads one batch with a `ToolCallRecorded` per
 /// call in reply order, and the reads are dispatched only after that batch.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_reply_s_record_heads_its_tool_calls_and_its_reads_are_dispatched_after_them() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -446,7 +438,6 @@ fn a_reply_s_record_heads_its_tool_calls_and_its_reads_are_dispatched_after_them
 /// §6.9 step 5, HI-24: a dispatch's results are journaled, each after its new items'
 /// observations, before the next turn is asked for, and the next turn carries the transcript.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_dispatch_s_results_are_journaled_before_the_next_turn_which_carries_the_transcript() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -490,7 +481,6 @@ fn a_dispatch_s_results_are_journaled_before_the_next_turn_which_carries_the_tra
 /// §6.9 step 4, `final_output`: a reply with no tool call is judged once, as a single call's output
 /// is, invalidations first, and the run ends `done` with its summary in the same batch.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_final_output_is_judged_once_and_ends_the_run_done_with_its_summary() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -528,7 +518,6 @@ fn a_final_output_is_judged_once_and_ends_the_run_done_with_its_summary() {
 /// §6.9 step 4: a reply asking for more tool calls than the run has left runs none of them; each is
 /// refused `call_budget` in the batch, and the run ends `bound`.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_reply_over_the_tool_call_budget_runs_none_and_ends_the_run() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -572,7 +561,6 @@ fn a_reply_over_the_tool_call_budget_runs_none_and_ends_the_run() {
 
 /// HI-6, §6.9 step 4: an error outcome ends the run `error`, with no output from that reply.
 #[test]
-#[ignore = "pending E19-13"]
 fn an_error_outcome_ends_the_run_with_no_output() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -592,7 +580,6 @@ fn an_error_outcome_ends_the_run_with_no_output() {
 /// §6.9 "at every step": a poll past the run's deadline ends it `deadline` without waiting for the
 /// worker, and asks the worker to cancel.
 #[test]
-#[ignore = "pending E19-13"]
 fn the_risk_clock_past_the_deadline_ends_the_run_and_cancels_it() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -621,7 +608,6 @@ fn the_risk_clock_past_the_deadline_ends_the_run_and_cancels_it() {
 
 /// HI-15, §6.9: a pause cancels the run in flight, which ends `mode`.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_pause_ends_the_run_mode() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -641,7 +627,6 @@ fn a_pause_ends_the_run_mode() {
 /// Rule 183, §5.3: a reply arriving after its run ended is journaled with no verdicts and no tool
 /// call records, and nothing follows it.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_late_reply_is_journaled_with_no_verdicts_and_no_tool_calls() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -688,7 +673,6 @@ fn a_late_reply_is_journaled_with_no_verdicts_and_no_tool_calls() {
 /// §6.10: a tool not on the run's menu can never run, whatever the reply asks; the gateway's
 /// validation is not the only wall.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_tool_off_the_menu_is_never_dispatched() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -729,7 +713,6 @@ fn a_tool_off_the_menu_is_never_dispatched() {
 
 /// HI-3: the same inputs give the same drafts, ids, requests and artifacts.
 #[test]
-#[ignore = "pending E19-13"]
 fn an_agentic_run_replays_identically() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
