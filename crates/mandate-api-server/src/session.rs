@@ -120,6 +120,10 @@ struct Entry {
     last_active: i64,
 }
 
+/// How long, in seconds, a cookie a refresh just rotated away still admits a call other than a
+/// refresh (DEC-1022).
+pub const ROTATION_GRACE_S: i64 = 0;
+
 const ID_BYTES: usize = 16;
 const SECRET_BYTES: usize = 32;
 const TAG_BYTES: usize = 32;

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use common::{at, hex};
 use mandate_api_server::config::{MIN_SESSION_KEY_BYTES, SessionKey, read_session_key};
 use mandate_api_server::session::{
-    Answer, MAX_PER_PRINCIPAL, MAX_SESSIONS, Random, Sessions, Unauthenticated,
+    Answer, MAX_PER_PRINCIPAL, MAX_SESSIONS, ROTATION_GRACE_S, Random, Sessions, Unauthenticated,
 };
 use mandate_authn::Request;
 use mandate_identity::PrincipalId;
@@ -708,4 +708,77 @@ fn a_rotated_cookie_presented_at_sign_in_ends_its_session() {
         Err(Unauthenticated)
     );
     assert_eq!(store.len(), 1);
+}
+
+/// A call in flight while a refresh rotates the cookie (DEC-1022): the rotated-away cookie still
+/// admits a call other than a refresh for [`ROTATION_GRACE_S`] seconds after the rotation, and
+/// after that is refused without ending the session. Only a refresh treats it as reuse.
+#[test]
+fn a_just_rotated_cookie_admits_calls_briefly_and_only_a_refresh_treats_it_as_reuse() {
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let granted = || Answer::Granted {
+        subject: SUBJECT.to_owned(),
+        principal: alice(),
+    };
+    let rotated_at = T0 + 100;
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(rotated_at))
+        .expect("granted")
+        .expect("a new cookie");
+    for request in [Request::Other, Request::Pause, Request::KillSwitch] {
+        assert!(
+            store
+                .authenticate(cookie.value(), request, at(rotated_at + ROTATION_GRACE_S))
+                .is_ok(),
+            "{request:?} in flight across the rotation is admitted"
+        );
+    }
+    assert_eq!(
+        store.authenticate(
+            cookie.value(),
+            Request::KillSwitch,
+            at(rotated_at + ROTATION_GRACE_S + 1)
+        ),
+        Err(Unauthenticated),
+        "after the grace the old cookie is refused"
+    );
+    assert!(
+        store
+            .authenticate(
+                rotated.value(),
+                Request::Other,
+                at(rotated_at + ROTATION_GRACE_S + 2)
+            )
+            .is_ok(),
+        "and the session lives on"
+    );
+    let again = store
+        .refresh(rotated.value(), granted(), at(rotated_at + 200))
+        .expect("granted")
+        .expect("a third cookie");
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Other, at(rotated_at + 201)),
+        Err(Unauthenticated),
+        "only the cookie just rotated away has a grace, never an older one"
+    );
+    assert!(
+        store
+            .authenticate(rotated.value(), Request::Other, at(rotated_at + 201))
+            .is_ok(),
+        "the one just rotated away does"
+    );
+    assert!(
+        store
+            .authenticate(again.value(), Request::Other, at(rotated_at + 202))
+            .is_ok()
+    );
+    assert_eq!(
+        store.refresh(rotated.value(), granted(), at(rotated_at + 203)),
+        Err(Unauthenticated),
+        "a refresh with it, even within the grace, is reuse"
+    );
+    assert!(store.is_empty(), "and reuse ends the session");
 }
