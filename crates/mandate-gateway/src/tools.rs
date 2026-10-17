@@ -188,6 +188,10 @@ impl OutputKind {
 /// spec §6.5's `{theses, invalidations}`).
 pub const STRUCTURED_MEMBERS: [&str; 2] = ["theses", "invalidations"];
 
+/// The only members a summary-only schema may have: agent harness spec §6.12's `watch` list, the
+/// part of a run's summary the model writes.
+pub const SUMMARY_MEMBERS: [&str; 1] = ["watch"];
+
 /// Whether `schema` is a structured output's: an object with a `theses` or `invalidations` member.
 pub fn structured(schema: &Value) -> bool {
     schema
@@ -198,6 +202,31 @@ pub fn structured(schema: &Value) -> bool {
                 .keys()
                 .any(|k| STRUCTURED_MEMBERS.contains(&k.as_str()))
         })
+}
+
+/// Whether `schema` is summary-only: an object whose members are all in [`SUMMARY_MEMBERS`], with
+/// no structured member anywhere inside it. Anything else is refused for an `action_tools` entry,
+/// the reading that only refuses more (DEC-176).
+pub fn summary_only(schema: &Value) -> bool {
+    let members = schema.get("properties").and_then(Value::as_object);
+    schema.get("type").and_then(Value::as_str) == Some("object")
+        && members.is_some_and(|m| {
+            !m.is_empty() && m.keys().all(|k| SUMMARY_MEMBERS.contains(&k.as_str()))
+        })
+        && !mentions_structured(schema)
+}
+
+/// Whether a structured member's name appears as a property anywhere in `schema`.
+fn mentions_structured(schema: &Value) -> bool {
+    let here = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .is_some_and(|m| {
+            m.iter().any(|(k, inner)| {
+                STRUCTURED_MEMBERS.contains(&k.as_str()) || mentions_structured(inner)
+            })
+        });
+    here || schema.get("items").is_some_and(mentions_structured)
 }
 
 /// An agentic entry's pinned loop (inference spec §4.1): how it gives its opinion, its tools,
@@ -223,10 +252,9 @@ impl Agentic {
     /// reach a run with no path to mediate it.
     pub fn well_formed(&self) -> bool {
         let actions = self.tools.iter().any(|t| t.class == ToolClass::Action);
-        let schemas_fit = |want: bool| self.output_schemas.values().all(|s| structured(s) == want);
         let combination = match self.output {
-            OutputKind::FinalOutput => !actions && schemas_fit(true),
-            OutputKind::ActionTools => actions && schemas_fit(false),
+            OutputKind::FinalOutput => !actions && self.output_schemas.values().all(structured),
+            OutputKind::ActionTools => actions && self.output_schemas.values().all(summary_only),
         };
         let sorted = self
             .tools

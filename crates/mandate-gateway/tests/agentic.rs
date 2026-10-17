@@ -257,6 +257,60 @@ fn the_registry_refuses_a_loop_it_could_not_pin() {
             }),
         ),
         (
+            "action_tools with a summary that is not an object",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+                a.output_schemas = summary_schemas();
+                a.output_schemas.insert(
+                    "monitor".to_owned(),
+                    common::json(r#"{"type":"array","max_items":3,"items":{"type":"boolean"}}"#),
+                );
+            }),
+        ),
+        (
+            "action_tools with a summary member outside the closed set",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+                a.output_schemas = summary_schemas();
+                a.output_schemas
+                    .insert("monitor".to_owned(), common::json(r#"{"type":"object","properties":{"notes":{"type":"string","max_length":9},"watch":{"type":"boolean"}}}"#));
+            }),
+        ),
+        (
+            "action_tools with an empty summary",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+                a.output_schemas = summary_schemas();
+                a.output_schemas.insert(
+                    "monitor".to_owned(),
+                    common::json(r#"{"type":"object","properties":{}}"#),
+                );
+            }),
+        ),
+        (
+            "action_tools with theses nested in the summary",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+                a.output_schemas = summary_schemas();
+                a.output_schemas
+                    .insert("monitor".to_owned(), common::json(r#"{"type":"object","properties":{"watch":{"type":"array","max_items":2,"items":{"type":"object","properties":{"theses":{"type":"boolean"}}}}}}"#));
+            }),
+        ),
+        (
+            "action_tools with invalidations nested in an object member",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+                a.output_schemas = summary_schemas();
+                a.output_schemas
+                    .insert("monitor".to_owned(), common::json(r#"{"type":"object","properties":{"watch":{"type":"object","properties":{"invalidations":{"type":"boolean"}}}}}"#));
+            }),
+        ),
+        (
             "action_tools with one structured schema left",
             Box::new(|a| {
                 a.output = OutputKind::ActionTools;
