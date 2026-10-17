@@ -3,10 +3,12 @@
 //! whole history at once.
 //!
 //! The cache folds one quote at a time against its watermark. The oracle never folds: it finds the
-//! watermark as the earliest-received of the latest-stamped quotes that are not future-stamped,
-//! then asks whether anything after it withdrew it, all in whole milliseconds and cents, with its
-//! own sanity rule in integers. A vendor time ahead of or behind the receive time, duplicates,
-//! replays and stamps far in the future all come from the generator.
+//! watermark as the earliest-taken of the latest-stamped quotes that are neither future-stamped nor
+//! received at or before a connection loss taken earlier, then asks whether anything after it
+//! withdrew it, all in whole milliseconds and cents, with its own sanity rule in integers. A vendor
+//! time ahead of or behind the receive time, quotes still in flight when the connection is lost,
+//! duplicates, replays, stamps far in the future, and quotes exactly at the spread and skew limits
+//! all come from the generator.
 
 mod common;
 
@@ -33,7 +35,11 @@ enum Event {
         message: usize,
         delay_ms: i64,
     },
-    Lost,
+    /// The connection was lost at `at_ms` by the host clock, which may be before quotes still
+    /// to be taken were received.
+    Lost {
+        at_ms: i64,
+    },
     Clock(bool),
     Query {
         now_ms: i64,
@@ -41,21 +47,30 @@ enum Event {
 }
 
 fn message() -> impl Strategy<Value = Message> {
-    (1u8..=2, 0i64..20_000, 9_900u64..10_100, -20i64..600).prop_map(
-        |(instrument, vendor_ms, bid, spread)| Message {
-            instrument,
-            vendor_ms,
-            bid,
-            ask: bid.checked_add_signed(spread).unwrap(),
+    let spread = prop_oneof![3 => (-20i64..600).prop_map(Some), 1 => Just(None)];
+    (1u8..=2, 0i64..20_000, 495u64..505, spread).prop_map(
+        |(instrument, vendor_ms, twentieths, spread)| {
+            let bid = twentieths * 20;
+            let at_limit = bid * SPREAD_BPS / 10_000;
+            let ask = match spread {
+                Some(spread) => bid.checked_add_signed(spread).unwrap(),
+                None => bid + at_limit,
+            };
+            Message {
+                instrument,
+                vendor_ms,
+                bid,
+                ask,
+            }
         },
     )
 }
 
 fn event(pool: usize) -> impl Strategy<Value = Event> {
     prop_oneof![
-        8 => (0..pool, -2_500i64..4_000)
+        8 => (0..pool, prop_oneof![4 => -2_500i64..4_000, 1 => Just(-SKEW_MS), 1 => Just(-SKEW_MS - 1)])
             .prop_map(|(message, delay_ms)| Event::Arrive { message, delay_ms }),
-        1 => Just(Event::Lost),
+        1 => (-3_000i64..24_000).prop_map(|at_ms| Event::Lost { at_ms }),
         2 => any::<bool>().prop_map(Event::Clock),
         4 => (-3_000i64..26_000).prop_map(|now_ms| Event::Query { now_ms }),
     ]
@@ -122,23 +137,34 @@ fn arrivals(pool: &[Message], events: &[Event], instrument: u8) -> Vec<Seen> {
         .collect()
 }
 
-/// The quote that marks after `events`: the earliest-received of the latest-stamped arrivals that
-/// are not future-stamped, if it is sane and neither a future-stamped arrival nor a connection
-/// loss came after it.
+/// Whether a connection loss taken before `seen` happened at or after its receipt, so it is not
+/// a live quote since resync.
+fn before_resync(events: &[Event], seen: &Seen) -> bool {
+    events[..seen.index]
+        .iter()
+        .any(|e| matches!(*e, Event::Lost { at_ms } if at_ms >= seen.received_ms))
+}
+
+/// The arrivals that can hold the watermark: not future-stamped and not before resync.
+fn candidates(pool: &[Message], events: &[Event], instrument: u8) -> Vec<Seen> {
+    arrivals(pool, events, instrument)
+        .into_iter()
+        .filter(|s| !s.future() && !before_resync(events, s))
+        .collect()
+}
+
+/// The quote that marks after `events`: the earliest-taken of the latest-stamped candidates, if
+/// it is sane and neither a future-stamped arrival nor a connection loss came after it.
 fn oracle_mark(pool: &[Message], events: &[Event], instrument: u8) -> Option<Seen> {
-    let seen = arrivals(pool, events, instrument);
-    let latest = seen
+    let candidates = candidates(pool, events, instrument);
+    let latest = candidates.iter().map(|s| s.message.vendor_ms).max()?;
+    let holder = *candidates.iter().find(|s| s.message.vendor_ms == latest)?;
+    let withdrawn = arrivals(pool, events, instrument)
         .iter()
-        .filter(|s| !s.future())
-        .map(|s| s.message.vendor_ms)
-        .max()?;
-    let holder = *seen
-        .iter()
-        .find(|s| !s.future() && s.message.vendor_ms == latest)?;
-    let withdrawn = seen.iter().any(|s| s.index > holder.index && s.future())
+        .any(|s| s.index > holder.index && s.future())
         || events[holder.index..]
             .iter()
-            .any(|e| matches!(e, Event::Lost));
+            .any(|e| matches!(e, Event::Lost { .. }));
     (holder.sane() && !withdrawn).then_some(holder)
 }
 
@@ -162,18 +188,16 @@ fn oracle_opening(
     })
 }
 
-/// The last arrival that marked when it came: not future-stamped, sane, and stamped after every
-/// earlier arrival that was not future-stamped.
+/// The last candidate that marked when it came: sane, and stamped after every earlier candidate.
 fn oracle_last_marked(pool: &[Message], events: &[Event], instrument: u8) -> Option<Quote> {
-    let seen = arrivals(pool, events, instrument);
+    let seen = candidates(pool, events, instrument);
     seen.iter()
         .enumerate()
         .filter(|(n, s)| {
-            !s.future()
-                && s.sane()
-                && seen[..*n].iter().all(|earlier| {
-                    earlier.future() || earlier.message.vendor_ms < s.message.vendor_ms
-                })
+            s.sane()
+                && seen[..*n]
+                    .iter()
+                    .all(|earlier| earlier.message.vendor_ms < s.message.vendor_ms)
         })
         .map(|(_, s)| s.quote())
         .next_back()
@@ -185,14 +209,14 @@ proptest! {
     #[test]
     fn the_cache_agrees_with_the_oracle_after_every_event((pool, events) in history()) {
         let mut cache = HotCache::new(freshness(), 2);
-        cache.subscribe(asset(1), Feed::Iex).unwrap();
-        cache.subscribe(asset(2), Feed::Iex).unwrap();
+        cache.subscribe(asset(1), Feed::Iex, at(-10_000)).unwrap();
+        cache.subscribe(asset(2), Feed::Iex, at(-10_000)).unwrap();
         for (n, event) in events.iter().enumerate() {
             match *event {
                 Event::Arrive { message, delay_ms } => {
                     cache.intake(quote_of(pool[message], delay_ms)).unwrap();
                 }
-                Event::Lost => cache.connection_lost(),
+                Event::Lost { at_ms } => cache.connection_lost(at(at_ms)),
                 Event::Clock(ok) => cache.set_clock_in_tolerance(ok),
                 Event::Query { .. } => {}
             }
@@ -216,29 +240,42 @@ proptest! {
         }
     }
 
-    /// Whatever arrives, an opening quote is sane, younger than the threshold and from a quote
-    /// stamped no later than `future_skew` after its receipt: stale or disordered data only ever
-    /// removes the quote, so it can never price or admit a larger opening.
+    /// Whatever arrives, an opening quote comes from an arrival that is sane, not future-stamped
+    /// and received after every connection loss taken before it, judged by the oracle's integer
+    /// rules, and is younger than the threshold: stale or disordered data only ever removes the
+    /// quote, so it can never price or admit a larger opening.
     #[test]
-    fn an_opening_quote_is_always_sane_fresh_and_not_future_stamped((pool, events) in history()) {
+    fn an_opening_quote_always_comes_from_a_sane_live_arrival((pool, events) in history()) {
         let mut cache = HotCache::new(freshness(), 2);
-        cache.subscribe(asset(1), Feed::Iex).unwrap();
-        cache.subscribe(asset(2), Feed::Iex).unwrap();
+        cache.subscribe(asset(1), Feed::Iex, at(-10_000)).unwrap();
+        cache.subscribe(asset(2), Feed::Iex, at(-10_000)).unwrap();
         cache.set_clock_in_tolerance(true);
-        for event in &events {
-            if let Event::Arrive { message, delay_ms } = *event {
-                cache.intake(quote_of(pool[message], delay_ms)).unwrap();
+        for (n, event) in events.iter().enumerate() {
+            match *event {
+                Event::Arrive { message, delay_ms } => {
+                    cache.intake(quote_of(pool[message], delay_ms)).unwrap();
+                }
+                Event::Lost { at_ms } => cache.connection_lost(at(at_ms)),
+                Event::Clock(_) | Event::Query { .. } => {}
             }
+            let prefix = &events[..=n];
             for instrument in 1..=2 {
                 for now_ms in [-3_000, 0, 5_000, 10_000, 20_000, 25_000] {
                     let Some(q) = cache.opening_quote(&asset(instrument), at(now_ms)) else {
                         continue;
                     };
-                    let source = cache.last_marked(&asset(instrument)).unwrap();
-                    prop_assert!(q.bid <= q.ask);
-                    prop_assert!(freshness().sane(source) && !freshness().future_stamped(source));
-                    prop_assert!(q.at <= at(now_ms) && at(now_ms - MAX_AGE_MS) <= q.at);
-                    prop_assert_eq!(q.at, source.vendor_time.min(source.received_at));
+                    let live = arrivals(&pool, prefix, instrument).into_iter().any(|s| {
+                        let basis = s.message.vendor_ms.min(s.received_ms);
+                        s.sane()
+                            && !s.future()
+                            && !before_resync(prefix, &s)
+                            && price(s.message.bid) == q.bid
+                            && price(s.message.ask) == q.ask
+                            && at(basis) == q.at
+                            && basis <= now_ms
+                            && now_ms - basis <= MAX_AGE_MS
+                    });
+                    prop_assert!(live, "instrument {} at {} ms after event {}: {:?}", instrument, now_ms, n, q);
                 }
             }
         }

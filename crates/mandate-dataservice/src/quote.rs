@@ -89,6 +89,8 @@ impl Freshness {
 
     /// Whether `quote` is fresh at `now`: its [`Quote::age_basis`] is at or before `now` and at
     /// most [`Self::max_age`] earlier, counted in UTC nanoseconds (DEC-994 item 4).
+    /// The receive time may be after `now` when the host clock stepped back; the clock-tolerance
+    /// check, not this one, keeps such a quote from an opening (DEC-433 item 5).
     pub fn fresh_at(&self, quote: &Quote, now: UtcNanos) -> bool {
         let basis = quote.age_basis();
         basis <= now && span(now, basis).is_some_and(|age| within(age, self.max_age))

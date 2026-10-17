@@ -20,9 +20,9 @@
 //!
 //! Every answer errs toward no quote, which denies openings and never touches an exit (`AGENTS.md`
 //! rules 3 and 13, DP-4): a quote that is stale, stamped too far in the future, out of order, a
-//! duplicate, crossed or too wide, or received before a connection loss never marks, and no quote
-//! is fresh while the host clock is not known to be in tolerance. The service decides only what it
-//! delivers; the gate's own checks stay the gate's.
+//! duplicate, crossed or too wide, or received before its subscription or the last connection
+//! loss never marks, and no quote is fresh while the host clock is not known to be in tolerance.
+//! The service decides only what it delivers; the gate's own checks stay the gate's.
 
 mod cache;
 mod quote;

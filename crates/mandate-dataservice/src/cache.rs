@@ -23,6 +23,9 @@ pub enum Intake {
     /// Stamped more than `future_skew` after its receipt: the instrument has no mark until a later
     /// sane quote, and the order watermark does not move (DEC-994 item 3).
     FutureStamped,
+    /// Received at or before the instrument's subscription or the last connection loss, so not a
+    /// live quote since resync (DP-7, DEC-994 item 5): the mark and the watermark are unchanged.
+    BeforeResync,
     /// Stamped at or before the last in-order quote (DEC-433 item 8): the mark is unchanged.
     OutOfOrder,
     /// The same message as the last in-order quote: dropped from the live path.
@@ -67,6 +70,9 @@ impl Error for CacheFull {}
 #[derive(Debug, Clone)]
 struct Entry {
     feed: Feed,
+    /// The subscription's instant, or the last connection loss after it: a quote received at or
+    /// before it never marks.
+    resync_from: UtcNanos,
     /// The last in-order quote, sane or not: the order watermark (DEC-994 item 2).
     watermark: Option<Quote>,
     /// The quote that marks now, if any.
@@ -76,9 +82,10 @@ struct Entry {
 }
 
 impl Entry {
-    fn empty(feed: Feed) -> Self {
+    fn empty(feed: Feed, resync_from: UtcNanos) -> Self {
         Self {
             feed,
+            resync_from,
             watermark: None,
             mark: None,
             last_marked: None,
@@ -108,20 +115,26 @@ impl HotCache {
         }
     }
 
-    /// Adds `instrument` on `feed` to the subscription set. Subscribing it again on the same feed
-    /// changes nothing; on another feed it starts over with no quote. [`CacheFull`] when a new
-    /// instrument would exceed the capacity.
-    pub fn subscribe(&mut self, instrument: AssetId, feed: Feed) -> Result<(), CacheFull> {
+    /// Adds `instrument` on `feed` to the subscription set at `at`, the host clock's time of the
+    /// subscription: only a quote received after `at` can mark it (spec §3.2, `resyncing`).
+    /// Subscribing it again on the same feed changes nothing; on another feed it starts over with
+    /// no quote. [`CacheFull`] when a new instrument would exceed the capacity.
+    pub fn subscribe(
+        &mut self,
+        instrument: AssetId,
+        feed: Feed,
+        at: UtcNanos,
+    ) -> Result<(), CacheFull> {
         if let Some(entry) = self.entries.get_mut(&instrument) {
             if entry.feed != feed {
-                *entry = Entry::empty(feed);
+                *entry = Entry::empty(feed, at);
             }
             return Ok(());
         }
         if self.entries.len() >= self.capacity {
             return Err(CacheFull);
         }
-        self.entries.insert(instrument, Entry::empty(feed));
+        self.entries.insert(instrument, Entry::empty(feed, at));
         Ok(())
     }
 
@@ -131,7 +144,9 @@ impl HotCache {
     }
 
     /// Takes one received quote. Checked in this order: subscribed on its feed, else
-    /// [`Refused`]; stamped too far in the future ([`Intake::FutureStamped`]); the same message as
+    /// [`Refused`]; stamped too far in the future ([`Intake::FutureStamped`]); received at or
+    /// before the subscription or the last connection loss ([`Intake::BeforeResync`]); the same
+    /// message as
     /// the watermark ([`Intake::Duplicate`]); stamped at or before the watermark
     /// ([`Intake::OutOfOrder`]); then it becomes the watermark, and marks if sane.
     pub fn intake(&mut self, quote: Quote) -> Result<Intake, Refused> {
@@ -145,6 +160,9 @@ impl HotCache {
         if self.freshness.future_stamped(&quote) {
             entry.mark = None;
             return Ok(Intake::FutureStamped);
+        }
+        if quote.received_at <= entry.resync_from {
+            return Ok(Intake::BeforeResync);
         }
         if let Some(watermark) = &entry.watermark {
             if watermark.same_message(&quote) {
@@ -167,12 +185,14 @@ impl HotCache {
         })
     }
 
-    /// The connection carrying every subscribed instrument was lost: no instrument has a mark
-    /// until a quote received after this one is taken (DP-7, DEC-994 item 5). Watermarks stay, so
-    /// a replay of an earlier quote never marks.
-    pub fn connection_lost(&mut self) {
+    /// The connection carrying every subscribed instrument was lost at `at`, by the host clock:
+    /// no instrument has a mark until a quote received after `at` marks it, however late a quote
+    /// received before it is taken (DP-7, DEC-994 item 5). Watermarks stay, so a replay of an
+    /// earlier quote never marks either.
+    pub fn connection_lost(&mut self, at: UtcNanos) {
         for entry in self.entries.values_mut() {
             entry.mark = None;
+            entry.resync_from = entry.resync_from.max(at);
         }
     }
 

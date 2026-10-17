@@ -9,9 +9,14 @@ use mandate_risk::SaneQuote;
 /// A cache with instrument 1 on IEX and the clock in tolerance.
 fn cache() -> HotCache {
     let mut cache = HotCache::new(freshness(), 4);
-    cache.subscribe(asset(1), Feed::Iex).unwrap();
+    cache.subscribe(asset(1), Feed::Iex, early()).unwrap();
     cache.set_clock_in_tolerance(true);
     cache
+}
+
+/// A subscription instant before every quote these cases send.
+fn early() -> mandate_time::UtcNanos {
+    at(-10_000)
 }
 
 fn opening(cache: &HotCache, now_ms: i64) -> Option<SaneQuote> {
@@ -89,7 +94,7 @@ fn a_quote_stamped_after_now_is_not_fresh() {
 #[test]
 fn no_quote_is_fresh_until_the_clock_is_known_in_tolerance_or_while_it_is_out() {
     let mut cache = HotCache::new(freshness(), 4);
-    cache.subscribe(asset(1), Feed::Iex).unwrap();
+    cache.subscribe(asset(1), Feed::Iex, early()).unwrap();
     cache.intake(quote(10_000, 10_010, at(0), at(0))).unwrap();
     assert_eq!(
         opening(&cache, 1),
@@ -214,32 +219,75 @@ fn a_crossed_or_too_wide_quote_withdraws_the_mark_and_moves_the_watermark() {
 }
 
 #[test]
-fn a_connection_loss_withdraws_every_mark_until_a_newer_quote() {
+fn a_connection_loss_withdraws_every_mark_until_a_quote_received_after_it() {
     let mut cache = cache();
-    cache.subscribe(asset(2), Feed::Iex).unwrap();
+    cache.subscribe(asset(2), Feed::Iex, early()).unwrap();
     cache.intake(quote(10_000, 10_010, at(0), at(0))).unwrap();
     let mut second = quote(5_000, 5_001, at(0), at(0));
     second.instrument = asset(2);
-    cache.intake(second.clone()).unwrap();
-    cache.connection_lost();
-    assert_eq!(opening(&cache, 1), None);
-    assert_eq!(cache.opening_quote(&asset(2), at(1)), None);
+    cache.intake(second).unwrap();
+    cache.connection_lost(at(5));
+    assert_eq!(opening(&cache, 5), None);
+    assert_eq!(cache.opening_quote(&asset(2), at(5)), None);
     assert_eq!(
-        cache.intake(quote(10_000, 10_010, at(0), at(5))),
-        Ok(Intake::Duplicate)
+        cache.intake(quote(10_001, 10_011, at(3), at(4))),
+        Ok(Intake::BeforeResync),
+        "a quote received before the loss and taken after it never marks"
     );
     assert_eq!(
-        opening(&cache, 5),
-        None,
-        "a replayed quote does not restore the mark"
+        cache.intake(quote(10_002, 10_012, at(5), at(5))),
+        Ok(Intake::BeforeResync),
+        "received at the instant of the loss is not after it"
     );
+    assert_eq!(opening(&cache, 5), None);
+    assert_eq!(
+        cache.intake(quote(10_000, 10_010, at(0), at(6))),
+        Ok(Intake::Duplicate),
+        "a replay received after the loss is still the watermark's message"
+    );
+    assert_eq!(
+        cache.intake(quote(10_003, 10_013, at(2), at(7))),
+        Ok(Intake::Marked),
+        "the in-flight quotes did not move the watermark"
+    );
+    assert_eq!(opening(&cache, 7).map(|q| q.bid), Some(price(10_003)));
     assert!(cache.last_marked(&asset(2)).is_some());
+    assert_eq!(cache.opening_quote(&asset(2), at(7)), None);
+    cache.connection_lost(at(1));
     assert_eq!(
-        cache.intake(quote(10_002, 10_012, at(6), at(6))),
+        cache.intake(quote(10_004, 10_014, at(6), at(5))),
+        Ok(Intake::BeforeResync),
+        "an earlier loss instant never moves the resync point back"
+    );
+}
+
+#[test]
+fn only_quotes_received_after_the_subscription_mark() {
+    let mut cache = HotCache::new(freshness(), 4);
+    cache.set_clock_in_tolerance(true);
+    cache.subscribe(asset(1), Feed::Iex, at(10)).unwrap();
+    assert_eq!(
+        cache.intake(quote(10_000, 10_010, at(9), at(10))),
+        Ok(Intake::BeforeResync)
+    );
+    assert_eq!(
+        cache.intake(quote(10_000, 10_010, at(9), at(11))),
         Ok(Intake::Marked)
     );
-    assert_eq!(opening(&cache, 6).map(|q| q.bid), Some(price(10_002)));
-    assert_eq!(cache.opening_quote(&asset(2), at(6)), None);
+    cache.unsubscribe(&asset(1));
+    cache.subscribe(asset(1), Feed::Iex, at(20)).unwrap();
+    assert_eq!(
+        cache.intake(quote(10_001, 10_011, at(15), at(19))),
+        Ok(Intake::BeforeResync),
+        "a resubscription forgets the watermark but takes nothing received before it"
+    );
+    assert_eq!(opening(&cache, 20), None);
+    cache.subscribe(asset(1), Feed::Iex, at(30)).unwrap();
+    assert_eq!(
+        cache.intake(quote(10_001, 10_011, at(21), at(25))),
+        Ok(Intake::Marked),
+        "subscribing again on the same feed keeps the first subscription's instant"
+    );
 }
 
 #[test]
@@ -253,12 +301,12 @@ fn only_subscribed_instruments_on_their_feed_are_taken() {
     assert_eq!(cache.intake(sip.clone()), Err(Refused::OtherFeed));
     assert_eq!(opening(&cache, 0), None);
     cache.intake(quote(10_000, 10_010, at(0), at(0))).unwrap();
-    cache.subscribe(asset(1), Feed::Iex).unwrap();
+    cache.subscribe(asset(1), Feed::Iex, at(0)).unwrap();
     assert!(
         opening(&cache, 0).is_some(),
         "subscribing again on the same feed keeps the mark"
     );
-    cache.subscribe(asset(1), Feed::Sip).unwrap();
+    cache.subscribe(asset(1), Feed::Sip, early()).unwrap();
     assert_eq!(opening(&cache, 0), None, "another feed starts over");
     assert_eq!(cache.last_marked(&asset(1)), None);
     assert_eq!(cache.intake(sip), Ok(Intake::Marked));
@@ -273,18 +321,21 @@ fn only_subscribed_instruments_on_their_feed_are_taken() {
 #[test]
 fn the_cache_holds_at_most_its_capacity() {
     let mut cache = HotCache::new(freshness(), 2);
-    assert_eq!(cache.subscribe(asset(1), Feed::Iex), Ok(()));
-    assert_eq!(cache.subscribe(asset(2), Feed::Iex), Ok(()));
-    assert_eq!(cache.subscribe(asset(3), Feed::Iex), Err(CacheFull));
+    assert_eq!(cache.subscribe(asset(1), Feed::Iex, early()), Ok(()));
+    assert_eq!(cache.subscribe(asset(2), Feed::Iex, early()), Ok(()));
     assert_eq!(
-        cache.subscribe(asset(2), Feed::Crypto),
+        cache.subscribe(asset(3), Feed::Iex, early()),
+        Err(CacheFull)
+    );
+    assert_eq!(
+        cache.subscribe(asset(2), Feed::Crypto, early()),
         Ok(()),
         "a feed change adds nothing"
     );
     cache.unsubscribe(&asset(1));
-    assert_eq!(cache.subscribe(asset(3), Feed::Iex), Ok(()));
+    assert_eq!(cache.subscribe(asset(3), Feed::Iex, early()), Ok(()));
     assert_eq!(
-        HotCache::new(freshness(), 0).subscribe(asset(1), Feed::Iex),
+        HotCache::new(freshness(), 0).subscribe(asset(1), Feed::Iex, early()),
         Err(CacheFull)
     );
 }

@@ -63,8 +63,8 @@
 #      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
 #      mandate-dataservice, the workspace data service (E2-6, DEC-994): above mandate-alpaca, whose
 #      stream messages it normalizes in a later slice, and above mandate-risk, whose `SaneQuote` it
-#      hands the gate; only the data service's own process links it, and runtimes and executors
-#      read it over the host-local channel (E21-44); and mandate-modelhost, the
+#      hands the gate; runtimes and executors are to read it over the host-local channel (E21-44),
+#      not link it; and mandate-modelhost, the
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
