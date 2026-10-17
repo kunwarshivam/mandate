@@ -13,7 +13,8 @@
 //! ledger.
 
 use mandate_canon::Digest;
-use sqlx::PgPool;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::{AssertSqlSafe, PgPool, Postgres, Transaction, raw_sql};
 
 use crate::{APP_ROLE, OWNER_ROLE};
 
@@ -114,8 +115,6 @@ pub enum MigrateError {
         file: &'static str,
         sqlstate: String,
     },
-    #[error("not implemented yet ({story})")]
-    Unimplemented { story: &'static str },
 }
 
 impl MigrateError {
@@ -131,7 +130,6 @@ impl MigrateError {
             Self::Changed { .. } => "migration_changed",
             Self::OutOfOrder { .. } => "migration_out_of_order",
             Self::Failed { .. } => "migration_failed",
-            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
@@ -151,8 +149,32 @@ impl From<sqlx::Error> for MigrateError {
 /// versions 1 to n each once, and [`MigrateError::Changed`] for a row whose file or SHA-256
 /// differs from `known`'s at that version.
 pub fn applied_prefix(known: &[Recorded], applied: &[Recorded]) -> Result<usize, MigrateError> {
-    let _ = (known, applied);
-    Err(MigrateError::Unimplemented { story: "E21-50" })
+    let last_known = i64::try_from(known.len()).unwrap_or(i64::MAX);
+    let newest = applied
+        .iter()
+        .map(|r| r.version)
+        .filter(|&v| v > last_known);
+    if let Some(version) = newest.max() {
+        return Err(MigrateError::SchemaNewer { version });
+    }
+    let mut by_version: Vec<&Recorded> = applied.iter().collect();
+    by_version.sort_by_key(|r| r.version);
+    for (expected, row) in (1i64..).zip(&by_version) {
+        if row.version != expected {
+            return Err(MigrateError::OutOfOrder {
+                version: row.version,
+                file: row.file.clone(),
+            });
+        }
+    }
+    for (row, known) in by_version.iter().zip(known) {
+        if row.file != known.file || row.sha256 != known.sha256 {
+            return Err(MigrateError::Changed {
+                file: row.file.clone(),
+            });
+        }
+    }
+    Ok(by_version.len())
 }
 
 /// Applies [`migrations`] to `schema` in the database `pool` connects to, as described in the
@@ -161,8 +183,32 @@ pub fn applied_prefix(known: &[Recorded], applied: &[Recorded]) -> Result<usize,
 ///
 /// # Errors
 /// As [`migrate_known`].
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the runner's own entry points call each other; the lint is for their callers"
+)]
 pub async fn migrate(pool: &PgPool, schema: &str) -> Result<MigrationReport, MigrateError> {
     migrate_known(pool, schema, migrations()).await
+}
+
+/// [`migrate`] over one connection to the database `dsn` names, closed before it returns. A DSN
+/// that does not parse is [`MigrateError::Unavailable`], like one that does not connect, and
+/// neither error carries any of its text.
+///
+/// # Errors
+/// As [`migrate_known`].
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the runner's own entry points call each other; the lint is for their callers"
+)]
+pub async fn migrate_dsn(dsn: &str, schema: &str) -> Result<MigrationReport, MigrateError> {
+    let options = dsn.parse::<PgConnectOptions>()?;
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy_with(options);
+    let outcome = migrate(&pool, schema).await;
+    pool.close().await;
+    outcome
 }
 
 /// [`migrate`] over `known` in place of [`migrations`], so tests can run forward steps, a failing
@@ -178,6 +224,232 @@ pub async fn migrate_known(
     schema: &str,
     known: &[Migration],
 ) -> Result<MigrationReport, MigrateError> {
-    let _ = (pool, schema, known, APP_ROLE);
-    Err(MigrateError::Unimplemented { story: "E21-50" })
+    if !plain_identifier(schema) {
+        return Err(MigrateError::SchemaInvalid);
+    }
+    let expected: Vec<Recorded> = known.iter().map(Migration::recorded).collect();
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(MIGRATION_LOCK)
+        .execute(&mut *tx)
+        .await?;
+    raw_sql(CREATE_ROLES).execute(&mut *tx).await?;
+    let held: bool = sqlx::query_scalar("SELECT pg_has_role(current_user, $1, 'SET')")
+        .bind(OWNER_ROLE)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !held {
+        return Err(MigrateError::OwnerRoleNotHeld);
+    }
+    let schema_owner: Option<String> = sqlx::query_scalar(
+        "SELECT pg_get_userbyid(nspowner)::text FROM pg_namespace WHERE nspname = $1",
+    )
+    .bind(schema)
+    .fetch_optional(&mut *tx)
+    .await?;
+    match schema_owner.as_deref() {
+        None => {
+            let create = format!("CREATE SCHEMA {schema} AUTHORIZATION {OWNER_ROLE}");
+            raw_sql(AssertSqlSafe(create)).execute(&mut *tx).await?;
+        }
+        Some(OWNER_ROLE) => {}
+        Some(_) => return Err(MigrateError::SchemaNotOwned),
+    }
+    let has_ledger = relation_exists(&mut tx, schema, LEDGER).await?;
+    let deploy_rows = if !has_ledger && schema == DEPLOY_SCHEMA {
+        deploy_ledger(&mut tx).await?
+    } else {
+        Vec::new()
+    };
+    let act_as_owner = format!(
+        "SET LOCAL ROLE {OWNER_ROLE}; SET LOCAL search_path TO {schema}; \
+         GRANT USAGE ON SCHEMA {schema} TO {APP_ROLE}"
+    );
+    raw_sql(AssertSqlSafe(act_as_owner))
+        .execute(&mut *tx)
+        .await?;
+    let took_over = if has_ledger {
+        0
+    } else {
+        let vouched = applied_prefix(&expected, &deploy_rows)?;
+        if vouched == 0 && holds_objects(&mut tx, schema).await? {
+            return Err(MigrateError::SchemaUnrecorded);
+        }
+        raw_sql(CREATE_LEDGER).execute(&mut *tx).await?;
+        for row in &deploy_rows {
+            record(&mut tx, row, DEPLOY_LEDGER).await?;
+        }
+        vouched
+    };
+    let ledger: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT version, file, sha256 FROM schema_migrations ORDER BY version")
+            .fetch_all(&mut *tx)
+            .await?;
+    let ledger: Vec<Recorded> = ledger
+        .into_iter()
+        .map(|(version, file, sha256)| Recorded {
+            version,
+            file,
+            sha256,
+        })
+        .collect();
+    let held = applied_prefix(&expected, &ledger)?;
+    let (already, pending) = known.split_at_checked(held).unwrap_or((known, &[]));
+    for migration in pending {
+        raw_sql(migration.sql)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| failed(migration.file, e))?;
+        record(&mut tx, &migration.recorded(), SOURCE).await?;
+    }
+    tx.commit().await?;
+    Ok(MigrationReport {
+        took_over,
+        already: already.iter().map(|m| m.file).collect(),
+        applied: pending.iter().map(|m| m.file).collect(),
+        version: known.last().map_or(0, |m| m.version),
+    })
+}
+
+/// The advisory lock every run holds for its whole transaction, so two runs never interleave.
+const MIGRATION_LOCK: i64 = 0x4b30_4d49_4752;
+
+/// The ledger's table, in the migrated schema, owned by [`OWNER_ROLE`] and readable by no one else.
+const LEDGER: &str = "schema_migrations";
+
+/// The `source` of a row this runner applied.
+const SOURCE: &str = "mandate db migrate";
+
+/// `deploy/bootstrap.sh`'s ledger, and the `source` of a row taken over from it.
+const DEPLOY_LEDGER: &str = "deploy.migrations";
+
+/// The two roles, `NOLOGIN`, when they are missing. A run in another database of the cluster may
+/// create one at the same moment; either outcome leaves it existing.
+const CREATE_ROLES: &str = "DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN
+        BEGIN
+            CREATE ROLE mandate_journal_owner NOLOGIN;
+        EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+        END;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN
+        BEGIN
+            CREATE ROLE mandate_journal_app NOLOGIN;
+        EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+        END;
+    END IF;
+END
+$$";
+
+const CREATE_LEDGER: &str = "CREATE TABLE schema_migrations (
+    version bigint PRIMARY KEY CHECK (version >= 1),
+    file text NOT NULL UNIQUE,
+    sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    source text NOT NULL,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+REVOKE ALL ON schema_migrations FROM PUBLIC";
+
+/// A lowercase SQL identifier that needs no quoting: a letter or `_`, then letters, digits and
+/// `_`, at most 63 bytes (Postgres's `NAMEDATALEN - 1`).
+fn plain_identifier(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    let first_ok = bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_lowercase() || b == b'_');
+    first_ok
+        && name.len() <= 63
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+async fn relation_exists(
+    tx: &mut Transaction<'static, Postgres>,
+    schema: &str,
+    relation: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = $1 AND c.relname = $2)",
+    )
+    .bind(schema)
+    .bind(relation)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// Whether `schema` holds any relation, function or type.
+async fn holds_objects(
+    tx: &mut Transaction<'static, Postgres>,
+    schema: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                        WHERE n.nspname = $1) \
+             OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+                        WHERE n.nspname = $1) \
+             OR EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+                        WHERE n.nspname = $1)",
+    )
+    .bind(schema)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// `deploy.migrations`'s rows, read as the connecting role, each with the version its file name
+/// starts with (0 when it starts with none); empty when the table does not exist.
+async fn deploy_ledger(
+    tx: &mut Transaction<'static, Postgres>,
+) -> Result<Vec<Recorded>, sqlx::Error> {
+    if !relation_exists(tx, "deploy", "migrations").await? {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT file, sha256 FROM deploy.migrations ORDER BY file")
+            .fetch_all(&mut **tx)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(file, sha256)| Recorded {
+            version: file_version(&file),
+            file,
+            sha256,
+        })
+        .collect())
+}
+
+/// The version a `migrations/` file name starts with: its digits before the first `_`.
+fn file_version(file: &str) -> i64 {
+    file.split_once('_')
+        .and_then(|(digits, _)| digits.parse().ok())
+        .unwrap_or(0)
+}
+
+async fn record(
+    tx: &mut Transaction<'static, Postgres>,
+    row: &Recorded,
+    source: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO schema_migrations (version, file, sha256, source) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(row.version)
+    .bind(&row.file)
+    .bind(&row.sha256)
+    .bind(source)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// A migration's SQL failed: Postgres's SQLSTATE names why. Any other failure is the database
+/// being unavailable, and carries no text from it.
+fn failed(file: &'static str, error: sqlx::Error) -> MigrateError {
+    match &error {
+        sqlx::Error::Database(e) => MigrateError::Failed {
+            file,
+            sqlstate: e.code().map(|c| c.into_owned()).unwrap_or_default(),
+        },
+        _ => MigrateError::Unavailable(error),
+    }
 }

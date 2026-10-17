@@ -3,7 +3,10 @@
 The Postgres journal hot store ([journal spec](../../docs/specs/journal.md) §6.1, backlog E5-3,
 DEC-109): the append protocol of `mandate-journal` in one transaction per append, with the
 append-only rules enforced by the database itself. The schema is in `migrations/` at the repository
-root.
+root, applied only by `mandate db migrate` through this crate's `migrate` runner (E21-50,
+[DEC-994](../../docs/project/decisions/DEC-994.md)): forward only, in one transaction, each file
+recorded with its SHA-256 in `<schema>.schema_migrations`. Clippy's `disallowed-methods` keeps any
+other caller, a process at start above all, from running it.
 
 ## Running the tests
 

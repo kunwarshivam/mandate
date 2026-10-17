@@ -7,9 +7,10 @@
 
 use std::io::Write;
 
+use anyhow::Context;
 use clap::{Args, Subcommand};
-use mandate_journal_pg::MigrationReport;
-use secrecy::SecretString;
+use mandate_journal_pg::{MigrationReport, migrate_dsn};
+use secrecy::{ExposeSecret, SecretString};
 
 #[derive(Debug, Subcommand)]
 pub enum DbCommand {
@@ -39,7 +40,35 @@ pub struct MigrateArgs {
 /// `owner_role_not_held`, `schema_not_owned`, `schema_unrecorded`, `schema_newer`,
 /// `migration_changed`, `migration_out_of_order`, `migration_failed`), having printed nothing; no
 /// message names the DSN.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "this command is the one place the journal schema is migrated (ES-08, OPS-13)"
+)]
 pub fn migrate(args: &MigrateArgs, report: &mut impl Write) -> anyhow::Result<MigrationReport> {
-    let _ = (args, report);
-    anyhow::bail!("Unimplemented: E21-50")
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the migration's runtime")?;
+    let outcome = runtime.block_on(migrate_dsn(args.journal.expose_secret(), &args.schema));
+    let done = outcome.map_err(|e| refused(e.code(), &e.to_string()))?;
+    if done.took_over > 0 {
+        writeln!(
+            report,
+            "took over {} files from deploy.migrations",
+            done.took_over
+        )?;
+    }
+    for file in &done.already {
+        writeln!(report, "already applied {file}")?;
+    }
+    for file in &done.applied {
+        writeln!(report, "applied {file}")?;
+    }
+    writeln!(report, "schema {} at version {}", args.schema, done.version)?;
+    Ok(done)
+}
+
+/// A refusal: its stable code, then the runner's message, which names no part of the DSN.
+fn refused(code: &str, message: &str) -> anyhow::Error {
+    anyhow::anyhow!("db migrate refused: {code}: {message}")
 }

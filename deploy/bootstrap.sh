@@ -119,25 +119,31 @@ CREATE TABLE IF NOT EXISTS deploy.migrations (
 SQL
 
 say "Migrations, in file order, each once, as mandate_journal_owner"
-for file in "$MIGRATIONS_DIR"/*.sql; do
-  name="$(basename "$file")"
-  digest="$(sha256sum "$file" | cut -d' ' -f1)"
-  applied="$(query "$DB" "SELECT sha256 FROM deploy.migrations WHERE file = '$name'")"
-  if [ -n "$applied" ]; then
-    if [ "$applied" != "$digest" ]; then
-      echo "$name was applied with sha256 $applied and now reads $digest; a migration is never edited" >&2
-      exit 1
+# Once `mandate db migrate` has run here, its ledger journal.schema_migrations is the record and
+# it alone applies migrations (E21-50, DEC-994); this loop never runs beside it.
+if [ -n "$(query "$DB" "SELECT 1 FROM pg_tables WHERE schemaname = 'journal' AND tablename = 'schema_migrations'")" ]; then
+  echo "journal.schema_migrations exists: \`mandate db migrate\` applies migrations on this host"
+else
+  for file in "$MIGRATIONS_DIR"/*.sql; do
+    name="$(basename "$file")"
+    digest="$(sha256sum "$file" | cut -d' ' -f1)"
+    applied="$(query "$DB" "SELECT sha256 FROM deploy.migrations WHERE file = '$name'")"
+    if [ -n "$applied" ]; then
+      if [ "$applied" != "$digest" ]; then
+        echo "$name was applied with sha256 $applied and now reads $digest; a migration is never edited" >&2
+        exit 1
+      fi
+      echo "already applied: $name"
+      continue
     fi
-    echo "already applied: $name"
-    continue
-  fi
-  {
-    printf 'BEGIN;\nSET ROLE mandate_journal_owner;\nSET search_path = journal;\n'
-    cat "$file"
-    printf '\nRESET ROLE;\nINSERT INTO deploy.migrations (file, sha256) VALUES (%s, %s);\nCOMMIT;\n' \
-      "'$name'" "'$digest'"
-  } | sql "$DB"
-done
+    {
+      printf 'BEGIN;\nSET ROLE mandate_journal_owner;\nSET search_path = journal;\n'
+      cat "$file"
+      printf '\nRESET ROLE;\nINSERT INTO deploy.migrations (file, sha256) VALUES (%s, %s);\nCOMMIT;\n' \
+        "'$name'" "'$digest'"
+    } | sql "$DB"
+  done
+fi
 
 say "Service users, directories, and the minimal vault's layout (DEC-692)"
 if ! getent group "$ART_GROUP" >/dev/null; then

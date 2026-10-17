@@ -36,8 +36,8 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 pub mod migrate;
 
 pub use migrate::{
-    MigrateError, Migration, MigrationReport, Recorded, applied_prefix, migrate, migrate_known,
-    migrations,
+    MigrateError, Migration, MigrationReport, Recorded, applied_prefix, migrate, migrate_dsn,
+    migrate_known, migrations,
 };
 
 /// The migration-only role that owns the journal tables (journal spec §6.1). [`migrate()`] creates
