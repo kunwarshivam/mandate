@@ -87,8 +87,8 @@ below.
 ### The demo
 
 `cargo xtask cell demo` is the whole local cell on a laptop, with paper and demo data only and no
-credential. It runs `cell up`, opens the `demo` workspace and verifies its control stream in the
-cell, and prints each part as `ready` or `skipped` with the lane it waits on. Then it runs `web/`
+credential. It runs `cell up`, opens the demo workspace (`01KDEM0000000000000000000W`, the one the
+cell's API server hosts) and verifies its control stream in the cell, and prints each part as `ready` or `skipped` with the lane it waits on. Then it runs `web/`
 at http://127.0.0.1:4317 in the foreground (Ctrl-C stops it; the cell keeps running). With
 `--no-web` it stops after the summary; CI runs it that way at the end of the `cell` job, which also
 upgrades every release in place.
@@ -101,6 +101,14 @@ upgrades every release in place.
 | A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
+
+The API server listens only on its pod's loopback, so nothing in the cluster reaches it until the
+tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
+or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
+the one 401. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
+in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
+start. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
+skips the API's parts.
 
 A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the
 release in `web/.nvmrc` and npm; the first run does `npm ci`.
@@ -135,7 +143,12 @@ and `MANDATE_IMAGE_MANDATE` (pinned by digest) set, and under `deploy/cell/compo
 `*:*:mandate:<role>:<password>`, owned by uid 999 with mode 0600, which libpq and sqlx require.
 Every Compose service runs as that one non-root user, the library Postgres image's, so its
 first-start script and each process can read the same files.
-`docker compose run control workspace open …` runs the CLI.
+`docker compose run control workspace open …` runs the CLI. The `api` service also needs
+`MANDATE_IMAGE_API`, the settings `MANDATE_API_ORG`, `MANDATE_API_WORKSPACE`, `MANDATE_API_ISSUER`,
+`MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN` and
+`MANDATE_DEPLOYMENT_TIER`, and `secrets/api-session-signing-key`: at least 32 random bytes, owned by
+uid 999 with mode 0600. It listens on its container's loopback and mounts no subject links, so
+every sign-in is refused there until a later change adds both.
 
 `docker compose run` of `control` or `journal-verify` needs a writable `/work`, given with
 `-v <dir>:/work`, as `cargo xtask cell drill compose` does.
