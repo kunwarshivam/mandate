@@ -28,7 +28,7 @@ use proptest::prelude::*;
 use super::doubles::{
     FixedClassifier, FixedGate, FixedReconciler, FixtureMandate, LedgerJournal, OneShare,
     PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, account_stream,
-    agent_stream, equities_only, instrument, output, passed_checks, setup, stub,
+    agent_stream, equities_only, instrument, output, passed_checks, seed, setup, stub,
 };
 use super::{
     Connector, Executor, ExitPath, JournalWriter, MandateSource, Protection, Reconciler, Stage,
@@ -934,11 +934,31 @@ fn a_denied_run_leaves_no_cycle_open() -> Result<(), String> {
 }
 
 /// Only `--new-cycle` starts another cycle, and it is a new intent with a new id, never the old
-/// one resubmitted.
+/// one resubmitted. The first cycle's order fills before the second starts: while it works,
+/// trading spec §5.3 rule 6 holds another opening in its instrument (DEC-1150 item 5).
 #[test]
 fn a_new_cycle_is_a_new_intent_with_a_new_id() -> Result<(), String> {
     let world = World::default();
     run_with(world.stages())?.map_err(|e| e.to_string())?;
+    let first = world
+        .tally
+        .borrow()
+        .submitted
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .ok_or("the first cycle submitted")?;
+    let account = account_stream();
+    let held = u64::try_from(world.ledger.borrow().len(&account)).map_err(|e| e.to_string())?;
+    let seq = held.saturating_add(1);
+    seed(
+        &world,
+        &account,
+        seq,
+        "01JFIRSTFILLEDXXXXXXXXXXXX",
+        "OrderStateChanged",
+        "system",
+        &format!(r#"{{"client_order_id":"{first}","state":"filled"}}"#),
+    )?;
     let mut setup = setup()?;
     setup.new_cycle = true;
     run_with_setup(world.stages(), &setup)
