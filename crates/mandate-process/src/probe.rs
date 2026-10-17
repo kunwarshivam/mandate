@@ -126,16 +126,14 @@ pub fn serve<C>(path: &Path, status: Status, clock: C) -> io::Result<()>
 where
     C: Fn() -> UtcNanos + Send + Sync + 'static,
 {
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_socket() => fs::remove_file(path)?,
-        Ok(_) => {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if !meta.file_type().is_socket() {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "probe path is not a socket",
             ));
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+        fs::remove_file(path)?;
     }
     let listener = UnixListener::bind(path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
