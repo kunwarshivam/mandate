@@ -113,9 +113,10 @@ pub enum ShellError {
     /// The runtime refused an input: it does not know what the input means (`AGENTS.md` rule 3).
     #[error("the runtime refused its input: {0}")]
     Runtime(#[from] RuntimeError),
-    /// The mandate's environment is not `paper`, or a draft would say so (TI-7).
-    #[error("the tracer runs only against the paper environment")]
-    NonPaperEnvironment,
+    /// The admitted mandate's environment is not the environment of the connection the run chose
+    /// (TI-7 as DEC-965 reads it).
+    #[error("the mandate's environment is not the run's connection's")]
+    EnvironmentMismatch,
     /// An environment variable tried to point the tracer at a host (TI-5, task brief control 3).
     #[error("{var} looks like a URL; the tracer reaches only the Alpaca paper host")]
     NonPaperHost { var: String },
@@ -167,7 +168,7 @@ impl ShellError {
             } => "broker_outcome_unknown",
             Self::Refused { stage, .. } => stage.code(),
             Self::Runtime(e) => e.code(),
-            Self::NonPaperEnvironment => "non_paper_environment",
+            Self::EnvironmentMismatch => "environment_mismatch",
             Self::NonPaperHost { .. } => "non_paper_host",
             Self::UniverseNotPinned => "universe_not_pinned",
             Self::CycleAlreadyOpen => "cycle_already_open",
@@ -186,7 +187,7 @@ impl ShellError {
         match self {
             Self::Refused { stage, .. } => Some(*stage),
             Self::Runtime(_)
-            | Self::NonPaperEnvironment
+            | Self::EnvironmentMismatch
             | Self::NonPaperHost { .. }
             | Self::UniverseNotPinned
             | Self::CycleAlreadyOpen

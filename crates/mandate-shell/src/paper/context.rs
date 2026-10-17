@@ -138,7 +138,7 @@ pub fn load_contexts_with_clock(
     facts: &PaperFacts,
     now: UtcNanos,
     agent: &AgentId,
-    _connection: Environment,
+    connection: Environment,
     clock: Rc<dyn PaperClock>,
 ) -> Result<Contexts, Cause> {
     let configuration = artifacts.production_configuration()?;
@@ -167,7 +167,7 @@ pub fn load_contexts_with_clock(
     );
     Ok(Contexts {
         executor,
-        run: run_context(artifacts, &facts.broker, today, template)?,
+        run: run_context(artifacts, &facts.broker, today, template, connection)?,
         quote,
     })
 }
@@ -309,6 +309,7 @@ fn run_context(
     broker: &BrokerFacts,
     today: Date,
     template: BindingGateInput,
+    connection: Environment,
 ) -> Result<RunContext, Cause> {
     let instrument = artifacts.instrument.asset_id.clone();
     let quote = &broker.quote;
@@ -382,7 +383,7 @@ fn run_context(
             disclosures_accepted: BTreeSet::new(),
             instrument_groups: BTreeMap::new(),
             claimed_by_other_agents: BTreeSet::new(),
-            connection_environment: Some(mandate_domain::Environment::Paper),
+            connection_environment: Some(connection),
             connection_loss_carry_usd: Usd::ZERO,
             eligibility_failures: BTreeSet::new(),
             previous_version: None,

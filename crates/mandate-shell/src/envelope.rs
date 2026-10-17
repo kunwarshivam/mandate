@@ -1,9 +1,9 @@
 //! The journal envelope the shell wraps every draft in, and the deterministic ids it injects.
 //!
 //! The cores never compose an envelope, so they cannot forge `seq`, `prev_hash`, or `recorded_at`
-//! (mandate-runtime's `EventDraft`). The shell composes it here, and the environment it writes is a
-//! constant: there is no input from which a draft could be built with any environment but `paper`
-//! (TI-7, `AGENTS.md` rule 8).
+//! (mandate-runtime's `EventDraft`). The shell composes it here, and the environment it writes is
+//! the one its envelope is handed: the run's chosen connection's, which the cycle admits a mandate
+//! only in (TI-7 as DEC-965 reads it, `AGENTS.md` rule 8).
 
 use std::collections::BTreeSet;
 
@@ -12,9 +12,6 @@ use mandate_journal::Environment;
 use mandate_time::UtcNanos;
 
 use crate::error::ShellError;
-
-/// The only environment the shell can write (TI-7).
-pub const ENVIRONMENT: Environment = Environment::Paper;
 
 /// The journal's environment for the connection environment `environment` (mandate spec §3:
 /// `paper` or `live`).
@@ -114,7 +111,7 @@ pub fn draft_bytes(
         ("clock_source", text("scheduler")),
         ("config_refs", Value::Object(draft.config_refs.clone())),
         ("correlation_id", Value::Null),
-        ("environment", text(ENVIRONMENT.as_str())),
+        ("environment", text(envelope.environment.as_str())),
         ("envelope_version", int(1)?),
         ("event_id", text(draft.event_id)),
         ("event_time", text(&envelope.event_time.to_string())),
