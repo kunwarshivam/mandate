@@ -185,7 +185,7 @@ prompt, sampling parameters (temperature, seed where supported), the output sche
 | `deadline_exceeded` | No complete response before the deadline | No further attempts | Maybe |
 | `provider_unavailable` | Connection failure, 5xx, or no endpoint healthy | Yes, within the deadline | Maybe |
 | `rate_limited_provider` | Provider 429 | Yes, after the provider's wait, within the deadline | No |
-| `credential_invalid` | Provider 401 or 403 | No | No |
+| `credential_invalid` | Provider 401 or 403, or the vault holds no key for the provider (then nothing is sent: journal spec §9.19 rule 152) | No | No |
 | `content_refused` | The provider declined to answer | No | Maybe |
 | `schema_invalid` | Response does not parse, or fails the output schema | No | Yes |
 | `identity_mismatch` | Reported identity differs from the pin | No | Yes |
@@ -200,7 +200,9 @@ The first six are refusals: nothing leaves the deployment.
 - **Retries.** Only transport failures retry (`provider_unavailable`, `rate_limited_provider`),
   only to endpoints serving the same identity, and only while the deadline leaves time. A content
   failure (`schema_invalid`, `identity_mismatch`, `content_refused`) never retries: sampling again
-  until something parses would select outputs (DEC-432 item 3). Each attempt is metered.
+  until something parses would select outputs (DEC-432 item 3). Each attempt is metered: at the
+  tokens its reply reports, or, for a `200` reply whose usage cannot be read, at the reservation's
+  maximum, so a cost the gateway cannot read is never counted as less than it could be.
 - **Streaming.** The gateway may stream from the provider to enforce the deadline and to stop at
   `max_output_tokens`. The caller never sees a partial output: it gets the whole validated output or
   an error.
@@ -486,11 +488,12 @@ a settlement only for the calls that could cost money, and spend for caps folds 
   item 4, DEC-998 item 5). A crash, a restart, or a hand-over never lowers spend; only a
   reservation's own settlement does, down to that call's cost. Spend folds from the meter stream
   alone ([journal spec §9.19](journal.md#919-model-gateway-records-dec-998)).
-- **The bound is hard only if the provider keeps to the request.** The request carries
+- **The bound holds only while the provider bills within the request.** The request carries
   `max_output_tokens` as the provider's own limit, and the maximum prices every prompt byte as a
-  fresh token, which no byte-level tokenizer exceeds. A provider that reports more is recorded as
-  reported, counted, and alerted (journal spec §9.19); the cap is then exceeded by that excess at
-  most once, since the next call sees it.
+  fresh token. A provider can still bill more: chat-template overhead, reasoning tokens, or tokens
+  outside `max_output_tokens`. A reply that reports more is recorded as reported, counted, and
+  alerted (journal spec §9.19). The cap is then exceeded by that excess, once for each such call,
+  including calls in flight together, and every later call sees it.
 - **Check 7 is unchanged.** Mandate spec §8.5 check 7 still refuses a thesis once the day's spend has
   reached the cap. The gateway's check is earlier and never lets a call push spend above a cap.
 - **Degrade, never add risk.** A refused call means no fresh output. Under §8.3 that can only shrink buys,
