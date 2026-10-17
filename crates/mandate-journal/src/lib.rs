@@ -22,6 +22,7 @@ use mandate_time::UtcNanos;
 
 mod agent;
 mod artifact;
+mod backtest_records;
 mod catalogue;
 mod connection_fold;
 mod connections;

@@ -97,7 +97,8 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         "ObservationRecorded" | "AgentModeChanged" => entry(AGENT, NONE),
 
         "AgentDeployed" | "DeploymentRejected" | "AgentStopped" => entry(CONTROL, &[MAN]),
-        "SurveillanceReportGenerated" | "BacktestRunRecorded" => entry(CONTROL, &[RULE]),
+        "SurveillanceReportGenerated" | "EvaluationRunRecorded" => entry(CONTROL, &[RULE]),
+        "BacktestRunRecorded" => entry(CONTROL, &[RULE, MAN]),
         "MandateVersionCreated"
         | "MandateConfirmed"
         | "PolicyChanged"
