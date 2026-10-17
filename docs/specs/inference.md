@@ -276,7 +276,8 @@ existing ones. So:
   checks its own caps and then asks the deployment's writer to reserve; that writer checks the
   deployment cap and appends in one step, and only then does the holder append to the workspace
   stream. A deployment writer that is unreachable inside the call's deadline, or fenced, ends the
-  call `meter_unavailable`, with nothing appended to either stream.
+  call `meter_unavailable`, with nothing appended to either stream, or an orphan (below) if its
+  append was in fact committed.
 - **One meter writer per workspace** (DEC-432 item 20). The gateway may run as several replicas, but
   a stream has one writer, fenced by epoch (journal spec §2, §5). So exactly one replica holds the
   meter writer role for a workspace, and it alone checks the workspace's caps and appends. Any other
