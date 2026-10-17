@@ -2697,6 +2697,11 @@ enables `live` (ES-23, OPS-5).
   run` with only the journal's role; a local-cell test with the API, the deployment manager, the
   metrics exporter, the model gateway and the control plane all unreachable shows each scope's
   `KillSwitchActivated` in every stream owner; and the runbook RB-03 names the command.
+  *Status:* slice 1 (DEC-2000): `pause` and `kill` in the binary at each scope (`brake.rs`), run as
+  the chart's `control` Job and `docker compose run control`. The `kill-switch` drill commits and
+  verifies each scope's kill switch and a pause with the five processes down. RB-03 is written.
+  **Open:** each stream owner's `KillSwitchActivated` in the cell waits on the runtime and executor
+  running there and on the executor's connection and workspace scopes (E7-4).
 - **E21-35 (Proposed, M8 then M11; SC; lane RL2)** As the founder, I want the cell's images built
   from `main` by digest, signed, and checked at start, so that only a release I can identify runs
   against a broker (design §7.1, OPS-15, ES-17). *Accepted when:* images hold E21-8's static
