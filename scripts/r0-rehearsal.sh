@@ -291,6 +291,8 @@ m["autonomy"]["default"] = "ask"
 m["capital"]["allocation_usd"] = "100"
 for limit in ("max_order_usd", "max_position_usd", "max_gross_exposure_usd"):
     m["risk"][limit] = "100"
+# Robinhood protects US equities with a stop-limit, so V-008 needs its offset (DEC-539).
+m["protection"]["crypto_stop_limit_offset"] = "0.01"
 m["universe"]["pinned_instruments"] = [
     {"asset_class": "us_equity", "asset_id": asset_id, "symbol": symbol}]
 open(target, "w").write(json.dumps(m, sort_keys=True, separators=(",", ":")))
