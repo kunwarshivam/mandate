@@ -70,7 +70,7 @@ commands:
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell demo --scenario demo
                         the demo's six steps in order on the local cell: each gesture on main run
-                        in the cell, each missing link named by its PR or story (E21-51)
+                        in the cell, each missing link named by its PR or story (E21-53)
   cell down             delete the local cell
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json

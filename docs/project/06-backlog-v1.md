@@ -2898,7 +2898,7 @@ enables `live` (ES-23, OPS-5).
   then migrated by the command ends with each file applied once; no process applies a migration at
   start, shown by the existing xtask lint; and the chart's migration Job (E21-36), E21-41 and the
   CI cell (E21-37) all run it.
-- **E21-51 (Proposed, M8, for the 2026-10-26 demo; lane E2E; claim #1528; DEC-2000)** As the
+- **E21-53 (Proposed, M8, for the 2026-10-26 demo; lane E2E; claim #1528; DEC-2000)** As the
   founder, I want the demo's whole story run end to end on the local cell by one command, so that
   every link the demo needs is either proven or named by the PR or story that closes it.
   *Accepted when:* `cargo xtask cell demo --scenario demo` runs on the local cell, with paper and
@@ -2914,8 +2914,10 @@ enables `live` (ES-23, OPS-5).
   ends with the workspace's control stream exported and verified by journal spec §11; and a CI
   job that is not a required check runs the scenario on every change so its ready steps stay
   green. Slice 1 runs steps 1 and 2 through the CLI and names every other link; later slices
-  replace each gap as its PR lands, including a local-cell-only token issuer for the API's
-  sign-in and the backtest report's API read and `web/` screen, which no other story covers.
+  replace each gap as its PR lands: E21-52's local-cell token issuer for the API's sign-in, the
+  API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
+  the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
+  kill switch's CLI (O4) and the deployment manager (D1).
 
 ## Won't (v1)
 

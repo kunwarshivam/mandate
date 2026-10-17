@@ -1,4 +1,4 @@
-//! `cargo xtask cell demo --scenario demo` (E21-51, DEC-2000): the demo's story, its six steps in
+//! `cargo xtask cell demo --scenario demo` (E21-53, DEC-2000): the demo's story, its six steps in
 //! order, on the local cell, with paper and demo data only and no credential. Every gesture whose
 //! pieces are on `main` runs for real, in one Job of the cell's own `control` process, so the
 //! artifact store its gestures share lives as long as they do; every link that is not on `main` is
@@ -145,8 +145,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap {
                     what: "sign-in to web/ and the workspace read through the API",
                     closes: "#1457 (the API server), #1486 and #1513 (subject links), the API's \
-                             cell image (processes.json `api`, lane A1), and a local-cell token \
-                             issuer for POST /v1/sessions (E21-51, not built)",
+                             cell image (processes.json `api`, lane A1 after #1457), and E21-52's \
+                             local-cell token issuer for POST /v1/sessions (lane SI)",
                 },
             ],
         },
@@ -198,11 +198,11 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap {
                     what: "the same gestures from web/",
                     closes: "E10-11 and E10-12, the API's version and deploy routes \
-                             (claims #751, #752)",
+                             (claims #751, #752; lane A2)",
                 },
                 Part::Gap {
                     what: "the agent's processes started from AgentDeployed",
-                    closes: "E21-33, the deployment manager (claim #1491)",
+                    closes: "E21-33, the deployment manager (claim #1491, lane D1)",
                 },
             ],
         },
@@ -213,9 +213,9 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 what: "a research run in the agent's runtime, through mandate-gateway's \
                        recorded fake",
                 closes: "#1521 (the runtime process) and its cell image (processes.json \
-                         `runtime`); the shell's research driver (DEC-996 item 2); E15-8's \
-                         closed records and E19-5's invalidation, without which no run starts \
-                         (#1476)",
+                         `runtime`, lane P); the shell's research driver (DEC-996 item 2, lane \
+                         I2, after R0); E15-8's closed records and E19-5's invalidation, without \
+                         which no run starts (#1476)",
             }],
         },
         Step {
@@ -225,7 +225,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 Part::Gap {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
-                    closes: "#1521 and its cell image (processes.json `runtime`)",
+                    closes: "#1521 and its cell image (processes.json `runtime`, lane P)",
                 },
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
@@ -235,11 +235,13 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap {
                     what: "the owner approves the ask in web/",
                     closes: "E9-4, step-up the API can verify before a grant (claim #759, \
-                             DEC-1007 item 3); `mandate approvals approve` is the CLI's path",
+                             lane SU; DEC-1007 item 3); `mandate approvals approve` is the CLI's \
+                             path",
                 },
                 Part::Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
-                    closes: "E21-30's executor slice (claim #1498, processes.json `executor`)",
+                    closes: "E21-30's executor slice (claim #1498, lane X; processes.json \
+                             `executor`)",
                 },
             ],
         },
@@ -249,8 +251,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![Part::Gap {
                 what: "the backtest of this version, its report read through the API and \
                        shown in web/",
-                closes: "#1482 (the backtest), then its API read and a web/ screen (E21-51, \
-                         not built)",
+                closes: "#1482 (the backtest), then its API read (lane I4) and a web/ \
+                         screen (lane W2)",
             }],
         },
         Step {
@@ -259,12 +261,13 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 Part::Gap {
                     what: "the kill switch from web/, recorded through the API",
-                    closes: "#1457 (POST /v1/workspaces/{ws}/kill-switch) and its cell image",
+                    closes: "#1457 (POST /v1/workspaces/{ws}/kill-switch) and its cell image \
+                             (lane A1)",
                 },
                 Part::Gap {
                     what: "the agent's processes stop on it",
-                    closes: "#1521 (the runtime reads it first), E21-30's executor slice, \
-                             E21-34 (`mandate agent kill`, lane O4)",
+                    closes: "#1521 (the runtime reads it first, lane P), E21-30's executor \
+                             slice (lane X), E21-34 (`mandate agent kill`, lane O4)",
                 },
             ],
         },

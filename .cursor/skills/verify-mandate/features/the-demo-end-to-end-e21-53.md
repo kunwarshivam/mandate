@@ -1,4 +1,4 @@
-# The demo, end to end, on the local cell (E21-51)
+# The demo, end to end, on the local cell (E21-53)
 
 - **Spec:** the managed-cells plan (`docs/project/tasks/managed-cells.md`), DEC-967, DEC-995 (the
   2026-10-26 demo), DEC-2000; journal spec §11 for the closing verification.
