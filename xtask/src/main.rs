@@ -32,7 +32,8 @@ commands:
   feature-map [--index] check the verification skill's feature map against the workspace, or
                         list its feature files and titles
   deps                  check every direct dependency against docs/dependencies.md
-  live-feature          check that only the runner may build `live`, and CI only compiles it
+  live-feature          check that only the runner may build `live`, and CI only compiles it or
+                        tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
@@ -1750,7 +1751,9 @@ fn live_feature_in(root: &Path) -> Result<()> {
 /// `live_feature` in `policy`, and only it may declare a `live` feature; no other feature of it
 /// (`default` included) and no dependency or feature of another crate turns `live` on; and CI
 /// never passes `--all-features`, and passes `live` only in at most one `cargo check` of the
-/// marked crate, so the feature compiles but no live build is ever produced or run.
+/// marked crate, so the feature compiles but no live build is ever produced or run, and in at most
+/// one workflow line that tests the marked crate in the `live,rh-sim` build (DEC-964), whose
+/// binaries hold no Robinhood host and dial loopback alone (DEC-922).
 fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Result<Vec<String>> {
     let mut problems = Vec::new();
     let packages = workspace_packages(meta);
@@ -1833,7 +1836,7 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
             }
         }
     }
-    let mut compile_only_seen = false;
+    let (mut compile_only_seen, mut rehearsal_seen) = (false, false);
     for file in ci {
         if file.text.contains('\0') {
             problems.push(format!(
@@ -1888,6 +1891,11 @@ fn live_feature_problems(policy: &Layers, meta: &Metadata, ci: &[CiFile]) -> Res
                 LiveFlag::CompileOnly => problems.push(format!(
                     "{at}: a second compile-only `{LIVE}` job; CI may compile it once"
                 )),
+                LiveFlag::RehearsalTest if !rehearsal_seen => rehearsal_seen = true,
+                LiveFlag::RehearsalTest => problems.push(format!(
+                    "{at}: a second run of the rehearsal's tests with `{LIVE}`; CI may run them \
+                     once (DEC-964)"
+                )),
                 LiveFlag::Build => problems.push(format!(
                     "{at}: passes `{LIVE}` outside the one `cargo check -p <runner>` CI may run"
                 )),
@@ -1924,8 +1932,11 @@ struct ResolvedMetadata {
 /// Neither it nor any cargo invocation of a `.github/workflows/` job's `run:` (up to a shell
 /// operator) may turn `live` on, hold a live-only package (`dep:<name>` in the runner's `live`) or
 /// pass `--all-features`, but one `cargo check -p <runner>` with only `live` may turn it on in the
-/// runner. Problems name the file and job, the package with each package turning `live` on or
-/// depending on it; a failed resolve or an expanding word is a problem, not an abort.
+/// runner, and so may one `cargo nextest run -p <runner>` with exactly `live` and `rh-sim`, in the
+/// job [`REHEARSAL_LIVE_JOB`] of [`REHEARSAL_LIVE_WORKFLOW`] alone and only as
+/// [`rehearsal_job_problems`] allows it (DEC-964); that run may hold no live-only package.
+/// Problems name the file and job, the package with each package turning `live` on or depending
+/// on it; a failed resolve or an expanding word is a problem, not an abort.
 fn resolved_live_problems(
     policy: &Layers,
     meta: &Metadata,
@@ -1941,7 +1952,7 @@ fn resolved_live_problems(
         .flatten()
         .filter_map(|enabled| enabled.strip_prefix("dep:"))
         .collect();
-    let mut builds = vec![("the default build".to_owned(), Vec::new(), true)];
+    let mut builds = vec![("the default build".to_owned(), Vec::new(), true, false)];
     let mut problems = Vec::new();
     let mut aliases = Aliases::new();
     let scripts: BTreeMap<String, Option<String>> = READ_SCRIPTS
@@ -1982,6 +1993,7 @@ fn resolved_live_problems(
         .filter(|file| file.path.starts_with(".github/workflows/"))
     {
         let (invocations, unread) = read_workflow(file, workflows, &scripts);
+        let mut guard_read = false;
         for (number, job, why) in unread {
             problems.push(format!(
                 "{}:{number}: {job}: {why}, so the line cannot be read and the check cannot judge \
@@ -1996,21 +2008,35 @@ fn resolved_live_problems(
                 invocation.job,
                 invocation.words.join(" ")
             );
+            let rehearsal_form =
+                runner.is_some_and(|runner| is_rehearsal_test(&invocation.words, runner));
+            let in_job =
+                file.path == REHEARSAL_LIVE_WORKFLOW && invocation.job == REHEARSAL_LIVE_JOB;
+            if rehearsal_form && !in_job {
+                problems.push(format!(
+                    "{at}: runs the rehearsal's tests with `{LIVE}` outside the job \
+                     `{REHEARSAL_LIVE_JOB}` of {REHEARSAL_LIVE_WORKFLOW} (DEC-964)"
+                ));
+            }
+            if let Some(runner) = runner.filter(|_| rehearsal_form && in_job && !guard_read) {
+                problems.extend(rehearsal_job_problems(file, runner));
+                guard_read = true;
+            }
             match expand_alias(&invocation.words, &aliases) {
                 Ok(None) => {}
                 Ok(Some(expanded)) => {
-                    builds.push((format!("{at}, its alias expanded"), expanded, false));
+                    builds.push((format!("{at}, its alias expanded"), expanded, false, false));
                 }
                 Err(()) => problems.push(format!(
                     "{at}: an alias chain that does not end cannot be read, so the check cannot \
                      judge it (DEC-868 item 3)"
                 )),
             }
-            builds.push((at, invocation.words, false));
+            builds.push((at, invocation.words, false, rehearsal_form && in_job));
         }
     }
-    let mut compile_only_seen = false;
-    for (at, words, default_build) in builds {
+    let (mut compile_only_seen, mut rehearsal_seen) = (false, false);
+    for (at, words, default_build, rehearsal_job) in builds {
         if words.iter().any(|word| word.contains(['$', '`'])) {
             problems.push(format!("{at}: words the shell expands cannot be resolved"));
             continue;
@@ -2037,13 +2063,21 @@ fn resolved_live_problems(
             ));
         }
         compile_only_seen |= compile_only;
+        let rehearsal = rehearsal_job && !rehearsal_seen;
+        if rehearsal_job && rehearsal_seen {
+            problems.push(format!(
+                "{at}: a second run of the rehearsal's tests with `{LIVE}`; CI may run them once \
+                 (DEC-964)"
+            ));
+        }
+        rehearsal_seen |= rehearsal;
         let reached = reached_ids(
             &resolve,
             &selected_ids(meta, &resolve, &words, default_build),
         );
         for node in &resolve.nodes {
             let name = node_name(meta, &node.id);
-            let runner_allowed = compile_only && runner == Some(name);
+            let runner_allowed = (compile_only || rehearsal) && runner == Some(name);
             if node.features.iter().any(|feature| feature == LIVE) && !runner_allowed {
                 let by = turned_on_by(meta, &resolve, name);
                 problems.push(format!(
@@ -2067,6 +2101,63 @@ fn resolved_live_problems(
         }
     }
     Ok(problems)
+}
+
+/// Every way the rehearsal job of `file` could hand a broker or data credential to the runner's
+/// tests in the `live,rh-sim` build (DEC-964): a line of the job, or of the workflow's top-level
+/// `env:`, that names `secrets` or the workflow's token (`github.token`), an `env:` name there that
+/// holds one of [`CREDENTIAL_NAME_PARTS`] in any case, and a job that does not run the tests as
+/// [`rehearsal_live_run`] spells it, with the [`CREDENTIAL_GUARD`] first in the same shell.
+fn rehearsal_job_problems(file: &CiFile, runner: &str) -> Vec<String> {
+    let sections = workflow_sections(&file.text);
+    let env_lines = block_lines(&file.text, "env");
+    let run = rehearsal_live_run(runner);
+    let mut problems = Vec::new();
+    let mut guarded = false;
+    for (number, line) in (1_usize..).zip(file.text.lines()) {
+        let Some((top, job)) = sections.get(&number) else {
+            continue;
+        };
+        let in_job = top == "jobs" && job.as_deref() == Some(REHEARSAL_LIVE_JOB);
+        if !in_job && top != "env" {
+            continue;
+        }
+        let code = uncommented(line);
+        let at = format!("{}:{number}: job `{REHEARSAL_LIVE_JOB}`", file.path);
+        let lower = code.to_ascii_lowercase();
+        let name = code
+            .trim_start_matches([' ', '-'])
+            .split_once(':')
+            .map(|(name, _)| name.trim().to_ascii_uppercase())
+            .filter(|_| env_lines.contains(&number));
+        if lower.contains("secrets") || lower.contains("github.token") {
+            problems.push(format!(
+                "{at}: names a secret or the workflow's token, which no step of the job may hold \
+                 (DEC-964)"
+            ));
+        } else if let Some(name) =
+            name.filter(|name| CREDENTIAL_NAME_PARTS.iter().any(|part| name.contains(part)))
+        {
+            problems.push(format!(
+                "{at}: sets `{name}`, a name that could carry a broker or data credential \
+                 (DEC-964)"
+            ));
+        }
+        guarded |= in_job
+            && code
+                .trim()
+                .trim_start_matches("- ")
+                .strip_prefix("run: ")
+                .is_some_and(|step| step.trim() == run);
+    }
+    if !guarded {
+        problems.push(format!(
+            "{}: job `{REHEARSAL_LIVE_JOB}` runs the rehearsal's tests with `{LIVE}` but not as \
+             `{run}`, so the credential guard `{CREDENTIAL_GUARD}` does not run first (DEC-964)",
+            file.path
+        ));
+    }
+    problems
 }
 
 /// The ids of `resolve` an invocation's `words` select, which a build starts from: each package
@@ -2229,17 +2320,18 @@ fn listed(label: &str, names: &BTreeSet<&str>) -> String {
     format!("{label} {}", quoted.join(", "))
 }
 
-/// Whether a cargo invocation's `words` are the one compile-only form (DEC-529 item 3): `check`,
-/// one package selected and it the `runner`, no whole-workspace selection, and `live` (or
-/// `<runner>/live`) the only feature it passes.
-fn is_compile_only(words: &[String], runner: &str) -> bool {
+/// A cargo invocation's selected packages and the items of the feature lists it passes, each
+/// item with a `<runner>/` prefix taken off, or `None` when it selects otherwise than by `-p`
+/// alone: a whole-workspace selection, `--exclude`, `--all-features`, `--manifest-path`, or a
+/// `-p` glued or in a short-flag cluster.
+fn runner_selection<'a>(words: &'a [String], runner: &str) -> Option<(Vec<&'a str>, Vec<&'a str>)> {
     let mut packages = Vec::new();
     let mut features = Vec::new();
     let mut rest = words.iter().map(String::as_str);
     while let Some(word) = rest.next() {
         match word {
             "--workspace" | "--all" | "--exclude" | "--all-features" | "--manifest-path" => {
-                return false;
+                return None;
             }
             "-p" | "--package" => packages.extend(rest.next()),
             "--features" | "-F" => features.extend(rest.next()),
@@ -2258,25 +2350,48 @@ fn is_compile_only(words: &[String], runner: &str) -> bool {
                         Some(ShortCluster::Package(_) | ShortCluster::Unread)
                     )
                 {
-                    return false;
+                    return None;
                 }
             }
         }
     }
-    let items: Vec<&str> = features
+    let prefix = format!("{runner}/");
+    let items = features
         .iter()
         .flat_map(|list| list.split([',', ' ']))
         .filter(|item| !item.is_empty())
+        .map(|item| item.strip_prefix(prefix.as_str()).unwrap_or(item))
         .collect();
-    let runner_live = format!("{runner}/{LIVE}");
+    Some((packages, items))
+}
+
+/// Whether a cargo invocation's `words` are the one compile-only form (DEC-529 item 3): `check`,
+/// one package selected and it the `runner`, no whole-workspace selection, and `live` (or
+/// `<runner>/live`) the only feature it passes.
+fn is_compile_only(words: &[String], runner: &str) -> bool {
+    let Some((packages, items)) = runner_selection(words, runner) else {
+        return false;
+    };
     words
         .first()
         .is_some_and(|subcommand| subcommand == "check")
         && packages == [runner]
         && !items.is_empty()
-        && items
-            .iter()
-            .all(|item| *item == LIVE || *item == runner_live)
+        && items.iter().all(|item| *item == LIVE)
+}
+
+/// Whether a cargo invocation's `words` are the one form that tests the runner with `live`
+/// (DEC-964): `nextest run`, one package selected and it the `runner`, no whole-workspace
+/// selection, and the features it passes exactly `live` and `rh-sim` (each bare or as
+/// `<runner>/<feature>`), so the build is the rehearsal's, which dials loopback alone (DEC-922).
+fn is_rehearsal_test(words: &[String], runner: &str) -> bool {
+    let Some((packages, items)) = runner_selection(words, runner) else {
+        return false;
+    };
+    let items: BTreeSet<&str> = items.into_iter().collect();
+    words.get(..2).is_some_and(|sub| sub == ["nextest", "run"])
+        && packages == [runner]
+        && items == BTreeSet::from([LIVE, REHEARSAL])
 }
 
 /// Each line of a workflow by number, with the top-level key it sits under and, under the
@@ -2471,12 +2586,14 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first three, `merge.yml` the last.
+/// (DEC-873 item 2). `ci.yml` runs the first three and the credential guard (DEC-964), `merge.yml`
+/// the fourth.
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
     ".github/scripts/merge-approved.sh",
+    CREDENTIAL_GUARD,
 ];
 
 /// The `CARGO_*` names a workflow may hold, exactly, no prefixes (DEC-873 item 5):
@@ -2531,6 +2648,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PORTABLE_RESULT",
     "POSTGRES_PASSWORD",
     "PYTHON_RESULT",
+    "RH_SIM_LIVE_RESULT",
     "RUN_PRS",
     "SCHEMA_MUTANTS_RESULT",
     "TEST_RESULT",
@@ -3909,6 +4027,39 @@ const LIVE: &str = "live";
 /// but `cargo xtask ci test-rh-sim`'s, the `live` one least of all, ever links it.
 const REHEARSAL: &str = "rh-sim";
 
+/// The one job that may run the runner's tests in the `live,rh-sim` build (DEC-964), in
+/// [`REHEARSAL_LIVE_WORKFLOW`]: the rehearsal build holds no Robinhood host and dials loopback
+/// alone (DEC-922), so it reaches no broker.
+const REHEARSAL_LIVE_JOB: &str = "fast-rh-sim-live";
+/// The workflow that holds [`REHEARSAL_LIVE_JOB`].
+const REHEARSAL_LIVE_WORKFLOW: &str = ".github/workflows/ci.yml";
+/// The script [`REHEARSAL_LIVE_JOB`] runs before its tests, in the same shell, which fails when
+/// the environment holds a name that could carry a broker or data credential (DEC-964).
+const CREDENTIAL_GUARD: &str = ".github/scripts/no-credentials.sh";
+/// The pieces, in any case, of an environment name that could carry a broker or data
+/// credential, which no step of [`REHEARSAL_LIVE_JOB`] may set; the [`CREDENTIAL_GUARD`] refuses
+/// the same pieces at run time.
+const CREDENTIAL_NAME_PARTS: [&str; 9] = [
+    "KEY",
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "ALPACA",
+    "APCA",
+    "ROBINHOOD",
+];
+
+/// The one step [`REHEARSAL_LIVE_JOB`] runs `runner`'s tests in, as its `run:` spells it: the
+/// [`CREDENTIAL_GUARD`], then `cargo nextest run` of `runner` alone with `live` and `rh-sim`.
+fn rehearsal_live_run(runner: &str) -> String {
+    format!(
+        "{CREDENTIAL_GUARD} && cargo nextest run --locked --no-tests=fail --package {runner} \
+         --features {LIVE},{REHEARSAL}"
+    )
+}
+
 /// What one line of a workflow, script or cargo configuration does with the `live` feature, worst
 /// first: a line holding several commands takes the worst of theirs.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -3924,6 +4075,9 @@ enum LiveFlag {
     /// `cargo check -p <runner>` with `live`: the one form CI may run, which builds nothing it
     /// could run.
     CompileOnly,
+    /// `cargo nextest run -p <runner>` with exactly `live` and `rh-sim`, in a workflow: the one
+    /// run of the rehearsal build's tests with `live` CI may make (DEC-964).
+    RehearsalTest,
     /// The line passes neither `live` nor a way around naming it.
     Absent,
 }
@@ -4882,7 +5036,8 @@ fn pipeline_live_flag(
                 }),
             );
         verdict = verdict.min(flag);
-        if builds || (flag != LiveFlag::CompileOnly && feature_values_refused(&words, ctx)) {
+        let allowed_live = matches!(flag, LiveFlag::CompileOnly | LiveFlag::RehearsalTest);
+        if builds || (!allowed_live && feature_values_refused(&words, ctx)) {
             verdict = verdict.min(LiveFlag::Unreadable);
         }
         let later_known = pipeline
@@ -5261,9 +5416,31 @@ fn command_live_flag(words: &[String], ctx: LineContext) -> LiveFlag {
         .map(|pair| pair[1])
         .collect();
     let whole_workspace = names.contains(&"--workspace") || names.contains(&"--all");
+    let tests_rehearsal = |runner: &str| {
+        let prefix = format!("{runner}/");
+        let items: BTreeSet<&str> = lists
+            .iter()
+            .flat_map(|(_, list)| list.split([',', ' ']))
+            .filter(|item| !item.is_empty())
+            .map(|item| item.strip_prefix(prefix.as_str()).unwrap_or(item))
+            .collect();
+        let nextest_run = cargo_at
+            .and_then(|at| names.get(at.saturating_add(1)..at.saturating_add(3)))
+            .is_some_and(|sub| sub == ["nextest", "run"]);
+        nextest_run
+            && items == BTreeSet::from([LIVE, REHEARSAL])
+            && ctx.path.starts_with(".github/workflows/")
+            && ctx.expression_command
+            && !ctx.with_value
+    };
     let verdict = match (checks, packages.as_slice(), ctx.runner) {
         (true, [package], Some(runner)) if *package == runner && !whole_workspace => {
             LiveFlag::CompileOnly
+        }
+        (false, [package], Some(runner))
+            if *package == runner && !whole_workspace && tests_rehearsal(runner) =>
+        {
+            LiveFlag::RehearsalTest
         }
         _ => LiveFlag::Build,
     };
@@ -7835,11 +8012,11 @@ mod tests {
         Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_PROFILE,
         MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
         Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
-        PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR,
-        SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, UnmutatedSource,
-        actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
-        ci, ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
-        feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, SCHEMA_CHECKERS,
+        SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
+        UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
+        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
+        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
         forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
         is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
@@ -7851,6 +8028,7 @@ mod tests {
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
     };
+    use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{unoptimised_config, unoptimised_packages};
 
@@ -11742,12 +11920,16 @@ mod tests {
 
     /// CI's fast jobs and the `cargo xtask ci` parts each runs, in order (DEC-871). The required
     /// `fast` verdict needs every one of them.
-    const FAST_CI_JOBS: [(&str, &[&str]); 5] = [
+    /// `fast-rh-sim-live` runs no part: it runs the runner's tests in the `live,rh-sim` build,
+    /// which no `cargo xtask` group runs, so the live-feature check reads the build it runs in
+    /// the workflow itself (DEC-964).
+    const FAST_CI_JOBS: [(&str, &[&str]); 6] = [
         ("fast-lint", &["lint", "spec-guard"]),
         ("fast-test", &["test-nextest"]),
         ("fast-pending", &["pending", "test-doc", "test-rh-sim"]),
         ("fast-python", &["test-python"]),
         ("fast-portable", &["portable"]),
+        ("fast-rh-sim-live", &[]),
     ];
 
     /// DEC-963: `cargo xtask ci test-rh-sim` tests every workspace crate that declares the
@@ -11800,6 +11982,111 @@ mod tests {
             "{error:?}"
         );
         assert_eq!(ran, 1, "a failed run stops the rest");
+    }
+
+    /// DEC-964: the credential guard the rehearsal job runs before its tests passes an
+    /// environment that holds no credential name, and fails on one that does, naming the variable
+    /// and never printing its value, whatever the name's case.
+    #[test]
+    fn the_credential_guard_fails_on_a_credential_name_without_printing_it() -> Result<()> {
+        let guard = repo_root()?.join(".github/scripts/no-credentials.sh");
+        let run = |extra: &[(&str, &str)]| -> Result<(bool, String)> {
+            let mut command = Command::new(&guard);
+            command
+                .env_clear()
+                .env("PATH", env::var_os("PATH").unwrap_or_default())
+                .env("CARGO_TERM_COLOR", "always");
+            for (name, value) in extra {
+                command.env(name, value);
+            }
+            let output = command.output()?;
+            let mut said = String::from_utf8_lossy(&output.stdout).into_owned();
+            said.push_str(&String::from_utf8_lossy(&output.stderr));
+            Ok((output.status.success(), said))
+        };
+        let (passed, said) = run(&[("MANDATE_RH_SIM_ENDPOINT", "http://127.0.0.1:1/mcp")])?;
+        assert!(
+            passed,
+            "an environment without a credential name passes: {said}"
+        );
+        let script = fs::read_to_string(&guard)?;
+        let pattern = format!("grep -E -i '{}'", CREDENTIAL_NAME_PARTS.join("|"));
+        assert!(
+            script.contains(&pattern),
+            "the guard refuses exactly CREDENTIAL_NAME_PARTS: `{pattern}`"
+        );
+        let each_part = CREDENTIAL_NAME_PARTS.map(|part| format!("X_{}_Y", part.to_lowercase()));
+        let named = [
+            "MANDATE_ALPACA_PAPER_KEY_ID",
+            "MANDATE_ALPACA_PAPER_SECRET",
+            "APCA_API_KEY_ID",
+            "alpaca_data",
+            "ROBINHOOD_SESSION",
+            "GITHUB_TOKEN",
+            "DB_PASSWORD",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ];
+        for name in each_part.iter().map(String::as_str).chain(named) {
+            let (passed, said) = run(&[(name, "not-a-real-value-7f3a")])?;
+            assert!(!passed, "{name} fails the guard");
+            assert!(said.contains(name), "the guard names {name}: {said}");
+            assert!(
+                !said.contains("not-a-real-value-7f3a"),
+                "the guard never prints a value: {said}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-964: the crates declaring both `live` and `rh-sim` are the runner alone, and CI's
+    /// `fast-rh-sim-live` job runs each one's guarded tests in the `live,rh-sim` build, skipped on
+    /// the documentation-only path, with read-only permissions and ten minutes (DEC-464).
+    #[test]
+    fn the_rehearsal_job_tests_every_crate_declaring_live_and_rh_sim() -> Result<()> {
+        let root = repo_root()?;
+        let meta = metadata_in(&root)?;
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let declaring: Vec<&str> = workspace_packages(&meta)
+            .iter()
+            .filter(|package| {
+                package.features.contains_key("live") && package.features.contains_key(REHEARSAL)
+            })
+            .map(|package| package.name.as_str())
+            .collect();
+        let runner: Vec<&str> = policy
+            .crates
+            .iter()
+            .filter(|(_, crate_policy)| crate_policy.live_feature)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(declaring, runner, "only the runner declares both features");
+        let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
+        let job = workflow_job(&workflow, REHEARSAL_LIVE_JOB)
+            .with_context(|| format!("ci.yml has `{REHEARSAL_LIVE_JOB}`"))?;
+        let trimmed: Vec<&str> = job.iter().map(|line| line.trim()).collect();
+        for package in declaring {
+            let run = format!("- run: {}", rehearsal_live_run(package));
+            let at = trimmed
+                .iter()
+                .position(|line| *line == run)
+                .with_context(|| format!("`{REHEARSAL_LIVE_JOB}` runs `{run}`"))?;
+            assert_eq!(
+                trimmed.get(at.saturating_add(1)),
+                Some(&"if: steps.change.outputs.docs_only != 'true'"),
+                "the run is skipped on the documentation-only path (DEC-112)"
+            );
+        }
+        for line in [
+            "timeout-minutes: 10",
+            "contents: read",
+            "persist-credentials: false",
+        ] {
+            assert!(
+                trimmed.contains(&line),
+                "`{REHEARSAL_LIVE_JOB}` has `{line}`"
+            );
+        }
+        Ok(())
     }
 
     /// The `cargo xtask ci <part>` parts a job's steps run, in order.
@@ -11937,7 +12224,8 @@ mod tests {
     }
 
     /// DEC-871's `fast` verdict, run as GitHub runs it (`bash -e`) over every combination of its
-    /// five parts' results (DEC-954 adds `fast-portable`): it passes only when every part succeeded, and a skipped part fails it.
+    /// six parts' results (DEC-954 adds `fast-portable`, DEC-964 `fast-rh-sim-live`): it passes
+    /// only when every part succeeded, and a skipped part fails it.
     #[test]
     fn fast_passes_only_when_every_part_succeeded() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -11949,6 +12237,7 @@ mod tests {
             "PENDING_RESULT",
             "PYTHON_RESULT",
             "PORTABLE_RESULT",
+            "RH_SIM_LIVE_RESULT",
         ];
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         for ((job, _), var) in FAST_CI_JOBS.iter().zip(vars) {
@@ -11959,7 +12248,7 @@ mod tests {
             );
         }
         let mut checked = 0usize;
-        for combination in 0..results.len().pow(5) {
+        for combination in 0..results.len().pow(6) {
             let mut command = Command::new("bash");
             command.args(["-e", "-c", &script]);
             let mut rest = combination;
@@ -11977,7 +12266,7 @@ mod tests {
             );
             checked = checked.saturating_add(1);
         }
-        assert_eq!(checked, 3125, "every combination of five results is judged");
+        assert_eq!(checked, 15625, "every combination of six results is judged");
         Ok(())
     }
 
@@ -12049,10 +12338,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            9,
+            10,
             "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
-             `fast-python`, `fast-portable`, `full-checks`, the mutation plan, the mutants \
-             matrix, and `schema-mutants`"
+             `fast-python`, `fast-portable`, `fast-rh-sim-live`, `full-checks`, the mutation \
+             plan, the mutants matrix, and `schema-mutants`"
         );
         for checkout in checkouts {
             assert!(
@@ -13186,6 +13475,103 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// The one run of the rehearsal's tests with `live` (DEC-964), as the runner of
+    /// [`live_policy`] spells it: the credential guard, then `cargo nextest run` of the runner
+    /// with `live,rh-sim`.
+    const REHEARSAL_RUN: &str = ".github/scripts/no-credentials.sh && cargo nextest run --locked \
+                                 --no-tests=fail --package the-runner --features live,rh-sim";
+
+    /// DEC-964: beside the compile-only form, one workflow line may run the runner's tests in the
+    /// `live,rh-sim` build, `cargo nextest run` of the runner alone with exactly `live` and
+    /// `rh-sim`. The same form outside a workflow, a second such line, another subcommand, another
+    /// package, the whole workspace, or another feature beside the two are each refused with the
+    /// file and line.
+    #[test]
+    fn ci_runs_the_runner_tests_with_live_only_in_the_rehearsal_form() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let allowed = [
+            format!("      - run: {REHEARSAL_RUN}"),
+            "      - run: cargo nextest run -p the-runner --features rh-sim,live".to_owned(),
+            "      - run: cargo nextest run -p the-runner -F the-runner/live,the-runner/rh-sim"
+                .to_owned(),
+        ];
+        for line in &allowed {
+            let files = [ci_file(
+                ".github/workflows/ci.yml",
+                &format!("      - run: cargo check -p the-runner --features live\n{line}\n"),
+            )];
+            assert_eq!(
+                live_feature_problems(&policy, &meta(), &files)?,
+                Vec::<String>::new(),
+                "{line}"
+            );
+        }
+        let refused = [
+            "      - run: cargo nextest run -p the-runner --features live",
+            "      - run: cargo nextest run -p the-runner --features live,rh-sim,x",
+            "      - run: cargo nextest run -p a-lib --features live,rh-sim",
+            "      - run: cargo nextest run --workspace --features live,rh-sim",
+            "      - run: cargo nextest list -p the-runner --features live,rh-sim",
+            "      - run: cargo test -p the-runner --features live,rh-sim",
+            "      - run: cargo build -p the-runner --features live,rh-sim",
+            "      - run: cargo run -p the-runner --features live,rh-sim",
+        ];
+        for line in refused {
+            let files = [ci_file(
+                ".github/workflows/ci.yml",
+                &format!("jobs:\n  j:\n    steps:\n{line}\n"),
+            )];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(problems.len(), 1, "{line}: {problems:?}");
+            assert!(
+                problems[0].contains(".github/workflows/ci.yml:4"),
+                "names the file and line: {problems:?}"
+            );
+        }
+        for line in [
+            "      - run: cargo check -p the-runner --features live --config \"cargo build --all-features\"",
+            "      - run: cargo nextest run -p the-runner --features live,rh-sim -E \"cargo build --all-features\"",
+            "      - run: echo \"cargo build --all-features\"",
+        ] {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(
+                problems.len(),
+                1,
+                "a quoted word naming cargo is refused: {line}"
+            );
+        }
+        let script = [ci_file(
+            ".github/scripts/build.sh",
+            &format!(
+                "set -e\n{}\n",
+                allowed[1].trim().trim_start_matches("- run: ")
+            ),
+        )];
+        let problems = live_feature_problems(&policy, &meta(), &script)?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "only a workflow may run it: {problems:?}"
+        );
+        assert!(
+            problems[0].contains(".github/scripts/build.sh:2"),
+            "{problems:?}"
+        );
+        let twice = [
+            ci_file(".github/workflows/a.yml", &allowed[0]),
+            ci_file(".github/workflows/b.yml", &allowed[0]),
+        ];
+        let problems = live_feature_problems(&policy, &meta(), &twice)?;
+        assert_eq!(problems.len(), 1, "at most one rehearsal run: {problems:?}");
+        assert!(
+            problems[0].contains(".github/workflows/b.yml:1"),
+            "{problems:?}"
+        );
+        Ok(())
+    }
+
     /// The repository as it stands: the policy, the workspace and every file the check reads
     /// pass, with no crate marked and no `live` feature anywhere. Main's files hold the token
     /// `live` only in comments, so the live-token backstop allows them (#738 review, fourth
@@ -13409,6 +13795,184 @@ jq -r "$filter" "$src"
         let unmarked = policy(&[(RUNNER, 9), ("a-lib", 5), ("a-tool", 6)], &[], &[]);
         let problems = check(&unmarked, with_runner(vec![]), &once, by_flags)?;
         names(&problems, &["check-live"], &["plain"]);
+        Ok(())
+    }
+
+    /// The test's own reading of what cargo resolves for the rehearsal's runs: the runner turns
+    /// `live` on exactly when an invocation passes `--all-features` or a word one of whose items,
+    /// split on `,`, `/` and `=`, is `live`, so `live,rh-sim` turns it on as cargo would.
+    fn by_items(words: &[String]) -> Resolve {
+        let live =
+            |w: &String| w == "--all-features" || w.split([',', '/', '=']).any(|i| i == "live");
+        three(if words.iter().any(live) {
+            &["live"]
+        } else {
+            &[]
+        })
+    }
+
+    /// `.github/workflows/ci.yml` holding `top` before its jobs, then the rehearsal job
+    /// `fast-rh-sim-live` with the lines `job`, each four spaces in, and a `plain` job.
+    fn rehearsal_workflow(top: &str, job: &[&str]) -> CiFile {
+        let mut text = format!("on: push\n{top}jobs:\n  fast-rh-sim-live:\n");
+        for line in job {
+            text.push_str(&format!("    {line}\n"));
+        }
+        text.push_str("  plain:\n    steps:\n      - run: cargo test\n");
+        ci_file(".github/workflows/ci.yml", &text)
+    }
+
+    /// The rehearsal job's guarded run, as a step of [`rehearsal_workflow`].
+    fn rehearsal_steps() -> Vec<String> {
+        vec![
+            "permissions:".to_owned(),
+            "  contents: read".to_owned(),
+            "steps:".to_owned(),
+            format!("  - run: {REHEARSAL_RUN}"),
+        ]
+    }
+
+    /// DEC-964: the rehearsal's tests may resolve `live` in the runner, once, and only in the
+    /// job `fast-rh-sim-live` of `ci.yml`, as its guarded run; the same form in another job, a
+    /// second time, or without the credential guard before it is named.
+    #[test]
+    fn only_the_rehearsal_job_may_test_the_runner_with_live() -> Result<()> {
+        let run = |flows: &[CiFile]| {
+            let mut read: Vec<CiFile> = flows.iter().map(|f| ci_file(&f.path, &f.text)).collect();
+            read.push(ci_file(CREDENTIAL_GUARD, "set -euo pipefail\n"));
+            check(&live_policy(), with_runner(vec![]), &read, by_items)
+        };
+        let steps = rehearsal_steps();
+        let lines: Vec<&str> = steps.iter().map(String::as_str).collect();
+        let guarded = rehearsal_workflow("", &lines);
+        assert_eq!(run(std::slice::from_ref(&guarded))?, Vec::<String>::new());
+        let mut both = workflow(&[("check-live", COMPILE_ONLY)]).text;
+        both.push_str(&guarded.text.replace("on: push\njobs:\n", ""));
+        assert_eq!(
+            run(&[ci_file(".github/workflows/ci.yml", &both)])?,
+            Vec::<String>::new(),
+            "the compile-only job and the rehearsal job together pass"
+        );
+        let elsewhere = run(&[workflow(&[("other", REHEARSAL_RUN)])])?;
+        names(&elsewhere, &["other", "fast-rh-sim-live"], &[]);
+        let guard_named = |problems: &[String]| problems.iter().any(|p| p.contains("run first"));
+        assert!(
+            !guard_named(&elsewhere),
+            "only the rehearsal job's own run is judged against the guard: {elsewhere:?}"
+        );
+        assert_eq!(
+            run(&[rehearsal_workflow("", &["steps:", "  - run: cargo test"])])?,
+            Vec::<String>::new(),
+            "a run without `live` in the job is not the rehearsal's"
+        );
+        for line in [
+            "cargo build -p the-runner --features live",
+            "cargo nextest run -p a-lib --features live,rh-sim",
+            "cargo nextest run -p the-runner --features live",
+        ] {
+            let step = format!("  - run: {line}");
+            let problems = run(&[rehearsal_workflow("", &["steps:", &step])])?;
+            assert!(
+                problems
+                    .iter()
+                    .any(|p| p.contains("resolves `live` in `the-runner`")),
+                "{line}: another form in the job may not resolve `live`: {problems:?}"
+            );
+            assert!(!guard_named(&problems), "{line}: {problems:?}");
+        }
+        let other_file = ci_file(".github/workflows/nightly.yml", &guarded.text);
+        let problems = run(&[other_file])?;
+        names(&problems, &["fast-rh-sim-live"], &["plain"]);
+        let mut twice = lines.clone();
+        twice.push("  - run: cargo nextest run -p the-runner --features live,rh-sim");
+        let problems = run(&[rehearsal_workflow("", &twice)])?;
+        assert!(
+            problems.iter().any(|p| p.contains("a second")),
+            "a second run is named: {problems:?}"
+        );
+        let unguarded = [
+            "steps:",
+            "  - run: cargo nextest run --locked --no-tests=fail --package the-runner --features \
+             live,rh-sim",
+        ];
+        let problems = run(&[rehearsal_workflow("", &unguarded)])?;
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`.github/scripts/no-credentials.sh`")),
+            "the missing guard is named: {problems:?}"
+        );
+        Ok(())
+    }
+
+    /// The problems the rehearsal job's credential guard reports, without the closed world's
+    /// refusals of names and actions it does not read (DEC-873), which the same lines may draw.
+    fn guard_problems(problems: Vec<String>) -> Vec<String> {
+        problems
+            .into_iter()
+            .filter(|problem| problem.contains("(DEC-964)"))
+            .collect()
+    }
+
+    /// DEC-964: no step of the rehearsal job may have a broker or data credential in its
+    /// environment. A `secrets` or `github.token` expression anywhere in the job or the
+    /// workflow's top-level `env:`, or an environment name there that could carry a credential,
+    /// is named with its line; the same in another job is not this check's.
+    #[test]
+    fn the_rehearsal_job_holds_no_credential() -> Result<()> {
+        let run = |flows: &[CiFile]| {
+            let mut read: Vec<CiFile> = flows.iter().map(|f| ci_file(&f.path, &f.text)).collect();
+            read.push(ci_file(CREDENTIAL_GUARD, "set -euo pipefail\n"));
+            check(&live_policy(), with_runner(vec![]), &read, by_items)
+        };
+        let steps = rehearsal_steps();
+        let with = |extra: &[&str]| {
+            let mut lines: Vec<&str> = steps.iter().map(String::as_str).collect();
+            lines.extend_from_slice(extra);
+            lines.into_iter().map(str::to_owned).collect::<Vec<_>>()
+        };
+        let refused_in_job: [&[&str]; 8] = [
+            &["env:", "  GH_TOKEN: x"],
+            &["env:", "  POSTGRES_PASSWORD: x"],
+            &["env:", "  MANDATE_ALPACA_PAPER_KEY_ID: x"],
+            &["env:", "  APCA_API_SECRET_KEY: x"],
+            &["env:", "  ROBINHOOD_ACCESS: x"],
+            &["env:", "  ANYTHING: ${{ secrets.ANYTHING }}"],
+            &["env:", "  GH: ${{ github.token }}"],
+            &[
+                "  - uses: some/action@v1",
+                "    with:",
+                "      token: ${{ secrets.T }}",
+            ],
+        ];
+        for extra in refused_in_job {
+            let lines = with(extra);
+            let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let problems = guard_problems(run(&[rehearsal_workflow("", &lines)])?);
+            assert_eq!(problems.len(), 1, "{extra:?}: {problems:?}");
+            assert!(
+                problems[0].contains("`fast-rh-sim-live`")
+                    && problems[0].contains(".github/workflows/ci.yml:"),
+                "names the job and line: {problems:?}"
+            );
+        }
+        let lines = with(&[]);
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        for top in ["env:\n  DATA_API_KEY: x\n", "env:\n  X: ${{ secrets.X }}\n"] {
+            let problems = guard_problems(run(&[rehearsal_workflow(top, &lines)])?);
+            assert_eq!(problems.len(), 1, "{top}: {problems:?}");
+        }
+        let harmless = rehearsal_workflow("env:\n  CARGO_TERM_COLOR: always\n", &lines);
+        let mut text = harmless.text;
+        text.push_str(
+            "  publish:\n    env:\n      GH_TOKEN: ${{ secrets.T }}\n    steps:\n      - run: \
+             cargo test\n",
+        );
+        assert_eq!(
+            run(&[ci_file(".github/workflows/ci.yml", &text)])?,
+            Vec::<String>::new(),
+            "another job's secret, and a plain name, are not the rehearsal job's"
+        );
         Ok(())
     }
 
