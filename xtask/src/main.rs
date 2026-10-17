@@ -695,7 +695,8 @@ struct Finding {
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
-/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -716,7 +717,17 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
     let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
     let cloudflare = Some("cloudflare-api-key");
+    let signer = "crates/mandate-objectstore/tests/sigv4.rs";
+    let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
+    let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
     vec![
+        (signer.to_owned(), example.clone(), None),
+        (signer.to_owned(), near_example, Some("alpaca-key-id")),
+        (
+            "crates/mandate-objectstore/tests/s3.rs".to_owned(),
+            example,
+            Some("alpaca-key-id"),
+        ),
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
         (

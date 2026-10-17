@@ -288,6 +288,31 @@ async fn a_plain_delete_removes_an_unlocked_object_and_only_marks_a_locked_one()
 }
 
 #[tokio::test]
+async fn a_probe_write_denied_for_its_retention_fails_closed_rather_than_falling_back() {
+    let Some(root) = common::root("noretention") else {
+        return;
+    };
+    common::create(&root, Some(SIX_YEARS)).await;
+    let unretained: Vec<&str> = common::WRITER_ACTIONS
+        .iter()
+        .copied()
+        .filter(|action| *action != "s3:PutObjectRetention")
+        .collect();
+    let writer = common::narrowed(&root, &unretained).await;
+    assert!(
+        matches!(
+            check_s3(&writer, PREFIX).await,
+            Err(CheckError::Store(S3Error::Rejected {
+                call: "PutObject",
+                status: 403,
+                ..
+            }))
+        ),
+        "a locked put refused by a permission is no evidence, and no unlocked probe is written"
+    );
+}
+
+#[tokio::test]
 async fn a_certificate_writes_only_to_its_own_store() {
     let Some(first) = common::root("certa") else {
         return;
