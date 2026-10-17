@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use mandate_canon::{Key, Object, Value, parse, to_canonical};
+use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_journal::{Draft, StreamType, check_batch, check_stream, closes, reads_stream};
 
 const RUN: &str = "01J9GT00A000000000000000R1";
@@ -242,13 +242,6 @@ fn step<'a>(node: &'a mut Value, name: &str) -> &'a mut Value {
     members
         .get_mut(name)
         .unwrap_or_else(|| panic!("no `{name}`"))
-}
-
-fn object(value: &mut Value) -> &mut Object {
-    match value {
-        Value::Object(members) => members,
-        _ => panic!("not an object"),
-    }
 }
 
 /// The draft with `event_id` `id`, wherever it is in `stream`.
@@ -2114,5 +2107,4 @@ fn the_catalogue_closes_the_run_records_on_the_agent_stream_and_their_rules_read
             "{event_type} is read for the stream rules"
         );
     }
-    let _ = object;
 }
