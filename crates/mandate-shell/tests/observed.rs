@@ -214,6 +214,7 @@ fn sources(now: &str, store: Option<Store>) -> (Sources<Broker>, Setup, Rc<Cell<
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: store.map(|store| Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: broker,
     };

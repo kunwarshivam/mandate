@@ -29,6 +29,17 @@ TOOLS=(
   "actionlint 1.7.12 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 actionlint"
 )
 
+# The local cell's tools (D-4, DEC-969; `cargo xtask cell`), with the versions in ci.yml. k3d is a
+# bare binary; helm publishes its binaries only on get.helm.sh (DEC-993 item 3), so it is fetched
+# best effort, like PostgreSQL below: without it the cell's checks skip.
+K3D_VERSION="5.9.0"
+K3D_SHA256="06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0"
+HELM_VERSION="4.3.0"
+HELM_SHA256="86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
+TOOLS+=(
+  "kubeconform 0.8.0 https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883 kubeconform"
+)
+
 installed_version() {
   case "$1" in
     cargo-deny) cargo-deny --version 2>/dev/null | awk '{print $2}' ;;
@@ -38,6 +49,7 @@ installed_version() {
     shellcheck) shellcheck --version 2>/dev/null | awk '/version:/ {print $2}' ;;
     actionlint) actionlint -version 2>/dev/null | awk 'NR==1 {print $1}' ;;
     cargo-mutants) cargo-mutants mutants --version 2>/dev/null | awk '{print $2}' ;;
+    kubeconform) kubeconform -v 2>/dev/null | sed 's/^v//' ;;
   esac
 }
 
@@ -62,6 +74,23 @@ for entry in "${TOOLS[@]}"; do
   tar -xzf "$tmp/$name.tgz" -C "$tmp" "$member"
   install -m 0755 "$tmp/$member" "$BIN/$name"
 done
+
+if [ "$(k3d version 2>/dev/null | awk 'NR==1 {print $3}')" != "v$K3D_VERSION" ]; then
+  echo "installing k3d $K3D_VERSION"
+  curl -sSfL -o "$tmp/k3d" "https://github.com/k3d-io/k3d/releases/download/v$K3D_VERSION/k3d-linux-amd64"
+  echo "$K3D_SHA256  $tmp/k3d" | sha256sum --check --quiet
+  install -m 0755 "$tmp/k3d" "$BIN/k3d"
+fi
+if [ "$(helm version --template '{{.Version}}' 2>/dev/null)" != "v$HELM_VERSION" ]; then
+  echo "installing helm $HELM_VERSION"
+  if curl -sSfL -o "$tmp/helm.tgz" "https://get.helm.sh/helm-v$HELM_VERSION-linux-amd64.tar.gz"; then
+    echo "$HELM_SHA256  $tmp/helm.tgz" | sha256sum --check --quiet
+    tar -xzf "$tmp/helm.tgz" -C "$tmp" linux-amd64/helm
+    install -m 0755 "$tmp/linux-amd64/helm" "$BIN/helm"
+  else
+    echo "warning: get.helm.sh is not reachable; helm not installed, so the cell's checks will skip" >&2
+  fi
+fi
 
 if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ] ||
   [ "$(uvx --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then

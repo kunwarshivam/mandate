@@ -1,0 +1,25 @@
+{{- /* One Deployment per long-running process whose image is built (§3.1, §3.2). */ -}}
+{{- define "mandate.service" -}}
+{{- $ctx := . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  template:
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name) }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
+---
+{{ include "mandate.emit" (include "mandate.service" (dict "root" $root "p" .)) }}
+{{- end }}

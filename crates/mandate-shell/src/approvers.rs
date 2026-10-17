@@ -14,6 +14,10 @@
 use std::collections::BTreeSet;
 
 use mandate_canon::Value;
+use mandate_domain::Environment;
+use mandate_num::Usd;
+use mandate_runtime::{LiveBroker, LiveScope, OpaqueUser};
+use mandate_spec::Mandate;
 use mandate_spec::document::ApproverRef;
 
 use crate::control::ControlRecord;
@@ -52,28 +56,27 @@ pub fn members(records: &[ControlRecord], connection: &str) -> Members {
     {
         return Members::Unread;
     }
-    let text = |record: &ControlRecord, name: &str| {
-        record
-            .payload
-            .get(name)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    };
-    let latest = records
+    match latest_record(records, connection) {
+        Some(record) if record.event_type == "ConnectionEstablished" => text_of(record, "user")
+            .filter(|user| !user.is_empty())
+            .map_or(Members::Unread, |user| Members::Owner(user.to_owned())),
+        Some(_) | None => Members::Unread,
+    }
+}
+
+/// The latest `ConnectionEstablished` or `ConnectionRevoked` of `connection` by `seq`, a
+/// revocation outranking an establishment at the same `seq`: the one record both [`members`] and
+/// [`live_cli_confirm`] read, so the two never disagree on which record governs.
+fn latest_record<'r>(records: &'r [ControlRecord], connection: &str) -> Option<&'r ControlRecord> {
+    records
         .iter()
         .filter(|record| {
             matches!(
                 record.event_type.as_str(),
                 "ConnectionEstablished" | "ConnectionRevoked"
-            ) && text(record, "connection_id").as_deref() == Some(connection)
+            ) && text_of(record, "connection_id") == Some(connection)
         })
-        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"));
-    match latest {
-        Some(record) if record.event_type == "ConnectionEstablished" => text(record, "user")
-            .filter(|user| !user.is_empty())
-            .map_or(Members::Unread, Members::Owner),
-        Some(_) | None => Members::Unread,
-    }
+        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"))
 }
 
 /// The user ids `references` resolve to among `members`: the set admission check 3 compares a
@@ -93,4 +96,51 @@ pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String
         })
         .map(|_| owner.clone())
         .collect()
+}
+
+/// One text member of `record`'s payload.
+fn text_of<'r>(record: &'r ControlRecord, name: &str) -> Option<&'r str> {
+    record.payload.get(name).and_then(Value::as_str)
+}
+
+/// DEC-923's scope for a live `cli_confirm` grant, read as `mandate approvals approve` reads it
+/// (DEC-970 item 1): on a `live` run, the mandate connection's latest record is a `live`
+/// `ConnectionEstablished`, its broker names the scope's broker, the confirmed mandate gives the
+/// per-order cap and the pinned instruments, and the owner is [`members`]' owner. `None` on a paper
+/// run, and whenever any part cannot be read, so the runtime refuses every live `cli_confirm`
+/// grant `step_up_method` (`AGENTS.md` rule 3).
+pub fn live_cli_confirm(
+    records: &[ControlRecord],
+    mandate: &Mandate,
+    environment: Environment,
+) -> Option<LiveScope> {
+    if environment != Environment::Live {
+        return None;
+    }
+    let connection = mandate.connection_id.as_str();
+    let Members::Owner(owner) = members(records, connection) else {
+        return None;
+    };
+    let latest = latest_record(records, connection)?;
+    if text_of(latest, "environment") != Some("live") {
+        return None;
+    }
+    let broker = match text_of(latest, "broker") {
+        Some("robinhood") => LiveBroker::Robinhood,
+        Some(_) | None => LiveBroker::Other,
+    };
+    let Ok(max_order_usd) = Usd::parse(mandate.risk.max_order_usd.as_str()) else {
+        return None;
+    };
+    Some(LiveScope {
+        broker,
+        max_order_usd,
+        pinned_instruments: mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .map(|instrument| instrument.asset_id.as_str().to_owned())
+            .collect(),
+        workspace_owner: OpaqueUser(owner),
+    })
 }
