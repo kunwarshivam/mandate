@@ -1,14 +1,19 @@
-# The weekly checks on main (ADR-0001 ES-11, ES-12, DEC-76; weekly since DEC-256): every per-PR job
-# plus long fuzz seeds, the seeded-bug mutation check, and a full-history secret scan. It ran
-# nightly until 2026-09-30, when the repository prepared to go private: the widened mutation gate
-# needs tens of minutes a run, and a private repository's Actions minutes cannot afford that every
-# night, so it runs Sunday 06:17 UTC and on demand. Skipped when main has not changed since the
-# last successful run, to save Actions minutes.
+# The nightly checks on main (ADR-0001 ES-11, ES-12, DEC-76, DEC-1006). Pull requests run only
+# the jobs their diff selects (DEC-1006), so every night main runs everything unselected:
+# `dispatch-ci` starts the per-PR `ci` workflow on main, where `select` has no diff base and
+# selects every crate and every job (all tests, `schema-mutants`, the macOS `portable` job), and
+# that run opens an issue itself if it fails (`ci.yml`'s `report-main`). Beside it, this workflow
+# runs the Postgres journal tests on the oldest supported version, the long fuzz seeds, the
+# seeded-bug mutation check of the reference implementation and a full-history secret scan, and
+# the whole-crate mutation sweep of every safety-critical crate, a seventh of it a run so every
+# mutant is tested once every seven runs, about weekly, while most shared runners stay with PRs
+# (DEC-1006 item 5). A failure opens an issue naming only the run and the jobs. Weekly from
+# DEC-256 until DEC-1006; skipped when main has not changed since the last successful run.
 name: nightly
 
 on:
   schedule:
-    - cron: "17 6 * * 0"
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -19,8 +24,6 @@ env:
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   CARGO_MUTANTS_VERSION: "27.1.0"
   CARGO_MUTANTS_SHA256: "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e"
-  ACTIONLINT_VERSION: "1.7.12"
-  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 
 jobs:
   changed:
@@ -44,19 +47,28 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-  nightly:
+  # Every per-PR job, unscoped: `ci.yml` dispatched on main selects everything (DEC-1006).
+  dispatch-ci:
     needs: changed
     if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    # 90 minutes: the 2026-09-30 run was cancelled at the old 30-minute cap mid
-    # `cargo xtask ci nightly`, after DEC-253 extended the mutation gate to every
-    # safety-critical crate (tool crates included) and the workspace grew by seven
-    # crates; the cap must clear the workload, not cancel it (last full success
-    # 2026-09-26).
-    timeout-minutes: 90
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch ci on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main
+
+  # The oldest Postgres the journal supports (ADR-0001 ES-08); per-PR `full-checks` runs the newest.
+  postgres-oldest:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
-    # The oldest Postgres the journal supports (ADR-0001 ES-08); per-PR `full` runs the newest.
     services:
       postgres:
         image: postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
@@ -77,31 +89,137 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-nextest@0.9.146
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask ci postgres
+
+  # Ten fuzz seeds of the mandate reference, its seeded-bug mutation check, and gitleaks over the
+  # whole history (`cargo xtask ci nightly`).
+  reference:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.19"
           enable-cache: true
-      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        with:
-          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146,typos@1.50.2,shellcheck@0.11.0
-      - name: Install actionlint (checksum-verified)
-        run: |
-          curl -sSfL -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
-          tar xzf actionlint.tgz actionlint && sudo install actionlint /usr/local/bin/ && rm actionlint actionlint.tgz
       - name: Install gitleaks (checksum-verified)
         run: |
-          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
-      # xtask's own tests drive the mutation gate over a fixture repository, so the nightly test run
-      # needs the tool the gate calls, as ci.yml's `fast` does (DEC-139).
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: select
+      - run: cargo xtask ci nightly
+
+  # DEC-1006 item 5. Tonight's share of the whole-crate mutation sweep: the gate's own listing of
+  # every safety-critical crate's source, cut into shards of at most eight mutants, of which the
+  # shards whose index is this run's number modulo seven run.
+  sweep-plan:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      mutants: ${{ steps.plan.outputs.mutants }}
+      shards: ${{ steps.plan.outputs.shards }}
+      total: ${{ steps.plan.outputs.total }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Install cargo-mutants (checksum-verified)
         run: |
-          curl -sSfL -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
           echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
           tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo xtask ci nightly
+        with:
+          shared-key: select
+      - name: Plan tonight's share of the sweep
+        id: plan
+        env:
+          MANDATE_SWEEP_NIGHT: ${{ github.run_number }}
+        run: cargo xtask ci sweep --plan >> "$GITHUB_OUTPUT"
+
+  # One shard of tonight's share, as a per-PR mutation shard runs (DEC-519, DEC-931, DEC-538), at
+  # most eight at a time so pull requests keep most of the shared runners.
+  sweep:
+    name: sweep (${{ matrix.shard }}/${{ needs.sweep-plan.outputs.total }})
+    needs: sweep-plan
+    if: needs.sweep-plan.outputs.shards != '[]' && needs.sweep-plan.outputs.shards != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.sweep-plan.outputs.shards) }}
+    env:
+      MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.sweep-plan.outputs.total }}
+      MANDATE_MUTANTS_PLANNED: ${{ needs.sweep-plan.outputs.mutants }}
+      MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+      MANDATE_PG_REQUIRED: "1"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_OPT_LEVEL: "1"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Start PostgreSQL 18 (digest-pinned)
+        run: .github/scripts/start-postgres.sh
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-nextest@0.9.146
+      - name: Install cargo-mutants (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
+          tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask ci sweep
+
+  # Opens an issue when any nightly job fails or is cancelled, naming only the run and the jobs'
+  # verdicts, never a log line (DEC-1006 item 5).
+  report:
+    needs: [changed, dispatch-ci, postgres-oldest, reference, sweep-plan, sweep]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue for the failed nightly (opaque)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERDICTS: changed ${{ needs.changed.result }}, dispatch-ci ${{ needs.dispatch-ci.result }}, postgres-oldest ${{ needs.postgres-oldest.result }}, reference ${{ needs.reference.result }}, sweep-plan ${{ needs.sweep-plan.result }}, sweep ${{ needs.sweep.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly failed at ${GITHUB_SHA}" -f body="The nightly run on main failed (${VERDICTS}): ${RUN_URL} (DEC-1006)"

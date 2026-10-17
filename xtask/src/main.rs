@@ -180,10 +180,11 @@ fn run() -> Result<()> {
         ["ci", "sweep", "--plan"] => {
             let plan = sweep_plan(Path::new("."), sweep_night()?)?;
             eprintln!(
-                "    sweep: {} mutant(s) over {} shard(s), {} of them tonight",
+                "    sweep: {} mutant(s) over {} shard(s), {} of them tonight, every shard once in {} runs",
                 plan.mutants,
                 plan.total,
-                plan.tonight.len()
+                plan.tonight.len(),
+                plan.rotation
             );
             print!("{}", plan.outputs());
             Ok(())
@@ -761,8 +762,32 @@ fn source_references(
 /// The repository paths `literal`, found in a file in `file_dir` of the crate in `crate_dir`,
 /// could name ([`source_references`]).
 fn literal_paths(literal: &str, file_dir: &str, crate_dir: &str) -> BTreeSet<String> {
-    let _ = (literal, file_dir, crate_dir);
-    BTreeSet::new()
+    let path_char = |c: char| c.is_ascii_alphanumeric() || "-_./*@+".contains(c);
+    let mut found = BTreeSet::new();
+    for piece in literal.split(|c: char| !path_char(c)) {
+        if piece.is_empty() || piece.contains("//") {
+            continue;
+        }
+        let (piece, glob) = match piece.split_once('*') {
+            Some((before, _)) => (before, true),
+            None => (piece, false),
+        };
+        let rooted = piece.strip_prefix('/');
+        let bases: Vec<&str> = if rooted.is_some() {
+            vec![""]
+        } else {
+            vec![file_dir, crate_dir, ""]
+        };
+        for base in bases {
+            if let Some(mut path) = normalized_join(base, rooted.unwrap_or(piece)) {
+                if glob {
+                    path.push('*');
+                }
+                found.insert(path);
+            }
+        }
+    }
+    found
 }
 
 /// `piece` joined to `base`, both relative to the repository root, with `.` and `..` resolved:
@@ -888,8 +913,60 @@ fn select(
     graph: &CrateGraph,
     references: &BTreeMap<String, BTreeSet<String>>,
 ) -> Selection {
-    let _ = (changed, references);
-    Selection::everything(graph, "pending E1-8: the selection is not written yet".to_owned())
+    let Some(changed) = changed else {
+        return Selection::everything(graph, "no diff base, so nothing is scoped".to_owned());
+    };
+    if graph.member_features {
+        return Selection::everything(
+            graph,
+            "a member turns on another member's feature, which a --package build unifies \
+             differently"
+                .to_owned(),
+        );
+    }
+    let mut seeds = BTreeSet::new();
+    let mut python = false;
+    let mut full_checks = false;
+    let mut schema_mutants = false;
+    for path in changed {
+        if selects_everything(path) {
+            return Selection::everything(graph, format!("{path} changed"));
+        }
+        let owner = owning_crate(graph, path);
+        let docs = is_docs_path(path);
+        let web = path_under(path, "web/");
+        if owner.is_none()
+            && !path.ends_with(".md")
+            && !KNOWN_OUTSIDE_CRATES
+                .iter()
+                .any(|entry| path_under(path, entry))
+        {
+            return Selection::everything(graph, format!("{path} is outside every known path"));
+        }
+        seeds.extend(owner.map(str::to_owned));
+        seeds.extend(
+            references
+                .iter()
+                .filter(|(_, named)| {
+                    named
+                        .iter()
+                        .any(|reference| references_path(reference, path))
+                })
+                .map(|(krate, _)| krate.clone()),
+        );
+        full_checks |= !docs && !web;
+        python |= owner.is_none() && !docs && !web;
+        schema_mutants |= SCHEMA_SWEEP_INPUTS
+            .iter()
+            .any(|entry| path_under(path, entry));
+    }
+    Selection {
+        everything: None,
+        crates: dependents_closure(graph, &seeds),
+        python,
+        full_checks,
+        schema_mutants,
+    }
 }
 
 /// The paths a change touches against `base`, renames as a deletion and an addition so both
@@ -6293,25 +6370,28 @@ fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
     .map(Some)
 }
 
-/// The mutants a shard of the whole-crate sweep tests at most, so a shard's slice stays near the
-/// per-PR shards' few minutes (DEC-1006 item 5). Slice sharding over `ceil(n / 10)` shards gives
-/// each shard `ceil(n / ceil(n / 10))` mutants, never more than this.
-const SWEEP_SHARD_MUTANTS: usize = 10;
+/// The mutants a shard of the whole-crate sweep tests at most, so a shard stays within ten
+/// minutes (DEC-1006 item 5): DEC-473 found fourteen or fifteen `mandate-executor` mutants a shard
+/// reaching the cap and eight fitting. Slice sharding over `ceil(n / 8)` shards gives each shard
+/// `ceil(n / ceil(n / 8))` mutants, never more than this.
+const SWEEP_SHARD_MUTANTS: usize = 8;
 
-/// The nightly runs one whole-crate sweep is spread over (DEC-1006 item 5): shard `k` runs in the
-/// runs whose number is `k` modulo this, so every mutant is tested once every seven nightly runs,
-/// about weekly, and a night's matrix leaves most of the shared runners to pull requests.
+/// The fewest nightly runs one whole-crate sweep is spread over (DEC-1006 item 5): shard `k` runs
+/// in the runs whose number is `k` modulo the rotation, so every mutant is tested once every seven
+/// nightly runs, about weekly, and a night's matrix leaves most of the shared runners to pull
+/// requests. [`SweepPlan::rotation_for`] lengthens it once a seventh would not fit one matrix.
 const SWEEP_ROTATION: u64 = 7;
 
 /// GitHub's ceiling on one matrix's jobs.
 const MATRIX_LIMIT: usize = 256;
 
-/// One night's share of the whole-crate sweep: the sweep's mutant count, its shard total, and the
-/// shards this night runs.
+/// One night's share of the whole-crate sweep: the sweep's mutant count, its shard total, the
+/// runs its rotation takes, and the shards this night runs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SweepPlan {
     mutants: usize,
     total: usize,
+    rotation: usize,
     tonight: Vec<usize>,
 }
 
@@ -6321,14 +6401,28 @@ impl SweepPlan {
         mutants.div_ceil(SWEEP_SHARD_MUTANTS)
     }
 
+    /// The runs a rotation over `total` shards takes: [`SWEEP_ROTATION`], or more when a night's
+    /// share would not fit one matrix, so a growing workspace lengthens the rotation rather than
+    /// failing the plan or dropping shards.
+    fn rotation_for(total: usize) -> usize {
+        usize::try_from(SWEEP_ROTATION)
+            .unwrap_or(usize::MAX)
+            .max(total.div_ceil(MATRIX_LIMIT))
+    }
+
     /// Night `night`'s share of a sweep of `mutants`: every shard whose index is `night` modulo
-    /// [`SWEEP_ROTATION`]. Refused when it would not fit one matrix.
+    /// the rotation, at most [`MATRIX_LIMIT`] of them.
     fn for_night(mutants: usize, night: u64) -> Result<Self> {
-        let _ = night;
+        let total = Self::shards_for(mutants);
+        let rotation = Self::rotation_for(total);
+        let turn = usize::try_from(night % u64::try_from(rotation).unwrap_or(u64::MAX))
+            .context("the rotation's turn fits a usize")?;
+        let tonight: Vec<usize> = (0..total).filter(|k| k % rotation == turn).collect();
         Ok(Self {
             mutants,
-            total: 0,
-            tonight: Vec::new(),
+            total,
+            rotation,
+            tonight,
         })
     }
 
@@ -13999,11 +14093,12 @@ mod tests {
     }
 
     /// DEC-1006 item 5: the sweep's shards each hold at most [`SWEEP_SHARD_MUTANTS`] under slice
-    /// sharding, the nights of one rotation together run every shard exactly once, a night's
-    /// outputs are the matrix GitHub reads, and a night that would not fit one matrix is refused.
+    /// sharding, the nights of one rotation together run every shard exactly once, no night needs
+    /// more than one matrix, the rotation is a week until a seventh outgrows a matrix and longer
+    /// after, and a night's outputs are the matrix GitHub reads.
     #[test]
     fn the_sweep_rotation_runs_every_shard_once_a_week() -> Result<()> {
-        for mutants in [0usize, 1, 9, 10, 11, 99, 12_538, 17_920] {
+        for mutants in [0usize, 1, 7, 8, 9, 99, 12_538, 14_336, 14_337, 40_000] {
             let total = SweepPlan::shards_for(mutants);
             if mutants > 0 {
                 assert!(
@@ -14011,10 +14106,19 @@ mod tests {
                     "{mutants} mutants over {total} shards"
                 );
             }
+            let rotation = SweepPlan::rotation_for(total);
+            assert!(rotation >= 7, "never more often than a seventh a night");
             let mut seen = vec![0usize; total];
-            for night in 0..SWEEP_ROTATION {
+            for night in 0..u64::try_from(rotation)? {
                 let plan = SweepPlan::for_night(mutants, 20_000 + night)?;
-                assert_eq!((plan.mutants, plan.total), (mutants, total));
+                assert_eq!(
+                    (plan.mutants, plan.total, plan.rotation),
+                    (mutants, total, rotation)
+                );
+                assert!(
+                    plan.tonight.len() <= MATRIX_LIMIT,
+                    "{mutants}: one matrix a night"
+                );
                 for &k in &plan.tonight {
                     if let Some(count) = seen.get_mut(k) {
                         *count += 1;
@@ -14027,27 +14131,28 @@ mod tests {
             );
         }
         assert_eq!(
+            SweepPlan::rotation_for(1_792),
+            7,
+            "a seventh fits one matrix"
+        );
+        assert_eq!(
+            SweepPlan::rotation_for(1_793),
+            8,
+            "and past it the rotation grows"
+        );
+        assert_eq!(SWEEP_ROTATION, 7);
+        assert_eq!(
             SweepPlan::for_night(25, 7)?.tonight,
             vec![0],
             "night 7 is night 0 again"
         );
         assert_eq!(SweepPlan::for_night(25, 9)?.tonight, vec![2]);
         assert!(
-            SweepPlan::for_night(25, 3)?.tonight.is_empty(),
-            "three shards leave night 3 idle"
+            SweepPlan::for_night(25, 4)?.tonight.is_empty(),
+            "four shards leave night 4 idle"
         );
-        assert_eq!(
-            SweepPlan::for_night(12_538, 0)?.outputs().lines().next(),
-            Some("mutants=12538")
-        );
-        let too_many = SWEEP_SHARD_MUTANTS * 7 * (MATRIX_LIMIT + 1);
-        assert!(
-            SweepPlan::for_night(too_many, 0).is_err(),
-            "a night past one matrix is refused"
-        );
-        assert!(SweepPlan::for_night(too_many - 7 * SWEEP_SHARD_MUTANTS, 0).is_ok());
         let plan = SweepPlan::for_night(30, 1)?;
-        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=3\n");
+        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=4\n");
         Ok(())
     }
 
