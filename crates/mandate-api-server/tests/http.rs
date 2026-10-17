@@ -51,6 +51,7 @@ fn app() -> App {
         journal: Arc::new(common::MemJournal::default()),
         members: Arc::new(mandate_api_server::members::until_parser),
         hosted: common::hosted(),
+        artifacts: None,
     }
 }
 

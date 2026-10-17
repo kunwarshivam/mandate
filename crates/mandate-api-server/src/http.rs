@@ -17,6 +17,7 @@ use axum::routing::{delete, get, post};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::encode;
 use mandate_canon::Value;
+use mandate_journal::ArtifactSource;
 
 use crate::clock::Clock;
 use crate::journal::Journal;
@@ -67,6 +68,9 @@ pub struct App {
     pub members: Arc<ParseMembers>,
     /// The one workspace this deployment hosts.
     pub hosted: Hosted,
+    /// The content-addressed store the agent reads take mandate documents from, read only
+    /// (DEC-1020 item 1); `None` when the deployment names none.
+    pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).

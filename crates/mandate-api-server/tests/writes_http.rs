@@ -86,6 +86,7 @@ fn fixture() -> Fixture {
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
+        artifacts: None,
     };
     let drain = Drain::new();
     let f = Fixture {

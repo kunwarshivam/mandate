@@ -22,6 +22,9 @@ use mandate_time::UtcNanos;
 
 const APP: &str = "https://app.owlhead.test";
 const T0: i64 = 1_791_000_000;
+/// A whole `content.action`, which every served approval binds (DEC-1021).
+const ACTION: &str = r#""action":{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","asset_class":"us_equity","side":"buy","qty":"3","limit":"101.5","order_usd":"304.5","purpose":"open"}"#;
+
 const OTHER_WORKSPACE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W40";
 
 type Records = Arc<Mutex<Result<Vec<MembershipRecord>, LookupFailed>>>;
@@ -37,6 +40,12 @@ struct Fixture {
 static DIRS: Mutex<u32> = Mutex::new(0);
 
 fn fixture() -> Fixture {
+    fixture_with(None)
+}
+
+fn fixture_with(
+    artifacts: Option<Arc<dyn mandate_journal::ArtifactSource + Send + Sync>>,
+) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::env::temp_dir().join(format!(
@@ -72,6 +81,7 @@ fn fixture() -> Fixture {
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
+        artifacts,
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),
@@ -195,18 +205,29 @@ fn seed(f: &Fixture) {
     streams.insert(
         a.clone(),
         vec![
-            row(&a, 1, "AgentModeChanged", r#"{"from":"normal","to":"paused","reason":"x"}"#),
+            row(
+                &a,
+                1,
+                "AgentModeChanged",
+                r#"{"from":"normal","to":"paused","reason":"x"}"#,
+            ),
             row(
                 &a,
                 2,
                 "ApprovalRequested",
-                &format!(r#"{{"content":{{"bound":{{"side":"buy"}}}},"content_hash":"{}","deadline":900}}"#, version(7)),
+                &format!(
+                    r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":900}}"#,
+                    version(7)
+                ),
             ),
             row(
                 &a,
                 3,
                 "ApprovalRequested",
-                &format!(r#"{{"content":{{"bound":{{"side":"buy"}}}},"content_hash":"{}","deadline":800}}"#, version(8)),
+                &format!(
+                    r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":800}}"#,
+                    version(8)
+                ),
             ),
             row(
                 &a,
@@ -279,7 +300,7 @@ fn the_agents_list_states_each_deployed_agent_from_the_journal() {
     assert_eq!(text(&body, "served_at"), "2026-10-03T04:00:00.000000000Z");
     let expected = parse(
         format!(
-            r#"[{{"agent_id":"agt_a","deployed_at":"2026-10-17T10:00:02.000000000Z","environment":"paper","mandate_version":"{}","mode":"paused","pending_approvals":1}},{{"agent_id":"agt_b","deployed_at":"2026-10-17T10:00:03.000000000Z","environment":"paper","mandate_version":"{}","mode":null,"pending_approvals":0}}]"#,
+            r#"[{{"agent_id":"agt_a","deployed_at":"2026-10-17T10:00:02.000000000Z","environment":"paper","label":null,"mandate":null,"mandate_version":"{}","mode":"paused","pending_approvals":1}},{{"agent_id":"agt_b","deployed_at":"2026-10-17T10:00:03.000000000Z","environment":"paper","label":null,"mandate":null,"mandate_version":"{}","mode":null,"pending_approvals":0}}]"#,
             version(1),
             version(2)
         )
@@ -436,6 +457,7 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
                 .iter()
                 .map(|a| {
                     assert!(a.get("content").is_none(), "the inbox carries no content");
+                    assert_eq!(a.get("order"), Some(&bound_order()), "but its order");
                     text(a, "approval_id").to_owned()
                 })
                 .collect(),
@@ -457,8 +479,9 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
     assert_eq!(text(approval, "content_hash"), version(8));
     assert_eq!(
         approval.get("content"),
-        Some(&parse(br#"{"bound":{"side":"buy"}}"#).expect("JSON"))
+        Some(&parse(format!("{{{ACTION}}}").as_bytes()).expect("JSON"))
     );
+    assert_eq!(approval.get("order"), Some(&bound_order()));
     for absent in ["01JBH3BTZ8K2M4N6P8R0S2T099", "not-an-id"] {
         assert_eq!(
             get(&f, &ws(&format!("/approvals/{absent}")), Some(&cookie)).status,
@@ -551,4 +574,155 @@ fn an_undecodable_path_on_a_reduction_only_session_is_reduction_only() {
     let reply = get(&f, "/v1/workspaces/%FF/agents", Some(&cookie));
     assert_eq!(reply.status, 403);
     assert!(String::from_utf8_lossy(&reply.body).contains(r#""code":"reduction_only""#));
+}
+
+/// The order [`ACTION`] binds, as `read-models/approval` states it: no execution plan in a
+/// version-1 request.
+fn bound_order() -> Value {
+    parse(br#"{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","asset_class":"us_equity","side":"buy","qty":"3","limit":"101.5","order_usd":"304.5","purpose":"open","tif":null,"protection":null}"#)
+        .expect("JSON")
+}
+
+const DOCUMENT: &str = include_str!("fixtures/mandate.json");
+
+/// The mandate document in canonical form, and the version that names it.
+fn document() -> (Vec<u8>, String) {
+    let bytes = to_canonical(&parse(DOCUMENT.as_bytes()).expect("JSON"));
+    let version = format!("sha256:{}", Digest::of(&bytes).to_hex());
+    (bytes, version)
+}
+
+/// `agt_a` deployed with the stored document's version, `agt_b` with one the store lacks, the
+/// document's connection established at version 2 on `acct_1`, and two reconciled holdings.
+fn seed_documents(f: &Fixture, deployed_version: &str) {
+    let mut established = row(
+        &ctl(),
+        4,
+        "ConnectionEstablished",
+        r#"{"connection_id":"conn_alpaca_paper_01","account_ref":"acct_1"}"#,
+    );
+    established.schema_version = 2;
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let observed = |seq, instrument: &str, qty: &str| {
+        row(
+            &acct,
+            seq,
+            "BrokerPositionObserved",
+            &format!(
+                r#"{{"instrument":"{instrument}","broker_qty":"{qty}","model_qty":"{qty}","mismatch":false,"risk_clock":"2026-10-17T10:00:00Z"}}"#
+            ),
+        )
+    };
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    streams.insert(
+        ctl(),
+        vec![
+            row(&ctl(), 1, "StreamOpened", "{}"),
+            row(
+                &ctl(),
+                2,
+                "AgentDeployed",
+                &format!(r#"{{"agent_id":"agt_a","mandate_version":"{deployed_version}"}}"#),
+            ),
+            row(
+                &ctl(),
+                3,
+                "AgentDeployed",
+                &format!(
+                    r#"{{"agent_id":"agt_b","mandate_version":"{}"}}"#,
+                    version(2)
+                ),
+            ),
+            established,
+        ],
+    );
+    streams.insert(
+        acct.clone(),
+        vec![
+            row(&acct, 1, "StreamOpened", "{}"),
+            observed(2, "b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081", "3"),
+        ],
+    );
+}
+
+fn envelope_value() -> Value {
+    parse(br#"{"allocation_usd":"1000","max_loss_from_allocation":"0.1","goal":"continuous","goal_end_date":null,"asset_classes":["us_equity"],"max_position_usd":"1000","max_order_usd":"300","max_orders_per_day":50,"max_daily_loss":"0.02","max_drawdown":"0.08"}"#)
+        .expect("JSON")
+}
+
+fn stored(bytes: Vec<u8>) -> Option<Arc<dyn mandate_journal::ArtifactSource + Send + Sync>> {
+    Some(Arc::new(std::collections::BTreeMap::from([(
+        Digest::of(&bytes),
+        bytes,
+    )])))
+}
+
+#[test]
+fn an_agent_carries_its_mandates_envelope_and_its_accounts_positions() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    let list = json(&get(&f, &ws("/agents"), Some(&cookie)));
+    let Some(Value::Array(agents)) = list.get("agents") else {
+        panic!("agents");
+    };
+    assert_eq!(
+        agents[0].get("label"),
+        Some(&Value::Str("tracer-aapl".into()))
+    );
+    assert_eq!(agents[0].get("mandate"), Some(&envelope_value()));
+    assert_eq!(
+        agents[0].get("account_positions"),
+        None,
+        "the list carries no positions"
+    );
+    assert_eq!(
+        agents[1].get("label"),
+        Some(&Value::Null),
+        "a document the store lacks"
+    );
+    assert_eq!(agents[1].get("mandate"), Some(&Value::Null));
+
+    let one = json(&get(&f, &ws("/agents/agt_a"), Some(&cookie)));
+    let agent = one.get("agent").expect("agent");
+    assert_eq!(agent.get("label"), Some(&Value::Str("tracer-aapl".into())));
+    let positions = parse(
+        br#"[{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","qty":"3","broker_qty":"3","mismatch":false,"observed_at":"2026-10-17T10:00:02.000000000Z"}]"#,
+    )
+    .expect("JSON");
+    assert_eq!(agent.get("account_positions"), Some(&positions));
+    let Some(Value::Array(as_of)) = one.get("as_of") else {
+        panic!("as_of");
+    };
+    let streams: Vec<&str> = as_of.iter().map(|w| text(w, "stream_id")).collect();
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    assert!(streams.contains(&acct.as_str()), "{streams:?}");
+
+    let other = json(&get(&f, &ws("/agents/agt_b"), Some(&cookie)));
+    assert_eq!(
+        other.get("agent").and_then(|a| a.get("account_positions")),
+        Some(&Value::Null),
+        "no document, so no connection to read"
+    );
+
+    f.journal.failing.lock().expect("unpoisoned").insert(acct);
+    let unread = get(&f, &ws("/agents/agt_a"), Some(&cookie));
+    assert_eq!(unread.status, 503);
+    assert_eq!(text(&json(&unread), "code"), "journal_unavailable");
+}
+
+#[test]
+fn without_a_store_nothing_from_the_document_is_reported() {
+    let (_, version) = document();
+    let f = fixture();
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    let one = json(&get(&f, &ws("/agents/agt_a"), Some(&cookie)));
+    let agent = one.get("agent").expect("agent");
+    for member in ["label", "mandate", "account_positions"] {
+        assert_eq!(agent.get(member), Some(&Value::Null), "{member}");
+    }
 }

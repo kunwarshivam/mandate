@@ -59,6 +59,8 @@ pub struct ApprovalView {
     pub deadline: i64,
     pub content_hash: String,
     pub content: Value,
+    /// The order the approval binds (DEC-1021).
+    pub order: Value,
 }
 
 /// Which approvals the inbox lists (`?state=`).
@@ -155,7 +157,10 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                 .get("payload")
                 .and_then(|p| p.get("content"))
                 .filter(|c| c.as_object().is_some());
-            if let (Some(deadline), Some(hash), Some(content)) = (deadline, hash, content) {
+            let bound = event.get("payload").and_then(order);
+            if let (Some(deadline), Some(hash), Some(content), Some(bound)) =
+                (deadline, hash, content, bound)
+            {
                 views.push(ApprovalView {
                     approval_id: row.event_id.clone(),
                     agent_id: agent_id.to_owned(),
@@ -164,6 +169,7 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                     deadline,
                     content_hash: hash.to_owned(),
                     content: content.clone(),
+                    order: bound,
                 });
             }
             continue;
@@ -233,4 +239,107 @@ pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
         },
         pending_approvals: u64::try_from(pending).unwrap_or(u64::MAX),
     }
+}
+
+/// The bound order of an `ApprovalRequested` payload (DEC-1021): `content.action`'s members, and
+/// version 2's `content.execution` time in force and protection, `null` without one.
+pub fn order(payload: &Value) -> Option<Value> {
+    let content = payload.get("content")?;
+    let action = content.get("action")?;
+    let mut members = Vec::with_capacity(9);
+    for name in ACTION_MEMBERS {
+        members.push((name, action.get(name)?.clone()));
+    }
+    let execution = content.get("execution");
+    for name in ["tif", "protection"] {
+        let planned = execution.and_then(|e| e.get(name)).cloned();
+        members.push((name, planned.unwrap_or(Value::Null)));
+    }
+    object(members)
+}
+
+/// `content.action`'s members, every one of which an approval binds.
+const ACTION_MEMBERS: [&str; 7] = [
+    "instrument",
+    "asset_class",
+    "side",
+    "qty",
+    "limit",
+    "order_usd",
+    "purpose",
+];
+
+/// An object of `members`.
+fn object(members: Vec<(&str, Value)>) -> Option<Value> {
+    let mut object = mandate_canon::Object::new();
+    for (name, value) in members {
+        object.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    Some(Value::Object(object))
+}
+
+/// The `account_ref` the control stream binds to `connection_id` (DEC-1020 item 3): the latest
+/// `ConnectionEstablished` at schema version 2 naming it, else its latest `ConnectionRequested`.
+/// That row decides: one without an `account_ref`, or with one outside the id grammar
+/// (`[A-Za-z0-9_-]+`), binds none rather than an older row's, so no stream name is formed from it.
+pub fn account_ref(control: &[StoredEvent], connection_id: &str) -> Option<String> {
+    let latest = |event_type: &str, schema_version: u64| {
+        control.iter().rev().find_map(|row| {
+            let event = envelope(row)?;
+            (row.event_type == event_type
+                && row.schema_version == schema_version
+                && text(&event, "payload.connection_id") == Some(connection_id))
+            .then_some(event)
+        })
+    };
+    let event = latest("ConnectionEstablished", 2).or_else(|| latest("ConnectionRequested", 1))?;
+    text(&event, "payload.account_ref")
+        .filter(|reference| {
+            !reference.is_empty()
+                && reference
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        })
+        .map(str::to_owned)
+}
+
+/// The account's holdings at its last reconciliation (DEC-1020 item 3): the latest
+/// `BrokerPositionObserved` per instrument, in instrument order, leaving out an instrument whose
+/// model and broker quantities are both zero.
+pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
+    let mut latest: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+    for row in account_rows {
+        if row.event_type != "BrokerPositionObserved" {
+            continue;
+        }
+        let Some(event) = envelope(row) else {
+            continue;
+        };
+        let member = |name: &str| event.get("payload").and_then(|p| p.get(name)).cloned();
+        let (Some(Value::Str(instrument)), Some(qty), Some(broker), Some(mismatch)) = (
+            member("instrument"),
+            member("model_qty"),
+            member("broker_qty"),
+            member("mismatch"),
+        ) else {
+            continue;
+        };
+        let held = [&qty, &broker].iter().any(|q| q.as_str() != Some("0"));
+        let position = object(vec![
+            ("instrument", Value::Str(instrument.clone())),
+            ("qty", qty),
+            ("broker_qty", broker),
+            ("mismatch", mismatch),
+            ("observed_at", Value::Str(row.recorded_at.clone())),
+        ]);
+        match (held, position) {
+            (true, Some(position)) => {
+                latest.insert(instrument, position);
+            }
+            _ => {
+                latest.remove(&instrument);
+            }
+        }
+    }
+    latest.into_values().collect()
 }
