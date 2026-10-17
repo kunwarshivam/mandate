@@ -105,6 +105,29 @@ upgrades every release in place.
 A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the
 release in `web/.nvmrc` and npm; the first run does `npm ci`.
 
+### The demo's scenario
+
+`cargo xtask cell demo --scenario demo` (E21-51, DEC-2000) runs the demo's story on the cell, its
+six steps in order, with paper and demo data only and no credential. Each gesture whose pieces are
+on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
+what its success prints. Each missing link prints as `gap` with the PR or story that closes it; a
+gap never fails the run and is never faked. The run ends by exporting the workspace's control
+stream and verifying it by journal spec §11. Each run uses a fresh workspace, `demo<run id>`.
+
+| Step | Runs today | Gaps, and what closes each |
+|---|---|---|
+| 1. Sign in, see the workspace | `workspace open` (paper), `workspace found` | Sign-in and the workspace read through the API: #1457, #1486, #1513, the API's cell image, and a local-cell token issuer (E21-51) |
+| 2. Deploy under a confirmed envelope | `config register`, `model register`, `version create`, `version confirm` shown then typed, `agent deploy` shown then typed | The same from `web/`: E10-11, E10-12; the agent's processes started from `AgentDeployed`: E21-33 |
+| 3. Research, through the gateway's recorded fake | Nothing yet | The runtime process (#1521) and its image; the shell's research driver (DEC-996 item 2); E15-8, E19-5 |
+| 4. Sized, gated, asked, approved, filled, protected | `approvals list` (empty until the runtime asks) | The runtime (#1521); approval from `web/`: E9-4; the fill and the stop on a fixture broker: E21-30's executor slice |
+| 5. A backtest of the same version | Nothing yet | #1482, then its API read and a `web/` screen (E21-51) |
+| 6. The kill switch from `web/` | Nothing yet | #1457's route and button; the processes stopping on it: #1521, E21-30's executor slice, E21-34 |
+
+The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
+every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs
+the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
+`MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
+
 ### The drills
 
 | Drill | What holds | Its seeded bug |
