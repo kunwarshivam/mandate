@@ -40,6 +40,10 @@ pub(crate) struct Layout {
 
 /// The tar of one file at the root, owned by root with `mode`, every timestamp zero.
 pub(crate) fn tar_one(name: &str, mode: u32, contents: &[u8]) -> Vec<u8> {
+    assert!(
+        name.len() <= NAME_LEN,
+        "a tar name of more than {NAME_LEN} bytes would overwrite the mode: {name}"
+    );
     let mut header = [0u8; RECORD];
     put(&mut header, 0, name.as_bytes());
     put(&mut header, 100, format!("{mode:07o}\0").as_bytes());
@@ -69,6 +73,9 @@ fn put(header: &mut [u8; RECORD], at: usize, field: &[u8]) {
         slot.copy_from_slice(field);
     }
 }
+
+/// The longest name a ustar header's name field holds without its prefix field.
+const NAME_LEN: usize = 100;
 
 /// A tar record's size.
 const RECORD: usize = 512;
@@ -211,6 +218,11 @@ pub(crate) fn push(
         let location = if location.starts_with('/') {
             format!("{base}{location}")
         } else {
+            ensure!(
+                location.starts_with(&format!("{base}/")),
+                "the registry named an upload location on another host; refusing to send it the \
+                 credential"
+            );
             location
         };
         let separator = if location.contains('?') { '&' } else { '?' };
@@ -277,7 +289,8 @@ fn curl(auth: Option<&Path>, args: &[&str], url: &str) -> Result<String> {
     let out = command.arg(url).output().context("starting `curl`")?;
     ensure!(
         out.status.success(),
-        "curl {url} failed: {}",
+        "curl {} failed: {}",
+        url.split('?').next().unwrap_or_default(),
         String::from_utf8_lossy(&out.stderr).trim()
     );
     String::from_utf8(out.stdout).context("curl printed non-UTF-8")
@@ -556,6 +569,20 @@ mod tests {
             Some("sha256:ab")
         );
         assert_eq!(header(text, "etag"), None);
+    }
+
+    /// Every shipped binary's name, and its signature's, fits the header's name field.
+    #[test]
+    fn every_shipped_name_fits_a_tar_header() {
+        for (_, name) in crate::release::BINARIES {
+            assert!(format!("{name}.sig").len() <= NAME_LEN, "{name}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "would overwrite the mode")]
+    fn a_name_too_long_for_the_header_is_refused() {
+        tar_one(&"n".repeat(NAME_LEN + 1), 0o444, b"");
     }
 
     /// A tar is whole 512-byte records and ends in two zero records.

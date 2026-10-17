@@ -80,7 +80,7 @@ pub(crate) struct Tool {
     pub(crate) member: Option<&'static str>,
 }
 
-/// The release build's tools (D-7, DEC-969; rows in `docs/dependencies.md`).
+/// The release build's tools (D-7, DEC-990; rows in `docs/dependencies.md`).
 pub(crate) const TOOLS: [Tool; 3] = [
     Tool {
         name: "cargo-auditable",
@@ -455,9 +455,9 @@ pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> R
 /// `cargo xtask release drill <dist> <out>` (E21-35): after `release images <dist> <out>
 /// --test-sign`, runs [`DRILLED`] as each of three images would run it, unpacked as a runtime
 /// does with the signature beside the binary: the test-signed image, the same binary unsigned,
-/// and one signed by a key nothing trusts. The unsigned and the wrongly signed are refused
-/// outside dev and CI, the wrongly signed and the test-signed outside dev and CI are refused, and
-/// in CI with the test key the test-signed and the unsigned start.
+/// and one signed by a key nothing trusts. Outside dev and CI the unsigned and the test-signed
+/// images are refused; the wrongly signed one is refused even in CI with the test key; and in CI
+/// the test-signed one (with the test key) and the unsigned one start.
 pub(crate) fn drill(root: &Path, dist: &Path, out: &Path) -> Result<()> {
     let paths = Paths::from_env(root)?;
     let tools = tools(&paths.cargo_home)?;
