@@ -413,3 +413,35 @@ proptest! {
         prop_assert_eq!(plane.authenticate(&genuine, at(0)), Ok(id(CELL)));
     }
 }
+
+#[test]
+fn an_id_is_one_to_64_of_the_journals_id_characters() {
+    for good in ["a", "dep_cell1", "A-b_9", &"x".repeat(64)] {
+        assert_eq!(
+            Ident::parse(good).map(|i| i.as_str().to_owned()),
+            Some(good.to_owned()),
+            "{good}"
+        );
+    }
+    for bad in ["", "a.b", "a b", "a@b", "é", &"x".repeat(65)] {
+        assert!(Ident::parse(bad).is_none(), "{bad}");
+    }
+    let endpoint = "https://cell1.example:8443/api";
+    assert_eq!(Endpoint::parse(endpoint).unwrap().as_str(), endpoint);
+}
+
+/// Only enrollment binds a key: a key handed to the plane when the deployment is created is
+/// dropped, so a deployment never authenticates without spending its token.
+#[test]
+fn a_key_given_at_creation_is_not_bound() {
+    let mut plane = ControlPlane {
+        store: MemoryStore::default(),
+    };
+    let pre_keyed = Deployment {
+        public_key: Some(pair(7).public_key().as_ref().try_into().unwrap()),
+        ..deployment(CELL, "https://cell1.example")
+    };
+    plane.create_deployment(pre_keyed, [1; 32], at(600));
+    let call = signed(CELL, &pair(7), "/v1/heartbeat", b"{}", at(0));
+    assert_eq!(plane.authenticate(&call, at(0)), Err(Refused::NotEnrolled));
+}
