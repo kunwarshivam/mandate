@@ -81,9 +81,11 @@ fn with_goal(
     ))
 }
 
-/// The gate's id for the run's instrument: the asset id's own text.
+/// The gate's id for the run's instrument: the asset id's own text. The gate refuses only an empty
+/// id, which a parsed asset id never is, so a refusal is the id's text not being canonical.
 pub(super) fn asset(asset: &AssetId) -> Result<mandate_risk::AssetId, BacktestError> {
-    mandate_risk::AssetId::new(asset.as_str()).map_err(|_| BacktestError::RecordOtherInstrument(0))
+    mandate_risk::AssetId::new(asset.as_str())
+        .map_err(|_| BacktestError::Num(mandate_num::NumError::NotCanonical))
 }
 
 /// The risk state's snapshot narrowed to the fields the gate reads.
