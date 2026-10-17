@@ -56,9 +56,11 @@ pub fn digest(issuer: &str, subject: &str) -> String {
 }
 
 /// The one file the server reads subject links from (DEC-1023): fixed, never a setting.
-pub const SUBJECT_LINKS: &str = "";
+pub const SUBJECT_LINKS: &str = "/etc/mandate/subject-links";
 
 /// The principal `issuer`'s `subject` signs in as, read from the file at `path` now.
+/// A path that does not itself name the file opened, a symlink included, is refused as exposed
+/// (DEC-1023), so only the file at the path is ever read.
 ///
 /// # Errors
 /// [`LinkRefusal`], in the order its variants are listed.
@@ -84,6 +86,10 @@ pub fn principal_owned(
     let opened = file.metadata().map_err(|_| LinkRefusal::Unreadable)?;
     if !opened.is_file() {
         return Err(LinkRefusal::Unreadable);
+    }
+    let at_path = fs::symlink_metadata(path).map_err(|_| LinkRefusal::Unreadable)?;
+    if (at_path.dev(), at_path.ino()) != (opened.dev(), opened.ino()) {
+        return Err(LinkRefusal::Exposed);
     }
     if opened.permissions().mode() & GROUP_OR_OTHERS_WRITE != 0 || !owners.contains(&opened.uid()) {
         return Err(LinkRefusal::Exposed);

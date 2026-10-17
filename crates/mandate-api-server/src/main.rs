@@ -47,6 +47,7 @@ use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
 use mandate_api_server::session::{OsRandom, Sessions};
+use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
@@ -187,7 +188,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         FetchedKeys::new(&setting("MANDATE_API_JWKS_URL")?).map_err(|_| StartRefusal::Setting {
             name: "MANDATE_API_JWKS_URL",
         })?;
-    let links = PathBuf::from(setting("MANDATE_API_SUBJECT_LINKS")?);
+    let links = PathBuf::from(subject::SUBJECT_LINKS);
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
     let start = Start {
         settings,
