@@ -8,7 +8,7 @@ use secrecy::ExposeSecret;
 use super::fixtures::client_secret;
 use super::layout::Layout;
 use crate::VaultError;
-use crate::import::{API_USER, EXEC_USER, import_client_secret, resolve_ids};
+use crate::import::{API_USER, EXEC_USER, ROOT_USER, import_client_secret, resolve_ids};
 use crate::startup::Ids;
 use crate::store::{ExecutorVault, MAX_SECRET_LEN};
 
@@ -115,7 +115,8 @@ fn an_endless_or_broken_stdin_is_refused() {
     assert!(layout.names("tokens").is_empty());
 }
 
-const PASSWD: &str = "root:x:0:0:root:/root:/bin/bash
+const PASSWD: &str = "rootless:x:7:7::/:/bin/false
+root:x:0:0:root:/root:/bin/bash
 owlhead_api2:x:1500:1500::/nonexistent:/usr/sbin/nologin
 owlhead_api:x:998:997::/nonexistent:/usr/sbin/nologin
 broken line
@@ -174,6 +175,11 @@ fn a_missing_or_unreadable_user_or_group_is_refused() {
             "group without {name}"
         );
     }
+    assert_eq!(
+        resolve_ids(&without(PASSWD, ROOT_USER), GROUP),
+        Err(VaultError::UnknownUser { name: ROOT_USER }),
+        "passwd without root"
+    );
     let bad_uid = PASSWD.replace("owlhead_api:x:998:", "owlhead_api:x:-1:");
     assert_eq!(
         resolve_ids(&bad_uid, GROUP),

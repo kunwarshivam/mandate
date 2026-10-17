@@ -82,12 +82,16 @@ fn read_line(source: &mut impl Read) -> Result<SecretSlice<u8>, VaultError> {
     line
 }
 
-/// The layout's ids from the host's `/etc/passwd` and `/etc/group` text: root is uid 0, and
-/// each service user's uid comes from `passwd`, each group's gid from `group`.
+/// The superuser that owns the vault directory (DEC-692 item 1).
+pub const ROOT_USER: &str = "root";
+
+/// The layout's ids from the host's `/etc/passwd` and `/etc/group` text: each user's uid comes
+/// from `passwd` (`root` included, so a test host can name its own user), each group's gid from
+/// `group`.
 /// The first line naming a user or group is taken, as `getpwnam` does.
 pub fn resolve_ids(passwd: &str, group: &str) -> Result<Ids, VaultError> {
     Ok(Ids {
-        root_uid: 0,
+        root_uid: id_of(passwd, ROOT_USER)?,
         api_uid: id_of(passwd, API_USER)?,
         api_gid: id_of(group, API_USER)?,
         exec_uid: id_of(passwd, EXEC_USER)?,

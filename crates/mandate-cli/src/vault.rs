@@ -5,7 +5,7 @@
 //! It runs under `systemd-run` as `owlhead_exec` with both vault keys as credentials
 //! (`deploy/set-secrets.sh`), so it reads `$CREDENTIALS_DIRECTORY`, `$MANDATE_VAULT_DIR`
 //! (default [`DEFAULT_VAULT_DIR`]), and the service users' ids from `/etc/passwd` and
-//! `/etc/group`.
+//! `/etc/group` ([`UserDatabase::from_host`]).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -42,10 +42,29 @@ pub enum ImportedSecret {
     AlpacaOauthClientSecret,
 }
 
-/// Runs the import with the process's `environment` and `stdin`, and reports to `out`.
+/// The host's user and group databases, as the text of `/etc/passwd` and `/etc/group`.
+#[derive(Debug, Clone)]
+pub struct UserDatabase {
+    pub passwd: String,
+    pub group: String,
+}
+
+impl UserDatabase {
+    /// Reads `/etc/passwd` and `/etc/group`.
+    pub fn from_host() -> anyhow::Result<Self> {
+        Ok(Self {
+            passwd: fs::read_to_string("/etc/passwd").context("reading /etc/passwd")?,
+            group: fs::read_to_string("/etc/group").context("reading /etc/group")?,
+        })
+    }
+}
+
+/// Runs the import with the process's `environment`, the host's `users`, and `stdin`, and
+/// reports to `out`.
 pub fn run_import(
     args: &ImportArgs,
     environment: &[(String, String)],
+    users: &UserDatabase,
     stdin: &mut impl Read,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
@@ -63,9 +82,8 @@ pub fn run_import(
         )
     })?;
     let vault_dir = variable("MANDATE_VAULT_DIR").unwrap_or(DEFAULT_VAULT_DIR);
-    let passwd = fs::read_to_string("/etc/passwd").context("reading /etc/passwd")?;
-    let group = fs::read_to_string("/etc/group").context("reading /etc/group")?;
-    let ids = resolve_ids(&passwd, &group).map_err(|e| anyhow!("{e} ({})", e.code()))?;
+    let ids =
+        resolve_ids(&users.passwd, &users.group).map_err(|e| anyhow!("{e} ({})", e.code()))?;
     let inputs = Inputs {
         role: Role::Executor,
         vault_dir: Path::new(vault_dir),

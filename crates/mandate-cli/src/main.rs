@@ -139,6 +139,7 @@ fn main() -> anyhow::Result<()> {
             vault::run_import(
                 &args,
                 &environment,
+                &vault::UserDatabase::from_host()?,
                 &mut io::stdin().lock(),
                 &mut io::stdout().lock(),
             )

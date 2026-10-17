@@ -98,3 +98,186 @@ fn the_import_has_help() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("alpaca-oauth-client-secret"), "{stdout}");
 }
+
+mod in_process {
+    //! The import's glue, run in this process over a vault laid out in a temporary directory,
+    //! with a user database that names the test's own user as both service users.
+
+    use std::fs;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    use mandate_cli::vault::{ImportArgs, ImportedSecret, UserDatabase, run_import};
+    use mandate_vault_local::entry::{ALPACA_CLIENT_SECRET_KEY_REF, Entry, KeyRef};
+    use mandate_vault_local::import::{API_USER, EXEC_USER};
+    use mandate_vault_local::startup::{Ids, Inputs, Role};
+    use mandate_vault_local::store::open;
+    use secrecy::ExposeSecret;
+
+    use super::CANARY;
+
+    struct Host {
+        root: PathBuf,
+        users: UserDatabase,
+    }
+
+    fn mode(path: &Path, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    impl Host {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("mandate-cli-vault-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            let vault = root.join("vault");
+            for dir in [
+                vault.clone(),
+                vault.join("pending"),
+                vault.join("tokens"),
+                root.join("credentials"),
+            ] {
+                fs::create_dir_all(dir).unwrap();
+            }
+            mode(&vault, 0o755);
+            mode(&vault.join("pending"), 0o2770);
+            mode(&vault.join("tokens"), 0o730);
+            fs::write(root.join("credentials/vault-pending-key"), [3; 32]).unwrap();
+            fs::write(root.join("credentials/vault-token-key"), [4; 32]).unwrap();
+            let meta = fs::metadata(&vault).unwrap();
+            let (uid, gid) = (meta.uid(), meta.gid());
+            let users = UserDatabase {
+                passwd: format!(
+                    "root:x:{uid}:{gid}::/:/bin/false\n{API_USER}:x:{uid}:{gid}::/:/bin/false\n{EXEC_USER}:x:{uid}:{gid}::/:/bin/false\n"
+                ),
+                group: format!("{API_USER}:x:{gid}:\n{EXEC_USER}:x:{gid}:\n"),
+            };
+            Self { root, users }
+        }
+
+        fn environment(&self) -> Vec<(String, String)> {
+            vec![
+                (
+                    "CREDENTIALS_DIRECTORY".to_owned(),
+                    self.root.join("credentials").display().to_string(),
+                ),
+                (
+                    "MANDATE_VAULT_DIR".to_owned(),
+                    self.root.join("vault").display().to_string(),
+                ),
+            ]
+        }
+
+        fn stored(&self) -> Option<Vec<u8>> {
+            let environment = Vec::new();
+            let meta = fs::metadata(self.root.join("vault")).unwrap();
+            let inputs = Inputs {
+                role: Role::Executor,
+                vault_dir: &self.root.join("vault"),
+                credentials_dir: &self.root.join("credentials"),
+                environment: &environment,
+                ids: Ids {
+                    root_uid: meta.uid(),
+                    api_uid: meta.uid(),
+                    api_gid: meta.gid(),
+                    exec_uid: meta.uid(),
+                    exec_gid: meta.gid(),
+                },
+            };
+            let vault = open(&inputs).unwrap().into_executor().unwrap();
+            let entry = Entry::client_secret(KeyRef::new(ALPACA_CLIENT_SECRET_KEY_REF).unwrap());
+            vault
+                .read(&entry)
+                .unwrap()
+                .map(|s| s.expose_secret().to_vec())
+        }
+    }
+
+    impl Drop for Host {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn args() -> ImportArgs {
+        ImportArgs {
+            secret: ImportedSecret::AlpacaOauthClientSecret,
+        }
+    }
+
+    #[test]
+    fn the_import_stores_stdin_and_reports_without_it() {
+        let host = Host::new("ok");
+        let mut out = Vec::new();
+        let mut stdin = format!("{CANARY}\n");
+        run_import(
+            &args(),
+            &host.environment(),
+            &host.users,
+            &mut stdin.as_bytes(),
+            &mut out,
+        )
+        .unwrap();
+        stdin.clear();
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(out, "the Alpaca OAuth client secret is in the vault\n");
+        assert_eq!(host.stored().as_deref(), Some(CANARY.as_bytes()));
+    }
+
+    #[test]
+    fn each_input_the_import_reads_is_its_own() {
+        let host = Host::new("inputs");
+        let refuse = |environment: &[(String, String)], users: &UserDatabase| {
+            let mut out = Vec::new();
+            let error = run_import(
+                &args(),
+                environment,
+                users,
+                &mut CANARY.as_bytes(),
+                &mut out,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(out.is_empty());
+            assert!(!error.contains(CANARY), "{error}");
+            error
+        };
+        let mut environment = host.environment();
+        environment[1].1 = host.root.join("elsewhere").display().to_string();
+        assert!(refuse(&environment, &host.users).contains("directory_mismatch"));
+        let mut environment = host.environment();
+        environment[0].1 = host.root.join("no-credentials").display().to_string();
+        assert!(refuse(&environment, &host.users).contains("key_missing"));
+        let mut environment = host.environment();
+        environment.push(("MANDATE_VAULT_PENDING_KEY".to_owned(), CANARY.to_owned()));
+        assert!(refuse(&environment, &host.users).contains("key_in_environment"));
+        let environment = vec![host.environment()[1].clone()];
+        assert!(refuse(&environment, &host.users).contains("CREDENTIALS_DIRECTORY"));
+        let no_exec = UserDatabase {
+            passwd: host
+                .users
+                .passwd
+                .lines()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            group: host.users.group.clone(),
+        };
+        assert!(refuse(&host.environment(), &no_exec).contains("unknown_user"));
+        let mut stdin_refused = host.environment();
+        stdin_refused.reverse();
+        let mut out = Vec::new();
+        let error = run_import(
+            &args(),
+            &stdin_refused,
+            &host.users,
+            &mut format!("{CANARY} {CANARY}").as_bytes(),
+            &mut out,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("secret_not_printable"), "{error}");
+        assert!(!error.contains(CANARY));
+        assert_eq!(host.stored(), None);
+    }
+}
