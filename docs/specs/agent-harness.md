@@ -515,6 +515,9 @@ caller (DEC-132 item 13). The harness supplies it like this:
   model's word, with no corroboration and no approval (rule 2).
 - In `exits_only`, a run is review-only: its theses are discarded unjudged and only its
   invalidations count.
+- Invalidations are judged in response order against the active theses, and an accepted one ends
+  its thesis at once. So a second invalidation of the same thesis in one response names no active
+  thesis and is `unknown_thesis`. Each thesis has one record (journal spec §9.21 rule 168).
 - **The record.** An accepted invalidation is journaled as `ThesisInvalidated` (journal spec §9.21,
   DEC-2202) in its call's judging batch, after the call record whose verdict it carries, and the
   executor's `UniverseChanged` names it as its cause. Until `mandate-journal` registers it, no
