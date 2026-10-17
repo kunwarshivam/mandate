@@ -671,7 +671,11 @@ fn the_startup_hold_lifts_once_the_executor_reconciles_the_account() {
         tick(&rig, NOW + second);
         process.step(at(NOW + second));
     }
-    assert_eq!(process.lifecycle().state(), State::Ready, "each row is folded once");
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "each row is folded once"
+    );
     assert_eq!(mode(&process), Mode::Normal);
 }
 
@@ -787,19 +791,25 @@ fn an_account_stream_that_cannot_be_read_hands_no_tick_and_never_holds_the_kill_
     assert_eq!(risk_clock(&process), Some(NOW + 1));
 }
 
-/// What the start cannot read, it does not guess: an unreadable control or account stream refuses
-/// the start, and the next process starts on the whole fold.
+/// What the start cannot read, it does not guess: an unreadable control or account stream stops the
+/// process before it is ready, after its replay, and the next process starts on the whole fold.
 #[test]
-fn a_start_that_cannot_read_the_control_or_account_stream_refuses() {
+fn a_start_that_cannot_read_the_control_or_account_stream_is_never_ready() {
     let rig = Rig::default();
     rig.control_down.set(true);
     let process = start(&rig, NOW);
-    assert_eq!(process.lifecycle().state(), State::Exited(Exit::Refused));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
     let rig = Rig::default();
     established(&rig, CONNECTION, ACCOUNT_REF, 2);
     rig.account_down.set(true);
     let process = start(&rig, NOW);
-    assert_eq!(process.lifecycle().state(), State::Exited(Exit::Refused));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
 }
 
 /// A record the core cannot fold stops the process rather than being skipped (DEC-85).
@@ -810,9 +820,15 @@ fn an_account_record_the_core_cannot_fold_stops_the_process() {
     let mut process = start(&rig, NOW);
     on_account(&rig, ACCOUNT, "NoSuchRecord", "{}");
     process.step(at(NOW + 1));
-    assert_eq!(process.lifecycle().state(), State::Exited(Exit::CycleFailed));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
     let restarted = start(&rig, NOW + 2);
-    assert_eq!(restarted.lifecycle().state(), State::Exited(Exit::Refused));
+    assert_eq!(
+        restarted.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
 }
 
 /// The account a running process follows never changes under it: a later establishment naming
@@ -824,8 +840,156 @@ fn an_establishment_naming_another_account_stops_the_process() {
     let mut process = start(&rig, NOW);
     established(&rig, CONNECTION, ACCOUNT_REF, 2);
     process.step(at(NOW + 1));
-    assert_eq!(process.lifecycle().state(), State::Ready, "the same account again");
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "the same account again"
+    );
     established(&rig, CONNECTION, OTHER_REF, 2);
     process.step(at(NOW + 2));
-    assert_eq!(process.lifecycle().state(), State::Exited(Exit::CycleFailed));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+}
+
+#[derive(Debug, Clone)]
+enum AccountOp {
+    Establish,
+    Reconcile { clean: bool },
+    Applied { here: bool, to: &'static str },
+    Unreadable,
+    Step,
+    Restart,
+}
+
+fn account_op() -> impl Strategy<Value = AccountOp> {
+    prop_oneof![
+        Just(AccountOp::Establish),
+        any::<bool>().prop_map(|clean| AccountOp::Reconcile { clean }),
+        (
+            any::<bool>(),
+            prop_oneof![
+                Just("normal"),
+                Just("exits_only"),
+                Just("paused"),
+                Just("stopped")
+            ]
+        )
+            .prop_map(|(here, to)| AccountOp::Applied { here, to }),
+        Just(AccountOp::Unreadable),
+        Just(AccountOp::Step),
+        Just(AccountOp::Restart),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// Whatever the interleaving of the executor's records, the connection's establishment,
+    /// unreadable account reads, passes, and restarts, once the account is established and a pass
+    /// reads it: the process is ready, and its effective mode is the executor's latest mode for this
+    /// agent, held at least `paused` until a clean reconciliation (trading spec §11, DEC-1014). The
+    /// oracle reads only the rows the test laid down.
+    #[test]
+    fn the_runtime_s_mode_follows_its_account_stream_whatever_the_interleaving(
+        ops in proptest::collection::vec(account_op(), 1..24),
+    ) {
+        let rig = Rig::default();
+        let mut second = NOW;
+        let mut process = start(&rig, second);
+        let mut is_established = false;
+        for op in ops {
+            second += 1;
+            match op {
+                AccountOp::Establish => {
+                    if !is_established {
+                        established(&rig, CONNECTION, ACCOUNT_REF, 2);
+                        is_established = true;
+                    }
+                }
+                AccountOp::Reconcile { clean } => on_account(
+                    &rig,
+                    ACCOUNT,
+                    "ReconciliationRun",
+                    if clean { r#"{"result":"clean"}"# } else { r#"{"result":"mismatch"}"# },
+                ),
+                AccountOp::Applied { here, to } => {
+                    let agent = if here { AGENT } else { "agent-b" };
+                    on_account(
+                        &rig,
+                        ACCOUNT,
+                        "AgentModeApplied",
+                        &format!(r#"{{"agent":"{agent}","to":"{to}"}}"#),
+                    );
+                }
+                AccountOp::Unreadable => {
+                    rig.account_down.set(true);
+                    tick(&rig, second);
+                    process.step(at(second));
+                    rig.account_down.set(false);
+                }
+                AccountOp::Step => {
+                    tick(&rig, second);
+                    process.step(at(second));
+                }
+                AccountOp::Restart => {
+                    process = start(&rig, second);
+                    if is_established {
+                        prop_assert_eq!(mode(&process), expected_mode(&rig), "at the start");
+                    }
+                }
+            }
+        }
+        if !is_established {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+        }
+        second += 1;
+        tick(&rig, second);
+        process.step(at(second));
+        prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
+        prop_assert_eq!(mode(&process), expected_mode(&rig), "{:?}", kinds(&rig));
+    }
+}
+
+/// The effective mode the account rows the test laid down call for: the executor's latest mode for
+/// this agent, held at least `paused` until a clean reconciliation. Computed from the rows alone.
+fn expected_mode(rig: &Rig) -> Mode {
+    let laid: Vec<(String, String)> = rig
+        .accounts
+        .borrow()
+        .iter()
+        .map(|r| {
+            let body = parse(&r.body).unwrap();
+            let payload = body.get("payload").unwrap();
+            let field = |name: &str| {
+                payload
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            match r.event_type.as_str() {
+                "ReconciliationRun" => ("reconciled".to_owned(), field("result")),
+                _ => (field("agent"), field("to")),
+            }
+        })
+        .collect();
+    let ever_clean = laid
+        .iter()
+        .any(|(kind, result)| kind == "reconciled" && result == "clean");
+    let copied = laid.iter().rev().find(|(agent, _)| agent == AGENT).map_or(
+        Mode::Normal,
+        |(_, to)| match to.as_str() {
+            "exits_only" => Mode::ExitsOnly,
+            "paused" => Mode::Paused,
+            "stopped" => Mode::Stopped,
+            _ => Mode::Normal,
+        },
+    );
+    if ever_clean {
+        copied
+    } else {
+        copied.max(Mode::Paused)
+    }
 }
