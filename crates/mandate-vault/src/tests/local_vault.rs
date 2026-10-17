@@ -10,21 +10,19 @@
     reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
 )]
 
-mod conformance;
-
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use conformance::Harness;
+use super::conformance::{self, Harness};
+use crate::SourceError;
+use crate::local::{GrantBook, LocalSource};
+use crate::policy::Identity;
+use crate::source::Grant;
 use mandate_connections::record::Environment;
 use mandate_time::UtcNanos;
-use mandate_vault::SourceError;
-use mandate_vault::local::{GrantBook, LocalSource};
-use mandate_vault::policy::Identity;
-use mandate_vault::source::Grant;
 use mandate_vault_local::startup::{Ids, Inputs, Role};
 use mandate_vault_local::store::{Opened, open};
 
@@ -204,11 +202,10 @@ async fn an_expired_or_foreign_grant_is_refused() {
     let h = Local::new();
     let now = conformance::at(1_000_000);
     let manager = h.source(Identity::ConnectionManager, now).await;
-    let grant =
-        mandate_vault::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
-            .await
-            .unwrap();
-    let late = conformance::at(1_000_000 + mandate_vault::source::GRANT_SECS);
+    let grant = crate::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
+        .await
+        .unwrap();
+    let late = conformance::at(1_000_000 + crate::source::GRANT_SECS);
     assert_eq!(
         h.exchange(&grant, late).await.map(drop),
         Err(SourceError::GrantInvalid)
@@ -239,14 +236,13 @@ async fn a_tampered_token_is_an_integrity_refusal_that_drops_the_lease() {
     let h = Local::new();
     let now = conformance::at(1_000_000);
     let manager = h.source(Identity::ConnectionManager, now).await;
-    let grant =
-        mandate_vault::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
-            .await
-            .unwrap();
+    let grant = crate::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
+        .await
+        .unwrap();
     let exchange = h.exchange(&grant, now).await.unwrap();
-    mandate_vault::source::SecretSource::put(
+    crate::source::SecretSource::put(
         &exchange,
-        &mandate_vault::policy::SecretPath::Token(conformance::c("c1")),
+        &crate::policy::SecretPath::Token(conformance::c("c1")),
         &conformance::secret("token-1"),
     )
     .await
@@ -254,7 +250,7 @@ async fn a_tampered_token_is_an_integrity_refusal_that_drops_the_lease() {
     let executor = h
         .source(Identity::Executor(conformance::c("c1")), now)
         .await;
-    let lease = mandate_vault::source::SecretSource::lease(&executor, &conformance::c("c1"), now)
+    let lease = crate::source::SecretSource::lease(&executor, &conformance::c("c1"), now)
         .await
         .unwrap();
     for entry in fs::read_dir(h.root.join("vault/tokens")).unwrap() {
@@ -264,9 +260,9 @@ async fn a_tampered_token_is_an_integrity_refusal_that_drops_the_lease() {
         bytes[last] ^= 1;
         fs::write(&path, bytes).unwrap();
     }
-    let renewed = mandate_vault::source::SecretSource::renew(&executor, &lease, now).await;
+    let renewed = crate::source::SecretSource::renew(&executor, &lease, now).await;
     assert_eq!(renewed.as_ref().map(drop), Err(&SourceError::Integrity));
-    let mut keeper = mandate_vault::lease::LeaseKeeper::new(lease);
+    let mut keeper = crate::lease::LeaseKeeper::new(lease);
     keeper.apply(renewed, now);
     assert!(keeper.secret(now).is_none());
 }
@@ -278,10 +274,9 @@ async fn each_local_grant_has_its_own_random_accessor_and_secret_id() {
     let manager = h.source(Identity::ConnectionManager, now).await;
     let mut seen = std::collections::BTreeSet::new();
     for _ in 0..4 {
-        let grant =
-            mandate_vault::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
-                .await
-                .unwrap();
+        let grant = crate::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
+            .await
+            .unwrap();
         let secret = secrecy::ExposeSecret::expose_secret(&grant.secret_id).to_owned();
         assert_eq!(grant.accessor.len(), 32);
         assert_eq!(secret.len(), 64);

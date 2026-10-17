@@ -612,8 +612,9 @@ fn openbao() -> Result<()> {
         "run",
         "--package",
         "mandate-vault",
-        "--test",
-        "openbao",
+        "--lib",
+        "--filterset",
+        "test(/^tests::openbao_server::/)",
         "--locked",
     ];
     eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));

@@ -17,18 +17,16 @@
     reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
 )]
 
-mod conformance;
-
 use std::fs;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use conformance::{Harness, at, c};
+use super::conformance::{self, Harness, at, c};
+use crate::SourceError;
+use crate::openbao::{OpenBaoConfig, OpenBaoSource, RoleCredentials, provision};
+use crate::policy::{Identity, Mounts};
+use crate::source::Grant;
 use mandate_time::UtcNanos;
-use mandate_vault::SourceError;
-use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, RoleCredentials, provision};
-use mandate_vault::policy::{Identity, Mounts};
-use mandate_vault::source::Grant;
 use secrecy::SecretString;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
@@ -295,10 +293,10 @@ async fn an_expired_grant_is_refused_before_any_login() {
     };
     let now = at(1_000_000);
     let manager = bao.source(Identity::ConnectionManager, now).await;
-    let grant = mandate_vault::source::SecretSource::issue_grant(&manager, &c("c1"), now)
+    let grant = crate::source::SecretSource::issue_grant(&manager, &c("c1"), now)
         .await
         .unwrap();
-    let late = at(1_000_000 + mandate_vault::source::GRANT_SECS);
+    let late = at(1_000_000 + crate::source::GRANT_SECS);
     assert_eq!(
         bao.exchange(&grant, late).await.map(drop),
         Err(SourceError::GrantInvalid)

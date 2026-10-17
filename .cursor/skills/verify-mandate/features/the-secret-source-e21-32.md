@@ -7,8 +7,8 @@
   `src/lease.rs` (`Lease`, `LeaseKeeper`), `src/local.rs` (over `mandate-vault-local`),
   `src/openbao.rs` (the OpenBao client and `provision`), `src/error.rs` (`SourceError`).
 - **Tests:** `crates/mandate-vault/src/tests/` (the policy matrix against a hand-written oracle,
-  the generated policies, the lease rule as a property test, the seal check);
-  `crates/mandate-vault/tests/conformance/` (one suite), run by `tests/local.rs` and
-  `tests/openbao.rs` (skipped unless an OpenBao server is configured).
+  the generated policies, the lease rule as a property test, the seal check), and there
+  `conformance.rs` (one suite), run by `local_vault.rs` and `openbao_server.rs` (skipped unless an
+  OpenBao server is configured; unit tests, since only `cfg(test)` may reach a dev server).
 - **Run:** `cargo nextest run -p mandate-vault`; with OpenBao,
   `.github/scripts/start-openbao.sh` then `cargo xtask ci openbao` with the variables it prints.

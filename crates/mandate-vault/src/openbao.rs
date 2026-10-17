@@ -9,8 +9,8 @@
 //!
 //! Before it logs in, the client reads `sys/seal-status`: a sealed vault is
 //! [`SourceError::Sealed`], since unsealing is an operator's step (DEC-977 item 5), and a dev
-//! server (in-memory storage) is [`SourceError::DevServerRefused`] unless the `dev-server`
-//! feature, which only this crate's tests turn on, allows it.
+//! server (in-memory storage) is [`SourceError::DevServerRefused`] outside this crate's own
+//! unit tests.
 //!
 //! A grant is a single-use AppRole secret id for that connection's exchange role, valid
 //! [`crate::source::GRANT_SECS`], whose token lives no longer.
@@ -39,9 +39,9 @@ use crate::source::{GRANT_SECS, Grant, SecretSource};
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// The longest an executor's token lives through renewals before it logs in again: 30 days.
 const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
-/// Whether this build may use a dev server: only with the `dev-server` feature, which only this
-/// crate's tests turn on.
-const ALLOW_DEV_SERVER: bool = cfg!(feature = "dev-server");
+/// Whether this build may use a dev server: only this crate's own unit-test build, so no other
+/// crate's build, test or not, can turn it on (DEC-977 item 6).
+const ALLOW_DEV_SERVER: bool = cfg!(test);
 
 /// Where the vault is and how to trust it.
 #[derive(Clone)]

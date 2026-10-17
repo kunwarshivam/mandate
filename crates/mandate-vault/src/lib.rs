@@ -11,7 +11,7 @@
 //! The workspace vault behind one interface (E21-32; infrastructure §5.2, §5.6; DEC-434 item 14;
 //! DEC-977). [`source::SecretSource`] is what a process holds: a session with the vault as one
 //! [`policy::Identity`]. Two backends implement it and pass one conformance suite
-//! (`tests/conformance/`):
+//! (`src/tests/conformance.rs`):
 //!
 //! - [`local::LocalSource`], over the demo host's local vault (`mandate-vault-local`, DEC-692);
 //! - [`openbao::OpenBaoSource`], over OpenBao's HTTP API, over TLS, with one AppRole and one

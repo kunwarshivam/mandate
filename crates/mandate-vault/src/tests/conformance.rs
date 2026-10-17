@@ -12,12 +12,12 @@
     reason = "ADR-0001 ES-09 excepts tests; each harness file uses the cases it runs"
 )]
 
+use crate::SourceError;
+use crate::lease::{LEASE_SECS, LeaseKeeper, RENEW_SECS};
+use crate::policy::{Access, Identity, SecretPath};
+use crate::source::{GRANT_SECS, Grant, SecretSource};
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
-use mandate_vault::SourceError;
-use mandate_vault::lease::{LEASE_SECS, LeaseKeeper, RENEW_SECS};
-use mandate_vault::policy::{Access, Identity, SecretPath};
-use mandate_vault::source::{GRANT_SECS, Grant, SecretSource};
 use secrecy::{ExposeSecret, SecretSlice};
 
 /// A secret no output may contain.
