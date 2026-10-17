@@ -2,8 +2,9 @@
 
 import { type FormEvent, useState } from "react";
 import { WarningDiamond } from "pixelarticons/react/WarningDiamond.js";
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/auth-config";
 import { BETA_REQUEST_PATH } from "@/lib/auth-routes";
-import { BETA_ROLES, type BetaRole } from "@/lib/beta";
+import { BETA_ROLES, type BetaRole, betaOpen } from "@/lib/beta";
 import { cn } from "@/lib/utils";
 import { BUTTON, FIELD, PIXEL, SUNKEN } from "./letter";
 
@@ -14,7 +15,7 @@ export const ROLE_LABELS: Record<BetaRole, string> = {
   builder: "Connecting an agent I've built",
 };
 
-type Status = "idle" | "sending" | "done" | "email" | "unavailable";
+type Status = "idle" | "sending" | "done" | "email" | "unavailable" | "closed";
 
 function problem(status: Status): string | null {
   switch (status) {
@@ -25,11 +26,22 @@ function problem(status: Status): string | null {
     case "idle":
     case "sending":
     case "done":
+    case "closed":
       return null;
     default: {
       const unreachable: never = status;
       return unreachable;
     }
+  }
+}
+
+/** Whether the route answered that the beta is closed (DEC-987), rather than failing. */
+async function answeredClosed(response: Response): Promise<boolean> {
+  try {
+    const body: unknown = await response.json();
+    return typeof body === "object" && body !== null && (body as { error?: unknown }).error === "closed";
+  } catch {
+    return false;
   }
 }
 
@@ -70,7 +82,9 @@ const LOOKS: Record<Look, { face: string; field: string; roles: string; role: st
  */
 export function BetaForm({ id = "beta", look = "guestbook", className }: { id?: string; look?: Look; className?: string }) {
   const style = LOOKS[look];
-  const [status, setStatus] = useState<Status>("idle");
+  const [status, setStatus] = useState<Status>(() =>
+    betaOpen(process.env.NODE_ENV, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, process.env.OWLHEAD_E2E_SCENARIOS) ? "idle" : "closed",
+  );
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<BetaRole | null>(null);
   const [website, setWebsite] = useState("");
@@ -85,10 +99,20 @@ export function BetaForm({ id = "beta", look = "guestbook", className }: { id?: 
         body: JSON.stringify({ email, role, website }),
       });
       if (response.ok) setStatus("done");
-      else setStatus(response.status === 400 ? "email" : "unavailable");
+      else if (response.status === 400) setStatus("email");
+      else setStatus((await answeredClosed(response)) ? "closed" : "unavailable");
     } catch {
       setStatus("unavailable");
     }
+  }
+
+  if (status === "closed") {
+    return (
+      <div role="status" className={cn("grid gap-2 text-base", style.face, className)} data-slot="beta-closed">
+        <p className="font-semibold">The private beta isn&apos;t taking requests yet.</p>
+        <p>Check back soon.</p>
+      </div>
+    );
   }
 
   if (status === "done") {
