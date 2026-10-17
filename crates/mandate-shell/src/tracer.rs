@@ -567,6 +567,9 @@ pub(crate) struct Session<'s> {
     holding: bool,
     /// The risk-adding submission held while `holding`, sent only by [`AskedCycle::submit`].
     held: Option<mandate_executor::SubmitOrder>,
+    /// The one risk-adding submission this run sent, which the watch watches (FT-1): a
+    /// protective order or an exit beside it is never counted against it (`AGENTS.md` rule 13).
+    opening: Option<mandate_executor::ClientOrderId>,
     pub(crate) report: Report,
     /// The time every record this session appends carries: the run's clock, then each wake's
     /// during a watch (DEC-858 item 3).
@@ -601,6 +604,7 @@ impl<'s> Session<'s> {
             cycle_open: false,
             holding: false,
             held: None,
+            opening: None,
             report: Report::default(),
             event_time: setup.now,
         };
@@ -941,7 +945,7 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
+    /// E1b's watch over the run's one risk-adding submission (DEC-858 items 3 to 5). Each wake pauses, moves
     /// the event time to the clock, and reads the entry back ([`entry_read`]: by its client order
     /// id, or by the profile's listing where it cannot query by it, DEC-1150 item 3), then ticks the
     /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
@@ -961,11 +965,9 @@ impl<'s> Session<'s> {
         watch: &Watch<P>,
         end: MayEnd<'_>,
     ) -> Result<(), ShellError> {
-        let Some(entry) = self.report.submitted.first() else {
+        let Some(entry) = self.opening.clone() else {
             return Ok(());
         };
-        let entry = mandate_executor::ClientOrderId::parse(entry)
-            .map_err(|error| refused(Stage::Executor)(Cause::Executor(error)))?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -1228,8 +1230,9 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Step 13. A submission goes out only when its `OrderSubmitted` committed in this run, only
-    /// when the operator asked for an order, and only once per run.
+    /// Step 13. A submission goes out only when its `OrderSubmitted` committed in this run, and
+    /// only when the operator asked for an order. One that adds risk goes out once per run; a
+    /// protective order or an exit always goes out (`AGENTS.md` rule 13, DEC-1151 item 5).
     fn broker(
         &mut self,
         request: &BrokerRequest,
@@ -1250,7 +1253,7 @@ impl<'s> Session<'s> {
             match door(
                 self.holding,
                 self.held.is_some(),
-                !self.report.submitted.is_empty(),
+                self.opening.is_some(),
                 order.purpose,
             ) {
                 Door::Second => return Err(ShellError::SecondSubmission),
@@ -1260,8 +1263,11 @@ impl<'s> Session<'s> {
                 }
                 Door::Pass => {}
             }
-            if !self.report.submitted.is_empty() {
-                return Err(ShellError::SecondSubmission);
+            if order.purpose.adds_risk() {
+                if self.opening.is_some() {
+                    return Err(ShellError::SecondSubmission);
+                }
+                self.opening = Some(order.client_order_id.clone());
             }
             self.report
                 .submitted
