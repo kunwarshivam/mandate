@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use common::after;
 use mandate_gateway::provider::Clock;
-use mandate_gateway_http::{SystemClock, budget, retry_after_ms, url_for};
+use mandate_gateway_http::{MAX_BODY_BYTES, SystemClock, budget, retry_after_ms, url_for};
 use mandate_time::UtcNanos;
 
 #[test]
@@ -81,6 +81,11 @@ fn a_path_outside_the_rules_is_refused() {
         url_for("openrouter.ai", "/a/../b").is_none(),
         "a path the URL parser would rewrite is refused"
     );
+}
+
+#[test]
+fn the_body_cap_is_four_mebibytes() {
+    assert_eq!(MAX_BODY_BYTES, 4_194_304, "DEC-2200 item 7");
 }
 
 #[test]

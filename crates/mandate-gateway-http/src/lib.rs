@@ -203,11 +203,12 @@ impl Transport for HttpsTransport {
 
 /// The URL of an attempt: `https://` + `host` + `path`, or `None` when either breaks DEC-2200 item
 /// 4. The host is a lowercase DNS name or IPv4 address, each label non-empty, with an optional port
-/// from 1 to 65535; the path starts with `/` and is visible ASCII without `?`, `#` or `\`; and the
-/// parsed URL's host and port must be exactly the ones given, so nothing is reinterpreted.
+/// from 1 to 65535, and the URL must parse back to exactly that host, port, and path. So nothing is
+/// reinterpreted: a path the parser would split or rewrite (a query, a fragment, a backslash, a
+/// space, a non-ASCII byte, a `..` segment, or no leading `/`) is refused, not sent changed.
 pub fn url_for(host: &str, path: &str) -> Option<Url> {
     let (name, port) = match host.split_once(':') {
-        Some((name, port)) => (name, Some(port)),
+        Some((name, digits)) => (name, Some(digits.parse::<u16>().ok().filter(|&p| p > 0)?)),
         None => (host, None),
     };
     let name_ok = !name.is_empty()
@@ -217,18 +218,7 @@ pub fn url_for(host: &str, path: &str) -> Option<Url> {
                     .bytes()
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         });
-    let port = match port {
-        None => None,
-        Some(digits) if digits.bytes().all(|b| b.is_ascii_digit()) => {
-            Some(digits.parse::<u16>().ok().filter(|&p| p > 0)?)
-        }
-        Some(_) => return None,
-    };
-    let path_ok = path.starts_with('/')
-        && path
-            .bytes()
-            .all(|b| b.is_ascii_graphic() && !matches!(b, b'?' | b'#' | b'\\'));
-    if !name_ok || !path_ok {
+    if !name_ok {
         return None;
     }
     let url = Url::parse(&format!("https://{host}{path}")).ok()?;
