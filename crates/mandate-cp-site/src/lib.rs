@@ -320,12 +320,63 @@ where
     I: FnMut() -> String,
     C: FnMut() -> UtcNanos,
 {
-    fn hand_over(&mut self, _verified: Verified) -> HandOver {
-        HandOver::Unavailable
+    fn hand_over(&mut self, verified: Verified) -> HandOver {
+        let (event_type, kind, payload) = record(&verified);
+        let digest = identity(&payload);
+        let sequence = verified.instruction().sequence().map(|s| s.get());
+        let covered: Vec<Ident> = match verified.instruction() {
+            Instruction::License(l) => self
+                .streams
+                .hosted()
+                .into_iter()
+                .filter(|(_, org)| *org == l.org_id)
+                .map(|(w, _)| w)
+                .collect(),
+            _ => self.streams.hosted().into_iter().map(|(w, _)| w).collect(),
+        };
+        let refusal = |reason| Refusal {
+            message: verified.message_kind(),
+            reason,
+            sequence,
+            document_digest: verified.document_digest(),
+        };
+        if covered.is_empty() {
+            return self.refuse_everywhere(&refusal(RefusalReason::NotAddressed));
+        }
+        let mut outcomes = Vec::new();
+        let mut replayed = false;
+        for workspace in covered {
+            let Some(records) = self.streams.records(&workspace) else {
+                outcomes.push(HandOver::Unavailable);
+                continue;
+            };
+            match standing(&records, &kind, &digest, sequence) {
+                Standing::InEffect => outcomes.push(HandOver::AlreadyApplied),
+                Standing::Replayed => {
+                    replayed = true;
+                    outcomes.push(self.refuse_on(&workspace, &refusal(RefusalReason::Replayed)));
+                }
+                Standing::New => {
+                    let draft = self.draft(event_type, &workspace, payload.clone());
+                    if self.streams.append(&workspace, &draft) {
+                        self.effects.apply(&workspace, &verified);
+                        outcomes.push(HandOver::Journaled);
+                    } else {
+                        outcomes.push(HandOver::Unavailable);
+                    }
+                }
+            }
+        }
+        let done = if replayed {
+            HandOver::Refused(RefusalReason::Replayed)
+        } else {
+            HandOver::Journaled
+        };
+        combined(&outcomes, done)
     }
 
-    fn refused(&mut self, _refusal: Refusal) -> HandOver {
-        HandOver::Unavailable
+    fn refused(&mut self, refusal: Refusal) -> HandOver {
+        self.refuse_everywhere(&refusal)
     }
 }
 
