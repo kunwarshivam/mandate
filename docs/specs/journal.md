@@ -4181,7 +4181,9 @@ An agentic research run ([agent harness spec §6.9](agent-harness.md#69-the-agen
 one gateway call with its own `ModelInvocationRecorded` (§9.19), unchanged: its position in the run
 is its order among the run's records, so it needs no turn member. A turn's rule 151 candidates are
 the final output's theses and invalidations, or, for an entry with action tools, the reply's
-`propose_thesis` and `invalidate` calls; their verdicts sort theses first, each kind in reply order.
+`propose_thesis` and `invalidate` calls that were mediated (not refused `call_budget`,
+`max_theses`, `max_repeat_denials`, or `run_ended`), mapped to the verdict list in reply order
+within each kind; their verdicts sort theses first, each kind in reply order.
 Five records carry the rest, all on the agent stream at `schema_version` 1 and closed as §9.2's
 conventions say (every member present, `null` only where the type is nullable, any other member
 refused, opaque text non-empty). Each has the run id as `correlation_id`, as the run's turn records
@@ -4242,7 +4244,7 @@ input (agent harness spec §6.12), once per run that ends.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `reason` | `done` \| `bound` \| `deadline` \| `cost` \| `mode` \| `error` \| `answered` | The model ended it; a bound the core counts ended it; the risk clock passed its deadline, or a turn ended `deadline_exceeded` on a deadline the run's time left had cut; a turn ended `budget_exhausted` under the run's ceiling or any other cap; a mode change, a version change, Stop, or the kill switch cancelled it; a turn ended with any other error outcome; or an `answer` was shown (§15) |
+| `reason` | `done` \| `bound` \| `deadline` \| `cost` \| `mode` \| `error` \| `answered` | The model ended it; a bound the core counts ended it; the risk clock passed its deadline, or a turn ended `deadline_exceeded` on a deadline the run's time left had cut; a turn ended `budget_exhausted` under the run's ceiling or any other cap; a mode change, a version change, a withdrawn model or disabled research, Stop, or the kill switch cancelled it; a turn ended with any other error outcome; or an `answer` was shown (§15) |
 | `bound` | `max_turns` \| `max_tool_calls` \| `max_repeat_denials` \| `max_theses` \| `null` | The bound, exactly when `reason` is `bound`: rule 182 |
 | `turns`, `tool_calls`, `result_bytes` | `integer` | The run's turns sent, its `ToolCallRecorded` records, and its read results' bytes |
 
