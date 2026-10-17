@@ -280,14 +280,16 @@ impl<S: Store> RuntimeProcess<S> {
     /// The account stream's rows past the core's own head for it, each folded once, in journal
     /// order, as the shell folds the account rows it commits (DEC-2209 items 3 to 5). The core acts
     /// on them at the next input, the tick that follows: it settles its startup hold and journals any
-    /// change of mode then (MI-6). Whether the stream was read and every row folded, so the clock
-    /// pass may follow; a row the core cannot fold stops the process.
+    /// change of mode then (MI-6). An account stream that cannot be read folds nothing and holds
+    /// nothing: the tick still runs on the core's last folded view, so no exit or approval deadline
+    /// waits on an account-stream outage (`AGENTS.md` rules 3 and 13). Whether the process is still
+    /// running: a row the core cannot fold stops it.
     fn account_pass(&mut self, now: UtcNanos) -> bool {
         let Some(Some(account)) = self.account.clone() else {
             return true;
         };
         let Some(events) = self.store.rows(&account).and_then(|r| tailed(&r).ok()) else {
-            return false;
+            return true;
         };
         let head = self.state.head(account.as_str()).map_or(0, |seq| seq.0);
         for event in events.iter().filter(|event| event.seq.0 > head) {
@@ -463,8 +465,6 @@ impl<S: Store> RuntimeProcess<S> {
         }
     }
 
-    /// Folds `rows` of the agent stream into the core; the stream's head after them, or `None` for
-    /// a row the core cannot fold.
     /// The account stream folded after the agent stream and before `Input::Started`, as the shell
     /// folds it, so the startup hold is taken with the broker's last known truth (DEC-2209 item 2).
     /// Whether every row folded; with no account named there is nothing to fold.
@@ -480,6 +480,8 @@ impl<S: Store> RuntimeProcess<S> {
             .all(|event| fold(&mut self.state, event).is_ok())
     }
 
+    /// Folds `rows` of the agent stream into the core; the stream's head after them, or `None` for
+    /// a row the core cannot fold.
     fn fold_rows(&mut self, rows: &[StoredEvent]) -> Option<u64> {
         for event in tailed(rows).ok()? {
             fold(&mut self.state, &event).ok()?;
