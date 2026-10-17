@@ -253,6 +253,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport: (),
     } = sources;
@@ -266,6 +267,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport,
     }
@@ -741,6 +743,7 @@ pub fn run<P: Ports>(
         account_ref: deployed.account_ref().to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
+        content_store: Some(Box::new(store.clone())),
         artifacts: Some(Arc::new(store)),
         symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport: (),
@@ -822,6 +825,7 @@ impl<S: Session> Booking<'_, S> {
             executor: Some(context),
             run: None,
             artifacts: Some(Arc::new(store)),
+            content_store: None,
             symbols: BrokerSymbols::registered([(ticker, asset_id)]),
             transport: (),
         };

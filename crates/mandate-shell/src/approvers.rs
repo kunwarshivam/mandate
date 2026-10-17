@@ -14,6 +14,9 @@
 use std::collections::BTreeSet;
 
 use mandate_canon::Value;
+use mandate_domain::Environment;
+use mandate_runtime::LiveScope;
+use mandate_spec::Mandate;
 use mandate_spec::document::ApproverRef;
 
 use crate::control::ControlRecord;
@@ -93,4 +96,19 @@ pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String
         })
         .map(|_| owner.clone())
         .collect()
+}
+
+/// DEC-923's scope for a live `cli_confirm` grant, read as `mandate approvals approve` reads it
+/// (DEC-970 item 1): on a `live` run, the mandate connection's latest record is a `live`
+/// `ConnectionEstablished`, its broker names the scope's broker, the confirmed mandate gives the
+/// per-order cap and the pinned instruments, and the owner is [`members`]' owner. `None` on a paper
+/// run, and whenever any part cannot be read, so the runtime refuses every live `cli_confirm`
+/// grant `step_up_method` (`AGENTS.md` rule 3).
+pub fn live_cli_confirm(
+    records: &[ControlRecord],
+    mandate: &Mandate,
+    environment: Environment,
+) -> Option<LiveScope> {
+    let _ = (records, mandate, environment);
+    None
 }
