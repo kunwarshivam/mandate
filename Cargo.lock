@@ -1657,6 +1657,7 @@ dependencies = [
  "mandate-num",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault-local",
  "proptest",
  "secrecy",
  "serde",
@@ -2267,9 +2268,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-vault"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "mandate-connections",
+ "mandate-time",
+ "mandate-vault-local",
+ "proptest",
+ "reqwest",
+ "ring",
+ "rustls",
+ "secrecy",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [
+ "mandate-connections",
+ "proptest",
+ "ring",
  "secrecy",
  "thiserror",
 ]
