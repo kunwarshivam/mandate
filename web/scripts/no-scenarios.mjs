@@ -1,6 +1,7 @@
 // Fails the build if the dev-only scenario switcher reached it, or if a production build (flag unset)
 // accepts a scenario. Run after `next build`: it scans the output for the switcher, then starts the
-// build and asks for the stale scenario by query parameter and by cookie. The e2e build
+// build and asks for the stale scenario by query parameter and by cookie, and for the mock workspace API
+// at `/v1` (DEC-975), which only the e2e build serves. The e2e build
 // (`OWLHEAD_E2E_SCENARIOS=1`, scripts/e2e-build.mjs) must accept both, so the flag is checked both ways.
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -31,7 +32,9 @@ export async function probe(origin) {
   const setCookie = byParam.headers.getSetCookie().join("; ");
   const byCookie = await fetch(`${origin}/`, { headers: { cookie: `${COOKIE}=stale` } });
   const html = await byCookie.text();
+  const mockApi = await fetch(`${origin}/v1/workspaces/ws_probe/health`);
   return {
+    mockApiStatus: mockApi.status,
     paramStatus: byParam.status,
     paramSetsCookie: setCookie.includes(`${COOKIE}=stale`),
     cookieRendersStale: html.includes(DEGRADED),
@@ -53,6 +56,8 @@ async function withBuild(run) {
   const origin = `http://127.0.0.1:${port}`;
   const next = spawn(join("node_modules", ".bin", "next"), ["start", "--hostname", "127.0.0.1", "--port", String(port)], {
     stdio: ["ignore", "ignore", "inherit"],
+    // The probe asks the build about scenarios, so it reads the fixtures whatever source the shell names (DEC-975).
+    env: { ...process.env, OWLHEAD_DATA_SOURCE: "fixtures" },
   });
   try {
     for (let i = 0; ; i++) {
@@ -78,10 +83,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { scanned, hits } = findSwitcher(join(process.cwd(), dir));
   if (hits.length) failures.push(`the dev-only scenario switcher is in the build:\n    ${hits.join("\n    ")}`);
   const seen = await withBuild(probe);
-  const accepts = seen.paramStatus === 307 && seen.paramSetsCookie && seen.cookieRendersStale;
-  const refuses = seen.paramStatus === 200 && !seen.paramSetsCookie && !seen.cookieRendersStale;
+  const accepts = seen.paramStatus === 307 && seen.paramSetsCookie && seen.cookieRendersStale && seen.mockApiStatus === 200;
+  const refuses = seen.paramStatus === 200 && !seen.paramSetsCookie && !seen.cookieRendersStale && seen.mockApiStatus === 404;
   if (e2e && !accepts) failures.push(`the e2e build must accept ?scenario=stale and its cookie: ${JSON.stringify(seen)}`);
-  if (!e2e && !refuses) failures.push(`a production build must ignore ?scenario= and the scenario cookie: ${JSON.stringify(seen)}`);
+  if (!e2e && !refuses) failures.push(`a production build must ignore ?scenario= and the scenario cookie, and serve no mock API: ${JSON.stringify(seen)}`);
   if (failures.length) {
     console.error(`no-scenarios (${dir}):\n  ${failures.join("\n  ")}`);
     process.exit(1);

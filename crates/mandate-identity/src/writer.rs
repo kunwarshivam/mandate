@@ -7,6 +7,8 @@
 //! and appends at the head it read; a moved head re-runs it, and a refusal is returned for the
 //! caller to retry, never clamped (rule 106).
 
+use std::convert::Infallible;
+
 use mandate_time::UtcNanos;
 
 use mandate_identity_seal::Seal;
@@ -84,23 +86,63 @@ pub enum WriteError<E> {
 /// last membership record; returns the committed record.
 pub fn write_membership<S: ControlStream>(
     stream: &mut S,
-    mut now: impl FnMut() -> UtcNanos,
+    now: impl FnMut() -> UtcNanos,
     event: MembershipEvent,
 ) -> Result<MembershipRecord, WriteError<S::Error>> {
+    let decide = |_: &ControlView, _: UtcNanos| Ok(Step::<Infallible>::Commit(event.clone()));
+    match write_decided::<S, Infallible, Infallible>(stream, now, decide) {
+        Ok(Ok(record)) => Ok(record),
+        Ok(Err(never)) | Err(Halt::Declined(never)) => match never {},
+        Err(Halt::Write(error)) => Err(error),
+    }
+}
+
+/// What a caller of [`write_decided`] decides from the view one attempt read, at the instant that
+/// attempt stamps: the event to commit, or to commit nothing and answer `T`.
+pub(crate) enum Step<T> {
+    Commit(MembershipEvent),
+    Stop(T),
+}
+
+/// Why [`write_decided`] committed nothing: the caller's refusal, or the writer's.
+pub(crate) enum Halt<E, R> {
+    Declined(R),
+    Write(WriteError<E>),
+}
+
+/// The one writer's attempt loop. Each attempt reads the head and the records, stamps
+/// `event_time` with `now()`, asks `decide` what to commit from that view at that instant, runs
+/// [`crate::check_order`], and appends at the head it read; a moved head re-runs the whole attempt,
+/// `decide` included, so a decision is never made on a view older than the append's.
+pub(crate) fn write_decided<S: ControlStream, T, R>(
+    stream: &mut S,
+    mut now: impl FnMut() -> UtcNanos,
+    mut decide: impl FnMut(&ControlView, UtcNanos) -> Result<Step<T>, R>,
+) -> Result<Result<MembershipRecord, T>, Halt<S::Error, R>> {
     for _ in 0..ATTEMPTS {
-        let view = stream.read().map_err(WriteError::Store)?;
+        let view = stream
+            .read()
+            .map_err(|e| Halt::Write(WriteError::Store(e)))?;
         let last = view.tail.iter().rev().find_map(|entry| match entry {
             ControlEntry::Membership(record) => Some(record),
             ControlEntry::Other { .. } => None,
         });
-        let seq = view.head.checked_add(1).ok_or(WriteError::StreamFull)?;
-        let record = MembershipRecord::new(Seal::grant(), seq, now(), event.clone());
-        check_order(last, &record).map_err(WriteError::Refused)?;
+        let seq = view
+            .head
+            .checked_add(1)
+            .ok_or(Halt::Write(WriteError::StreamFull))?;
+        let at = now();
+        let event = match decide(&view, at).map_err(Halt::Declined)? {
+            Step::Commit(event) => event,
+            Step::Stop(answer) => return Ok(Err(answer)),
+        };
+        let record = MembershipRecord::new(Seal::grant(), seq, at, event);
+        check_order(last, &record).map_err(|r| Halt::Write(WriteError::Refused(r)))?;
         let appended = stream.append(view.head, &record);
-        match appended.map_err(WriteError::Store)? {
-            Appended::Committed => return Ok(record),
+        match appended.map_err(|e| Halt::Write(WriteError::Store(e)))? {
+            Appended::Committed => return Ok(Ok(record)),
             Appended::HeadMoved => continue,
         }
     }
-    Err(WriteError::Contended)
+    Err(Halt::Write(WriteError::Contended))
 }

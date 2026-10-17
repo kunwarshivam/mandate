@@ -138,6 +138,7 @@ impl Draft {
                     actor: fields.get("actor"),
                     causation_id,
                     pii_refs: fields.get("pii_refs"),
+                    event_time: fields.get("event_time"),
                 },
             )?
         } else {
