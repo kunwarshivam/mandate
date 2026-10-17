@@ -206,7 +206,12 @@ fn a_body_that_is_not_the_providers_shape_is_schema_invalid_and_costs_its_maximu
     let record = run(
         &mut gateway,
         &model,
-        vec![delivered(200, b"{\"oops\":true}".to_vec(), 10)],
+        vec![delivered(
+            200,
+            format!("{{\"oops\":true,\"model\":\"{SLUG}\",\"provider\":\"{REPORTED_PROVIDER}\"}}")
+                .into_bytes(),
+            10,
+        )],
     );
     assert_eq!(record.outcome, Outcome::SchemaInvalid);
     let MeterRecord::Reserved(r) = &gateway.meter().store().records()[0] else {
@@ -215,6 +220,95 @@ fn a_body_that_is_not_the_providers_shape_is_schema_invalid_and_costs_its_maximu
     assert_eq!(
         record.cost, r.max_cost,
         "a cost that cannot be read is counted at the maximum"
+    );
+}
+
+#[test]
+fn a_misshaped_reply_that_reports_another_identity_or_none_is_identity_mismatch_and_benched() {
+    let without = |model: Option<&str>, provider: Option<&str>, members: &[&str]| {
+        let mut v: serde_json::Value =
+            serde_json::from_slice(&reply_body(GOOD_OUTPUT, model, provider, 400, 120)).unwrap();
+        for member in members {
+            v.as_object_mut().unwrap().remove(*member);
+        }
+        serde_json::to_vec(&v).unwrap()
+    };
+    let other = Some("anthropic/claude-haiku-4.5");
+    let cases = [
+        without(other, Some(REPORTED_PROVIDER), &["usage"]),
+        without(other, Some(REPORTED_PROVIDER), &["choices"]),
+        without(Some(SLUG), Some("Amazon Bedrock"), &["usage", "choices"]),
+        without(None, None, &["usage"]),
+        b"{\"oops\":true}".to_vec(),
+        b"[1,2]".to_vec(),
+        b"not json".to_vec(),
+    ];
+    for body in cases {
+        let (mut gateway, model) = gateway();
+        let record = run(&mut gateway, &model, vec![delivered(200, body.clone(), 10)]);
+        let shown = String::from_utf8_lossy(&body);
+        assert_eq!(record.outcome, Outcome::IdentityMismatch, "{shown}");
+        assert_eq!(record.output, None);
+        assert_eq!(record.attempts, 1);
+        let healthy: Vec<bool> = gateway
+            .registry()
+            .resolve(&model)
+            .unwrap()
+            .endpoints()
+            .map(|(_, h)| h)
+            .collect();
+        assert_eq!(healthy, vec![false], "{shown}: the endpoint is benched");
+        let MeterRecord::Reserved(r) = &gateway.meter().store().records()[0] else {
+            panic!()
+        };
+        assert_eq!(
+            record.cost, r.max_cost,
+            "{shown}: an unreadable cost is the maximum"
+        );
+    }
+}
+
+#[test]
+fn a_failed_attempt_the_provider_billed_is_never_retried_and_settles_within_its_reservation() {
+    let (mut gateway, model) = gateway();
+    let record = run(
+        &mut gateway,
+        &model,
+        vec![
+            delivered(503, ok_body(), 10),
+            delivered(503, ok_body(), 10),
+            ok_reply(10),
+        ],
+    );
+    assert_eq!(record.outcome, Outcome::ProviderUnavailable);
+    assert_eq!(record.attempts, 1, "a billed attempt ends the call");
+    assert_eq!(gateway.transport().sent().len(), 1);
+    let records = gateway.meter().store().records();
+    let (MeterRecord::Reserved(r), MeterRecord::Settled(s)) = (&records[0], &records[1]) else {
+        panic!()
+    };
+    assert!(record.cost > Usd6::ZERO);
+    assert!(
+        s.cost <= r.max_cost,
+        "the settlement stays within the reservation"
+    );
+    let (mut gateway, model) = common::gateway();
+    let record = run(
+        &mut gateway,
+        &model,
+        vec![
+            delivered(
+                503,
+                reply_body(GOOD_OUTPUT, Some(SLUG), Some(REPORTED_PROVIDER), 1 << 60, 1),
+                10,
+            ),
+            ok_reply(10),
+        ],
+    );
+    assert_eq!(record.outcome, Outcome::ProviderUnavailable);
+    assert_eq!(
+        record.attempts, 1,
+        "a failed attempt that may have been billed ends the call"
     );
 }
 

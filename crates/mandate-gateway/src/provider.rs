@@ -163,11 +163,11 @@ pub struct Prompt {
     pub user: String,
 }
 
-/// A provider's response, as the adapter read it.
+/// A provider's response, as the adapter read it. The identity that served it is read apart, by
+/// [`ProviderAdapter::reported`], so a body of the wrong shape cannot hide a substitution.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Reply {
     pub request_id: Option<String>,
-    pub reported: Reported,
     pub content: Option<String>,
     pub refused: bool,
     pub usage: Usage,
@@ -180,6 +180,9 @@ pub trait ProviderAdapter {
     -> HttpRequest;
     /// The response body read, or `None` when it is not the provider's response shape.
     fn reply(&self, body: &[u8]) -> Option<Reply>;
+    /// What the response body says served the call, whatever the rest of its shape: each part
+    /// `None` when the body does not say (INF-2).
+    fn reported(&self, body: &[u8]) -> Reported;
 }
 
 /// Event ids for the meter's records.

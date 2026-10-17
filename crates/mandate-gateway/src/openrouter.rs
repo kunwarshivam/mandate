@@ -83,10 +83,6 @@ impl ProviderAdapter for OpenRouter {
             || message.get("refusal").is_some_and(|r| !r.is_null());
         Some(Reply {
             request_id: text(object.get("id")),
-            reported: Reported {
-                model: text(object.get("model")),
-                provider: text(object.get("provider")),
-            },
             content: text(message.get("content")),
             refused,
             usage: Usage {
@@ -95,5 +91,14 @@ impl ProviderAdapter for OpenRouter {
                 cached: count(&["prompt_tokens_details", "cached_tokens"]).unwrap_or(0),
             },
         })
+    }
+
+    fn reported(&self, body: &[u8]) -> Reported {
+        let value: Json = serde_json::from_slice(body).unwrap_or(Json::Null);
+        let text = |name: &str| value.get(name).and_then(Json::as_str).map(str::to_owned);
+        Reported {
+            model: text("model"),
+            provider: text("provider"),
+        }
     }
 }

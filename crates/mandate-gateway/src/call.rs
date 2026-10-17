@@ -8,10 +8,11 @@
 //!    both allow (`policy_denied`), the exact cache, the local rate caps (`rate_limited_local`),
 //!    and the meter's reservation of the maximum cost (`budget_exhausted`, `meter_unavailable`).
 //! 2. **Attempts,** only while the deadline leaves time, at most [`MAX_ATTEMPTS`]: a transport
-//!    failure retries, a content failure never does (inference spec §3.4). A response read after
-//!    the deadline is `deadline_exceeded`, discarded, and never cached (INF-3). A reported model or
-//!    provider other than the pin's is `identity_mismatch`, and the endpoint is marked unhealthy
-//!    (INF-2).
+//!    failure retries, a content failure never does (inference spec §3.4), and neither does an
+//!    attempt that was billed or may have been. A response read after the deadline is
+//!    `deadline_exceeded`, discarded, and never cached (INF-3). A 200 whose reported model or
+//!    provider is not the pin's, or is missing, is `identity_mismatch` whatever the rest of its
+//!    shape, and the endpoint is marked unhealthy (INF-2).
 //! 3. **Settlement** of the reservation at the reported cost, or at the reservation's maximum when
 //!    the cost of an attempt cannot be read, so spend is never under-counted.
 
@@ -479,6 +480,10 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
                     outcome = kind;
                     break;
                 }
+                Attempt::Retry(kind) if billed(cost, unknown_cost) => {
+                    outcome = kind;
+                    break;
+                }
                 Attempt::Retry(kind) => outcome = kind,
             }
         }
@@ -531,17 +536,18 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         let reply_ref = Digest::of(&body);
         draft.record.response_ref = Some(reply_ref);
         draft.record.response = Some(body.clone());
-        let Some(reply) = reply else {
-            return Attempt::Failed(Outcome::SchemaInvalid);
-        };
-        draft.record.provider_request_id = reply.request_id.clone();
-        draft.record.reported_identity = reply.reported.text();
-        if !entry.serves(endpoint, &reply.reported) {
+        let reported = self.adapter.reported(&body);
+        draft.record.reported_identity = reported.text();
+        if !entry.serves(endpoint, &reported) {
             let _ = self
                 .registry
                 .set_healthy(&draft.record.model, &endpoint.id, false);
             return Attempt::Failed(Outcome::IdentityMismatch);
         }
+        let Some(reply) = reply else {
+            return Attempt::Failed(Outcome::SchemaInvalid);
+        };
+        draft.record.provider_request_id = reply.request_id.clone();
         if reply.refused {
             return Attempt::Failed(Outcome::ContentRefused);
         }
@@ -580,6 +586,12 @@ const MAX_TOKENS: u64 = (1 << 53) - 1;
 
 fn readable(usage: Usage) -> bool {
     usage.input <= MAX_TOKENS && usage.output <= MAX_TOKENS && usage.cached <= MAX_TOKENS
+}
+
+/// An attempt the provider billed, or may have, is never retried: the reservation holds one
+/// attempt's maximum, so a call is billed for at most one attempt and settles within it (INF-6).
+fn billed(cost: Usd6, unknown_cost: bool) -> bool {
+    unknown_cost || cost > Usd6::ZERO
 }
 
 /// A request the gateway cannot make at all; it is refused before anything is recorded, sent,

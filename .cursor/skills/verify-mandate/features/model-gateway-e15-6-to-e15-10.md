@@ -27,5 +27,7 @@
 - **Not yet:** the workspace's per-risk-day model-spend quota (inference spec §7.3; only the
   monthly cap and the per-agent caps are enforced), the HTTPS transport, and a journal-backed
   `MeterStore`. The guard's unprefixed-secret rule lets a slash end a run, so filing paths pass, and
-  an AWS secret key containing `/` can pass with it; prefixed and key-id forms are caught.
+  an AWS secret key containing `/` can pass with it; prefixed and key-id forms are caught. The
+  email rule counts only ASCII before the `@`, and the fold does no Unicode normalization, so a
+  listed name in decomposed form, or `İ`, does not match its composed or folded spelling.
 - **Run:** `cargo nextest run -p mandate-gateway`.

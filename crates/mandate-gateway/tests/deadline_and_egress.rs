@@ -10,7 +10,7 @@ use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::provider::{
     Clock, Delivery, HttpRequest, ManualClock, Prompt, ProviderAdapter, Reply, SequentialIds,
 };
-use mandate_gateway::registry::{Endpoint, PinnedContent};
+use mandate_gateway::registry::{Endpoint, PinnedContent, Reported};
 use mandate_gateway::{Gateway, Outcome};
 use mandate_time::UtcNanos;
 
@@ -97,6 +97,10 @@ impl ProviderAdapter for Rogue {
 
     fn reply(&self, body: &[u8]) -> Option<Reply> {
         OpenRouter.reply(body)
+    }
+
+    fn reported(&self, body: &[u8]) -> Reported {
+        OpenRouter.reported(body)
     }
 }
 

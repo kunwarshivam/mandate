@@ -42,6 +42,7 @@ enum Reply {
     Late,
     ServerError {
         recovers: bool,
+        billed: bool,
     },
     ConnectFailed,
     RateLimited {
@@ -51,6 +52,11 @@ enum Reply {
     Reported {
         model: Option<String>,
         provider: Option<String>,
+    },
+    Misshaped {
+        model: Option<String>,
+        provider: Option<String>,
+        without_choices: bool,
     },
     BadSchema,
     NotProviderShape,
@@ -93,11 +99,12 @@ fn reply_strategy() -> impl Strategy<Value = Reply> {
     prop_oneof![
         4 => (0u64..=100, 0u64..=1_000).prop_map(|(input_pct, output)| Reply::Ok { input_pct, output }),
         1 => Just(Reply::Late),
-        1 => any::<bool>().prop_map(|recovers| Reply::ServerError { recovers }),
+        1 => (any::<bool>(), any::<bool>()).prop_map(|(recovers, billed)| Reply::ServerError { recovers, billed }),
         1 => Just(Reply::ConnectFailed),
         1 => (0u64..90_000).prop_map(|retry_ms| Reply::RateLimited { retry_ms }),
         1 => Just(Reply::TimedOut),
         2 => (reported_strategy(), reported_strategy()).prop_map(|(model, provider)| Reply::Reported { model, provider }),
+        1 => (reported_strategy(), reported_strategy(), any::<bool>()).prop_map(|(model, provider, without_choices)| Reply::Misshaped { model, provider, without_choices }),
         1 => Just(Reply::BadSchema),
         1 => Just(Reply::NotProviderShape),
         1 => Just(Reply::Refused),
@@ -178,6 +185,26 @@ fn body(reply: &Reply, prompt_len: u64) -> Option<(u16, Vec<u8>, Option<u64>)> {
             ),
             None,
         ),
+        Reply::Misshaped {
+            model,
+            provider,
+            without_choices,
+        } => {
+            let mut v: serde_json::Value = serde_json::from_slice(&reply_body(
+                GOOD_OUTPUT,
+                model.as_deref(),
+                provider.as_deref(),
+                prompt_len / 2,
+                200,
+            ))
+            .unwrap();
+            let object = v.as_object_mut().unwrap();
+            object.remove("usage");
+            if *without_choices {
+                object.remove("choices");
+            }
+            (200, serde_json::to_vec(&v).unwrap(), None)
+        }
         Reply::BadSchema => (
             200,
             reply_body(
@@ -219,12 +246,23 @@ fn script(reply: &Reply, latency_ms: u64, prompt_len: u64) -> Vec<Recorded> {
             latency_ms: 60_000,
             delivery: Delivery::TimedOut,
         }],
-        Reply::ServerError { recovers } => {
-            let mut out = vec![delivered(503, vec![], latency / 3); 2];
+        Reply::ServerError { recovers, billed } => {
+            let failed = if *billed {
+                reply_body(
+                    GOOD_OUTPUT,
+                    Some(SLUG),
+                    Some(REPORTED_PROVIDER),
+                    prompt_len,
+                    u64::from(content().max_output_tokens),
+                )
+            } else {
+                vec![]
+            };
+            let mut out = vec![delivered(503, failed.clone(), latency / 3); 2];
             out.push(if *recovers {
                 ok_reply(latency / 3)
             } else {
-                delivered(503, vec![], latency / 3)
+                delivered(503, failed, latency / 3)
             });
             out
         }
@@ -251,6 +289,7 @@ fn script(reply: &Reply, latency_ms: u64, prompt_len: u64) -> Vec<Recorded> {
 struct Observed {
     start: UtcNanos,
     reported: Option<(Option<String>, Option<String>)>,
+    late: bool,
     record: CallRecord,
     cached_after: bool,
 }
@@ -335,12 +374,17 @@ fn run(caps: &CapModel, steps: &[Step]) -> Run {
                         .unwrap();
                 }
                 let reported = match reply {
-                    Reply::Reported { model, provider } => Some((model.clone(), provider.clone())),
+                    Reply::Reported { model, provider }
+                    | Reply::Misshaped {
+                        model, provider, ..
+                    } => Some((model.clone(), provider.clone())),
+                    Reply::NotProviderShape => Some((None, None)),
                     _ => None,
                 };
                 calls.push(Observed {
                     start,
                     reported,
+                    late: matches!(reply, Reply::Late),
                     record,
                     cached_after,
                 });
@@ -519,6 +563,12 @@ fn deadline_oracle(run: &Run) -> Result<(), String> {
                 r.call_id, r.deadline
             ));
         }
+        if call.late && !r.cache_hit && r.outcome == Outcome::Ok {
+            return Err(format!(
+                "{}: an ok from a reply scripted past the deadline",
+                r.call_id
+            ));
+        }
         let late = r.completed_at > r.deadline;
         if late && r.outcome == Outcome::Ok {
             return Err(format!(
@@ -554,12 +604,16 @@ fn identity_oracle(run: &Run) -> Result<(), String> {
             continue;
         };
         let r = &call.record;
-        if !matches!(r.outcome, Outcome::Ok | Outcome::IdentityMismatch) || r.cache_hit {
+        if r.cache_hit {
             continue;
         }
         let matches =
             model.as_deref() == Some(SLUG) && provider.as_deref() == Some(REPORTED_PROVIDER);
-        if !matches && (r.outcome != Outcome::IdentityMismatch || r.output.is_some()) {
+        let read_as_content = matches!(
+            r.outcome,
+            Outcome::Ok | Outcome::SchemaInvalid | Outcome::ContentRefused
+        );
+        if !matches && (read_as_content || r.output.is_some()) {
             return Err(format!(
                 "{}: reported {model:?} {provider:?} gave {:?}",
                 r.call_id, r.outcome
@@ -810,6 +864,7 @@ fn observed(start: &str, record: CallRecord, cached_after: bool) -> Observed {
     Observed {
         start: at(start),
         reported: None,
+        late: false,
         record,
         cached_after,
     }
@@ -855,6 +910,12 @@ fn seeded_the_deadline_oracle_catches_late_use_and_late_caching() {
         deadline_oracle(&run_of(seq, vec![])).is_err(),
         "a later hit on a late response"
     );
+    let mut stale_stamp = observed(START, good.clone(), false);
+    stale_stamp.late = true;
+    assert!(
+        deadline_oracle(&run_of(vec![stale_stamp], vec![])).is_err(),
+        "an ok from a late reply stamped with a stale clock reading"
+    );
     let mut far = good.clone();
     far.deadline = at("2026-10-16T14:01:00.000000001Z");
     assert!(
@@ -892,6 +953,7 @@ fn seeded_the_identity_oracle_catches_a_substituted_model() {
         calls: vec![Observed {
             start: at(START),
             reported,
+            late: false,
             record,
             cached_after: false,
         }],
@@ -912,12 +974,24 @@ fn seeded_the_identity_oracle_catches_a_substituted_model() {
         identity_oracle(&one(pinned, refused.clone())).is_err(),
         "the pin's own identity refused"
     );
-    let mut leaked = refused;
+    let mut leaked = refused.clone();
     leaked.output = good.output.clone();
     assert!(
-        identity_oracle(&one(other, leaked)).is_err(),
+        identity_oracle(&one(other.clone(), leaked)).is_err(),
         "a refused call that kept its output"
     );
+    for outcome in [Outcome::SchemaInvalid, Outcome::ContentRefused] {
+        let mut misread = refused.clone();
+        misread.outcome = outcome;
+        assert!(
+            identity_oracle(&one(other.clone(), misread.clone())).is_err(),
+            "a substituted model's misshaped reply read as {outcome:?}"
+        );
+        assert!(
+            identity_oracle(&one(Some((None, None)), misread)).is_err(),
+            "a reply with no identity read as {outcome:?}"
+        );
+    }
 }
 
 #[test]
@@ -930,6 +1004,7 @@ fn seeded_the_record_oracle_catches_a_record_the_journal_would_refuse() {
         calls: vec![Observed {
             start: at(START),
             reported: None,
+            late: false,
             record,
             cached_after: false,
         }],
