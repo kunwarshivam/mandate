@@ -11,12 +11,12 @@
   `crates/mandate-paper/src/lib.rs` as `PaperError`'s `Connection` and `Lapse` variants. The
   runner's `live` cargo feature (`crates/mandate-paper/Cargo.toml`, the crate
   `xtask/layers.toml` marks `live_feature`) is the only door to the Robinhood connector:
-  the default build's connection seam refuses `connector_not_built` (DEC-910 item 1). CI's
-  only build of this suite is the default one; a locally built `--features live` leaves the
-  `connector_not_built` pins failing by design (the settled #1297 reading):
-  `a_live_record_refuses_the_connector_this_build_does_not_hold`,
+  the default build's connection seam refuses `connector_not_built` (DEC-910 item 1). The
+  pins that read the seam (`a_live_record_refuses_the_connector_this_build_does_not_hold`,
   `a_re_establishment_after_a_revocation_restores_the_connection` and
-  `a_revocation_of_another_connection_does_not_refuse_this_one`.
+  `a_revocation_of_another_connection_does_not_refuse_this_one`) expect what the build they
+  run in serves, `connector_not_built` without `live` and the connection with it, so they hold
+  in every build (DEC-963, replacing #1297's reading that they fail under `live` by design).
 - **Tests:** `crates/mandate-paper/tests/connection.rs`: the connection refusals (no record, a
   revoked record — a revoked paper record included, a lone revocation with no prior
   establishment, a revocation of another connection refused never, and a re-establishment after

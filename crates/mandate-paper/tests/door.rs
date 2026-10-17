@@ -7,9 +7,8 @@
 //! (DEC-918, the row's readings). Every pending test fails on its stub until the row's
 //! implementation lands (DEC-77); the fixtures are recorded records and journaled rows that
 //! carry no credential and reach no host (ES-19, LT-1, `AGENTS.md` rule 8). Like
-//! `tests/connection.rs`'s merged pins (the settled #1297 reading), CI builds this suite in the
-//! default build alone, so the pin that asserts the default build's `connector_not_built` arm
-//! fails under a locally built `--features live` by design, and no CI job runs it there.
+//! `tests/connection.rs`'s pins, the one that reads the build's connector expects what the build
+//! it runs in serves (DEC-963): `connector_not_built` without `live`, the connection with it.
 
 #[path = "../../mandate-shell/tests/common/mod.rs"]
 mod common;
@@ -163,8 +162,11 @@ fn a_paper_run_through_the_door_keeps_todays_connection() {
 /// `DeploymentRefusal::Live`" — and ES-09, through the frame the run calls: the door names its
 /// own refusal where the shell's fold would answer a V-rule or `live`, and the run's report
 /// carries each door refusal verbatim — a revoked record, a record binding another account
-/// stream, and LT-1's runtime build test (a live record choosing the Robinhood connector this
-/// build does not hold, the arm a locally built `--features live` turns by design).
+/// stream, and LT-1's runtime build test: a live record choosing the Robinhood connector refuses
+/// in a build without `live`, which holds none, and passes the door in a build with it (the
+/// founder's, or the rehearsal's `live,rh-sim`), so the expectation is read from the suite's own
+/// `cfg`, never the crate's door constant, and a door that does not match the build fails here
+/// in either (DEC-963).
 #[test]
 fn the_door_names_its_own_refusal_where_the_shell_would_answer_live() {
     let mandate = paper_mandate();
@@ -186,12 +188,17 @@ fn the_door_names_its_own_refusal_where_the_shell_would_answer_live() {
     );
     let live = live_mandate();
     let live_id = live.connection_id.as_str();
-    let not_built = vec![established(1, live_id, "robinhood", "live", ACCOUNT)];
+    let robinhood = vec![established(1, live_id, "robinhood", "live", ACCOUNT)];
+    let served = if cfg!(feature = "live") {
+        Ok(live_connection())
+    } else {
+        Err("the record chooses a connector this build does not hold".to_owned())
+    };
     assert_eq!(
-        through_the_door(&not_built, &live),
-        Err("the record chooses a connector this build does not hold".to_owned()),
-        "LT-1's runtime seam: the default build holds no Robinhood connector, so the run's
-         report names the build, never `live`"
+        through_the_door(&robinhood, &live),
+        served,
+        "LT-1's runtime seam: a build without `live` holds no Robinhood connector, so the run's
+         report names the build, never `live`; a build with it serves the record"
     );
 }
 

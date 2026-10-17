@@ -67,8 +67,8 @@
   and LT-14 (the run's own account stream carried, no flat or spent check on a paper
   connection, whatever it holds), the exact refusal the run's report holds where the shell
   would answer a V-rule or `live` (the revoked paper record, the record binding another
-  account stream, and LT-1's runtime build test — the `connector_not_built` arm a locally
-  built `--features live` turns by design, no CI job ever running it there), §2's account
+  account stream, and LT-1's runtime build test — `connector_not_built` in a build without
+  `live`, the connection in one with it, DEC-963), §2's account
   stream form and type (another run's names naming another run's stream; a form the journal
   cannot hold failing closed, never a fallback stream), the bound stream alone spending, and
   DEC-470 item 1's counts carried as data, re-derived by nothing. `crates/mandate-paper/src/tests.rs`'s

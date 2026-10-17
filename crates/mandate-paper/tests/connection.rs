@@ -40,6 +40,20 @@ fn live_mandate() -> Mandate {
     Mandate::parse(&json(&text)).expect("the live fixture mandate parses")
 }
 
+/// What a live record choosing the Robinhood connector gets in the build this suite runs in
+/// (LT-1, DEC-910 item 1, DEC-963): a build without `live` (the default one, or `rh-sim` alone)
+/// holds no Robinhood connector, so the record refuses `connector_not_built`; a build with
+/// `live` (the founder's, or the rehearsal's `live,rh-sim`, DEC-922) serves it as
+/// [`live_connection`]. The oracle is the suite's own `cfg`, never the crate's door constant, so
+/// a door that opens in a build without `live`, or stays shut in one with it, fails here.
+fn served_live_record() -> Result<Connection, ConnectionRefusal> {
+    if cfg!(feature = "live") {
+        Ok(live_connection())
+    } else {
+        Err(ConnectionRefusal::NotBuilt)
+    }
+}
+
 /// The paper mandate the run confirmed (the fixture unedited, on its own connection).
 fn paper_mandate() -> Mandate {
     Mandate::parse(&json(&spy_mandate(&model()))).expect("the paper fixture mandate parses")
@@ -221,17 +235,19 @@ fn a_paper_mandate_without_a_record_keeps_todays_path() {
 }
 
 /// LT-1 and DEC-529 item 3 (DEC-910 item 1): the default build holds no Robinhood host or
-/// connector, so the live record that chooses one refuses here — the `live` feature is the only
-/// door, and no run of this build can reach Robinhood. CI's only build of this suite is the
-/// default one; E7-26's implementation, which declares the feature, gates this test where it
-/// adds the `live` arm.
+/// connector, so the live record that chooses one refuses there — the `live` feature is the only
+/// door, and no run of a build without it can reach Robinhood. A build with `live` holds the
+/// connector, so there the same record is served, over the account it binds; the expectation is
+/// [`served_live_record`]'s, so the test holds in every build and fails in each on a door that
+/// does not match the build (DEC-963, which replaces #1297's reading that it fails under
+/// `live` by design).
 #[test]
 fn a_live_record_refuses_the_connector_this_build_does_not_hold() {
     let mandate = live_mandate();
     let id = mandate.connection_id.as_str();
     let records = vec![established(1, id, "robinhood", "live", ACCOUNT)];
-    let refused = connection(&records, &mandate, ACCOUNT);
-    assert_eq!(refused, Err(ConnectionRefusal::NotBuilt));
+    let chosen = connection(&records, &mandate, ACCOUNT);
+    assert_eq!(chosen, served_live_record());
 }
 
 /// V-001 (DEC-910 item 2): the environment is the confirmed mandate's, so a record that states
@@ -348,8 +364,9 @@ fn a_revoked_paper_record_refuses_the_paper_run_too() {
 /// DEC-910 item 2: the revocation refusal's qualifier is whose connection holds the record —
 /// "any mandate whose connection has a revoked record" — so a `ConnectionRevoked` of a different
 /// connection never refuses this one, wherever the stream holds it beside this connection's own
-/// establishment: the paper run keeps its recorded path and the live record keeps refusing only
-/// on the build, never on a revocation that is not its own.
+/// establishment: the paper run keeps its recorded path and the live record gets only what its
+/// build serves it ([`served_live_record`]), never a refusal for a revocation that is not its
+/// own.
 #[test]
 fn a_revocation_of_another_connection_does_not_refuse_this_one() {
     let paper = paper_mandate();
@@ -379,8 +396,8 @@ fn a_revocation_of_another_connection_does_not_refuse_this_one() {
         established(1, id, "robinhood", "live", ACCOUNT),
         revoked(2, "conn_other_01"),
     ];
-    let refused = connection(&records, &live, ACCOUNT);
-    assert_eq!(refused, Err(ConnectionRefusal::NotBuilt));
+    let chosen = connection(&records, &live, ACCOUNT);
+    assert_eq!(chosen, served_live_record());
 }
 
 /// DEC-910 item 2 and journal spec §9.8 rule 66: the revocation's reach ends at a later
@@ -388,7 +405,8 @@ fn a_revocation_of_another_connection_does_not_refuse_this_one() {
 /// re-establishment rule 66 allows (a second `ConnectionEstablished` only after the
 /// revocation, with the same broker, environment and account stream) is that later
 /// establishment — so the connection is served again: the paper run proceeds on it, and the
-/// live record refuses only on the build, never as revoked.
+/// live record gets only what its build serves it ([`served_live_record`]), never a refusal as
+/// revoked.
 #[test]
 fn a_re_establishment_after_a_revocation_restores_the_connection() {
     let paper = paper_mandate();
@@ -414,8 +432,8 @@ fn a_re_establishment_after_a_revocation_restores_the_connection() {
         revoked(2, id),
         established(3, id, "robinhood", "live", ACCOUNT),
     ];
-    let refused = connection(&re_established, &live, ACCOUNT);
-    assert_eq!(refused, Err(ConnectionRefusal::NotBuilt));
+    let chosen = connection(&re_established, &live, ACCOUNT);
+    assert_eq!(chosen, served_live_record());
 }
 
 /// DEC-910 item 2 (journal spec §9.8: "No rule refuses a `ConnectionRevoked`"): a revocation
