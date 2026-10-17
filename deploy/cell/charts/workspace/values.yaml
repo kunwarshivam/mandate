@@ -26,6 +26,7 @@ images:
   # (D-5).
   postgres: ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9
   mandate: ""
+  api: ""
   runtime: ""
   executor: ""
   token-exchange: ""
@@ -33,6 +34,23 @@ images:
   model-gateway: ""
   exporter: ""
   data: ""
+
+# The workspace API server's settings (workspace API spec §3.11 item 2), each required once
+# images.api is named. None is a secret: the session signing key is made in the pod's memory at
+# each start, since sessions live in that one replica's memory too, and the subject links are a
+# ConfigMap the operator makes, mounted at the one fixed path (DEC-1023).
+api:
+  # The hosted workspace and its organization, as ULIDs (MANDATE_API_WORKSPACE, MANDATE_API_ORG).
+  org: ""
+  workspace: ""
+  # The identity provider: issuer, audience, and its published key set (identity spec §6.1).
+  issuer: ""
+  audience: ""
+  jwksUrl: ""
+  # The web app's origin, exactly as a browser sends it (§3.3 item 5).
+  appOrigin: ""
+  # The ConfigMap holding the `subject-links` key; empty mounts none, so every sign-in is refused.
+  subjectLinks: ""
 
 # Where the workspace journal's Postgres is. The journal-db chart's defaults match these.
 journal:

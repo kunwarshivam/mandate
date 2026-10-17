@@ -31,6 +31,7 @@ IN_CLUSTER = {"postgres", "vault", "model-gateway"}
 # Each destination is (target, protocol, port); `dns` is added for any process with a destination.
 SECTION_3_1 = {
     "migrate": {("postgres", "TCP", 5432)},
+    "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443)},
     "control": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("identity-provider", "TCP", 443)},
     "journal-verify": {("postgres", "TCP", 5432)},
     "runtime": {("postgres", "TCP", 5432), ("model-gateway", "TCP", 8080), ("artifact-store", "TCP", 443)},
@@ -320,6 +321,11 @@ SECRET_KEY = re.compile(
 )
 
 
+# Variables that name where a credential file is, never hold one: libpq's pgpass file and systemd's
+# credentials directory, which the API server reads its session key from (workspace API §3.11).
+FILE_PATH_NAMES = ("PGPASSFILE", "CREDENTIALS_DIRECTORY")
+
+
 def secrets_as_files(docs: list[dict]) -> list[str]:
     """Secrets arrive only as mounted files (DEC-822 item 4): no env from a Secret, no password in a
     DSN, no Secret object in the chart."""
@@ -333,7 +339,7 @@ def secrets_as_files(docs: list[dict]) -> list[str]:
                     problems.append(f"{c['name']}: {e['name']} from {e['valueFrom']}")
                 if re.search(r"://[^/@]*:[^/@]*@", e.get("value", "")):
                     problems.append(f"{c['name']}: {e['name']} carries a password")
-                if SECRET_KEY.search(e["name"]) and e["name"] != "PGPASSFILE":
+                if SECRET_KEY.search(e["name"]) and e["name"] not in FILE_PATH_NAMES:
                     problems.append(f"{c['name']}: {e['name']} looks like a secret")
     return problems
 
@@ -385,7 +391,15 @@ def portable(docs: list[dict]) -> list[str]:
     storage class, node name or ingress class in the workspace chart."""
     problems = [f"{d['kind']} uses {d['apiVersion']}" for d in docs if d["apiVersion"] not in ALLOWED_APIS]
     text = json.dumps(docs)
-    for word in ("storageClassName", "nodeName", "nodeSelector", "ingressClassName", "cattle.io", "hetzner", "digitalocean"):
+    for word in (
+        "storageClassName",
+        "nodeName",
+        "nodeSelector",
+        "ingressClassName",
+        "cattle.io",
+        "hetzner",
+        "digitalocean",
+    ):
         if word in text:
             problems.append(f"the chart names {word}")
     return problems
@@ -437,7 +451,9 @@ def compose_matches(compose: dict) -> list[str]:
         ):
             problems.append(f"{name} is not hardened")
         for key, value in s.get("environment", {}).items():
-            if (SECRET_KEY.search(key) and key != "PGPASSFILE") or re.search(r"://[^/@]*:[^/@]*@", value):
+            if (SECRET_KEY.search(key) and key not in FILE_PATH_NAMES) or re.search(
+                r"://[^/@]*:[^/@]*@", value
+            ):
                 problems.append(f"{name}: {key} holds a secret")
         external = any(t not in IN_CLUSTER for t in p["egress"])
         if ("egress" in s["networks"]) != external:
@@ -505,6 +521,80 @@ def test_secrets_as_files():
 
 def test_migration_first():
     assert migration_first(render_all()) == []
+
+
+LOOPBACK = re.compile(r"^(127\.0\.0\.1|\[::1\]):[0-9]+$")
+SUBJECT_LINKS = "/etc/mandate/subject-links"
+
+
+def api_contained(docs: list[dict]) -> list[str]:
+    """The API server (workspace API §3.11) listens on its pod's loopback only, so nothing in the
+    cluster reaches it before the tunnel's route; its session key lives only in a memory-backed
+    directory it reads but cannot write, made owner-only at each start; and the subject links, when
+    named, are a ConfigMap mounted read-only at the one fixed path (DEC-1023)."""
+    problems = []
+    for w in [w for w in workloads(docs) if w["metadata"]["name"] == "api"]:
+        spec = pod_spec(w)
+        api = next(c for c in spec["containers"] if c["name"] == "api")
+        args = api.get("args", [])
+        binds = [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--bind", "--probe-bind")]
+        if sorted(a for a in args if a.startswith("--")) != ["--bind", "--probe-bind"] or not all(
+            LOOPBACK.match(b) for b in binds
+        ):
+            problems.append(f"api listens beyond its loopback: {args}")
+        env = {e["name"]: e.get("value") for e in api.get("env", [])}
+        volumes = {v["name"]: v for v in spec.get("volumes", [])}
+        mounts = {m["mountPath"]: m for m in api.get("volumeMounts", [])}
+        key_dir = env.get("CREDENTIALS_DIRECTORY")
+        key_mount = mounts.get(key_dir or "")
+        key_volume = volumes.get((key_mount or {}).get("name", ""), {})
+        if not (
+            key_mount
+            and key_mount.get("readOnly") is True
+            and key_volume.get("emptyDir", {}).get("medium") == "Memory"
+        ):
+            problems.append(f"api's session key is not in read-only pod memory: {key_mount}, {key_volume}")
+        makers = [
+            c
+            for c in spec.get("initContainers", [])
+            if any(m["name"] == (key_mount or {}).get("name") for m in c.get("volumeMounts", []))
+        ]
+        if len(makers) != 1 or "umask 077" not in " ".join(makers[0].get("command", [])):
+            problems.append("api's session key is not made owner-only by one init container")
+        links = mounts.get(SUBJECT_LINKS)
+        if links is not None:
+            source = volumes.get(links["name"], {})
+            if links.get("readOnly") is not True or not source.get("configMap") or "emptyDir" in source:
+                problems.append(f"api's subject links are not a read-only ConfigMap: {links}, {source}")
+        if any(m.startswith("/etc/mandate") and m != SUBJECT_LINKS for m in mounts):
+            problems.append(f"api mounts another file under /etc/mandate: {sorted(mounts)}")
+    return problems
+
+
+def test_api_contained():
+    plain = render_all()
+    linked = render_all("--set", "api.subjectLinks=subject-links")
+    assert [w["metadata"]["name"] for w in workloads(plain) if w["metadata"]["name"] == "api"] == ["api"]
+    assert api_contained(plain) == [] and api_contained(linked) == []
+    assert SUBJECT_LINKS not in {
+        m["mountPath"] for m in first_container(owner_workload(plain))["volumeMounts"]
+    }
+    assert SUBJECT_LINKS in {m["mountPath"] for m in first_container(owner_workload(linked))["volumeMounts"]}
+    for seed in (
+        lambda w: first_container(w)["volumeMounts"][-1].update(readOnly=False),
+        lambda w: pod_spec(w)["volumes"][-1].update(configMap=None, emptyDir={}),
+        lambda w: first_container(w)["volumeMounts"].append(
+            {"name": "tmp", "mountPath": "/etc/mandate/other"}
+        ),
+    ):
+        assert api_contained(mutate(linked, "api", "Deployment", seed)), seed
+    for refused in ("api.org=", "api.workspace=", "api.jwksUrl=http://issuer.example/jwks"):
+        args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", refused]
+        assert helm(CHART, *args).returncode != 0, refused
+
+
+def owner_workload(docs: list[dict]) -> dict:
+    return next(w for w in workloads(docs) if w["metadata"]["name"] == "api")
 
 
 def without_ingress(docs: list[dict]) -> list[dict]:
@@ -587,6 +677,8 @@ def tiers(docs: list[dict]) -> set[str]:
     found = set()
     for w in workloads(docs):
         for c in pod_spec(w)["containers"]:
+            names = [e["name"] for e in c.get("env", [])]
+            assert len(names) == len(set(names)), f"{w['metadata']['name']} sets an env var twice: {names}"
             env = {e["name"]: e.get("value") for e in c.get("env", [])}
             if "HOME" in env and w["metadata"]["name"] != "cloudflared":
                 found.add(env.get("MANDATE_DEPLOYMENT_TIER", "unset"))
@@ -595,10 +687,16 @@ def tiers(docs: list[dict]) -> set[str]:
 
 def test_deployment_tier_is_set_from_values():
     hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
-    assert tiers(render(*every_image())) == {"production"}, "unset is production"
-    assert tiers(render_all()) == {"ci"}, "the local cell runs its own unsigned build as ci"
+    api = ["--set", f"images.api={PLACEHOLDER.format('api')}"]
+    images = every_image()
+    at = next(i for i in range(len(images)) if images[i : i + 2] == api)
+    without_api = images[:at] + images[at + 2 :]
+    assert tiers(render(*without_api)) == {"production"}, "unset is production"
+    assert tiers(render_all()) == {"ci"}, (
+        "the local cell, its API server too, runs its own unsigned build as ci"
+    )
     k3s = ("-f", str(CELL / "values" / "k3s.yaml"))
-    assert tiers(render(*k3s, "-f", str(hosted), *every_image())) == {"dev"}, "cell #1 is dev (DEC-2001)"
+    assert tiers(render(*k3s, "-f", str(hosted), *without_api)) == {"dev"}, "cell #1 is dev (DEC-2001)"
     for refused in ("live", "prod", ""):
         assert helm(CHART, "--set", f"deploymentTier={refused}").returncode != 0, refused
 
@@ -751,6 +849,27 @@ SEEDED = [
         lambda d: [*d, {"kind": "HelmChart", "apiVersion": "helm.cattle.io/v1", "metadata": {"name": "x"}}],
     ),
     (
+        api_contained,
+        lambda d: mutate(
+            d,
+            "api",
+            "Deployment",
+            lambda w: first_container(w).update(
+                args=["--bind", "0.0.0.0:8080", "--probe-bind", "127.0.0.1:8081"]
+            ),
+        ),
+    ),
+    (
+        api_contained,
+        lambda d: mutate(
+            d, "api", "Deployment", lambda w: pod_spec(w)["volumes"][-1]["emptyDir"].pop("medium")
+        ),
+    ),
+    (
+        api_contained,
+        lambda d: mutate(d, "api", "Deployment", lambda w: pod_spec(w)["initContainers"].pop()),
+    ),
+    (
         portable,
         lambda d: mutate(
             d, "executor", "Deployment", lambda w: pod_spec(w).update(nodeSelector={"node": "pool-1"})
@@ -781,6 +900,7 @@ def test_roles_and_compose_seeded_bugs_are_caught():
         lambda c: c["services"]["journal-verify"]["networks"].append("egress"),
         lambda c: c["networks"].update(journal={}),
         lambda c: c["services"].pop("journal-verify"),
+        lambda c: c["services"]["api"]["environment"].update(MANDATE_API_SECRET="x"),
     ):
         compose = copy.deepcopy(COMPOSE)
         change(compose)
