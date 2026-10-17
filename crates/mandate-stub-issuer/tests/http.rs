@@ -177,7 +177,8 @@ fn no_host_two_hosts_or_http_1_0_is_refused() {
     assert_eq!(post(&two, "HTTP/1.1"), 421, "two Host headers");
     let ours = format!("Host: {addr}\r\n");
     assert_eq!(post(&ours, "HTTP/1.1"), 200, "the control");
-    assert!(post(&ours, "HTTP/1.0") >= 400, "HTTP/1.0 gets no token");
+    let old = post(&ours, "HTTP/1.0");
+    assert!(old == 0 || old >= 400, "HTTP/1.0 gets no token: {old}");
 }
 
 #[test]

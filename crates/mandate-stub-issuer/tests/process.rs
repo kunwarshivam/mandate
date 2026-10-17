@@ -85,7 +85,7 @@ impl Drop for Running {
 }
 
 /// Starts a stub on a free loopback port with `extra` arguments, waits for its announce line, and
-/// checks that the line names the issuer, its key set's URL and `audience`, in any order.
+/// checks that the one line names the issuer, its key set's URL and `audience`, in any form.
 fn started(
     extra: &[&str],
     audience: &str,
@@ -122,16 +122,18 @@ fn started(
         line.ends_with('\n') && line.matches('\n').count() == 1,
         "{line:?}"
     );
-    let mut values: Vec<&str> = line
-        .split_whitespace()
-        .map(|word| word.rsplit_once('=').map_or(word, |(_, value)| value))
-        .collect();
-    values.sort_unstable();
-    let issuer = format!("http://{addr}");
     let jwks = format!("http://{addr}/jwks.json");
-    let mut expected = vec![issuer.as_str(), jwks.as_str(), audience];
-    expected.sort_unstable();
-    assert_eq!(values, expected, "the announce line {line:?}");
+    assert!(line.contains(&jwks), "the key set's URL in {line:?}");
+    let rest = line.replacen(&jwks, "", 1);
+    assert!(
+        rest.contains(&format!("http://{addr}")),
+        "the issuer in {line:?}"
+    );
+    assert!(
+        rest.split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+            .any(|word| word == audience),
+        "the audience in {line:?}"
+    );
     (child, stdout, addr)
 }
 

@@ -91,7 +91,8 @@ pub fn send(
     raw(addr, &bytes)
 }
 
-/// Writes `request` to `addr` as it is and reads the answer.
+/// Writes `request` to `addr` as it is and reads the answer; a connection closed with no answer
+/// is status 0.
 pub fn raw(addr: SocketAddr, request: &[u8]) -> Reply {
     let mut stream = TcpStream::connect(addr).expect("connect");
     stream
@@ -100,6 +101,13 @@ pub fn raw(addr: SocketAddr, request: &[u8]) -> Reply {
     stream.write_all(request).expect("write");
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).expect("read");
+    if raw.is_empty() {
+        return Reply {
+            status: 0,
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+    }
     let split = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")

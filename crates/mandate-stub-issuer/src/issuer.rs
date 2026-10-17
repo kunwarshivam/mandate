@@ -20,8 +20,7 @@ pub enum IssueError {
 }
 
 /// One issuer: its exact issuer string, its audience, its key's id, and its key set. The key
-/// itself is never readable.
-#[derive(Debug)]
+/// itself is never readable, and `Issuer` has no `Debug` form that could print it.
 pub struct Issuer {
     /// `http://<bind>`, exactly.
     pub issuer: String,
