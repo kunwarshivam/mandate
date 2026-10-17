@@ -1,17 +1,17 @@
-"""Journal spec v0.48 §9.21's reference vectors for the invalidation verdict (DEC-2202, backlog
+"""Journal spec v0.49 §9.22's reference vectors for the invalidation verdict (DEC-2202, backlog
 E19-5): the agent stream's `ThesisInvalidated`, the record a removal names as its cause (mandate
 spec §8.6, agent harness spec §6.7).
 
-The schema and the per-draft rules 165 and 166 live in `control.py`, beside the thesis records, so
+The schema and the per-draft rules 184 and 185 live in `control.py`, beside the thesis records, so
 one validator judges every closed schema. This module builds the `thesis_invalidation` section:
 
 1. base drafts: an invalidation the model's verdict caused, one a revoked source caused, the
    research call whose judged verdict the first names, and the thesis records the stream admitted;
-2. an invalid draft for every member type and rules 165 and 166, and valid drafts for the cases a
+2. an invalid draft for every member type and rules 184 and 185, and valid drafts for the cases a
    rule might be misread to refuse;
-3. batches for rule 167, the batch rule that ties a model's invalidation to its call's judged
+3. batches for rule 186, the batch rule that ties a model's invalidation to its call's judged
    verdict, and every judged invalidation verdict to its record;
-4. agent streams for rule 168, the stream rule that names an admitted, current, not yet invalidated
+4. agent streams for rule 187, the stream rule that names an admitted, current, not yet invalidated
    thesis, each stream a list of `append` batches.
 
 Every stream and batch draft also passes every other rule (rules 151 and 153 among them), and every
@@ -28,7 +28,7 @@ import research
 from common import apply_change, change, delete, digest_strings
 from control import AGENT_STREAM, RUNTIME, SERVICES, check_of, reported, violations
 
-SPEC = "docs/specs/journal.md v0.48 §9.21 (DEC-2202)"
+SPEC = "docs/specs/journal.md v0.49 §9.22 (DEC-2202)"
 STREAM = AGENT_STREAM
 MANDATE = research.ref("research_mandate")
 FIRST = research.THESES[0]
@@ -155,7 +155,7 @@ NULLED = ("thesis_id", "lineage_id", "instrument_id", "cause", "evidence")
 
 
 def member_drafts() -> list[dict]:
-    b, clause = BASE_INVALIDATED, "§9.21 types"
+    b, clause = BASE_INVALIDATED, "§9.22 types"
     out = []
     for member, wrong_kind, wrong_form in MEMBERS:
         path = f"payload.{member}"
@@ -176,18 +176,18 @@ def member_drafts() -> list[dict]:
 def rule_drafts() -> list[dict]:
     m, r = BASE_INVALIDATED, BASE_REVOKED
     return [
-        invalid("invalidated.165.no_candidate", "rule 165: a model's invalidation names its verdict", m, [change("payload.candidate", None)], "schema", "payload.candidate"),
-        invalid("invalidated.165.source", "rule 165: a model's invalidation names no source", m, [change("payload.source", REVOKED_SOURCE)], "schema", "payload.source"),
-        invalid("invalidated.165.no_cause", "rule 165: a model's invalidation names its call", m, [change("causation_id", None)], "schema", "causation_id"),
-        invalid("revoked.165.candidate", "rule 165: a revoked source's invalidation names no verdict", r, [change("payload.candidate", 0)], "schema", "payload.candidate"),
-        invalid("revoked.165.evidence", "rule 165: a revoked source's invalidation cites no items", r, [change("payload.evidence", list(EVIDENCE))], "schema", "payload.evidence"),
-        invalid("revoked.165.no_source", "rule 165: a revoked source's invalidation names the source", r, [change("payload.source", None)], "schema", "payload.source"),
-        invalid("revoked.165.no_cause", "rule 165: a revoked source's invalidation names the allowlist that dropped it", r, [change("causation_id", None)], "schema", "causation_id"),
-        invalid("invalidated.165.first", "rule 165: the first that fails, in order", m, [change("payload.candidate", None), change("payload.source", REVOKED_SOURCE)], "schema", "payload.candidate"),
-        invalid("invalidated.166.actor", "rule 166", m, [change("actor", dict(SERVICES))], "schema", "actor.kind"),
+        invalid("invalidated.184.no_candidate", "rule 184: a model's invalidation names its verdict", m, [change("payload.candidate", None)], "schema", "payload.candidate"),
+        invalid("invalidated.184.source", "rule 184: a model's invalidation names no source", m, [change("payload.source", REVOKED_SOURCE)], "schema", "payload.source"),
+        invalid("invalidated.184.no_cause", "rule 184: a model's invalidation names its call", m, [change("causation_id", None)], "schema", "causation_id"),
+        invalid("revoked.184.candidate", "rule 184: a revoked source's invalidation names no verdict", r, [change("payload.candidate", 0)], "schema", "payload.candidate"),
+        invalid("revoked.184.evidence", "rule 184: a revoked source's invalidation cites no items", r, [change("payload.evidence", list(EVIDENCE))], "schema", "payload.evidence"),
+        invalid("revoked.184.no_source", "rule 184: a revoked source's invalidation names the source", r, [change("payload.source", None)], "schema", "payload.source"),
+        invalid("revoked.184.no_cause", "rule 184: a revoked source's invalidation names the allowlist that dropped it", r, [change("causation_id", None)], "schema", "causation_id"),
+        invalid("invalidated.184.first", "rule 184: the first that fails, in order", m, [change("payload.candidate", None), change("payload.source", REVOKED_SOURCE)], "schema", "payload.candidate"),
+        invalid("invalidated.185.actor", "rule 185", m, [change("actor", dict(SERVICES))], "schema", "actor.kind"),
         invalid("invalidated.without_mandate", "§9 row: `man`", m, [change("config_refs", {})], "missing_config_ref", "config_refs.mandate_version"),
         invalid("invalidated.on_the_control_stream", "§9: an agent-stream record", m, [change("stream_id", "ctl:ws_01J8Z2")], "wrong_stream", "event_type"),
-        invalid("invalidated.at_version_2", "§9.21: schema version 1 only", m, [change("schema_version", 2)], "unknown_schema", "payload"),
+        invalid("invalidated.at_version_2", "§9.22: schema version 1 only", m, [change("schema_version", 2)], "unknown_schema", "payload"),
     ]
 
 
@@ -200,11 +200,11 @@ def valid_drafts() -> list[dict]:
     """The cases a rule might be misread to refuse; each must be accepted."""
     m = BASE_INVALIDATED
     return [
-        valid("invalidated.no_evidence", "rule 165: the output may cite no item", m, [change("payload.evidence", [])]),
-        valid("invalidated.evidence_as_given", "§9.21: the items as the output gave them, unordered and repeated", m, [change("payload.evidence", ["item_b", "item_a", "item_b"])]),
-        valid("invalidated.later_candidate", "rule 165: any candidate index", m, [change("payload.candidate", 3)]),
-        valid("invalidated.revision", "§9.21: a revision's thesis, in its lineage", m, [change("payload.thesis_id", REVISION)]),
-        valid("invalidated.no_run", "§9.21: `correlation_id` is not read", m, [change("correlation_id", None)]),
+        valid("invalidated.no_evidence", "rule 184: the output may cite no item", m, [change("payload.evidence", [])]),
+        valid("invalidated.evidence_as_given", "§9.22: the items as the output gave them, unordered and repeated", m, [change("payload.evidence", ["item_b", "item_a", "item_b"])]),
+        valid("invalidated.later_candidate", "rule 184: any candidate index", m, [change("payload.candidate", 3)]),
+        valid("invalidated.revision", "§9.22: a revision's thesis, in its lineage", m, [change("payload.thesis_id", REVISION)]),
+        valid("invalidated.no_run", "§9.22: `correlation_id` is not read", m, [change("correlation_id", None)]),
     ]
 
 
@@ -215,18 +215,18 @@ def draft_for(section: dict, case: dict) -> dict:
     return draft
 
 
-# --------------------------------------------------------------------------- rules 167 and 168
+# --------------------------------------------------------------------------- rules 186 and 187
 
 
 def batch_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
-    """Rule 167 over one `append` batch: the first draft that breaks it, with the member reported.
+    """Rule 186 over one `append` batch: the first draft that breaks it, with the member reported.
     A model's invalidation names an earlier call of the batch whose verdict at its `candidate` is a
     judged invalidation, which no earlier invalidation of the batch names; and every judged
     invalidation verdict of a call in the batch is named by a later invalidation of the batch."""
     named: set[tuple[str, int]] = set()
     for i, d in enumerate(drafts):
         p = d["payload"]
-        if d["event_type"] == "ModelInvocationRecorded" and "batch.167.complete" not in skip:
+        if d["event_type"] == "ModelInvocationRecorded" and "batch.186.complete" not in skip:
             later = [
                 (x["causation_id"], x["payload"]["candidate"])
                 for x in drafts[i + 1 :]
@@ -237,57 +237,57 @@ def batch_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dic
                     return {"index": i, "reason": "schema", "path": f"payload.verdicts[{j}].result"}
         if d["event_type"] != "ThesisInvalidated" or p["cause"] != "model":
             continue
-        earlier = drafts if "batch.167.order" in skip else drafts[:i]
+        earlier = drafts if "batch.186.order" in skip else drafts[:i]
         call = next(
             (
                 x
                 for x in earlier
                 if x["event_id"] == d["causation_id"]
-                and (x["event_type"] == "ModelInvocationRecorded" or "batch.167.call" in skip)
+                and (x["event_type"] == "ModelInvocationRecorded" or "batch.186.call" in skip)
             ),
             None,
         )
         if call is None:
-            if "batch.167.present" in skip:
+            if "batch.186.present" in skip:
                 continue
             return {"index": i, "reason": "schema", "path": "causation_id"}
         verdicts = call["payload"].get("verdicts", [])
         k = p["candidate"]
         item = verdicts[k] if 0 <= k < len(verdicts) else None
-        fits = item is not None and (item["kind"] == "invalidation" or "batch.167.kind" in skip)
-        fits = fits and (item["result"] == "judged" or "batch.167.result" in skip)
+        fits = item is not None and (item["kind"] == "invalidation" or "batch.186.kind" in skip)
+        fits = fits and (item["result"] == "judged" or "batch.186.result" in skip)
         if not fits:
             return {"index": i, "reason": "schema", "path": "payload.candidate"}
-        if (d["causation_id"], k) in named and "batch.167.once" not in skip:
+        if (d["causation_id"], k) in named and "batch.186.once" not in skip:
             return {"index": i, "reason": "schema", "path": "payload.candidate"}
         named.add((d["causation_id"], k))
     return None
 
 
 def stream_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
-    """Rule 168 over an agent stream from its start: the first `ThesisInvalidated` that names a thesis
+    """Rule 187 over an agent stream from its start: the first `ThesisInvalidated` that names a thesis
     already invalidated, or not the one the stream last admitted for its instrument in its lineage."""
     invalidated: set[str] = set()
     admitted: dict[str, dict] = {}
     holder: dict[str, str] = {}
     for i, d in enumerate(drafts):
         p = d["payload"]
-        if d["event_type"] in research.THESIS_EVENTS and (p["admitted"] or "stream.168.admitted" in skip):
+        if d["event_type"] in research.THESIS_EVENTS and (p["admitted"] or "stream.187.admitted" in skip):
             admitted[p["thesis_id"]] = p
             holder[p["instrument_id"]] = p["thesis_id"]
         if d["event_type"] != "ThesisInvalidated":
             continue
         thesis = p["thesis_id"]
         fail = None
-        if thesis in invalidated and "stream.168.once" not in skip:
+        if thesis in invalidated and "stream.187.once" not in skip:
             fail = "payload.thesis_id"
         elif thesis not in admitted:
-            fail = None if "stream.168.known" in skip else "payload.thesis_id"
-        elif admitted[thesis]["lineage_id"] != p["lineage_id"] and "stream.168.lineage" not in skip:
+            fail = None if "stream.187.known" in skip else "payload.thesis_id"
+        elif admitted[thesis]["lineage_id"] != p["lineage_id"] and "stream.187.lineage" not in skip:
             fail = "payload.lineage_id"
-        elif admitted[thesis]["instrument_id"] != p["instrument_id"] and "stream.168.instrument" not in skip:
+        elif admitted[thesis]["instrument_id"] != p["instrument_id"] and "stream.187.instrument" not in skip:
             fail = "payload.instrument_id"
-        elif holder.get(p["instrument_id"]) != thesis and "stream.168.current" not in skip:
+        elif holder.get(p["instrument_id"]) != thesis and "stream.187.current" not in skip:
             fail = "payload.thesis_id"
         if fail is not None:
             return {"index": i, "reason": "schema", "path": fail}
@@ -346,21 +346,21 @@ def batch_cases() -> list[dict]:
     only_theses = [gateway.verdict(0, "thesis", "judged")]
     c1, c2, c3, c4, c5 = call(1), call(2, two), call(3, refused), call(4, theses), call(5, only_theses)
     return [
-        case("the_call_then_its_invalidation", "rule 167: one batch, the call first", [c1, invalidation(1, c1)], ok),
-        case("two_invalidations", "rule 167: each judged verdict its own record", [c2, invalidation(1, c2), invalidation(2, c2, candidate=1, thesis_id=REVISION)], ok),
-        case("a_refused_invalidation_has_no_record", "rule 167: only a judged verdict is handed on", [c3, invalidation(1, c3)], ok),
-        case("after_the_theses", "rule 167: a candidate counts the theses before it", [c4, invalidation(1, c4, candidate=1)], ok),
-        case("a_call_with_theses_only", "rule 167: a call with no invalidation names none", [c5], ok),
-        case("a_revoked_source", "rule 167: a revoked source's invalidation names no call", [invalidation(1, None)], ok),
-        case("alone", "rule 167: the call is in the same batch", [invalidation(1, c1)], at(0, "causation_id")),
-        case("before_its_call", "rule 167: the call is earlier in the batch", [invalidation(1, c1), c1], at(0, "causation_id")),
-        case("names_another_event", "rule 167: the cause is the call, not another record of the batch", [c5, DRAFTS[BASE_ADMITTED], invalidation(1, c5) | {"causation_id": DRAFTS[BASE_ADMITTED]["event_id"]}], at(2, "causation_id")),
-        case("names_a_thesis_verdict", "rule 167: the verdict is an invalidation's", [c5, invalidation(1, c5)], at(1, "payload.candidate")),
-        case("names_a_refused_verdict", "rule 167: the verdict is judged", [c3, invalidation(1, c3), invalidation(2, c3, candidate=1, thesis_id=REVISION)], at(2, "payload.candidate")),
-        case("names_no_verdict", "rule 167: the call has a verdict at the candidate", [c1, invalidation(1, c1), invalidation(2, c1, candidate=5, thesis_id=REVISION)], at(2, "payload.candidate")),
-        case("one_verdict_twice", "rule 167: one record per verdict", [c1, invalidation(1, c1), invalidation(2, c1, thesis_id=REVISION)], at(2, "payload.candidate")),
-        case("a_judged_verdict_with_no_record", "rule 167: every judged verdict is handed on", [c1], at(0, "payload.verdicts[0].result")),
-        case("the_second_verdict_with_no_record", "rule 167: every judged verdict, in order", [c2, invalidation(1, c2)], at(0, "payload.verdicts[1].result")),
+        case("the_call_then_its_invalidation", "rule 186: one batch, the call first", [c1, invalidation(1, c1)], ok),
+        case("two_invalidations", "rule 186: each judged verdict its own record", [c2, invalidation(1, c2), invalidation(2, c2, candidate=1, thesis_id=REVISION)], ok),
+        case("a_refused_invalidation_has_no_record", "rule 186: only a judged verdict is handed on", [c3, invalidation(1, c3)], ok),
+        case("after_the_theses", "rule 186: a candidate counts the theses before it", [c4, invalidation(1, c4, candidate=1)], ok),
+        case("a_call_with_theses_only", "rule 186: a call with no invalidation names none", [c5], ok),
+        case("a_revoked_source", "rule 186: a revoked source's invalidation names no call", [invalidation(1, None)], ok),
+        case("alone", "rule 186: the call is in the same batch", [invalidation(1, c1)], at(0, "causation_id")),
+        case("before_its_call", "rule 186: the call is earlier in the batch", [invalidation(1, c1), c1], at(0, "causation_id")),
+        case("names_another_event", "rule 186: the cause is the call, not another record of the batch", [c5, DRAFTS[BASE_ADMITTED], invalidation(1, c5) | {"causation_id": DRAFTS[BASE_ADMITTED]["event_id"]}], at(2, "causation_id")),
+        case("names_a_thesis_verdict", "rule 186: the verdict is an invalidation's", [c5, invalidation(1, c5)], at(1, "payload.candidate")),
+        case("names_a_refused_verdict", "rule 186: the verdict is judged", [c3, invalidation(1, c3), invalidation(2, c3, candidate=1, thesis_id=REVISION)], at(2, "payload.candidate")),
+        case("names_no_verdict", "rule 186: the call has a verdict at the candidate", [c1, invalidation(1, c1), invalidation(2, c1, candidate=5, thesis_id=REVISION)], at(2, "payload.candidate")),
+        case("one_verdict_twice", "rule 186: one record per verdict", [c1, invalidation(1, c1), invalidation(2, c1, thesis_id=REVISION)], at(2, "payload.candidate")),
+        case("a_judged_verdict_with_no_record", "rule 186: every judged verdict is handed on", [c1], at(0, "payload.verdicts[0].result")),
+        case("the_second_verdict_with_no_record", "rule 186: every judged verdict, in order", [c2, invalidation(1, c2)], at(0, "payload.verdicts[1].result")),
     ]
 
 
@@ -379,23 +379,23 @@ def stream_cases() -> list[dict]:
     c3, c4 = call(3, both), call(4, both)
     lineage = revised["payload"]["lineage_id"]
     return [
-        case("invalidated_after_admission", "rule 168: an admitted thesis", [[admitted], [c1, invalidation(1, c1)]], ok),
-        case("a_revision_invalidated", "rule 168: the revision holds its instrument", [[admitted], [revised], [c1, invalidation(1, c1, thesis_id=REVISION, lineage_id=lineage)]], ok),
-        case("a_revoked_source", "rule 168: a revoked source's invalidation too", [[admitted], [invalidation(1, None)]], ok),
-        case("re_admitted_after_its_invalidation", "rule 168: an invalidated instrument may be admitted again, in a new lineage", [[admitted], [c1, invalidation(1, c1)], [new_thesis()]], ok),
-        case("a_re_admission_invalidated", "rule 168: a re-admission is a new thesis, invalidated once too", [[admitted], [c1, invalidation(1, c1)], [new_thesis()], [c2, invalidation(2, c2, thesis_id=RENEWAL, lineage_id=RENEWAL)]], ok),
-        case("invalidated_then_a_new_thesis_in_one_response", "§9.21 batch order: the invalidation follows the call and precedes the response's thesis records", [[admitted], [c3, invalidation(1, c3, candidate=1), new_thesis()]], ok),
-        case("in_one_batch", "rule 168: the admission is earlier in the batch", [[admitted, c1, invalidation(1, c1)]], ok),
-        case("never_admitted", "rule 168: a thesis the stream admitted", [[c1, invalidation(1, c1)]], at(1, "payload.thesis_id")),
-        case("before_its_admission", "rule 168: admitted earlier", [[c1, invalidation(1, c1), admitted]], at(1, "payload.thesis_id")),
-        case("a_refused_thesis", "rule 168: admitted, not only judged", [[refused], [c1, invalidation(1, c1, thesis_id=REFUSED_THESIS, lineage_id=REFUSED_THESIS, instrument_id=OTHER_ASSET)]], at(2, "payload.thesis_id")),
-        case("invalidated_twice", "rule 168: one invalidation per thesis", [[admitted], [c1, invalidation(1, c1)], [c2, invalidation(2, c2)]], at(4, "payload.thesis_id")),
-        case("revoked_after_its_invalidation", "rule 168: whatever the second's cause", [[admitted], [c1, invalidation(1, c1)], [invalidation(2, None)]], at(3, "payload.thesis_id")),
-        case("another_lineage", "rule 168: the thesis's own lineage", [[admitted], [c1, invalidation(1, c1, lineage_id="th_01J8ZTZZ")]], at(2, "payload.lineage_id")),
-        case("a_substituted_instrument", "rule 168: the thesis's own instrument", [[admitted], [c1, invalidation(1, c1, instrument_id=OTHER_ASSET)]], at(2, "payload.instrument_id")),
-        case("superseded_by_its_revision", "rule 168: the thesis that holds the instrument now", [[admitted], [revised], [c1, invalidation(1, c1)]], at(3, "payload.thesis_id")),
-        case("a_new_thesis_before_its_invalidation_a_correct_writer_never_uses", "§9.21 batch order: a thesis record before the invalidation supersedes it", [[admitted], [c4, new_thesis(), invalidation(1, c4, candidate=1)]], at(3, "payload.thesis_id")),
-        case("superseded_by_a_renewal", "rule 168: a renewal holds it now", [[admitted], [renewal()], [c1, invalidation(1, c1)]], at(3, "payload.thesis_id")),
+        case("invalidated_after_admission", "rule 187: an admitted thesis", [[admitted], [c1, invalidation(1, c1)]], ok),
+        case("a_revision_invalidated", "rule 187: the revision holds its instrument", [[admitted], [revised], [c1, invalidation(1, c1, thesis_id=REVISION, lineage_id=lineage)]], ok),
+        case("a_revoked_source", "rule 187: a revoked source's invalidation too", [[admitted], [invalidation(1, None)]], ok),
+        case("re_admitted_after_its_invalidation", "rule 187: an invalidated instrument may be admitted again, in a new lineage", [[admitted], [c1, invalidation(1, c1)], [new_thesis()]], ok),
+        case("a_re_admission_invalidated", "rule 187: a re-admission is a new thesis, invalidated once too", [[admitted], [c1, invalidation(1, c1)], [new_thesis()], [c2, invalidation(2, c2, thesis_id=RENEWAL, lineage_id=RENEWAL)]], ok),
+        case("invalidated_then_a_new_thesis_in_one_response", "§9.22 batch order: the invalidation follows the call and precedes the response's thesis records", [[admitted], [c3, invalidation(1, c3, candidate=1), new_thesis()]], ok),
+        case("in_one_batch", "rule 187: the admission is earlier in the batch", [[admitted, c1, invalidation(1, c1)]], ok),
+        case("never_admitted", "rule 187: a thesis the stream admitted", [[c1, invalidation(1, c1)]], at(1, "payload.thesis_id")),
+        case("before_its_admission", "rule 187: admitted earlier", [[c1, invalidation(1, c1), admitted]], at(1, "payload.thesis_id")),
+        case("a_refused_thesis", "rule 187: admitted, not only judged", [[refused], [c1, invalidation(1, c1, thesis_id=REFUSED_THESIS, lineage_id=REFUSED_THESIS, instrument_id=OTHER_ASSET)]], at(2, "payload.thesis_id")),
+        case("invalidated_twice", "rule 187: one invalidation per thesis", [[admitted], [c1, invalidation(1, c1)], [c2, invalidation(2, c2)]], at(4, "payload.thesis_id")),
+        case("revoked_after_its_invalidation", "rule 187: whatever the second's cause", [[admitted], [c1, invalidation(1, c1)], [invalidation(2, None)]], at(3, "payload.thesis_id")),
+        case("another_lineage", "rule 187: the thesis's own lineage", [[admitted], [c1, invalidation(1, c1, lineage_id="th_01J8ZTZZ")]], at(2, "payload.lineage_id")),
+        case("a_substituted_instrument", "rule 187: the thesis's own instrument", [[admitted], [c1, invalidation(1, c1, instrument_id=OTHER_ASSET)]], at(2, "payload.instrument_id")),
+        case("superseded_by_its_revision", "rule 187: the thesis that holds the instrument now", [[admitted], [revised], [c1, invalidation(1, c1)]], at(3, "payload.thesis_id")),
+        case("a_new_thesis_before_its_invalidation_a_correct_writer_never_uses", "§9.22 batch order: a thesis record before the invalidation supersedes it", [[admitted], [c4, new_thesis(), invalidation(1, c4, candidate=1)]], at(3, "payload.thesis_id")),
+        case("superseded_by_a_renewal", "rule 187: a renewal holds it now", [[admitted], [renewal()], [c1, invalidation(1, c1)]], at(3, "payload.thesis_id")),
     ]
 
 
@@ -467,7 +467,7 @@ def check_section(section: dict, skip: frozenset[str] = frozenset()) -> list[str
         for batch in case["batches"]:
             got = batch_failure(batch, skip) or gateway.agent_stream_failure(records, skip)
             if got is not None:
-                problems.append(found("streams.batches", f"{case['name']}: a batch breaks rule 167 or the stream rule 153: {got}"))
+                problems.append(found("streams.batches", f"{case['name']}: a batch breaks rule 186 or the stream rule 153: {got}"))
                 break
         got = stream_failure(records, skip)
         if got != expected_failure(case):
@@ -481,10 +481,10 @@ VALIDATOR_MUTANTS = (
     "record.extra",
     "record.missing",
     "config_refs.required",
-    *(f"rule.165.{n}" for n in ("candidate", "evidence", "source", "causation")),
-    "rule.166",
-    *(f"batch.167.{n}" for n in ("complete", "order", "call", "present", "kind", "result", "once")),
-    *(f"stream.168.{n}" for n in ("admitted", "once", "known", "lineage", "instrument", "current")),
+    *(f"rule.184.{n}" for n in ("candidate", "evidence", "source", "causation")),
+    "rule.185",
+    *(f"batch.186.{n}" for n in ("complete", "order", "call", "present", "kind", "result", "once")),
+    *(f"stream.187.{n}" for n in ("admitted", "once", "known", "lineage", "instrument", "current")),
 )
 
 
@@ -502,7 +502,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
     return [
         ("a base invalidation names no mandate", "drafts.valid", mutated(lambda s: s["drafts"][BASE_INVALIDATED].update(config_refs={}))),
         ("the base invalidation names another thesis", "drafts.linked", mutated(lambda s: s["drafts"][BASE_INVALIDATED]["payload"].update(thesis_id=REVISION))),
-        ("an invalid draft's path differs", "invalid_drafts", mutated(lambda s: case(s, "invalid_drafts", "revoked.165.no_source")["expect"].update(path="payload.candidate"))),
+        ("an invalid draft's path differs", "invalid_drafts", mutated(lambda s: case(s, "invalid_drafts", "revoked.184.no_source")["expect"].update(path="payload.candidate"))),
         ("a valid draft names a source", "valid_drafts", mutated(lambda s: case(s, "valid_drafts", "invalidated.no_evidence")["changes"].append(change("payload.source", REVOKED_SOURCE)))),
         ("a batch draft is the executor's", "batches.records", mutated(lambda s: case(s, "batches", "a_revoked_source")["drafts"][0].update(actor=dict(SERVICES)))),
         ("a batch case expects the wrong draft", "batches.rule", mutated(lambda s: case(s, "batches", "one_verdict_twice")["expect"].update(index=1))),
