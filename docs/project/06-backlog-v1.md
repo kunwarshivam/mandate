@@ -2285,6 +2285,35 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     sequences;
   - a run still produces opinions only (rule 4) and never sizes or places an order.
 
+- **E19-15 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
+  [#1536](https://github.com/kunwarshivam/mandate/issues/1536), lane EX)** As an owner, I want to
+  ask my agent at the desk "why did you buy X?", "why did you ask me?", "what are you watching?", or
+  "why was this refused?" and get an answer from my own records, each claim linked to the record it
+  rests on, a plain-language explanation under each approval ask, and a transcript of every desk and explain run, so
+  that I understand what my agent did without reading the journal
+  ([agent harness spec §15](../specs/agent-harness.md#15-owner-and-explain-runs-the-desk),
+  [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 as `owner` and `explain` runs).
+  *Depends on:* E19-13 (lane AH): the loop, its run records, and the tool contract, which it reuses
+  and does not duplicate; E15-6 to E15-10 (the gateway); E21-31 (the API server). *Accepted when:*
+  - the owner and explain tool sets are read, `note`, and `answer` only, and every stream after any
+    run holds only that run's records more than before, under a compromised model (EX-1);
+  - cross-tenant and cross-agent reads: a property test over two workspaces and several agents with
+    canaries finds no foreign canary in any tool result, prompt, answer, or record, and identical
+    `not_found` results for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
+    scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
+  - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
+    (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);
+  - every shown answer's `written_after_reading` and every turn's menu are recomputed by an oracle
+    from the run's records (EX-12); every returned field is servable to the reader's row by the cited-record projections workspace API §4.6.1 defines (EX-13);
+  - spend is reserved against the agent's, workspace's, and deployment's configured budgets, never a
+    constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
+    are byte-identical with the explain run absent, stalled, or failing (EX-9);
+  - CI and the demo use recorded fakes only; the disclaimer is the placeholder until DEC-2241, and
+    approval explanations stay behind both `desk.model_answers` and `desk.approval_explanations` until its item 3 is decided.
+  *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
+  through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
+  its own spec change and DEC first.
+
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
 - Minor 1: say which clock each research field uses. The cut-off comes from the risk clock, which is

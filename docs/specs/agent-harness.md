@@ -28,6 +28,7 @@ else.
 12. [Decisions](#12-decisions)
 13. [Open questions](#13-open-questions)
 14. [Backlog](#14-backlog)
+15. [Owner and explain runs: the desk](#15-owner-and-explain-runs-the-desk) (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md))
 
 ## 1. Scope
 
@@ -818,3 +819,335 @@ Existing stories keep their ids: E6-1 (the runtime), E15-1 (the LLM research sig
 (scorecards), E15-6 to E15-10 (the gateway, the registry, `ModelInvocationRecorded`, metering,
 locality), E17-2 (the thesis contract), E17-5 (drift), E17-7 (vetted sources), and E17-8 (forward
 paper). E19 holds only what none of them covered.
+
+## 15. Owner and explain runs: the desk
+
+*Added for E12-5 and E19-15 ([DEC-2240](../project/decisions/DEC-2240.md), agent readings;
+[DEC-2241](../project/decisions/DEC-2241.md), [DEC-2242](../project/decisions/DEC-2242.md), and
+[DEC-2243](../project/decisions/DEC-2243.md), Proposed for the founder). It builds on E19-13's
+agentic loop (lane AH's harness design input, ADR-0005 when it merges: its §4 run kinds, §5
+tools, §9 run records) and adds no loop, no gateway path, and no run record of its own.
+§1 to §14 are lane AH's and are not changed here.*
+
+The **desk** is where an owner talks to their agent: "why did you buy X?", "why did you ask me?",
+"what are you watching?", "why was this refused?". Two of E19-13's run kinds serve it:
+
+| Kind | Trigger | What it produces |
+|---|---|---|
+| `owner` | A desk message, journaled on the control stream as `OwnerQuestionSubmitted` (§15.6) and copied by the runtime | An answer that cites the records it rests on |
+| `explain` | The runtime raises an ASK (`ApprovalRequested`) | The plain-language explanation shown under that approval |
+
+[DEC-192](../project/04-decision-log.md#decisions) is the rule both serve: "why" is answered from
+the journal, a model phrases the answer and adds no fact, and a fact the journal lacks reads "not
+recorded". §15.5 says which part of that the checks enforce and which part is disclosed.
+
+### 15.1 Scope and preconditions
+
+- **Slice 1 (the 2026-10-26 demo)** is read-only: both kinds get read and think tools only, and the
+  `answer` tool (§15.5). No action tool is in their tool set but `answer`, which acts on nothing
+  and only hands the answer to the checks (§15.6). Slice 2 (§15.12, planned) adds
+  proposals the owner confirms.
+- **Where they run.** In the agent process, on E19-13's loop beside the tick, never in it (HI-7,
+  HI-21). They follow every run rule of E19-13: at most one run in flight per agent; owner and
+  explain runs pre-empt queued runs and never trading; mode gates them (HI-15), so while the agent
+  is `paused` or `stopped` no owner or explain run starts and the desk serves the fallback (§15.5).
+- **Not advice.** They say what the agent did and why, from the record. They never recommend a
+  trade, an answer to an approval, a mandate change, or any other action to the owner (compliance
+  doc; `AGENTS.md` "Do not"). The disclaimer is the founder's (§15.8).
+- **Preconditions.** No owner or explain run calls a model until all of these hold: E19-13's change
+  to INF-5 admits the pinned tool set, and its run records are registered in `mandate-journal`;
+  `OwnerQuestionSubmitted` is registered (§15.6); DEC-997 is accepted; and, for the workspace,
+  either DEC-2241 (wording), DEC-2242 (who pays), and DEC-2243 (what may reach a hosted provider)
+  are all accepted, or the workspace is one of the platform's own demo and development workspaces,
+  on the platform's key, with the deployment flag `desk.model_answers` on (off by default). Until
+  then the desk answers with the fallback: the records, no model text. CI and the demo use
+  recorded-fake gateway fixtures only, with no network.
+- **What it shares with the agent's other runs** (disclosed). Owner and explain runs draw on the
+  agent's daily model budget, so members' questions can spend it and leave fewer research and
+  monitoring runs that day, the safe direction (HI-9). Under one run in flight per agent, a desk run
+  of up to 60 s delays a queued monitoring run by as much, and with it any invalidation or
+  discretionary exit that run would propose; at most one desk run goes ahead of a queued monitoring
+  run (§15.7). Risk exits, protection, and kill switches never wait for any run (HI-14).
+
+### 15.2 Invariants
+
+Each is a named test whose oracle computes the expected result its own way and is shown to catch a
+seeded bug first, under E19-13's **compromised model**: a gateway double that picks any
+schema-valid tool call or answer at every turn. E19-13's invariants (HI-1 to HI-28 as ADR-0005 §10
+amends them) hold for these runs as for any; these add what is particular to the desk.
+
+| ID | Invariant | How it is tested |
+|---|---|---|
+| EX-1 | **Read only in slice 1.** An owner or explain run's tool set holds read tools, `note`, and `answer` only. Under any model behaviour, the only records the run itself causes are E19-13's run records for it; no `IntentProposed`, thesis, invalidation, approval answer, owner command or request, draft, or version follows from it (rules 4, 11, 12) | Rung 2: a test asserts the owner and explain tool sets are the listed tools and that each read tool's port returns data only. Property with a compromised model, in a harness where the run is the only writer: an independent fold of the agent, account, and control streams before and after each run differs only by that run's records; and in a concurrent harness, no record whose `causation_id` chain reaches the run is of any other type |
+| EX-2 | **The agent's own records only.** Every tool reads only the folds of this agent's process: its agent stream, the account-stream records that name this agent's intents or id, and the mandate document of the version in effect. No control-stream record: owner input reaches the tools only through the runtime's agent-stream copies. `memory.runs` never returns another member's owner run. A ref that is not this agent's, another workspace's, or absent returns the same `not_found`, with the same body and timing class | Property over a cell with two workspaces and several agents, canaries planted in each: random questions and tool requests naming refs drawn from every agent and workspace; an oracle that knows each record's owner finds no foreign canary in any tool result, prompt artifact, answer, or record, and the foreign and absent `not_found` results are byte-identical |
+| EX-3 | **Scope comes from construction, never the model.** The workspace and agent are the process's (§5.1); no tool argument names a workspace, stream, agent, role, or principal; an argument the tool's schema does not name is refused by the schema check | Schema test over every tool; a property that every tool call's effective scope equals the process's |
+| EX-4 | **Every segment cites a record the run read.** An answer is shown only if it has at least one segment and each segment cites at least one ref returned by a tool of the same run, or it has no segment and at least one `not_recorded` item; a `not_recorded` item is a closed topic code rendered from the platform's template, never model text (§15.5) | Property with a compromised model citing random refs, refs of other runs, and nothing, and putting facts in `not_recorded`: no answer with an uncited segment or an unread citation is shown; the oracle rebuilds the readable set from the run's journaled tool results |
+| EX-5 | **No fixture advice phrase is shown.** No shown answer contains a phrase of the advice fixture list (§15.5): a recommendation to buy, sell, hold, approve, skip, or change the mandate, a price target, or a likely profit (DEC-126). Paraphrases outside the list are a disclosed residual (§15.10) | Property: a compromised model that embeds each fixture phrase in any case and spacing; none is shown. A list of neutral sentences ("the agent bought", "the gate refused") all pass, so the check is not vacuous. A seeded mutant that drops any one phrase from the checker's copy is caught. The list is a versioned file of the desk crate, `fixtures/advice-phrases.txt`, inside the entry's content hash |
+| EX-6 | **No quantity, price, limit value, dollar figure, P&L, or account reference from a record, and no number from the question, in a prompt.** A thesis's conviction and confidence, which the research model itself wrote, do reach it. Tool results reach the model through the redacted projection (§15.4), and the question and every free-text field enter the prompt through the numeric scrub (§15.4). Spelled-out numbers are a disclosed residual. What does reach the provider is DEC-2243's question | Canary test: canary quantities, prices, limit values, dollar amounts, P&L, and account refs in every record field the tools read, in the question, and in thesis text and headlines; none appears in any prompt artifact |
+| EX-7 | **Bounded.** A run makes at most §15.7's turns and tool calls and ends within its deadline, and its spend is reserved through the gateway against the agent's, the workspace's, and the deployment's budgets before any byte leaves (INF-7) | Property over random model behaviour; independent counters over the run's journaled records and the meter fold |
+| EX-8 | **Journaled before shown.** No answer is shown, and no turn reads a tool result, before its record commits (HI-24). A failed or `Ambiguous` append shows no model text | Fault injection on every append |
+| EX-9 | **Off every risk path.** An approval is raised, delivered, answered, and timed out exactly as without an explain run; a missing or late explanation only leaves the card without one. No owner or explain run delays a tick, an exit, protection, or a kill switch (rule 3, HI-14, HI-21). Their spend can make later research calls `budget_exhausted` sooner, which is the safe direction (HI-9) | Property over the approval flow, with no other run queued: one input sequence run with the explain run absent, stalled until its deadline, and failing; every draft and the account stream are byte-identical across the three |
+| EX-10 | **Nothing in notifications.** No notice, push payload, page title, or URL carries answer text, a question, or a cited record's content (rule 6, API-10) | Payload capture on every notice; a URL lint over the desk routes |
+| EX-11 | **Replay without a model.** Every shown answer, its checks, and its outcome are rebuilt from the journal (HI-3, INF-10) | Replay with a gateway that fails on any call |
+| EX-12 | **Provenance is complete.** Every shown answer's `written_after_reading` equals the set of untrusted results returned before its `answer` call, and the menu offered at each turn equals the trigger's menu (ADR-0005 §16 items 2 and 3) | Property with an adaptive compromised model (it picks its calls from the run so far, §16 item 9): an oracle that re-folds the run's tool results recomputes the set and the menu; seeded bugs (a result dropped, a tool added mid-run) are caught |
+| EX-13 | **Nothing beyond the reader's row.** Every field a run's tools return is in the cited-record projection for its type (§15.4, workspace API §4.6.1), and reaches only that run's readers (§15.3): an owner run's only the asking operator, under the chat row; an explain run's the view row's holders, and then only the approval, thesis, universe-entry, and mode projections | Property: for every tool, menu, and returned row, an oracle built from §4.6.1's projection table and §15.3's reader table, written apart from the tools, accepts every returned field and every route serving it; seeded bugs (a tool returning a gate check's rule-set version, the explain menu gaining `records.decisions`, an owner run's record served to another member) are caught |
+
+### 15.3 Who asks, and who reads
+
+| Surface | Authorized by (workspace API §3.7) | Notes |
+|---|---|---|
+| Send a desk message | *Chat thread with the agent* | A client has no chat. Other members do not see the question at the desk; the journal's *Read records* holders (workspace admin, auditor, service account) can, as they can every record (workspace API §4.8, journal spec §7) |
+| Read one's own thread, its answers, the cited records, the fallback records, and the owner run's transcript | *Chat thread with the agent*, the asking member only | The decision and order fields an owner run returns (the autonomy outcome and its rule, the dry run's verdict and reason code, a refused order's binding-gate verdict and first reason code) reach only this member, under the chat row. [DEC-192](../project/04-decision-log.md#decisions) (Accepted) assembles a "why" answer from "the decision's `DecisionMade`, its thesis, the rule or delegation that decided it, and the gate's result"; keeping those fields to the asking operator is this section's own tightening (DEC-2240 item 4, under DEC-176) |
+| Read an approval's explanation, its cited records, and the explain run's transcript | *View agents, positions, decisions* | With the approval (workspace API §4.3). The explain menu (below) returns the approval's, thesis's, universe entry's, and mode's fields of workspace API §4.6.1, which are §4.3's and §4.7's (D2, D4) plus refs and the admission verdict, all within the view row's "decisions" Never through a client's `read` scope (workspace API §3.8) |
+| Transcript of a research run (ideation, monitoring) | *Read records* in slice 1 | Its tool results hold news, filings, and quotes, and licensed text must stay where DEC-431 item 17 keeps it (HI-23); the model-output trace (J2) is already *Read records*. A redacted research transcript under the view row is a later change |
+
+No permission row is added or widened: what reaches a member beyond the view row's existing reads
+reaches only the asking operator, under the chat row.
+
+### 15.4 Tools
+
+Each tool is read-only, typed, and pinned with its argument schema in the run kind's entry (inside
+its content hash, ADR-0005 §5). Every returned row carries a `ref`, the opaque handle
+`ev:<event_id>` or `art:<sha256>`; only a returned ref may be cited. A fold's row takes the ref of
+the event that last changed it: a position its last fill's, a universe entry its `UniverseChanged`'s,
+the mode its last `AgentModeChanged`'s or restriction's, or the agent stream's `StreamOpened`'s before any, a run its first record's; the mandate's is
+`art:` and its document's hash. Where E19-13's final tool set (#1540) defines a read of the same
+meaning, the desk uses that tool under that name with the projection below; every other tool here
+is the desk's own (§15.6 item 6). These are the fields each returns, and the cited-record
+projections of workspace API §4.6.1 are exactly these fields plus the figures:
+
+| Tool | Arguments | Returns (redacted projection) | Caps |
+|---|---|---|---|
+| `records.decisions` | `instrument?` (symbol), `from?`, `to?` | `DecisionMade` records, newest first: ref, time, symbol, side, purpose, autonomy outcome and its rule or delegation name, the dry run's verdict and reason code, `requested_by` | 25 rows |
+| `records.decision` | `ref` | One decision: `records.decisions`'s fields, the refs of its thesis and of what followed (approval, order), and whether an owner request caused it | 1 |
+| `records.approvals` | `state?` | Approvals: ref, time, symbol, side, purpose, state, outcome, the rule that asked | 25 rows |
+| `records.approval` | `ref` | One approval, as §4.3's single read serves it without figures: symbol, asset class, side, purpose, `decided_by` (the rule or default that asked), deadline, state, and the refs of its decision and thesis | 1 |
+| `records.orders` | `instrument?` | Orders and fills: ref, time, symbol, side, state, fill time, and for a refused one the binding gate's verdict and first reason code, as the orders read model shows them | 25 rows |
+| `memory.positions` | — | Instruments held and whether each is removed | 50 rows |
+| `memory.universe` | — | The working universe: symbol, state (active, removed, refused), reason, thesis ref | 50 rows |
+| `memory.theses` | `state?` | Theses: ref, symbol, direction, conviction and confidence (labelled self-reported and uncalibrated, DEC-126), `as_of`, `expires_at`, state, admission verdict | 25 rows |
+| `memory.thesis` | `ref` | One thesis: `memory.theses`'s fields, its text and invalidation (quoted research-agent text), and its run's ref | 1; 4,000 bytes |
+| `memory.runs` | `kind?` | Past ideation, monitoring, and explain runs, never an owner run: ref, kind, trigger, start, end reason, and their structured summaries (typed fields, never prose; ADR-0005 §16 item 8), marked untrusted | 10 rows |
+| `mandate.read` | — | The deployed version's structural fields: version ref, goal type, asset classes, `max_instruments`, autonomy rules by name, limit kinds by name | 1 |
+| `mode.read` | — | This agent's effective mode and each restriction that binds it, by name, with what it blocks and how it lifts | 1 |
+
+**Citable types**, the closed list every returned row is one of: decision, approval, order, position,
+universe entry, thesis, run, mode, and the mandate's structural fields. A gate view's checks,
+rule-set version, quotes, and marks stay *Read records* (workspace API §4.8, J6), and an owner
+request's body and a signal output are not citable (EX-13).
+
+**The redacted projection.** Results carry identifiers, times, symbols, sides, reason codes, rule
+and limit names, states, and the agent's own model text. Never a quantity, price, limit value,
+dollar figure, P&L, account reference, broker number, or another agent's id. The web app renders a
+cited record with its figures through the cited-record read (workspace API §4.6.1), so the owner sees the numbers
+and the provider does not.
+
+**The numeric scrub.** Before the question, thesis text, or a headline enters a prompt, a
+deterministic scrub replaces every run of digits, with any sign, separator, or unit attached, with
+`[number]`. Times reach the model as typed fields of tool results, never through the scrubbed text.
+The stored question keeps the member's words; only the prompt is scrubbed. Spelled-out numbers
+pass: a disclosed residual.
+
+**Untrusted results.** A result is untrusted when it holds model or third-party text: a thesis's
+text and invalidation, a headline, and a run summary. Every untrusted result is delimited and marked
+as data in every prompt (spotlighting, ADR-0005 §16 item 5). That is defence in depth only: no
+invariant rests on it. EX-1, EX-3, and EX-4 bound what injected text can do.
+
+**The menu is fixed by the trigger, before anything untrusted is read** (ADR-0005 §16 item 2).
+Tools outside a run's menu are left out of its schema:
+
+| Run | Menu |
+|---|---|
+| `owner`, slice 1 | Every read tool above, `note`, and `answer`. No other action tool |
+| `explain` | `records.approval`, `memory.thesis`, `memory.universe`, `mode.read`, `note`, and `answer`; `memory.universe` filtered by code to the approval's instrument. Every field is within the view row (§15.3) |
+| `owner`, slice 2 | The slice-1 menu, plus the action tools only when the owner chose to make a request (a control the web app shows, journaled with the message), never because the model or a result asked; §15.12 |
+
+**Provenance** (ADR-0005 §16 item 3). Every shown answer and explanation records which untrusted
+results were in the run's context when it was written: the refs of the untrusted results returned
+by every tool call before its `answer` call, as `written_after_reading`. The desk shows it under the
+answer ("written after reading: …", each a link), so the owner, a reviewer, and a later explain run
+can see what may have steered it. It is derived from the run's journaled tool calls, never from the
+model's text.
+
+### 15.5 The answer, the checks, and the fallback
+
+The run ends by calling `answer` with `{"segments": [{"text": …, "cites": [ref, …]}],
+"not_recorded": [code, …]}`, where each code is one of the closed list `reason_for_trade`,
+`reason_for_ask`, `reason_for_refusal`, `watchlist`, `figures` (shown from the records, never by the
+model), `future_actions` (the plan view's, not the desk's), and `other`, each rendered by the
+platform from a fixed template. The harness checks it deterministically, in this order, and returns
+the first failure to the model as the tool's result, as ADR-0005 §5's feedback does, so the model
+may correct it within the run's bounds; the last answer that passes is shown:
+
+| Result | When |
+|---|---|
+| `empty` | No segment and no `not_recorded` code |
+| `uncited_segment` | A segment cites nothing |
+| `unknown_citation` | A segment cites a ref no tool of this run returned |
+| `advice_language` | The text holds a phrase of the advice fixture list (`fixtures/advice-phrases.txt`): "you should", "I recommend", "consider buying", "you may want to approve", "skip this", "price target", "likely profit", and the list's other phrasings (DEC-126). Describing what the agent did ("the agent bought", "the rule asked you") is not advice |
+| `too_long` | More than 8 segments, or more than 2,000 characters |
+| `shown` | Every check passed |
+
+An answer with no segment and at least one `not_recorded` code is shown as "not recorded" with
+each code's template text (DEC-192). Each shown segment is quoted text attributed to the agent (API-18), followed
+by its cited records rendered from the product read models.
+
+**What the checks hold of DEC-192, and what they do not.** They enforce that every sentence of model text
+cites a record the run read and that the owner sees that record beside it. They cannot tell whether a
+sentence says what its record says: a model may cite a real record and misstate it. That residual
+is disclosed, not blocked (§15.10, DEC-2240 item 7): the template says to add no fact, and the
+cited record is always shown beside the text.
+
+**The fallback**, one definition for every case. Whenever the desk has no shown answer for a
+question (no run started, as in a customer workspace before §15.1's decisions, or a run ended
+without one: a bound, the deadline, a model error, a spent budget, a mode change), the question's
+state is `unavailable` and the desk shows generic text that no explanation could be written, with
+the deterministic fallback records: computed at read time from the agent's folds, independent of any
+run, through the cited-record projections (workspace API §4.6.1), namely the agent's latest 10
+decisions and its current mode, newest first, served inline with the message under the asker's chat
+row (no run, so no run-scoped link), stamped with the watermarks read (API-14). No model text. A lost or failed run is never re-run by
+the platform; the owner may ask again, which is a new run and a new cost.
+
+**Every state to its exit.** The run's own lifecycle (crash, restart, version change, mode change,
+deadline) is E19-13's. For the desk:
+
+| Event | What the owner sees |
+|---|---|
+| The guard refuses the question | `OwnerQuestionSubmitted` is journaled with no question (journal spec §9.23); the runtime copies nothing and starts no run. The desk shows it `refused`, with generic text asking the member to leave out keys, account numbers, and personal details |
+| No run starts for a question within 60 s of its `recorded_at` (the agent paused or stopped, the process down, a precondition of §15.1 unmet, or a run in flight) | The desk shows it `unavailable`, with the fallback. The runtime starts no run for a question whose `recorded_at` is more than 60 s before the risk clock at its copy (two deployment clocks, within the scheduler's tolerance, journal spec §5.4); the desk's own `unavailable` uses the API's clock at the read. If a run still starts under watermark lag, its states override: `running` and then `answered` replace `unavailable`, so the desk never shows an answer and `unavailable` at once |
+| The process restarts during a run | E19-13 ends it; the desk shows the fallback. Its reservations stay counted (inference §7.3) |
+| The agent is paused, stopped, or killed | No owner or explain run starts; one in flight is cancelled at its next step (ADR-0005 §4). The desk serves the fallback for each later question |
+| The approval an explain run explains resolves | The explanation, if already shown, stays with the resolved approval; a run still in flight ends, and the card is left without one. No second explain run starts for that approval |
+| A question waits behind a run in flight | It runs next, ahead of queued runs, unless a monitoring run has already waited behind one desk run (§15.7); if it cannot start within 60 s of its `recorded_at`, it is `unavailable` with the fallback |
+| The asking member loses the chat role | The run completes and is journaled; reading it needs the role again (API-2) |
+
+### 15.6 Records
+
+E19-13's records carry the runs ([#1540](https://github.com/kunwarshivam/mandate/pull/1540) at head
+36cf67d9, journal spec §9.22 there), on the agent stream, written by the runtime core:
+`RunStarted` with `kind` `owner` or `explain`, `trigger` `owner_question` or `approval` and its
+`cause`, and the run's `menu`; one `ModelInvocationRecorded` per turn; `ToolCallRecorded` and
+`ToolResultRecorded` for every tool call, the `answer` check's result as the result's `code`;
+`RunSummaryRecorded`; and `RunEnded`, whose reason `answered` marks a shown answer. #1540's rule 173
+allows one `explain` run per approval and one `owner` run per question. Whatever
+names #1540 merges with, §15 means those records. One record is new, on the control stream
+([journal spec §9.23](journal.md#923-desk-question-records-dec-2240)):
+
+| Event | When |
+|---|---|
+| `OwnerQuestionSubmitted` | A member sends a desk message: the agent, the question as an artifact (or `null` with the guard's rule when the gateway's guard refuses it, so it is never stored). The runtime copies an accepted one at most once, as the `RunStarted` of an `owner` run whose `trigger.cause` names it, as it copies `OwnerRequestSubmitted`; a refused one is not copied |
+
+**What §15 still asks of #1540** (at head 36cf67d9 it already has `ToolResultRecorded.untrusted`
+and one `owner` `RunStarted` per cause, rule 173):
+
+1. `ToolResultRecorded`'s `code` list gains §15.5's results: `empty`, `uncited_segment`,
+   `unknown_citation`, `advice_language`, `too_long`, and `shown`. #1540's journal text says this
+   section adds them; whichever of the two merges second writes them into §9.22.
+2. HI-11's closed input list gains the desk's inputs (the redacted projection of §15.4), under
+   DEC-2243 once the founder decides it.
+
+The desk's tools are declared here, in §15.4, with their class: every one is `read`, `note` is
+`think`, and `answer` is `action`, the run's one owner-facing output, so #1540's rule 177 makes its
+`ToolCallRecorded` carry `provenance`, the untrusted results its prompt held, and
+`written_after_reading` is that list (ADR-0005 §16 item 3); its `ToolResultRecorded` has `result` `ok` and, as
+`code`, the check result, one of §15.5's (item 1). `answer` acts on nothing: it
+only hands the answer to the checks, so it adds no action path (EX-1). Owner and explain entries
+have `RunStarted.output` `action_tools`, and `answer`'s mediation is §15.5's checks alone: no
+verdict record, builder, gate, autonomy rule, or HI-27 rate limit, and no candidacy under journal
+rule 151. HI-25's oracle covers it as its journaled check result. Their names fill `RunStarted.menu` and `ToolCallRecorded.tool`, which #1540
+types as text constrained by the menu, so no journal change is needed for them. The invariant names
+HI-24 to HI-28 cited here are #1540's.
+
+### 15.7 Bounds and spend
+
+| Bound | Owner run | Explain run |
+|---|---|---|
+| Question | 1,000 characters | The platform's fixed question |
+| Turns | 6 | 4 |
+| Tool calls per turn; per run | 4; 16 | 4; 8 |
+| `answer` calls | 3 | 2 |
+| Result size | §15.4's caps; 16 KiB per result | The same |
+| Deadline | `RunStarted.deadline`, the cut-off plus the entry's `max_run_s` of 60 s, on the risk clock | The same, or the approval's deadline if sooner |
+| Rate | 30 questions per member per risk day; 1 waiting or in flight per member (a second is `rate_limited`); at most one desk run ahead of a queued monitoring run, so invalidations never starve | 1 per approval |
+
+**Spend is settings, never constants** (DEC-2240 item 9). Every turn is reserved through the
+gateway against the agent's daily model budget, the workspace's configured budget, and the
+deployment cap (ADR-0005 §8), as E19-13 meters every run. On the platform's demo and development
+deployment the cap is DEC-997's $50.00 a month. Who pays for a customer's runs is DEC-2242, Proposed.
+The non-money bounds are engineering values in the entry; a bound reached ends the run with the
+fallback, and changes nothing the agent may do (EX-9).
+
+### 15.8 Wording and disclaimer
+
+Compliance question 41 decides what an explanation must disclaim. Until the founder and counsel
+answer it (DEC-2241, Proposed), every shown answer and explanation carries the placeholder key
+`NOTE-EXPLAINER-NOT-ADVICE`, rendered as a named placeholder and never as drafted legal text; the
+template describes and never advises; and §15.5's check refuses the advice fixture list.
+
+### 15.9 The approval's explanation
+
+- **When.** The runtime starts one `explain` run when it raises an ASK, after the
+  `ApprovalRequested` commits, at most one per approval. The read of the approval starts nothing
+  and writes nothing.
+- **Shown only where DEC-2241 item 3 allows.** Until the founder decides it, the explanation is
+  shown only in the platform's own demo and development workspaces, and only when both deployment
+  flags `desk.model_answers` (§15.1) and `desk.approval_explanations` are on, each off by default. Elsewhere the run does not start.
+- **What it changes.** Nothing about the approval: it is outside the approval's content and
+  `content_hash` (API-12, mandate spec §6.4), shown below the content as quoted text with its
+  cited records. The approver's answer does not record which explanation was shown, which is
+  acceptable only while the flag is off; DEC-2241 asks whether `explain` text should be templated
+  over record fields before it is turned on. The approval read returns at once with the explanation's state (`none`,
+  `running`, `shown`, `unavailable`) and never waits for it (EX-9). It never says how to answer.
+
+### 15.10 Adversaries
+
+| Adversary | Attack | Blocked or disclosed by |
+|---|---|---|
+| Curious member | Asks about another workspace's or agent's records by ref | EX-2, EX-3: scope from construction; foreign refs read as absent |
+| Bad model | Invents a reason | EX-4: every segment cites a record the run read, shown beside the text. A citation that does not support its sentence is disclosed (§15.5) |
+| Bad model | Recommends a trade, or tells the approver to approve | EX-5's fixture list, the template, and the placeholder. A paraphrase outside the list is a disclosed residual, listed in DEC-2241 for counsel |
+| Bad model | Loops on tool or answer calls to run up cost | §15.7's bounds, reserved spend (EX-7) |
+| Malicious content | Injection in a thesis or headline that asks the run to act or read elsewhere | EX-1: no tool but `answer`, which acts on nothing; EX-3: no tool takes a scope |
+| Malicious content | Injection that tries to exfiltrate figures | EX-6: no figure from a record's fields is in the prompt; the model has no outbound path (HI-28) |
+| Owner | Types figures or a key into a question | The numeric scrub (§15.4); the gateway's guard refuses a key before the question is stored |
+| Many members asking at once | Cost and queueing | §15.7's rate and spend bounds; one run in flight per agent, so trading's runs wait only as E19-13 allows |
+| Outage | The gateway or provider is down | The fallback; approvals, exits, and kill switches never wait (EX-9) |
+
+### 15.11 What exists today
+
+As of 2026-10-17: nothing of §15 is built. E19-13 (lane AH) is writing the loop, its run records,
+and the tool contract; the gateway's HTTPS transport is in review (#1519); the workspace API server
+is E21-31 (#1457). The work is backlog E19-15; the crate that holds the desk's tools, scrub, and
+checks is safety-critical (tenant isolation and roles), so it gets a `layers.toml` entry, a
+CODEOWNERS line, the lint header, and mutants on its diff.
+
+### 15.12 Slice 2: actions asked at the desk (planned)
+
+*Specified now so that slice 1 does not close the door on it; nothing of it is built in slice 1.*
+The founder's framing (2026-10-17, relayed by the coordinator): the desk is the interactive session
+with your agent, "like Claude Code for trading". In slice 2 an owner may ask at the desk for an
+action, such as "sell half of X" or "stop watching Y".
+
+1. **The model proposes, deterministic code builds, the owner confirms.** An owner run gains
+   E19-13's action tools, each of which only proposes: an order request (instrument, side, and a
+   `fraction` of the held quantity or none) becomes an owner request that the builder sizes, the
+   gate dry-runs, and the autonomy rules classify (DEC-190); an envelope edit, such as removing an instrument
+   from a pinned universe, becomes a draft version classified by mandate spec §9.2; the working
+   universe of a research agent is never edited from the desk (rule 11). Each returns a card: the exact request with the
+   builder's figures, the gate's verdict, the autonomy outcome, and its `card_digest`. The model
+   never names a quantity, price, or limit.
+2. **HI-26, owner words are confirmed** (ADR-0005 §6 item 5). No owner-run action proceeds unless
+   the owner's own separate call, carrying that card's digest, sends it, under the owner's own row
+   (*Make an owner request*, *Draft a mandate version*, *Confirm a version*) and with step-up for
+   every desk-originated send (lane SU), which is stricter than the matrix for an owner request.
+   The send journals `OwnerRequestSubmitted` or the draft and confirmation records; the runtime's
+   builder, gate, and autonomy rules decide as for any owner request; a confirmed version is the
+   only way the envelope moves (rule 11, DEC-141, API-5).
+3. **Never the only way to reduce risk** (rule 13). Owner exits, pause, hold, and the kill switch
+   keep their deterministic controls and API-7's guarantees.
+4. **Invariants added with slice 2:** HI-26 as a property test (no `OwnerRequestSubmitted`, draft,
+   or confirmation from a desk message without the owner's send of that card's digest before it);
+   EX-14, a send whose digest differs from the card's is refused and commits nothing; EX-15, no
+   member of a card holds model text (API-18).
+5. **Depends on** E19-13's action tools, lane SU's step-up for desk sends, the card-send route of
+   workspace API §4.6, and its own spec change and DEC.
