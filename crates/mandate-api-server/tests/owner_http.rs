@@ -1,5 +1,5 @@
 //! Resume, Stop, owner exit, acknowledgment, and command status over HTTP (§3.11 item 12, §4.2,
-//! §5.4, §5.5, API-6, API-7, API-12; DEC-2101): recorded as the CLI records them, with step-up
+//! §5.4, §5.5, API-6, API-7, API-12; DEC-2102): recorded as the CLI records them, with step-up
 //! forwarded only once the port verifies it, and status read from the owning streams' direct
 //! causation alone. Expected payloads, digests, and phases are written out here from the spec.
 

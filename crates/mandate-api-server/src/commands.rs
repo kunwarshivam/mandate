@@ -46,7 +46,7 @@ pub enum Command {
         approval: String,
         content_hash: String,
     },
-    /// Resume the agent, with the evidence the step-up port verified, or `null` (DEC-2101 item 4).
+    /// Resume the agent, with the evidence the step-up port verified, or `null` (DEC-2102 item 4).
     Resume { agent: String, step_up: Value },
     /// The owner's Stop (DEC-136): with `release`, the positions become the owner's and the
     /// command names the release warning shown.
@@ -56,7 +56,7 @@ pub enum Command {
         step_up: Value,
     },
     /// The owner's exit of one instrument, with the confirmed `bid`, `bid_size`, and `floor` when
-    /// all three were sent (§5.4); its step-up is never forwarded (DEC-2101 item 4).
+    /// all three were sent (§5.4); its step-up is never forwarded (DEC-2102 item 4).
     OwnerExit {
         agent: String,
         instrument: String,
@@ -66,7 +66,7 @@ pub enum Command {
 
 /// The warning a Stop with release names (DEC-136, PX-13 (a)), the text `mandate agent stop
 /// --release` shows; a Stop through the API names the content reference of exactly this text
-/// (DEC-2101 item 3).
+/// (DEC-2102 item 3).
 pub const RELEASE_WARNING: &str = "The positions become yours and unprotected: this agent's \
      protective orders are canceled and nothing watches them. This warning is recorded with your \
      confirmation.";

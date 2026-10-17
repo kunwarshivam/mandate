@@ -1,4 +1,4 @@
-//! Command status (§5.5, §3.11 item 12, [DEC-2101](../../../docs/project/decisions/DEC-2101.md)
+//! Command status (§5.5, §3.11 item 12, [DEC-2102](../../../docs/project/decisions/DEC-2102.md)
 //! item 6): `GET /v1/workspaces/{ws}/commands/{event_id}`. A command's steps are the events whose
 //! `causation_id` is it on each deployed agent's stream and each account stream the control stream
 //! names, and its phase is the most final of theirs. Only the owning streams' events say what

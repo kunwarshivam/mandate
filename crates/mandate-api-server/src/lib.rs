@@ -28,7 +28,7 @@
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
 //! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
 //!   forwarded only once the port verifies it, and [`status`] reports a command's phase from the
-//!   owning streams' direct causation (DEC-2101).
+//!   owning streams' direct causation (DEC-2102).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.

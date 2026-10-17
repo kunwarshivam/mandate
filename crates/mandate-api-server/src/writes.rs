@@ -433,7 +433,7 @@ pub(crate) fn ref_text(reference: &Ref) -> Option<String> {
     json_string(&encode(reference).ok()?)
 }
 
-/// `POST /v1/workspaces/{ws}/agents/{id}/resume` (§3.11 item 12, DEC-2101): recorded with the
+/// `POST /v1/workspaces/{ws}/agents/{id}/resume` (§3.11 item 12, DEC-2102): recorded with the
 /// evidence the port verified, or `null`, which the runtime refuses (§5.4).
 pub async fn resume(
     State(app): State<Arc<App>>,
@@ -461,7 +461,7 @@ pub async fn resume(
     stepped(&app, &gate, &workspace, &make, &forwarded).await
 }
 
-/// `POST /v1/workspaces/{ws}/agents/{id}/stop` (§3.11 item 12, DEC-2101 items 3 and 4): a Stop
+/// `POST /v1/workspaces/{ws}/agents/{id}/stop` (§3.11 item 12, DEC-2102 items 3 and 4): a Stop
 /// with release names the platform's own release warning, else `invalid` at `/warning_shown`.
 pub async fn stop(
     State(app): State<Arc<App>>,
@@ -495,7 +495,7 @@ pub async fn stop(
     stepped(&app, &gate, &workspace, &make, &forwarded).await
 }
 
-/// `POST /v1/workspaces/{ws}/agents/{id}/exits` (§3.11 item 12, §5.4, DEC-2101): an API-7
+/// `POST /v1/workspaces/{ws}/agents/{id}/exits` (§3.11 item 12, §5.4, DEC-2102): an API-7
 /// operation, decoded leniently; recorded with the confirmed bid when all of it was sent, and no
 /// step-up, so it loses only the owner-exit privilege (mandate spec §6.1).
 pub async fn owner_exit(
@@ -607,7 +607,7 @@ struct Forwarded<'a> {
 }
 
 /// Authorizes the command `make` builds and records it with the presented evidence when the port
-/// verifies it, else with `null` (DEC-2101 item 4). A repeat whose key holds the command with the
+/// verifies it, else with `null` (DEC-2102 item 4). A repeat whose key holds the command with the
 /// evidence as presented replays before the port is asked again (§3.4 step 1).
 async fn stepped(
     app: &App,
