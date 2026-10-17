@@ -11938,7 +11938,7 @@ approval_cancellations:
 control_plane:
   spec: docs/specs/journal.md v0.44 §9.17 (DEC-981)
   drafts:
-    ControlPlaneEnrolled:
+    control_plane_enrolled:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP000000000000000000
@@ -11962,7 +11962,7 @@ control_plane:
         certificate_fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       artifact_refs: []
       pii_refs: []
-    LicenseApplied:
+    license_applied:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP010000000000000000
@@ -11996,7 +11996,7 @@ control_plane:
         document_digest: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       artifact_refs: []
       pii_refs: []
-    LicenseStateChanged:
+    license_state_changed:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP020000000000000000
@@ -12020,7 +12020,7 @@ control_plane:
         judged_at: '2026-10-17T13:05:00.000000000Z'
       artifact_refs: []
       pii_refs: []
-    ReleaseOffered:
+    release_offered:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP030000000000000000
@@ -12044,7 +12044,7 @@ control_plane:
         key_id: release_key_1
       artifact_refs: []
       pii_refs: []
-    ReleaseInstalled:
+    release_installed:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP040000000000000000
@@ -12068,7 +12068,7 @@ control_plane:
         trigger: promotion
       artifact_refs: []
       pii_refs: []
-    ReleaseWithdrawnNoticed:
+    release_withdrawn_noticed:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP050000000000000000
@@ -12092,7 +12092,7 @@ control_plane:
         document_digest: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
       artifact_refs: []
       pii_refs: []
-    CatalogEntryRegistered:
+    catalog_entry_registered:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP060000000000000000
@@ -12117,7 +12117,7 @@ control_plane:
         key_id: release_key_1
       artifact_refs: []
       pii_refs: []
-    DataBundleImported:
+    data_bundle_imported:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP070000000000000000
@@ -12141,7 +12141,7 @@ control_plane:
         key_id: data_key_1
       artifact_refs: []
       pii_refs: []
-    UsageReportSealed:
+    usage_report_sealed:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP080000000000000000
@@ -12168,7 +12168,7 @@ control_plane:
         report_digest: '2222222222222222222222222222222222222222222222222222222222222222'
       artifact_refs: []
       pii_refs: []
-    ControlPlaneMessageRefused:
+    control_plane_message_refused:
       envelope_version: 1
       environment: paper
       event_id: 01J8Z4CP090000000000000000
@@ -12195,7 +12195,7 @@ control_plane:
   invalid_drafts:
   - name: ControlPlaneEnrolled.deployment_id.kind
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.deployment_id
       value: 7
@@ -12205,7 +12205,7 @@ control_plane:
       path: payload.deployment_id
   - name: ControlPlaneEnrolled.deployment_id.form
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.deployment_id
       value: not an id
@@ -12215,7 +12215,7 @@ control_plane:
       path: payload.deployment_id
   - name: ControlPlaneEnrolled.deployment_id.null
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.deployment_id
       value: null
@@ -12225,7 +12225,7 @@ control_plane:
       path: payload.deployment_id
   - name: ControlPlaneEnrolled.org_id.kind
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.org_id
       value: 7
@@ -12235,7 +12235,7 @@ control_plane:
       path: payload.org_id
   - name: ControlPlaneEnrolled.org_id.form
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.org_id
       value: not an id
@@ -12245,7 +12245,7 @@ control_plane:
       path: payload.org_id
   - name: ControlPlaneEnrolled.org_id.null
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.org_id
       value: null
@@ -12255,7 +12255,7 @@ control_plane:
       path: payload.org_id
   - name: ControlPlaneEnrolled.mode.kind
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.mode
       value: 7
@@ -12265,7 +12265,7 @@ control_plane:
       path: payload.mode
   - name: ControlPlaneEnrolled.mode.form
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.mode
       value: not_listed
@@ -12275,7 +12275,7 @@ control_plane:
       path: payload.mode
   - name: ControlPlaneEnrolled.mode.null
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.mode
       value: null
@@ -12285,7 +12285,7 @@ control_plane:
       path: payload.mode
   - name: ControlPlaneEnrolled.certificate_fingerprint.kind
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.certificate_fingerprint
       value: 7
@@ -12295,7 +12295,7 @@ control_plane:
       path: payload.certificate_fingerprint
   - name: ControlPlaneEnrolled.certificate_fingerprint.form
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.certificate_fingerprint
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -12305,7 +12305,7 @@ control_plane:
       path: payload.certificate_fingerprint
   - name: ControlPlaneEnrolled.certificate_fingerprint.null
     clause: §9.17 types
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.certificate_fingerprint
       value: null
@@ -12315,7 +12315,7 @@ control_plane:
       path: payload.certificate_fingerprint
   - name: ControlPlaneEnrolled.missing
     clause: §9.17 closed
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.deployment_id
       delete: true
@@ -12325,7 +12325,7 @@ control_plane:
       path: payload.deployment_id
   - name: ControlPlaneEnrolled.extra
     clause: §9.17 closed
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.note
       value: x
@@ -12335,7 +12335,7 @@ control_plane:
       path: payload.note
   - name: LicenseApplied.license_id.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.license_id
       value: 7
@@ -12345,7 +12345,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseApplied.license_id.form
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.license_id
       value: not an id
@@ -12355,7 +12355,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseApplied.license_id.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.license_id
       value: null
@@ -12365,7 +12365,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseApplied.sequence.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.sequence
       value: '3'
@@ -12375,7 +12375,7 @@ control_plane:
       path: payload.sequence
   - name: LicenseApplied.sequence.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.sequence
       value: null
@@ -12385,7 +12385,7 @@ control_plane:
       path: payload.sequence
   - name: LicenseApplied.org_id.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.org_id
       value: 7
@@ -12395,7 +12395,7 @@ control_plane:
       path: payload.org_id
   - name: LicenseApplied.org_id.form
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.org_id
       value: not an id
@@ -12405,7 +12405,7 @@ control_plane:
       path: payload.org_id
   - name: LicenseApplied.org_id.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.org_id
       value: null
@@ -12415,7 +12415,7 @@ control_plane:
       path: payload.org_id
   - name: LicenseApplied.deployment_ids.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.deployment_ids
       value: x
@@ -12425,7 +12425,7 @@ control_plane:
       path: payload.deployment_ids
   - name: LicenseApplied.deployment_ids.item
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.deployment_ids
       value:
@@ -12436,7 +12436,7 @@ control_plane:
       path: payload.deployment_ids[0]
   - name: LicenseApplied.max_workspaces.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.max_workspaces
       value: '3'
@@ -12446,7 +12446,7 @@ control_plane:
       path: payload.max_workspaces
   - name: LicenseApplied.max_workspaces.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.max_workspaces
       value: null
@@ -12456,7 +12456,7 @@ control_plane:
       path: payload.max_workspaces
   - name: LicenseApplied.max_agents_deployed.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.max_agents_deployed
       value: '3'
@@ -12466,7 +12466,7 @@ control_plane:
       path: payload.max_agents_deployed
   - name: LicenseApplied.max_agents_deployed.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.max_agents_deployed
       value: null
@@ -12476,7 +12476,7 @@ control_plane:
       path: payload.max_agents_deployed
   - name: LicenseApplied.features.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.features
       value: x
@@ -12486,7 +12486,7 @@ control_plane:
       path: payload.features
   - name: LicenseApplied.features.item
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.features
       value:
@@ -12497,7 +12497,7 @@ control_plane:
       path: payload.features[0]
   - name: LicenseApplied.not_before.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_before
       value: 7
@@ -12507,7 +12507,7 @@ control_plane:
       path: payload.not_before
   - name: LicenseApplied.not_before.form
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_before
       value: '2026-10-17'
@@ -12517,7 +12517,7 @@ control_plane:
       path: payload.not_before
   - name: LicenseApplied.not_before.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_before
       value: null
@@ -12527,7 +12527,7 @@ control_plane:
       path: payload.not_before
   - name: LicenseApplied.not_after.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_after
       value: 7
@@ -12537,7 +12537,7 @@ control_plane:
       path: payload.not_after
   - name: LicenseApplied.not_after.form
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_after
       value: '2026-10-17'
@@ -12547,7 +12547,7 @@ control_plane:
       path: payload.not_after
   - name: LicenseApplied.not_after.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_after
       value: null
@@ -12557,7 +12557,7 @@ control_plane:
       path: payload.not_after
   - name: LicenseApplied.grace_days.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.grace_days
       value: '3'
@@ -12567,7 +12567,7 @@ control_plane:
       path: payload.grace_days
   - name: LicenseApplied.grace_days.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.grace_days
       value: null
@@ -12577,7 +12577,7 @@ control_plane:
       path: payload.grace_days
   - name: LicenseApplied.key_id.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.key_id
       value: 7
@@ -12587,7 +12587,7 @@ control_plane:
       path: payload.key_id
   - name: LicenseApplied.key_id.form
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.key_id
       value: not an id
@@ -12597,7 +12597,7 @@ control_plane:
       path: payload.key_id
   - name: LicenseApplied.key_id.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.key_id
       value: null
@@ -12607,7 +12607,7 @@ control_plane:
       path: payload.key_id
   - name: LicenseApplied.document_digest.kind
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.document_digest
       value: 7
@@ -12617,7 +12617,7 @@ control_plane:
       path: payload.document_digest
   - name: LicenseApplied.document_digest.form
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.document_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -12627,7 +12627,7 @@ control_plane:
       path: payload.document_digest
   - name: LicenseApplied.document_digest.null
     clause: §9.17 types
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.document_digest
       value: null
@@ -12637,7 +12637,7 @@ control_plane:
       path: payload.document_digest
   - name: LicenseApplied.missing
     clause: §9.17 closed
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.license_id
       delete: true
@@ -12647,7 +12647,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseApplied.extra
     clause: §9.17 closed
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.note
       value: x
@@ -12657,7 +12657,7 @@ control_plane:
       path: payload.note
   - name: LicenseStateChanged.license_id.kind
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.license_id
       value: 7
@@ -12667,7 +12667,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseStateChanged.license_id.form
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.license_id
       value: not an id
@@ -12677,7 +12677,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseStateChanged.license_id.null
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.license_id
       value: null
@@ -12687,7 +12687,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseStateChanged.from.kind
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.from
       value: 7
@@ -12697,7 +12697,7 @@ control_plane:
       path: payload.from
   - name: LicenseStateChanged.from.form
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.from
       value: not_listed
@@ -12707,7 +12707,7 @@ control_plane:
       path: payload.from
   - name: LicenseStateChanged.to.kind
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.to
       value: 7
@@ -12717,7 +12717,7 @@ control_plane:
       path: payload.to
   - name: LicenseStateChanged.to.form
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.to
       value: not_listed
@@ -12727,7 +12727,7 @@ control_plane:
       path: payload.to
   - name: LicenseStateChanged.to.null
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.to
       value: null
@@ -12737,7 +12737,7 @@ control_plane:
       path: payload.to
   - name: LicenseStateChanged.judged_at.kind
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.judged_at
       value: 7
@@ -12747,7 +12747,7 @@ control_plane:
       path: payload.judged_at
   - name: LicenseStateChanged.judged_at.form
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.judged_at
       value: '2026-10-17'
@@ -12757,7 +12757,7 @@ control_plane:
       path: payload.judged_at
   - name: LicenseStateChanged.judged_at.null
     clause: §9.17 types
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.judged_at
       value: null
@@ -12767,7 +12767,7 @@ control_plane:
       path: payload.judged_at
   - name: LicenseStateChanged.missing
     clause: §9.17 closed
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.license_id
       delete: true
@@ -12777,7 +12777,7 @@ control_plane:
       path: payload.license_id
   - name: LicenseStateChanged.extra
     clause: §9.17 closed
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.note
       value: x
@@ -12787,7 +12787,7 @@ control_plane:
       path: payload.note
   - name: ReleaseOffered.release_id.kind
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.release_id
       value: 7
@@ -12797,7 +12797,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseOffered.release_id.form
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.release_id
       value: not an id
@@ -12807,7 +12807,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseOffered.release_id.null
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.release_id
       value: null
@@ -12817,7 +12817,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseOffered.sequence.kind
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.sequence
       value: '3'
@@ -12827,7 +12827,7 @@ control_plane:
       path: payload.sequence
   - name: ReleaseOffered.sequence.null
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.sequence
       value: null
@@ -12837,7 +12837,7 @@ control_plane:
       path: payload.sequence
   - name: ReleaseOffered.manifest_digest.kind
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.manifest_digest
       value: 7
@@ -12847,7 +12847,7 @@ control_plane:
       path: payload.manifest_digest
   - name: ReleaseOffered.manifest_digest.form
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.manifest_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -12857,7 +12857,7 @@ control_plane:
       path: payload.manifest_digest
   - name: ReleaseOffered.manifest_digest.null
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.manifest_digest
       value: null
@@ -12867,7 +12867,7 @@ control_plane:
       path: payload.manifest_digest
   - name: ReleaseOffered.key_id.kind
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.key_id
       value: 7
@@ -12877,7 +12877,7 @@ control_plane:
       path: payload.key_id
   - name: ReleaseOffered.key_id.form
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.key_id
       value: not an id
@@ -12887,7 +12887,7 @@ control_plane:
       path: payload.key_id
   - name: ReleaseOffered.key_id.null
     clause: §9.17 types
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.key_id
       value: null
@@ -12897,7 +12897,7 @@ control_plane:
       path: payload.key_id
   - name: ReleaseOffered.missing
     clause: §9.17 closed
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.release_id
       delete: true
@@ -12907,7 +12907,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseOffered.extra
     clause: §9.17 closed
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.note
       value: x
@@ -12917,7 +12917,7 @@ control_plane:
       path: payload.note
   - name: ReleaseInstalled.release_id.kind
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.release_id
       value: 7
@@ -12927,7 +12927,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseInstalled.release_id.form
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.release_id
       value: not an id
@@ -12937,7 +12937,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseInstalled.release_id.null
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.release_id
       value: null
@@ -12947,7 +12947,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseInstalled.sequence.kind
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.sequence
       value: '3'
@@ -12957,7 +12957,7 @@ control_plane:
       path: payload.sequence
   - name: ReleaseInstalled.sequence.null
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.sequence
       value: null
@@ -12967,7 +12967,7 @@ control_plane:
       path: payload.sequence
   - name: ReleaseInstalled.manifest_digest.kind
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.manifest_digest
       value: 7
@@ -12977,7 +12977,7 @@ control_plane:
       path: payload.manifest_digest
   - name: ReleaseInstalled.manifest_digest.form
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.manifest_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -12987,7 +12987,7 @@ control_plane:
       path: payload.manifest_digest
   - name: ReleaseInstalled.manifest_digest.null
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.manifest_digest
       value: null
@@ -12997,7 +12997,7 @@ control_plane:
       path: payload.manifest_digest
   - name: ReleaseInstalled.trigger.kind
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.trigger
       value: 7
@@ -13007,7 +13007,7 @@ control_plane:
       path: payload.trigger
   - name: ReleaseInstalled.trigger.form
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.trigger
       value: not_listed
@@ -13017,7 +13017,7 @@ control_plane:
       path: payload.trigger
   - name: ReleaseInstalled.trigger.null
     clause: §9.17 types
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.trigger
       value: null
@@ -13027,7 +13027,7 @@ control_plane:
       path: payload.trigger
   - name: ReleaseInstalled.missing
     clause: §9.17 closed
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.release_id
       delete: true
@@ -13037,7 +13037,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseInstalled.extra
     clause: §9.17 closed
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.note
       value: x
@@ -13047,7 +13047,7 @@ control_plane:
       path: payload.note
   - name: ReleaseWithdrawnNoticed.release_id.kind
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.release_id
       value: 7
@@ -13057,7 +13057,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseWithdrawnNoticed.release_id.form
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.release_id
       value: not an id
@@ -13067,7 +13067,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseWithdrawnNoticed.release_id.null
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.release_id
       value: null
@@ -13077,7 +13077,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseWithdrawnNoticed.reason.kind
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.reason
       value: 7
@@ -13087,7 +13087,7 @@ control_plane:
       path: payload.reason
   - name: ReleaseWithdrawnNoticed.reason.form
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.reason
       value: not_listed
@@ -13097,7 +13097,7 @@ control_plane:
       path: payload.reason
   - name: ReleaseWithdrawnNoticed.reason.null
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.reason
       value: null
@@ -13107,7 +13107,7 @@ control_plane:
       path: payload.reason
   - name: ReleaseWithdrawnNoticed.key_id.kind
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.key_id
       value: 7
@@ -13117,7 +13117,7 @@ control_plane:
       path: payload.key_id
   - name: ReleaseWithdrawnNoticed.key_id.form
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.key_id
       value: not an id
@@ -13127,7 +13127,7 @@ control_plane:
       path: payload.key_id
   - name: ReleaseWithdrawnNoticed.key_id.null
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.key_id
       value: null
@@ -13137,7 +13137,7 @@ control_plane:
       path: payload.key_id
   - name: ReleaseWithdrawnNoticed.document_digest.kind
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.document_digest
       value: 7
@@ -13147,7 +13147,7 @@ control_plane:
       path: payload.document_digest
   - name: ReleaseWithdrawnNoticed.document_digest.form
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.document_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -13157,7 +13157,7 @@ control_plane:
       path: payload.document_digest
   - name: ReleaseWithdrawnNoticed.document_digest.null
     clause: §9.17 types
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.document_digest
       value: null
@@ -13167,7 +13167,7 @@ control_plane:
       path: payload.document_digest
   - name: ReleaseWithdrawnNoticed.missing
     clause: §9.17 closed
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.release_id
       delete: true
@@ -13177,7 +13177,7 @@ control_plane:
       path: payload.release_id
   - name: ReleaseWithdrawnNoticed.extra
     clause: §9.17 closed
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: payload.note
       value: x
@@ -13187,7 +13187,7 @@ control_plane:
       path: payload.note
   - name: CatalogEntryRegistered.kind.kind
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.kind
       value: 7
@@ -13197,7 +13197,7 @@ control_plane:
       path: payload.kind
   - name: CatalogEntryRegistered.kind.form
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.kind
       value: not_listed
@@ -13207,7 +13207,7 @@ control_plane:
       path: payload.kind
   - name: CatalogEntryRegistered.kind.null
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.kind
       value: null
@@ -13217,7 +13217,7 @@ control_plane:
       path: payload.kind
   - name: CatalogEntryRegistered.entry_id.kind
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.entry_id
       value: 7
@@ -13227,7 +13227,7 @@ control_plane:
       path: payload.entry_id
   - name: CatalogEntryRegistered.entry_id.form
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.entry_id
       value: not an id
@@ -13237,7 +13237,7 @@ control_plane:
       path: payload.entry_id
   - name: CatalogEntryRegistered.entry_id.null
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.entry_id
       value: null
@@ -13247,7 +13247,7 @@ control_plane:
       path: payload.entry_id
   - name: CatalogEntryRegistered.content_hash.kind
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.content_hash
       value: 7
@@ -13257,7 +13257,7 @@ control_plane:
       path: payload.content_hash
   - name: CatalogEntryRegistered.content_hash.form
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.content_hash
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -13267,7 +13267,7 @@ control_plane:
       path: payload.content_hash
   - name: CatalogEntryRegistered.content_hash.null
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.content_hash
       value: null
@@ -13277,7 +13277,7 @@ control_plane:
       path: payload.content_hash
   - name: CatalogEntryRegistered.sequence.kind
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.sequence
       value: '3'
@@ -13287,7 +13287,7 @@ control_plane:
       path: payload.sequence
   - name: CatalogEntryRegistered.sequence.null
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.sequence
       value: null
@@ -13297,7 +13297,7 @@ control_plane:
       path: payload.sequence
   - name: CatalogEntryRegistered.key_id.kind
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.key_id
       value: 7
@@ -13307,7 +13307,7 @@ control_plane:
       path: payload.key_id
   - name: CatalogEntryRegistered.key_id.form
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.key_id
       value: not an id
@@ -13317,7 +13317,7 @@ control_plane:
       path: payload.key_id
   - name: CatalogEntryRegistered.key_id.null
     clause: §9.17 types
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.key_id
       value: null
@@ -13327,7 +13327,7 @@ control_plane:
       path: payload.key_id
   - name: CatalogEntryRegistered.missing
     clause: §9.17 closed
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.kind
       delete: true
@@ -13337,7 +13337,7 @@ control_plane:
       path: payload.kind
   - name: CatalogEntryRegistered.extra
     clause: §9.17 closed
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.note
       value: x
@@ -13347,7 +13347,7 @@ control_plane:
       path: payload.note
   - name: DataBundleImported.dataset.kind
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.dataset
       value: 7
@@ -13357,7 +13357,7 @@ control_plane:
       path: payload.dataset
   - name: DataBundleImported.dataset.form
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.dataset
       value: not an id
@@ -13367,7 +13367,7 @@ control_plane:
       path: payload.dataset
   - name: DataBundleImported.dataset.null
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.dataset
       value: null
@@ -13377,7 +13377,7 @@ control_plane:
       path: payload.dataset
   - name: DataBundleImported.bundle_digest.kind
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.bundle_digest
       value: 7
@@ -13387,7 +13387,7 @@ control_plane:
       path: payload.bundle_digest
   - name: DataBundleImported.bundle_digest.form
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.bundle_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -13397,7 +13397,7 @@ control_plane:
       path: payload.bundle_digest
   - name: DataBundleImported.bundle_digest.null
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.bundle_digest
       value: null
@@ -13407,7 +13407,7 @@ control_plane:
       path: payload.bundle_digest
   - name: DataBundleImported.sequence.kind
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.sequence
       value: '3'
@@ -13417,7 +13417,7 @@ control_plane:
       path: payload.sequence
   - name: DataBundleImported.sequence.null
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.sequence
       value: null
@@ -13427,7 +13427,7 @@ control_plane:
       path: payload.sequence
   - name: DataBundleImported.key_id.kind
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.key_id
       value: 7
@@ -13437,7 +13437,7 @@ control_plane:
       path: payload.key_id
   - name: DataBundleImported.key_id.form
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.key_id
       value: not an id
@@ -13447,7 +13447,7 @@ control_plane:
       path: payload.key_id
   - name: DataBundleImported.key_id.null
     clause: §9.17 types
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.key_id
       value: null
@@ -13457,7 +13457,7 @@ control_plane:
       path: payload.key_id
   - name: DataBundleImported.missing
     clause: §9.17 closed
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.dataset
       delete: true
@@ -13467,7 +13467,7 @@ control_plane:
       path: payload.dataset
   - name: DataBundleImported.extra
     clause: §9.17 closed
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.note
       value: x
@@ -13477,7 +13477,7 @@ control_plane:
       path: payload.note
   - name: UsageReportSealed.report_id.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_id
       value: 7
@@ -13487,7 +13487,7 @@ control_plane:
       path: payload.report_id
   - name: UsageReportSealed.report_id.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_id
       value: not an id
@@ -13497,7 +13497,7 @@ control_plane:
       path: payload.report_id
   - name: UsageReportSealed.report_id.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_id
       value: null
@@ -13507,7 +13507,7 @@ control_plane:
       path: payload.report_id
   - name: UsageReportSealed.deployment_id.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.deployment_id
       value: 7
@@ -13517,7 +13517,7 @@ control_plane:
       path: payload.deployment_id
   - name: UsageReportSealed.deployment_id.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.deployment_id
       value: not an id
@@ -13527,7 +13527,7 @@ control_plane:
       path: payload.deployment_id
   - name: UsageReportSealed.deployment_id.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.deployment_id
       value: null
@@ -13537,7 +13537,7 @@ control_plane:
       path: payload.deployment_id
   - name: UsageReportSealed.org_id.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.org_id
       value: 7
@@ -13547,7 +13547,7 @@ control_plane:
       path: payload.org_id
   - name: UsageReportSealed.org_id.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.org_id
       value: not an id
@@ -13557,7 +13557,7 @@ control_plane:
       path: payload.org_id
   - name: UsageReportSealed.org_id.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.org_id
       value: null
@@ -13567,7 +13567,7 @@ control_plane:
       path: payload.org_id
   - name: UsageReportSealed.period_start.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_start
       value: 7
@@ -13577,7 +13577,7 @@ control_plane:
       path: payload.period_start
   - name: UsageReportSealed.period_start.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_start
       value: '2026-10-17'
@@ -13587,7 +13587,7 @@ control_plane:
       path: payload.period_start
   - name: UsageReportSealed.period_start.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_start
       value: null
@@ -13597,7 +13597,7 @@ control_plane:
       path: payload.period_start
   - name: UsageReportSealed.period_end.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_end
       value: 7
@@ -13607,7 +13607,7 @@ control_plane:
       path: payload.period_end
   - name: UsageReportSealed.period_end.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_end
       value: '2026-10-17'
@@ -13617,7 +13617,7 @@ control_plane:
       path: payload.period_end
   - name: UsageReportSealed.period_end.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_end
       value: null
@@ -13627,7 +13627,7 @@ control_plane:
       path: payload.period_end
   - name: UsageReportSealed.prev_report_hash.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.prev_report_hash
       value: 7
@@ -13637,7 +13637,7 @@ control_plane:
       path: payload.prev_report_hash
   - name: UsageReportSealed.prev_report_hash.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.prev_report_hash
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -13647,7 +13647,7 @@ control_plane:
       path: payload.prev_report_hash
   - name: UsageReportSealed.prev_report_hash.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.prev_report_hash
       value: null
@@ -13657,7 +13657,7 @@ control_plane:
       path: payload.prev_report_hash
   - name: UsageReportSealed.report_digest.kind
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_digest
       value: 7
@@ -13667,7 +13667,7 @@ control_plane:
       path: payload.report_digest
   - name: UsageReportSealed.report_digest.form
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -13677,7 +13677,7 @@ control_plane:
       path: payload.report_digest
   - name: UsageReportSealed.report_digest.null
     clause: §9.17 types
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_digest
       value: null
@@ -13687,7 +13687,7 @@ control_plane:
       path: payload.report_digest
   - name: UsageReportSealed.missing
     clause: §9.17 closed
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.report_id
       delete: true
@@ -13697,7 +13697,7 @@ control_plane:
       path: payload.report_id
   - name: UsageReportSealed.extra
     clause: §9.17 closed
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.note
       value: x
@@ -13707,7 +13707,7 @@ control_plane:
       path: payload.note
   - name: ControlPlaneMessageRefused.message.kind
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       value: 7
@@ -13717,7 +13717,7 @@ control_plane:
       path: payload.message
   - name: ControlPlaneMessageRefused.message.form
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       value: not_listed
@@ -13727,7 +13727,7 @@ control_plane:
       path: payload.message
   - name: ControlPlaneMessageRefused.message.null
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       value: null
@@ -13737,7 +13737,7 @@ control_plane:
       path: payload.message
   - name: ControlPlaneMessageRefused.reason.kind
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.reason
       value: 7
@@ -13747,7 +13747,7 @@ control_plane:
       path: payload.reason
   - name: ControlPlaneMessageRefused.reason.form
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.reason
       value: not_listed
@@ -13757,7 +13757,7 @@ control_plane:
       path: payload.reason
   - name: ControlPlaneMessageRefused.reason.null
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.reason
       value: null
@@ -13767,7 +13767,7 @@ control_plane:
       path: payload.reason
   - name: ControlPlaneMessageRefused.sequence.kind
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.sequence
       value: '3'
@@ -13777,7 +13777,7 @@ control_plane:
       path: payload.sequence
   - name: ControlPlaneMessageRefused.document_digest.kind
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.document_digest
       value: 7
@@ -13787,7 +13787,7 @@ control_plane:
       path: payload.document_digest
   - name: ControlPlaneMessageRefused.document_digest.form
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.document_digest
       value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -13797,7 +13797,7 @@ control_plane:
       path: payload.document_digest
   - name: ControlPlaneMessageRefused.document_digest.null
     clause: §9.17 types
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.document_digest
       value: null
@@ -13807,7 +13807,7 @@ control_plane:
       path: payload.document_digest
   - name: ControlPlaneMessageRefused.missing
     clause: §9.17 closed
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       delete: true
@@ -13817,7 +13817,7 @@ control_plane:
       path: payload.message
   - name: ControlPlaneMessageRefused.extra
     clause: §9.17 closed
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.note
       value: x
@@ -13827,7 +13827,7 @@ control_plane:
       path: payload.note
   - name: ControlPlaneEnrolled.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: actor
       value: &id005
@@ -13841,7 +13841,7 @@ control_plane:
       path: actor.kind
   - name: ControlPlaneEnrolled.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -13851,7 +13851,7 @@ control_plane:
       path: event_type
   - name: ControlPlaneEnrolled.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: schema_version
       value: 2
@@ -13861,7 +13861,7 @@ control_plane:
       path: payload
   - name: LicenseApplied.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: actor
       value: *id005
@@ -13871,7 +13871,7 @@ control_plane:
       path: actor.kind
   - name: LicenseApplied.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -13881,7 +13881,7 @@ control_plane:
       path: event_type
   - name: LicenseApplied.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: schema_version
       value: 2
@@ -13891,7 +13891,7 @@ control_plane:
       path: payload
   - name: LicenseStateChanged.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: actor
       value: *id005
@@ -13901,7 +13901,7 @@ control_plane:
       path: actor.kind
   - name: LicenseStateChanged.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -13911,7 +13911,7 @@ control_plane:
       path: event_type
   - name: LicenseStateChanged.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: schema_version
       value: 2
@@ -13921,7 +13921,7 @@ control_plane:
       path: payload
   - name: ReleaseOffered.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: actor
       value: *id005
@@ -13931,7 +13931,7 @@ control_plane:
       path: actor.kind
   - name: ReleaseOffered.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -13941,7 +13941,7 @@ control_plane:
       path: event_type
   - name: ReleaseOffered.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: schema_version
       value: 2
@@ -13951,7 +13951,7 @@ control_plane:
       path: payload
   - name: ReleaseInstalled.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: actor
       value: *id005
@@ -13961,7 +13961,7 @@ control_plane:
       path: actor.kind
   - name: ReleaseInstalled.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -13971,7 +13971,7 @@ control_plane:
       path: event_type
   - name: ReleaseInstalled.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: schema_version
       value: 2
@@ -13981,7 +13981,7 @@ control_plane:
       path: payload
   - name: ReleaseWithdrawnNoticed.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: actor
       value: *id005
@@ -13991,7 +13991,7 @@ control_plane:
       path: actor.kind
   - name: ReleaseWithdrawnNoticed.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -14001,7 +14001,7 @@ control_plane:
       path: event_type
   - name: ReleaseWithdrawnNoticed.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: ReleaseWithdrawnNoticed
+    base_draft: release_withdrawn_noticed
     changes:
     - path: schema_version
       value: 2
@@ -14011,7 +14011,7 @@ control_plane:
       path: payload
   - name: CatalogEntryRegistered.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: actor
       value: *id005
@@ -14021,7 +14021,7 @@ control_plane:
       path: actor.kind
   - name: CatalogEntryRegistered.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -14031,7 +14031,7 @@ control_plane:
       path: event_type
   - name: CatalogEntryRegistered.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: schema_version
       value: 2
@@ -14041,7 +14041,7 @@ control_plane:
       path: payload
   - name: DataBundleImported.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: actor
       value: *id005
@@ -14051,7 +14051,7 @@ control_plane:
       path: actor.kind
   - name: DataBundleImported.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -14061,7 +14061,7 @@ control_plane:
       path: event_type
   - name: DataBundleImported.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: schema_version
       value: 2
@@ -14071,7 +14071,7 @@ control_plane:
       path: payload
   - name: UsageReportSealed.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: actor
       value: *id005
@@ -14081,7 +14081,7 @@ control_plane:
       path: actor.kind
   - name: UsageReportSealed.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -14091,7 +14091,7 @@ control_plane:
       path: event_type
   - name: UsageReportSealed.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: schema_version
       value: 2
@@ -14101,7 +14101,7 @@ control_plane:
       path: payload
   - name: ControlPlaneMessageRefused.by_a_user
     clause: 'rule 137: workspace control services write it as a system actor'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: actor
       value: *id005
@@ -14111,7 +14111,7 @@ control_plane:
       path: actor.kind
   - name: ControlPlaneMessageRefused.on_an_agent_stream
     clause: '§9 row: a control-stream record'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: stream_id
       value: agent:ws_01J8Z2:agent_a
@@ -14121,7 +14121,7 @@ control_plane:
       path: event_type
   - name: ControlPlaneMessageRefused.at_version_2
     clause: '§9.17: closed at schema version 1 only'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: schema_version
       value: 2
@@ -14131,7 +14131,7 @@ control_plane:
       path: payload
   - name: LicenseApplied.no_deployments
     clause: 'rule 138: a license covers a deployment'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.deployment_ids
       value: []
@@ -14141,7 +14141,7 @@ control_plane:
       path: payload.deployment_ids
   - name: LicenseApplied.deployments_descending
     clause: 'rule 138: deployments strictly ascending'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.deployment_ids
       value:
@@ -14153,7 +14153,7 @@ control_plane:
       path: payload.deployment_ids
   - name: LicenseApplied.deployments_repeated
     clause: 'rule 138: deployments strictly ascending, so a repeat is refused'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.deployment_ids
       value:
@@ -14165,7 +14165,7 @@ control_plane:
       path: payload.deployment_ids
   - name: LicenseApplied.features_descending
     clause: 'rule 138: features strictly ascending'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.features
       value:
@@ -14177,7 +14177,7 @@ control_plane:
       path: payload.features
   - name: LicenseApplied.validity_empty
     clause: 'rule 138: not_before earlier than not_after'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_after
       value: '2026-10-01T00:00:00.000000000Z'
@@ -14187,7 +14187,7 @@ control_plane:
       path: payload.not_after
   - name: LicenseApplied.validity_reversed
     clause: 'rule 138: not_before earlier than not_after'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.not_before
       value: '2027-10-01T00:00:00.000000000Z'
@@ -14199,7 +14199,7 @@ control_plane:
       path: payload.not_after
   - name: LicenseApplied.sequence_zero
     clause: 'rule 139: a sequence is at least 1'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.sequence
       value: 0
@@ -14209,7 +14209,7 @@ control_plane:
       path: payload.sequence
   - name: ReleaseOffered.sequence_zero
     clause: 'rule 139: a sequence is at least 1'
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: payload.sequence
       value: 0
@@ -14219,7 +14219,7 @@ control_plane:
       path: payload.sequence
   - name: ReleaseInstalled.sequence_zero
     clause: 'rule 139: a sequence is at least 1'
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.sequence
       value: 0
@@ -14229,7 +14229,7 @@ control_plane:
       path: payload.sequence
   - name: CatalogEntryRegistered.sequence_zero
     clause: 'rule 139: a sequence is at least 1'
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.sequence
       value: 0
@@ -14239,7 +14239,7 @@ control_plane:
       path: payload.sequence
   - name: DataBundleImported.sequence_zero
     clause: 'rule 139: a sequence is at least 1'
-    base_draft: DataBundleImported
+    base_draft: data_bundle_imported
     changes:
     - path: payload.sequence
       value: 0
@@ -14249,7 +14249,7 @@ control_plane:
       path: payload.sequence
   - name: ControlPlaneMessageRefused.sequence_zero
     clause: 'rule 139: a sequence is at least 1'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.sequence
       value: 0
@@ -14259,7 +14259,7 @@ control_plane:
       path: payload.sequence
   - name: LicenseStateChanged.unchanged
     clause: 'rule 140: a state change changes the state'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.from
       value: valid
@@ -14269,7 +14269,7 @@ control_plane:
       path: payload.to
   - name: UsageReportSealed.empty_period
     clause: 'rule 141: period_start earlier than period_end'
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.period_end
       value: '2026-10-17T12:00:00.000000000Z'
@@ -14279,7 +14279,7 @@ control_plane:
       path: payload.period_end
   - name: ControlPlaneMessageRefused.unknown_with_sequence
     clause: 'rule 142: a message outside the list has no sequence'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       value: unknown
@@ -14291,7 +14291,7 @@ control_plane:
       path: payload.sequence
   - name: ControlPlaneMessageRefused.unknown_unsigned
     clause: 'rule 142: a message outside the list is refused only out_of_list or malformed'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       value: unknown
@@ -14305,7 +14305,7 @@ control_plane:
       path: payload.reason
   - name: ControlPlaneMessageRefused.replayed_without_sequence
     clause: 'rule 142: a replay is judged by its sequence'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.sequence
       value: null
@@ -14316,7 +14316,7 @@ control_plane:
   valid_drafts:
   - name: ControlPlaneEnrolled.hybrid
     clause: '§9.17: either mode'
-    base_draft: ControlPlaneEnrolled
+    base_draft: control_plane_enrolled
     changes:
     - path: payload.mode
       value: hybrid
@@ -14324,7 +14324,7 @@ control_plane:
       outcome: Valid
   - name: LicenseApplied.two_deployments
     clause: 'rule 138: several deployments, ascending'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.deployment_ids
       value:
@@ -14334,7 +14334,7 @@ control_plane:
       outcome: Valid
   - name: LicenseApplied.no_features
     clause: 'rule 138: the feature set may be empty'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.features
       value: []
@@ -14342,7 +14342,7 @@ control_plane:
       outcome: Valid
   - name: LicenseApplied.both_features
     clause: 'rule 138: both features, ascending'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.features
       value:
@@ -14352,7 +14352,7 @@ control_plane:
       outcome: Valid
   - name: LicenseApplied.sequence_one
     clause: 'rule 139: the first sequence is 1'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.sequence
       value: 1
@@ -14360,7 +14360,7 @@ control_plane:
       outcome: Valid
   - name: LicenseApplied.zero_entitlements
     clause: '§9.17: an entitlement may be zero'
-    base_draft: LicenseApplied
+    base_draft: license_applied
     changes:
     - path: payload.max_workspaces
       value: 0
@@ -14372,7 +14372,7 @@ control_plane:
       outcome: Valid
   - name: LicenseStateChanged.lapsed
     clause: 'rule 140: any move between states'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.from
       value: grace
@@ -14382,7 +14382,7 @@ control_plane:
       outcome: Valid
   - name: LicenseStateChanged.renewed
     clause: 'rule 140: a lapse ends with a new license'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: payload.from
       value: lapsed
@@ -14392,7 +14392,7 @@ control_plane:
       outcome: Valid
   - name: ReleaseInstalled.rollback
     clause: '§9.17: an operator rollback names an older release'
-    base_draft: ReleaseInstalled
+    base_draft: release_installed
     changes:
     - path: payload.trigger
       value: rollback
@@ -14402,7 +14402,7 @@ control_plane:
       outcome: Valid
   - name: CatalogEntryRegistered.registry_entry
     clause: '§9.17: either catalog kind'
-    base_draft: CatalogEntryRegistered
+    base_draft: catalog_entry_registered
     changes:
     - path: payload.kind
       value: model_registry_entry
@@ -14410,7 +14410,7 @@ control_plane:
       outcome: Valid
   - name: UsageReportSealed.first_report
     clause: '§9.17: a deployment''s first report chains from 64 zeros'
-    base_draft: UsageReportSealed
+    base_draft: usage_report_sealed
     changes:
     - path: payload.prev_report_hash
       value: '0000000000000000000000000000000000000000000000000000000000000000'
@@ -14418,7 +14418,7 @@ control_plane:
       outcome: Valid
   - name: ControlPlaneMessageRefused.unreadable
     clause: 'rule 142: a refusal with no readable sequence'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.sequence
       value: null
@@ -14428,7 +14428,7 @@ control_plane:
       outcome: Valid
   - name: ControlPlaneMessageRefused.unknown
     clause: 'rule 142: a message outside the list'
-    base_draft: ControlPlaneMessageRefused
+    base_draft: control_plane_message_refused
     changes:
     - path: payload.message
       value: unknown
@@ -14440,7 +14440,7 @@ control_plane:
       outcome: Valid
   - name: LicenseStateChanged.caused
     clause: '§9.17: no rule reads the cause'
-    base_draft: LicenseStateChanged
+    base_draft: license_state_changed
     changes:
     - path: causation_id
       value: 01J8Z3P2A000000000000000Q3
@@ -14448,7 +14448,7 @@ control_plane:
       outcome: Valid
   - name: ReleaseOffered.live
     clause: '§9.17: either environment'
-    base_draft: ReleaseOffered
+    base_draft: release_offered
     changes:
     - path: environment
       value: live

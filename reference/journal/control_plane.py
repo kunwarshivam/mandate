@@ -128,9 +128,14 @@ PAYLOADS: dict[str, dict] = {
 EVENT_IDS = {name: f"01J8Z4CP{i:02d}".ljust(26, "0") for i, name in enumerate(CP_RECORDS)}
 
 
+def snake(record: str) -> str:
+    """A record's base-draft key: §4.1's key grammar admits no capital letter."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", record).lower()
+
+
 def base_drafts() -> dict[str, dict]:
     return {
-        name: {
+        snake(name): {
             "envelope_version": 1,
             "environment": "paper",
             "event_id": EVENT_IDS[name],
@@ -152,11 +157,11 @@ def base_drafts() -> dict[str, dict]:
 
 
 def invalid(name, clause, base, changes, reason, path):
-    return control_invalid(f"{base}.{name}", clause, base, changes, reason, path)
+    return control_invalid(f"{base}.{name}", clause, snake(base), changes, reason, path)
 
 
 def valid(name, clause, base, changes):
-    return control_valid(f"{base}.{name}", clause, base, changes)
+    return control_valid(f"{base}.{name}", clause, snake(base), changes)
 
 
 def wrong_form(ty) -> object | None:
@@ -501,22 +506,23 @@ def check_section(section: dict) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
     drafts = section["drafts"]
-    if sorted(drafts) != sorted(CP_RECORDS):
+    if sorted(drafts) != sorted(snake(r) for r in CP_RECORDS):
         problems.append(
             found("drafts.records", f"base drafts {sorted(drafts)} are not the ten §9.17 records")
         )
+    records = {snake(r): r for r in CP_RECORDS}
     for name, draft in drafts.items():
         got = violations(draft)
         if got:
             problems.append(found("drafts.valid", f"base draft {name}: {got}"))
-        if draft.get("event_type") != name or draft.get("actor", {}).get("kind") != "system":
+        if draft.get("event_type") != records.get(name) or draft.get("actor", {}).get("kind") != "system":
             problems.append(
                 found("drafts.records", f"base draft {name} is not that record by a system actor")
             )
         if plain_strings(draft.get("payload")):
             problems.append(found("drafts.no_text", f"base draft {name} carries text"))
         sequence = (draft.get("payload") or {}).get("sequence")
-        if name in SEQUENCED and not (isinstance(sequence, int) and sequence >= 1):
+        if records.get(name) in SEQUENCED and not (isinstance(sequence, int) and sequence >= 1):
             problems.append(found("drafts.sequence", f"base draft {name} has no sequence of at least 1"))
     for case in section["invalid_drafts"]:
         got = violations(draft_for(section, case))
@@ -564,22 +570,22 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "a base draft is written by a user",
             "drafts.valid",
-            mutated(lambda s: s["drafts"]["LicenseApplied"].update(actor=dict(USER))),
+            mutated(lambda s: s["drafts"]["license_applied"].update(actor=dict(USER))),
         ),
         (
             "a base draft is filed as another record",
             "drafts.records",
-            mutated(lambda s: s["drafts"]["UsageReportSealed"].update(event_type="ReleaseOffered")),
+            mutated(lambda s: s["drafts"]["usage_report_sealed"].update(event_type="ReleaseOffered")),
         ),
         (
             "a base draft carries free text in an id-shaped member",
             "drafts.no_text",
-            mutated(lambda s: s["drafts"]["ReleaseOffered"]["payload"].update(release_id="x" * 65)),
+            mutated(lambda s: s["drafts"]["release_offered"]["payload"].update(release_id="x" * 65)),
         ),
         (
             "a base draft carries no sequence",
             "drafts.sequence",
-            mutated(lambda s: s["drafts"]["DataBundleImported"]["payload"].update(sequence=0)),
+            mutated(lambda s: s["drafts"]["data_bundle_imported"]["payload"].update(sequence=0)),
         ),
         (
             "an invalid draft's expectation differs",
