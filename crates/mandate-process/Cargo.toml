@@ -1,0 +1,17 @@
+[package]
+name = "mandate-process"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The lifecycle every long-running process shares: states, liveness and readiness, the drain and crash-loop bounds, and the probe answers (E21-28, DEC-994)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-journal.workspace = true
+mandate-time.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
