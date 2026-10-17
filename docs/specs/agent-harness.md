@@ -982,7 +982,7 @@ E19-13's run records carry the runs: `RunStarted` (kind `owner` or `explain`), o
 `ModelInvocationRecorded` per turn, `ToolCallRecorded` and `ToolResultRecorded`, and `RunEnded`, on
 the agent stream, written by the runtime core. The `answer` tool's call and result are its
 `ToolCallRecorded` and `ToolResultRecorded`, so the check outcome is journaled like any tool result.
-One record is new, on the control stream ([journal spec §9.22](journal.md#922-desk-question-records-dec-2240)):
+One record is new, on the control stream ([journal spec §9.23](journal.md#923-desk-question-records-dec-2240)):
 
 | Event | When |
 |---|---|
