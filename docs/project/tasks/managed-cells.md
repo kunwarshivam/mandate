@@ -76,7 +76,7 @@ process its own pod, a workspace's data service, executors and runtimes on one n
 
 **Out of scope here:** the model gateway, the cold exporter and anchorer (E5-7), the market-data
 service's live ingest, the token-exchange process's hosting (it waits on E10-13 and DEC-821's
-connection manager), the global control plane (E20), billing (E14) and the shared data plane. The
+connection manager), the control plane beyond lane G's first slice (licensing, metering, the relay, E14 billing) and the shared data plane. The
 cell runs without them: the runtime's research path stays off, and data comes as fixtures or the
 founder's own paper feed.
 
@@ -88,6 +88,24 @@ gate, counsel and the M13 penetration test (infrastructure §1.1). No test place
 reads a credential (`AGENTS.md` rules 7 and 8): the local cell's broker is a fixture
 (a broker fixture built on `mandate-sim`'s fill model, or `mandate-rh-sim` on loopback
 where its build applies), and Alpaca paper keys are never in CI.
+
+## The three API surfaces
+
+The founder asked, as relayed, that the plan build the control plane's and the data plane's APIs
+too (DEC-967 item 11). There are three surfaces, each its own lane, all packaged the same way:
+
+| Surface | Implements | What exists today | First slice | How it runs in cell #1 without later rework |
+|---|---|---|---|---|
+| **1. Workspace services API** (lane A, first: the web app, the CLI and the owner's MCP adapter, E10-6, all call it) | [Workspace API spec](../../specs/workspace-api.md) v0.1; E10-10 to E10-14 | `mandate-api`: the contract (problem documents, request and response shapes, principals, the idempotency key), pure, with no transport; the identity crates; `mandate-audit`'s reads | E21-31: the server process over that contract, serving the routes already on `main`, with sessions, tenant scope and probes | One Deployment per workspace deployment behind the cell's one ingress (the `cloudflared` pod). More traffic is more replicas of the same Deployment: every mutating call commits its control-stream event first (API-3), so replicas share nothing but the journal |
+| **2. Global control plane** (lane G) | [Control-plane design](../../design/control-plane.md) v0.1; E20 | Nothing built (design §7); `actor.build` digests are journaled | E21-43: the directory (E20-1), cell routing (the directory maps a workspace to its cell's API endpoint, and clients cache the route), fleet health from heartbeats (E20-5), and the cell's `cp-agent` with enrollment (E20-2). Licensing, metering, billing, the relay, distribution and the anchor witness come later | Its own Helm release from the same chart conventions, in its own namespace with its own database, keys and egress (DEC-440 item 16 wants separate accounts and keys from every cell). On cell #1's k3s only if the founder accepts that (H10); moving it to its own cluster later is a values change. The cell reaches it only outbound through `cp-agent` (design §3), and its outage stops no trading (OPS-12) |
+| **3. Data plane** (lane M) | [Data-plane spec](../../specs/data-plane.md) v0.2 (§3, §5, §6); infrastructure §3.1's internal channels | `mandate-marketdata` (historical bars and trades into Parquet, `inspect`); `mandate-alpaca`'s latest-quote and asset reads; `mandate-time`'s calendar. No live stream, no data service (spec §9) | Two halves. **Market data:** E2-6 (the workspace data service) then E2-5 (Alpaca streaming, on recorded fixtures in CI), served to runtimes and executors over the host-local channel (E21-44). **Internal interfaces:** E21-42, which pins down that workspace services and the agent processes meet only in the journal | The data service is a pod per workspace, on the workspace's node by pod affinity (§3.2). The host-local channel is a per-workspace Unix socket, never a network route, so spreading a workspace over nodes stays the data-plane spec change §3.2 says it is, not a chart rewrite. The shared data plane (spec §6) stays Won't for v1 |
+
+What "internal interfaces" means here: workspace services (the API server, the deployment manager,
+the approval service) never call a runtime, an executor or the scheduler. They append to the
+control stream; each stream's owner copies what it needs into its own stream (journal §2) and acts
+(DEC-17: journal tailing with `LISTEN`/`NOTIFY` as a hint). The only other channels are the
+host-local market-data channel and the probes. That is what lets every process scale, restart and
+hand over on its own, and it is what E21-42 makes checked rather than assumed.
 
 ## The rule that makes the lanes parallel
 
@@ -111,7 +129,7 @@ first dependency is a founder decision (listed under [Dependencies](#dependencie
 
 ## Lanes
 
-Nine lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
+Eleven lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
 PR at a time. **SC** marks a safety-critical story: tests PR first, reviewed by an agent on a
 different model, zero missed mutants, green CI (`AGENTS.md` Safety-critical paths, DEC-79).
 
@@ -128,7 +146,7 @@ different model, zero missed mutants, green CI (`AGENTS.md` Safety-critical path
 P3 is the lane's largest slice: split it into the executor first (it carries the kill switch and
 protection), then the runtime.
 
-### Lane A: the workspace API server (A2)
+### Lane A: the workspace API server (A2), the first API surface
 
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
@@ -201,6 +219,23 @@ MinIO is not in this lane. It may come later only as an optional in-cell cache, 
 copy or the backup, and only after the founder and counsel decide its AGPL-3.0 licence (DEC-967
 item 10, DEC-434 item 16).
 
+### Lane G: the global control plane's first slice
+
+| Order | Story | What | Existing crates it needs | New crate |
+|---|---|---|---|---|
+| G0 | E20-3 (SC, exists; journal spec first) | The closed message set and its journal events, before any message flows | `mandate-journal` | — |
+| G1 | **E21-43** with E20-1, E20-2, E20-5 (exist) | Directory, cell routing and fleet health as one small service, and `cp-agent` in the cell; packaged as its own Helm release | `mandate-api` (the problem-document conventions), `mandate-identity` (role names only; no personal data, E20-1), `mandate-journal-pg` (its own database), `mandate-process` | `mandate-cp` (the service), `mandate-cp-agent` (SC: it hands verified instructions to workspace services) |
+| G2 | later: E20-4, E20-6 to E20-10, E14 | Licensing, signed manifests, metering, the relay, distribution, the anchor witness | — | — |
+
+### Lane M: the data plane
+
+| Order | Story | What | Existing crates it needs | New crate |
+|---|---|---|---|---|
+| M1 | **E21-42** (SC) | The internal interfaces, checked: workspace services reach agent processes only through the journal | `mandate-journal`, the crates of lanes A, D and P | — |
+| M2 | E2-6 (SC, exists) | The workspace data service: normalized records, receive times, a bounded hot cache | `mandate-marketdata`, `mandate-time`, `mandate-domain`, `mandate-alpaca` | the data service's crate, named by E2-6 |
+| M3 | **E21-44** (SC) | The host-local channel in the cell | M2, K1 | — |
+| M4 | E2-5 (SC, exists), E2-13 | Alpaca streaming on recorded fixtures, then the fault-injection suite | `mandate-alpaca`, M2 | — |
+
 ### Lane W: `web/` on Cloudflare Workers (the one approved spend)
 
 | Order | Story | What | Existing crates it needs | New crate |
@@ -220,6 +255,8 @@ flowchart LR
         C1a["C1 E21-37 cell boots"]
         W1["W1 E21-38 Workers"]
         S1["S1 E21-40 object store check"]
+        M1["M1 E21-42 internal interfaces"]
+        G0["G0 E20-3 message set"]
     end
     subgraph W1g["Wave 1"]
         P2["P2 E21-29 scheduler"]
@@ -230,6 +267,8 @@ flowchart LR
         O2["O2 E21-4 alerts"]
         R2["R2 E21-35 images, signing"]
         S2["S2 E21-41 CloudNativePG"]
+        M2["M2 E2-6 data service"]
+        G1["G1 E21-43 directory, routing, fleet"]
     end
     subgraph W2["Wave 2"]
         P4["P4 E21-7 drain, hand-over"]
@@ -250,6 +289,9 @@ flowchart LR
     S1 --> S2
     K1 --> S2
     S2 --> C1b
+    M2 --> M3["M3 E21-44 local channel"] --> C1b
+    G0 --> G1
+    K1 --> G1
     P3 --> P4
     D1 --> P4
     P3 --> O4
@@ -258,9 +300,9 @@ flowchart LR
 ```
 
 - **Wave 0** (start now, in parallel): P1, V1, O1, R1, K1 and C1's first slice, W1, S1's interface
-  and its CI half. None needs another lane.
+  and its CI half, M1's check over what exists, G0's journal spec change. None needs another lane.
 - **Wave 1**: P2 and P3 after P1; A1 once the HTTP dependency (D-1) is approved and E10-10's first
-  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1.
+  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1; M2 now (it needs no other lane); G1 after G0 and K1.
 - **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; C1's drills
   as each process image lands.
 - **After R0 closes**: P5, and any queued change to the four R0 files.
@@ -292,6 +334,7 @@ cost model (§10) is the formula; these are its first inputs.
 | H6 | Paging and on-call tool (DEC-434 item 20) | O3, before design partners | A free tier, or about $10 to $30 per user |
 | H7 | Larger CI runners, if the cell job cannot stay under ten minutes on standard runners by sharding (DEC-464) | C1 | About $0.01 to $0.05 per runner-minute: a few dollars to tens of dollars a month at today's PR rate |
 | H8 | A hardware signing key for ES-17, if the founder holds none | R2 reaches a hosted cell | One-off, about $50 to $90 |
+| H10 | Where the control plane's first slice runs (DEC-440 item 16) | G1 reaches a hosted cell | On cell #1's VMs as a separate release, namespace, database and keys: no extra cost, but not the separate accounts item 16 recommends. On its own small VM: about $8 to $20 |
 | H9 | The production cells, a second region, a standby in a second failure domain, the global control plane | The Phase 2 gate, counsel and the penetration test | Not estimated here; roughly double H1 to H3 per region, plus the control plane (DEC-440 item 16) |
 
 Already approved, for comparison: Cloudflare Workers for `web/` (DEC-967 item 3), on the paid plan

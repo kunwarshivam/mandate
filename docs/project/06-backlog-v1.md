@@ -2558,7 +2558,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
   overview.
 
-Rows E21-28 to E21-41 come from the [managed-cells plan](tasks/managed-cells.md)
+Rows E21-28 to E21-44 come from the [managed-cells plan](tasks/managed-cells.md)
 ([DEC-967](decisions/DEC-967.md), Proposed until the founder confirms the relayed answers). Each
 names its lane. None buys hosting, and none edits `crates/mandate-paper/src/lib.rs` or
 `crates/mandate-shell/src/control.rs`, `adapters.rs` or `paper/` before R0 closes (DEC-967 item 2).
@@ -2716,6 +2716,40 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   every stream (OPS-8); a failover drill with intents in flight shows zero duplicates and zero lost
   acknowledged appends; and while the cell has one node the standby's shared failure domain is
   disclosed in the cell's own status, not hidden.
+- **E21-42 (Proposed, M8; SC; lane M1)** As an owner, I want workspace services and my agent's
+  processes to meet only in the journal, so that the API, the deployment manager or the approval
+  service can never act on a runtime, an executor or the scheduler behind the journal's back
+  (design §3.1; journal spec §2; DEC-17). *Accepted when:* a layering rule in `xtask/layers.toml`
+  fails any workspace-services crate (the API server, the deployment manager, the approval service,
+  `cp-agent`) that depends on `mandate-daemon`'s process loops, or any agent-process crate that
+  depends on a workspace-services crate; the chart's network policies give no workspace-services pod
+  a route to an agent-process pod, shown by a local-cell test; a fault-injection test that drops
+  every `LISTEN`/`NOTIFY` wake-up still delivers each owner command, a kill switch included, by
+  tailing; and the design's §3.1 lists every channel that remains (the journal, the host-local
+  market-data channel, the probes), with nothing else.
+- **E21-43 (Proposed, M8; lane G1; with E20-1, E20-2 and E20-5)** As an org admin, I want the
+  global control plane's first slice (the directory, cell routing and fleet health) running as its
+  own deployment in the same packaging as a cell, so that a second cell is a new install and not a
+  redesign (control-plane design §3.1, §3.2, §3.4; DEC-967 item 11). *Accepted when:* E20-1's,
+  E20-2's and E20-5's criteria pass; the directory maps each workspace to its cell's API endpoint,
+  and a client with a cached route reaches its deployment with the control plane down; it installs
+  as its own Helm release with its own namespace, database, keys and egress, and a test renders it
+  beside a cell release with no shared secret; the cell reaches it only outbound through
+  `cp-agent`, which hands verified instructions to workspace services and appends nothing itself
+  (design §3); cutting the link stops no trading, no kill switch and no reconciliation (OPS-12,
+  E20-11); and licensing, metering, the relay, distribution and the anchor witness are absent, not
+  stubbed.
+- **E21-44 (Proposed, M8; SC; lane M3; after E2-6)** As an owner, I want the workspace data
+  service's channel to my runtimes and executors kept host-local in the cell, so that quotes reach
+  them without a network route and no other workspace can read them (design §3.1, §3.2;
+  data-plane spec §3.6; OPS-6). *Accepted when:* before its tests, a DEC records the mechanism (a
+  per-workspace Unix socket on a node-local volume, or another that stays on the host and is
+  portable Kubernetes), with its security review; the chart places the data service, executors and
+  runtimes of one workspace on one node; a local-cell test shows another workspace's pod cannot
+  open the channel and that no network policy entry carries it; the consumers' side is read-only;
+  conflation never drops status, LULD or correction messages (DP-4); and with the channel cut,
+  every held instrument goes stale and openings are denied while exits follow the exit price
+  ladder (trading spec §5.6).
 
 ## Won't (v1)
 
