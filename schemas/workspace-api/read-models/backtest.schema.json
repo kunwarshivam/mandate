@@ -1,0 +1,751 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/backtest.schema.json",
+  "description": "GET /backtests/{id} (§4.2, DEC-1001). The report is the owner's own mandate version's simulated history.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "backtest"
+  ],
+  "properties": {
+    "backtest": {
+      "$ref": "#/$defs/Backtest"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Backtest": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One backtest of the workspace's own mandate version (DEC-1001 item 5). state is running until BacktestRunRecorded commits; report is the artifact's object only when completed.",
+      "required": [
+        "backtest_id",
+        "mandate_version",
+        "state",
+        "refusal",
+        "report_ref",
+        "report"
+      ],
+      "properties": {
+        "backtest_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "mandate_version": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "completed",
+            "refused"
+          ]
+        },
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Code"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report_ref": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Report"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "const": "completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refusal": {
+                "type": "null"
+              },
+              "report_ref": {
+                "$ref": "../common.schema.json#/$defs/ContentRef"
+              },
+              "report": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "const": "refused"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refusal": {
+                "$ref": "#/$defs/Code"
+              },
+              "report_ref": {
+                "type": "null"
+              },
+              "report": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "const": "running"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refusal": {
+                "type": "null"
+              },
+              "report_ref": {
+                "type": "null"
+              },
+              "report": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Report": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The backtest report artifact, report_version 2 (DEC-1001 item 2): canonical JSON stored under sha256 of its bytes. It holds no thesis-quality figure (DEC-99, DEC-1001 item 3) and carries disclosures by name only (DEC-1003).",
+      "required": [
+        "kind",
+        "report_version",
+        "subject",
+        "mandate_version",
+        "instrument",
+        "research_agent",
+        "inputs",
+        "strategy",
+        "benchmark",
+        "excess_total_return",
+        "decisions",
+        "risk",
+        "equity",
+        "limitations",
+        "disclosures"
+      ],
+      "properties": {
+        "kind": {
+          "const": "backtest_report"
+        },
+        "report_version": {
+          "const": 2
+        },
+        "subject": {
+          "const": "mandate_version"
+        },
+        "mandate_version": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "instrument": {
+          "$ref": "../common.schema.json#/$defs/AssetId"
+        },
+        "research_agent": {
+          "type": "boolean"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bars",
+            "model_outputs",
+            "theses",
+            "config"
+          ],
+          "properties": {
+            "bars": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            "model_outputs": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            "theses": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            "config": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            }
+          }
+        },
+        "strategy": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "benchmark": {
+          "$ref": "#/$defs/Metrics"
+        },
+        "excess_total_return": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "decisions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "outcomes",
+            "gate_reasons",
+            "hold_reasons",
+            "rows"
+          ],
+          "properties": {
+            "count": {
+              "$ref": "#/$defs/Count"
+            },
+            "outcomes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "submitted",
+                "builder_hold",
+                "builder_refused",
+                "gate_deny",
+                "gate_defer",
+                "gate_hold",
+                "autonomy_deny",
+                "ask_unanswered",
+                "order_working"
+              ],
+              "properties": {
+                "submitted": {
+                  "$ref": "#/$defs/Count"
+                },
+                "builder_hold": {
+                  "$ref": "#/$defs/Count"
+                },
+                "builder_refused": {
+                  "$ref": "#/$defs/Count"
+                },
+                "gate_deny": {
+                  "$ref": "#/$defs/Count"
+                },
+                "gate_defer": {
+                  "$ref": "#/$defs/Count"
+                },
+                "gate_hold": {
+                  "$ref": "#/$defs/Count"
+                },
+                "autonomy_deny": {
+                  "$ref": "#/$defs/Count"
+                },
+                "ask_unanswered": {
+                  "$ref": "#/$defs/Count"
+                },
+                "order_working": {
+                  "$ref": "#/$defs/Count"
+                }
+              }
+            },
+            "gate_reasons": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/Code"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/Count"
+              }
+            },
+            "hold_reasons": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/Code"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/Count"
+              }
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DecisionRow"
+              }
+            }
+          }
+        },
+        "risk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "limits_latched",
+            "risk_exits",
+            "most_restrictive_mode"
+          ],
+          "properties": {
+            "limits_latched": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(max_daily_loss|lifetime_floor|profit_stop|drawdown_ladder\\[[0-9]{1,2}\\])$"
+              }
+            },
+            "risk_exits": {
+              "$ref": "#/$defs/Count"
+            },
+            "most_restrictive_mode": {
+              "enum": [
+                "normal",
+                "exits_only",
+                "paused",
+                "stopped"
+              ]
+            }
+          }
+        },
+        "equity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy",
+            "benchmark"
+          ],
+          "properties": {
+            "strategy": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EquityPoint"
+              }
+            },
+            "benchmark": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EquityPoint"
+              }
+            }
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "no_lookahead_by_receive_time",
+              "recorded_model_outputs_only",
+              "admissions_replayed_not_rejudged",
+              "fills_within_bar_range",
+              "spread_from_fill_model",
+              "single_instrument",
+              "daily_decisions",
+              "asks_unanswered_skip",
+              "mechanics_not_thesis_quality"
+            ]
+          }
+        },
+        "disclosures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "LEGEND-HYPOTHETICAL",
+              "NOTE-BACKTEST-MECHANICS",
+              "NOTE-BACKTEST-LIMITS"
+            ]
+          }
+        }
+      }
+    },
+    "Metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "E4-2's metric block, unchanged (DEC-127).",
+      "required": [
+        "period_count",
+        "first_date",
+        "last_date",
+        "starting_equity",
+        "ending_equity",
+        "net_pnl",
+        "total_return",
+        "return_sum",
+        "return_sum_of_squares",
+        "mean_return",
+        "variance",
+        "volatility",
+        "periods_per_year",
+        "variance_annualized",
+        "volatility_annualized",
+        "risk_free_per_period",
+        "sharpe_squared",
+        "sharpe_sign",
+        "sharpe",
+        "sharpe_squared_annualized",
+        "sharpe_annualized",
+        "max_drawdown",
+        "max_drawdown_usd",
+        "max_drawdown_peak_period",
+        "max_drawdown_trough_period",
+        "buy_notional",
+        "sell_notional",
+        "traded_notional",
+        "fill_count",
+        "turnover",
+        "fees_total",
+        "fees_charged",
+        "fees_accrued",
+        "fees_asset",
+        "submitted_qty",
+        "filled_qty",
+        "absent"
+      ],
+      "properties": {
+        "period_count": {
+          "$ref": "#/$defs/Count"
+        },
+        "first_date": {
+          "$ref": "#/$defs/Date"
+        },
+        "last_date": {
+          "$ref": "#/$defs/Date"
+        },
+        "starting_equity": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "ending_equity": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "net_pnl": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "total_return": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "return_sum": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "return_sum_of_squares": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "mean_return": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "variance": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "volatility": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "periods_per_year": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366
+        },
+        "variance_annualized": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "volatility_annualized": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "risk_free_per_period": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "sharpe_squared": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sharpe_sign": {
+          "enum": [
+            "negative",
+            "zero",
+            "positive"
+          ]
+        },
+        "sharpe": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sharpe_squared_annualized": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sharpe_annualized": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_drawdown": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_drawdown_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "max_drawdown_peak_period": {
+          "$ref": "#/$defs/Count"
+        },
+        "max_drawdown_trough_period": {
+          "$ref": "#/$defs/Count"
+        },
+        "buy_notional": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "sell_notional": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "traded_notional": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "fill_count": {
+          "$ref": "#/$defs/Count"
+        },
+        "turnover": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "fees_total": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "fees_charged": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "fees_accrued": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "fees_asset": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "submitted_qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "filled_qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "absent": {
+          "anyOf": [
+            {
+              "enum": [
+                "fewer_than_two_periods",
+                "zero_variance"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "DecisionRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One decision instant (DEC-1001 item 2): what the version's own path decided and why. A hold has a null purpose.",
+      "required": [
+        "at",
+        "date",
+        "purpose",
+        "outcome",
+        "reason",
+        "decided_by",
+        "qty",
+        "limit",
+        "outputs_used"
+      ],
+      "properties": {
+        "at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "date": {
+          "$ref": "#/$defs/Date"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "increase",
+                "discretionary_exit",
+                "risk_exit"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "submitted",
+            "builder_hold",
+            "builder_refused",
+            "gate_deny",
+            "gate_defer",
+            "gate_hold",
+            "autonomy_deny",
+            "ask_unanswered",
+            "order_working"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Code"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decided_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_.:-]{0,127}$"
+        },
+        "qty": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outputs_used": {
+          "$ref": "#/$defs/Count"
+        }
+      }
+    },
+    "EquityPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "equity"
+      ],
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/Date"
+        },
+        "equity": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        }
+      }
+    },
+    "Date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "Code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "Count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "unevaluatedProperties": false
+}

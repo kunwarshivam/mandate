@@ -1,0 +1,269 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-17T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-17T14:30:00.000000000Z"
+    }
+  ],
+  "backtest": {
+    "backtest_id": "bt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+    "mandate_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "state": "completed",
+    "refusal": null,
+    "report_ref": "sha256:1212121212121212121212121212121212121212121212121212121212121212",
+    "report": {
+      "kind": "backtest_report",
+      "report_version": 2,
+      "subject": "mandate_version",
+      "mandate_version": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "instrument": "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
+      "research_agent": true,
+      "inputs": {
+        "bars": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+        "model_outputs": "sha256:0202020202020202020202020202020202020202020202020202020202020202",
+        "theses": "sha256:0303030303030303030303030303030303030303030303030303030303030303",
+        "config": "sha256:0404040404040404040404040404040404040404040404040404040404040404"
+      },
+      "strategy": {
+        "period_count": 3,
+        "first_date": "2026-09-01",
+        "last_date": "2026-09-03",
+        "starting_equity": "10000",
+        "ending_equity": "10120.5",
+        "net_pnl": "120.5",
+        "total_return": "0.01205",
+        "return_sum": "0.012",
+        "return_sum_of_squares": "0.0001",
+        "mean_return": "0.004",
+        "variance": "0.00002",
+        "volatility": "0.004472135955",
+        "periods_per_year": 252,
+        "variance_annualized": "0.00504",
+        "volatility_annualized": "0.070992957397",
+        "risk_free_per_period": "0",
+        "sharpe_squared": "0.8",
+        "sharpe_sign": "positive",
+        "sharpe": "0.894427190999",
+        "sharpe_squared_annualized": "201.6",
+        "sharpe_annualized": "14.198591479439",
+        "max_drawdown": "0.002",
+        "max_drawdown_usd": "20.1",
+        "max_drawdown_peak_period": 1,
+        "max_drawdown_trough_period": 2,
+        "buy_notional": "5000",
+        "sell_notional": "0",
+        "traded_notional": "5000",
+        "fill_count": 1,
+        "turnover": "0.5",
+        "fees_total": "0.01",
+        "fees_charged": "0",
+        "fees_accrued": "0.01",
+        "fees_asset": "0",
+        "submitted_qty": "20",
+        "filled_qty": "20",
+        "absent": null
+      },
+      "benchmark": {
+        "period_count": 3,
+        "first_date": "2026-09-01",
+        "last_date": "2026-09-03",
+        "starting_equity": "10000",
+        "ending_equity": "10200",
+        "net_pnl": "120.5",
+        "total_return": "0.02",
+        "return_sum": "0.012",
+        "return_sum_of_squares": "0.0001",
+        "mean_return": "0.004",
+        "variance": "0.00002",
+        "volatility": "0.004472135955",
+        "periods_per_year": 252,
+        "variance_annualized": "0.00504",
+        "volatility_annualized": "0.070992957397",
+        "risk_free_per_period": "0",
+        "sharpe_squared": "0.8",
+        "sharpe_sign": "positive",
+        "sharpe": "0.894427190999",
+        "sharpe_squared_annualized": "201.6",
+        "sharpe_annualized": "14.198591479439",
+        "max_drawdown": "0.002",
+        "max_drawdown_usd": "20.1",
+        "max_drawdown_peak_period": 1,
+        "max_drawdown_trough_period": 2,
+        "buy_notional": "5000",
+        "sell_notional": "0",
+        "traded_notional": "5000",
+        "fill_count": 1,
+        "turnover": "0.5",
+        "fees_total": "0.01",
+        "fees_charged": "0",
+        "fees_accrued": "0.01",
+        "fees_asset": "0",
+        "submitted_qty": "20",
+        "filled_qty": "20",
+        "absent": null
+      },
+      "excess_total_return": "-0.00795",
+      "decisions": {
+        "count": 9,
+        "outcomes": {
+          "submitted": 1,
+          "builder_hold": 1,
+          "builder_refused": 1,
+          "gate_deny": 1,
+          "gate_defer": 1,
+          "gate_hold": 1,
+          "autonomy_deny": 1,
+          "ask_unanswered": 1,
+          "order_working": 1
+        },
+        "gate_reasons": {},
+        "hold_reasons": {
+          "at_or_above_target": 1
+        },
+        "rows": [
+          {
+            "at": "2026-09-02T13:30:00.000000000Z",
+            "date": "2026-09-01",
+            "purpose": "open",
+            "outcome": "submitted",
+            "reason": null,
+            "decided_by": "rule:small_opening",
+            "qty": "20",
+            "limit": "250.05",
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-03T13:30:00.000000000Z",
+            "date": "2026-09-02",
+            "purpose": null,
+            "outcome": "builder_hold",
+            "reason": "at_or_above_target",
+            "decided_by": null,
+            "qty": null,
+            "limit": null,
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-04T13:30:00.000000000Z",
+            "date": "2026-09-03",
+            "purpose": "increase",
+            "outcome": "builder_refused",
+            "reason": "crossed_quote",
+            "decided_by": null,
+            "qty": null,
+            "limit": null,
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-05T13:30:00.000000000Z",
+            "date": "2026-09-04",
+            "purpose": "increase",
+            "outcome": "gate_deny",
+            "reason": "position_cap",
+            "decided_by": null,
+            "qty": "4",
+            "limit": "251.1",
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-06T13:30:00.000000000Z",
+            "date": "2026-09-05",
+            "purpose": "discretionary_exit",
+            "outcome": "gate_defer",
+            "reason": "close_window",
+            "decided_by": null,
+            "qty": "24",
+            "limit": "249.9",
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-07T13:30:00.000000000Z",
+            "date": "2026-09-06",
+            "purpose": "risk_exit",
+            "outcome": "gate_hold",
+            "reason": "unknown_order",
+            "decided_by": null,
+            "qty": "24",
+            "limit": "249.9",
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-08T13:30:00.000000000Z",
+            "date": "2026-09-07",
+            "purpose": "open",
+            "outcome": "autonomy_deny",
+            "reason": null,
+            "decided_by": "rule:no_new_names",
+            "qty": "20",
+            "limit": "250.05",
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-09T13:30:00.000000000Z",
+            "date": "2026-09-08",
+            "purpose": "open",
+            "outcome": "ask_unanswered",
+            "reason": null,
+            "decided_by": "rule:large_opening",
+            "qty": "20",
+            "limit": "250.05",
+            "outputs_used": 1
+          },
+          {
+            "at": "2026-09-10T13:30:00.000000000Z",
+            "date": "2026-09-09",
+            "purpose": null,
+            "outcome": "order_working",
+            "reason": null,
+            "decided_by": null,
+            "qty": null,
+            "limit": null,
+            "outputs_used": 1
+          }
+        ]
+      },
+      "risk": {
+        "limits_latched": [
+          "drawdown_ladder[0]"
+        ],
+        "risk_exits": 0,
+        "most_restrictive_mode": "normal"
+      },
+      "equity": {
+        "strategy": [
+          {
+            "date": "2026-09-01",
+            "equity": "10000"
+          }
+        ],
+        "benchmark": [
+          {
+            "date": "2026-09-01",
+            "equity": "10000"
+          }
+        ]
+      },
+      "limitations": [
+        "no_lookahead_by_receive_time",
+        "recorded_model_outputs_only",
+        "admissions_replayed_not_rejudged",
+        "fills_within_bar_range",
+        "spread_from_fill_model",
+        "single_instrument",
+        "daily_decisions",
+        "asks_unanswered_skip",
+        "mechanics_not_thesis_quality"
+      ],
+      "disclosures": [
+        "LEGEND-HYPOTHETICAL",
+        "NOTE-BACKTEST-MECHANICS",
+        "NOTE-BACKTEST-LIMITS"
+      ]
+    }
+  }
+}
