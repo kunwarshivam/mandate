@@ -76,6 +76,7 @@ cargo xtask cell drill --seeded   # each drill with its bug planted; fails if on
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
+cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -141,8 +142,9 @@ release in `web/.nvmrc` and npm; the first run does `npm ci`.
 A seeded run counts as caught only when its report names the planted bug's own symptom
 (`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, a commit
 with the standby fenced, a segment not in the archive), never any failure. `standby-down` and
-`archive` run in CI's `cell-journal` job, beside `cell`, so each stays within ten minutes
-(DEC-464). A skipped drill is reported as skipped, never as held. In the
+`archive` run in CI's `cell-journal` job and `restart`, which with the synchronous standby is a
+failover and the old primary's rejoin, in `cell-failover`, each beside `cell`, so each stays within
+ten minutes (DEC-464). A skipped drill is reported as skipped, never as held. In the
 seeded egress run, with the workspace's policies deleted, the probes open TCP connections to the
 live trading hosts from the runner, to prove the drill can see a leak; they send no byte, so no
 request reaches a broker (AGENTS.md rule 8).

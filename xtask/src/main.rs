@@ -22,7 +22,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | objectstore | mutants | schema-mutants | cell | cell-journal | sweep; or one part
+                        postgres | objectstore | mutants | schema-mutants | cell | cell-journal | cell-failover | sweep; or one part
                         of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
                         pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
                         the crates the diff selects (DEC-1190); with no diff base, all of them
@@ -93,6 +93,7 @@ const PR_JOBS: &[&str] = &[
     "schema-mutants",
     "cell",
     "cell-journal",
+    "cell-failover",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -243,6 +244,7 @@ fn run() -> Result<()> {
                 cell::DRILLS
                     .into_iter()
                     .chain(cell::JOURNAL_DRILLS)
+                    .chain(cell::FAILOVER_DRILLS)
                     .collect()
             } else {
                 names
@@ -279,7 +281,8 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
-        "cell-journal" => cell::ci_journal(),
+        "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
+        "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -15182,11 +15185,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            13,
+            14,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
-             `cell-journal`"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
+             `cell-journal`, and `cell-failover`"
         );
         for checkout in checkouts {
             assert!(

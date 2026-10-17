@@ -106,18 +106,21 @@ pub enum Drill {
     Archive,
 }
 
-pub const DRILLS: [Drill; 6] = [
+pub const DRILLS: [Drill; 5] = [
     Drill::Boot,
     Drill::Journal,
     Drill::Egress,
     Drill::Compose,
-    Drill::Restart,
     Drill::KillSwitch,
 ];
 
 /// The journal's own drills (E21-41), which `cargo xtask ci cell-journal` runs in a job of their
 /// own so each cell job stays within its ten minutes (DEC-464).
 pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
+
+/// The drill that kills the journal's primary, which with a synchronous standby is a failover and
+/// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
+pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -137,6 +140,7 @@ impl Drill {
         DRILLS
             .into_iter()
             .chain(JOURNAL_DRILLS)
+            .chain(FAILOVER_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -227,19 +231,19 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// `cargo xtask ci cell-journal`: the cell, then the journal's drills, plain and seeded (E21-41).
-/// The chart checks are `ci cell`'s. Skipped as `ci cell` is.
-pub fn ci_journal() -> Result<()> {
+/// `cargo xtask ci cell-journal` and `ci cell-failover`: the cell, then `drills`, plain and seeded
+/// (E21-41). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
             bail!("{CELL_REQUIRED_ENV} is set but {reason}");
         }
-        eprintln!("    cell-journal: {reason}; skipping (see deploy/cell/README.md)");
+        eprintln!("    {job}: {reason}; skipping (see deploy/cell/README.md)");
         return Ok(());
     }
     up()?;
-    drill(&JOURNAL_DRILLS, false)?;
-    drill(&JOURNAL_DRILLS, true)
+    drill(drills, false)?;
+    drill(drills, true)
 }
 
 /// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
@@ -1812,6 +1816,51 @@ fn generate_in(root: &Path, write: bool) -> Result<()> {
     Ok(())
 }
 
+/// What the journal cluster says of itself, each instance's role and readiness, and the last lines
+/// of every instance that is not Ready, for a drill's report.
+fn cluster_state() -> String {
+    let status = kubectl(&[
+        "get",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.phase} ({.status.phaseReason}); primary {.status.currentPrimary}, target {.status.targetPrimary}",
+    ])
+    .unwrap_or_default();
+    let pods = kubectl(&[
+        "get",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        "cnpg.io/cluster=journal",
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}|{.metadata.labels.cnpg\\.io/instanceRole}|{.status.conditions[?(@.type==\"Ready\")].status}{\"\\n\"}{end}",
+    ])
+    .unwrap_or_default();
+    let mut report = format!("{}; instances:", status.trim());
+    for line in pods.lines().filter(|l| !l.is_empty()) {
+        report.push_str(&format!(" {line};"));
+        let mut fields = line.split('|');
+        let name = fields.next().unwrap_or_default();
+        if fields.nth(1) != Some("True") {
+            let tail = kubectl(&[
+                "logs",
+                name,
+                "--namespace",
+                NAMESPACE,
+                "-c",
+                "postgres",
+                "--tail=15",
+            ])
+            .unwrap_or_default();
+            report.push_str(&format!("\n[{name}]\n{tail}"));
+        }
+    }
+    report
+}
+
 /// Writes a control stream, kills the journal's primary, waits for CloudNativePG to bring the
 /// cluster back, and verifies the stream. Seeded, it asks for a stream id the restart did not keep,
 /// which must read as lost (`export_stream_empty`).
@@ -1872,14 +1921,21 @@ fn restart(seeded: bool) -> Result<Verdict> {
             "the journal's primary pod was not Ready again within the drill's polls".into(),
         ));
     }
-    kubectl(&[
+    if kubectl(&[
         "wait",
         "--namespace",
         NAMESPACE,
         "--for=condition=Ready",
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
-    ])?;
+    ])
+    .is_err()
+    {
+        return Ok(Verdict::Broken(format!(
+            "the journal cluster was not Ready within 300s of its primary's restart: {}",
+            cluster_state()
+        )));
+    }
     let stream = if seeded {
         format!("ctl:{workspace}lost")
     } else {
