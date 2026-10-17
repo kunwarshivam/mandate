@@ -153,6 +153,12 @@ macro_rules! conformance_tests {
 
         $(#[$attr])*
         #[test]
+        fn model_gateway_stream_vectors() {
+            $crate::conformance::model_gateway_stream_vectors($fresh);
+        }
+
+        $(#[$attr])*
+        #[test]
         fn matches_the_memory_journal_on_random_sequences() {
             $crate::conformance::run(
                 $fresh,
@@ -824,6 +830,87 @@ const APPENDS: &[(&str, &[&str], Drafts)] = &[
 ];
 
 /// Every append case of the journal vectors, each on a fresh backend holding the vectors' chain.
+/// Journal spec v0.46 §9.19's stream rules through `append` (rules 153 and 158, DEC-2201): each
+/// `model_gateway` stream vector appended to a fresh backend, one record per append and then as one
+/// batch, refuses at the vector's record with its reason and path and stores nothing from there on.
+/// The agent-stream vectors start after the stream's `StreamOpened`, which the agent-stream chain
+/// fixture's first body supplies; the meter-stream vectors open their own stream.
+pub fn model_gateway_stream_vectors<B: Backend>(fresh: impl Fn() -> Option<B>) {
+    let fx = fixture();
+    let section = get(&fx, "model_gateway");
+    let opened = draft_of(get(&list(&fx, "agent_stream.chain")[0], "body"));
+    let mut judged = 0;
+    for case in list(section, "agent_streams")
+        .iter()
+        .chain(list(section, "streams"))
+    {
+        let name = text(case, "name");
+        let records: Vec<Vec<u8>> = list(case, "records").iter().map(to_canonical).collect();
+        let s = StreamId::parse(text(&list(case, "records")[0], "stream_id")).unwrap();
+        let lead: Vec<Vec<u8>> = if text(&list(case, "records")[0], "event_type") == "StreamOpened"
+        {
+            Vec::new()
+        } else {
+            vec![opened.clone()]
+        };
+        let expect = get(case, "expect");
+        let want = (text(expect, "outcome") == "Invalid").then(|| {
+            (
+                lead.len() + usize::try_from(int(expect, "index")).unwrap(),
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            )
+        });
+        let all: Vec<&[u8]> = lead.iter().chain(&records).map(Vec::as_slice).collect();
+
+        let Some(mut b) = fresh() else { return };
+        let epoch = b.take_ownership(&s);
+        let mut got = None;
+        for (head, draft) in (0u64..).zip(&all) {
+            match b.append(&s, head, epoch, now(), &[draft]) {
+                AppendOutcome::Committed(_) => {}
+                AppendOutcome::Invalid { error, .. } => {
+                    got = Some((
+                        usize::try_from(head).unwrap(),
+                        error.reason.code().to_owned(),
+                        error.path,
+                    ));
+                    break;
+                }
+                other => panic!("{name}: one by one, {other:?}"),
+            }
+        }
+        assert_eq!(got, want, "{name}: one record per append");
+        let stored = want.as_ref().map_or(all.len(), |(index, _, _)| *index);
+        assert_eq!(
+            b.rows(&s).len(),
+            stored,
+            "{name}: nothing from the refusal on"
+        );
+
+        let Some(mut b) = fresh() else { return };
+        let epoch = b.take_ownership(&s);
+        let got = match b.append(&s, 0, epoch, now(), &all) {
+            AppendOutcome::Committed(rows) => {
+                assert_eq!(rows.len(), all.len(), "{name}");
+                None
+            }
+            AppendOutcome::Invalid { draft, error } => {
+                Some((draft, error.reason.code().to_owned(), error.path))
+            }
+            other => panic!("{name}: as one batch, {other:?}"),
+        };
+        assert_eq!(got, want, "{name}: as one batch");
+        assert_eq!(
+            b.rows(&s).len(),
+            if want.is_some() { 0 } else { all.len() },
+            "{name}: a refused batch writes nothing"
+        );
+        judged += 1;
+    }
+    assert_eq!(judged, 11, "every model_gateway stream vector is appended");
+}
+
 pub fn append_vectors<B: Backend>(fresh: impl Fn() -> Option<B>) {
     let fx = fixture();
     let artifacts = fixture_artifacts(&fx);

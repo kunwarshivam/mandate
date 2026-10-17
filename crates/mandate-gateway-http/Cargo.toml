@@ -1,0 +1,23 @@
+[package]
+name = "mandate-gateway-http"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The model gateway's HTTPS transport: one attempt to the allowlisted host over TLS, within its deadline, with the provider key as a sensitive header (E15-6, E15-10, DEC-2200)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-gateway.workspace = true
+mandate-time.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "time"] }
+
+[dev-dependencies]
+mandate-canon.workspace = true
+rcgen.workspace = true
+serde_json.workspace = true
