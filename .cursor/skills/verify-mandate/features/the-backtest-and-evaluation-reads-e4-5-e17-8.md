@@ -7,7 +7,7 @@
   (fail closed: the internal paper workspace setting, a completed run without its report, a
   duplicate id, the permission row).
 - **Code:** `crates/mandate-api-server`. `src/backtests.rs` (the pure folds: the one record naming
-  an id, by equality, or `Unreadable` for a duplicate or a record outside §9.18's shape; the report
+  an id, by equality, or `Unreadable` for a duplicate or a record failing a member it serves from; the report
   object's `kind`, `report_version`, and mandate version; a control stream shown `paper`),
   `src/routes.rs` (`one_backtest`, `one_evaluation`: `reader()`'s authentication and the view row,
   the report read from the store and digest-checked through `src/documents.rs`'s `checked`, the

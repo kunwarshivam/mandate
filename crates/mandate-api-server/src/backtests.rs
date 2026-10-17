@@ -8,9 +8,10 @@
 //!   its record commits.
 //! - An evaluation is the one `EvaluationRunRecorded` whose `payload.evaluation_id` equals the id.
 //!   Whether it is served at all is the route's: only in an internal paper workspace (DEC-1143).
-//! - A record that breaks §9.18's shape, or a second record with the same id, is
+//! - A record failing a member the read serves from, or a second record with the same id, is
 //!   [`Found::Unreadable`]: the journal holds no single answer, so the read claims none, neither
-//!   the first, the last, nor an absence (DEC-1143 item 3).
+//!   the first, the last, nor an absence. DEC-1143 item 5 lists the members; `append` enforces
+//!   the rest of §9.18 at write time.
 //!
 //! Every function here is pure: rows and bytes in, values out. The store is read by the route.
 
@@ -34,9 +35,9 @@ pub const PAPER: &str = "paper";
 pub enum Found<T> {
     /// No record names the id: the read's 404.
     Absent,
-    /// Exactly one record names it, and it has §9.18's shape.
+    /// Exactly one record names it, and every member the read serves from is well formed.
     One(T),
-    /// A record names it but breaks §9.18's shape, or more than one does: the read's 503.
+    /// A record names it but fails a member the read serves from, or more than one does: the 503.
     Unreadable,
 }
 

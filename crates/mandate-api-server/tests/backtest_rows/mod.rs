@@ -4,6 +4,8 @@
 
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
+use std::collections::BTreeSet;
+
 use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_journal::StoredEvent;
 
@@ -36,12 +38,39 @@ pub fn reference(n: u8) -> String {
     format!("sha256:{}", format!("{n:02x}").repeat(32))
 }
 
-/// A control-stream row at `seq` in `environment`, schema version 1.
+/// A control-stream row at `seq` in `environment`, schema version 1, with the envelope §3 and
+/// §9.18 give it: the `system` runner as `actor`, the `config_refs` the reference's
+/// `REQUIRED_REFS` names for the two run records (a backtest's `mandate_version` is its
+/// payload's), and every `sha256:` reference in the payload, sorted, as `artifact_refs`
+/// (`theses_head` holds bare hex record hashes, so none of them is one).
 pub fn row_in(environment: &str, seq: u64, event_type: &str, payload: &str) -> StoredEvent {
     let stream = ctl();
     let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    let parsed = parse(payload.as_bytes()).expect("the payload");
+    let rule_set = reference(10);
+    let config_refs = match event_type {
+        "BacktestRunRecorded" => match parsed.get("mandate_version").and_then(Value::as_str) {
+            Some(version) => {
+                format!(r#"{{"mandate_version":"{version}","rule_set":"{rule_set}"}}"#)
+            }
+            None => format!(r#"{{"rule_set":"{rule_set}"}}"#),
+        },
+        "EvaluationRunRecorded" => format!(r#"{{"rule_set":"{rule_set}"}}"#),
+        _ => "{}".to_owned(),
+    };
+    let mut refs = BTreeSet::new();
+    artifact_refs(&parsed, &mut refs);
+    let artifact_refs = refs
+        .iter()
+        .map(|reference| format!("\"{reference}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let actor = format!(
+        r#"{{"build":"{}","id":"backtest_runner","kind":"system","version":"0.1.0"}}"#,
+        reference(0)
+    );
     let text = format!(
-        r#"{{"environment":"{environment}","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
+        r#"{{"actor":{actor},"artifact_refs":[{artifact_refs}],"config_refs":{config_refs},"environment":"{environment}","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
     StoredEvent {
@@ -55,6 +84,28 @@ pub fn row_in(environment: &str, seq: u64, event_type: &str, payload: &str) -> S
         prev_hash: Digest::ZERO,
         hash: Digest::of(&body),
         body,
+    }
+}
+
+/// Every string in `value` that is `sha256:` and 64 lowercase hex digits: §3's `artifact_refs`.
+fn artifact_refs(value: &Value, into: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(text) => {
+            let is_reference = text.strip_prefix("sha256:").is_some_and(|hex| {
+                hex.len() == 64
+                    && hex
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            });
+            if is_reference {
+                into.insert(text.clone());
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| artifact_refs(item, into)),
+        Value::Object(members) => members
+            .values()
+            .for_each(|member| artifact_refs(member, into)),
+        Value::Null | Value::Bool(_) | Value::Int(_) => {}
     }
 }
 
@@ -93,7 +144,7 @@ pub fn evaluation_payload(id: &str, report: &str) -> String {
     format!(
         r#"{{"evaluation_id":"{id}","decision":"DEC-122","cut_off":"2026-12-01T00:00:00.000000000Z","theses":"{}","theses_from":["agent:{WORKSPACE}:agt_a:1"],"theses_to":["agent:{WORKSPACE}:agt_a:9"],"theses_head":["{}"],"closes":"{}","cost_model":"{}","code_build":"{}","report":"{report}","report_version":1,"passed":true}}"#,
         reference(5),
-        reference(6),
+        "06".repeat(32),
         reference(7),
         reference(8),
         reference(9),
