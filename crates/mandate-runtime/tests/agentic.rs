@@ -767,3 +767,445 @@ fn an_agentic_run_replays_identically() {
     }
     assert_eq!(journals[0], journals[1]);
 }
+
+/// The step's result, refused or not, for the cases that must be refused.
+fn tried(
+    lp: &mut Loop,
+    input: ResearchInput,
+    ports: &Ports<'_>,
+    world: &World,
+) -> Result<ResearchStep, mandate_runtime::RuntimeError> {
+    lp.step(input, ports, world)
+}
+
+/// DEC-2206 item 8: a `single_call` step that journals carries its run as the correlation id, so
+/// the shell can stamp the run on every draft; one that journals nothing carries none.
+#[test]
+fn a_single_call_step_that_journals_names_its_run() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = World::open();
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let started = go(&mut lp, ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
+    assert_eq!(started.correlation_id, None, "the start journals nothing");
+    let Some((run_id, cut_off)) = started.requests.iter().find_map(|r| match r {
+        ResearchRequest::Start { run_id, cut_off } => Some((run_id.clone(), *cut_off)),
+        _ => None,
+    }) else {
+        panic!("a due run starts");
+    };
+    let plane = RecordedPlane::load();
+    let retrieval = retrieve(&config().plan, &world.scope(cut_off), plane.readers())
+        .unwrap_or_else(|e| panic!("{e}"));
+    let items = retrieval
+        .items
+        .iter()
+        .map(|item| {
+            RetrievedObservation::capture(item, cut_off)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .0
+        })
+        .collect();
+    let seeded = go(
+        &mut lp,
+        ResearchInput::Retrieved {
+            run_id: run_id.clone(),
+            items,
+        },
+        &ports,
+        &world,
+    );
+    assert_eq!(seeded.correlation_id.as_deref(), Some(run_id.as_str()));
+}
+
+/// HI-2: a seed off the run's cut-off, or with an item twice, is refused and journals nothing.
+#[test]
+fn an_agentic_seed_off_its_cut_off_or_with_an_item_twice_is_refused() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    for broken in ["off_cut_off", "twice"] {
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let started = go(&mut lp, ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
+        let Some((run_id, cut_off)) = started.requests.iter().find_map(|r| match r {
+            ResearchRequest::Start { run_id, cut_off } => Some((run_id.clone(), *cut_off)),
+            _ => None,
+        }) else {
+            panic!("a due run starts");
+        };
+        let plane = RecordedPlane::load();
+        let retrieval = retrieve(&config().plan, &world.scope(cut_off), plane.readers())
+            .unwrap_or_else(|e| panic!("{e}"));
+        let mut items: Vec<RetrievedObservation> = retrieval
+            .items
+            .iter()
+            .map(|item| {
+                RetrievedObservation::capture(item, cut_off)
+                    .unwrap_or_else(|e| panic!("{e}"))
+                    .0
+            })
+            .collect();
+        if broken == "twice" {
+            let first = items[0].clone();
+            items.push(first);
+        } else {
+            items[0].observation.as_of = clock(CUT_OFF - 1);
+        }
+        let before = lp.types().len();
+        let refused = tried(
+            &mut lp,
+            ResearchInput::Retrieved { run_id, items },
+            &ports,
+            &world,
+        );
+        assert!(refused.is_err(), "{broken}: {refused:?}");
+        assert_eq!(lp.types().len(), before, "{broken}: nothing journaled");
+        assert!(lp.research.in_flight().is_some(), "{broken}: the run stays");
+    }
+}
+
+/// §5.3: a run cancelled before its first turn has no call out, so a refused call for it is not
+/// its and is refused.
+#[test]
+fn a_run_cancelled_before_its_first_turn_has_no_call_to_answer() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let started = go(&mut lp, ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
+    let Some(run_id) = started.requests.iter().find_map(|r| match r {
+        ResearchRequest::Start { run_id, .. } => Some(run_id.clone()),
+        _ => None,
+    }) else {
+        panic!("a due run starts");
+    };
+    lp.shell.run(Input::Command(Command::Pause), &ports);
+    go(
+        &mut lp,
+        ResearchInput::Poll(clock(CUT_OFF + 1)),
+        &ports,
+        &world,
+    );
+    let refused = tried(
+        &mut lp,
+        ResearchInput::Refused {
+            run_id,
+            at: clock(CUT_OFF + 2),
+            error: mandate_gateway::RequestError::UnknownModel,
+        },
+        &ports,
+        &world,
+    );
+    assert!(refused.is_err(), "{refused:?}");
+}
+
+/// A turn's reply is the run's only if it is the record of the call out: a record of another call,
+/// or one arriving while the reply's reads are out, is refused and journals nothing.
+#[test]
+fn a_reply_that_is_not_the_turn_s_call_is_refused() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    let turn = turn_of(&seed);
+    let mut other = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
+    other.call_id = "01J9ZZZZZZZZZZZZZZZZZZZZZZ".to_owned();
+    let before = run.lp.types().len();
+    let refused = tried(
+        &mut run.lp,
+        ResearchInput::Called {
+            run_id: run.run_id.clone(),
+            at: clock(CUT_OFF + 20),
+            record: Box::new(other),
+        },
+        &ports,
+        &world,
+    );
+    assert!(refused.is_err(), "another call's record: {refused:?}");
+    assert_eq!(run.lp.types().len(), before);
+    let record = reply(
+        &run,
+        &turn,
+        &world,
+        vec![call(
+            0,
+            "news.search",
+            r#"{"symbols":["AAPL"],"terms":["services"]}"#,
+        )],
+        None,
+    );
+    answered(&mut run, record.clone(), &ports, &world);
+    let before = run.lp.types().len();
+    let again = tried(
+        &mut run.lp,
+        ResearchInput::Called {
+            run_id: run.run_id.clone(),
+            at: clock(CUT_OFF + 21),
+            record: Box::new(record),
+        },
+        &ports,
+        &world,
+    );
+    assert!(again.is_err(), "a reply while the reads are out: {again:?}");
+    assert_eq!(run.lp.types().len(), before);
+}
+
+/// §5.3: a reply that arrives once research may no longer run is journaled with nothing used, and
+/// the run ends `mode`; one completed after the run's deadline ends it `deadline`.
+#[test]
+fn a_reply_research_may_no_longer_use_ends_the_run_mode_or_deadline() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    for late in [false, true] {
+        let mut world = world();
+        let (mut run, seed) = seeded(&ports, &world);
+        let turn = turn_of(&seed);
+        let mut record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
+        if late {
+            record.completed_at = mandate_time::UtcNanos::from_parts(CUT_OFF + 901, 0)
+                .unwrap_or_else(|e| panic!("{e}"));
+            record.deadline = record.completed_at;
+        } else {
+            world.preconditions =
+                mandate_runtime::Preconditions::read(&common::research::Catalog(false));
+        }
+        answered(&mut run, record, &ports, &world);
+        assert!(
+            run.lp.events("ThesisProposed").is_empty(),
+            "nothing is used"
+        );
+        let ended = run.lp.events("RunEnded");
+        assert_eq!(
+            payload_str(ended[0], "reason"),
+            Some(if late { "deadline" } else { "mode" })
+        );
+        assert!(run.lp.research.in_flight().is_none(), "the run is over");
+        let summary = run.lp.events("RunSummaryRecorded");
+        assert_eq!(summary.len(), 1);
+    }
+}
+
+/// A dispatch's results are the run's only if they answer exactly its calls, of its turn, in order.
+#[test]
+fn results_that_are_not_the_dispatch_s_calls_are_refused() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    for broken in ["index", "turn", "run"] {
+        let (mut run, seed) = seeded(&ports, &world);
+        let turn = turn_of(&seed);
+        let record = reply(
+            &run,
+            &turn,
+            &world,
+            vec![call(
+                0,
+                "news.search",
+                r#"{"symbols":["AAPL"],"terms":["services"]}"#,
+            )],
+            None,
+        );
+        answered(&mut run, record, &ports, &world);
+        let result = match broken {
+            "index" => read_result(1, 1, "{}"),
+            _ => read_result(if broken == "turn" { 2 } else { 1 }, 0, "{}"),
+        };
+        let run_id = if broken == "run" {
+            "01J9ZZZZZZZZZZZZZZZZZZZZZY".to_owned()
+        } else {
+            run.run_id.clone()
+        };
+        let before = run.lp.types().len();
+        let refused = tried(
+            &mut run.lp,
+            ResearchInput::Dispatched {
+                run_id,
+                at: clock(CUT_OFF + 25),
+                results: vec![result],
+            },
+            &ports,
+            &world,
+        );
+        assert!(refused.is_err(), "{broken}: {refused:?}");
+        assert_eq!(run.lp.types().len(), before, "{broken}");
+    }
+}
+
+/// Results that arrive once research may no longer run, or after the deadline, journal nothing they
+/// hold and end the run (`mode`, `deadline`); a pause exactly at the deadline is still `mode`.
+#[test]
+fn results_research_may_no_longer_use_end_the_run() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    for (case, at, paused, reason) in [
+        ("paused", CUT_OFF + 25, true, "mode"),
+        ("paused_at_the_deadline", CUT_OFF + 900, true, "mode"),
+        ("late", CUT_OFF + 901, false, "deadline"),
+    ] {
+        let world = world();
+        let (mut run, seed) = seeded(&ports, &world);
+        let turn = turn_of(&seed);
+        let record = reply(
+            &run,
+            &turn,
+            &world,
+            vec![call(
+                0,
+                "news.search",
+                r#"{"symbols":["AAPL"],"terms":["services"]}"#,
+            )],
+            None,
+        );
+        answered(&mut run, record, &ports, &world);
+        if paused {
+            run.lp.shell.run(Input::Command(Command::Pause), &ports);
+        }
+        go(
+            &mut run.lp,
+            ResearchInput::Dispatched {
+                run_id: run.run_id.clone(),
+                at: clock(at),
+                results: vec![read_result(1, 0, "{}")],
+            },
+            &ports,
+            &world,
+        );
+        assert!(run.lp.events("ToolResultRecorded").is_empty(), "{case}");
+        let ended = run.lp.events("RunEnded");
+        assert_eq!(payload_str(ended[0], "reason"), Some(reason), "{case}");
+    }
+}
+
+/// A poll that cancels a run exactly at its deadline, because the owner paused, ends it `mode`,
+/// not `deadline`: only the risk clock past the deadline is a deadline end.
+#[test]
+fn a_pause_seen_at_the_deadline_ends_the_run_mode() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, _) = seeded(&ports, &world);
+    run.lp.shell.run(Input::Command(Command::Pause), &ports);
+    go(
+        &mut run.lp,
+        ResearchInput::Poll(clock(CUT_OFF + 900)),
+        &ports,
+        &world,
+    );
+    let ended = run.lp.events("RunEnded");
+    assert_eq!(payload_str(ended[0], "reason"), Some("mode"));
+}
+
+/// Every turn's call id is its own: none is the id of a record the run journaled.
+#[test]
+fn a_turn_s_call_id_is_never_a_journaled_record_s() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (run, seed) = seeded(&ports, &world);
+    let turn = turn_of(&seed);
+    assert!(
+        run.lp
+            .shell
+            .agent_journal
+            .iter()
+            .all(|event| event.event_id.0 != turn.call.call_id),
+        "{}",
+        turn.call.call_id
+    );
+}
+
+/// `RunSummaryRecorded` counts the run's theses proposed and admitted from its thesis records: an
+/// admitted thesis counts once, an ignored one only as proposed.
+#[test]
+fn the_summary_counts_the_theses_proposed_and_admitted() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let short = RESPONSE_AAPL.replace(r#""long""#, r#""short""#);
+    for (output, admitted) in [(RESPONSE_AAPL.to_owned(), 1), (short, 0)] {
+        let world = world();
+        let (mut run, seed) = seeded(&ports, &world);
+        let turn = turn_of(&seed);
+        let record = reply(&run, &turn, &world, Vec::new(), Some(&output));
+        answered(&mut run, record, &ports, &world);
+        let summary = run.lp.events("RunSummaryRecorded")[0];
+        assert_eq!(
+            summary.payload.get("proposed").and_then(Value::as_int),
+            Some(1),
+            "{output}"
+        );
+        assert_eq!(
+            summary.payload.get("admitted").and_then(Value::as_int),
+            Some(admitted),
+            "{output}"
+        );
+    }
+}
+
+/// `RunEnded.result_bytes` counts the run's read results only (§6.9 step 5): a note's bytes do not.
+#[test]
+fn the_end_counts_only_read_results_bytes() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    let turn = turn_of(&seed);
+    let record = reply(
+        &run,
+        &turn,
+        &world,
+        vec![
+            call(
+                0,
+                "news.search",
+                r#"{"symbols":["AAPL"],"terms":["services"]}"#,
+            ),
+            call(1, "note", r#"{"text":"check services"}"#),
+        ],
+        None,
+    );
+    answered(&mut run, record, &ports, &world);
+    let next = go(
+        &mut run.lp,
+        ResearchInput::Dispatched {
+            run_id: run.run_id.clone(),
+            at: clock(CUT_OFF + 25),
+            results: vec![read_result(1, 0, "0123456789"), read_result(1, 1, "abc")],
+        },
+        &ports,
+        &world,
+    );
+    let turn = turn_of(&next);
+    let record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
+    answered(&mut run, record, &ports, &world);
+    let ended = run.lp.events("RunEnded")[0];
+    assert_eq!(
+        ended.payload.get("result_bytes").and_then(Value::as_int),
+        Some(10)
+    );
+}
+
+/// §6.9 step 6: a turn ended `budget_exhausted` ends the run `cost`, one ended
+/// `deadline_exceeded` ends it `deadline`, and any other error `error`.
+#[test]
+fn an_error_outcome_names_its_end() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    for (outcome, reason) in [
+        (Outcome::BudgetExhausted, "cost"),
+        (Outcome::DeadlineExceeded, "deadline"),
+        (Outcome::RateLimitedLocal, "error"),
+    ] {
+        let world = world();
+        let (mut run, seed) = seeded(&ports, &world);
+        let turn = turn_of(&seed);
+        let mut record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
+        record.outcome = outcome;
+        record.output = None;
+        answered(&mut run, record, &ports, &world);
+        let ended = run.lp.events("RunEnded");
+        assert_eq!(payload_str(ended[0], "reason"), Some(reason), "{outcome:?}");
+    }
+}
