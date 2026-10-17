@@ -14,7 +14,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use mandate_api::problem::{Effect, Problem, ProblemCode};
+use mandate_api::problem::{Effect, Problem, ProblemCode, Violation};
 use mandate_api::wire::encode;
 use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
@@ -26,6 +26,7 @@ use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
+use crate::status;
 use crate::stepup::StepUp;
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
@@ -145,6 +146,22 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/mandate-versions/{version}/confirm",
             post(version_routes::confirm).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/resume",
+            post(writes::resume).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/stop",
+            post(writes::stop).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/exits",
+            post(writes::owner_exit).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/commands/{command}",
+            get(status::status).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",
@@ -351,6 +368,20 @@ pub(crate) fn problem_body(code: ProblemCode) -> Bytes {
         .and_then(|problem| encode(&problem).ok())
         .map(Bytes::from)
         .unwrap_or_default()
+}
+
+/// The 422 `invalid` naming `violations`, with nothing recorded.
+pub(crate) fn invalid(violations: Vec<Violation>) -> Response {
+    let body = Problem::of(ProblemCode::Invalid, Effect::None, None, None)
+        .ok()
+        .map(|problem| Problem {
+            violations,
+            ..problem
+        })
+        .and_then(|problem| encode(&problem).ok())
+        .map(Bytes::from)
+        .unwrap_or_default();
+    problem(StatusCode::UNPROCESSABLE_ENTITY, body)
 }
 
 pub(crate) fn problem(code: StatusCode, body: Bytes) -> Response {

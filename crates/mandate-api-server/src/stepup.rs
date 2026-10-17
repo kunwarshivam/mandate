@@ -7,7 +7,8 @@
 
 use mandate_api::envelope::StepUpEvidence;
 use mandate_api::problem::ProblemCode;
-use mandate_canon::Digest;
+use mandate_api::wire::encode;
+use mandate_canon::{Digest, Value, parse};
 use mandate_identity::{PrincipalId, StepUpActionKind};
 use mandate_time::UtcNanos;
 
@@ -51,5 +52,14 @@ impl StepUp for Unbound {
         _now: UtcNanos,
     ) -> Result<(), ProblemCode> {
         Err(ProblemCode::StepUpMissing)
+    }
+}
+
+/// Step-up evidence as the journal records it (journal spec §9.2), or `null` without any; `None`
+/// only for evidence the canonical form cannot hold.
+pub fn journaled(evidence: Option<&StepUpEvidence>) -> Option<Value> {
+    match evidence {
+        Some(evidence) => parse(&encode(evidence).ok()?).ok(),
+        None => Some(Value::Null),
     }
 }
