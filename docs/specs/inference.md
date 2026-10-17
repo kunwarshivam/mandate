@@ -200,7 +200,11 @@ The first six are refusals: nothing leaves the deployment.
 - **Retries.** Only transport failures retry (`provider_unavailable`, `rate_limited_provider`),
   only to endpoints serving the same identity, and only while the deadline leaves time. A content
   failure (`schema_invalid`, `identity_mismatch`, `content_refused`) never retries: sampling again
-  until something parses would select outputs (DEC-432 item 3). Each attempt is metered: at the
+  until something parses would select outputs (DEC-432 item 3). An attempt the provider billed, or
+  may have (its usage reported or unreadable), is never retried either, whatever its status: the
+  reservation holds one attempt's maximum (DEC-998 item 12). A `200` whose reported model or
+  provider is missing or is not the pin's is `identity_mismatch` whatever the rest of its shape:
+  the identity is read before the output (INF-2). Each attempt is metered: at the
   tokens its reply reports, or, for a `200` reply whose usage cannot be read, at the reservation's
   maximum, so a cost the gateway cannot read is never counted as less than it could be.
 - **Streaming.** The gateway may stream from the provider to enforce the deadline and to stop at
