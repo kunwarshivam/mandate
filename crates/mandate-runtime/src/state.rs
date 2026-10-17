@@ -76,6 +76,16 @@ pub struct RuntimeState {
     /// The latest `ConnectionChecked` of this deployment's own connection, or `None` while the
     /// account stream holds none (journal spec §9.8, DEC-969).
     connection_check: Option<ConnectionCheck>,
+    /// The account stream's `OrderRequestRecorded` events that name an intent, by event id: what
+    /// links an `OrderSubmitted`, whose `causation_id` is its request (journal spec §9.5 rule 45),
+    /// or at version 1 the intent itself, to the intent it sends (DEC-1006 item 4).
+    requests: BTreeMap<EventId, EventId>,
+    /// Each order the account stream has submitted for an intent, by client order id, a
+    /// replacement following the order it replaced.
+    orders_of: BTreeMap<String, EventId>,
+    /// The intents whose order or decision the account stream has ended: a binding-gate deny, an
+    /// abandonment, or a terminal state of its order. Nothing else ends one (DEC-1006 item 4).
+    ended: BTreeSet<EventId>,
 }
 
 /// One folded `ConnectionChecked`: whether every check it lists passed, and its risk clock.
@@ -170,6 +180,9 @@ impl RuntimeState {
             assertions: BTreeMap::new(),
             owner_exits: BTreeMap::new(),
             connection_check: None,
+            requests: BTreeMap::new(),
+            orders_of: BTreeMap::new(),
+            ended: BTreeSet::new(),
         }
     }
 
@@ -398,6 +411,22 @@ impl RuntimeState {
     pub(crate) fn connection_admits_openings(&self, now: RiskClock) -> bool {
         self.connection_check.is_none_or(|check| {
             check.passed && now.secs() < check.at.secs().saturating_add(CONNECTION_CHECK_COVERS_S)
+        })
+    }
+
+    /// Whether an opening or increase this runtime proposed in `instrument` is still working: its
+    /// intent committed and nothing on the account stream has ended it. Trading spec §5.3 rule 6
+    /// allows one working non-protective order per instrument, so another opening there waits for
+    /// it to end (DEC-1006 item 5). Read for openings and increases alone, never for an exit
+    /// (`AGENTS.md` rule 13).
+    pub(crate) fn opening_works_in(&self, instrument: &InstrumentId) -> bool {
+        self.outstanding.values().any(|live| {
+            live.purpose.adds_risk()
+                && !self.ended.contains(&live.intent_id)
+                && matches!(
+                    self.bodies.get(&live.intent_id),
+                    Some(IntentBody::Order { instrument: held, .. }) if held == instrument
+                )
         })
     }
 
@@ -656,7 +685,35 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 state.submission_unreconciled = false;
             }
         }
-        "OrderSubmitted" => state.submission_unreconciled = true,
+        "OrderSubmitted" => {
+            state.submission_unreconciled = true;
+            let intent = event.causation_id.as_ref().and_then(|cause| {
+                state
+                    .requests
+                    .get(cause)
+                    .cloned()
+                    .or_else(|| state.bodies.contains_key(cause).then(|| cause.clone()))
+            });
+            if let (Some(intent), Some(order)) =
+                (intent, payload::str_of(&event.payload, "client_order_id"))
+            {
+                state.orders_of.insert(order.to_owned(), intent);
+            }
+        }
+        "OrderRequestRecorded" => {
+            if let Some(intent) = payload::str_of(&event.payload, "intent_id") {
+                state
+                    .requests
+                    .insert(event.event_id.clone(), EventId(intent.to_owned()));
+            }
+        }
+        "OrderStateChanged" => order_state_changed(state, &event.payload),
+        "GateDecided" => {
+            if payload::str_of(&event.payload, "verdict") == Some("deny") {
+                ended_intent(state, &event.payload);
+            }
+        }
+        "OrderAbandoned" => ended_intent(state, &event.payload),
         "ConnectionChecked" => {
             let check = payload::connection_check_of(&event.payload)?;
             if check.connection_id == state.deployment.connection.0 {
@@ -681,15 +738,11 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             }
         }
         "StreamOpened"
-        | "GateDecided"
-        | "OrderRequestRecorded"
-        | "OrderAbandoned"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
         | "DecisionMade"
         | "ThesisProposed"
         | "ThesisRevised"
-        | "OrderStateChanged"
         | "BrokerExchangeRecorded"
         | "FillApplied"
         | "LateFillApplied"
@@ -732,6 +785,39 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
     }
     Ok(())
+}
+
+/// An `OrderStateChanged` of an order the runtime follows: a terminal state ends its intent, and a
+/// replacement passes the intent to the order that replaced it. A record that names no order,
+/// no state, or an order this runtime did not submit ends nothing (DEC-1006 item 4).
+fn order_state_changed(state: &mut RuntimeState, payload: &Value) {
+    let (Some(order), Some(to)) = (
+        payload::str_of(payload, "client_order_id"),
+        payload::str_of(payload, "state"),
+    ) else {
+        return;
+    };
+    let Some(intent) = state.orders_of.get(order).cloned() else {
+        return;
+    };
+    match to {
+        "filled" | "canceled" | "rejected" | "expired" | "abandoned" => {
+            state.ended.insert(intent);
+        }
+        "replaced" => {
+            if let Some(successor) = payload::str_of(payload, "replaced_by") {
+                state.orders_of.insert(successor.to_owned(), intent);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Ends the intent a payload's `intent_id` names, when it names one.
+fn ended_intent(state: &mut RuntimeState, payload: &Value) {
+    if let Some(intent) = payload::str_of(payload, "intent_id") {
+        state.ended.insert(EventId(intent.to_owned()));
+    }
 }
 
 /// What an account-stream mode change does to a kill switch the runtime still holds.

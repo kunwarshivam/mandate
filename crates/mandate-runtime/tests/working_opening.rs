@@ -418,3 +418,41 @@ fn a_grant_read_while_an_opening_works_is_skipped() {
         after.draft_types()
     );
 }
+
+/// A version-1 `OrderSubmitted` names its intent as its cause directly, and is followed the same.
+#[test]
+fn an_order_caused_by_its_intent_is_followed_too() {
+    let (ids, gate, plan, view) = (
+        TestIds,
+        AllowGate,
+        FixedPlan::opening(Autonomy::Auto),
+        universe(&["AAPL"]),
+    );
+    let ports = ports(&ids, &gate, &plan, &view);
+    let (mut shell, intent) = opened(&ports);
+    let mut account = Account {
+        shell: &mut shell,
+        at: 115,
+    };
+    let submitted = copied(
+        ACCOUNT_STREAM,
+        account.next(),
+        "OrderSubmitted",
+        with_clock(&[("client_order_id", text("md-direct"))], 115),
+        &intent,
+    );
+    account.fold(&submitted);
+    let ran = evaluated(&mut shell, &ports, 118);
+    assert!(held(&ran), "submitted, it works: {:?}", ran.draft_types());
+    let mut account = Account {
+        shell: &mut shell,
+        at: 119,
+    };
+    account.state("md-direct", "filled", None);
+    let ran = evaluated(&mut shell, &ports, 120);
+    assert!(
+        proposed(&ran).is_some(),
+        "its fill ends it: {:?}",
+        ran.draft_types()
+    );
+}

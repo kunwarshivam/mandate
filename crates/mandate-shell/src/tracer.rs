@@ -942,7 +942,8 @@ impl<'s> Session<'s> {
     }
 
     /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
-    /// the event time to the clock, and reads the entry back by its client order id, then ticks the
+    /// the event time to the clock, and reads the entry back ([`entry_read`]: by its client order
+    /// id, or by the profile's listing where it cannot query by it, DEC-1006 item 3), then ticks the
     /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
     /// of the read. Every wake asks the run's LT-10 question ([`watch_may_end`], DEC-912 item 3),
     /// in place of the bare terminal read the watch kept before E7-26 (DEC-858 item 4, DEC-914
@@ -976,6 +977,10 @@ impl<'s> Session<'s> {
         let agent = mandate_executor::AgentId(self.setup.deployment.agent.0.clone());
         let mut cancel_handed = false;
         let mut read: Option<String> = None;
+        let queryable = match self.stages.connector.profile() {
+            Ok(profile) => profile.idempotency().query_by_client_order_id,
+            Err(..) => true,
+        };
         loop {
             runtime.block_on(watch.pause.pause(watch.interval));
             let now = watch.pause.now();
@@ -993,25 +998,14 @@ impl<'s> Session<'s> {
                 ))?;
                 continue;
             }
-            let answer = self
-                .stages
-                .connector
-                .call(&BrokerRequest::GetOrderByClientId(entry.clone()));
-            read = match &answer {
-                Ok(BrokerOutcome::Order(order)) => Some(order.status.clone()),
-                Ok(BrokerOutcome::Submitted(..))
-                | Ok(BrokerOutcome::DuplicateClientOrderId { .. })
-                | Ok(BrokerOutcome::Rejected(..))
-                | Ok(BrokerOutcome::Absent { .. })
-                | Ok(BrokerOutcome::OpenOrders(..))
-                | Ok(BrokerOutcome::Positions(..))
-                | Ok(BrokerOutcome::Account(..))
-                | Ok(BrokerOutcome::Activities { .. })
-                | Ok(BrokerOutcome::CancelAccepted { .. })
-                | Ok(BrokerOutcome::AccountWideAccepted)
-                | Ok(BrokerOutcome::Listed { .. }) => None,
-                Err(..) => None,
-            };
+            let request = entry_read(
+                queryable,
+                &entry,
+                instrument,
+                mandate_executor::RiskClock::from_secs(self.setup.now.secs()),
+            );
+            let answer = self.stages.connector.call(&request);
+            read = entry_status(&answer, &entry);
             self.step_watched(map::broker_input(answer).map_err(refused(Stage::Connector))?)?;
             self.step_watched(mandate_executor::Input::Tick(
                 mandate_executor::RiskClock::from_secs(now.secs()),
@@ -1464,9 +1458,21 @@ fn entry_read(
     instrument: &InstrumentId,
     since: mandate_executor::RiskClock,
 ) -> BrokerRequest {
-    let _ = (queryable, instrument, since);
-    BrokerRequest::GetOrderByClientId(entry.clone())
+    if queryable {
+        return BrokerRequest::GetOrderByClientId(entry.clone());
+    }
+    BrokerRequest::ListOrders(mandate_executor::OrderListing {
+        client_order_id: entry.clone(),
+        instrument: instrument.clone(),
+        origin: mandate_executor::OrderOrigin::Agentic,
+        created_since: mandate_executor::RiskClock::from_secs(
+            since.secs().saturating_sub(WATCH_LISTING_MARGIN_S),
+        ),
+    })
 }
+
+/// DEC-862 item 2's margin: a listing starts this long before the order could have been placed.
+const WATCH_LISTING_MARGIN_S: i64 = 300;
 
 /// The entry's broker status in `answer`, which the run's LT-10 question reads (DEC-912 item 3):
 /// the order an order query answered, or, from a listing, the one record that names the entry by
@@ -1476,9 +1482,17 @@ fn entry_status(
     answer: &Result<BrokerOutcome, mandate_executor::ConnectorError>,
     entry: &mandate_executor::ClientOrderId,
 ) -> Option<String> {
-    let _ = entry;
     match answer {
         Ok(BrokerOutcome::Order(order)) => Some(order.status.clone()),
+        Ok(BrokerOutcome::Listed { orders, .. }) => {
+            let mut named = orders
+                .iter()
+                .filter(|record| record.order.client_order_id.as_deref() == Some(entry.as_str()));
+            match (named.next(), named.next()) {
+                (Some(one), None) => Some(one.order.status.clone()),
+                (Some(_), Some(_)) | (None, Some(_)) | (None, None) => None,
+            }
+        }
         Ok(BrokerOutcome::Submitted(..))
         | Ok(BrokerOutcome::DuplicateClientOrderId { .. })
         | Ok(BrokerOutcome::Rejected(..))
@@ -1488,8 +1502,7 @@ fn entry_status(
         | Ok(BrokerOutcome::Account(..))
         | Ok(BrokerOutcome::Activities { .. })
         | Ok(BrokerOutcome::CancelAccepted { .. })
-        | Ok(BrokerOutcome::AccountWideAccepted)
-        | Ok(BrokerOutcome::Listed { .. }) => None,
+        | Ok(BrokerOutcome::AccountWideAccepted) => None,
         Err(..) => None,
     }
 }

@@ -79,8 +79,10 @@ fn ledger_current(view: &ExecutorState, entry: &ClientOrderId) -> bool {
 /// Asks what became of an order in doubt, by the id [`lookup_target`] names for it. Where the
 /// profile can query by client order id, by that id. Otherwise an `Unknown` order on an account
 /// dedicated to its agent is listed once (DEC-862 items 1 to 3); on a shared account nothing is
-/// asked and the order stays `Unknown`. An order in any other state keeps the lookup, which such
-/// a connector refuses unsent.
+/// asked and the order stays `Unknown`. An order in any other state, which the broker has already
+/// described to us, is listed the same way on any account, and only the record naming it by our
+/// own id is ever adopted for it ([`listed`]), so no query the connector refuses unsent is asked
+/// (DEC-1006 item 1).
 pub(crate) fn query_unknown(
     batch: &mut Batch<'_, '_>,
     id: ClientOrderId,
@@ -88,9 +90,15 @@ pub(crate) fn query_unknown(
     let Some(order) = batch.view.orders.get(&id) else {
         return Ok(());
     };
-    if queryable(&batch.view) || order.state != OrderState::Unknown {
+    if queryable(&batch.view) {
         if let Some(target) = lookup_target(&batch.view, &id) {
             batch.broker(BrokerRequest::GetOrderByClientId(target));
+        }
+        return Ok(());
+    }
+    if order.state != OrderState::Unknown {
+        if let Some(target) = lookup_target(&batch.view, &id) {
+            list(batch, target);
         }
         return Ok(());
     }
@@ -103,8 +111,26 @@ pub(crate) fn query_unknown(
         .details
         .get(&id)
         .and_then(|detail| detail.submitted_at);
-    let (true, Some(at)) = (listable, submitted) else {
+    let (true, Some(_)) = (listable, submitted) else {
         return Ok(());
+    };
+    list(batch, id);
+    Ok(())
+}
+
+/// One listing of `id`'s instrument from DEC-862 item 2's margin before its `OrderSubmitted`, or
+/// nothing when the order or its submission is not in the fold.
+fn list(batch: &mut Batch<'_, '_>, id: ClientOrderId) {
+    let Some(order) = batch.view.orders.get(&id) else {
+        return;
+    };
+    let Some(at) = batch
+        .view
+        .details
+        .get(&id)
+        .and_then(|detail| detail.submitted_at)
+    else {
+        return;
     };
     let listing = OrderListing {
         client_order_id: id,
@@ -113,7 +139,6 @@ pub(crate) fn query_unknown(
         created_since: RiskClock::from_secs(at.secs().saturating_sub(LISTING_MARGIN_S)),
     };
     batch.broker(BrokerRequest::ListOrders(listing));
-    Ok(())
 }
 
 /// DEC-863 item 3: another order the account stream holds that a record with no client order id
@@ -159,9 +184,12 @@ fn matches(
     same && named
 }
 
-/// The answer to a listing (DEC-862 items 3 to 5). Only an `Unknown` order this executor would
-/// have listed is considered; exactly one matching record is folded as the broker's description
-/// of it, through §5.7's table, and zero or several leave it `Unknown` with nothing sent.
+/// The answer to a listing (DEC-862 items 3 to 5). Only an order this executor would have listed
+/// is considered; exactly one matching record is folded as the broker's description of it,
+/// through §5.7's table, and zero or several leave it as it was with nothing sent. For an
+/// `Unknown` order a record carrying no client order id may match (DEC-863); for one in any other
+/// state only a record naming it by our own id does, never a look-alike, so a working order is
+/// never taken as filled or gone on a guess (DEC-1006 item 2).
 pub(crate) fn listed(
     batch: &mut Batch<'_, '_>,
     raw: &str,
@@ -173,12 +201,13 @@ pub(crate) fn listed(
     let Some(order) = batch.view.orders.get(&id) else {
         return Ok(());
     };
-    let asked = order.state == OrderState::Unknown
-        && !queryable(&batch.view)
-        && order
-            .agent
-            .as_ref()
-            .is_some_and(|agent| dedicated(&batch.view, agent));
+    let working = order.state != OrderState::Unknown;
+    let asked = !queryable(&batch.view)
+        && (working
+            || order
+                .agent
+                .as_ref()
+                .is_some_and(|agent| dedicated(&batch.view, agent)));
     let request = batch
         .view
         .details
@@ -190,6 +219,7 @@ pub(crate) fn listed(
     let found: Vec<&ListedOrder> = records
         .iter()
         .filter(|record| matches(&batch.view, &id, ours, record))
+        .filter(|record| !working || record.order.client_order_id.as_deref() == Some(id.as_str()))
         .collect();
     let [one] = found.as_slice() else {
         return Ok(());

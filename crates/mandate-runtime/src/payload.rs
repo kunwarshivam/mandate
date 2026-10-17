@@ -473,6 +473,9 @@ pub(crate) const REASON_RESTRICTION: &str = "restriction_changed";
 /// §7.3 row 5's, the account `closing_only` because the connection is not usable, which a later
 /// check's failure reaches through `suspended` (connections spec §8.1, §9.1; DEC-969).
 pub(crate) const ACCOUNT_RESTRICTED: &str = "account_restricted";
+/// The dry run's reason code for an opening in an instrument where another still works: trading
+/// spec §5.3 rule 6's, one working non-protective order per instrument (DEC-1006 item 5).
+pub(crate) const WORKING_ORDER_LIMIT: &str = "working_order_limit";
 pub(crate) const REASON_STARTUP_HOLD: &str = "awaiting_reconciliation";
 pub(crate) const REASON_OWNER_PAUSE: &str = "owner_pause";
 pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";
