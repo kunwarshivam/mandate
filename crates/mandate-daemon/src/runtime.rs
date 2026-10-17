@@ -295,8 +295,9 @@ impl<S: Store> RuntimeProcess<S> {
     /// `AgentModeApplied` reaches the runtime on the next input (DEC-1014 item 1). The account is
     /// the one the control stream's `control` rows name; a process that follows one account and
     /// is told of another stops, and the next process follows the new one from its start. Whether
-    /// the clock may be read: an account that cannot be read hands no tick, so nothing is decided
-    /// on a mode that may be stale.
+    /// the clock may be read: an account that cannot be read folds nothing this pass, and the tick
+    /// is still handed, so no risk exit or deadline waits on it (`AGENTS.md` rule 13); an opening
+    /// decided on a mode that may be stale still meets the executor's gate (rule 1).
     fn account_pass(&mut self, now: UtcNanos, control: &[StoredEvent]) -> bool {
         let named = account_of(control, self.state.deployment(), self.environment);
         match (&self.account, named) {
@@ -311,8 +312,7 @@ impl<S: Store> RuntimeProcess<S> {
             return true;
         };
         match self.fold_account(&account) {
-            Account::Folded => true,
-            Account::Unreadable => false,
+            Account::Folded | Account::Unreadable => true,
             Account::Unfoldable => {
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 false

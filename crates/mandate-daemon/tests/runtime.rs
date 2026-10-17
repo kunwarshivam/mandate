@@ -781,10 +781,10 @@ fn each_pass_reads_the_control_then_the_account_then_the_clock_stream() {
     assert!(first(ACCOUNT) < first(CLOCK), "{reads:?}");
 }
 
-/// An account stream that cannot be read hands no tick, so nothing is decided on a mode that may be
-/// stale, and never holds the owner's kill switch (ES-06).
+/// An account stream that cannot be read folds nothing, and holds neither the owner's kill switch
+/// (ES-06) nor the tick, so no risk exit or deadline waits on it (`AGENTS.md` rule 13).
 #[test]
-fn an_account_stream_that_cannot_be_read_hands_no_tick_and_never_holds_the_kill_switch() {
+fn an_account_stream_that_cannot_be_read_holds_neither_the_kill_switch_nor_the_tick() {
     let rig = Rig::default();
     established(&rig, CONNECTION, ACCOUNT_REF, 2);
     reconciled(&rig, ACCOUNT);
@@ -794,11 +794,23 @@ fn an_account_stream_that_cannot_be_read_hands_no_tick_and_never_holds_the_kill_
     tick(&rig, NOW + 1);
     process.step(at(NOW + 1));
     assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
-    assert_eq!(risk_clock(&process), None);
-    assert_eq!(process.lifecycle().state(), State::Ready);
-    rig.account_down.set(false);
-    process.step(at(NOW + 2));
     assert_eq!(risk_clock(&process), Some(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AgentModeApplied",
+        &format!(r#"{{"agent":"{AGENT}","to":"paused"}}"#),
+    );
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    let folded = |p: &RuntimeProcess<Rig>| p.state().head(ACCOUNT).map(|seq| seq.0);
+    assert_eq!(folded(&process), Some(1), "nothing folded while unreadable");
+    assert_eq!(risk_clock(&process), Some(NOW + 2));
+    rig.account_down.set(false);
+    tick(&rig, NOW + 3);
+    process.step(at(NOW + 3));
+    assert_eq!(folded(&process), Some(2), "folded once readable again");
 }
 
 /// What the start cannot read, it does not guess: an unreadable control or account stream stops the
@@ -1081,9 +1093,8 @@ proptest! {
                     tick(&rig, second);
                     process.step(at(second));
                     rig.account_down.set(false);
-                    if !is_established {
-                        oracle.passed(&laid(&rig), false);
-                    }
+                    oracle.passed(&laid(&rig), false);
+                    prop_assert_eq!(mode(&process), oracle.mode(&laid(&rig)), "unreadable");
                 }
                 AccountOp::Step => {
                     tick(&rig, second);

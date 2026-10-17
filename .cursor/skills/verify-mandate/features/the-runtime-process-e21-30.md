@@ -21,7 +21,7 @@
   switches, ticks, lost answers, and restarts with an oracle from the control rows; and for the
   account stream, the startup hold lifting on a clean reconciliation, the account folded before the
   start, the latest establishment followed and another connection's or environment's ignored, an
-  unreadable account handing no tick, an unfoldable record, another environment's row, or a changed
+  unreadable account holding neither the kill switch nor the tick, an unfoldable record, another environment's row, or a changed
   account stopping the process, and a property test whose oracle derives the effective mode and the
   startup hold from the account rows alone. `mandate-runtime`'s
   `a_reconciliation_from_before_the_start_does_not_lift_a_hold_taken_with_an_intent_outstanding`
