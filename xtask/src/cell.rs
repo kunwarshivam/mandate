@@ -37,6 +37,20 @@ const CNPG_CHART_SHA256: &str = "b53d3991fe84bcf38767e7702cae78666265427a127a26f
 const CNPG_OPERATOR_TAG: &str =
     "1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07";
 const CNPG_NAMESPACE: &str = "cnpg-system";
+/// CloudNativePG's Barman Cloud plugin, which archives the journal's WAL and takes its base backups
+/// (E21-41): its chart from the GitHub release, checked by SHA-256, and its two images pinned by
+/// digest (D-5). Its certificates come from [`PLUGIN_TLS_CHART`], not cert-manager (DEC-1050).
+const PLUGIN_CHART_URL: &str = "https://github.com/cloudnative-pg/charts/releases/download/plugin-barman-cloud-v0.8.1/plugin-barman-cloud-0.8.1.tgz";
+const PLUGIN_CHART_SHA256: &str =
+    "9ad0b9e56da2777a1a0269feaf7215e18297e9c8b5730e04acb27b5d462e9456";
+const PLUGIN_IMAGE_TAG: &str =
+    "v0.15.1@sha256:c75acad19a36e8176cfe2885761ff1b836c6ef977d7257e298c99a28b5c302ef";
+const PLUGIN_SIDECAR_TAG: &str =
+    "v0.15.1@sha256:2287a793a804db751edd0d07d44cd549e357677e98a800eb12e2cf7c0d53f9b0";
+pub const PLUGIN_TLS_CHART: &str = "deploy/cell/charts/backup-plugin-tls";
+/// The local cell's stand-in for the S1 endpoint, in its own namespace (DEC-1050 item 5).
+pub const ARCHIVE_STORE_CHART: &str = "deploy/cell/charts/archive-store";
+const ARCHIVE_STORE_NAMESPACE: &str = "archive-store";
 pub const WORKSPACE_CHART: &str = "deploy/cell/charts/workspace";
 pub const JOURNAL_CHART: &str = "deploy/cell/charts/journal-db";
 const WORKSPACE_VALUES: &str = "deploy/cell/values/k3d.yaml";
@@ -82,6 +96,14 @@ pub enum Drill {
     /// The kill switch with the exporter, the API and the deployment manager down (OPS-4, E21-34);
     /// skipped, and named, until its processes and `mandate agent kill` are on `main`.
     KillSwitch,
+    /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
+    /// and once the standby is back the cluster takes appends again and every stream it holds
+    /// verifies (OPS-2, E21-41).
+    StandbyDown,
+    /// A closed WAL segment and a base backup reach the archive: Postgres reports the segment
+    /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
+    /// and fetch the segment back (E21-41).
+    Archive,
 }
 
 pub const DRILLS: [Drill; 6] = [
@@ -93,6 +115,10 @@ pub const DRILLS: [Drill; 6] = [
     Drill::KillSwitch,
 ];
 
+/// The journal's own drills (E21-41), which `cargo xtask ci cell-journal` runs in a job of their
+/// own so each cell job stays within its ten minutes (DEC-464).
+pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
+
 impl Drill {
     pub fn name(self) -> &'static str {
         match self {
@@ -102,12 +128,15 @@ impl Drill {
             Self::Compose => "compose",
             Self::Restart => "restart",
             Self::KillSwitch => "kill-switch",
+            Self::StandbyDown => "standby-down",
+            Self::Archive => "archive",
         }
     }
 
     pub fn parse(name: &str) -> Result<Self> {
         DRILLS
             .into_iter()
+            .chain(JOURNAL_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -129,6 +158,10 @@ impl Drill {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
             Self::KillSwitch => "none until the drill runs",
+            Self::StandbyDown => {
+                "the cluster's durability set to `preferred`, so the primary commits alone"
+            }
+            Self::Archive => "the archive pointed at another bucket of the same store",
         }
     }
 }
@@ -144,6 +177,8 @@ impl Drill {
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "",
+            Self::StandbyDown => "committed with the standby fenced",
+            Self::Archive => "is not in the archive",
         }
     }
 }
@@ -192,22 +227,60 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// helm lint and a strict schema check of every rendering of both charts, then the chart's
-/// invariant tests, which render it themselves (deploy/tests/test_cell.py).
+/// `cargo xtask ci cell-journal`: the cell, then the journal's drills, plain and seeded (E21-41).
+/// The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+pub fn ci_journal() -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    cell-journal: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
+    drill(&JOURNAL_DRILLS, false)?;
+    drill(&JOURNAL_DRILLS, true)
+}
+
+/// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
+/// `kubernetes` Service, the first address of its default service range.
+const KUBE_API_RENDERED: &str = r#"kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}"#;
+
+/// helm lint and a strict schema check of every rendering of every chart, then the charts'
+/// invariant tests, which render them themselves (deploy/tests/).
 pub fn chart_checks() -> Result<()> {
-    for (chart, values) in [
-        (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml"),
-        (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml"),
-        (WORKSPACE_CHART, "deploy/cell/values/managed.yaml"),
-        (JOURNAL_CHART, "deploy/cell/values/k3d-journal-db.yaml"),
+    for (chart, values, namespace) in [
+        (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml", NAMESPACE),
+        (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml", NAMESPACE),
+        (
+            WORKSPACE_CHART,
+            "deploy/cell/values/managed.yaml",
+            NAMESPACE,
+        ),
+        (
+            JOURNAL_CHART,
+            "deploy/cell/values/k3d-journal-db.yaml",
+            NAMESPACE,
+        ),
+        (ARCHIVE_STORE_CHART, "", ARCHIVE_STORE_NAMESPACE),
+        (PLUGIN_TLS_CHART, "", CNPG_NAMESPACE),
     ] {
-        sh("helm", &["lint", "--strict", chart, "-f", values])?;
-        let rendered = output(
-            "helm",
-            &["template", "cell", chart, "-n", NAMESPACE, "-f", values],
-        )?;
+        let mut args = vec![chart];
+        if !values.is_empty() {
+            args.extend(["-f", values]);
+        }
+        if chart == JOURNAL_CHART {
+            args.extend(["--set-json", KUBE_API_RENDERED]);
+        }
+        let mut lint = vec!["lint", "--strict"];
+        lint.extend(&args);
+        sh("helm", &lint)?;
+        let mut template = vec!["template", "cell", "-n", namespace];
+        template.extend(&args);
+        let rendered = output("helm", &template)?;
         kubeconform(&rendered)?;
-        no_live_host_allowed(values, &parse_documents(&rendered)?, &live_addresses()?)?;
+        let named = if values.is_empty() { chart } else { values };
+        no_live_host_allowed(named, &parse_documents(&rendered)?, &live_addresses()?)?;
     }
     let status = Command::new("uv")
         .args([
@@ -217,7 +290,7 @@ pub fn chart_checks() -> Result<()> {
             "python",
             "pytest",
             "-q",
-            "../deploy/tests/test_cell.py",
+            "../deploy/tests",
         ])
         .env("MANDATE_CELL_HELM_REQUIRED", "1")
         .status()
@@ -228,8 +301,9 @@ pub fn chart_checks() -> Result<()> {
     Ok(())
 }
 
-/// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` has no
-/// schema there and is skipped by kind, never by a missing-schema wildcard.
+/// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` and
+/// `ScheduledBackup` and the Barman Cloud plugin's `ObjectStore` have no schema there and are
+/// skipped by kind, never by a missing-schema wildcard.
 fn kubeconform(rendered: &str) -> Result<()> {
     let mut child = Command::new("kubeconform")
         .args([
@@ -238,7 +312,7 @@ fn kubeconform(rendered: &str) -> Result<()> {
             "-kubernetes-version",
             "1.35.0",
             "-skip",
-            "Cluster",
+            "Cluster,ObjectStore,ScheduledBackup",
         ])
         .stdin(Stdio::piped())
         .spawn()
@@ -424,7 +498,7 @@ pub fn up() -> Result<()> {
             "--overwrite",
         ],
     )?;
-    let chart = operator_chart()?;
+    let chart = fetched_chart("cloudnative-pg.tgz", CNPG_CHART_URL, CNPG_CHART_SHA256)?;
     let operator_tag = format!("image.tag={CNPG_OPERATOR_TAG}");
     helm(&[
         "upgrade",
@@ -440,6 +514,8 @@ pub fn up() -> Result<()> {
         "--timeout",
         "5m",
     ])?;
+    backup_plugin()?;
+    archive_store()?;
     helm(&[
         "upgrade",
         "--install",
@@ -462,6 +538,15 @@ pub fn up() -> Result<()> {
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
     ])?;
+    let domain = kubectl(&[
+        "get",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
+    ])?;
+    eprintln!("    journal: failure domains: {}", domain.trim());
     let image_value = format!("images.mandate={image}");
     helm(&[
         "upgrade",
@@ -601,12 +686,12 @@ fn create_cluster() -> Result<()> {
     bail!("the cell's API server never became ready")
 }
 
-/// The operator chart from its GitHub release, kept under `target/cell` and checked by SHA-256
+/// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
 /// every time it is used.
-fn operator_chart() -> Result<String> {
-    let path = state()?.join("cloudnative-pg.tgz");
+fn fetched_chart(name: &str, url: &str, want: &str) -> Result<String> {
+    let path = state()?.join(name);
     let file = path.display().to_string();
-    if !path.exists() || sha256(&file)? != CNPG_CHART_SHA256 {
+    if !path.exists() || sha256(&file)? != want {
         sh(
             "curl",
             &[
@@ -616,15 +701,129 @@ fn operator_chart() -> Result<String> {
                 "--retry-all-errors",
                 "-o",
                 &file,
-                CNPG_CHART_URL,
+                url,
             ],
         )?;
     }
     let found = sha256(&file)?;
-    if found != CNPG_CHART_SHA256 {
-        bail!("the CloudNativePG chart's SHA-256 is {found}, not {CNPG_CHART_SHA256}");
+    if found != want {
+        bail!("the chart {name}'s SHA-256 is {found}, not {want}");
     }
     Ok(file)
+}
+
+/// The Barman Cloud plugin beside the operator, with the certificates the TLS chart makes in place
+/// of cert-manager's; when an upgrade remade them, the plugin restarts, since it reads them only
+/// at start.
+fn backup_plugin() -> Result<()> {
+    let before = plugin_certificate_end()?;
+    helm(&[
+        "upgrade",
+        "--install",
+        "backup-plugin-tls",
+        PLUGIN_TLS_CHART,
+        "--namespace",
+        CNPG_NAMESPACE,
+    ])?;
+    let chart = fetched_chart(
+        "plugin-barman-cloud.tgz",
+        PLUGIN_CHART_URL,
+        PLUGIN_CHART_SHA256,
+    )?;
+    let image = format!("image.tag={PLUGIN_IMAGE_TAG}");
+    let sidecar = format!("sidecarImage.tag={PLUGIN_SIDECAR_TAG}");
+    helm(&[
+        "upgrade",
+        "--install",
+        "barman-cloud",
+        &chart,
+        "--namespace",
+        CNPG_NAMESPACE,
+        "--set",
+        &image,
+        "--set",
+        &sidecar,
+        "--set",
+        "certificate.createClientCertificate=false",
+        "--set",
+        "certificate.createServerCertificate=false",
+        "--set",
+        "certificate.createIssuer=false",
+        "--wait",
+        "--timeout",
+        "5m",
+    ])?;
+    if !before.is_empty() && before != plugin_certificate_end()? {
+        kubectl(&[
+            "rollout",
+            "restart",
+            "deployment/barman-cloud",
+            "--namespace",
+            CNPG_NAMESPACE,
+        ])?;
+        kubectl(&[
+            "rollout",
+            "status",
+            "deployment/barman-cloud",
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--timeout=300s",
+        ])?;
+    }
+    Ok(())
+}
+
+/// When each of the plugin's two certificates ends, as the TLS chart records it; empty before the
+/// first install. Either changing means the plugin must restart.
+fn plugin_certificate_end() -> Result<String> {
+    let mut ends = String::new();
+    for secret in ["barman-cloud-server-tls", "barman-cloud-client-tls"] {
+        let end = kubectl(&[
+            "get",
+            "secret",
+            secret,
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--ignore-not-found",
+            "-o",
+            "jsonpath={.metadata.annotations.mandate\\.dev/not-after}",
+        ])?;
+        ends.push_str(end.trim());
+        ends.push('/');
+    }
+    Ok(if ends == "//" { String::new() } else { ends })
+}
+
+/// The test store the journal archives to in the local cell, and the workspace's namespace, where
+/// it puts the archive's key.
+fn archive_store() -> Result<()> {
+    kubectl(&[
+        "create",
+        "namespace",
+        NAMESPACE,
+        "--dry-run=client",
+        "-o",
+        "json",
+    ])
+    .and_then(|ns| {
+        let ns: Value = serde_json::from_str(&ns).context("reading the namespace")?;
+        apply(&[ns])
+    })?;
+    let client = format!("clientNamespace={NAMESPACE}");
+    helm(&[
+        "upgrade",
+        "--install",
+        "archive-store",
+        ARCHIVE_STORE_CHART,
+        "--namespace",
+        ARCHIVE_STORE_NAMESPACE,
+        "--create-namespace",
+        "--set",
+        &client,
+        "--wait",
+        "--timeout",
+        "5m",
+    ])
 }
 
 fn sha256(file: &str) -> Result<String> {
@@ -733,6 +932,8 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Compose => compose_drill(seeded),
             Drill::Restart => restart(seeded),
             Drill::KillSwitch => kill_switch(),
+            Drill::StandbyDown => standby_down(seeded),
+            Drill::Archive => archive(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
@@ -927,6 +1128,15 @@ fn tamper_segment(jobs: &mut [Value]) -> Result<()> {
 
 /// Applies a rendered Job and waits until it succeeds or fails; returns which, with its logs.
 fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
+    run_job_watching(objects, || Ok(()))
+}
+
+/// [`run_job`], calling `watch` at each poll while the Job runs, as a drill that must see what the
+/// database does during the Job.
+fn run_job_watching(
+    objects: Vec<Value>,
+    mut watch: impl FnMut() -> Result<()>,
+) -> Result<(bool, String)> {
     let job = objects
         .iter()
         .find(|o| o["kind"] == "Job")
@@ -950,6 +1160,7 @@ fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
         if succeeded == "1" || failed == "1" {
             return Ok((succeeded == "1", job_logs(&name, job)));
         }
+        watch()?;
         sleep(Duration::from_secs(2));
     }
     bail!("Job {name} neither succeeded nor failed in time")
@@ -1709,6 +1920,606 @@ fn kill_switch() -> Result<Verdict> {
          kill` (O4, E21-34)"
             .into()
     }))
+}
+
+/// The name of the journal's pod in `role` (`primary` or `replica`).
+fn journal_pod(role: &str) -> Result<String> {
+    let selector = format!("cnpg.io/cluster=journal,cnpg.io/instanceRole={role}");
+    let name = kubectl(&[
+        "get",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &selector,
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+    ])?;
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("the journal has no {role} pod");
+    }
+    Ok(name.to_string())
+}
+
+/// One query on the primary as its local superuser, through the pod's own socket: the drills
+/// read what Postgres itself holds, not what a process reports.
+fn on_primary(sql: &str) -> Result<String> {
+    let primary = journal_pod("primary")?;
+    Ok(kubectl(&[
+        "exec",
+        "--namespace",
+        NAMESPACE,
+        &primary,
+        "-c",
+        "postgres",
+        "--",
+        "psql",
+        "-X",
+        "-d",
+        "mandate",
+        "-tAc",
+        sql,
+    ])?
+    .trim()
+    .to_string())
+}
+
+/// Polls `check` until it is true or the drill's polls run out.
+fn until(mut check: impl FnMut() -> Result<bool>) -> Result<bool> {
+    for _ in 0..POLLS {
+        if check()? {
+            return Ok(true);
+        }
+        sleep(Duration::from_secs(2));
+    }
+    Ok(false)
+}
+
+/// How many standbys stream to the primary and count for its synchronous commits.
+fn synchronous_standbys() -> Result<String> {
+    on_primary(
+        "SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum') AND state = 'streaming'",
+    )
+}
+
+/// The journal's events stored for `stream`, as the primary sees them.
+fn stored_events(stream: &str) -> Result<String> {
+    on_primary(&format!(
+        "SELECT count(*) FROM journal.events WHERE stream_id = '{stream}'"
+    ))
+}
+
+/// The control CLI's `workspace open` for `workspace` as a run Job, ended after `deadline` seconds.
+fn open_job(id: &str, workspace: &str, deadline: u32) -> Result<Vec<Value>> {
+    let args = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--environment",
+        "paper",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store"
+    ]);
+    let mut open = render(
+        &[format!("run.id=\"{id}\""), format!("run.args={args}")],
+        Some("templates/run.yaml"),
+    )?;
+    for job in open.iter_mut().filter(|o| o["kind"] == "Job") {
+        job["spec"]["activeDeadlineSeconds"] = json!(deadline);
+    }
+    Ok(open)
+}
+
+/// The verify Job over `streams`, and whether it passed, with its logs.
+fn verify_streams(id: &str, streams: &[String]) -> Result<(bool, String)> {
+    let verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={}", json!(streams)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    run_job(verify)
+}
+
+/// How long the drill's append waits on the fenced standby before the drill ends it: long enough
+/// that a primary committing alone would have answered many times over.
+const FENCED_APPEND_SECS: u32 = 60;
+
+/// OPS-2 with the synchronous standby down: the standby is fenced (CloudNativePG stops its
+/// Postgres), an append is tried, and it must wait on the standby rather than commit: the primary
+/// shows a backend waiting for synchronous replication, the CLI never reports the commit, the
+/// primary shows none of its events, and the Job ends on its deadline. Whatever happened, the
+/// standby is then unfenced, the durability put back, and the cluster waited for until a
+/// synchronous standby streams again; then it must take a new append, and every stream written
+/// verifies. Seeded, the cluster's durability is `preferred` first, so the primary drops the
+/// standby and commits alone, which the drill must report.
+fn standby_down(seeded: bool) -> Result<Verdict> {
+    if !until(|| Ok(synchronous_standbys()? == "1"))? {
+        return Ok(Verdict::Broken(
+            "before the drill, no synchronous standby streams to the primary".into(),
+        ));
+    }
+    let fenced = if seeded {
+        set_durability("preferred").and_then(|()| fenced_append(seeded))
+    } else {
+        fenced_append(seeded)
+    };
+    let restored = restore_standby(seeded);
+    let (verdict, fenced) = fenced?;
+    let streaming = restored?;
+    if verdict != Verdict::Held {
+        return Ok(verdict);
+    }
+    if !streaming {
+        return Ok(Verdict::Broken(
+            "the standby never streamed synchronously again after it was unfenced".into(),
+        ));
+    }
+    let id = run_id()?;
+    let workspace = format!("standby{id}");
+    let (opened, logs) = run_job(open_job(&format!("{id}b"), &workspace, 120)?)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "with the standby back, `mandate workspace open` failed:\n{logs}"
+        )));
+    }
+    let mut streams = vec![format!("ctl:{workspace}")];
+    if stored_events(&fenced)? != "0" {
+        streams.push(fenced);
+    }
+    let (verified, logs) = verify_streams(&id, &streams)?;
+    if verified {
+        Ok(Verdict::Held)
+    } else {
+        Ok(Verdict::Broken(format!(
+            "with the standby back, the streams did not verify:\n{logs}"
+        )))
+    }
+}
+
+/// Unfences the standby, puts `required` back after a seeded run, and waits for the cluster to be
+/// Ready with a synchronous standby streaming, so the next drill starts from a whole cluster;
+/// whether one streams again. Every step runs even when an earlier one failed.
+fn restore_standby(seeded: bool) -> Result<bool> {
+    let unfenced = kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "cnpg.io/fencedInstances-",
+    ]);
+    let durable = if seeded {
+        set_durability("required")
+    } else {
+        Ok(())
+    };
+    let ready = kubectl(&[
+        "wait",
+        "--namespace",
+        NAMESPACE,
+        "--for=condition=Ready",
+        "cluster.postgresql.cnpg.io/journal",
+        "--timeout=300s",
+    ]);
+    let streaming = until(|| Ok(synchronous_standbys()? == "1"));
+    unfenced?;
+    durable?;
+    ready?;
+    streaming
+}
+
+/// Backends on the primary waiting for a standby to confirm their commit.
+fn waiting_on_standby() -> Result<String> {
+    on_primary("SELECT count(*) FROM pg_stat_activity WHERE wait_event = 'SyncRep'")
+}
+
+/// Fences the standby, waits until the primary has no synchronous standby, and tries one append,
+/// watching the primary for the commit that waits on the standby; the verdict, and the stream the
+/// append was for, which the drill checks once the standby is back.
+fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
+    let standby = journal_pod("replica")?;
+    let fence = format!("cnpg.io/fencedInstances=[\"{standby}\"]");
+    kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "--overwrite",
+        &fence,
+    ])?;
+    let id = run_id()?;
+    let stream = format!("ctl:fenced{id}");
+    if !until(|| Ok(synchronous_standbys()? == "0"))? {
+        let broken =
+            format!("{standby} was fenced, but the primary still streams to a synchronous standby");
+        return Ok((Verdict::Broken(broken), stream));
+    }
+    let workspace = format!("fenced{id}");
+    let deadline = if seeded { 120 } else { FENCED_APPEND_SECS };
+    let mut waited = false;
+    let (opened, logs) = run_job_watching(open_job(&id, &workspace, deadline)?, || {
+        if !waited {
+            waited = waiting_on_standby()? != "0";
+        }
+        Ok(())
+    })?;
+    let stored = stored_events(&stream)?;
+    let verdict = if opened {
+        Verdict::Broken(format!(
+            "an append committed with the standby fenced: `mandate workspace open` succeeded, and the primary holds {stored} of its events"
+        ))
+    } else if stored != "0" {
+        Verdict::Broken(format!(
+            "an append committed with the standby fenced: the primary holds {stored} events of {stream}, though the CLI never had its commit\n{logs}"
+        ))
+    } else if let end = job_end(&format!("control-{id}"))?
+        && end != "DeadlineExceeded"
+    {
+        Verdict::Broken(format!(
+            "the append with the standby fenced failed (`{end}`) rather than waited:\n{logs}"
+        ))
+    } else if !waited {
+        Verdict::Broken(format!(
+            "the append's Job ran out its deadline, but no commit ever waited on the standby, so the drill did not see what stopped it:\n{logs}"
+        ))
+    } else {
+        Verdict::Held
+    };
+    Ok((verdict, stream))
+}
+
+/// Why a Job that failed ended, as its `Failed` condition says, or its `FailureTarget` while the
+/// controller is still stopping its pod (`DeadlineExceeded` for one its deadline stopped); waited
+/// for, since a Job counts its failed pod before it sets either.
+fn job_end(name: &str) -> Result<String> {
+    let mut reason = String::new();
+    until(|| {
+        reason = kubectl(&[
+            "get",
+            "job",
+            name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.conditions[?(@.type==\"FailureTarget\")].reason} {.status.conditions[?(@.type==\"Failed\")].reason}",
+        ])?
+        .split_whitespace()
+        .last()
+        .unwrap_or_default()
+        .to_string();
+        Ok(!reason.is_empty())
+    })?;
+    Ok(reason)
+}
+
+/// Sets the journal cluster's `dataDurability`, as only a seeded drill does.
+fn set_durability(durability: &str) -> Result<()> {
+    let patch = json!({"spec": {"postgresql": {"synchronous": {"dataDurability": durability}}}});
+    kubectl(&[
+        "patch",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "-p",
+        &patch.to_string(),
+    ])
+    .map(|_| ())
+}
+
+/// The archive's destination and endpoint, as the installed ObjectStore holds them.
+fn archive_destination() -> Result<(String, String)> {
+    let both = kubectl(&[
+        "get",
+        "objectstore.barmancloud.cnpg.io/journal-archive",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.spec.configuration.destinationPath} {.spec.configuration.endpointURL}",
+    ])?;
+    let (path, url) = both
+        .trim()
+        .split_once(' ')
+        .context("the archive's ObjectStore names no destination or endpoint")?;
+    Ok((path.to_string(), url.to_string()))
+}
+
+/// Points the archive at `path`, as only a seeded drill does, and back.
+fn set_destination(path: &str) -> Result<()> {
+    let patch = json!({"spec": {"configuration": {"destinationPath": path}}});
+    kubectl(&[
+        "patch",
+        "objectstore.barmancloud.cnpg.io/journal-archive",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "-p",
+        &patch.to_string(),
+    ])
+    .map(|_| ())
+}
+
+/// Writes a stream, closes the WAL segment that holds it, takes a base backup, and reads both back
+/// from the store with Barman's own tools. Seeded, the archive goes to another bucket of the same
+/// store first, which Postgres cannot tell, so only the read from the store can catch it; the
+/// destination is put back whatever happened. A seeded run leaves its segment and base backup under
+/// that other path, so the archive at the real one has a gap: a later restore takes its own base
+/// backup first.
+fn archive(seeded: bool) -> Result<Verdict> {
+    let (path, url) = archive_destination()?;
+    let verdict = if seeded {
+        set_destination(&format!("{path}-elsewhere")).and_then(|()| archived(&path, &url))
+    } else {
+        archived(&path, &url)
+    };
+    let restored = if seeded {
+        set_destination(&path)
+    } else {
+        Ok(())
+    };
+    let verdict = verdict?;
+    restored?;
+    Ok(verdict)
+}
+
+fn archived(path: &str, url: &str) -> Result<Verdict> {
+    let id = run_id()?;
+    let workspace = format!("archive{id}");
+    let (opened, logs) = run_job(open_job(&id, &workspace, 120)?)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "`mandate workspace open` failed before the archive check:\n{logs}"
+        )));
+    }
+    let segment = on_primary("SELECT pg_walfile_name(pg_current_wal_lsn())")?;
+    on_primary("SELECT pg_switch_wal()")?;
+    let reported = until(|| {
+        let last = on_primary("SELECT coalesce(last_archived_wal, '') FROM pg_stat_archiver")?;
+        Ok(last.len() == segment.len() && last >= segment)
+    })?;
+    if !reported {
+        return Ok(Verdict::Broken(format!(
+            "Postgres never reported {segment} archived: {}",
+            on_primary("SELECT failed_count, last_failed_wal FROM pg_stat_archiver")?
+        )));
+    }
+    let backup = format!("journal-drill-{id}");
+    let backup_id = base_backup(&backup);
+    let _ = kubectl(&[
+        "delete",
+        "backup",
+        &backup,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let backup_id = match backup_id? {
+        Ok(backup_id) => backup_id,
+        Err(phase) => {
+            let sidecars = kubectl(&[
+                "get",
+                "pod",
+                "--namespace",
+                NAMESPACE,
+                "--selector",
+                "cnpg.io/cluster=journal",
+                "-o",
+                "jsonpath={range .items[*]}{.metadata.name}: {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].lastState.terminated.reason} {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].restartCount} restarts; {end}",
+            ])
+            .unwrap_or_default();
+            return Ok(Verdict::Broken(format!(
+                "the base backup {backup} did not complete (phase `{phase}`); the plugin's sidecars: {}",
+                sidecars.trim()
+            )));
+        }
+    };
+    let read = read_archive(&id, path, url, &segment);
+    let _ = kubectl(&[
+        "delete",
+        "pod",
+        &format!("archive-check-{id}"),
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let _ = kubectl(&[
+        "delete",
+        "networkpolicy",
+        "archive-check",
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+    ]);
+    let read = read?;
+    if !read.listed {
+        return Ok(Verdict::Broken(format!(
+            "Barman could not list the store at {path}, so the drill read nothing:\n{}",
+            read.logs
+        )));
+    }
+    if !read.fetched {
+        return Ok(Verdict::Broken(if read.logs.contains("does not exist") {
+            format!("{segment} is not in the archive at {path}:\n{}", read.logs)
+        } else {
+            format!(
+                "Barman failed to fetch {segment} from {path} for another reason than its absence:\n{}",
+                read.logs
+            )
+        }));
+    }
+    if !read.logs.contains(&backup_id) {
+        return Ok(Verdict::Broken(format!(
+            "the base backup {backup_id} is not in the archive at {path}:\n{}",
+            read.logs
+        )));
+    }
+    Ok(Verdict::Held)
+}
+
+/// Takes a base backup through the plugin: its Barman id once it completes, or the phase it ended
+/// in when it did not.
+fn base_backup(backup: &str) -> Result<std::result::Result<String, String>> {
+    apply(&[json!({
+        "apiVersion": "postgresql.cnpg.io/v1",
+        "kind": "Backup",
+        "metadata": {"name": backup},
+        "spec": {
+            "cluster": {"name": "journal"},
+            "method": "plugin",
+            "pluginConfiguration": {"name": "barman-cloud.cloudnative-pg.io"}
+        }
+    })])?;
+    let mut phase = String::new();
+    until(|| {
+        phase = kubectl(&[
+            "get",
+            "backup",
+            backup,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.phase}/{.status.backupId}/{.status.error}",
+        ])?
+        .trim()
+        .to_string();
+        Ok(phase.starts_with("completed/") || phase.starts_with("failed/"))
+    })?;
+    Ok(match phase.strip_prefix("completed/") {
+        Some(rest) if !rest.starts_with('/') => {
+            Ok(rest.split('/').next().unwrap_or_default().to_string())
+        }
+        _ => Err(phase),
+    })
+}
+
+/// What the check pod read from the store: whether Barman listed it, whether it fetched the
+/// segment, and both tools' logs.
+struct ArchiveRead {
+    listed: bool,
+    fetched: bool,
+    logs: String,
+}
+
+/// A pod with the plugin's own sidecar image and the archive's key that lists the base backups and
+/// fetches `segment` back from `path`, as a restore would, under a network policy of its own that
+/// reaches the store and nothing else. The caller removes the pod and the policy.
+fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<ArchiveRead> {
+    let image = format!("ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:{PLUGIN_SIDECAR_TAG}");
+    let name = format!("archive-check-{id}");
+    let key = |env: &str, key: &str| json!({"name": env, "valueFrom": {"secretKeyRef": {"name": "journal-archive-key", "key": key}}});
+    let tool = |name: &str, args: Vec<&str>| {
+        json!({
+            "name": name,
+            "image": image,
+            "command": args,
+            "env": [
+                key("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID"),
+                key("AWS_SECRET_ACCESS_KEY", "ACCESS_SECRET_KEY"),
+                {"name": "AWS_DEFAULT_REGION", "value": "us-east-1"},
+                {"name": "HOME", "value": "/tmp"}
+            ],
+            "securityContext": {
+                "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true,
+                "capabilities": {"drop": ["ALL"]}
+            },
+            "resources": {
+                "limits": {"cpu": "200m", "memory": "256Mi"},
+                "requests": {"cpu": "200m", "memory": "256Mi"}
+            },
+            "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}]
+        })
+    };
+    let fetched = format!("/tmp/{segment}");
+    let policy = json!({
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "archive-check"},
+        "spec": {
+            "podSelector": {"matchLabels": {"mandate.dev/archive-check": "true"}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [],
+            "egress": [
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                         "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                 "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}]},
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ARCHIVE_STORE_NAMESPACE}},
+                         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "mandate-archive-store"}}}],
+                 "ports": [{"protocol": "TCP", "port": 9000}]}
+            ]
+        }
+    });
+    let pod = json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "labels": {"mandate.dev/archive-check": "true", "mandate.dev/archive-client": "true"}
+        },
+        "spec": {
+            "restartPolicy": "Never",
+            "automountServiceAccountToken": false,
+            "securityContext": {
+                "runAsNonRoot": true, "runAsUser": 26, "runAsGroup": 26,
+                "seccompProfile": {"type": "RuntimeDefault"}
+            },
+            "initContainers": [tool(
+                "list",
+                vec!["barman-cloud-backup-list", "--endpoint-url", url, path, "journal"]
+            )],
+            "containers": [tool(
+                "fetch",
+                vec!["barman-cloud-wal-restore", "--endpoint-url", url, path, "journal", segment, &fetched]
+            )],
+            "volumes": [{"name": "tmp", "emptyDir": {}}]
+        }
+    });
+    apply(&[policy, pod])?;
+    let mut phase = String::new();
+    until(|| {
+        phase = kubectl(&[
+            "get",
+            "pod",
+            &name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.phase}",
+        ])?
+        .trim()
+        .to_string();
+        Ok(phase == "Succeeded" || phase == "Failed")
+    })?;
+    let listed = kubectl(&[
+        "get",
+        "pod",
+        &name,
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.initContainerStatuses[0].state.terminated.exitCode}",
+    ])?;
+    let mut logs = String::new();
+    for container in ["list", "fetch"] {
+        if let Ok(out) = kubectl(&["logs", &name, "--namespace", NAMESPACE, "-c", container]) {
+            for line in out.lines() {
+                logs.push_str(&format!("[{container}] {line}\n"));
+            }
+        }
+    }
+    Ok(ArchiveRead {
+        listed: listed.trim() == "0",
+        fetched: phase == "Succeeded",
+        logs,
+    })
 }
 
 const COMPOSE_DIR: &str = "deploy/cell/compose";

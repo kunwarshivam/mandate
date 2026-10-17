@@ -1,5 +1,5 @@
 apiVersion: v2
 name: mandate-journal-db
-description: The workspace journal's Postgres under the CloudNativePG operator (D-5), with the journal's roles and one credential Secret per process type; lane S2 (E21-41) grows it to the synchronous standby, WAL archive and restore
+description: The workspace journal's Postgres under the CloudNativePG operator (D-5) - a primary and a synchronous standby, the journal's roles and one credential Secret per process type, and the WAL archive and base backups through the Barman Cloud plugin (E21-41, DEC-1050)
 type: application
 version: 0.1.0
