@@ -36,6 +36,7 @@ import approval
 import audit
 import canceled
 import control_plane
+import deployment_manager
 import connections
 import clients
 import cold
@@ -3834,6 +3835,7 @@ def render(
     requests_section: dict,
     cancel_section: dict,
     control_plane_section: dict,
+    deployment_manager_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
@@ -3866,6 +3868,7 @@ def render(
             "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
             "control_plane": control_plane_section,
+            "deployment_manager": deployment_manager_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
@@ -3929,6 +3932,7 @@ def main(argv: list[str] | None = None) -> int:
     requests_section = requests.build_section()
     cancel_section = canceled.build_section()
     control_plane_section = control_plane.build_section()
+    deployment_manager_section = deployment_manager.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
@@ -3973,6 +3977,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += control_plane.run_mutants(control_plane_section)
     problems += gateway.check_section(gateway_section)
     problems += gateway.run_mutants(gateway_section)
+    problems += deployment_manager.check_section(deployment_manager_section)
+    problems += deployment_manager.run_mutants(deployment_manager_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4021,6 +4027,7 @@ def main(argv: list[str] | None = None) -> int:
         requests_section,
         cancel_section,
         control_plane_section,
+        deployment_manager_section,
         broker_profile,
         connections_section,
         request_section,
@@ -4051,6 +4058,7 @@ def main(argv: list[str] | None = None) -> int:
         or timeouts.check_section(reread["approval_timeouts"])
         or canceled.check_section(reread["approval_cancellations"])
         or control_plane.check_section(reread["control_plane"])
+        or deployment_manager.check_section(reread["deployment_manager"])
         or requests.check_section(reread["approval_requests"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
@@ -4129,6 +4137,10 @@ def main(argv: list[str] | None = None) -> int:
         f"model-gateway drafts, {len(gateway_section['agent_streams'])} agent and {len(gateway_section['streams'])} meter streams, "
         f"{len(gateway_section['folds'])} spend folds, {gateway_section['fuzz']['runs']} fuzzed meter streams, "
         f"{len(gateway.VALIDATOR_MUTANTS)} validator and {len(gateway.vector_mutants(gateway_section))} vector mutants caught; "
+        f"{len(deployment_manager_section['invalid_drafts'])} invalid and "
+        f"{len(deployment_manager_section['valid_drafts'])} valid deployment-manager drafts, "
+        f"{len(deployment_manager.VALIDATOR_MUTANTS)} validator and "
+        f"{len(deployment_manager.vector_mutants(deployment_manager_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "

@@ -27,6 +27,7 @@
 /crates/mandate-agentd/     @kunwarshivam
 /crates/mandate-alerts/     @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
+/crates/mandate-api-server/ @kunwarshivam
 /crates/mandate-api/        @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
 /crates/mandate-artifacts-fs/ @kunwarshivam
@@ -63,6 +64,7 @@
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-release/    @kunwarshivam
+/crates/mandate-research-driver/ @kunwarshivam
 /crates/mandate-research-run/ @kunwarshivam
 /crates/mandate-research/   @kunwarshivam
 /crates/mandate-rh-sim/     @kunwarshivam
