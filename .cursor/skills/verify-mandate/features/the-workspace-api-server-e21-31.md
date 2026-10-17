@@ -14,7 +14,7 @@
   access keeping pause and the kill switch, caps), `src/subject.rs` (the subject-link file of
   digests), `src/token.rs` and `src/keys.rs` (the issuer's access token against its fetched key
   set), `src/clock.rs`, `src/commands.rs` (pause and the kill switch as journal spec
-  §9.11's `OwnerCommandIssued`, the repeat's comparison, the scope's lookup, and the append loop),
+  §9.11's `OwnerCommandIssued`, an approval's Skip as §9.7's `ApprovalResponseSubmitted`, the repeat's comparison, the scope's lookup, and the append loop),
   `src/writes.rs` (their routes, checked in §3.3's order), `src/journal.rs` (the read and append
   port), and the `mandate-api-server` binary (`--bind`, `--probe-bind`,
   `--pod-address`, `--drain-bound-s`; SIGTERM drains).
@@ -38,5 +38,7 @@
   `tests/writes_http.rs`: pause and each kill-switch scope recorded before the `202`, the derived
   id, no forwarded step-up, replay and conflict by key and by a concurrent copy, §3.3's order, the
   body read only after authentication, the 404s, the matrix rows, the failed reads, a lapsed
-  session, an append that does not settle, a drain, and the hold left unmounted.
+  session, an append that does not settle, a drain, the hold left unmounted, and an approval's
+  Skip (recorded, lenient, found on a deployed agent's stream, the Skip row only) with a grant
+  refused for its step-up.
 - **Run:** `cargo nextest run -p mandate-api-server`.

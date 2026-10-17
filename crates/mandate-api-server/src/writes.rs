@@ -1,13 +1,12 @@
-//! The owner-command routes (§4.2, §5.4, §3.11 item 10, DEC-1007): `POST
-//! /v1/workspaces/{ws}/agents/{id}/pause` and `…/kill-switch`. The hold is not mounted until the
-//! runtime folds it (DEC-1007 item 1).
+//! The owner-command routes (§4.2, §5.2, §5.4, §3.11 item 10, DEC-1007): `POST
+//! /v1/workspaces/{ws}/agents/{id}/pause`, `…/kill-switch`, and `…/approvals/{id}/responses`.
+//! The hold is not mounted until the runtime folds it (DEC-1007 item 1).
 //!
 //! Each is checked in §3.3 item 1's order: the session (the one 401, or `reduction_only`), the
 //! CSRF mark (403), then the `Idempotency-Key` and the body, read only then, by §5's lenient
-//! decoder (422), then the
-//! matrix row and the scope (403 or the one 404). Its `OwnerCommandIssued` is on the control stream
-//! before the `202` (rule 5), and a repeat under the key replays it (API-4). Neither readiness nor
-//! a drain gates them (API-7).
+//! decoder (422), then the matrix row and the scope (403 or the one 404). Its event is on the
+//! control stream before the `202` (rule 5), and a repeat under the key replays it (API-4).
+//! Neither readiness nor a drain gates them (API-7).
 
 use std::sync::Arc;
 
@@ -17,19 +16,21 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
-use mandate_api::lenient::{Api7, Kept, decode_lenient};
+use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::requests::{KillSwitchRequest, PauseRequest, Scope};
-use mandate_api::wire::{EventId, Id, encode};
+use mandate_api::wire::{EventId, Id, Ref, encode};
 use mandate_authn::Request;
 use mandate_canon::{Value, parse};
+use mandate_identity::Permission;
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::commands::{Command, Issued, KillScope, Settled, draft, in_workspace, same, settle};
 use crate::http::{App, browser, problem, problem_body};
+use crate::reads::deployed;
 use crate::routes::{
-    Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
+    Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
 
@@ -168,10 +169,22 @@ async fn recorded(
         Unreadable::Command,
     )
     .await;
-    let reader = match authorized {
-        Ok(reader) => reader,
-        Err(refusal) => return refusal.response(),
-    };
+    match authorized {
+        Ok(reader) => committed(app, gate, &reader, command, dropped, status).await,
+        Err(refusal) => refusal.response(),
+    }
+}
+
+/// Records `command` on the control stream `reader` read, once its scope is found there, or
+/// replays the event its key already recorded.
+async fn committed(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    command: &Command,
+    dropped: &[String],
+    status: Option<&str>,
+) -> Response {
     let Some(environment) = reader.control.first().map(|row| row.environment.as_str()) else {
         return Refused::NotFound.response();
     };
@@ -207,7 +220,7 @@ async fn recorded(
         },
     };
     match settled {
-        Settled::Stored(row) => accepted(&row, gate.now, dropped, status),
+        Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
         Settled::Conflict => problem(
             StatusCode::CONFLICT,
             problem_body(ProblemCode::IdempotencyConflict),
@@ -249,13 +262,14 @@ fn derived(gate: &Gate, workspace: &str, command: &Command) -> Option<(EventId, 
 
 /// The `202` for the stored `row` (§5.4): its id, `recorded`, and what this call dropped.
 fn accepted(
+    id_member: &'static str,
     row: &StoredEvent,
     now: UtcNanos,
     dropped: &[String],
     status: Option<&str>,
 ) -> Response {
     let mut members = vec![
-        ("command_id", string(&row.event_id)),
+        (id_member, string(&row.event_id)),
         ("phase", string("recorded")),
         (
             "as_of",
@@ -284,13 +298,84 @@ fn unknown(id: EventId) -> Response {
     problem(StatusCode::SERVICE_UNAVAILABLE, body)
 }
 
-/// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10).
+/// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10): a Skip is
+/// recorded; a grant is refused for its step-up, which the server cannot verify yet, once the
+/// approval is found.
 pub async fn respond(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     path: Result<Path<(String, String)>, PathRejection>,
     body: Body,
 ) -> Response {
-    let _ = (app, headers, path, body);
-    crate::http::unauthenticated()
+    let Ok(Path((workspace, approval))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (gate, kept) = match admitted::<ApprovalAnswer>(&app, &headers, Request::Other, body).await
+    {
+        Ok(accepted) => accepted,
+        Err(refusal) => return refusal.response(),
+    };
+    let permission = match kept.value {
+        ApprovalAnswer::Approved(_) => Permission::Approve,
+        ApprovalAnswer::Skipped(_) => Permission::Skip,
+    };
+    let authorized = authorized(
+        &app,
+        &gate.admitted,
+        gate.now,
+        &workspace,
+        permission,
+        Unreadable::Command,
+    )
+    .await;
+    let reader = match authorized {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let agent = match requester(&app, &reader, &approval).await {
+        Ok(Some(agent)) => agent,
+        Ok(None) => return Refused::NotFound.response(),
+        Err(refusal) => return refusal.response(),
+    };
+    let skip = match &kept.value {
+        ApprovalAnswer::Skipped(skip) => skip,
+        ApprovalAnswer::Approved(grant) => {
+            let code = match grant.step_up {
+                Some(_) => ProblemCode::StepUpMissing,
+                None => ProblemCode::StepUpRequired,
+            };
+            return problem(StatusCode::UNAUTHORIZED, problem_body(code));
+        }
+    };
+    let command = Command::Skip {
+        agent,
+        approval,
+        content_hash: ref_text(&skip.content_hash).unwrap_or_default(),
+    };
+    committed(&app, &gate, &reader, &command, &kept.dropped, None).await
+}
+
+/// The deployed agent whose stream requested `approval`, found by equality with an
+/// `ApprovalRequested` event id; `None` when no deployed agent's stream holds one.
+async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<String>, Refused> {
+    for deployment in deployed(&reader.control) {
+        let stream = format!("agent:{}:{}", reader.workspace, deployment.0);
+        let rows = app
+            .journal
+            .rows(&stream)
+            .await
+            .map_err(|_| Refused::JournalUnavailable)?;
+        let requested = rows
+            .iter()
+            .any(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
+        if requested {
+            return Ok(Some(deployment.0));
+        }
+    }
+    Ok(None)
+}
+
+/// The text of a content reference, as it serializes.
+fn ref_text(reference: &Ref) -> Option<String> {
+    json_string(&encode(reference).ok()?)
 }

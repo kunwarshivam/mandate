@@ -791,7 +791,7 @@ fn responses(approval: &str) -> String {
 
 fn skipped() -> Vec<u8> {
     format!(
-        r#"{{"verdict":"skipped","content_hash":"{}","record":null,"step_up":null,"delegation":null}}"#,
+        r#"{{"verdict":"skipped","content_hash":"{}","step_up":null,"delegation":null}}"#,
         hash("ab")
     )
     .into_bytes()
@@ -976,6 +976,14 @@ fn only_the_skip_row_skips_and_a_reduction_only_session_cannot() {
     assert_eq!(code(&reply), (403, ProblemCode::Forbidden, Effect::None));
     let approver = signed_in(&f, alice());
     f.clock.set(f.clock.secs() + 6 * 60);
+    let paused = post(
+        &f,
+        &ws("/agents/agt_a/pause"),
+        &approver,
+        Some("lapse-pause-000001"),
+        b"{}",
+    );
+    assert_eq!(paused.status, 202, "a pause records the outage refresh");
     let lapsed = post(&f, &responses(APPROVAL), &approver, Some(KEY), &skipped());
     assert_eq!(
         code(&lapsed),
