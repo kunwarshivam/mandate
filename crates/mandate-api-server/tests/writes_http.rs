@@ -87,6 +87,8 @@ fn fixture() -> Fixture {
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
         artifacts: None,
+        objects: None,
+        step_up: Arc::new(mandate_api_server::stepup::Unbound),
     };
     let drain = Drain::new();
     let f = Fixture {

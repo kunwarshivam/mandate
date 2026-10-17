@@ -23,8 +23,10 @@ use crate::clock::Clock;
 use crate::journal::Journal;
 use crate::lifecycle::{Drain, Lifecycle};
 use crate::members::{Hosted, ParseMembers};
+use crate::objects::ObjectStore;
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
+use crate::stepup::StepUp;
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
 use crate::writes;
@@ -71,6 +73,11 @@ pub struct App {
     /// The content-addressed store the agent reads take mandate documents from, read only
     /// (DEC-1020 item 1); `None` when the deployment names none.
     pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// The same store, which the version routes add objects to (DEC-2100 item 8); `None` when
+    /// the deployment names none, and those routes then answer `journal_unavailable`.
+    pub objects: Option<Arc<dyn ObjectStore>>,
+    /// The step-up port (DEC-2100 item 2): [`crate::stepup::Unbound`] until E9-4 binds it.
+    pub step_up: Arc<dyn StepUp>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).

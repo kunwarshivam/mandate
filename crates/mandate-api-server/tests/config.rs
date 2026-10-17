@@ -332,9 +332,7 @@ fn the_artifact_store_is_optional_and_refused_by_name_when_unusable() {
 
     let file = root.join("a-file");
     fs::write(&file, b"not a directory").expect("a file");
-    let refused = artifact_store(Some(file.join("store").as_os_str()))
-        .err()
-        .expect("refused");
+    let refused = artifact_store(Some(file.join("store").as_os_str())).expect_err("refused");
     assert_eq!(
         refused,
         StartRefusal::Setting {
