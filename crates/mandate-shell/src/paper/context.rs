@@ -15,7 +15,7 @@ use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
     RiskContext as BuilderRiskContext, buy_action,
 };
-use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
+use mandate_domain::{AssetClass as DomainAssetClass, Environment, MarketSession};
 use mandate_executor::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
     InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
@@ -96,7 +96,11 @@ impl PaperClock for FixedPaperClock {
     }
 }
 
-/// Judges `facts` at `now` and assembles the two trusted contexts from them.
+/// Judges `facts` at `now` and assembles the two trusted contexts from them. `connection` is the
+/// environment of the connection the run chose (the live door's choice, `mandate-paper`'s
+/// `chosen`), which the run context hands V-001 as the connection's environment, never a
+/// constant: a mandate whose environment differs from it refuses at the cycle's validation
+/// (DEC-505 item 3, DEC-965).
 ///
 /// Refused, in order: any broker position or open order (DEC-470 item 1); an account that is not
 /// `ACTIVE`, is blocked or suspended, or owes accrued fees; an asset record older than the quote
@@ -113,8 +117,16 @@ pub fn load_contexts(
     facts: &PaperFacts,
     now: UtcNanos,
     agent: &AgentId,
+    connection: Environment,
 ) -> Result<Contexts, Cause> {
-    load_contexts_with_clock(artifacts, facts, now, agent, Rc::new(FixedPaperClock(now)))
+    load_contexts_with_clock(
+        artifacts,
+        facts,
+        now,
+        agent,
+        connection,
+        Rc::new(FixedPaperClock(now)),
+    )
 }
 
 /// [`load_contexts`] with a clock that the binding gate reads again for every order request.
@@ -126,6 +138,7 @@ pub fn load_contexts_with_clock(
     facts: &PaperFacts,
     now: UtcNanos,
     agent: &AgentId,
+    _connection: Environment,
     clock: Rc<dyn PaperClock>,
 ) -> Result<Contexts, Cause> {
     let configuration = artifacts.production_configuration()?;

@@ -270,7 +270,16 @@ fn the_liquidity_facts_read_the_registered_instrument() {
 fn the_preflight_judges_the_registered_instruments_asset_record() {
     let artifacts = Stream::deployed(SNAPSHOT, RULES, FEE).artifacts().unwrap();
     let agent = mandate_runtime::AgentId("agent_spy".to_owned());
-    let judged = |facts: PaperFacts| load_contexts(&artifacts, &facts, now(), &agent).map(|_| ());
+    let judged = |facts: PaperFacts| {
+        load_contexts(
+            &artifacts,
+            &facts,
+            now(),
+            &agent,
+            mandate_domain::Environment::Paper,
+        )
+        .map(|_| ())
+    };
     let spy = judged(spy_facts(SPY, "SPY", BrokerExchange::Arca, now()));
     assert!(spy.is_ok(), "{spy:?}");
     let others = [
@@ -291,7 +300,14 @@ fn the_preflight_judges_the_registered_instruments_asset_record() {
     let facts = spy_facts(SPY, "SPY", BrokerExchange::Arca, now());
     let refused = format!(
         "{:?}",
-        load_contexts(&later, &facts, now(), &agent).map(|_| ())
+        load_contexts(
+            &later,
+            &facts,
+            now(),
+            &agent,
+            mandate_domain::Environment::Paper
+        )
+        .map(|_| ())
     );
     let at_the_classification =
         refused.contains("Absent") && refused.contains("ETP classification");
@@ -310,7 +326,13 @@ fn gate_account(rules: AccountRules, figures: [&str; 3]) -> Result<AccountSnapsh
     facts.broker.account.last_equity = last_equity;
     facts.broker.account_rules = rules;
     let agent = mandate_runtime::AgentId("agent_spy".to_owned());
-    let contexts = load_contexts(&artifacts, &facts, now(), &agent)?;
+    let contexts = load_contexts(
+        &artifacts,
+        &facts,
+        now(),
+        &agent,
+        mandate_domain::Environment::Paper,
+    )?;
     let decision = contexts.run.decision.expect("a decision context");
     Ok(decision.gate.expect("an advisory gate context").account)
 }

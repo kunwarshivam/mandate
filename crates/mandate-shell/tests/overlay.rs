@@ -342,7 +342,14 @@ fn run(mandate: &str, governed: Option<&Governed>, proposing: Proposing) -> Ran 
     let deployed = deployed.unwrap();
     let agent = deployed.deployment().agent.clone();
     let facts = spy_facts(SPY, "SPY", Exchange::Arca, at(TUESDAY));
-    let contexts = load_contexts(&artifacts, &facts, at(TUESDAY), &agent).unwrap();
+    let contexts = load_contexts(
+        &artifacts,
+        &facts,
+        at(TUESDAY),
+        &agent,
+        mandate_domain::Environment::Paper,
+    )
+    .unwrap();
     let mut context = contexts.run;
     context.governance = governed.map(|governed| governed.governance.clone());
     if let Proposing::Retargeted(purpose, _, _) = proposing {
@@ -379,6 +386,7 @@ fn run(mandate: &str, governed: Option<&Governed>, proposing: Proposing) -> Ran 
         now: at(TUESDAY),
         place_one_order: true,
         new_cycle: false,
+        connection_environment: mandate_domain::Environment::Paper,
     };
     let mut stages = production(sources);
     if let Proposing::Retargeted(_, purpose, side) = proposing {

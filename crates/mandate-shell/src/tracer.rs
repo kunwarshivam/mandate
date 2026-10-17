@@ -25,7 +25,7 @@ use mandate_time::UtcNanos;
 
 use crate::envelope::{
     DraftFields, Envelope, IdSpace, Ids, Writer, account_stream, agent_stream, control_stream,
-    draft_bytes,
+    draft_bytes, journal_environment,
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::lt10::watch_may_end;
@@ -53,6 +53,10 @@ pub struct Setup {
     pub place_one_order: bool,
     /// Lets a run start a new cycle on an agent stream that already carries an intent (TI-12).
     pub new_cycle: bool,
+    /// The environment of the connection the run chose (the live door's choice): the one
+    /// environment the admitted mandate may name and every draft of the run carries (TI-7 as
+    /// DEC-965 reads it).
+    pub connection_environment: mandate_domain::Environment,
 }
 
 /// What a run did.
@@ -709,6 +713,7 @@ impl<'s> Session<'s> {
                 writer: Writer::Executor,
                 actor_id: "executor",
                 event_time: mark.at,
+                environment: journal_environment(self.setup.connection_environment),
             },
             &DraftFields {
                 event_id: &event_id,
@@ -791,6 +796,7 @@ impl<'s> Session<'s> {
                 writer,
                 actor_id,
                 event_time: self.event_time,
+                environment: journal_environment(self.setup.connection_environment),
             },
             &DraftFields {
                 event_id: &event_id,
@@ -1313,6 +1319,7 @@ impl<'s> Session<'s> {
                         writer: Writer::Agent,
                         actor_id: &self.setup.deployment.agent.0,
                         event_time: self.event_time,
+                        environment: journal_environment(self.setup.connection_environment),
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,
@@ -1342,6 +1349,7 @@ impl<'s> Session<'s> {
                         writer: Writer::Executor,
                         actor_id: "executor",
                         event_time: self.event_time,
+                        environment: journal_environment(self.setup.connection_environment),
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,

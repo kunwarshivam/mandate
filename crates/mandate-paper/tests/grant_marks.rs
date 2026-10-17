@@ -516,6 +516,7 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
         &facts,
         now,
         &agent,
+        mandate_domain::Environment::Paper,
         Rc::new(GateClock(clock.clone())),
     )
     .unwrap();
@@ -559,6 +560,7 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
         now,
         place_one_order: true,
         new_cycle: false,
+        connection_environment: mandate_domain::Environment::Paper,
     };
     let watch = Watch {
         pause: clock.clone(),

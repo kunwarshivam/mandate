@@ -16,6 +16,15 @@ use crate::error::ShellError;
 /// The only environment the shell can write (TI-7).
 pub const ENVIRONMENT: Environment = Environment::Paper;
 
+/// The journal's environment for the connection environment `environment` (mandate spec §3:
+/// `paper` or `live`).
+pub fn journal_environment(environment: mandate_domain::Environment) -> Environment {
+    match environment {
+        mandate_domain::Environment::Paper => Environment::Paper,
+        mandate_domain::Environment::Live => Environment::Live,
+    }
+}
+
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -58,6 +67,8 @@ pub struct Envelope<'a> {
     pub actor_id: &'a str,
     /// The injected clock's reading. The shell never reads a wall clock (ES-21).
     pub event_time: UtcNanos,
+    /// The environment of the connection the run chose, which the admitted mandate names too.
+    pub environment: Environment,
 }
 
 /// One draft as the journal takes it.
@@ -232,7 +243,9 @@ mod tests {
     };
     use mandate_time::UtcNanos;
 
-    use super::{DraftFields, Envelope, IdSpace, Ids, Writer, draft_bytes, object, text};
+    use super::{
+        DraftFields, Envelope, Environment, IdSpace, Ids, Writer, draft_bytes, object, text,
+    };
 
     fn envelope_of(bytes: &[u8]) -> Result<Value, String> {
         parse(bytes).map_err(|e| format!("{e:?}"))
@@ -262,6 +275,41 @@ mod tests {
         assert_eq!(id.len(), 27, "{id}");
     }
 
+    /// DEC-965: the envelope says the environment it is handed, the chosen connection's, never a
+    /// constant.
+    #[test]
+    fn a_draft_says_the_environment_its_envelope_is_handed() -> Result<(), String> {
+        let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let payload = Value::Object(mandate_canon::Object::new());
+        let config_refs = mandate_canon::Object::new();
+        for (environment, text) in [(Environment::Paper, "paper"), (Environment::Live, "live")] {
+            let bytes = draft_bytes(
+                &Envelope {
+                    stream: "agent:ws1:agent1",
+                    writer: Writer::Agent,
+                    actor_id: "agent1",
+                    event_time: at,
+                    environment,
+                },
+                &DraftFields {
+                    event_id: "00000100000000000001000000",
+                    event_type: "CycleStarted",
+                    schema_version: 1,
+                    causation_id: None,
+                    config_refs: &config_refs,
+                    payload: &payload,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            let envelope = envelope_of(&bytes)?;
+            assert_eq!(
+                envelope.get("environment").and_then(Value::as_str),
+                Some(text)
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn every_draft_says_paper_and_names_its_stream_writer_and_causation() -> Result<(), String> {
         let at = UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|e| e.to_string())?;
@@ -273,6 +321,7 @@ mod tests {
                 writer: Writer::Executor,
                 actor_id: "executor",
                 event_time: at,
+                environment: Environment::Paper,
             },
             &DraftFields {
                 event_id: "10000100000000000001000000",
@@ -335,6 +384,7 @@ mod tests {
                 writer: Writer::Agent,
                 actor_id: "ag1",
                 event_time: at,
+                environment: Environment::Paper,
             },
             &DraftFields {
                 event_id: "00000100000000000000000000",
@@ -373,6 +423,7 @@ mod tests {
                 writer: Writer::Executor,
                 actor_id: "executor",
                 event_time: at,
+                environment: Environment::Paper,
             },
             &DraftFields {
                 event_id: "10000100000000000000000000",
@@ -419,6 +470,7 @@ mod tests {
                 writer: Writer::Executor,
                 actor_id: "executor",
                 event_time: at,
+                environment: Environment::Paper,
             },
             &DraftFields {
                 event_id: "10000100000000000001000000",
@@ -476,6 +528,7 @@ mod tests {
             writer: Writer::Executor,
             actor_id: "executor",
             event_time: at,
+            environment: Environment::Paper,
         };
         let empty = mandate_canon::Object::new();
         let opened = draft_bytes(
@@ -540,6 +593,7 @@ mod tests {
                 writer: Writer::Agent,
                 actor_id: "agent-a",
                 event_time: at,
+                environment: Environment::Paper,
             },
             &DraftFields {
                 event_id: "00000100000000000000000000",

@@ -299,7 +299,14 @@ fn watched_to(now: &str, bound: &str, place: bool, door: Door, fill: Fill) -> Wa
     let deployed = deployed.unwrap();
     let agent = deployed.deployment().agent.clone();
     let facts = spy_facts(SPY, "SPY", Exchange::Arca, at(now));
-    let contexts = load_contexts(&artifacts, &facts, at(now), &agent).unwrap();
+    let contexts = load_contexts(
+        &artifacts,
+        &facts,
+        at(now),
+        &agent,
+        mandate_domain::Environment::Paper,
+    )
+    .unwrap();
     let file = MANDATE_FILE.get_or_init(|| {
         let path =
             std::env::temp_dir().join(format!("mandate-shell-e1b-{}.json", std::process::id()));
@@ -340,6 +347,7 @@ fn watched_to(now: &str, bound: &str, place: bool, door: Door, fill: Fill) -> Wa
         now: at(now),
         place_one_order: place,
         new_cycle: false,
+        connection_environment: mandate_domain::Environment::Paper,
     };
     let watch = Watch {
         pause: clock.clone(),
