@@ -284,7 +284,6 @@ fn differential(db: &support::TestDb, batches: &[Vec<usize>]) -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn the_same_causes_give_the_same_notice_stream_on_postgres_as_in_memory() -> Checked {
     a_dsn_that_does_not_parse_is_refused_closed();
     within_deadline(the_same_notice_stream)
@@ -307,7 +306,6 @@ fn the_same_notice_stream() -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_second_dispatcher_on_postgres_fences_the_first_before_its_send() -> Checked {
     a_dsn_that_does_not_parse_is_refused_closed();
     within_deadline(the_second_dispatcher_fences_the_first)
@@ -352,7 +350,6 @@ fn the_second_dispatcher_fences_the_first() -> Checked {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_read_that_fails_on_postgres_is_journal_unavailable_and_sends_nothing() -> Checked {
     a_dsn_that_does_not_parse_is_refused_closed();
     within_deadline(a_failed_read_sends_nothing)
