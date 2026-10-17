@@ -7,7 +7,8 @@
  * (DEC-1003). Unknown members are ignored (spec §3.2).
  */
 import type { WorkspaceClient } from "./client";
-import type { ApiError, ContentRef, Decoded, Decoder, Watermark } from "./types";
+import { array, closedEnum, contentRef, decimal, integer, isRecord, nullable, object, timestamp, watermark } from "./decode";
+import type { ApiError, ContentRef, Decoded, DecodeIssue, Decoder, Watermark } from "./types";
 
 export const OUTCOMES = ["submitted", "builder_hold", "builder_refused", "gate_deny", "gate_defer", "gate_hold", "autonomy_deny", "ask_unanswered", "order_working"] as const;
 export type Outcome = (typeof OUTCOMES)[number];
@@ -141,28 +142,215 @@ export type Backtest =
 /** What a read of one backtest gives a screen: the backtest asked for, or the API's failure. */
 export type BacktestRead = { ok: true; backtest: Backtest } | { ok: false; error: ApiError };
 
-/** The body of `read-models/backtest`: the backtest and the streams it reflects (`AsOf`, at least one). */
-export const backtestRead: Decoder<{ backtest: Backtest; as_of: Watermark[] }> = (value, path): Decoded<{ backtest: Backtest; as_of: Watermark[] }> => {
-  void value;
-  void path;
-  throw new Error("Unimplemented: E4-5");
+const fail = <T,>(path: string, problem: DecodeIssue["problem"], value: string | null = null, allowed: readonly string[] | null = null): Decoded<T> => ({
+  ok: false,
+  issue: { path, problem, value, allowed },
+});
+
+function patterned(pattern: RegExp): Decoder<string> {
+  return (value, path) => {
+    if (typeof value !== "string") return fail(path, "wrong_type");
+    return pattern.test(value) ? { ok: true, value } : fail(path, "not_canonical", value);
+  };
+}
+
+/** A value the schema fixes (`const`): anything else is a value the closed set does not list. */
+function constant<const T extends string | number>(expected: T): Decoder<T> {
+  return (value, path) => (value === expected ? { ok: true, value: expected } : fail(path, typeof value === typeof expected ? "unknown_enum_value" : "wrong_type", String(value), [String(expected)]));
+}
+
+const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : fail(path, "wrong_type"));
+
+/** `minItems: 1` when `least` is 1, and `uniqueItems`. */
+function uniqueList<T extends string>(item: Decoder<T>, least: 0 | 1): Decoder<T[]> {
+  return (value, path) => {
+    const read = array(item)(value, path);
+    if (!read.ok) return read;
+    return read.value.length >= least && new Set(read.value).size === read.value.length ? read : fail(path, "not_canonical", JSON.stringify(read.value));
+  };
+}
+
+/** `common.schema.json`'s `Id`, `AssetId`; the backtest schema's `Date` and `Code`. */
+const id = patterned(/^[A-Za-z0-9_-]{1,64}$/);
+const assetId = patterned(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+const date = patterned(/^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/);
+const CODE = /^[a-z][a-z0-9_]{0,63}$/;
+const code = patterned(CODE);
+const decidedBy = patterned(/^[a-z][a-z0-9_.:-]{0,127}$/);
+const latchedLimit = patterned(/^(max_daily_loss|lifetime_floor|profit_stop|drawdown_ladder\[[0-9]{1,2}\])$/);
+/** `Count`: a non-negative integer up to 2^53 − 1. */
+const count = integer;
+
+const periodsPerYear: Decoder<number> = (value, path) => {
+  const read = integer(value, path);
+  if (!read.ok) return read;
+  return read.value >= 1 && read.value <= 366 ? read : fail(path, "wrong_type", String(read.value));
 };
+
+/** JSON Pointer escaping (RFC 6901). */
+const pointer = (path: string, member: string) => `${path}/${member.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+
+/** A map from a reason code to a count (`propertyNames: Code`, `additionalProperties: Count`). */
+const reasonCounts: Decoder<Record<string, number>> = (value, path) => {
+  if (!isRecord(value)) return fail(path, "wrong_type");
+  const out: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!CODE.test(key)) return fail(pointer(path, key), "not_canonical", key);
+    const read = count(entry, pointer(path, key));
+    if (!read.ok) return read;
+    out[key] = read.value;
+  }
+  return { ok: true, value: out };
+};
+
+const nullableDecimal = nullable(decimal);
+
+const metrics = object<Metrics>({
+  period_count: count,
+  first_date: date,
+  last_date: date,
+  starting_equity: decimal,
+  ending_equity: decimal,
+  net_pnl: decimal,
+  total_return: decimal,
+  return_sum: decimal,
+  return_sum_of_squares: decimal,
+  mean_return: decimal,
+  variance: nullableDecimal,
+  volatility: nullableDecimal,
+  periods_per_year: periodsPerYear,
+  variance_annualized: nullableDecimal,
+  volatility_annualized: nullableDecimal,
+  risk_free_per_period: decimal,
+  sharpe_squared: nullableDecimal,
+  sharpe_sign: closedEnum<SharpeSign>(["negative", "zero", "positive"]),
+  sharpe: nullableDecimal,
+  sharpe_squared_annualized: nullableDecimal,
+  sharpe_annualized: nullableDecimal,
+  max_drawdown: decimal,
+  max_drawdown_usd: decimal,
+  max_drawdown_peak_period: count,
+  max_drawdown_trough_period: count,
+  buy_notional: decimal,
+  sell_notional: decimal,
+  traded_notional: decimal,
+  fill_count: count,
+  turnover: decimal,
+  fees_total: decimal,
+  fees_charged: decimal,
+  fees_accrued: decimal,
+  fees_asset: decimal,
+  submitted_qty: decimal,
+  filled_qty: decimal,
+  absent: nullable(closedEnum(ABSENT)),
+});
+
+const outcome = closedEnum(OUTCOMES);
+
+const decisionRow = object<DecisionRow>({
+  at: timestamp,
+  date,
+  purpose: nullable(closedEnum(PURPOSES)),
+  outcome,
+  reason: nullable(code),
+  decided_by: nullable(decidedBy),
+  qty: nullableDecimal,
+  limit: nullableDecimal,
+  outputs_used: count,
+});
+
+const equityPoint = object<EquityPoint>({ date, equity: decimal });
+
+/** The nine outcome codes, each a required member with its count, zeros included. */
+const outcomeCounts = object<Record<Outcome, number>>(Object.fromEntries(OUTCOMES.map((o) => [o, count])) as Record<Outcome, Decoder<number>>);
+
+const report = object<BacktestReport>({
+  kind: constant("backtest_report"),
+  report_version: constant(2),
+  subject: constant("mandate_version"),
+  mandate_version: contentRef,
+  instrument: assetId,
+  research_agent: flag,
+  inputs: object({ bars: contentRef, model_outputs: contentRef, theses: contentRef, config: contentRef }),
+  strategy: metrics,
+  benchmark: metrics,
+  excess_total_return: decimal,
+  decisions: object({ count, outcomes: outcomeCounts, gate_reasons: reasonCounts, hold_reasons: reasonCounts, rows: array(decisionRow) }),
+  risk: object({ limits_latched: uniqueList(latchedLimit, 0), risk_exits: count, most_restrictive_mode: closedEnum(MODES) }),
+  equity: object({ strategy: array(equityPoint), benchmark: array(equityPoint) }),
+  limitations: uniqueList(closedEnum(LIMITATIONS), 1),
+  disclosures: uniqueList(closedEnum(DISCLOSURES), 1),
+});
+
+type Served = { backtest_id: string; mandate_version: ContentRef; state: Backtest["state"]; refusal: string | null; report_ref: ContentRef | null; report: BacktestReport | null };
+
+const served = object<Served>({
+  backtest_id: id,
+  mandate_version: contentRef,
+  state: closedEnum(["running", "completed", "refused"]),
+  refusal: nullable(code),
+  report_ref: nullable(contentRef),
+  report: nullable(report),
+});
+
+/** The schema's three conditionals: the state decides which of the three members are present. */
+const backtest: Decoder<Backtest> = (value, path) => {
+  const read = served(value, path);
+  if (!read.ok) return read;
+  const b = read.value;
+  const base = { backtest_id: b.backtest_id, mandate_version: b.mandate_version };
+  const present = (member: "refusal" | "report_ref" | "report", want: boolean) => (b[member] === null) === want;
+  for (const member of ["refusal", "report_ref", "report"] as const) {
+    const want = b.state === "completed" ? member !== "refusal" : b.state === "refused" && member === "refusal";
+    if (present(member, want)) return fail(`${path}/${member}`, "wrong_type");
+  }
+  switch (b.state) {
+    case "running":
+      return { ok: true, value: { ...base, state: "running", refusal: null, report_ref: null, report: null } };
+    case "refused":
+      return b.refusal === null ? fail(`${path}/refusal`, "wrong_type") : { ok: true, value: { ...base, state: "refused", refusal: b.refusal, report_ref: null, report: null } };
+    case "completed":
+      return b.report_ref === null || b.report === null ? fail(`${path}/report`, "wrong_type") : { ok: true, value: { ...base, state: "completed", refusal: null, report_ref: b.report_ref, report: b.report } };
+    default: {
+      const unhandled: never = b.state;
+      throw new Error(`unhandled state ${String(unhandled)}`);
+    }
+  }
+};
+
+/** `AsOf`: one watermark for each stream the read reflects, at least one (spec §6.1, API-14). */
+const asOf: Decoder<Watermark[]> = (value, path) => {
+  const read = array(watermark)(value, path);
+  if (!read.ok) return read;
+  return read.value.length > 0 ? read : fail(path, "missing");
+};
+
+/** The body of `read-models/backtest`: the backtest and the streams it reflects (`AsOf`, at least one). */
+export const backtestRead: Decoder<{ backtest: Backtest; as_of: Watermark[] }> = object({ backtest, as_of: asOf });
+
+function invalid(issue: DecodeIssue): BacktestRead {
+  return { ok: false, error: { code: "invalid_response", effect: "none", status: 200, event_id: null, retryable: true, violations: [], decode: issue } };
+}
+
+/** The answer is for the id asked, or it is refused: a screen never shows another backtest's report as this one. */
+function forId(read: { backtest: Backtest }, backtestId: string): BacktestRead {
+  const answered = read.backtest.backtest_id;
+  return answered === backtestId ? { ok: true, backtest: read.backtest } : invalid({ path: "/backtest/backtest_id", problem: "wrong_type", value: answered, allowed: null });
+}
 
 /** Reads one backtest over the API; an answer for another id is refused. */
 export async function readBacktestFrom(client: WorkspaceClient, backtestId: string): Promise<BacktestRead> {
-  void client;
-  void backtestId;
-  throw new Error("Unimplemented: E4-5");
+  const outcome = await client.read(`/backtests/${encodeURIComponent(backtestId)}`, backtestRead);
+  return outcome.ok ? forId(outcome.value, backtestId) : { ok: false, error: outcome.error };
 }
 
 /** A body held in the served shape (the fixtures), through the same decoder and the same id check. */
 export function servedBacktest(body: unknown, backtestId: string): BacktestRead {
-  void body;
-  void backtestId;
-  throw new Error("Unimplemented: E4-5");
+  const read = backtestRead(body, "");
+  return read.ok ? forId(read.value, backtestId) : invalid(read.issue);
 }
 
 /** The answer to an id nothing holds: the API's 404 `not_found`. */
 export function backtestNotFound(): BacktestRead {
-  throw new Error("Unimplemented: E4-5");
+  return { ok: false, error: { code: "not_found", effect: "none", status: 404, event_id: null, retryable: false, violations: [], decode: null } };
 }

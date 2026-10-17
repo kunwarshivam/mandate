@@ -6,11 +6,14 @@ import { AgentBacktests, BacktestReport, BacktestReportScreen } from "./backtest
 import { type Backtest, backtestRead } from "@/api/backtest";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
+import { demoScreen } from "@/components/demo/demo-routes";
 import { AgentSectionScreen } from "@/components/screens/agent-detail";
 import { BACKTEST_FIXTURES, BACKTEST_IDS } from "@/fixtures/backtests";
 import { AGENT_IDS } from "@/fixtures/workspace";
+import { routeNeeds } from "@/lib/access";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { RoleProvider } from "@/lib/roles";
+import { crumbsFor } from "@/lib/screens";
 import { renderWithRuntime } from "@/test/harness";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -49,7 +52,8 @@ function apiMount(node: React.ReactNode, tamper?: (route: string, body: Record<s
   );
 }
 
-const placeholders = () => Array.from(document.querySelectorAll("[data-placeholder]")).map((p) => p.textContent);
+/** The report's own placeholders, in order; the performance disclosure beside net P&L is checked on its own. */
+const placeholders = () => Array.from(document.querySelectorAll("[data-placeholder]:not([data-placeholder=performance])")).map((p) => p.textContent);
 const table = (name: string) => screen.getByRole("table", { name });
 const cellsOf = (row: HTMLElement) => within(row).getAllByRole("cell").map((c) => c.textContent?.replace(/\s+/g, " ").trim());
 function rowNamed(t: HTMLElement, header: RegExp): HTMLElement {
@@ -65,7 +69,8 @@ afterEach(() => cleanup());
 describe("the backtest report (B2; DEC-1001, DEC-1003, DEC-2400)", () => {
   it("shows a completed run: the legend first, the version, the instrument, the dates and both columns of FR-4.2", async () => {
     renderWithRuntime(<BacktestReportScreen backtestId={BACKTEST_IDS.lmnCompleted} />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Backtest" })).toBeInTheDocument();
+    await screen.findByRole("region", { name: "The run" });
+    expect(screen.getByRole("heading", { level: 1, name: "Backtest" })).toBeInTheDocument();
     expect(placeholders()[0]).toBe("[[LEGEND-HYPOTHETICAL]]");
     expect(screen.getByText(/^Simulated/)).toBeInTheDocument();
     const facts = screen.getByRole("region", { name: "The run" });
@@ -247,5 +252,18 @@ describe("an agent's Backtests section (DEC-2400 item 4)", () => {
     apiMount(<AgentSectionScreen agentId={AGENT_IDS.btc} section="prove/backtests" />);
     expect(await screen.findByRole("heading", { name: "Not available from your deployment yet" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Refused/ })).toBeNull();
+  });
+});
+
+describe("the backtest route (DEC-2400 item 3)", () => {
+  it("is named by kind in the trail, opens for anyone who may see agents, and is the same screen in the example app", () => {
+    const href = `/backtests/${BACKTEST_IDS.lmnCompleted}`;
+    expect(crumbsFor(href, () => undefined)).toEqual([
+      { href: "/", label: "Home" },
+      { href, label: "Backtest" },
+    ]);
+    expect(routeNeeds(href)).toBe("agents.view");
+    expect(demoScreen(href)).toEqual(<BacktestReportScreen backtestId={BACKTEST_IDS.lmnCompleted} />);
+    for (const bad of ["/backtests", "/backtests/bt.1", `${href}/x`]) expect(demoScreen(bad), bad).toBeNull();
   });
 });
