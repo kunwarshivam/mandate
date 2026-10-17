@@ -6,6 +6,10 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
+use mandate_process::Snapshot;
+use mandate_process::probe::{self, Probe};
+use mandate_time::UtcNanos;
+
 use crate::supervisor::{Phase, Status};
 
 /// The longest request line read, and how long a client may stay silent, so that one client
@@ -13,20 +17,21 @@ use crate::supervisor::{Phase, Status};
 const LINE_BOUND: u64 = 1024;
 const READ_BOUND: Duration = Duration::from_secs(1);
 
-/// The status line and body for a request path in a phase.
+/// The status line and body for a request path in a phase, in the shared probe words (DEC-970
+/// item 7). The phase carries no heartbeat bound yet (DEC-968 item 7).
 ///
 /// - `/livez`: `200 live` until the process has stopped, then `503 stopped`.
 /// - `/readyz`: `200 ready` only while it runs cycles, else `503 not_ready`; a draining process
 ///   is not ready.
 /// - anything else: `404 not_found`.
 pub fn answer(path: &str, phase: Phase) -> (u16, &'static str) {
-    match (path, phase) {
-        ("/livez", Phase::Stopped(_)) => (503, "stopped"),
-        ("/livez", _) => (200, "live"),
-        ("/readyz", Phase::Ready) => (200, "ready"),
-        ("/readyz", _) => (503, "not_ready"),
-        _ => (404, "not_found"),
-    }
+    let probe = match path {
+        "/livez" => Probe::Live,
+        "/readyz" => Probe::Ready,
+        _ => return (404, "not_found"),
+    };
+    let answer = probe::answer(probe, Snapshot::unbounded(phase.state()), UtcNanos::EPOCH);
+    (if answer.ok { 200 } else { 503 }, answer.word)
 }
 
 /// Binds `addr`, which must be a loopback address, and answers from `status` on a thread of its
