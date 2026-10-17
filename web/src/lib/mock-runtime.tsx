@@ -6,7 +6,8 @@ import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApprove
 import { clock } from "./format";
 import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
-import type { BacktestRead } from "@/api/backtest";
+import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
+import { servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
 
 /**
@@ -454,9 +455,10 @@ export function RuntimeProvider({
     [reachable, silent, recordAfterMs, recorded],
   );
 
+  /** A fixture backtest in its served shape, through the API's own decoder; an id no fixture holds is the API's 404. */
   const readBacktest = useCallback(async (backtestId: string): Promise<BacktestRead> => {
-    void backtestId;
-    throw new Error("Unimplemented: E4-5");
+    const body = servedBacktestFixture(backtestId);
+    return body === undefined ? backtestNotFound() : servedBacktest(body, backtestId);
   }, []);
 
   const value = useMemo(
