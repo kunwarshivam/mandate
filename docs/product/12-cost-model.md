@@ -72,8 +72,8 @@ Every call goes through one aggregator (DEC-432 item 14) and is metered with its
 cost (INF-6, [inference spec §7.1](../specs/inference.md#71-metering-record)).
 
 **Research (slow tier).** One call per `single_call` run (agent harness §6.2). An agentic run
-(agent harness §6.9, DEC-2201) makes up to `max_turns` calls, each priced as below with its own
-`T_in`, and its sum is capped by the run's ceiling, so `c_run = min(Σ c_turn, max_run_cost_usd)`
+(agent harness §6.9, DEC-2203) makes up to `max_turns` calls, each priced as below with its own
+`T_in`, and its sum is capped by the run's ceiling, so `c_run = min(Σ c_turn, research_run_cost_cap_usd)`, the workspace's configured ceiling,
 takes the place of `c_call` in `I_research`.
 
 ```

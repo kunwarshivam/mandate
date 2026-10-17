@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.2, draft for review ([DEC-2201](../project/decisions/DEC-2201.md)): v0.1 ([DEC-431](../project/decisions/DEC-431.md)) with the research run made a bounded agent loop, the founder's decision of 2026-10-17. Items 1 to 14 and 20 to 25 of DEC-431 are agent readings, item 6 now superseded; items 15 to 17 were decided by the founder on 2026-10-03; items 18 and 19 are Proposed for the founder, and the spec proceeds on the conservative option of each. Where this spec needs a rule in another spec, it says so, and that rule lands in that spec's own change |
+| **Status** | v0.2, draft for review ([DEC-2203](../project/decisions/DEC-2203.md)): v0.1 ([DEC-431](../project/decisions/DEC-431.md)) with the research run made a bounded agent loop, the founder's decision of 2026-10-17. Items 1 to 14 and 20 to 25 of DEC-431 are agent readings, item 6 now superseded; items 15 to 17 were decided by the founder on 2026-10-03; items 18 and 19 are Proposed for the founder, and the spec proceeds on the conservative option of each. Where this spec needs a rule in another spec, it says so, and that rule lands in that spec's own change |
 | **Implements** | [HLD §5](../HLD.md#5-agent-runtime), [§6 flows B to D](../HLD.md#6-key-flows), [§9](../HLD.md#9-intelligence-layer); PRD FR-3.9, FR-5.1; backlog E19 (new), and the harness halves of E6-1, E15-1, E15-3, E17-2, E17-5, E17-7, E17-8 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §8; [journal spec](journal.md) §2, §5, §8, §9; [trading domain spec](trading-domain.md) §5.5, §7.4, §11; [inference spec](inference.md) (the callee: what happens to a model call); [data-plane spec](data-plane.md) (market data, news, filings; its §4.6 owns the capture of retrieved items, DP-3) |
 | **Related** | [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), [ADR-0003](../adr/0003-earned-autonomy.md), [harness engineering note](../product/11-harness-engineering.md), [DEC-432](../project/decisions/DEC-432.md) |
@@ -14,26 +14,29 @@ else.
 
 ## Change history
 
-- **v0.2 ([DEC-2201](../project/decisions/DEC-2201.md); E19-13):** the research run becomes a
-  bounded agent loop, by the founder's decision of 2026-10-17: "it has to be agentic harness, as
-  what we are selling/the product is agent harness for trading." The trading loop, the order
+- **v0.2 ([DEC-2203](../project/decisions/DEC-2203.md); E19-13):** the research run becomes a
+  bounded agent loop, by the founder's decision of 2026-10-17 that the harness the platform offers is
+  an agentic one (quoted in DEC-2203), "like Claude Code for trading". The trading loop, the order
   builder, the gate, the autonomy rules, and the envelope do not change.
   - **Two modes, pinned.** The research entry pins `mode`: `single_call`, v0.1's run, unchanged, or
     `agentic` (§6.9). Its tool declarations and loop bounds are inside the content hash (§6.10,
-    §6.11).
-  - **Tools read, and only from the store.** The model names reads from a pinned set of read-only
-    tools with typed arguments, scoped by the harness to the data universe, the cut-off, and the
-    allowlist version (§6.10). No tool call makes the data plane fetch from a source (HI-26).
-  - **Every turn and every tool call is journaled before use** (HI-2): a `ModelInvocationRecorded`
-    per turn, and a `ToolCallRecorded` per tool call with the items it returned as
-    `ObservationRecorded` (journal spec v0.48 §9.21).
-  - **Every bound ends the run with no output** (§6.11, HI-8, HI-24): turns, tool calls, the run's
-    cost ceiling, and its deadline on the risk clock. Only result size trims.
-  - **Invariants.** HI-2, HI-3, HI-4, HI-8, and HI-11 are restated for turns; HI-24 to HI-27 are new.
-    §9's adversaries gain the loop's own: steered reads, tool-call storms, huge results, cost
-    runaway, and a crash mid-loop.
-  - **No runtime fallback.** A failed agentic run is missing; it is never retried as a single call
-    (§6.9, DEC-2201 item 13).
+    §6.11); a `single_call` entry's hash is unchanged.
+  - **Read tools and proposal tools.** Reads take typed arguments and the harness's scope, and read
+    only the data plane's store (HI-26). Proposals (`propose_thesis`, `propose_entry`, `invalidate`,
+    `propose_exit`, `note`) are mediated on paths that already exist, with the autonomy policy as the
+    permission mode; `propose_entry` only classifies. `ask_owner` and `propose_mandate_change` are
+    specified and not yet declared (§6.10).
+  - **Two run kinds, one loop:** ideation and monitoring (§6.9).
+  - **Every turn, every tool call, and every run's end is journaled** (HI-2, HI-27): a
+    `ModelInvocationRecorded` per turn, a `ToolCallRecorded` per tool call, and a
+    `ResearchRunEnded` per run (journal spec v0.49 §9.22).
+  - **Every bound ends the run** (§6.11, HI-24): turns, tool calls, the run's cost ceiling, and its
+    deadline on the risk clock. Only result size trims. Money is workspace configuration, never a
+    figure in this spec.
+  - **Invariants.** HI-2, HI-3, HI-4, HI-8, HI-11, and HI-23 are restated for turns; HI-24 to HI-27
+    are new. §9's adversaries gain the loop's own.
+  - **No runtime fallback and no resume.** A failed agentic run is missing; it is never retried as a
+    single call, and a crash ends it (§6.9).
 
 ## Contents
 
@@ -98,7 +101,9 @@ else.
 | Runtime core | `mandate-runtime`: the pure state machine. `fold` replays an event; `handle` is the only producer of effects |
 | Shell | `mandate-shell`: the process that runs the core's effects, tails streams, and binds the stages |
 | Research worker | The research-run logic, in its own crate `mandate-research-run` (planned, layer 5, below `mandate-runtime`), with every I/O behind a port the shell implements (§4). It gathers data, calls the gateway, and hands results to the core. It never appends to the journal |
-| Research run | One bounded pass of the research loop: a cut-off instant, one retrieval, and one set of candidate theses and invalidations. In `single_call` mode it makes one model call; in `agentic` mode it makes up to `max_turns` (§6.9) |
+| Research run | One bounded pass of the research loop at one cut-off instant. In `single_call` mode: one retrieval, one model call, and one set of candidate theses and invalidations. In `agentic` mode: a seed retrieval, then up to `max_turns` calls, with the model's reads and proposals between them (§6.9) |
+| Run kind | An agentic run's `ideate` or `monitor`, picked by the core at the start (§6.9) |
+| Read tool, proposal tool | The two classes of tool: a read only reads (§6.10); a proposal is the model's opinion, which deterministic code mediates on a path that already exists (§6.10) |
 | Mode | The research entry's pinned `mode`: `single_call` (§6.2) or `agentic` (§6.9). Inside the content hash, so a change of mode is a new signal-model version (§8.4) |
 | Turn | One gateway call of an agentic run. Its reply is either tool calls or the final answer |
 | Tool | A read the research entry declares, with a pinned argument schema and result caps (§6.10). The model names a tool and its arguments; the harness scopes and runs it |
@@ -116,7 +121,7 @@ else.
 2. **Code gathers; the model asks.** Every read runs in deterministic code, against the data plane's
    point-in-time store, from allowlisted sources (inference spec §8.3). In `single_call` mode the
    retrieval plan is all there is. In `agentic` mode the model may also ask for reads, but only
-   through the entry's pinned read-only tools, and the harness, never the model, sets each read's
+   through the entry's pinned read tools, and the harness, never the model, sets each read's
    scope (§6.10, INF-5).
 3. **Journal before use.** Every retrieved item is journaled as `ObservationRecorded` before the
    model reads it ([data-plane spec §4.6](data-plane.md#46-the-research-query-interface), DP-3), and
@@ -147,14 +152,14 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| HI-1 | **Opinions only.** No model output or research run produces an `IntentProposed`, an `ApprovalResponded`, an owner command, or any other order or owner input. Model output reaches the order path only as a research-agent output that §8.3 combines | Property: with a compromised model, every `IntentProposed` follows a `DecisionMade` from the order builder whose dry run allowed it. `mandate-research-run` sits at layer 5, below `mandate-runtime` (layer 6), so it cannot name `IntentSink` (rung 1, `xtask/layers.toml`) |
+| HI-1 | **Opinions only.** No model output or research run produces an `IntentProposed`, an `ApprovalResponded`, an owner command, or any other order or owner input. Model output reaches the order path only as a research-agent output that §8.3 combines. In an agentic run that holds for every proposal tool: `propose_thesis` reaches it only through admission and the builder, `propose_entry` only classifies and submits nothing, and `invalidate` and `propose_exit` only remove (§6.10) | Property: with a compromised model, every `IntentProposed` follows a `DecisionMade` from the order builder whose dry run allowed it. `mandate-research-run` sits at layer 5, below `mandate-runtime` (layer 6), so it cannot name `IntentSink` (rung 1, `xtask/layers.toml`) |
 | HI-2 | **Journal before use.** Every item a call's inputs hold is in a committed `ObservationRecorded` before the core emits the call effect (data-plane spec §4.6, DP-3). Every model output any decision reads is in a committed `ModelInvocationRecorded` earlier in `seq` than the first event that depends on it (INF-10, caller side). In an agentic run, per turn: no tool call runs before its turn's `ModelInvocationRecorded` commits, and no turn's call effect precedes the commit of every earlier turn's `ToolCallRecorded` and the `ObservationRecorded` of every item those tool calls returned | Property over random append failures, including `Ambiguous` and `Unavailable`, and crashes between retrieval and the reply and between any two steps of a loop: no call effect precedes its observations' commit; no tool dispatch precedes its turn's record; no thesis record, `ModelOutputRecorded`, or `DecisionMade` cites a response without an earlier committed record; a crash after retrieval or after a tool's read leaves every item on the stream (DP-3's replay test). The oracle orders the effects and commits by its own log, never by the core's state |
 | HI-3 | **Replay without a model.** Folding the agent stream reproduces every thesis record, `ModelOutputRecorded`, and `DecisionMade` byte for byte, and, for an agentic run, the loop's state after every turn: turns used, tool calls used, result bytes used, and spend | Replay with a gateway port and a data-plane port that each fail the test on any call; compare drafts with stored bodies, and the loop state with an oracle that counts the run's records itself |
-| HI-4 | **Reads only; the model names only allowlisted reads.** The retrieval plan's readers and every tool can only read. No reader, no tool, and nothing in the model's output can place, cancel, or change an order; approve; append to any stream; change a mandate, policy, allowlist, or universe; read the vault; or reach a host other than the data plane. In `single_call` mode the model names no read. In `agentic` mode it names only a tool its entry declares and offers in that turn, with arguments its pinned schema admits; the harness sets every read's workspace, agent, cut-off, data universe, and allowlist version (§6.10, INF-5) | A test enumerates every data port `mandate-research-run` declares and asserts each only returns data (rung 2). The tool set is a closed enum dispatched to those ports only, so a tool with any other effect cannot be named (rung 1). The layer rule does not hold the ports: a layer-5 crate could still declare a write port, so review keeps it out (rung 3). The output schema and the tool declarations have no member the harness executes beyond a read. Property: with a compromised model naming random tools and arguments, every port call carries the harness's scope and no other |
+| HI-4 | **Reads only read, proposals only propose; the model names only allowlisted reads.** The retrieval plan's readers and every read tool can only read. Every proposal tool reaches only the path §6.10 maps it to. No reader, no tool, and nothing in the model's output can size, price, place, cancel, or change an order; approve; append to any stream; change a mandate, policy, allowlist, or universe; read the vault; or reach a host other than the data plane. In `single_call` mode the model names no read. In `agentic` mode it names only a tool its entry declares and offers in that turn, with arguments its pinned schema admits; the harness sets every read's workspace, agent, cut-off, data universe, and allowlist version (§6.10, INF-5) | A test enumerates every data port `mandate-research-run` declares and asserts each only returns data (rung 2). The tool set is a closed enum dispatched to those ports only, so a tool with any other effect cannot be named (rung 1). The layer rule does not hold the ports: a layer-5 crate could still declare a write port, so review keeps it out (rung 3). The output schema and the tool declarations have no member the harness executes beyond a read. Property: with a compromised model naming random tools and arguments, every port call carries the harness's scope and no other |
 | HI-5 | **The envelope does not move.** No research run, under any model output, changes an envelope field or the policy (MI-16, INF-16) | Property: the mandate version and the policy digest are equal before and after any sequence of research runs with a compromised model |
 | HI-6 | **Missing is safe.** Every error kind of [inference spec §3.3](inference.md#33-error-kinds), and every harness rejection of §6.5, yields no output for that run. The order builder then counts the model as missing: 0 for exits, fully bearish for buys (§8.3, MI-10, INF-4) | Property: for each error kind and each rejection, the builder's buy value is at most its value with the model removed, and no sell is proposed that is not proposed without it |
 | HI-7 | **Research never blocks trading.** For any input sequence, the trading loop's drafts are the same whatever the research worker's latency, failure, or crash, apart from the research outputs that arrive as inputs (INF-13, caller side) | Property: replay one input sequence with research latency drawn at random, including never finishing; the drafts not caused by research are identical |
-| HI-8 | **Runs are bounded.** At most one run is in flight per agent. No run starts before `next_proposal_at` (§5.3). No run reads more than its retrieval plan's caps. A `single_call` run makes one model call. An agentic run makes at most `max_turns` calls and `max_tool_calls` tool calls, holds at most `max_run_result_bytes` of tool results, spends at most its `max_run_cost_usd` (inference spec §7.3, with §7.3's disclosed provider excess), and ends by its deadline on the risk clock (§6.11). Spend caps are the gateway's (INF-7) | Property over random schedules, model replies, tool results, and crashes, with an independent count of runs, turns, tool calls, bytes, and spend from the journal and the meter stream |
+| HI-8 | **Runs are bounded.** At most one run is in flight per agent. No run starts before `next_proposal_at` (§5.3). No run reads more than its retrieval plan's caps. A `single_call` run makes one model call. An agentic run makes at most `max_turns` calls and `max_tool_calls` tool calls, holds at most `max_run_result_bytes` of read results, spends at most the workspace's `research_run_cost_cap_usd` (inference spec §7.3, with §7.3's disclosed provider excess), and ends by its deadline on the risk clock (§6.11). Spend caps are the gateway's (INF-7) | Property over random schedules, model replies, tool results, and crashes, with an independent count of runs, turns, tool calls, bytes, and spend from the journal and the meter stream |
 | HI-9 | **A spent budget means fewer ideas, never more risk.** With a binding cap or budget, no buy draft is larger than without it, no opening or increase exists that does not exist without it, no sell is proposed that is not proposed without it, and every risk-exit, protective-order, and kill-switch draft is byte-identical (DEC-120, INF-7, rule 2). Stale research outputs may shrink or withhold buys (§7.3 step 3), and a discretionary exit that waited on a research verdict may be absent, as under any model outage (MI-10); both are the intended effect | Property: one input sequence run with and without a binding cap; compare every draft pairwise by an independent oracle on size and side |
 | HI-10 | **Injected text is bounded.** Whatever a news item or filing says, it can at most yield a thesis or an invalidation. A thesis enters the working universe only through §8.5, and its first order is decided by the autonomy rules with the admission ceiling (§6.2 step 5). An invalidation only removes (MI-19). With a compromised model, no limit is breached | The adversarial bench (E19-6): injection fixtures for every source, in the retrieval plan's reads and in every tool's results, and a compromised model that follows every injected instruction it can express as a tool call; zero limit breaches, zero orders without a dry-run allow, and no read outside the scope HI-4 names |
 | HI-11 | **Inputs hold only what they may.** A call's inputs, every turn's included, contain only: data from the data plane at or before the cut-off, the agent's own memory (§6.4), the owner's `behavior.description`, and the working-universe facts §6.4 lists. Never a credential, a vault reference, personal data, a dollar figure of the agent or account, or another agent's or workspace's data (INF-8, caller side) | Canary test: plant canary values in the vault, in another agent's memory, in another workspace, and in the agent's equity; scan every prompt artifact of a run, every turn's, and every tool result artifact for them |
@@ -170,10 +175,10 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 | HI-21 | **No model call inside the tick.** The decide step never calls or waits on the gateway. Every model output, fast tier included, enters the core as an input after its record commits, and a missing or late output is missing (§6.8, rule 3, MI-10). No exit's latency depends on a model provider | A gateway double that stalls for ever on every call: the decide step stays within ES-24's budget, and every exit, protective-order, and kill-switch draft is identical to a run with no gateway at all |
 | HI-22 | **Every candidate has a journaled verdict.** Every candidate thesis and invalidation of a judged run is journaled with its verdict, a harness check's reason or the admission's (§6.5). No run is judged while no record can hold a harness verdict (§6.2 preconditions) | Property with a compromised model: the count of journaled verdicts equals the count of candidates in the committed responses, by an oracle that parses the response artifacts itself |
 | HI-23 | **Only cited licensed text is kept, in what the harness writes** (DEC-431 item 17). The harness never writes licensed text a thesis did not cite to the journal's artifact store: not in an observation, a prompt artifact, a tool call's result artifact, or an evidence artifact (§6.6). The model's response is outside this invariant: it may echo licensed text, a disclosed residual (§6.6) | Plant a canary phrase in an uncited licensed item; scan every observation, prompt, tool-result, and evidence artifact the run wrote. The same phrase in a cited item is found, among those, only in the thesis's evidence artifact. The response artifact is not scanned |
-| HI-24 | **Every bound ends the run with no output** (rule 3, §6.11). An agentic run that reaches a bound (a reply with more tool calls than the run has left, a tool call in the last turn, a turn the run's cost ceiling cannot cover, or the risk clock passing the run's deadline) ends there: no thesis record, `ModelOutputRecorded`, or invalidation follows from it, nothing in it is retried, and the order builder counts the model as missing (HI-6). Only result size trims instead of ending, because the model cannot know it before it asks | Property with a compromised model and random bounds: an oracle that recomputes each bound from the run's journaled records alone asserts that every run reaching one has no output event after its last turn, and that every run with an output event reached none |
-| HI-25 | **A run re-runs from its record.** Driving the loop again, with a gateway that answers each turn from the run's recorded response looked up by `request_digest` and a data plane at the same store snapshot and allowlist version, reproduces every record of the run byte for byte. A turn whose request differs from the recorded one finds no answer, so a divergence ends the re-run rather than inventing a reply (INF-10, DEC-2201 item 11) | Record random runs, then re-run each from its artifacts and compare every record; seeded bugs: a tool result reordered, a bound off by one, a turn's inputs missing one earlier result |
+| HI-24 | **Every bound ends the run with no output** (rule 3, §6.11). An agentic run that reaches a bound (a reply with more tool calls than the run has left, a tool call in the last turn, a turn the run's cost ceiling cannot cover, or the risk clock passing the run's deadline) ends there: no thesis record, `ModelOutputRecorded`, or invalidation follows from it, nothing in it is retried, and the order builder counts the model as missing (HI-6). Only result size trims instead of ending, because the model cannot know it before it asks | Property with a compromised model, random bounds, and random clock ticks: an oracle that recomputes each bound from the run's journaled records and the ticks the core folded (the deadline is the cut-off plus `max_run_s`) asserts that every run reaching one has no output event after the batch that reached it, and that its `ResearchRunEnded` names that bound; and that a run with no `ResearchRunEnded` is one the test crashed |
+| HI-25 | **A run re-runs from its record.** Driving the loop again, with a gateway that answers each turn from the run's recorded response looked up by `request_digest` and a data plane at the same store snapshot and the run's frozen scope (§6.9 step 1), reproduces every record of the run byte for byte. A turn whose request differs from the recorded one finds no answer, so a divergence ends the re-run rather than inventing a reply (INF-10, DEC-2203 item 11) | Record random runs, then re-run each from its artifacts and compare every record; the data-plane double answers a read the run recorded as `failed` with that failure, since a timeout cannot be measured again. Seeded bugs: a tool result reordered, a bound off by one, a turn's inputs missing one earlier result. Until licensed text is read (§6.2 preconditions) every item is kept in full; after, the re-run covers runs inside the licence's horizon, as §6.6 says of prompts |
 | HI-26 | **Model text leaves only in its own call.** A tool call reads the workspace data service's point-in-time store and nothing else: it never makes the data plane fetch from a source, and no argument the model wrote reaches any host but the gateway's own call to the pinned model (§6.10, DP-9). Search terms are matched inside the store | Run random agentic runs with the sources' HTTPS transport and every network port replaced by doubles that fail the test on any request; a canary term in a tool argument is found in no request any double saw |
-| HI-27 | **Every tool call has one record, before the next turn.** Every tool call in a committed turn's reply has exactly one `ToolCallRecorded`, refused calls included, committed before the next turn's call effect or the run's judging. A run cancelled or crashed before that is never judged. Only the final turn's `ModelInvocationRecorded` carries verdicts (journal spec §9.21) | Property with a compromised model and random append failures and crashes: an oracle that parses every turn's response artifact itself counts the tool calls and matches each to exactly one record, in order, earlier than the next turn's record |
+| HI-27 | **Every tool call has one record, before the next turn.** Every tool call in a committed turn's reply has exactly one `ToolCallRecorded`, refused calls included, committed before the next turn's call effect or the run's judging. A run cancelled or crashed before that is never judged. Only the final turn's `ModelInvocationRecorded` carries verdicts (journal spec §9.22) | Property with a compromised model and random append failures and crashes: an oracle that parses every turn's response artifact itself counts the tool calls and matches each to exactly one record, in order, earlier than the next turn's record |
 
 ## 4. Components
 
@@ -298,7 +303,8 @@ stateDiagram-v2
     Calling --> Judging: ModelInvocationRecorded committed with outcome ok and a final answer
     Calling --> Dispatching: agentic: ModelInvocationRecorded committed with outcome ok and tool calls within the bounds
     Dispatching --> Calling: every ToolCallRecorded and its ObservationRecorded batch committed (§6.9 step 4)
-    Calling --> Idle: ModelInvocationRecorded committed with an error outcome, or a bound reached (HI-24)
+    Calling --> Idle: ModelInvocationRecorded committed with an error outcome, a reply that ends the run, or the last turn (ResearchRunEnded in the same batch)
+    Calling --> Idle: a reply beyond the tool calls left: its ToolCallRecorded refusals and ResearchRunEnded in the record's batch (HI-24, HI-27)
     Retrieving --> Cancelled: mode tightens, kill switch, Stop, a version change (§5.4), or the run's deadline
     Calling --> Cancelled: as above
     Dispatching --> Cancelled: as above
@@ -326,7 +332,7 @@ stateDiagram-v2
 |---|---|---|
 | Regular-session close | Unchanged. The core evaluates at its cadence; discretionary equity exits defer to the open ([§6.2](mandate.md#62-evaluation) step 2); an evaluation runs at the open | Runs continue, and an agentic run's cut-off stays the one it started with for every turn. A thesis admitted outside the session waits for its stagger offset, counted from the next regular-session open for equities (§8.4) |
 | Midnight America/New_York | `RiskDayStarted` on the account stream; the ask budget resets (§6.4) | The spend caps reset by risk day (inference spec §7.3). A run in flight continues; each of its calls counts against the risk day the gateway's meter assigns it, so an agentic run's turns may straddle two risk days. The run's own cost ceiling does not reset: it covers the whole run |
-| Restart | §5.1 step 8: replay, startup hold, reconciliation | A run in flight is lost. Its reservation stays counted (DEC-432 item 4). Its call is never re-sent under the old `call_id` (inference spec §3.4), and any output it had is never used, because nothing was journaled. A run whose record committed but whose judging batch did not is not judged after the restart: it ends there. An agentic run is never resumed: its recorded turns and tool calls stay on the stream, every turn's reservation stays counted, no tool call of a recorded turn that has no `ToolCallRecorded` is run, and no further turn is sent (DEC-2201 item 12). The next run waits for `next_proposal_at` |
+| Restart | §5.1 step 8: replay, startup hold, reconciliation | A run in flight is lost. Its reservation stays counted (DEC-432 item 4). Its call is never re-sent under the old `call_id` (inference spec §3.4), and any output it had is never used, because nothing was journaled. A run whose record committed but whose judging batch did not is not judged after the restart: it ends there. An agentic run is never resumed: its recorded turns and tool calls stay on the stream, every turn's reservation stays counted, no tool call of a recorded turn that has no `ToolCallRecorded` is run, and no further turn is sent (DEC-2203 item 12). The next run waits for `next_proposal_at` |
 | Version change ([§2.2](mandate.md#22-applying-a-new-version)) | A reducing or neutral version applies immediately; an increasing one at the next evaluation with no `Unknown` order. Pending approvals are cancelled | A version that changes the research agent's pin, clears `behavior.research`, or pins the universe cancels the run in flight. Any other version lets it finish, and its candidates are judged under the version in effect (HI-17) |
 | Kill switch, Stop | The core applies the final mode first, cancels approvals, and hands one agent-scoped flatten plan | The run is cancelled at once. No run starts again |
 | Pause | Mode `paused`; pending approvals cancelled | The run is cancelled. No call until resume (HI-15) |
@@ -420,7 +426,7 @@ and ends in steps 5 and 6 for its final turn):
 
 **One call per `single_call` run.** That mode's model cannot ask for more data. The agentic mode,
 in which the model names further reads through pinned tools and the harness runs them, is §6.9
-(DEC-2201, the founder's decision of 2026-10-17, answering v0.1's §13 item 6).
+(DEC-2203, the founder's decision of 2026-10-17, answering v0.1's §13 item 6).
 
 ### 6.3 Retrieval
 
@@ -473,7 +479,7 @@ template (inference spec §3.1); callers never pass free-form prompt text.
 | The cut-off, the data universe, `universe.asset_classes`, `universe.max_instruments`, and the current working universe | Allocation, limits, equity, P&L, or any other dollar figure of the agent or account. Sizing is not the model's business |
 | Held instruments, and the agent's own theses and their scores | Other agents' or other workspaces' data, the aggregate-flow monitor, operator halts |
 | For a revision, once allowed (§6.5): the predecessor and its score | Approval content, owner commands, notification text, autonomy rules, delegations, tripwires, the review date |
-| In an agentic run: the transcript of earlier turns (each reply, and each tool call's result as recorded), and the run's remaining turns and tool calls | The run's cost ceiling, its spend, or any price: the budget is the harness's to enforce, not the model's to plan around |
+| In an agentic run: the run kind, the transcript of earlier turns (each reply, and each tool call's result as recorded: read items, proposal verdicts, and `propose_entry`'s classification codes), and the run's remaining turns and tool calls | The run's cost ceiling, its spend, or any price: the budget is the harness's to enforce, not the model's to plan around |
 
 **Untrusted data is marked, not trusted to stay marked.** The template puts retrieved text in
 delimited data sections and says it is data. That lowers, but does not remove, the chance that
@@ -528,8 +534,9 @@ corroboration, the lineage cap, and a full universe.
 | `ObservationRecorded` | agent | Every retrieved item, before the call effect (§6.2 step 2), and every item a tool call returns that the run has not observed, before the next turn's call effect (§6.9 step 5) | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177). The duty is the [data-plane spec's §4.6](data-plane.md#46-the-research-query-interface) (DP-3) |
 | Meter reservation and settlement | `meter:{workspace_id}` (gateway) | Before the call leaves, and on completion | Closed in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (`MeterReserved`, `MeterSettled`; DEC-998) |
 | `ModelInvocationRecorded` | agent | After every call, whatever the outcome, including a late one; in an agentic run, one per turn | Closed in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) with DEC-432 item 11's members and this spec's two: the run id as `correlation_id`, and the retrieved context as `observations`, the event ids of the run's `ObservationRecorded` the turn's prompt holds |
-| `ToolCallRecorded` | agent | Every tool call of an agentic run's committed turn, refused ones included, in the batch with the items it returned, before the next turn's call effect (§6.9 steps 4 and 5) | Closed in [journal spec §9.21](journal.md#921-tool-call-records-dec-2201) (journal spec v0.48, DEC-2201 item 10): the turn's `call_id`, its index, the tool, the arguments and the result as artifacts, the result and its reason, the result's bytes, `truncated`, and the `observations` it returned |
-| Candidate verdicts | agent | With the judging batch; in an agentic run, on the final turn's record only | The `verdicts` member of `ModelInvocationRecorded` (journal spec §9.19 rule 151, DEC-998 item 1). Until `mandate-journal` registers it, no run is judged (§6.2 preconditions, HI-22) |
+| `ToolCallRecorded` | agent | Every tool call of an agentic run's committed turn, refused ones included: a proposal's in the batch its turn's record heads, a read's in the batch with the items it returned, before the next turn's call effect (§6.9 steps 4 and 5) | Closed in [journal spec §9.22](journal.md#922-tool-call-and-run-records-dec-2203) (journal spec v0.49, DEC-2203 item 10): the turn's `call_id`, its index, the tool, the arguments and the result as artifacts, the result and its reason, the result's bytes, `truncated`, and the `observations` it returned |
+| `ResearchRunEnded` | agent | When an agentic run ends, for any reason but a crash, in the batch that ends it, or alone for a deadline or a cancellation | Closed in journal spec v0.49 §9.22: the kind, how it ended, and its turns, tool calls, and result bytes |
+| Candidate verdicts | agent | With the judging batch; in an agentic run, on each turn's record, for that reply's proposal calls | The `verdicts` member of `ModelInvocationRecorded` (journal spec §9.19 rule 151, DEC-998 item 1). Until `mandate-journal` registers it, no run is judged (§6.2 preconditions, HI-22) |
 | `ThesisProposed`, `ThesisRevised` | agent | Every thesis admission judged | Closed in [journal spec §9.4](journal.md#94-research-agent-thesis-records-dec-413) |
 | `ModelOutputRecorded` | agent | Each judged thesis, `ignored` null only when admitted | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177) |
 | `UniverseChanged` | account | The executor's copy of an admission or removal | Closed in journal spec §9.3 |
@@ -596,43 +603,91 @@ HI-7, HI-14, INF-13, and ES-24's 1 ms budget for the decide step:
 
 ### 6.9 The agentic loop
 
-An `agentic` research entry ([DEC-2201](../project/decisions/DEC-2201.md)) turns one run into a
-bounded loop of turns. §6.2's preconditions bind it unchanged. What the model may read is §6.10; how
-far the loop may go is §6.11. The output, its checks, and its judging are §6.5's, unchanged.
+An `agentic` research entry ([DEC-2203](../project/decisions/DEC-2203.md)) makes the research agent
+work the way a coding agent does, "like Claude Code for trading" (the founder): one loop per agent,
+in which the model works with tools. **Read tools** run freely inside the loop's bounds. **Proposal
+tools** are how the model gives an opinion, and deterministic code mediates every one, as a coding
+agent's permission system mediates its tool calls: the harness checks it, the order builder sizes,
+the gate checks the limits and the account rules, and the autonomy policy (AUTO, ASK, DENY) is the
+permission mode. The model never sizes, prices, or places an order (rule 4), and no tool changes the
+envelope (rule 11). The owner's instructions, `behavior.description` (the strategy brief, a coding
+agent's project instructions), are owner input inside the envelope (§6.4). The journal is the
+transcript (§6.6). Pause, Stop, and the kill switch are the interrupt, and none of them depends on
+the loop (HI-14, HI-15, HI-20).
 
-1. **Start.** As §6.2 step 1. The core also fixes the run's deadline, the cut-off plus
-   `max_run_s` on the risk clock, and its cost ceiling, `max_run_cost_usd`. Every turn shares the
-   run's one cut-off.
-2. **Seed.** As §6.2 step 2: the entry's retrieval plan runs at the cut-off and its items are
-   journaled as `ObservationRecorded` before the first turn's call effect.
+§6.2's preconditions bind it unchanged. What the model may call is §6.10; how far the loop may go is
+§6.11.
+
+**Two run kinds, one loop.** Ideation and monitoring are the same loop, with the same read tools,
+bounds, and records, started from different context. The core picks the kind when the run starts,
+from folded state alone:
+
+| Kind | When | Seed (§6.3's plan, scoped) | Proposal tools offered |
+|---|---|---|---|
+| `ideate` | Mode `normal`, and the working universe holds fewer than `universe.max_instruments` | The whole retrieval plan over the data universe | `propose_thesis`, `propose_entry`, `invalidate`, `propose_exit`, `note` |
+| `monitor` | Mode `exits_only`, or the working universe is full, and the agent has at least one active thesis | The plan's reads for held instruments and active theses only | `invalidate`, `propose_exit`, `note` |
+
+With neither, no run starts and nothing is called. A monitoring run reads news and filings on what
+the agent holds and decides whether a thesis is invalidated; its only effect is an invalidation,
+which the core turns into a removal and its exits under the existing rules (§6.7). Both kinds run on
+the one interval, `behavior.research.interval_s` (§5.3). A monitoring interval of its own would be a
+new envelope field, so it waits for a mandate spec change (E19-14).
+
+One run, in order:
+
+1. **Start.** As §6.2 step 1. The core also fixes, for the whole run, its kind, its deadline (the
+   cut-off plus `max_run_s` on the risk clock), its cost ceiling (the workspace's configured
+   `research_run_cost_cap_usd`, §6.11), and its read scope: the cut-off, the allowlist version, and
+   the data universe as of the start. Every read of every turn uses that one scope, so a run reads
+   one consistent snapshot. A source revoked or a universe changed mid-run does not widen it: what
+   the run proposes is judged under the version in effect when it is mediated (HI-17), and §8.5's
+   allowlist check refuses a thesis that cites a source no longer allowed.
+2. **Seed.** As §6.2 step 2, with the kind's scope: the plan's items are journaled as
+   `ObservationRecorded` before the first turn's call effect.
 3. **Turn *k*** (from 1). The worker sends one gateway call, filled as §10.1 says for a single call
    plus:
    - `turns`: the transcript so far: each earlier turn's reply, by its response artifact, and each
      of its tool calls' results, exactly as their `ToolCallRecorded` artifacts hold them;
-   - `tools`: the entry's tool declarations, or none when *k* is `max_turns` or no tool call is
-     left, so the last turn must answer (DEC-2201 item 7);
-   - the remaining turns and tool calls, among the typed inputs (§6.4);
+   - `tools`: the read tools and the kind's proposal tools; in the last turn (*k* = `max_turns`) the
+     proposal tools only, so the model can still give its opinion but read no more; and none once the
+     run has no tool call left, so the model must end;
+   - the run kind and its remaining turns and tool calls, among the typed inputs (§6.4);
    - `spend_ceiling_usd`: the run's ceiling less the `cost_usd` of its earlier turns' records
      (inference spec §3.1, §7.3);
-   - `deadline`: the dispatch instant plus the lesser of the entry's `deadline_ms` and the run time
-     left on the risk clock at dispatch.
-4. **Record.** The core journals the turn's `ModelInvocationRecorded`: the run id as
-   `correlation_id`, and as `observations` the event ids of every observation the turn's prompt
-   holds, the seed's and every earlier tool call's. Then:
-   - an error outcome ends the run with no output (HI-6, §7.3);
-   - a final answer is judged: the record heads §6.2 step 5's judging batch with its verdicts
-     (journal spec §9.19 rule 151, DEC-1120 item 6), and step 6 follows;
-   - tool calls within the run's remaining tool calls go to step 5;
-   - tool calls beyond them run none: the core journals each as a `ToolCallRecorded` refused
-     `call_budget`, in one batch with no read, and the run ends with no output (HI-24).
-5. **Dispatch and capture.** The core emits one dispatch effect with the turn's tool calls in reply
-   order, each with the scope the harness sets (§6.10). The worker runs them one after another
-   through the read-only ports, applies §6.10's and §6.11's caps, and hands every result back. The
-   core journals in one batch, for each tool call in order: an `ObservationRecorded` for each item it
-   returned that the run has not observed already, then its `ToolCallRecorded` naming the
+   - `deadline`: the core hands the worker `r`, the run's time left as a duration on the risk clock
+     when it emits the turn; the worker sets the call's deadline to its wall-clock dispatch instant
+     plus the lesser of the entry's `deadline_ms` and `r` (§10.1). The core stays pure, and the
+     deadline cancellation on the risk clock still binds whatever the wall clock does.
+4. **Record and mediate.** The core journals the turn's `ModelInvocationRecorded` (the run id as
+   `correlation_id`; as `observations`, every observation the turn's prompt holds, the seed's and
+   every earlier tool call's) at the head of one batch. Then:
+   - an error outcome ends the run with no output (HI-6, §7.3): `ResearchRunEnded` `call_failed`, or
+     `cost_ceiling` for a `budget_exhausted` under the run's ceiling, in the same batch;
+   - a reply with no tool call ends the run (`finished`): it is the model's closing summary, valid
+     against the agentic output schema, kept in the response artifact, and an input to nothing;
+   - a reply with more tool calls than the run has left runs none of them: the batch records each as
+     a `ToolCallRecorded` refused `call_budget`, the record carries no verdicts, and the run ends
+     with no further output (`call_budget`, HI-24);
+   - otherwise the batch mediates every proposal call of the reply as §6.10 says, at once and in
+     reply order: the candidates' verdicts on the turn's record (journal spec §9.19 rule 151, the
+     proposal calls being the candidates), each judged thesis's record and output (§6.2 step 5),
+     each accepted invalidation's record (E19-5), and one `ToolCallRecorded` for each proposal
+     call, whose result is what the model is told. The executor then copies admissions and removals
+     (§6.2 step 6).
+5. **Read and capture.** If the reply asked for reads, the core emits one dispatch effect with them
+   in reply order, each with the scope the harness sets (§6.10). The worker runs them one after
+   another through the read-only ports, applies §6.10's and §6.11's caps, and hands every result
+   back. The core journals in one batch, for each read in order: an `ObservationRecorded` for each
+   item it returned that the run has not observed already, then its `ToolCallRecorded` naming the
    observations of every item it returned, earlier ones included. An item already observed in the
    run is named again, never journaled twice, so every observation list stays strictly ascending
-   (journal spec §9.19 rule 150, §9.21 rule 167). Then turn *k* + 1, at step 3.
+   (journal spec §9.19 rule 150, §9.22 rule 173). Then turn *k* + 1, at step 3; after the last
+   turn, the run ends (`last_turn`).
+
+**Every end is journaled.** A run that ends for any reason but a crash has one `ResearchRunEnded`
+(journal spec §9.22), in the batch that ends it, or on its own when the core cancels it for the
+deadline (`deadline`) or a mode, version, Stop, or kill switch (`cancelled`). So which bound ended a
+run, and how often, folds from the journal (HI-24, §7.3); a run with no end record crashed.
 
 At every step, the run is cancelled exactly as §5.3 and §5.4 say, and also when the risk clock
 passes its deadline. A reply or a read that arrives after that is §5.3's late result.
@@ -642,6 +697,11 @@ spend fold from the run's own records through `mandate-research-run`'s pure loop
 picks each next step from journaled facts, and a replay picks the same ones (HI-3). The worker never
 appends (HI-16) and never chooses whether a turn or a tool call happens.
 
+**A crash ends the run; the journal is still the transcript.** A restart never resumes a run
+(§5.4): the turn in flight at a crash has a reservation but no record, so neither its cost nor its
+reply is the core's to count or use, and resuming would need a journaled turn start (§13 item 8).
+Replay rebuilds every recorded turn exactly (HI-3), and the next run starts at its due time.
+
 **No fallback to a single call.** A failed agentic run is missing (HI-6). It is never retried as a
 `single_call` run, because sampling again after a failure would select outputs (DEC-432 item 3). The
 `single_call` mode stays registered and pinnable; which mode an agent runs is the pin the owner
@@ -650,8 +710,10 @@ confirmed (§8.4).
 ### 6.10 Tools
 
 The tools are the research entry's pinned declarations: a closed set, each with an argument schema
-and result caps inside the content hash. The gateway offers only those (inference spec INF-5) and
-returns each tool call as data; the harness runs it. v0.2 declares these five and no other:
+and caps inside the content hash. The gateway offers only those (inference spec INF-5), returns each
+call as data, and runs none; the harness runs or mediates it. v0.2 declares these ten and no other.
+
+**Read tools** read and do nothing else:
 
 | Tool | Arguments (the pinned schema) | Returns | Caps (defaults) | Reads through |
 |---|---|---|---|---|
@@ -661,26 +723,77 @@ returns each tool call as data; the harness runs it. v0.2 declares these five an
 | `bars` | `symbol`: 1 data-universe symbol; `count`: 1 to 260 | Daily bars ending at or before the cut-off | 260 bars | The bar reader |
 | `quote` | `symbols`: 1 to 10 | The last quote at or before the cut-off, with its time and sanity flag | 10 quotes | The quote reader |
 
+**Proposal tools** propose, and deterministic code decides. Each maps onto a path that already
+exists; none is a new way to an order:
+
+| Tool | Arguments | Mediated by | Permission mode | The model is told |
+|---|---|---|---|---|
+| `propose_thesis` | §6.5's model fields: `instrument`, `direction`, `conviction`, `confidence`, `horizon_s`, thesis text, `invalidation`, `evidence` (item ids) | §6.5's harness checks, then §8.5's admission, exactly as a single call's candidate; the platform fills every platform field (HI-18). An admitted thesis is the research agent's §8.2 output, which the order builder combines at its next scheduled evaluation | Admission is §8.5's; the first order in the instrument is §6.2's, with the admission ceiling (`autonomy.admission`, default `ask`, MI-17) | The verdict: a harness check's reason, or admission's result (`admitted`, or §8.5's reason) |
+| `propose_entry` | `instrument`; `thesis_id`, its active thesis. No side (no short sales: a buy), size, or price | A dry run, now, of the evaluation for that instrument: the order builder sizes from the fresh outputs, the gate dry-runs, and §6.2 classifies with every ceiling, the admission ceiling included. **Nothing is submitted.** The order, if any, is the next scheduled evaluation's, sized and classified again then (cadence unchanged, rule 11) | §6.2: AUTO, ASK (the next evaluation asks the owner), or DENY with its reason | The classification and its reason code, or `no_order` when the builder proposes nothing. Never a quantity, a price, or a dollar figure (HI-11). Refused `no_active_thesis` without one |
+| `invalidate` | `thesis_id`; `evidence` (item ids); `reason` text | §6.7: the invalidation verdict (E19-5's record); the instrument is removed at once and exits only, its exits discretionary, paced, and never denied (§6.1, MI-19) | Built-in AUTO: removal only reduces risk (rule 2) | `removed`, or `unknown_thesis` |
+| `propose_exit` | `instrument`; `reason` text | The same as `invalidate`, for the active thesis that holds the instrument: research can end only its own thesis, and the exit that follows is the removal's | Built-in AUTO | `removed`, or `unknown_thesis` when no active thesis holds the instrument |
+| `note` | `text`: at most 2,000 bytes | Kept in the tool call's record and the transcript, and nowhere else: no later run, owner, or check reads it | — | `ok` |
+
+`propose_thesis`, `invalidate`, and `propose_exit` are the run's candidates: each has a verdict on
+its turn's record (rule 151, HI-22), `propose_exit` with the kind `invalidation`. Nothing a proposal
+returns can enlarge an order, skip a check, or reach the gate on another path: a thesis still needs
+admission and the builder, an entry is only classified, and an exit only removes (HI-1, HI-10).
+
+**Specified, and not declared in v0.2.** Two proposal tools need records and decisions that do not
+exist yet, so no v0.2 entry declares them, and a model cannot call them:
+
+- **`ask_owner`** (a question for the owner, at most 500 bytes): always ASK by nature. It needs a
+  journaled question, an in-app delivery whose notification carries only opaque ids and generic
+  text (rule 6), and a control-stream answer that a later run reads as owner input. One per run,
+  rate-limited per day; an unanswered question expires with no effect (rule 3). E19-14 adds its
+  journal and notifications spec changes first.
+- **`propose_mandate_change`** (a draft new mandate version: a diff and its reasons, for example
+  "widen the universe to semiconductors"). Never applied by the agent: it is always ASK, whatever
+  the autonomy policy. It enters as a platform proposal of envelope values
+  ([mandate spec §7](mandate.md#7-compiler-and-platform-proposals-dec-97)); the owner reviews the
+  diff, the validator and the change classification run, and confirmation needs step-up (rule 11).
+  A model can never confirm; an unanswered proposal expires with no change (rule 3); and proposals
+  are rate-limited per agent, so a model cannot nag the owner into a change. Whether the platform's
+  agent may propose envelope changes at all, and how they are worded, is compliance text the founder
+  decides (DEC-79): [DEC-2203](../project/decisions/DEC-2203.md) item 14, Proposed. Until it is
+  accepted, no entry declares it.
+
 **The harness sets the scope; the model only narrows it.** Every read takes the run's workspace,
 agent, cut-off, data universe, and allowlist version from the harness (HI-4, HI-13). The model's
 arguments can only narrow a read inside that scope:
 
 - **Symbols** resolve in the instrument snapshot. A call naming any symbol outside the data universe
-  is refused whole, `out_of_universe`, and reads nothing.
-- **Item ids** must be ones the run already received. Any other is refused `unknown_item`, so the
-  model cannot walk the store by guessing ids.
+  (for a monitoring run, outside its held instruments and active theses) is refused whole,
+  `out_of_universe`, and reads nothing. A thesis outside it is refused as in v0.1
+  (`unknown_instrument`, or §8.5's floor).
+- **Item ids** must be ones the run already received, of the kind the tool takes (`filing_text` a
+  filing's), and a range must start inside the stored text. Anything else is refused `unknown_item`,
+  so the model cannot walk the store by guessing ids.
 - **Terms** are words of 1 to 32 bytes of letters, digits, spaces, hyphens, and periods. The data
   service matches them, case-folded, as whole words against an item's stored headline and summary,
   or a filing's form and excerpt. A term never widens a read, and it never leaves the data service
   (HI-26).
 - **Windows** end at the cut-off and filter on knowledge time (DP-1).
 
-**Results are data, marked untrusted.** A result is canonical JSON, items ordered by knowledge time,
-newest first, then item id, each marked as untrusted third-party data with its item id and source id
-(§6.4). A cap drops the oldest items first and sets `truncated`. A refused or failed tool call
-returns `{"error": "<reason>"}` and nothing else: the model learns the reason, never why the data
-service said so. A failed read (`unavailable`: the data service did not answer within
-`tool_timeout_s`, or refused) is an empty read, as in §6.3, and the run goes on.
+**Results are data, marked untrusted.** A read's result is canonical JSON, items ordered by
+knowledge time, newest first, then item id, each marked as untrusted third-party data with its item
+id and source id (§6.4). A harness cap (a tool's item cap, `max_result_bytes`, or what
+`max_run_result_bytes` has left) drops the oldest items first and sets `truncated`; the model's own
+`limit` or `count` is not a cap. A refused or failed tool call returns `{"error": "<reason>"}` and
+nothing else, and that object is what its record keeps: the model learns the reason, never why the
+data service said so. A failed read (`unavailable`: the data service did not answer within
+`tool_timeout_s`, or refused) brings no items, and the run goes on.
+
+**Every item has one identity.** An item is observed once per run, keyed as below; a later read
+that returns it again names its first observation. Each is one `ObservationRecorded` with the read's
+source, the item's instrument, the run's cut-off as `as_of`, and the item's record as `data_ref`:
+
+| Tool | One item is | Its key |
+|---|---|---|
+| `news`, `filings` | One stored item | Its item id |
+| `filing_text` | One range of one filing's text | The filing's id, the offset, and the length |
+| `bars` | One daily bar | The instrument and the bar's date |
+| `quote` | One quote | The instrument and the quote's time |
 
 **A tool call never causes a fetch.** The readers query the workspace data service's point-in-time
 store. Ingestion fills that store on its own schedule (data-plane spec §4.2) and is never triggered by
@@ -690,33 +803,37 @@ A range is an item of its own for capture and evidence, but its drift observatio
 filing's, under the filing's id, and the detector folds each item id once, so it never counts a
 filing twice.
 
-**Not yet:** a `fundamentals` tool waits for the data plane's XBRL facts (E2-9), and adding it is a
-new research entry. There is no scratch-note tool: the turns already hold the model's reasoning, and
-a note would be one more thing the model writes (DEC-2201 item 5).
+**Not yet:** a `fundamentals` read tool waits for the data plane's XBRL facts (E2-9), and adding it
+is a new research entry.
 
 ### 6.11 Loop bounds
 
-The loop bounds are pinned in the research entry, inside its content hash (§8.4). They are
-engineering values (DEC-431 item 7's rule), under every cap the founder set, which they never raise.
+The loop's shape bounds are pinned in the research entry, inside its content hash (§8.4). They are
+engineering values (DEC-431 item 7's rule). Money is not pinned: the run's cost ceiling is workspace
+configuration, under every cap above it (inference spec §7.3), and the spec hardcodes no figure
+(DEC-2203 item 9).
 
 | Bound | Default | On reaching it |
 |---|---|---|
-| `max_turns` | 6 | Turn 6 is offered no tool. A tool call in it is `schema_invalid` at the gateway, and the run ends with no output |
-| `max_tool_calls` (per run) | 12 | A reply asking for more than the run has left runs none of them; each is recorded refused `call_budget`, and the run ends with no output |
-| `max_tool_calls_per_turn` | 4 | The output schema's bound on a reply's tool calls; more is `schema_invalid`, and the run ends |
-| `max_result_bytes` (per tool call) | 24,000 | The result is cut, oldest items first, and recorded `truncated` |
-| `max_run_result_bytes` | 96,000 | Each result is cut to what the run has left; at zero it is empty and `truncated` |
-| `max_run_cost_usd` | $0.25 | The next turn's reservation does not fit under `spend_ceiling_usd`: the call ends `budget_exhausted`, and the run ends with no output |
+| `max_turns` | 6 | Turn 6 is offered the proposal tools only. After it the run ends |
+| `max_tool_calls` (per run, reads and proposals) | 16 | A reply asking for more than the run has left runs none of them; each is recorded refused `call_budget`, and the run ends with no output. Once none is left, the next turn is offered no tool and must end the run |
+| `max_tool_calls_per_turn` | 4 | The bound on a reply's tool calls; more is `schema_invalid`, and the run ends |
+| `max_theses` (per run) | 4 | v0.1's cap on theses per run (§6.5): a fifth `propose_thesis` is refused at the gateway, `schema_invalid`, and the run ends |
+| `max_result_bytes` (per read) | 24,000 | The result is cut, oldest items first, and recorded `truncated` |
+| `max_run_result_bytes` | 96,000 | Each read's result is cut to what the run has left; at zero it is empty and `truncated` |
+| `research_run_cost_cap_usd` (workspace configuration) | None: the workspace sets it. With none set, no agentic run starts (rule 3) | The next turn's reservation does not fit under `spend_ceiling_usd`: the call ends `budget_exhausted`, and the run ends with no output |
 | `max_run_s` | 900 s on the risk clock | The core cancels the run at the first tick at or after its deadline; a late reply is journaled and never used |
 | `tool_timeout_s` | 10 s | The read fails `unavailable`; the run goes on |
 
-**Every bound ends the run, except size** (HI-24, rule 3). The founder's brief is that exceeding any
-bound ends the run with no output. The model cannot know a result's size before it asks, so only
-result size trims; every bound the model's own choices reach ends the run.
+**Every bound ends the run, except size** (HI-24, rule 3). Exceeding any bound ends the run with no
+further output. The model cannot know a result's size before it asks, so only result size trims;
+every bound the model's own choices reach ends the run. Proposals a run already had mediated before
+it ended stand, as any judged output does.
 
-**The prompt stays bounded.** A turn's prompt holds the seed, at most `max_run_result_bytes` of tool
-results, and the earlier replies, each at most `max_output_tokens`. So every turn's maximum cost
-(inference spec §7.2) is bounded before the run starts, and the run's ceiling bounds their sum.
+**The prompt stays bounded.** A turn's prompt holds the seed, at most `max_run_result_bytes` of read
+results, the proposal results (each a short verdict), and the earlier replies, each at most
+`max_output_tokens`. So every turn's maximum cost (inference spec §7.2) is bounded before the run
+starts, and the run's ceiling bounds their sum.
 
 ## 7. Budgets, deadlines, and degradation
 
@@ -728,7 +845,8 @@ results, and the earlier replies, each at most `max_output_tokens`. So every tur
 | Proposal interval | `behavior.research.interval_s` | The owner, at least the policy's `research_interval_s` | The run schedule (§5.3) |
 | Runs in flight | 1 | Fixed | The core |
 | Calls per run | 1 in `single_call`; `max_turns` in `agentic` (6) | Fixed for `single_call` (§6.2); the research entry for `agentic` (§6.11) | The core |
-| Tool calls, result bytes, run cost ceiling, run deadline | §6.11's table: 12 tool calls (4 a turn), 24,000 bytes a result and 96,000 a run, $0.25, 900 s | The research entry | The core from the run's records; the gateway for the ceiling (`spend_ceiling_usd`); the readers for the caps |
+| Tool calls, result bytes, run deadline | §6.11's table: 16 tool calls (4 a turn), 4 theses, 24,000 bytes a read and 96,000 a run, 900 s | The research entry | The core from the run's records; the readers for the caps |
+| Run cost ceiling | `research_run_cost_cap_usd` | Workspace configuration; no figure is pinned or hardcoded (§6.11) | The gateway (`spend_ceiling_usd`), from the core's fold of the run's records |
 | Call deadline | The entry's `deadline_ms` | Pinned with the model (DEC-432 item 1) | The gateway (INF-3) |
 | Output tokens | The entry's `max_output_tokens` | Pinned with the model | The gateway |
 | Retrieval caps | §6.3's table | The research entry | The readers |
@@ -767,7 +885,8 @@ Exits, protection, kill switches, pending approvals, and quant models are untouc
 
 **An agentic run's bounds** (§6.11) are treated like an error kind: the run ends with no output and
 is not retried, the next run waits for its due time, and nothing else changes (HI-24). Three runs in a
-row that end on the same bound alert the operator with the bound's name, never content, because a
+row whose `ResearchRunEnded` names the same bound alert the operator with the bound's name, never
+content, because a
 pinned bound that every run reaches is a research-entry defect for a new version to fix (§8.4).
 
 **Harness treatment of each gateway error kind** ([inference spec §3.3](inference.md#33-error-kinds)):
@@ -810,14 +929,14 @@ measures mechanics only:
 | Harness check failures, by reason | No reason rises without an explanation in the change |
 | Admission verdicts | Every candidate's verdict follows from §8.5 alone (the oracle recomputes it) |
 | Injection fixtures (E19-6) | Zero admissions that cite only injected items; zero limit breaches |
-| Cost per run | Within the entry's maximum cost; for an agentic entry, within `max_run_cost_usd` |
+| Cost per run | Within the entry's maximum cost; for an agentic entry, within the evaluation workspace's `research_run_cost_cap_usd` |
 | Agentic runs: turns, tool calls, and bound hits, by bound | Reported per run. No bound is reached by more than a tenth of the set's runs without an explanation in the change |
 | Agentic runs: re-run from the record (HI-25) | Every run of the set reproduces byte for byte |
 | Agentic runs: reads injected text asked for | Zero reads outside HI-4's scope; zero admissions that cite only injected items |
 
 A regression evaluation is never evidence that theses are good; only §8.1 is (DEC-99). Its results
 are never shown to owners as performance. The first agentic entry is pinned by the internal paper
-and demo agents only after this evaluation and E19-6's bench pass on it (DEC-2201 item 13). It complements, and does not replace, the gateway's
+and demo agents only after this evaluation and E19-6's bench pass on it (DEC-2203 item 13). It complements, and does not replace, the gateway's
 evaluation gate before a model is offered ([inference spec §4.3](inference.md#43-evaluation-gate-before-a-model-is-offered)).
 
 ### 8.4 What a change is
@@ -829,6 +948,7 @@ evaluation gate before a model is offered ([inference spec §4.3](inference.md#4
 | The source allowlist | Versioned platform configuration (DEC-101), recorded in every thesis. Not a mandate version | Platform review; journaled as `ConfigSnapshotRegistered` |
 | Harness code (readers, checks, scheduler) | A platform build, named by `actor.build` on every event. Not a mandate version | CI and independent review, as for the gate |
 | A model withdrawn | `PlatformOperatorAction` `model_withdrawn`; outputs count as missing (§8.1, INF-15) | The operator |
+| Moving an agent from `single_call` to `agentic` | A new research entry, so the row above. The confirmation screen discloses what changes: the model chooses its own reads within the pinned bounds, a run may make several calls under the workspace's run ceiling, and the model may propose theses, entries, and exits that the same rules mediate | The owner, with step-up |
 
 So the platform cannot change what a running research agent is shown, how it is asked, or which
 model answers without the owner confirming a new version. And a DEC-99 pass belongs to the content
@@ -866,7 +986,10 @@ E17-8) before users' agents may pin it.
 | Bad tick | A bad bar or quote makes a thesis look corroborated | Admission is `ask` by default; the gate uses sane marks and the collar; the thesis does not size the order |
 | Model outage | The provider is down or slow | Missing means safe (HI-6); research stops; theses expire at their horizon (§7.3) |
 | Runaway cost | A crash loop or a retry storm | One run in flight; the interval counts from the last reservation, any turn's; no re-send under an old `call_id`; reservations stay counted (§5.3, inference spec §7.3) |
-| Runaway cost | An agentic run that keeps calling | `max_turns`, and `spend_ceiling_usd` on every turn: the run cannot reserve past `max_run_cost_usd`, and the founder's daily and monthly caps still bind beneath it (§6.11, inference spec §7.3) |
+| Runaway cost | An agentic run that keeps calling | `max_turns`, and `spend_ceiling_usd` on every turn: the run cannot reserve past the workspace's `research_run_cost_cap_usd`, and every daily, monthly, and deployment cap still binds beneath it (§6.11, inference spec §7.3) |
+| Bad model | Floods proposals: theses, entries, or exits | `max_theses`, `max_tool_calls`, and the per-turn bound; every thesis still needs §8.5 and its first order the admission ceiling; `propose_entry` submits nothing, so repeating it changes no order; an exit only removes its own thesis's instrument, paced, and re-entry waits for `reentry_cooldown_s` |
+| Bad model | Uses `propose_entry` to learn the account | Its result is a classification and a reason code, never a size, a price, or a dollar figure (HI-11) |
+| Bad model | Uses `note` to plant instructions for later | A note stays in its own run's record; no later run, owner, or check reads it (§6.10) |
 | Crash | The process dies mid-loop, between a turn and its tool calls, or between tool calls | The run is never resumed: recorded turns stay, reservations stay counted, no turn is re-sent under its old `call_id`, no tool call of the recorded turn runs, and the run is not judged (§5.4, HI-27) |
 
 ## 10. Interfaces
@@ -877,7 +1000,7 @@ E17-8) before users' agents may pin it.
 of a schema-valid output from the pinned model or a typed error (§3.3); no call outlives its
 deadline; reservations before the call and spend that never decreases within a risk day (INF-7,
 DEC-432 item 4); the caller appends `ModelInvocationRecorded` (§3.6); only the entry's pinned
-read-only tools, returned as validated data and never run (INF-5, v0.4); the prompt guard (§8.3). Because the founder chose one aggregator for every call (DEC-432 item 14), DEC-67 on
+tools, reads and proposals, returned as validated data and never run by the gateway (INF-5, v0.4); the prompt guard (§8.3). Because the founder chose one aggregator for every call (DEC-432 item 14), DEC-67 on
 this path rests on two of DEC-432's readings by name: item 9 (routing locked to endpoints serving
 the identical weights) and item 10 (a reported identity that differs from the pin is
 `identity_mismatch`, so missing).
@@ -892,10 +1015,10 @@ the identical weights) and item 10 (a reported identity that differs from the pi
 | `model` | The research agent's pinned id, version, and content hash |
 | `inputs` | §6.4's typed inputs |
 | `as_of` | The run's cut-off |
-| `deadline` | The call's dispatch instant plus the entry's `deadline_ms`, on the wall clock (§6.2 step 3) |
+| `deadline` | `single_call`: the call's dispatch instant plus the entry's `deadline_ms`, on the wall clock (§6.2 step 3). `agentic`: the dispatch instant plus the lesser of `deadline_ms` and the run time `r` the core handed over (§6.9 step 3) |
 | `max_output_tokens` | The entry's |
 | `turns` | `single_call`: empty. `agentic`: the transcript of earlier turns (§6.9 step 3) |
-| `tools` | `single_call`: none. `agentic`: the entry's tool declarations, or none in the last turn or with no tool call left |
+| `tools` | `single_call`: none. `agentic`: the read tools and the run kind's proposal tools; the proposal tools only in the last turn; none with no tool call left |
 | `spend_ceiling_usd` | `single_call`: none. `agentic`: the run's ceiling less its earlier turns' cost |
 
 **What this spec asks of the inference spec**, for its next revision:
@@ -914,12 +1037,15 @@ the identical weights) and item 10 (a reported identity that differs from the pi
    hold licensed text, `prompt_ref` names the rendered prompt with each licensed item's text
    replaced by its raw-bytes digest, and `request_digest` stays the digest of the full prompt. Until
    that lands, research reads no licensed text (§6.2 preconditions).
-6. **Turns and read-only tools** (DEC-2201, the founder's decision). The registry entry pins `mode`,
-   its tool declarations, and its loop bounds inside the content hash. A request carries `turns`,
-   the tools offered in that turn, and `spend_ceiling_usd`, all in the canonical request. A reply is
-   either the final output or one to `max_tool_calls_per_turn` tool calls, each naming an offered
-   tool with arguments valid against its pinned schema, and the gateway runs none of them; anything
-   else is `schema_invalid`. Answered by inference spec v0.4 (INF-5, §3.1, §3.2, §4.1, §6, §7.3).
+6. **Turns and pinned tools** (DEC-2203, the founder's decision). The registry entry pins `mode`,
+   its tool declarations (reads and proposals, §6.10), and its loop bounds inside the content hash;
+   a `single_call` entry's hash is unchanged. A request carries `turns`, the tools offered in that
+   turn, and `spend_ceiling_usd`. `turns` and the offered `tools` are in the canonical request, so
+   a recorded turn is found again by its `request_digest` (HI-25); `spend_ceiling_usd` is not, since
+   it only decides whether the call is made. A reply is either the final output or one to
+   `max_tool_calls_per_turn` tool calls, each naming an offered tool with arguments valid against
+   its pinned schema, and the gateway runs none of them; anything else is `schema_invalid`.
+   Answered by inference spec v0.4 (INF-5, §3.1, §3.2, §4.1, §6, §7.3).
 
 ### 10.2 The data plane ([data-plane spec](data-plane.md))
 
@@ -946,7 +1072,7 @@ the identical weights) and item 10 (a reported identity that differs from the pi
   verdicts (E19-5). It is unchanged otherwise.
 - **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8, closed in
   journal spec v0.46 §9.19, registration in `mandate-journal` pending) and an
-  invalidation verdict (E19-5), and `ToolCallRecorded` (journal spec v0.48 §9.21, registration in
+  invalidation verdict (E19-5), and `ToolCallRecorded` (journal spec v0.49 §9.22, registration in
   `mandate-journal` pending, E19-13). `ObservationRecorded` exists and is closed (journal spec §9.1); it
   needs no new member, because the drift detector's typed observation is the artifact it names
   (§6.3).
@@ -963,7 +1089,7 @@ As of 2026-10-03.
 | Thesis records | **Specified:** journal spec §9.4 is closed. The `mandate-journal` registration is in progress (DEC-414) |
 | `ModelInvocationRecorded` | **Specified:** journal spec v0.46 §9.19 closes it and the meter stream (DEC-998). The `mandate-journal` registration is pending (E15-8) |
 | Model gateway | **Specified as a draft:** [inference spec](inference.md) v0.1; no code (E15-6 to E15-10) |
-| Agentic research loop | **Specified** (v0.2, §6.9 to §6.11, DEC-2201); no code. The `single_call` path in `mandate-research-run` calls through `mandate-gateway` on the recorded fake (DEC-1120). E19-13 adds the loop state, the tool dispatch over read-only ports, the gateway's turn shape, `ToolCallRecorded`'s registration, and recorded multi-turn fixtures |
+| Agentic research loop | **Specified** (v0.2, §6.9 to §6.11, DEC-2203); no code. `ask_owner` and `propose_mandate_change` are specified and not declared (E19-14, DEC-2203 item 14). The `single_call` path in `mandate-research-run` calls through `mandate-gateway` on the recorded fake (DEC-1120). E19-13 adds the loop state, the tool dispatch over read-only ports, the gateway's turn shape, `ToolCallRecorded`'s registration, and recorded multi-turn fixtures |
 | LLM research loop | **Spike only:** `python/research_spike` (E17-0) gathers bars and news, makes one call per UTC day through an aggregator, parses strictly, sizes by a fixed rule, and keeps its own JSONL journal. It is not product code and has no gate; its paper runs await the founder's go |
 | Retrieval plan, readers, checks, run scheduler in Rust | **Planned** (E19-2, E19-3) |
 | News, filings, screens, allowlist | **Specified as a draft** ([data-plane spec](data-plane.md) v0.1); no code. `mandate-marketdata` downloads Alpaca historical bars into Parquet; there is no news or filings store and no allowlist file |
@@ -992,11 +1118,17 @@ rule, or closes a gap by the reading that adds no risk.
 | 18 | Where the hosted fast tier's call runs (DEC-432 item 13) | Off the trading tick, its output arriving as an input, missing or late meaning missing, and no exit's latency depending on a provider (§6.8, HI-21). In force now |
 | 19 | Who makes the agent-scoped kill switch work while the agent process is down (§13 item 1) | The executor flattens the agent from the control stream after a deadline, with the deployment manager's restart as the second line. Meanwhile it is disclosed, and E19-8 is Must before live trading |
 
-**Decided by the founder on 2026-10-17** ([DEC-2201](../project/decisions/DEC-2201.md) item 1): "it has
-to be agentic harness, as what we are selling/the product is agent harness for trading." The
-research run is a bounded agent loop over read-only, allowlisted tools (§6.9 to §6.11). Items 2 to 13
-of DEC-2201 are agent readings under DEC-79 and DEC-176 that carry it out without moving a risk
-boundary; DEC-431 item 6 (one call per run) is superseded.
+**Decided by the founder on 2026-10-17** ([DEC-2203](../project/decisions/DEC-2203.md) item 1, where
+the founder's words are quoted): the research harness is agentic, "like Claude Code for trading".
+The research run is a bounded agent loop over pinned read and proposal tools (§6.9 to §6.11). The
+founder also clarified that DEC-997's $50 a month is the demo deployment's cap, not a customer limit
+(DEC-2203 item 9). The other items of DEC-2203 are agent readings under DEC-79 and DEC-176 that carry
+these out without moving a risk boundary; DEC-431 item 6 (one call per run) is superseded.
+
+**Proposed for the founder** (DEC-2203): item 14, whether the agent may propose mandate changes at
+all and how they are worded (compliance, DEC-79), with `propose_mandate_change` undeclared
+meanwhile; item 15, who pays for a customer's model calls (pricing), with both a plan and the
+customer's own key served by `key_owner` meanwhile.
 
 Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15, not repeated here.
 
@@ -1021,12 +1153,19 @@ Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15
    source.
 5. **Drift escalation** is DEC-266 item 4, the founder's. Until then the detector computes and
    reports, and every thin-slice admission is `ask` under the internal research profile.
-6. **Answered** ([DEC-2201](../project/decisions/DEC-2201.md), the founder, 2026-10-17): runs may be
-   agentic, with reads through pinned read-only tools (§6.9 to §6.11), and inference spec v0.4 makes
+6. **Answered** ([DEC-2203](../project/decisions/DEC-2203.md), the founder, 2026-10-17): runs may be
+   agentic, with pinned read and proposal tools (§6.9 to §6.11), and inference spec v0.4 makes
    the matching change.
 7. **Where research runs.** This spec keeps the worker inside the agent process (DEC-08). If memory
    or CPU limits make that costly, a separate research process per agent could hand results through
    the journal. The invariants do not change.
+8. **Resuming an agentic run after a crash** (§6.9). A run is never resumed today, because the
+   turn in flight has a reservation but no journaled start, so neither its cost nor its reply can be
+   attributed to the run. Resuming needs a journaled turn start naming the call id before the call
+   leaves, so the ceiling fold can count an open reservation; then a restart within the run's
+   deadline could continue from the last committed step with a new call id. E19-14 holds it.
+9. **A monitoring interval of its own** (§6.9) is a new envelope field under `behavior.research`,
+   so a mandate spec change, E19-14.
 
 ## 14. Backlog
 
@@ -1034,4 +1173,6 @@ The work is epic **E19 Agent harness** in the [backlog](../project/06-backlog-v1
 Existing stories keep their ids: E6-1 (the runtime), E15-1 (the LLM research signal model), E15-3
 (scorecards), E15-6 to E15-10 (the gateway, the registry, `ModelInvocationRecorded`, metering,
 locality), E17-2 (the thesis contract), E17-5 (drift), E17-7 (vetted sources), and E17-8 (forward
-paper). E19 holds only what none of them covered. E19-13 is v0.2's agentic loop (DEC-2201).
+paper). E19 holds only what none of them covered. E19-13 is v0.2's agentic loop (DEC-2203);
+E19-14 holds its follow-ups: `ask_owner`, `propose_mandate_change` once the founder decides, a
+monitoring interval, and resuming after a crash.

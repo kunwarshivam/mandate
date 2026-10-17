@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2201](../project/decisions/DEC-2201.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
+| **Status** | Draft v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
 | **Owner** | Engineering |
 | **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 accepted by the agent; items 15 to 20 decided by the founder on 2026-10-03; items 21 and 22 Proposed for the founder) |
 | **Backlog** | E2-5 to E2-19 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
@@ -343,7 +343,7 @@ interface in the workspace data service. The agent harness spec defines the tool
 
 **A query reads the store and never fetches.** It answers from what ingestion (§4.2) has already
 stored, as of `as_of`. No query, whatever its filters, makes the data service fetch from a source,
-so a filter the research agent chose never leaves the workspace deployment (DP-9, DEC-2201 item 4).
+so a filter the research agent chose never leaves the workspace deployment (DP-9, DEC-2203 item 4).
 
 Every item returned is journaled as `ObservationRecorded` (source, instrument, `as_of`, `data_ref`)
 **before** the model reads it.
