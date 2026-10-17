@@ -338,6 +338,7 @@ fn watched_to(now: &str, bound: &str, place: bool, door: Door, fill: Fill) -> Wa
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: broker.clone(),
     };

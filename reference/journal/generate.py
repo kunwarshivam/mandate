@@ -35,6 +35,7 @@ import account
 import approval
 import audit
 import canceled
+import control_plane
 import connections
 import clients
 import cold
@@ -3832,6 +3833,7 @@ def render(
     timeout_section: dict,
     requests_section: dict,
     cancel_section: dict,
+    control_plane_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
@@ -3863,6 +3865,7 @@ def render(
             "approval_timeouts": timeout_section,
             "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
+            "control_plane": control_plane_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
@@ -3925,6 +3928,7 @@ def main(argv: list[str] | None = None) -> int:
     timeout_section = timeouts.build_section()
     requests_section = requests.build_section()
     cancel_section = canceled.build_section()
+    control_plane_section = control_plane.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
@@ -3965,6 +3969,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
     problems += canceled.run_mutants(cancel_section)
+    problems += control_plane.check_section(control_plane_section)
+    problems += control_plane.run_mutants(control_plane_section)
     problems += gateway.check_section(gateway_section)
     problems += gateway.run_mutants(gateway_section)
     problems += check_broker_profile(broker_profile)
@@ -4014,6 +4020,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout_section,
         requests_section,
         cancel_section,
+        control_plane_section,
         broker_profile,
         connections_section,
         request_section,
@@ -4043,6 +4050,7 @@ def main(argv: list[str] | None = None) -> int:
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
         or canceled.check_section(reread["approval_cancellations"])
+        or control_plane.check_section(reread["control_plane"])
         or requests.check_section(reread["approval_requests"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
@@ -4114,6 +4122,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(cancel_section['invalid_drafts'])} invalid and {len(cancel_section['valid_drafts'])} valid "
         f"approval-cancel drafts, {len(canceled.VALIDATOR_MUTANTS)} validator and "
         f"{len(canceled.vector_mutants(cancel_section))} vector mutants caught; "
+        f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
+        f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
+        f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "
         f"{len(gateway_section['invalid_drafts'])} invalid and {len(gateway_section['valid_drafts'])} valid "
         f"model-gateway drafts, {len(gateway_section['agent_streams'])} agent and {len(gateway_section['streams'])} meter streams, "
         f"{len(gateway_section['folds'])} spend folds, {gateway_section['fuzz']['runs']} fuzzed meter streams, "

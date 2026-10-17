@@ -9,6 +9,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -107,4 +108,57 @@ fn sigterm_drains_the_ready_process_and_it_exits_drained() {
     let (status, stderr) = child.exited();
     assert_eq!(status.code(), Some(0));
     assert_eq!(stderr, "drained\n");
+}
+
+fn scrape(addr: &str) -> String {
+    let mut stream = TcpStream::connect(addr).unwrap_or_else(|e| panic!("connect: {e}"));
+    stream
+        .write_all(b"GET /metrics HTTP/1.1\r\n\r\n")
+        .unwrap_or_else(|e| panic!("write: {e}"));
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .unwrap_or_else(|e| panic!("read: {e}"));
+    response
+}
+
+#[test]
+fn the_process_serves_its_metrics_on_loopback() {
+    let mut child = Guard::spawn(&["--fixture"]);
+    let stdout = child.0.stdout.take().unwrap_or_else(|| unreachable!());
+    let (send, lines) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if send.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let next = || {
+        lines
+            .recv_timeout(BOUND)
+            .unwrap_or_else(|e| panic!("no announce line: {e}"))
+    };
+    assert!(next().starts_with("health 127.0.0.1:"));
+    let metrics = next();
+    let addr = metrics
+        .strip_prefix("metrics ")
+        .unwrap_or_else(|| panic!("announce line: {metrics:?}"))
+        .to_owned();
+    assert!(addr.starts_with("127.0.0.1:"), "{addr}");
+    let wanted = r#"mandate_process_reconciliations_total{process_type="agent_process",reason_code="completed"} 1"#;
+    let deadline = Instant::now() + BOUND;
+    let mut response = scrape(&addr);
+    while !response.contains(wanted) {
+        assert!(Instant::now() < deadline, "never reconciled: {response}");
+        thread::sleep(Duration::from_millis(20));
+        response = scrape(&addr);
+    }
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(
+        response.contains(
+            r#"mandate_process_build_info{process_type="agent_process",release="0.0.0"} 1"#
+        ),
+        "{response}"
+    );
 }
