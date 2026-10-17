@@ -1,4 +1,4 @@
-"""Journal spec v0.48 §9.18's reference vectors for the backtest and evaluation records (DEC-1001,
+"""Journal spec v0.49 §9.18's reference vectors for the backtest and evaluation records (DEC-1001,
 DEC-1002): `BacktestRunRecorded`, one backtest of a mandate version, and `EvaluationRunRecorded`,
 one forward-paper evaluation, both on the workspace control stream at schema version 1, each naming
 its report by artifact and the digests that reproduce it. `theses_head` holds bare record hashes
@@ -47,7 +47,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.48 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)"
+SPEC = "docs/specs/journal.md v0.49 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)"
 AT = "2026-10-17T15:30:00.000000000Z"
 CUT_OFF = "2026-10-16T20:00:00.000000000Z"
 CAUSE = "01J8Z5B0A000000000000000Q1"
