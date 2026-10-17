@@ -340,7 +340,8 @@ is a credential:
   repository holds, or this page.
 
 Each `mandate` gesture that commits shows a code first and commits only when it is run again with
-`--code`. Every command below states `--environment live`.
+`--code`. Every command that takes an environment states `--environment live`; the
+download, `inspect`, the preflight and the run read it from the workspace and the mandate.
 
 **A. Before the day (laptop prerequisites).**
 
@@ -377,11 +378,12 @@ Each `mandate` gesture that commits shows a code first and commits only when it 
 **B. The workspace and its configuration (once).**
 
 1. `mandate workspace open --workspace ws_live --environment live "${J[@]}"` prints `opened ctl:ws_live`.
-2. The bars. Pick a cheap broad ETF priced under about 90 USD a share (DEC-529 item 2) as `<TICKER>`.
+2. The bars, downloaded on the run day itself so they end on the last completed session. Pick a
+   cheap broad ETF priced under about 90 USD a share (DEC-529 item 2) as `<TICKER>`.
 
    ```bash
    mandate download --symbols <TICKER> --asset-class us-equity --kind bars --timeframe 1Day \
-     --feed iex --start <a date 60 sessions back> --end <yesterday> --out "$MARKET"
+     --feed iex --start <a date 60 sessions back> --end <the last completed session> --out "$MARKET"
    mandate inspect "$MARKET/alpaca/iex/bars-1Day/<TICKER>"
    ```
 
@@ -534,8 +536,9 @@ Each `mandate` gesture that commits shows a code first and commits only when it 
 
    Compare them with Robinhood's history. A difference is a finding to record, never to edit.
 4. **The restart sends nothing.** `MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> "${RUN[@]}"
-   --place-one-order` is refused before any place call: `the account the connection binds is not
-   flat` (DEC-470 item 1).
+   --place-one-order` is refused before any place call. Either refusal passes: `the account the
+   connection binds is not flat` (DEC-470 item 1) or `the connection record is spent` (DEC-910 item
+   3). A sold-out position that Robinhood still lists as a zero row reads not flat (R23).
 5. Record the evidence (no account number) in R0's docs PR.
 
 **G. While the share is held, and the kill switch.**
