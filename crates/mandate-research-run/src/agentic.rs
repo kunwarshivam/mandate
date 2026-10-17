@@ -445,6 +445,14 @@ impl RunState {
         &self.start
     }
 
+    /// The read result bytes the run has left, which a dispatch carries (§6.9 step 5).
+    pub fn result_bytes_left(&self) -> u32 {
+        self.start
+            .bounds
+            .max_run_result_bytes
+            .saturating_sub(self.read_bytes)
+    }
+
     /// Takes the seed's items (§6.9 step 2), so a later `news.get` or `filings.get` may name them.
     ///
     /// # Errors
@@ -622,14 +630,22 @@ impl RunState {
         Ok(self.after_dispatch())
     }
 
-    /// Ends the run: which pending theses to commit, which to discard (§6.9 step 6).
+    /// Ends the run: which pending theses to commit, which to discard (§6.9 step 6). A `done` end
+    /// is only the one the loop itself decided, so no caller can commit theses on a run a bound, an
+    /// error, or a cancellation ended (HI-9); any other end discards, and is always accepted.
     ///
     /// # Errors
-    /// [`ResearchRunError::LoopOrder`] for a run that has already ended.
+    /// [`ResearchRunError::LoopOrder`] for a run that has already ended, or a `done` end the loop
+    /// did not decide.
     pub fn end(&mut self, reason: EndReason) -> Result<EndPlan, ResearchRunError> {
         if self.ended.is_some() {
             return Err(ResearchRunError::LoopOrder {
                 what: "a second end",
+            });
+        }
+        if matches!(reason, EndReason::Done(_)) && self.stop != Some(reason) {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a done end the loop did not decide",
             });
         }
         self.ended = Some(reason);
@@ -743,7 +759,9 @@ impl RunState {
     }
 
     /// The code a read is refused before it runs, if any: a symbol outside the run's frozen scope,
-    /// or an item the run never received of the kind the tool takes (§6.10).
+    /// or an item the run never received of the kind the tool takes (§6.10). Arguments the
+    /// gateway's schema check should already have refused (unparseable, a member missing or of the
+    /// wrong type, no symbol) prove nothing in scope, so they are refused the same way.
     fn screen(&self, call: &ToolCall) -> Option<Code> {
         let arguments = mandate_canon::parse(call.arguments.as_bytes()).ok();
         let member = |name: &str| arguments.as_ref().and_then(|value| value.get(name));
@@ -854,11 +872,7 @@ impl RunState {
             return Next::End(reason);
         }
         Next::Turn {
-            result_bytes_left: self
-                .start
-                .bounds
-                .max_run_result_bytes
-                .saturating_sub(self.read_bytes),
+            result_bytes_left: self.result_bytes_left(),
         }
     }
 }
