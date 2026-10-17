@@ -319,8 +319,9 @@ DEC-261 item 9.
 
 ### 3.8 The closed message set
 
-Every message on the link, its direction, and what it may cause on the site. Names are provisional
-until the journal spec registers the events (E20-3). Every event in the "Journaled" column is
+Every message on the link, its direction, and what it may cause on the site. Journal spec v0.44
+§9.17 registers the events, closed, on each covered workspace's control stream (E20-3,
+[DEC-981](../project/decisions/DEC-981.md)). Every event in the "Journaled" column is
 appended by workspace control services, the control stream's single writer, never by `cp-agent`.
 
 | Message | Direction | Signed by | Journaled on the site as | Allowed effect on the site |
@@ -335,7 +336,7 @@ appended by workspace control services, the control stream's single writer, neve
 | `ReleaseManifest` | In | Release key | `ReleaseOffered`; `ReleaseInstalled` when the site installs | Offer to the site's operator or update window. Never installs by itself in hybrid |
 | `ReleaseWithdrawn` | In | Release key | `ReleaseWithdrawnNoticed` | Refuse new installs of it; alert |
 | `CatalogEntry` | In | Release or registry key | `CatalogEntryRegistered` (kind, content hash, sequence), so CP-9 has a journaled highest sequence per kind. A registry entry a mandate later pins is still registered as `ConfigSnapshotRegistered` (existing), which carries no sequence | Becomes selectable after the local evaluation gate and the owner's pin (inference spec §4.2). Never changes an existing pin |
-| `DataBundle` | In | Data key | `DataBundleImported` (bundle digest, kind, sequence), journaled before any byte of the bundle is used, so CP-9 has a journaled highest sequence and an observation can name its bundle (data plane spec §6.1) | New data for queries. Never an order input except through a thesis that passes every check (DP-8) |
+| `DataBundle` | In | Data key | `DataBundleImported` (dataset, bundle digest, sequence), journaled before any byte of the bundle is used, so CP-9 has a journaled highest sequence and an observation can name its bundle (data plane spec §6.1) | New data for queries. Never an order input except through a thesis that passes every check (DP-8) |
 | `Receipt` | In | Plane key | Not journaled: stored with the report or anchor | None. Not an instruction |
 
 Any other message, or any field outside its schema, is refused and journaled as

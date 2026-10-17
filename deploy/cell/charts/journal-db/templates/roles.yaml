@@ -1,0 +1,46 @@
+{{- /*
+The journal's roles (journal spec §6.1, infrastructure §3.5), from files/roles.sql, which
+`cargo xtask cell generate` writes from processes.json and the Compose file's Postgres runs too.
+CloudNativePG runs it once at bootstrap, as the superuser in the journal database.
+*/ -}}
+{{- define "journal.rolesConfigMap" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journal-roles
+  labels:
+    {{- include "journal.labels" . | nindent 4 }}
+data:
+  roles.sql: {{ .Files.Get "files/roles.sql" | quote }}
+{{- end -}}
+{{- /*
+One credential per role, made here: a random password, kept on upgrade by reading the Secret
+back, and a pgpass line any libpq or sqlx client reads from a mounted file.
+*/ -}}
+{{- define "journal.roleSecret" -}}
+{{- $name := printf "journal-role-%s" (.role | replace "_" "-") -}}
+{{- $existing := lookup "v1" "Secret" .root.Release.Namespace $name -}}
+{{- $password := randAlphaNum 40 -}}
+{{- if and $existing $existing.data -}}
+{{- $password = b64dec (get $existing.data "password") -}}
+{{- end -}}
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/basic-auth
+metadata:
+  name: {{ $name | quote }}
+  labels:
+    {{- include "journal.labels" .root | nindent 4 }}
+    cnpg.io/reload: "true"
+stringData:
+  username: {{ .role | quote }}
+  password: {{ $password | quote }}
+  pgpass: {{ printf "*:*:mandate:%s:%s\n" .role $password | quote }}
+{{- end -}}
+---
+{{ include "journal.emit" (include "journal.rolesConfigMap" .) }}
+{{- $root := . }}
+{{- range (prepend (include "journal.roles" . | fromJsonArray) "mandate_migrator") }}
+---
+{{ include "journal.emit" (include "journal.roleSecret" (dict "root" $root "role" .)) }}
+{{- end }}

@@ -1,0 +1,56 @@
+{{- /*
+The migration Job (§7.2, OPS-13): a pre-install and pre-upgrade hook, so it finishes before any
+process is created or rolled, and no process ever migrates at start. It runs as the
+migration-owner role, applying each file of migrations/ once, in order, recorded with its SHA-256
+in deploy.migrations, as deploy/bootstrap.sh does on the demo host. Its own network policies are
+hooks too, made before it, because the release's policies do not exist yet on a first install.
+*/ -}}
+{{- define "mandate.migrations" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migrations
+  labels:
+    app.kubernetes.io/name: mandate-workspace
+    app.kubernetes.io/instance: {{ .root.Release.Name | quote }}
+    mandate.dev/workspace: {{ .root.Values.workspace | quote }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  migrate.sh: {{ .root.Files.Get "files/migrate.sh" | quote }}
+  {{- range $path, $_ := .root.Files.Glob "files/migrations/*.sql" }}
+  {{ base $path }}: {{ $.root.Files.Get $path | quote }}
+  {{- end }}
+{{- end -}}
+{{- define "mandate.migrateJob" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 300
+  template:
+    {{- $mounts := "- {name: migrations, mountPath: /migrations, readOnly: true}" }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" "migrate" "command" (list "bash" "/migrations/migrate.sh") "mounts" $mounts) }}
+    {{- $volumes := "- {name: migrations, configMap: {name: migrations, defaultMode: 292}}" }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container "volumes" $volumes) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "migration") | fromJsonArray) }}
+{{- $ctx := dict "root" $root "p" . }}
+---
+{{ include "mandate.emit" (include "mandate.migrations" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.egressPolicy" (merge (dict "annotations" (dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-weight" "-10" "helm.sh/hook-delete-policy" "before-hook-creation")) $ctx)) }}
+---
+{{ include "mandate.emit" (include "mandate.migrateJob" $ctx) }}
+{{- end }}
