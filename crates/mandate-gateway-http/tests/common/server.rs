@@ -56,6 +56,9 @@ pub enum Reply {
     },
     /// Sends `body` with no declared length, its end marked by closing the connection.
     Unsized(Vec<u8>),
+    /// Answers `body` without `Connection: close`, keeps the connection open `linger_ms`, reads
+    /// nothing more, and closes it: a reused connection would fail after its second request.
+    KeepAlive { body: Vec<u8>, linger_ms: u64 },
     /// Declares `declared` body bytes, sends `body` (fewer), and drops the connection.
     CutShort {
         status: u16,
@@ -197,14 +200,22 @@ fn handle(
             delay_ms,
         } => {
             std::thread::sleep(Duration::from_millis(*delay_ms));
-            let _ = tls.write_all(&head(*status, headers, Some(body.len())));
+            let _ = tls.write_all(&head(*status, headers, Some(body.len()), true));
             let _ = tls.write_all(body);
             tls.conn.send_close_notify();
             let _ = tls.flush();
         }
         Reply::Unsized(body) => {
-            let _ = tls.write_all(&head(200, &[], None));
+            let _ = tls.write_all(&head(200, &[], None, true));
             let _ = tls.write_all(body);
+            tls.conn.send_close_notify();
+            let _ = tls.flush();
+        }
+        Reply::KeepAlive { body, linger_ms } => {
+            let _ = tls.write_all(&head(200, &[], Some(body.len()), false));
+            let _ = tls.write_all(body);
+            let _ = tls.flush();
+            std::thread::sleep(Duration::from_millis(*linger_ms));
             tls.conn.send_close_notify();
             let _ = tls.flush();
         }
@@ -213,7 +224,7 @@ fn handle(
             declared,
             body,
         } => {
-            let _ = tls.write_all(&head(*status, &[], Some(*declared)));
+            let _ = tls.write_all(&head(*status, &[], Some(*declared), true));
             let _ = tls.write_all(body);
             let _ = tls.flush();
             let _ = tls.sock.shutdown(std::net::Shutdown::Both);
@@ -221,7 +232,7 @@ fn handle(
     }
 }
 
-fn head(status: u16, headers: &[(String, String)], length: Option<usize>) -> Vec<u8> {
+fn head(status: u16, headers: &[(String, String)], length: Option<usize>, close: bool) -> Vec<u8> {
     let mut head = format!("HTTP/1.1 {status} Scripted\r\n");
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
@@ -229,7 +240,10 @@ fn head(status: u16, headers: &[(String, String)], length: Option<usize>) -> Vec
     if let Some(length) = length {
         head.push_str(&format!("Content-Length: {length}\r\n"));
     }
-    head.push_str("Connection: close\r\n\r\n");
+    if close {
+        head.push_str("Connection: close\r\n");
+    }
+    head.push_str("\r\n");
     head.into_bytes()
 }
 

@@ -12,7 +12,7 @@ mod common;
 use std::time::Instant;
 
 use common::server::{Reply, closed_port, pki, serve};
-use common::{PATH, in_ms, request, send, status_of, trusting};
+use common::{PATH, in_ms, request, send, sentinel, status_of, trusting};
 use mandate_gateway::provider::{Clock, Delivery, HttpRequest, ProviderKey, Transport};
 use mandate_gateway_http::{HttpsTransport, MAX_BODY_BYTES, SetupError, SystemClock, TlsRoots};
 
@@ -131,9 +131,11 @@ fn a_redirect_is_a_status_and_is_not_followed() {
     );
     assert_eq!(status_of(&delivery), Some(307));
     assert_eq!(redirecting.seen().len(), 1);
-    assert!(
-        server.seen().is_empty(),
-        "the redirect's target saw nothing"
+    sentinel(&pki, server.port);
+    assert_eq!(
+        server.seen().len(),
+        1,
+        "the redirect's target saw only the sentinel"
     );
 }
 
@@ -234,7 +236,8 @@ fn with_no_time_left_nothing_is_sent() {
         &mut SystemClock,
     );
     assert_eq!(delivery, Delivery::TimedOut);
-    assert_eq!(server.handshakes(), 0, "nothing was sent");
+    sentinel(&pki, server.port);
+    assert_eq!(server.handshakes(), 1, "only the sentinel was sent");
 }
 
 #[test]
@@ -252,7 +255,10 @@ fn a_refused_connection_is_connect_failed() {
 fn an_untrusted_server_is_connect_failed_and_is_sent_nothing() {
     let pki = pki();
     let stranger = common::server::pki();
-    let server = serve(&pki, vec![Reply::ok(b"{}"), Reply::ok(b"{}")]);
+    let server = serve(
+        &pki,
+        vec![Reply::ok(b"{}"), Reply::ok(b"{}"), Reply::ok(b"{}")],
+    );
     let mut platform = HttpsTransport::new(TlsRoots::Platform).unwrap();
     assert_eq!(
         send(&mut platform, &request(server.port, b"{}"), Some(&key())),
@@ -268,9 +274,16 @@ fn an_untrusted_server_is_connect_failed_and_is_sent_nothing() {
         Delivery::ConnectFailed,
         "another authority's roots refuse it too"
     );
-    assert!(
-        server.seen().is_empty(),
-        "no request reached an untrusted server"
+    sentinel(&pki, server.port);
+    assert_eq!(
+        server.seen().len(),
+        1,
+        "no request reached the server it did not trust; only the sentinel did"
+    );
+    assert_eq!(
+        server.handshakes(),
+        1,
+        "neither refused handshake completed"
     );
 }
 
@@ -342,7 +355,12 @@ fn a_host_or_path_outside_the_rules_or_a_bad_key_sends_nothing() {
         send(&mut transport, &request(port, b"{}"), Some(&bad_key)),
         Delivery::ConnectFailed
     );
-    assert_eq!(server.handshakes(), 0, "none of them was sent");
+    sentinel(&pki, server.port);
+    assert_eq!(
+        server.handshakes(),
+        1,
+        "none of them was sent; only the sentinel"
+    );
 }
 
 #[test]
@@ -388,4 +406,91 @@ fn the_key_never_prints() {
     let shown = format!("{transport:?}");
     assert!(!shown.contains(KEY), "{shown}");
     assert!(!format!("{:?}", key()).contains(KEY));
+}
+
+#[test]
+fn an_idle_connection_is_never_reused_by_the_next_attempt() {
+    let pki = pki();
+    let server = serve(
+        &pki,
+        vec![
+            Reply::KeepAlive {
+                body: b"{\"first\":1}".to_vec(),
+                linger_ms: 500,
+            },
+            Reply::ok(b"{\"second\":2}"),
+        ],
+    );
+    let mut transport = trusting(&pki);
+    let req = request(server.port, b"{}");
+    assert_eq!(
+        status_of(&send(&mut transport, &req, Some(&key()))),
+        Some(200)
+    );
+    assert_eq!(
+        send(&mut transport, &req, Some(&key())),
+        Delivery::Response {
+            status: 200,
+            body: b"{\"second\":2}".to_vec(),
+            retry_after_ms: None,
+        },
+        "the second attempt opened its own connection"
+    );
+    assert_eq!(server.handshakes(), 2);
+}
+
+const PROXY_CHILD: &str = "MANDATE_GATEWAY_HTTP_PROXY_CHILD";
+
+/// Runs itself again in a child process whose environment names a proxy that refuses every
+/// connection, since the workspace forbids the `unsafe` that setting it in-process would need.
+#[test]
+fn a_proxy_named_in_the_environment_is_not_used() {
+    if std::env::var_os(PROXY_CHILD).is_some() {
+        let pki = pki();
+        let server = serve(&pki, vec![Reply::ok(b"{}")]);
+        let delivery = send(
+            &mut trusting(&pki),
+            &request(server.port, b"{}"),
+            Some(&key()),
+        );
+        assert_eq!(
+            status_of(&delivery),
+            Some(200),
+            "sent directly, not to the proxy"
+        );
+        assert_eq!(server.seen().len(), 1);
+        return;
+    }
+    let refusing = format!("http://127.0.0.1:{}", closed_port());
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+    child
+        .args([
+            "--exact",
+            "a_proxy_named_in_the_environment_is_not_used",
+            "--nocapture",
+        ])
+        .env(PROXY_CHILD, "1")
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy");
+    for name in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        child.env(name, &refusing);
+    }
+    let output = child.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("1 passed"),
+        "the child ran the test: {stdout}"
+    );
 }

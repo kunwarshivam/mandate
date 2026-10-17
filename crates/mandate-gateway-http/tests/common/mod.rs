@@ -54,6 +54,14 @@ pub fn send(
     transport.send(request, key, in_ms(10_000), &mut SystemClock)
 }
 
+/// A trusted request that must be answered `200`. The server takes connections one at a time, in
+/// order, so once this one is answered every earlier connection to `port` has been handled: what
+/// the server recorded before it is final, and a "nothing was sent" check is not vacuous.
+pub fn sentinel(pki: &Pki, port: u16) {
+    let delivery = send(&mut trusting(pki), &request(port, b"{}"), None);
+    assert_eq!(status_of(&delivery), Some(200), "the sentinel request");
+}
+
 pub fn status_of(delivery: &Delivery) -> Option<u16> {
     match delivery {
         Delivery::Response { status, .. } => Some(*status),

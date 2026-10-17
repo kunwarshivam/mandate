@@ -81,13 +81,17 @@ pub struct HttpsTransport {
 }
 
 impl HttpsTransport {
-    /// HTTPS only, no proxy, no redirect, TLS on the `ring` provider, trusting `roots`.
+    /// HTTPS only, no proxy, no redirect, no idle connection kept, TLS on the `ring` provider,
+    /// trusting `roots`. Keeping no idle connection matters: the runtime runs only inside an
+    /// attempt, so a connection the server closed between attempts would be handed to the next one
+    /// and fail after sending, an unbilled attempt counted at its maximum (DEC-2200 item 5).
     pub fn new(roots: TlsRoots) -> Result<Self, SetupError> {
         let _already_installed = rustls::crypto::ring::default_provider().install_default();
         let builder = reqwest::Client::builder()
             .https_only(true)
             .no_proxy()
-            .redirect(redirect::Policy::none());
+            .redirect(redirect::Policy::none())
+            .pool_max_idle_per_host(0);
         let builder = match roots {
             TlsRoots::Platform => builder,
             TlsRoots::Only(certificates) => builder.tls_backend_preconfigured(only(&certificates)?),
@@ -193,10 +197,12 @@ impl Transport for HttpsTransport {
         let body = request.body.clone();
         let this = &*self;
         std::thread::scope(|scope| {
-            scope
-                .spawn(|| this.runtime.block_on(this.attempt(url, body, key, budget)))
-                .join()
-                .unwrap_or(Delivery::TimedOut)
+            match std::thread::Builder::new().spawn_scoped(scope, || {
+                this.runtime.block_on(this.attempt(url, body, key, budget))
+            }) {
+                Ok(attempt) => attempt.join().unwrap_or(Delivery::TimedOut),
+                Err(_) => Delivery::ConnectFailed,
+            }
         })
     }
 }
