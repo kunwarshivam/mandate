@@ -1,0 +1,55 @@
+{{- /*
+One-off runs (§3.1: Phase 1's control services are the founder's CLI; E21-34's kill switch runs
+the same way). Rendered only when `run.id` is set, so a plain install has none. `cargo xtask cell
+drill` renders this file with `--show-only` and applies it.
+*/ -}}
+{{- define "mandate.run" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s" .p.name .root.Values.run.id | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    {{- $mounts := "- {name: work, mountPath: /work}" }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" .root.Values.run.args "mounts" $mounts) }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container) | nindent 4 }}
+{{- end -}}
+{{- define "mandate.verify" -}}
+{{- $ctx := . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s" .p.name .root.Values.verify.id | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    {{- $mounts := "- {name: work, mountPath: /work}" }}
+    {{- $exports := "" }}
+    {{- $verifies := "" }}
+    {{- range $i, $stream := .root.Values.verify.streams }}
+    {{- $file := printf "/work/segment-%d.jsonl" $i }}
+    {{- $exports = print $exports "\n" (include "mandate.container" (dict "root" $ctx.root "p" $ctx.p "name" (printf "export-%d" $i) "args" (list "journal" "export" $stream $file "--journal" "$(MANDATE_JOURNAL_DSN)") "mounts" $mounts)) }}
+    {{- $verifies = print $verifies "\n" (include "mandate.container" (dict "root" $ctx.root "p" $ctx.p "name" (printf "verify-%d" $i) "args" (list "journal" "verify" $file) "mounts" $mounts)) }}
+    {{- end }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "initContainers" $exports "containers" $verifies) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- if .Values.run.id }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "run") | fromJsonArray) }}
+---
+{{ include "mandate.emit" (include "mandate.run" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}
+{{- if .Values.verify.id }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "verify") | fromJsonArray) }}
+---
+{{ include "mandate.emit" (include "mandate.verify" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}
