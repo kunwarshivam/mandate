@@ -36,9 +36,7 @@ use tokio::runtime::Runtime;
 use crate::connect_check::{ACCOUNT_NUMBER_VAR, Observed, SeenContract, observe};
 #[cfg(any(test, feature = "rh-sim"))]
 use crate::sim_market::{MARKET_FIXTURE_VAR, SimMarket};
-use crate::{BrokerAsk, LapseSnapshot, PaperError, Session};
-#[cfg(any(test, feature = "rh-sim"))]
-use mandate_alpaca::TokioPause;
+use crate::{BrokerAsk, LapseSnapshot, PaperError, RunClock, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
 /// a Robinhood host is written, and only the runner's `live` feature without `rh-sim` compiles
@@ -284,8 +282,8 @@ fn logged_in(endpoint: RobinhoodEndpoint) -> Result<LoggedIn, PaperError> {
 /// # Errors
 /// [`PaperError::Credentials`] when the login or the session's handshake fails; no error names
 /// a token.
-pub(crate) fn connect(dial: &Dial) -> Result<Linked, PaperError> {
-    logged_in(dial.endpoint.clone())?.session(&dial.account_number, dial.market.as_deref())
+pub(crate) fn connect(dial: &Dial, clock: RunClock) -> Result<Linked, PaperError> {
+    logged_in(dial.endpoint.clone())?.session(&dial.account_number, dial.market.as_deref(), clock)
 }
 
 /// O1b's login at `endpoint`, its host the one authorization host: discovery, registration of
@@ -320,9 +318,11 @@ pub trait SessionMarket: Sized {
     /// The source a session's market reads go through, built with no request, or why there is
     /// none, in which case the session's preflight refuses [`MARKET_UNREAD`].
     ///
+    /// A fixture stamps its reads with `clock`, the run's own (DEC-962 item 1).
+    ///
     /// # Errors
     /// [`MarketUnread`] when the source cannot be built.
-    fn open(fixture: Option<&Path>) -> Result<Self, MarketUnread>;
+    fn open(fixture: Option<&Path>, clock: RunClock) -> Result<Self, MarketUnread>;
 }
 
 /// A session's market source could not be built; nothing was read.
@@ -334,26 +334,28 @@ impl SessionMarket for AlpacaPaperHttp {
 
     /// The Alpaca paper client over the environment's paper keys (DEC-947 item 5); a fixture is
     /// never read.
-    fn open(_fixture: Option<&Path>) -> Result<Self, MarketUnread> {
+    fn open(_fixture: Option<&Path>, _clock: RunClock) -> Result<Self, MarketUnread> {
         let keys = Credentials::from_env().map_err(|_| MarketUnread)?;
         Self::new(keys).map_err(|_| MarketUnread)
     }
 }
 
 #[cfg(any(test, feature = "rh-sim"))]
-impl SessionMarket for SimMarket {
+impl SessionMarket for SimMarket<RunClock> {
     const FIXTURE_VAR: Option<&'static str> = Some(MARKET_FIXTURE_VAR);
 
-    /// The fixture directory's market on the system clock; no key is read and no host dialed.
-    fn open(fixture: Option<&Path>) -> Result<Self, MarketUnread> {
+    /// The fixture directory's market on the run's clock, so its quote is stamped at the instant
+    /// the rehearsal set (DEC-962 item 1); no key is read and no host dialed.
+    fn open(fixture: Option<&Path>, clock: RunClock) -> Result<Self, MarketUnread> {
         let dir = fixture.ok_or(MarketUnread)?;
-        Self::load(dir, TokioPause).map_err(|_| MarketUnread)
+        Self::load(dir, clock).map_err(|_| MarketUnread)
     }
 }
 
-/// This build's market source (DEC-961 item 1): the fixture in the `rh-sim` build.
+/// This build's market source (DEC-961 item 1): the fixture in the `rh-sim` build, on the run's
+/// clock (DEC-962).
 #[cfg(feature = "rh-sim")]
-pub type Market = SimMarket;
+pub type Market = SimMarket<RunClock>;
 
 /// This build's market source (DEC-961 item 1): Alpaca in every build without `rh-sim`, the
 /// `live` one included.
@@ -435,6 +437,7 @@ impl LoggedIn {
         self,
         account_number: &str,
         fixture: Option<&Path>,
+        run_clock: RunClock,
     ) -> Result<Linked, PaperError> {
         let Self {
             runtime,
@@ -452,7 +455,7 @@ impl LoggedIn {
             .map_err(|_| PaperError::Credentials)?;
         let connector =
             RobinhoodConnector::new(client, account_number.to_owned(), Tickers::default());
-        let market = Market::open(fixture).ok();
+        let market = Market::open(fixture, run_clock).ok();
         Ok(Linked::new(
             RobinhoodBridge::new(runtime, connector),
             market,

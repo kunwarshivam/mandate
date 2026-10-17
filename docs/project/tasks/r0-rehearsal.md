@@ -86,12 +86,36 @@ account streams export and verify. The rehearsal stops here; the `ask` opening, 
 `cli_confirm`, the fill and the refused second run need a run between 09:30 and 15:50 New York
 time on a trading day.
 
+**Re-run on `claude/r0-sim-clock` (R12 passed on the rehearsal's clock, [DEC-962](../decisions/DEC-962.md),
+claim [#1416](https://github.com/kunwarshivam/mandate/issues/1416)), with no Alpaca key in the
+environment, on Saturday 2026-10-17, with `--sim-clock 2026-10-19T15:00:00Z` (Monday, 11:00 New
+York time):** every runner and CLI process ran on one clock starting at that instant, and the
+simulator stamped its orders on it. 1a (the CLI now with `--features mandate-cli/rh-sim`), 1b, 1c,
+2a0 and 2a to 2k pass. 2l passes R12: the judge reads the run clock inside the registered
+calendar's regular session and outside the close window, and the run stops one check later, at
+`the tracer stopped at Validate: a mandate with no validation or policy violations`
+([R13](#the-blocker-chain-beyond-step-2l)): the shell's run context tells the mandate validator
+the connection is `paper`, so a `live` mandate breaks V-001. A diagnostic build, not committed,
+printed the rejection: `violations: {V001}, warnings: {W002}`, no policy violation. 2m and 2s stop
+there too, so nothing is sent, no approval is asked (2n; 2o and 2p not run) and the agent stream
+stays empty (2q, 2r agent); the control and account streams export and verify. The same binaries
+without `--sim-clock` still stop at R12, so the override is what moves the run past it. **The
+rehearsal stops here, at R13**: the `ask` opening, the grant with `cli_confirm`, the fill from the
+simulator and the refused second run were not reached.
+
 ## How to run it
 
 ```bash
 scripts/r0-rehearsal.sh                # builds, then rehearses; exits 0 only if every step passes
 scripts/r0-rehearsal.sh --no-build     # reuse the binaries in CARGO_TARGET_DIR
+scripts/r0-rehearsal.sh --sim-clock 2026-10-19T15:00:00Z   # outside market hours (DEC-962)
 ```
+
+`--sim-clock` runs the whole rehearsal on one clock that reads the instant when the script starts
+and moves with the system clock: each CLI and runner process gets `MANDATE_RH_SIM_CLOCK` at its
+start, the simulator its script's `clock`, the daily-bars writer its `<at>`, and the CLI is built
+with its `rh-sim` feature. Only the `rh-sim` builds read the variable; the `live` runner and the
+founder's CLI never do (DEC-962).
 
 The script builds into its own `CARGO_TARGET_DIR` with `CARGO_INCREMENTAL=0` unless one is set.
 It uses `MANDATE_PG_URL` (a superuser DSN; a schema of its own is created and dropped) or else
@@ -114,6 +138,27 @@ covers `scripts/`). The whole run takes under a minute after the builds.
   `RHETF`, which matters at [R5](#the-blocker-chain-beyond-step-2l).
 - **Simulator script:** one agentic account with 100 USD cash and buying power, the regular
   session, `RHETF` quoted at 85, and one scripted buy fill at 85.
+
+## The step table (`claude/r0-sim-clock`, run on 2026-10-17 with `--sim-clock 2026-10-19T15:00:00Z`)
+
+`$C` is `MANDATE_RH_SIM_CLOCK=<the rehearsal clock at the process's start>`, which every runner and
+CLI process got; `$M`, `$B`, `$J` and `$O` are as below.
+
+| Step | R0 | Command | Result | Output (last line) |
+|---|---|---|---|---|
+| 1a | 1 | `cargo build --bins -p mandate-cli -p mandate-rh-sim --features mandate-cli/rh-sim` | PASS | `Finished` |
+| 1b, 1c | 1 | as below | PASS | `Finished` |
+| 2a0 | 2 | `rehearsal_bars $WORK/market/daily RHETF 85 2026-10-19T15:00:34.987144790Z` | PASS | the dataset's directory |
+| 2a | 2 | the simulator with `"clock"` in its script, then the resource metadata | PASS | `{"authorization_servers":[…],"resource":"http://127.0.0.1:<port>/mcp"}` |
+| 2b to 2k | 2, 3 | as below, each with `$C` | PASS | as below: `opened ctl:ws_r0 … at seq 1` to `deployed as event … at seq 10` |
+| 2d2 | 2, 3 | the connect check with `$C` | PASS | `checked 10000100000000000000000001` |
+| 2l | 2, 4 | `$C $M MANDATE_RH_SIM_ENDPOINT=<sim> mandate-paper --workspace ws_r0 --agent agent_r0 --account-ref <ref> $J $B --confirm-live` | **FAIL** (R13) | `the tracer stopped at Validate: a mandate with no validation or policy violations` (was `a run clock inside the regular session`: R12) |
+| 2m | 2, 5 | the same with `--place-one-order` | **FAIL** (R13) | the same |
+| 2n | 2, 5 | `$C mandate approvals list --agent agent_r0 $O $J` | **FAIL** (from 2m) | `no approvals`; 2o and 2p not run |
+| 2q, 2r ctl | 2, 6 | export and verify `ctl:ws_r0` | PASS | `verified, stream ctl:ws_r0, seq 1 to 10, …` |
+| 2q, 2r acct | 2, 6 | export and verify `acct:ws_r0:<ref>` | PASS | `verified, stream acct:ws_r0:<ref>, seq 1 to 2, …` |
+| 2q, 2r agent | 2, 6 | export and verify `agent:ws_r0:agent_r0` | **FAIL** (from 2m) | `export_stream_empty` |
+| 2s | 2, 7 | the placing run again | **FAIL** (R13) | refused before any place call, but by V-001, not by the spent record |
 
 ## The step table (`claude/r0-sim-market-data`, run on 2026-10-17 at about 01:10 UTC)
 
@@ -183,7 +228,8 @@ once the one before is fixed.
 | R3 | `DeploymentRefusal::Live` | `crates/mandate-paper/src/lib.rs` handed `LiveAdmission::refusing()` | DEC-934 item 4 | **Fixed**, #1378 (DEC-947 item 3) | `live_admission(BUILT_WITH, --confirm-live, the door's answer, the dialed endpoint's host, pinned_host(Build::CURRENT))`. The `rh-sim` build pins `REHEARSAL_HOST` (`127.0.0.1`, the simulator's address) and no longer compiles Robinhood's `MCP_HOST`; the `live` build alone pins `agent.robinhood.com`. DEC-934 item 3's exact equality is unchanged |
 | R4 | `Cause::Absent` with `SESSION_UNBUILT` | `crates/mandate-paper/src/robinhood.rs` (`Linked`) | No MCP session carried the login's token | **Fixed**, #1378 (DEC-947 items 4 and 5) | the session is the login, the pinned transport carrying the token as its bearer (DEC-946's `with_bearer`), `McpClient::connect` (first-connection contract check), one `RobinhoodConnector` scoped to `MANDATE_RH_ACCOUNT_NUMBER`, in the shell's `RobinhoodBridge`. Its preflight is DEC-933 item 2's, its cycle the shell's new `robinhood_production_cycle`, its broker ask #1380's `BrokerAsk::robinhood` |
 | R5 | `Stage::Reconcile` refusals of the market reads (**fixed for the rehearsal** in `claude/r0-sim-market-data`, [DEC-961](../decisions/DEC-961.md): the `rh-sim` build reads them from a fixture, every other build from Alpaca as below) | `mandate_shell::paper::market_facts` (`crates/mandate-shell/src/paper/facts.rs:145`) and `robinhood_facts` (`:201`) | A Robinhood run's preflight reads the asset record, IEX quote and minute bars from **Alpaca's** data API (DEC-933 item 2), and `--bars` must come from `mandate download`, so the rehearsal needs the founder's Alpaca data keys, which no agent has (rule 8); and the simulator's quote must name the same instrument and agree with the real IEX quote within the collar (DEC-529 item 12), so the rehearsal must pin the founder's real ticker and script the simulator's quote near its price, not `RHETF` | Not a code defect | The founder runs the rehearsal on their own machine with their data keys, after `mandate download` and `inspect`, and sets the simulator's `quotes` from the latest IEX ask (the script's `sim.json`, one line) |
-| R12 | `the tracer stopped at Validate: a run clock inside the regular session`, **observed at 2l, 2m and 2s** on 2026-10-17 (a Saturday) | `crates/mandate-shell/src/paper/judge.rs:95` (`regular_session_outside_close_window`), reached from `judge` (`:62`) through `load_contexts_with_clock`, which `run()` calls at `crates/mandate-paper/src/lib.rs:697` | An opening is judged only inside the regular session and outside its last `close_window_minutes` (rule 12, trading spec §9.6), and the run's clock is the system's | Not a code defect | Run the rehearsal between 09:30 and 15:50 New York time on a trading day |
+| R12 | `the tracer stopped at Validate: a run clock inside the regular session`, **observed at 2l, 2m and 2s** on 2026-10-17 (a Saturday) | `crates/mandate-shell/src/paper/judge.rs:95` (`regular_session_outside_close_window`), reached from `judge` (`:62`) through `load_contexts_with_clock`, which `run()` calls at `crates/mandate-paper/src/lib.rs:697` | An opening is judged only inside the regular session and outside its last `close_window_minutes` (rule 12, trading spec §9.6), and the run's clock is the system's | Not a code defect; **passed on the rehearsal's clock** in `claude/r0-sim-clock` ([DEC-962](../decisions/DEC-962.md), claim #1416) | Run the rehearsal between 09:30 and 15:50 New York time on a trading day, or with `--sim-clock <instant inside a regular session>`, which only the `rh-sim` builds read |
+| R13 | `the tracer stopped at Validate: a mandate with no validation or policy violations`, **observed at 2l, 2m and 2s** on the rehearsal's clock (V-001; W-002 only a warning; no policy violation) | `crates/mandate-shell/src/adapters.rs:898` (the refusal's text in `validated_mandate`, `:894`, called at `:951`), on the run context `crates/mandate-shell/src/paper/context.rs:372` builds in `run_context` (`:294`): `connection_environment: Some(mandate_domain::Environment::Paper)` | The shell's run context hard-codes the connection as `paper`, a lock from the paper adapter's first slice like R9's, so V-001 (`crates/mandate-spec/src/validate.rs:545`) rejects every `live` mandate at the cycle's validation, though `version confirm` and `agent deploy` validated it against the recorded live connection | **None**; not fixed here (the founder's brief: record and stop) | The run context's `connection_environment` from the connection the door chose (its record's environment), so a live run on a live connection passes V-001 and a paper mandate on it still fails; a safety-critical shell change with its tests first |
 | R6 | the `ask` opening denied at its deadline | `crates/mandate-paper/src/wiring.rs:296` (`wait_for_the_grant`) | Until item 9 lands, the runtime is never handed the founder's grant, so the opening is skipped at `timeout_s` (`on_timeout: skip`, rule 3) even after `mandate approvals approve` commits it | **Item 9**, [#1367](https://github.com/kunwarshivam/mandate/pull/1367) (`claude/live-grant-cycle-answers`, DEC-940) | — |
 | R7 | the restart (R0 step 7) | the startup reconciliation | A restart after a lost place answer must adopt exactly one matching order or keep it `Unknown` (DEC-529 item 4) | **Item 10** (`claude/unknown-adoption-run-path`) | — |
 
@@ -193,7 +239,10 @@ once the one before is fixed.
 | R10b | none at run time: a live sell's fees can be booked under two cents below Robinhood's own figure | `crates/mandate-accounting/src/account.rs` (`equity_fees`, `charge`) | Robinhood rounds each fee of a trade to cents separately (SEC up, TAF and CAT to the nearest cent), and §6.2 rounds the day's total once (DEC-958 item 4). R0's one order is a buy, which is never understated | **Fixed** by [DEC-960](../decisions/DEC-960.md) (claim #1409): §6.2's `fee_rounding: per_fee_per_fill` and RC-26 (spec PR #1410), then the fold on `claude/fee-rounding-code`: `ROBINHOOD_LIVE` rounds each fee of each fill up to the cent, so a live sell is never booked below Robinhood's figure; paper and Alpaca stay `daily_total` | A per-fill, per-fee ceiling for the Robinhood schedule: a trading-domain spec PR first (§6.2 and a reference case, ES-22), then the fold; the same spec PR changes §6.2's "transcribed from Alpaca's fee schedule" to the broker's |
 | R11 | `the tracer stopped at Reconcile: the agentic account's snapshot`, **observed at 2l** before the fix | `crates/mandate-shell/src/robinhood.rs` (`RobinhoodBridge::preflight_facts`), reached from `crates/mandate-paper/src/robinhood.rs` (`Linked::preflight`); the refusal was `mandate-mcp`'s `Throttled` on the preflight's first `get_portfolio` | The live start read the account snapshot (three scoped reads, six calls) for the lapse, and the preflight then read it again at once, together with tradability and the quote. After the connect's own calls, the ordinary bucket (`crates/mandate-mcp/src/transport.rs`: 10 tokens, one a second) had no token left, and a throttled read was a refusal, never a wait | **Fixed** in `claude/r0-mcp-read-budget` ([DEC-959](../decisions/DEC-959.md), claim #1408): 2l's Robinhood reads all answer | The fix as built: the live start keeps the lapse's snapshot with the run clock read before it was sent, and the same session's preflight stands on it while it is at most the rule set's quote age bound old (reading only the tradability and the quote), and reads the account again otherwise; every broker read is `CallClass::Read`, which on an empty ordinary bucket waits for its next token when it is due within `read_wait` (2 s) and is refused at once otherwise. Openings and exits never wait |
 
-So the rehearsal can pass only after R8 lands (R9 by DEC-957, R10 by DEC-958, R11 by DEC-959), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
+On the rehearsal's clock (DEC-962) R12 is passed and R13 is the first refusal; what lies behind it
+(the `ask` opening and the grant, R6's lane, DEC-940; the fill and R8's ticker mapping, DEC-956;
+the restart, R7's lane, DEC-941) is on `main` but not yet observed. Before DEC-962: the rehearsal
+could pass only after R8 lands (R9 by DEC-957, R10 by DEC-958, R11 by DEC-959), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
 9 and 10, and inside the regular session (R12). R5 no longer needs the founder's machine for
 the rehearsal: the `rh-sim` build reads the market from a fixture (DEC-961); the live order still
 reads Alpaca's with the founder's data keys.

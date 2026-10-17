@@ -539,6 +539,58 @@ fn an_issued_token_opens_the_mcp_session_and_a_scripted_fill_follows_the_place()
     Ok(())
 }
 
+/// The rehearsal's broker clock (DEC-962 item 3): with the script's `clock`, each order is stamped
+/// on a clock that starts at it when the server starts and moves with the time the server has
+/// served, so the runner's `created_at_gte` listing finds what it placed; without one, as before,
+/// an order has no creation time.
+#[test]
+fn the_scripted_clock_stamps_each_order_and_moves_with_the_server() -> Outcome {
+    let start = mandate_time::UtcNanos::parse_rfc3339("2026-10-19T15:00:00Z").unwrap();
+    let clocked = json!({
+        "accounts": [{"number": AGENTIC, "agentic_allowed": true, "cash": "750.25",
+            "buying_power": "10000", "pattern_day_trader": false}],
+        "session": "regular", "quotes": {"SPY": "500"}, "clock": "2026-10-19T15:00:00Z"});
+    let place = |server: &SimServer, n: u32| -> String {
+        let token = access_token(server);
+        let mut wire = Wire::connect_with(&server.url().unwrap(), &token);
+        let order = wire.call(
+            "place_equity_order",
+            json!({"account_number": AGENTIC, "symbol": "SPY", "side": "buy", "type": "limit",
+                "quantity": "1", "limit_price": "500", "time_in_force": "gfd",
+                "market_hours": "regular_hours", "ref_id": ref_id(n)}),
+        );
+        order["structuredContent"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let server = SimServer::rehearse(Script::parse(&clocked.to_string()).unwrap(), 0)?;
+    let first = place(&server, 1);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let second = place(&server, 2);
+    let held = server.drive(|sim| sim.orders(AGENTIC))?.unwrap();
+    let stamp = |id: &str| {
+        held.iter()
+            .find(|o| o.id == id)
+            .unwrap()
+            .created_at
+            .unwrap()
+    };
+    let (first, second) = (stamp(&first), stamp(&second));
+    let bound = mandate_time::UtcNanos::parse_rfc3339("2026-10-19T15:01:00Z").unwrap();
+    assert!(start <= first && first < bound, "{first}");
+    assert!(
+        second.secs() * 1_000_000_000 + i64::from(second.nanos())
+            >= first.secs() * 1_000_000_000 + i64::from(first.nanos()) + 20_000_000,
+        "the clock moves with the server: {first} then {second}"
+    );
+    let unclocked = rehearsal();
+    let id = place(&unclocked, 3);
+    let held = unclocked.drive(|sim| sim.orders(AGENTIC))?.unwrap();
+    assert_eq!(held.iter().find(|o| o.id == id).unwrap().created_at, None);
+    Ok(())
+}
+
 #[test]
 fn the_server_started_without_the_rehearsal_needs_no_token() -> Outcome {
     let server = SimServer::start(script().sim().unwrap(), mandate_rh_sim::Variant::Honest)?;
