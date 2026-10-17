@@ -6,7 +6,9 @@
  * connections) are optional: a 404 is "not reported", never the deployment down.
  */
 import type { WorkspaceClient } from "./client";
-import type { ApiError, Decoder, Watermark } from "./types";
+import { array, closedEnum, contentRef, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
+import { emptyWorkspace } from "./reads";
+import type { ApiError, Decoded, DecodeIssue, Decoder, ReadOutcome, Watermark } from "./types";
 import type { AgentMode, AssetClass, Environment, Workspace } from "@/fixtures/types";
 
 export interface MandateSummary {
@@ -84,26 +86,168 @@ export interface ApiView {
 
 export type LoadedApi = { ok: true; ws: Workspace; view: ApiView; as_of: Watermark[] } | { ok: false; error: ApiError };
 
-export const agentsRead: Decoder<{ agents: AgentRow[] }> = () => {
-  throw new Error("Unimplemented: E11-9");
+const fail = <T,>(path: string, problem: DecodeIssue["problem"], value: string | null = null): Decoded<T> => ({ ok: false, issue: { path, problem, value, allowed: null } });
+
+const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : fail(path, "wrong_type"));
+
+function patterned(pattern: RegExp): Decoder<string> {
+  return (value, path) => {
+    if (typeof value !== "string") return fail(path, "wrong_type");
+    return pattern.test(value) ? { ok: true, value } : fail(path, "not_canonical", value);
+  };
+}
+
+/** A count: a non-negative integer, at least `least`. */
+function count(least: number): Decoder<number> {
+  return (value, path) => {
+    const read = integer(value, path);
+    if (!read.ok) return read;
+    return read.value >= least ? read : fail(path, "wrong_type");
+  };
+}
+
+const record: Decoder<Record<string, unknown>> = (value, path) => (isRecord(value) ? { ok: true, value } : fail(path, "wrong_type"));
+const instrument = patterned(/^.{1,200}$/s);
+const day = patterned(/^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/);
+const label = patterned(/^[a-z0-9][a-z0-9-]{0,62}$/);
+const assetClass = closedEnum<AssetClass>(["crypto", "us_equity"]);
+
+const mandateSummary = object<MandateSummary>({
+  allocation_usd: decimal,
+  max_loss_from_allocation: decimal,
+  goal: closedEnum(["continuous", "accumulate", "profit_stop"]),
+  goal_end_date: nullable(day),
+  asset_classes: array(assetClass),
+  max_position_usd: decimal,
+  max_order_usd: decimal,
+  max_orders_per_day: count(1),
+  max_daily_loss: decimal,
+  max_drawdown: decimal,
+});
+
+const agentMembers = {
+  agent_id: string,
+  environment: closedEnum<Environment>(["paper", "live"]),
+  mandate_version: contentRef,
+  deployed_at: timestamp,
+  mode: nullable(closedEnum<AgentMode>(["normal", "exits_only", "paused", "stopped"])),
+  pending_approvals: count(0),
+  label: nullable(label),
+  mandate: nullable(mandateSummary),
 };
-export const agentRead: Decoder<{ agent: AgentDetail }> = () => {
-  throw new Error("Unimplemented: E11-9");
+const agentRow = object<AgentRow>(agentMembers);
+const position = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
+const agentDetail = object<AgentDetail>({ ...agentMembers, positions: nullable(array(position)) });
+
+const boundOrder = object<BoundOrder>({
+  instrument,
+  asset_class: assetClass,
+  side: closedEnum(["buy"]),
+  qty: decimal,
+  limit: decimal,
+  order_usd: decimal,
+  purpose: closedEnum(["open", "increase"]),
+  tif: nullable(closedEnum(["day", "gtc", "ioc"])),
+  protection: nullable(object<{ stop: string; take_profit: string | null }>({ stop: decimal, take_profit: nullable(decimal) })),
+});
+const approvalMembers = {
+  approval_id: string,
+  agent_id: string,
+  state: closedEnum<ApprovalState>(["pending", "acted", "skipped", "timed_out", "canceled"]),
+  requested_at: timestamp,
+  deadline: count(0),
+  content_hash: contentRef,
+  order: boundOrder,
 };
-export const approvalsRead: Decoder<{ approvals: ApprovalRow[] }> = () => {
-  throw new Error("Unimplemented: E11-9");
-};
-export const approvalRead: Decoder<{ approval: ApprovalDetail }> = () => {
-  throw new Error("Unimplemented: E11-9");
-};
+const approvalRow = object<ApprovalRow>(approvalMembers);
+const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record });
+
+export const agentsRead = object<{ agents: AgentRow[] }>({ agents: array(agentRow) });
+export const agentRead = object<{ agent: AgentDetail }>({ agent: agentDetail });
+export const approvalsRead = object<{ approvals: ApprovalRow[] }>({ approvals: array(approvalRow) });
+export const approvalRead = object<{ approval: ApprovalDetail }>({ approval: approvalDetail });
 
 /** An approval's deadline as a time: its risk-clock seconds read as Unix seconds, UTC. */
 export function deadlineIso(deadline: number): string {
-  void deadline;
-  throw new Error("Unimplemented: E11-9");
+  return new Date(deadline * 1000).toISOString();
+}
+
+/** The reads the schemas do not define yet (DEC-975 item 5's provisional bodies): health and connections. */
+interface ServedComponent {
+  state: "ok" | "stale" | "down";
+  freshness: { observed_at: string; stale: boolean };
+}
+const component = object<ServedComponent>({ state: closedEnum(["ok", "stale", "down"]), freshness: object({ observed_at: timestamp, stale: flag }) });
+const health = object<{ served_at: string } & Record<keyof Workspace["health"], ServedComponent>>({ served_at: timestamp, market_data: component, broker: component, deployment: component, relay: component });
+const connections = object<{ connections: Array<{ connection_id: string; environment: Environment }> }>({
+  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]) })),
+});
+
+/** A read the API may not serve yet: its 404 is "not reported" (`null`), any other failure is the load's. */
+async function optional<T>(read: Promise<ReadOutcome<T>>): Promise<{ ok: true; value: T | null; as_of: Watermark[] } | { ok: false; error: ApiError }> {
+  const outcome = await read;
+  if (outcome.ok) return { ok: true, value: outcome.value, as_of: outcome.as_of };
+  if (outcome.error.status === 404 && outcome.error.code === "not_found") return { ok: true, value: null, as_of: [] };
+  return outcome;
+}
+
+function mismatch(path: string): LoadedApi {
+  return { ok: false, error: { code: "invalid_response", effect: "none", status: 200, event_id: null, retryable: true, violations: [], decode: { path, problem: "wrong_type", value: null, allowed: null } } };
+}
+
+/** The newest watermark per stream the reads reflect (API-14). */
+function newest(marks: Watermark[]): Watermark[] {
+  const by = new Map<string, Watermark>();
+  for (const mark of marks) {
+    const seen = by.get(mark.stream_id);
+    if (!seen || mark.seq > seen.seq) by.set(mark.stream_id, mark);
+  }
+  return [...by.values()];
 }
 
 export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
-  void client;
-  throw new Error("Unimplemented: E11-9");
+  const [agents, pending, resolved, served, held] = await Promise.all([
+    client.read("/agents", agentsRead),
+    client.read("/approvals?state=pending", approvalsRead),
+    client.read("/approvals?state=resolved", approvalsRead),
+    optional(client.read("/health", health)),
+    optional(client.read("/connections", connections)),
+  ]);
+  for (const outcome of [agents, pending, resolved, served, held]) if (!outcome.ok) return { ok: false, error: outcome.error };
+  if (!agents.ok || !pending.ok || !resolved.ok || !served.ok || !held.ok) return mismatch("");
+
+  const enc = encodeURIComponent;
+  const agentIds = agents.value.agents.map((a) => a.agent_id);
+  const approvalIds = [...new Set([...pending.value.approvals, ...resolved.value.approvals].map((a) => a.approval_id))];
+  const [details, approvals] = await Promise.all([
+    Promise.all(agentIds.map((id) => client.read(`/agents/${enc(id)}`, agentRead))),
+    Promise.all(approvalIds.map((id) => client.read(`/approvals/${enc(id)}`, approvalRead))),
+  ]);
+  const marks = [...agents.as_of, ...pending.as_of, ...resolved.as_of, ...served.as_of, ...held.as_of];
+  const view: ApiView = { agents: [], approvals: [] };
+  for (const [i, outcome] of details.entries()) {
+    if (!outcome.ok) return { ok: false, error: outcome.error };
+    if (outcome.value.agent.agent_id !== agentIds[i]) return mismatch(`/agents/${i}`);
+    view.agents.push(outcome.value.agent);
+    marks.push(...outcome.as_of);
+  }
+  for (const [i, outcome] of approvals.entries()) {
+    if (!outcome.ok) return { ok: false, error: outcome.error };
+    if (outcome.value.approval.approval_id !== approvalIds[i]) return mismatch(`/approvals/${i}`);
+    view.approvals.push(outcome.value.approval);
+    marks.push(...outcome.as_of);
+  }
+
+  const now = served.value?.served_at ?? new Date().toISOString();
+  const unreported = { state: "stale" as const, as_of: now };
+  const at = (c: ServedComponent | undefined) => (c ? { state: c.state === "ok" && c.freshness.stale ? ("stale" as const) : c.state, as_of: c.freshness.observed_at } : unreported);
+  const connection = held.value?.connections[0] ?? null;
+  const base = emptyWorkspace("ready", now);
+  const ws: Workspace = {
+    ...base,
+    environment: connection?.environment ?? view.agents[0]?.environment ?? base.environment,
+    connection: { ...base.connection, connection_id: connection?.connection_id ?? "" },
+    health: { market_data: at(served.value?.market_data), broker: at(served.value?.broker), deployment: at(served.value?.deployment), relay: at(served.value?.relay) },
+  };
+  return { ok: true, ws, view, as_of: newest(marks) };
 }

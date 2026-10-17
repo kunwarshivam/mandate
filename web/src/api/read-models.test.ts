@@ -67,16 +67,18 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
   });
 
   it("refuses a missing member, an unshaped label, and an approval without the content hash it binds (API-12)", () => {
-    const { mandate: _m, ...noMandate } = ROW;
+    const noMandate: Record<string, unknown> = { ...ROW };
+    delete noMandate.mandate;
     expect(problem(agentsRead({ agents: [noMandate] }, ""))).toBe("missing /agents/0/mandate");
     expect(problem(agentsRead({ agents: [{ ...ROW, label: "BTC Accumulator" }] }, ""))).toBe("not_canonical /agents/0/label");
-    const { content_hash: _h, ...noHash } = APPROVAL;
+    const noHash: Record<string, unknown> = { ...APPROVAL };
+    delete noHash.content_hash;
     expect(problem(approvalsRead({ approvals: [noHash] }, ""))).toBe("missing /approvals/0/content_hash");
     expect(problem(agentRead({ agent: ROW }, ""))).toBe("missing /agent/positions");
   });
 
   it("shows a deadline as the UTC time its risk-clock seconds name", () => {
-    expect(deadlineIso(1791476040)).toBe("2026-10-08T14:54:00.000Z");
+    expect(deadlineIso(1791476040)).toBe("2026-10-08T16:14:00.000Z");
     expect(deadlineIso(0)).toBe("1970-01-01T00:00:00.000Z");
   });
 });

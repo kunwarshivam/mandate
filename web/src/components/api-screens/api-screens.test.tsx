@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiAgent, ApiAgents, ApiApproval, ApiApprovals, ApiHome, BySource } from "./api-screens";
 import { type Fetch } from "@/api/client";
@@ -41,7 +41,7 @@ const agentOf = (id: string) => fixture.agents.find((a) => a.agent_id === id)!;
 const pending = fixture.approvals.filter((a) => a.status === "delivered");
 
 afterEach(() => {
-  document.body.innerHTML = "";
+  cleanup();
 });
 
 describe("the screens over the workspace API's read models (DEC-1096)", () => {
@@ -67,7 +67,7 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     const agents = await screen.findByRole("region", { name: "Agents" });
     expect(within(agents).getAllByText("Name not reported")).toHaveLength(fixture.agents.length);
     expect(within(agents).getAllByText("Mode not reported")).toHaveLength(fixture.agents.length);
-    document.body.innerHTML = "";
+    cleanup();
     mount(<ApiAgent agentId={fixture.agents[0].agent_id} />, "approvals", blank);
     expect(await screen.findByText("Mandate not reported")).toBeTruthy();
     expect(screen.getByText("Positions not reported")).toBeTruthy();
@@ -137,7 +137,7 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
   it("picks the screen by the source: the API's over the API, the fixture screen over the fixtures", async () => {
     mount(<BySource fixtures={<p>fixture screen</p>} api={<p>api screen</p>} />);
     expect(await screen.findByText("api screen")).toBeTruthy();
-    document.body.innerHTML = "";
+    cleanup();
     await act(async () => {
       render(
         <Providers workspace={buildWorkspace("normal")} tick={false}>
