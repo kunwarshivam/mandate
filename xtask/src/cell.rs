@@ -1851,8 +1851,8 @@ fn cluster_state() -> String {
                 name,
                 "--namespace",
                 NAMESPACE,
-                "-c",
-                "postgres",
+                "--all-containers",
+                "--prefix",
                 "--tail=15",
             ])
             .unwrap_or_default();

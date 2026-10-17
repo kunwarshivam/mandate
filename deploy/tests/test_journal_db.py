@@ -106,8 +106,20 @@ def former_primary_can_rejoin(docs: list[dict]) -> list[str]:
     if cluster is None:
         return ["no Cluster"]
     grants = cluster["spec"].get("bootstrap", {}).get("initdb", {}).get("postInitSQL", [])
-    want = "GRANT CONNECT ON DATABASE postgres TO streaming_replica"
-    return [] if want in grants else [f"postInitSQL {grants} does not grant {want}"]
+    problems = []
+    for want in (
+        "CREATE ROLE streaming_replica WITH LOGIN REPLICATION",
+        "GRANT CONNECT ON DATABASE postgres TO streaming_replica",
+    ):
+        if want not in grants:
+            problems.append(f"postInitSQL {grants} lacks {want}")
+    initdb = cluster["spec"]["bootstrap"]["initdb"]
+    for statement in grants + initdb.get("postInitApplicationSQL", []):
+        if "$" in statement:
+            problems.append(
+                f"`$` in an init statement, which Kubernetes expands in the init Job's arguments: {statement}"
+            )
+    return problems
 
 
 def archive_configured(docs: list[dict]) -> list[str]:
@@ -307,6 +319,13 @@ def test_former_primary_can_rejoin():
         docs, "Cluster", "journal", lambda c: c["spec"]["bootstrap"]["initdb"].pop("postInitSQL")
     )
     assert former_primary_can_rejoin(stripped)
+    dollar = mutate(
+        docs,
+        "Cluster",
+        "journal",
+        lambda c: c["spec"]["bootstrap"]["initdb"]["postInitSQL"].insert(0, "DO $$ BEGIN NULL; END $$"),
+    )
+    assert former_primary_can_rejoin(dollar)
 
 
 def test_archive_configured():
