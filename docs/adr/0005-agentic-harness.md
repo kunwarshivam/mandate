@@ -117,7 +117,11 @@ records it.
   "no tools" to "exactly the pinned menu", and OpenRouter's routing lock admits `tools` for pinned
   declarations only (DEC-997 item 2, with the founder's acceptance of DEC-997).
 - Delivery, from the design input: slice 1 the specs (lane AH, 10/19); slice 2 the gateway's tool
-  calls and per-turn metering (lanes I1 and AH); slice 3 the loop with read and think tools (AH);
+  calls and per-turn metering (lanes I1 and AH, 10/21); slice 3 the loop with read and think tools
+  (AH), **with E19-6's adversarial bench and a §8.3 regression evaluation inside it** (recorded-fake
+  scenarios, an adaptive compromised model, safety at pass^k), so they can pass by about 10/24 and
+  the demo agents may pin the agentic entry (DEC-2203 item 13); a live-model pass^k is not planned
+  under the $50 cap;
   slice 4 action tools with verdict feedback (AH and I2); slice 5 the shell's driver (I2, after R0);
   slice 6 the desk and transcript view (EX and W2); slice 7 the demo scenario end to end. If the
   agentic slices are not ready, the demo agents pin a `single_call` entry instead: a choice of pin

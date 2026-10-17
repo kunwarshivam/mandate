@@ -176,12 +176,13 @@ Each oracle must catch a seeded bug before it is trusted (`AGENTS.md`, "Independ
 | `max_output_tokens` | From the registry entry. Bounds the call's maximum cost (§7.2) |
 | `turns` | Empty except for an agentic research run: the transcript of its earlier turns, each the model's reply (by its response artifact) and the caller's result for each of that reply's tool calls ([agent harness spec §6.9](agent-harness.md#69-the-agentic-loop)). Part of the rendered prompt |
 | `tools` | The names of the entry's pinned tool declarations offered in this turn, or none. Only an `agentic` entry has any. A name the entry does not declare, or non-empty `turns` or `tools` for a `single_call` entry, is a `RequestError`, never sent |
+| `run_kind` | Empty except for an agentic research run: `ideate`, `monitor`, or a kind §15 of the agent harness spec adds. It picks the entry's output schema for the run (§4.1) and is part of the canonical request; a kind the entry has no schema for is a `RequestError`, never sent |
 | `spend_ceiling_usd` | Optional, fixed-point USD: a cap on this call's reservation, set by the caller from its run's own records (§7.3). Not part of the canonical request: it decides only whether the call is made |
 
 The **canonical request** is the canonical JSON (journal spec §4) of the model identity, the rendered
-prompt (the transcript included), the tool declarations offered, sampling parameters (temperature,
+prompt (the transcript included), the tool declarations offered, the `run_kind`, sampling parameters (temperature,
 `top_p`, seed where supported, and the reasoning mode and effort), the output schema, and
-`max_output_tokens`. Its SHA-256 is the `request_digest`. The tool declarations, and the reasoning
+`max_output_tokens`. Its SHA-256 is the `request_digest`. The tool declarations, the `run_kind`, and the reasoning
 and `top_p` members where the entry pins none, are **left out when there are none**, so a
 `single_call` entry's canonical request, its `request_digest`, and every recorded fake keyed by it
 (DEC-1120) are what they were before v0.4.
@@ -336,11 +337,11 @@ entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts
 | Field | Rule |
 |---|---|
 | `model_id`, `version` | The signal model's id and semantic version (mandate spec §8.1) |
-| `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `mode`, `retrieval_plan`, `tools`, `loop_bounds`, `output_schema`, `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
+| `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `mode`, `retrieval_plan`, `tools`, `loop_bounds`, `output_schema` (or `output_schemas`), `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
 | `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
 | `template` | The prompt template and the input contract it renders |
 | `retrieval_plan`, `validation_bounds` | For a model whose inputs are retrieved: which reads fill the input contract and their caps, and the bounds its output is checked against (agent harness spec §6.3, §6.5). Inside the hash, so the pin covers what the model is shown (rule 11, DEC-432 item 22) |
-| `mode`, `tools`, `loop_bounds` | For the research agent: `single_call` or `agentic`; for `agentic`, the tool declarations, reads and proposals (each a name from the harness's closed set, a description, an argument schema, and result caps) and the loop's bounds (agent harness spec §6.10, §6.11). Inside the hash, so the pin covers what the model may call and how far the loop may go (rule 11, DEC-2203). Every other entry is `single_call` with no tools. **For a `single_call` entry the three members are left out of the canonical object**, so its hash, and every pin of it, is the hash it had before v0.4 |
+| `mode`, `tools`, `loop_bounds`, `output_schemas` | For the research agent: `single_call` or `agentic`; for `agentic`, `output_schemas`, the output schema keyed by run kind, which replaces `output_schema` (a `monitor` run's has no `theses` member, so a monitoring thesis is `schema_invalid`); for `agentic`, the tool declarations, reads and proposals (each a name from the harness's closed set, a description, an argument schema, and result caps) and the loop's bounds (agent harness spec §6.10, §6.11). Inside the hash, so the pin covers what the model may call and how far the loop may go (rule 11, DEC-2203). Every other entry is `single_call` with no tools. **For a `single_call` entry `mode`, `tools`, `loop_bounds`, and `output_schemas` are left out of the canonical object**, so its hash, and every pin of it, is the hash it had before v0.4 |
 | `output_schema` | JSON Schema of the output (mandate spec §8.2, or §8.4's thesis) |
 | `params_schema` | The user-set parameters; no defaults (DEC-52) |
 | `deadline_ms`, `max_output_tokens`, sampling parameters | Pinned with the model. The sampling parameters are temperature, `top_p`, the seed, and the **reasoning mode and effort** (for OpenRouter, `reasoning.effort`, or `reasoning.enabled: false`), since a model's behaviour changes with its reasoning setting as with its quantization (DEC-2203 item 22). `top_p` and reasoning are left out of the canonical object where the entry pins none, so no existing hash changes. The call record holds them through `model.content_hash` and `request_digest`, which both cover them, so journal spec §9.19's `sampling` member is unchanged |
@@ -457,7 +458,13 @@ DEC-432 item 14's guard stands and no live call runs). The routing lock is set p
   that turn, with `tool_choice` `auto`, or is absent when none is offered (always, for a
   `single_call` entry); no `functions` or `plugins` (web search among them), and `transforms` sent
   empty, so no prompt compression applies. `require_parameters: true` routes only to an upstream
-  that honours `tools` (DEC-2203).
+  that honours `tools` (DEC-2203). **Tool names on the wire:** OpenAI-compatible function names
+  allow only `[a-zA-Z0-9_-]`, so the adapter sends a declared name with each `.` written as `__`
+  (`market.bars` as `market__bars`) and maps a reply's names back. Declared names are lower-case
+  `[a-z_]` segments joined by `.`, and no segment holds `__`, so the mapping cannot collide; a reply
+  naming a wire name that maps to no offered tool is `schema_invalid`. The transcript gives each
+  tool call a deterministic id from its turn and index, never the provider's, so a re-run's
+  request digests match (DEC-2204, lane I1).
 
 The response's reported model and provider must both equal the pin, or the call is
 `identity_mismatch` (DEC-997 item 2). Each endpoint records the routing slug it requests and the

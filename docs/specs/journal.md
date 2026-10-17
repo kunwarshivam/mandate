@@ -4200,6 +4200,7 @@ do, and `config_refs.model_version` naming the research entry (§9's `mod`).
 | `data_universe_ref` | `ref` | The data universe as of the start, as an artifact |
 | `cost_ceiling_usd` | `decimal` | The run's cost ceiling from workspace configuration (agent harness spec §6.11) |
 | `deadline` | `timestamp` | The cut-off plus the entry's `max_run_s`, on the risk clock |
+| `memory` | `[ulid]` | The `event_id`s of the agent's own thesis records and earlier `RunSummaryRecorded` records placed in the prompt's prefix, strictly ascending: rule 172. An action's provenance includes them by reference (agent harness spec §6.12) |
 
 **`ToolCallRecorded`**: one tool call a committed reply asked for, refused ones included, in the
 batch its turn's record heads, in reply order.
@@ -4221,7 +4222,7 @@ the next turn's call is sent (agent harness spec HI-24).
 |---|---|---|
 | `tool_call` | `ulid` | The `event_id` of its `ToolCallRecorded`: rule 178 |
 | `result` | `ok` \| `refused` \| `failed` | `ok`: the read or think ran, or the action was mediated, whatever its verdict. `refused`: the harness ran nothing. `failed`: a read did not answer: rule 179 |
-| `code` | `admitted` \| `asked` \| `removed` \| `unknown_instrument` \| `unknown_evidence` \| `duplicate_instrument` \| `forbidden_language` \| `revisions_not_enabled` \| `unknown_thesis` \| `direction_not_allowed` \| `asset_class_not_allowed` \| `not_eligible` \| `source_not_allowed` \| `not_corroborated` \| `universe_full` \| `cooldown` \| `not_admitted` \| `out_of_universe` \| `unknown_item` \| `unavailable` \| `call_budget` \| `max_theses` \| `max_repeat_denials` \| `run_ended` \| `null` | The model-visible code it was told (agent harness spec §6.13 item 5): an action's verdict, or a refusal's or failure's reason. `null` only for an `ok` read or think: rule 179. Lane EX's change adds its `answer` checks to this list |
+| `code` | `admitted` \| `removed` \| `unknown_instrument` \| `unknown_evidence` \| `duplicate_instrument` \| `forbidden_language` \| `revisions_not_enabled` \| `unknown_thesis` \| `direction_not_allowed` \| `asset_class_not_allowed` \| `not_eligible` \| `source_not_allowed` \| `not_corroborated` \| `universe_full` \| `not_admitted` \| `out_of_universe` \| `unknown_item` \| `unavailable` \| `call_budget` \| `max_theses` \| `max_repeat_denials` \| `run_ended` \| `null` | The model-visible code it was told (agent harness spec §6.13 item 5): an action's verdict, or a refusal's or failure's reason. `null` only for an `ok` read or think: rule 179. Lane EX's change adds its `answer` checks to this list |
 | `untrusted` | `boolean` | The result holds third-party or model-written text (news, filings, theses, run summaries), so an action written after it records it as provenance (agent harness spec §6.12) |
 | `content_ref` | `ref` | The result as the model was given it, stored as an artifact, with licensed text replaced by its digest once licensed sources are read (agent harness spec §6.6); for a refusal or failure, the `{"error": code}` object |
 | `bytes` | `integer` | The byte length of the result as the model was given it |
@@ -4241,7 +4242,7 @@ input (agent harness spec §6.12), once per run that ends.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `reason` | `done` \| `bound` \| `deadline` \| `cost` \| `mode` \| `error` \| `answered` | The model ended it; a bound of the entry ended it; the risk clock passed its deadline; a turn ended `budget_exhausted` under the run's ceiling or any other cap; a mode change, a version change, Stop, or the kill switch cancelled it; a turn ended with any other error outcome; or an `answer` was shown (§15) |
+| `reason` | `done` \| `bound` \| `deadline` \| `cost` \| `mode` \| `error` \| `answered` | The model ended it; a bound the core counts ended it; the risk clock passed its deadline, or a turn ended `deadline_exceeded` on a deadline the run's time left had cut; a turn ended `budget_exhausted` under the run's ceiling or any other cap; a mode change, a version change, Stop, or the kill switch cancelled it; a turn ended with any other error outcome; or an `answer` was shown (§15) |
 | `bound` | `max_turns` \| `max_tool_calls` \| `max_repeat_denials` \| `max_theses` \| `null` | The bound, exactly when `reason` is `bound`: rule 182 |
 | `turns`, `tool_calls`, `result_bytes` | `integer` | The run's turns sent, its `ToolCallRecorded` records, and its read results' bytes |
 
@@ -4253,7 +4254,8 @@ number order after the members' types:
 
 171. Every §9.22 record: the actor is an `agent` (`actor.kind`), the runtime that owns the stream,
      and `correlation_id` is not `null` (`correlation_id`).
-172. `RunStarted`: `menu` is strictly ascending by bytes (`payload.menu`, reason `non_canonical`);
+172. `RunStarted`: `menu` and `memory` are strictly ascending by bytes (`payload.menu`,
+     `payload.memory`, reason `non_canonical`);
      `trigger.cause` is `null` exactly when `trigger.kind` is `schedule` (`payload.trigger.cause`);
      and `kind` fits `trigger.kind`: `ideate` a schedule, `monitor` a schedule or an event, `owner`
      an owner question, `explain` an approval (`payload.trigger.kind`); the first that fails.
@@ -4292,8 +4294,9 @@ number order after the members' types:
      instrument twice (`payload.watch`).
 182. `RunEnded`: `bound` is not `null` exactly when `reason` is `bound` (`payload.bound`).
 183. Agent stream, a `ModelInvocationRecorded` with `purpose` `research` whose `correlation_id` is
-     an agentic run's: it follows that run's `RunStarted` (`correlation_id`), and no `RunEnded` of the
-     run precedes it unless that `RunEnded`'s `reason` is `deadline` or `mode` and the record's
+     that of an earlier `RunStarted` (a `single_call` run has none, so this rule does not reach it;
+     that an agentic turn's record follows its `RunStarted` at all is the writer's): no `RunEnded` of
+     the run precedes it unless that `RunEnded`'s `reason` is `deadline` or `mode` and the record's
      `verdicts` is empty (`correlation_id`). A late reply to a cancelled run is so still journaled,
      and rule 175 keeps any tool call of it out (no tool call follows a `RunEnded`, rule 174), as
      agent harness spec §5.3 says. Every other §9.19 rule is unchanged.

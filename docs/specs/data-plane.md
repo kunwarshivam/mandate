@@ -338,15 +338,17 @@ interface in the workspace data service. The agent harness spec defines the tool
 | `as_of` | Required; the agent's decision time. Only records with knowledge time at or before it are returned (DP-1) |
 | `allowlist_version` | The version in effect; items from other sources are never returned (DP-9) |
 | `instruments`, `kinds`, `window`, `limit` | Filters; instruments by `asset_id` |
-| `terms` | Optional, at most five words of 1 to 32 bytes (letters, digits, spaces, hyphens, periods). Matched case-folded as whole words against the stored headline and summary of a news item, or the form and excerpt of a filing, inside the data service. A term only narrows, and is never sent to a source or any other host ([agent harness spec §6.10](agent-harness.md#610-tools), HI-28) |
-| `items` | Optional: item ids the caller already received. With `range`, returns that byte range of one stored filing's text, cut on UTF-8 boundaries; where the store holds only an excerpt, the read fails |
+| `terms` | Optional, at most five terms, each 1 to 32 bytes of letters, digits, spaces, hyphens, and periods; a term with spaces is a phrase. An item matches only when **every** term appears, case-folded, as a whole word or phrase in its stored headline and summary (news) or its form and excerpt (filings), inside the data service, so a query's result is a deterministic function of the store and its arguments. A term only narrows, and is never sent to a source or any other host ([agent harness spec §6.10](agent-harness.md#610-tools), HI-28) |
+| `items` | Optional: item ids the caller already received |
+| `range` | Optional, with exactly one filing in `items`: `{offset, length}`, a byte range of that filing's stored text, cut on UTF-8 boundaries. Where the store holds only an excerpt, or `offset` is past the end, the read fails |
 
 **A query reads the store and never fetches.** It answers from what ingestion (§4.2) has already
 stored, as of `as_of`. No query, whatever its filters, makes the data service fetch from a source,
 so a filter the research agent chose never leaves the workspace deployment (DP-9, DEC-2203 item 4).
 
 Every item returned is journaled as `ObservationRecorded` (source, instrument, `as_of`, `data_ref`)
-**before** the model reads it.
+**before** the model reads it, or already is: an item the agent stream already holds is named by its
+first observation and never journaled twice ([agent harness spec §6.10](agent-harness.md#610-tools)).
 
 The E17-5 input-drift detector does not fold the event's own members. `ObservationRecorded` is
 closed with `source`, `instrument_id`, `as_of`, and `data_ref`, and `as_of` is the run's cut-off,

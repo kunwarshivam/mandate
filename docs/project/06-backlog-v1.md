@@ -2302,9 +2302,13 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
     feedback) follows in its own slice;
   - `mandate-journal` registers the five §9.22 records with a draft for every rule 171 to 183;
-  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-10, HI-11, HI-22, HI-23, and HI-24 to HI-28 hold as property
-    tests with independent oracles, each shown to catch a seeded bug, against an adaptive
-    compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling;
+  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25, and HI-28 hold as
+    property tests with independent oracles, each shown to catch a seeded bug, against an adaptive
+    compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling; HI-26
+    and HI-27 hold vacuously until §15's owner runs and `ask_owner` land, and get their tests then;
+  - E19-6's adversarial bench and a §8.3 regression evaluation on recorded-fake scenarios are built
+    inside this story's loop slice and pass on the agentic entry by about 10/24, so the demo agents
+    may pin it;
   - recorded multi-turn fixtures run the loop in CI and the demo with no network (HI-3);
   - no agent pins an agentic entry before E19-6's bench and a §8.3 regression evaluation pass on it
     (DEC-2203 item 13).
