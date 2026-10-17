@@ -749,22 +749,36 @@ pattern); the answer is the runtime's, from the agent stream.
 - **Read the thread.** `GET /agents/{id}/desk` returns `read-models/desk`: the asking member's own
   50 most recent messages to that agent, newest first, each with its state: `refused` when the guard refused it (no run starts); `waiting` until the
   runtime's copy starts a run; `running`; then `answered` or `unavailable`. A question no run has
-  started within 60 s of its `recorded_at` is `unavailable` from then on, with the fallback
-  computed at read time (agent harness spec §15.5). Other members' messages are never served at
+  started within 60 s of its `recorded_at`, and one whose run ended without a shown answer, is
+  `unavailable`, with the fallback computed at read time (agent harness spec §15.5); a run that
+  starts late overrides it. Other members' messages are never served at
   the desk; *Read records* holders see them in the journal like every record (§4.8).
+- **Clients.** The desk, the cited-record read, the run routes, and the transcript view are
+  outside every client scope (§3.8): a client token is refused `forbidden` on each.
 - **Read one.** `GET /agents/{id}/desk/messages/{message_id}`, the asking member's only (another
   member's id is the same `not_found`): the question as typed (never for a refused one), the
   state, the run's ref, and for `answered` the answer: each segment as `{"text": quoted model
   text, "author": "agent", "cites": [ref]}`, the `not_recorded` codes with their template text, `written_after_reading` (the refs of the untrusted results in the run's context when it was written, each a link; agent harness spec §15.4), and `disclaimer`
   (`NOTE-EXPLAINER-NOT-ADVICE`, a named placeholder, DEC-2241). `records` lists each cited ref, or
-  for any other state every ref the run's tools returned, newest first, each with its record type
+  for `unavailable` the fallback records of agent harness spec §15.5, each with its record type
   and the path of the cited-record read below. No member holds an action (API-18). `as_of` names
   the control and agent streams' watermarks (API-14).
-- **Read a cited record.** `GET /agents/{id}/runs/{run_id}/records/{ref}` serves the record a run
-  returned, through the projection the product read models already serve for its type (one of agent harness spec §15.4's citable types: a decision, approval, order,
-  position, universe entry, thesis, run, mode, or the mandate's structural fields, as §4.3 and §4.7
-  serve them, figures included), authorized by the *View agents, positions, decisions* row. A ref the run did not return
-  is the same `not_found`. It never serves the raw journal event, which stays *Read records* (§4.8).
+- **Read a cited record.** `GET /agents/{id}/runs/{run_id}/records/{ref}` serves a record a run
+  returned, authorized by the *View agents, positions, decisions* row, through one projection per
+  citable type (agent harness spec §15.4), figures included:
+
+  | Type | Projection |
+  |---|---|
+  | Decision | `DecisionMade`'s time, instrument, side, purpose, quantity and limit as decided, combined conviction, autonomy outcome and its rule or delegation, the dry run's verdict and reason code, `requested_by` |
+  | Approval | As §4.3's single read serves it |
+  | Order | §4.7's order row, and for a refused order the binding gate's verdict and first reason code; never the gate view's checks, rule-set version, quotes, or marks (§4.8, J6) |
+  | Position, universe entry, thesis, mode | As §4.7's positions, universe and theses, and agent reads serve them |
+  | Run | The run's kind, trigger, start, end reason, and structured summary |
+  | Mandate | The structural fields of §4.7's agent read: goal type, asset classes, `max_instruments`, autonomy rules, limits |
+
+  A ref the run did not return is the same `not_found`, and so is any ref of an `owner` run to
+  anyone but the member who asked. It never serves the raw journal event, which stays *Read
+  records* (§4.8). The same projections serve the desk's fallback records.
 - **Transcript view.** `GET /agents/{id}/runs` and `GET /agents/{id}/runs/{run_id}`: every turn,
   tool call, tool result, and verdict of a run as E19-13's records hold them, model text quoted and
   attributed (API-18), tool results through the same projections. Research and explain runs under
@@ -774,7 +788,8 @@ pattern); the answer is the runtime's, from the agent stream.
   (`none`, `running`, `shown`, `unavailable`) and, when `shown`, the answer in the shape above,
   under the approval's own row, never through a client's `read` scope (§3.8). The read starts nothing and never waits (agent harness spec EX-9);
   the explanation is outside `content` and `content_hash` (API-12). Until DEC-2241 item 3 is
-  decided it is served only where the deployment flag `desk.approval_explanations` is on.
+  decided it is served only where both deployment flags `desk.model_answers` and
+  `desk.approval_explanations` are on.
 - **Never in a notice.** No notice, push payload, title, or URL carries a question, answer text, or
   a cited record's content (API-10).
 

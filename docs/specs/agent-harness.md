@@ -884,11 +884,11 @@ amends them) hold for these runs as for any; these add what is particular to the
 | EX-6 | **No figure from a record's numeric fields, and no number from the question, in a prompt.** Tool results reach the model through the redacted projection (§15.4), and the question and every free-text field enter the prompt through the numeric scrub (§15.4). Spelled-out numbers are a disclosed residual. What does reach the provider is DEC-2243's question | Canary test: canary quantities, prices, dollar amounts, and account refs in every record field the tools read, in the question, and in thesis text and headlines; none appears in any prompt artifact |
 | EX-7 | **Bounded.** A run makes at most §15.7's turns and tool calls and ends within its deadline, and its spend is reserved through the gateway against the agent's, the workspace's, and the deployment's budgets before any byte leaves (INF-7) | Property over random model behaviour; independent counters over the run's journaled records and the meter fold |
 | EX-8 | **Journaled before shown.** No answer is shown, and no turn reads a tool result, before its record commits (HI-24). A failed or `Ambiguous` append shows no model text | Fault injection on every append |
-| EX-9 | **Off every risk path.** An approval is raised, delivered, answered, and timed out exactly as without an explain run; a missing or late explanation only leaves the card without one. No owner or explain run delays a tick, an exit, protection, or a kill switch (rule 3, HI-14, HI-21). Their spend can make later research calls `budget_exhausted` sooner, which is the safe direction (HI-9) | Property: one input sequence run with the explain run absent, stalled for ever, and failing; every draft and the account stream are byte-identical across the three |
+| EX-9 | **Off every risk path.** An approval is raised, delivered, answered, and timed out exactly as without an explain run; a missing or late explanation only leaves the card without one. No owner or explain run delays a tick, an exit, protection, or a kill switch (rule 3, HI-14, HI-21). Their spend can make later research calls `budget_exhausted` sooner, which is the safe direction (HI-9) | Property over the approval flow, with no other run queued: one input sequence run with the explain run absent, stalled until its deadline, and failing; every draft and the account stream are byte-identical across the three |
 | EX-10 | **Nothing in notifications.** No notice, push payload, page title, or URL carries answer text, a question, or a cited record's content (rule 6, API-10) | Payload capture on every notice; a URL lint over the desk routes |
 | EX-11 | **Replay without a model.** Every shown answer, its checks, and its outcome are rebuilt from the journal (HI-3, INF-10) | Replay with a gateway that fails on any call |
 | EX-12 | **Provenance is complete.** Every shown answer's `written_after_reading` equals the set of untrusted results returned before its `answer` call, and the menu offered at each turn equals the trigger's menu (ADR-0005 §16 items 2 and 3) | Property with an adaptive compromised model (it picks its calls from the run so far, §16 item 9): an oracle that re-folds the run's tool results recomputes the set and the menu; seeded bugs (a result dropped, a tool added mid-run) are caught |
-| EX-13 | **Nothing beyond the reader's row.** Every field a desk or explain run's tools return is a field the cited-record read serves to every principal who may read the answer (*View agents, positions, decisions*), for one of the citable types of §15.4; so neither an answer's text nor its records can carry what the reader's row does not cover (ADR-0005 §11's role half) | Property: for every tool and every row it returns, an oracle built from the cited-record read's own projections, one per citable type, serves every returned field; a seeded bug (a tool returning a gate check's rule-set version) is caught |
+| EX-13 | **Nothing beyond the reader's row.** Every field a desk or explain run's tools return is a field the cited-record read serves to every principal who may read the answer (*View agents, positions, decisions*), for one of the citable types of §15.4; so neither an answer's text nor its records can carry what the reader's row does not cover (ADR-0005 §11's role half) | Property: for every tool and every row it returns, an oracle built from the projections workspace API §4.6.1 defines, one per citable type, serves every returned field; a seeded bug (a tool returning a gate check's rule-set version) is caught |
 
 ### 15.3 Who asks, and who reads
 
@@ -909,8 +909,8 @@ what the view row already serves.
 Each tool is read-only, typed, and pinned with its argument schema in the run kind's entry (inside
 its content hash, ADR-0005 §5). Every returned row carries a `ref`, the opaque handle
 `ev:<event_id>` or `art:<sha256>`; only a returned ref may be cited. The tools are E19-13's read
-tools where one exists (`memory.positions`, `memory.theses`, `memory.runs`, `records.query`,
-`mandate.read`), narrowed to these shapes for the desk:
+tools where one exists (`memory.positions`, `memory.theses`, `memory.runs`, `mandate.read`,
+`note`), narrowed to these shapes for the desk:
 
 | Tool | Arguments | Returns (redacted projection) | Caps |
 |---|---|---|---|
@@ -928,9 +928,13 @@ tools where one exists (`memory.positions`, `memory.theses`, `memory.runs`, `rec
 | `mode.read` | — | This agent's effective mode and each restriction that binds it, by name, with what it blocks and how it lifts | 1 |
 
 **Citable types**, the closed list every returned row is one of: decision, approval, order, position,
-universe entry, thesis, run, mode, and the mandate's structural fields. Each is a type the *View
-agents, positions, decisions* row already serves (workspace API §4.3, §4.7); a gate check's detail,
-an owner request's body, and a signal output are not citable (EX-13).
+universe entry, thesis, run, mode, and the mandate's structural fields. Each has its
+projection defined once, in the cited-record read of workspace API §4.6.1, served under the *View
+agents, positions, decisions* row: the decisions that row names, with their autonomy outcome and the
+dry-run's verdict and reason code, and an order's binding-gate verdict with its first reason code,
+which is the product's answer to "why was this refused". The gate view's every check, rule-set
+version, quotes, and marks stay *Read records* (workspace API §4.8, J6), and an owner request's
+body and a signal output are not citable (EX-13).
 
 **The redacted projection.** Results carry identifiers, times, symbols, sides, reason codes, rule
 and limit names, states, and the agent's own model text. Never a quantity, price, limit value,
@@ -955,7 +959,7 @@ Tools outside a run's menu are left out of its schema:
 | Run | Menu |
 |---|---|
 | `owner`, slice 1 | Every read tool above, `note`, and `answer`. No action tool |
-| `explain` | `records.approval`, `records.decision`, `records.orders`, `memory.thesis`, `memory.theses`, `mandate.read`, `mode.read`, `note`, and `answer`, all scoped to the one approval's decision |
+| `explain` | `records.approval`, `records.decision`, `records.orders`, `memory.thesis`, `memory.theses`, `mandate.read`, `mode.read`, `note`, and `answer`; the list tools filtered by code to the approval's instrument |
 | `owner`, slice 2 | The slice-1 menu, plus the action tools only when the owner chose to make a request (a control the web app shows, journaled with the message), never because the model or a result asked; §15.12 |
 
 **Provenance** (ADR-0005 §16 item 3). Every shown answer and explanation records which untrusted
@@ -994,10 +998,14 @@ sentence says what its record says: a model may cite a real record and misstate 
 is disclosed, not blocked (§15.10, DEC-2240 item 7): the template says to add no fact, and the
 cited record is always shown beside the text.
 
-**The fallback.** A run that ends without a shown answer (a bound, the deadline, a model error, a
-spent budget, a mode that does not allow runs, or the preconditions of §15.1) leaves the owner with
-generic text that no explanation could be written, and the deterministic records the run's tools
-returned, newest first, each with its link. No model text. A lost or failed run is never re-run by
+**The fallback**, one definition for every case. Whenever the desk has no shown answer for a
+question (no run started, as in a customer workspace before §15.1's decisions, or a run ended
+without one: a bound, the deadline, a model error, a spent budget, a mode change), the question's
+state is `unavailable` and the desk shows generic text that no explanation could be written, with
+the deterministic fallback records: computed at read time from the agent's folds, independent of any
+run, by the cited-record read's own projections (workspace API §4.6.1), namely the agent's latest
+10 decisions and its current mode, newest first, each with its link, stamped with the watermarks
+read (API-14). No model text. A lost or failed run is never re-run by
 the platform; the owner may ask again, which is a new run and a new cost.
 
 **Every state to its exit.** The run's own lifecycle (crash, restart, version change, mode change,
@@ -1006,7 +1014,7 @@ deadline) is E19-13's. For the desk:
 | Event | What the owner sees |
 |---|---|
 | The guard refuses the question | `OwnerQuestionSubmitted` is journaled with no question (journal spec §9.23); the runtime copies nothing and starts no run. The desk shows it `refused`, with generic text asking the member to leave out keys, account numbers, and personal details |
-| No run starts for a question within 60 s of its `recorded_at` (the agent paused or stopped, the process down, a precondition of §15.1 unmet, or a run in flight) | The desk shows it `unavailable` from then on, with the fallback computed at read time from the agent's folds by deterministic code and no model: the decisions read model's latest 10 rows (workspace API §4.7), stamped with the watermarks it read (API-14). The runtime never starts a run for a question whose `event_time` is more than 60 s before the risk clock at its copy, so a late copy cannot answer after the desk said `unavailable` |
+| No run starts for a question within 60 s of its `recorded_at` (the agent paused or stopped, the process down, a precondition of §15.1 unmet, or a run in flight) | The desk shows it `unavailable`, with the fallback. The runtime starts no run for a question whose `recorded_at` is more than 60 s before the risk clock at its copy. If a run still starts under watermark lag, its states override: `running` and then `answered` replace `unavailable`, so the desk never shows an answer and `unavailable` at once |
 | The process restarts during a run | E19-13 ends it; the desk shows the fallback. Its reservations stay counted (inference §7.3) |
 | The agent is paused, stopped, or killed | No owner or explain run starts; one in flight is cancelled at its next step (ADR-0005 §4). The desk serves the fallback for each later question |
 | The approval an explain run explains resolves | The explanation, if already shown, stays with the resolved approval; a run still in flight ends, and the card is left without one. No second explain run starts for that approval |
@@ -1049,7 +1057,7 @@ One record is new, on the control stream ([journal spec §9.23](journal.md#923-d
 | `answer` calls | 3 | 2 |
 | Result size | §15.4's caps; 16 KiB per result | The same |
 | Deadline | 60 s from the copy | 60 s, or the approval's deadline if sooner |
-| Rate | 30 questions per member per risk day, 1 in flight per member | 1 per approval |
+| Rate | 30 questions per member per risk day; 1 waiting or in flight per member (a second is `rate_limited`); at most one desk run ahead of a queued monitoring run, so invalidations never starve | 1 per approval |
 
 **Spend is settings, never constants** (DEC-2240 item 9). Every turn is reserved through the
 gateway against the agent's daily model budget, the workspace's configured budget, and the
@@ -1071,8 +1079,8 @@ template describes and never advises; and §15.5's check refuses the advice fixt
   `ApprovalRequested` commits, at most one per approval. The read of the approval starts nothing
   and writes nothing.
 - **Shown only where DEC-2241 item 3 allows.** Until the founder decides it, the explanation is
-  shown only in the platform's own demo and development workspaces, behind the deployment flag
-  `desk.approval_explanations` (off by default). Elsewhere the run does not start.
+  shown only in the platform's own demo and development workspaces, and only when both deployment
+  flags `desk.model_answers` (§15.1) and `desk.approval_explanations` are on, each off by default. Elsewhere the run does not start.
 - **What it changes.** Nothing about the approval: it is outside the approval's content and
   `content_hash` (API-12, mandate spec §6.4), shown below the content as quoted text with its
   cited records. The approver's answer does not record which explanation was shown, which is
