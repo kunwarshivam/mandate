@@ -1,7 +1,7 @@
-//! Journal spec v0.49 §9.22 (agent harness spec §6.9, DEC-2203): the agent stream's run records,
+//! Journal spec v0.50 §9.23 (agent harness spec §6.9, DEC-2203): the agent stream's run records,
 //! `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`, `RunSummaryRecorded`, and `RunEnded`, with
-//! rules 171 to 183. §9.22 has no vectors, so the drafts are written here: one honest run, and each
-//! case one edit to it with the reason and path the spec's text names, written out from §9.22, never
+//! rules 171 to 183. §9.23 has no vectors, so the drafts are written here: one honest run, and each
+//! case one edit to it with the reason and path the spec's text names, written out from §9.23, never
 //! read from the journal's own schema. A stream is judged batch by batch from its start, by
 //! `Draft::parse`, `check_batch`, and `check_stream` against the batches before it, and the first
 //! draft that fails is reported by its index across the whole stream.

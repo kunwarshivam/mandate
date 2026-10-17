@@ -1,4 +1,4 @@
-//! The records journal spec v0.49 §9.22 closes for an agentic research run (agent harness spec
+//! The records journal spec v0.50 §9.23 closes for an agentic research run (agent harness spec
 //! §6.9, DEC-2203): the agent stream's `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`,
 //! `RunSummaryRecorded`, and `RunEnded`. Rules 171 and 172 are the draft's ([`rules`]); rules 173 to
 //! 183 are stream rules ([`stream_rule`]), which [`crate::check_stream`] runs with the stream's
@@ -17,7 +17,7 @@ const SUMMARY: &str = "RunSummaryRecorded";
 const ENDED: &str = "RunEnded";
 const INVOCATION: &str = "ModelInvocationRecorded";
 
-/// The event types §9.22 closes, all on the agent stream.
+/// The event types §9.23 closes, all on the agent stream.
 pub(crate) const RUN_RECORDS: [&str; 5] = [STARTED, CALLED, RESULT, SUMMARY, ENDED];
 
 /// The codes only a refused result carries (rule 179).
@@ -44,13 +44,13 @@ const NOT_VERDICTS: [&str; 6] = [
 /// The most entries a summary's `watch` holds (rule 181).
 const MAX_WATCH: usize = 10;
 
-/// Whether §9.22 governs `event_type`: the catalogue admits its records on the agent stream alone,
+/// Whether §9.23 governs `event_type`: the catalogue admits its records on the agent stream alone,
 /// so the stream is already the agent's here.
 pub(crate) fn governs(event_type: &str) -> bool {
     RUN_RECORDS.contains(&event_type)
 }
 
-/// The §9.22 schema of `event_type` at `schema_version` on `stream`, or `None`.
+/// The §9.23 schema of `event_type` at `schema_version` on `stream`, or `None`.
 pub(crate) fn schema(
     event_type: &str,
     schema_version: u64,
