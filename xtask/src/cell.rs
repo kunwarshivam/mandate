@@ -152,8 +152,8 @@ pub fn tools_missing() -> Option<String> {
     None
 }
 
-/// `cargo xtask ci cell`: the chart checks, then the cell itself, every drill, and every drill
-/// again with its bug planted. Skipped without docker, k3d and helm unless CI requires it.
+/// `cargo xtask ci cell`: the chart checks, then the cell itself, every drill, every drill again
+/// with its bug planted, and the demo without `web/`, which upgrades the releases in place. Skipped without docker, k3d and helm unless CI requires it.
 pub fn ci() -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -543,19 +543,17 @@ fn kubectl(args: &[&str]) -> Result<String> {
 
 /// `kubectl apply` of `objects`, as JSON on stdin.
 fn apply(objects: &[Value]) -> Result<()> {
+    apply_as(objects, &[])
+}
+
+/// `kubectl apply` of `objects` with `extra` flags, as JSON on stdin.
+fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
     let list = json!({"apiVersion": "v1", "kind": "List", "items": objects});
+    let mut args = vec!["exec", "-i", NODE, "kubectl", "apply"];
+    args.extend_from_slice(extra);
+    args.extend_from_slice(&["--namespace", NAMESPACE, "-f", "-"]);
     let mut child = Command::new("docker")
-        .args([
-            "exec",
-            "-i",
-            NODE,
-            "kubectl",
-            "apply",
-            "--namespace",
-            NAMESPACE,
-            "-f",
-            "-",
-        ])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .spawn()
@@ -654,9 +652,13 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
     }
 }
 
-/// Puts back every object of the release a seeded drill removed.
+/// Puts back every object of the release a seeded drill removed, as helm's own field manager, so a
+/// later `helm upgrade` (the demo's) owns them again without a conflict.
 fn restore() -> Result<()> {
-    apply(&release_objects()?)
+    apply_as(
+        &release_objects()?,
+        &["--server-side", "--field-manager=helm", "--force-conflicts"],
+    )
 }
 
 /// The workspace release's objects as installed, hooks aside: `helm get manifest`.
@@ -1629,9 +1631,75 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
     }
 }
 
+/// One piece of the full local cell (E21-37's demo): ready, or skipped because the lane that
+/// builds it is not on `main` yet. A skipped piece is named, never faked.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DemoPart {
+    pub name: &'static str,
+    pub skipped: Option<String>,
+}
+
+/// Which demo parts this checkout can bring up. Stub until the demo lands (DEC-921).
+pub fn demo_parts(_processes: &[Value], _cli_help: &str) -> Vec<DemoPart> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn process(name: &str, built: bool) -> Value {
+        json!({"name": name, "built": built})
+    }
+
+    #[test]
+    fn a_demo_part_is_ready_only_once_its_lane_is_on_main() {
+        let today = [
+            process("control", true),
+            process("runtime", false),
+            process("executor", false),
+        ];
+        let parts = demo_parts(
+            &today,
+            "Commands:\n  workspace  Open the workspace control stream\n",
+        );
+        let skipped: Vec<&str> = parts
+            .iter()
+            .filter(|p| p.skipped.is_some())
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(
+            skipped.len(),
+            4,
+            "API, agent, membership and web/ wait on their lanes: {skipped:?}"
+        );
+        assert!(
+            parts.iter().take(2).all(|p| p.skipped.is_none()),
+            "the cell and the journal are always there"
+        );
+
+        let later = [
+            process("api", true),
+            process("runtime", true),
+            process("executor", true),
+        ];
+        let parts = demo_parts(
+            &later,
+            "Commands:\n  membership  Grant the founding membership\n",
+        );
+        assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+    }
+
+    #[test]
+    fn an_agent_needs_both_its_runtime_and_its_executor() {
+        for (runtime, executor) in [(true, false), (false, true)] {
+            let list = [process("runtime", runtime), process("executor", executor)];
+            let agent = demo_parts(&list, "")
+                .into_iter()
+                .find(|p| p.name.starts_with("a paper agent"));
+            assert!(agent.is_some_and(|a| a.skipped.is_some()));
+        }
+    }
 
     #[test]
     fn a_cidr_contains_exactly_its_addresses() {
