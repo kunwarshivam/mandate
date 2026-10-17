@@ -56,6 +56,7 @@
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-notify/     @kunwarshivam
 /crates/mandate-num/        @kunwarshivam
+/crates/mandate-objectstore/ @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
