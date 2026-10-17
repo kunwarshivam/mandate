@@ -9,7 +9,6 @@ use common::{
 };
 use mandate_canon::{Value, parse};
 use mandate_gateway::fake::{Recorded, RecordedTransport};
-use mandate_gateway::meter::Caps;
 use mandate_gateway::money::Usage;
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::provider::{Delivery, NoKeys, ProviderAdapter, SecretError, SecretSource};
@@ -94,6 +93,10 @@ fn request() -> mandate_gateway::CallRequest {
         deadline: common::at(common::CUT_OFF + 120),
         observations: Vec::new(),
         key_owner: mandate_gateway::KeyOwner::Platform,
+        run_kind: None,
+        turns: Vec::new(),
+        tools: Vec::new(),
+        spend_ceiling: None,
     }
 }
 
@@ -147,7 +150,7 @@ fn a_selected_openrouter_gateway_sends_through_the_hosted_transport_with_the_vau
     let mut fake = RecordedTransport::new();
     fake.script(vec![ok_reply()]);
     let (mut gateway, selection) = research_gateway(
-        parts(Caps::demo()),
+        parts(common::budget()),
         Box::new(common::FixtureVault),
         Some(hosted),
         fake,
@@ -175,7 +178,7 @@ fn a_hosted_transport_without_a_vaulted_key_is_never_used() {
     let mut fake = RecordedTransport::new();
     fake.script(vec![ok_reply()]);
     let (mut gateway, selection) = research_gateway(
-        parts(Caps::demo()),
+        parts(common::budget()),
         Box::new(NoKeys),
         Some(hosted),
         fake,
@@ -190,7 +193,7 @@ fn a_hosted_transport_without_a_vaulted_key_is_never_used() {
         "the call went to the fake"
     );
     let (_, selection) = research_gateway(
-        parts(Caps::demo()),
+        parts(common::budget()),
         Box::new(common::FixtureVault),
         None::<NoHostedTransport>,
         RecordedTransport::new(),
