@@ -1392,7 +1392,9 @@ struct Finding {
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
 /// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
-/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
+/// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
+/// allowed in that test file alone, and any other value under the same setting there is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -1416,6 +1418,10 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let signer = "crates/mandate-objectstore/tests/sigv4.rs";
     let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
     let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
+    let process = "crates/mandate-api-server/tests/process.rs";
+    let ulid = concat!("01JB3K6F0C9R2V7N", "4M8Q1T5W3Y");
+    let setting = format!("        .env(\"MANDATE_API_WORKSPACE\", \"{ulid}\")");
+    let not_ulid = format!("        .env(\"MANDATE_API_ORG\", \"{page}\")");
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1448,6 +1454,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (bootstrap.to_owned(), fingerprint.clone(), None),
         ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
         (bootstrap.to_owned(), not_fingerprint, cloudflare),
+        (process.to_owned(), setting.clone(), None),
+        ("stray-process.rs".to_owned(), setting, generic),
+        (process.to_owned(), not_ulid, generic),
     ]
 }
 
