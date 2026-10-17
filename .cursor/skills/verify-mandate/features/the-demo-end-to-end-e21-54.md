@@ -6,7 +6,7 @@
   cell-demo`), and the demo's envelope and instrument under `deploy/cell/demo/`.
 - **Tests:** `xtask/src/cell/scenario.rs`'s unit tests: the demo files are canonical JSON and the
   envelope is paper and asks every opening; the plan runs the six steps in order and types only the
-  codes it was shown; every gesture is in the run's workspace and never live; every gap names the
+  codes it was shown; every gesture is in the run's workspace and never live; the cell's API is checked only for its refusal with no session; every gap names the
   PR or story that closes it; and the gestures run in one pod after the egress gate.
 - **Run:** `cargo xtask cell demo --scenario demo` on a machine with docker, k3d and helm
   (`deploy/cell/README.md`, "The demo's scenario"); CI's `cell-demo` job, which no required check
