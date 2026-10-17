@@ -1,0 +1,16 @@
+# A managed Kubernetes cluster, rendered in CI to show the chart uses no k3s-only, provider-only or
+# cloud-only API (E21-36, DEC-967 item 6). Its DNS pods carry the upstream `k8s-app: kube-dns`
+# label, as k3s's do.
+workspace: ws1
+environment: paper
+egress:
+  dns:
+    namespace: kube-system
+    podSelector:
+      k8s-app: kube-dns
+ingress:
+  cloudflared:
+    enabled: true
+    tokenFrom: cloudflared-tunnel
+    # region1.v2.argotunnel.com and region2.v2.argotunnel.com, as resolved on 2026-10-17.
+    edge: ["198.41.192.0/24", "198.41.200.0/24"]

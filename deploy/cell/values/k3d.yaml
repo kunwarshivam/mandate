@@ -1,0 +1,5 @@
+# The local and CI cell (E21-37): k3s in containers on a developer machine or a CI runner.
+# `cargo xtask cell up` sets `images.mandate` to the image it built from the change.
+workspace: ws1
+environment: paper
+localImages: true

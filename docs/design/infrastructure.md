@@ -171,6 +171,20 @@ stream (DEC-131). Facts cross between them only as journaled copies (journal §2
 each other's events through journal tailing with Postgres `LISTEN`/`NOTIFY` as a wake-up hint
 (DEC-17); a lost notification costs latency, not correctness.
 
+**Workspace services and agent processes meet only in the journal** (E21-42,
+[DEC-986](../project/decisions/DEC-986.md)). Workspace services (the control services, the API,
+the dispatcher, `cp-agent`) never call a runtime, an executor, a connector or the scheduler, and
+agent processes never call a workspace service. Exactly three channels connect processes in a
+workspace deployment: the journal (appends under each stream's single writer, read by tailing),
+the host-local market-data channel below, which serves runtimes and executors only, and the
+orchestrator's probes (§3.4), which read health and change nothing. The `[process_groups]` table of
+`xtask/layers.toml` makes the first rule checked: no crate in one group reaches a crate in the
+other through any chain of dependencies (`cargo xtask layers`). The default-deny network policies
+that keep a workspace-services pod from routing to an agent-process pod come with the chart
+(E21-36), and the test that drops every `LISTEN`/`NOTIFY` wake-up and still delivers each owner
+command by tailing comes with the long-running processes (E21-2); both are E21-42's remaining
+criteria.
+
 **The market-data channel is host-local, and it is not in the egress allow-list.** The data-plane
 spec (§3.6) has the data service push normalized quotes, instrument statuses, and LULD bands to the
 workspace's runtimes and executors over an in-process or same-host channel. Here that is a Unix
