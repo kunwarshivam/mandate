@@ -104,7 +104,7 @@ records it.
 | `propose_mandate_change` from the agent's runs | Owner runs only, specified and not declared | The memo's narrowing; whether the agent may propose envelope changes at all is compliance text (item 15) |
 | A run in flight resumes after a crash | A crash ends the run; replay is exact | Without a journaled turn start, a resumed run cannot count the lost turn's reservation (E19-14) |
 | Compaction of long runs | Not needed under v0.2's bounds | The bounds keep every prompt small; a journaled compaction is a later change |
-| Action tools with mid-run verdict feedback as the stretch goal | Specified, and undeclared until the founder decides | A cap that ends such a run leaves earlier admissions standing, so HI-9 holds only in a weaker form, which is the founder's (DEC-2203 item 25) |
+| Action tools' verdicts take effect at once | A thesis's verdict is provisional mid-run and commits only when the run ends normally; an invalidation takes effect at once | A cap that ends a run must never leave an admission behind, so HI-9 holds strictly (the coordinator's tightening, DEC-2203 item 25) |
 | `ask_owner` in slice 1 | Specified, not declared | It needs its own records, an opaque notification (rule 6), and founder-approved wording (item 20) |
 
 ## Consequences

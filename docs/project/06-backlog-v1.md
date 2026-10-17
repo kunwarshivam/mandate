@@ -2300,9 +2300,9 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     run kind, and §6.11's bounds, each ending the run except result size;
   - the `final_output` path runs end to end: the runtime core (lane I2's E19-3 side) judges the final
     output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
-    feedback) follows in its own slice once the founder decides DEC-2203 item 25;
+    feedback, theses committed only at a normal end, DEC-2203 item 25) follows in its own slice;
   - `mandate-journal` registers the five §9.22 records with a draft for every rule 171 to 183;
-  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25, and HI-28 hold as
+  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-9, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25 (its action half once `action_tools` is declared), and HI-28 hold as
     property tests with independent oracles, each shown to catch a seeded bug, against an adaptive
     compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling; HI-26
     and HI-27 hold vacuously until §15's owner runs and `ask_owner` land, and get their tests then;
