@@ -152,8 +152,8 @@ pub fn tools_missing() -> Option<String> {
     None
 }
 
-/// `cargo xtask ci cell`: the chart checks, then the cell itself, every drill, and every drill
-/// again with its bug planted. Skipped without docker, k3d and helm unless CI requires it.
+/// `cargo xtask ci cell`: the chart checks, then the cell itself, every drill, every drill again
+/// with its bug planted, and the demo without `web/`, which upgrades the releases in place. Skipped without docker, k3d and helm unless CI requires it.
 pub fn ci() -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -165,7 +165,8 @@ pub fn ci() -> Result<()> {
     chart_checks()?;
     up()?;
     drill(&DRILLS, false)?;
-    drill(&DRILLS, true)
+    drill(&DRILLS, true)?;
+    demo(false)
 }
 
 /// helm lint and a strict schema check of every rendering of both charts, then the chart's
@@ -291,10 +292,18 @@ fn kubeconfig() -> Result<String> {
     Ok(state()?.join("kubeconfig").display().to_string())
 }
 
-/// The image tag this change's build gets: the commit, so two changes never share one.
+/// The image tag of this checkout's build: the binary's own SHA-256, so an uncommitted edit gets a
+/// new image rather than the last one imported under the same commit.
 fn image_tag() -> Result<String> {
-    let commit = output("git", &["rev-parse", "--short=12", "HEAD"])?;
-    Ok(format!("mandate.local/mandate:{}", commit.trim()))
+    let digest = sha256(&static_binary())?;
+    let short = digest
+        .get(..12)
+        .context("a SHA-256 shorter than 12 digits")?;
+    Ok(format!("mandate.local/mandate:{short}"))
+}
+
+fn static_binary() -> String {
+    format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate")
 }
 
 /// `cargo xtask cell up`: build the `mandate` image from this checkout (never with the `live`
@@ -302,6 +311,7 @@ fn image_tag() -> Result<String> {
 /// journal's Postgres and the workspace chart, and wait until every pod is ready and the
 /// migration Job has finished.
 pub fn up() -> Result<()> {
+    build_binary()?;
     let image = image_tag()?;
     build_image(&image)?;
     if !cluster_exists()? {
@@ -395,7 +405,7 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// `mandate-cli` linked statically, so the image needs no base (DEC-993 item 9), with no feature
 /// at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
 /// overflow checks, and the cell's journals are small.
-fn build_image(image: &str) -> Result<()> {
+fn build_binary() -> Result<()> {
     let args = [
         "build",
         "--locked",
@@ -418,12 +428,16 @@ fn build_image(image: &str) -> Result<()> {
     if !status.success() {
         bail!("the static build of mandate-cli failed with {status}");
     }
+    Ok(())
+}
+
+fn build_image(image: &str) -> Result<()> {
     let context = state()?.join("image");
     if context.exists() {
         fs::remove_dir_all(&context).context("clearing the image context")?;
     }
     fs::create_dir_all(&context)?;
-    let binary = format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate");
+    let binary = static_binary();
     fs::copy(&binary, context.join("mandate"))
         .with_context(|| format!("copying {binary} into the image context"))?;
     let context = context.display().to_string();
@@ -543,19 +557,17 @@ fn kubectl(args: &[&str]) -> Result<String> {
 
 /// `kubectl apply` of `objects`, as JSON on stdin.
 fn apply(objects: &[Value]) -> Result<()> {
+    apply_as(objects, &[])
+}
+
+/// `kubectl apply` of `objects` with `extra` flags, as JSON on stdin.
+fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
     let list = json!({"apiVersion": "v1", "kind": "List", "items": objects});
+    let mut args = vec!["exec", "-i", NODE, "kubectl", "apply"];
+    args.extend_from_slice(extra);
+    args.extend_from_slice(&["--namespace", NAMESPACE, "-f", "-"]);
     let mut child = Command::new("docker")
-        .args([
-            "exec",
-            "-i",
-            NODE,
-            "kubectl",
-            "apply",
-            "--namespace",
-            NAMESPACE,
-            "-f",
-            "-",
-        ])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .spawn()
@@ -654,9 +666,14 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
     }
 }
 
-/// Puts back every object of the release a seeded drill removed.
+/// Puts back every object of the release a seeded drill removed, as helm's own field manager, so a
+/// later `helm upgrade` (the demo's, at the end of `ci cell`) can own them again; that upgrade is
+/// the check that it does.
 fn restore() -> Result<()> {
-    apply(&release_objects()?)
+    apply_as(
+        &release_objects()?,
+        &["--server-side", "--field-manager=helm", "--force-conflicts"],
+    )
 }
 
 /// The workspace release's objects as installed, hooks aside: `helm get manifest`.
@@ -1629,9 +1646,264 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
     }
 }
 
+/// The workspace `cargo xtask cell demo` opens, whose control stream it verifies.
+const DEMO_WORKSPACE: &str = "demo";
+/// Where `web/` serves on the developer's machine (its `npm run dev`).
+const WEB_URL: &str = "http://127.0.0.1:4317";
+/// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
+/// that, once listed, it is a service.
+const API_PROCESS: &str = "api";
+
+/// One piece of the full local cell (E21-37's demo): ready, or skipped because the lane that
+/// builds it is not on `main` yet. A skipped piece is named, never faked.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DemoPart {
+    pub name: &'static str,
+    pub skipped: Option<String>,
+}
+
+/// Which demo parts this checkout can bring up: a process is there once the process list marks
+/// it built (its lane's image exists), and the founding membership once the CLI has its gesture.
+pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
+    let built = |name: &str| {
+        processes
+            .iter()
+            .any(|p| p["name"] == name && p["built"] == true)
+    };
+    let lane = |ready: bool, why: &str| (!ready).then(|| why.to_string());
+    vec![
+        DemoPart {
+            name: "the cell: k3d, CloudNativePG, the migration Job",
+            skipped: None,
+        },
+        DemoPart {
+            name: "a demo workspace whose control stream verifies (journal spec §11)",
+            skipped: None,
+        },
+        DemoPart {
+            name: "the workspace API server, through a port-forward",
+            skipped: lane(
+                built(API_PROCESS),
+                "the API server is not on main yet (lane A1, E21-31)",
+            ),
+        },
+        DemoPart {
+            name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
+            skipped: lane(
+                built("runtime") && built("executor"),
+                "the runtime and executor images are not on main yet (lane P1, #1451)",
+            ),
+        },
+        DemoPart {
+            name: "the founding membership",
+            skipped: lane(
+                cli_help
+                    .lines()
+                    .filter(|l| l.starts_with("  ") && !l.starts_with("   "))
+                    .any(|l| l.split_whitespace().next() == Some("membership")),
+                "the founding membership gesture is not on main yet (lane ID1)",
+            ),
+        },
+        DemoPart {
+            name: "web/ against the cell's API",
+            skipped: lane(
+                built(API_PROCESS),
+                "web/ runs on its own fixtures until the API server lands (lane A1)",
+            ),
+        },
+    ]
+}
+
+/// `cargo xtask cell demo [--no-web]`: the full local cell on a developer machine, with paper and
+/// demo data only. It brings up the cell, opens the demo workspace and verifies its journal,
+/// prints what is ready and what is skipped and why, then runs `web/` in the foreground at
+/// [`WEB_URL`] unless `--no-web`.
+pub fn demo(web: bool) -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        bail!("the demo needs docker, k3d and helm: {reason} (deploy/cell/README.md)");
+    }
+    up()?;
+    demo_workspace()?;
+    let image = image_tag()?;
+    let help = output(
+        "docker",
+        &["run", "--rm", "--network", "none", &image, "--help"],
+    )
+    .context("reading the CLI's commands from the image it built")?;
+    let parts = demo_parts(&processes()?, &help);
+    eprintln!("==> the local cell (paper and demo data only; local-cell results, never staging's)");
+    for part in &parts {
+        match &part.skipped {
+            None => eprintln!("    ready    {}", part.name),
+            Some(why) => eprintln!("    skipped  {}: {why}", part.name),
+        }
+    }
+    eprintln!(
+        "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
+         stop: cargo xtask cell down"
+    );
+    if !web {
+        return Ok(());
+    }
+    if output("npm", &["--version"]).is_err() {
+        eprintln!("    web/: npm is not installed (web/.nvmrc names the Node.js release); skipped");
+        return Ok(());
+    }
+    if !Path::new("web/node_modules").exists() {
+        sh_in("web", "npm", &["ci"])?;
+    }
+    let wanted = fs::read_to_string("web/.nvmrc").unwrap_or_default();
+    let node = output("node", &["--version"]).unwrap_or_default();
+    if node.trim().trim_start_matches('v') != wanted.trim() {
+        eprintln!(
+            "    web/: Node.js is {}, web/.nvmrc names {}; it may still run",
+            node.trim(),
+            wanted.trim()
+        );
+    }
+    eprintln!("==> web/ at {WEB_URL} (Ctrl-C stops it; the cell keeps running)");
+    let status = Command::new("npm")
+        .current_dir("web")
+        .args(["run", "dev"])
+        .status()
+        .context("starting `npm run dev`")?;
+    if status.success() || status.code().is_none() {
+        Ok(())
+    } else {
+        bail!("`npm run dev` in web/ failed with {status}")
+    }
+}
+
+/// Opens the demo workspace's control stream once (a second run finds it open and goes on), then
+/// exports and verifies it in the cell.
+fn demo_workspace() -> Result<()> {
+    let id = run_id()?;
+    let args = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        DEMO_WORKSPACE,
+        "--environment",
+        "paper",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store"
+    ]);
+    let open = render(
+        &[format!("run.id=\"{id}\""), format!("run.args={args}")],
+        Some("templates/run.yaml"),
+    )?;
+    let (opened, logs) = run_job(open)?;
+    if !opened && !logs.contains("workspace_already_open") {
+        bail!("`mandate workspace open --workspace {DEMO_WORKSPACE}` failed in the cell:\n{logs}");
+    }
+    let streams = json!([format!("ctl:{DEMO_WORKSPACE}")]);
+    let verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={streams}"),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (verified, logs) = run_job(verify)?;
+    if !verified {
+        bail!("the demo workspace's control stream did not verify:\n{logs}");
+    }
+    Ok(())
+}
+
+fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
+    eprintln!("    $ (cd {dir} && {program} {})", args.join(" "));
+    let status = Command::new(program)
+        .current_dir(dir)
+        .args(args)
+        .status()
+        .with_context(|| format!("starting `{program}`"))?;
+    if !status.success() {
+        bail!(
+            "`{program} {}` in {dir} failed with {status}",
+            args.join(" ")
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn process(name: &str, built: bool) -> Value {
+        json!({"name": name, "built": built})
+    }
+
+    #[test]
+    fn a_demo_part_is_ready_only_once_its_lane_is_on_main() {
+        let today = [
+            process("control", true),
+            process("runtime", false),
+            process("executor", false),
+        ];
+        let parts = demo_parts(
+            &today,
+            "Commands:\n  workspace  Open the workspace control stream\n",
+        );
+        let skipped: Vec<&str> = parts
+            .iter()
+            .filter(|p| p.skipped.is_some())
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(
+            skipped.len(),
+            4,
+            "API, agent, membership and web/ wait on their lanes: {skipped:?}"
+        );
+        assert!(
+            parts.iter().take(2).all(|p| p.skipped.is_none()),
+            "the cell and the journal are always there"
+        );
+
+        let later = [
+            process("api", true),
+            process("runtime", true),
+            process("executor", true),
+        ];
+        let parts = demo_parts(
+            &later,
+            "Commands:\n  membership  Grant the founding membership\n",
+        );
+        assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+    }
+
+    #[test]
+    fn api_is_a_planned_name() -> Result<()> {
+        let all = processes_in(&crate::repo_root()?)?;
+        let listed = all.iter().find(|p| p["name"] == API_PROCESS);
+        assert!(
+            listed.is_none_or(|p| p["kind"] == "service"),
+            "the API server, once listed, is a service named `{API_PROCESS}`"
+        );
+        let help = "Commands:\n  workspace  Open\n      membership is named in a wrapped line\n";
+        let membership = demo_parts(&[], help)
+            .into_iter()
+            .find(|p| p.name == "the founding membership");
+        assert!(
+            membership.is_some_and(|m| m.skipped.is_some()),
+            "a wrapped description line is not a command"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_agent_needs_both_its_runtime_and_its_executor() {
+        for (runtime, executor) in [(true, false), (false, true)] {
+            let list = [process("runtime", runtime), process("executor", executor)];
+            let agent = demo_parts(&list, "")
+                .into_iter()
+                .find(|p| p.name.starts_with("a paper agent"));
+            assert!(agent.is_some_and(|a| a.skipped.is_some()));
+        }
+    }
 
     #[test]
     fn a_cidr_contains_exactly_its_addresses() {
