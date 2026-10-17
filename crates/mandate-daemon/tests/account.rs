@@ -358,33 +358,28 @@ fn each_pass_reads_control_then_account_then_clock() {
     assert!(position(ACCOUNT_STREAM) < position(CLOCK), "{reads:?}");
 }
 
-/// DEC-2209 item 5: an account stream that cannot be read ends the pass after the kill switch, and
-/// hands no tick on a stale view of the account.
+/// DEC-2209 item 5: an account stream that cannot be read folds nothing and holds nothing: the
+/// kill switch is journaled, and the tick is still handed on the last folded view; the rows are
+/// folded once the stream is back.
 #[test]
-fn an_unreadable_account_stream_never_holds_the_kill_switch_and_hands_no_tick() {
+fn an_unreadable_account_stream_holds_neither_the_kill_switch_nor_the_tick() {
     let rig = Rig::default();
-    reconciliation(&rig, "clean");
     let mut process = start(&rig, Some(ACCOUNT), NOW);
     rig.account_down.set(true);
+    reconciliation(&rig, "clean");
     kill_switch(&rig);
-    tick(&rig, NOW + 1);
-    rig.reads.borrow_mut().clear();
-    process.step(at(NOW + 1));
+    pass(&rig, &mut process, NOW + 1);
     assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
-    assert!(
-        !rig.reads.borrow().iter().any(|s| s == CLOCK),
-        "{:?}",
-        rig.reads.borrow()
-    );
-    let clock = || process.state().risk_clock().map(|clock| clock.secs());
-    assert_eq!(clock(), Some(NOW), "only the account rows' own risk clock");
-    assert_eq!(process.lifecycle().state(), State::Ready);
-    rig.account_down.set(false);
-    process.step(at(NOW + 2));
     assert_eq!(
         process.state().risk_clock().map(|clock| clock.secs()),
-        Some(NOW + 1)
+        Some(NOW + 1),
+        "the tick was handed"
     );
+    assert_eq!(process.state().head(ACCOUNT_STREAM), None, "nothing folded");
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    rig.account_down.set(false);
+    pass(&rig, &mut process, NOW + 2);
+    assert_eq!(process.state().head(ACCOUNT_STREAM), Some(Seq(1)));
 }
 
 /// DEC-2209 item 2: an account stream that cannot be read at start stops the process before the
