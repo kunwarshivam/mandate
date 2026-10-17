@@ -1,0 +1,37 @@
+{{- /*
+Default deny (infrastructure §9, OPS-5): no pod in the workspace's namespace sends or accepts
+anything a policy below does not allow. Each process type then gets exactly its egress column of
+§3.1 and no ingress; only a process another process names as a target accepts that one caller.
+*/ -}}
+{{- define "mandate.defaultDeny" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  labels:
+    app.kubernetes.io/name: mandate-workspace
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    mandate.dev/workspace: {{ .Values.workspace | quote }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+{{- end -}}
+{{- include "mandate.checkImages" . }}
+---
+{{ include "mandate.emit" (include "mandate.defaultDeny" .) }}
+{{- $root := . }}
+{{- $all := include "mandate.processes" . | fromJsonArray }}
+{{- range $all }}
+{{- if and (ne .kind "migration") (index $root.Values.images .image) }}
+---
+{{ include "mandate.emit" (include "mandate.egressPolicy" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}
+{{- range $target := list "model-gateway" }}
+{{- range $all }}
+{{- if and (eq .name $target) (index $root.Values.images .image) }}
+---
+{{ include "mandate.emit" (include "mandate.ingressPolicy" (dict "root" $root "p" . "port" 8080)) }}
+{{- end }}
+{{- end }}
+{{- end }}

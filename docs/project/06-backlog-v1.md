@@ -2690,7 +2690,7 @@ enables `live` (ES-23, OPS-5).
   role before processes roll, never at start (OPS-13); secrets arrive only as mounted files, never
   environment variables (DEC-822 item 4); `helm lint`, a schema check and a test that renders the
   chart and asserts each of these pass in CI; `environment` accepts only `paper` or `backtest`, except the `live` Robinhood connection of E21-48 (DEC-967 item 15); and
-  no template or crate uses a k3s-only, Hetzner-only or cloud-only API, the storage class, the node
+  no template or crate uses a k3s-only, DigitalOcean-only or other provider-only API, the storage class, the node
   count and the ingress (a `cloudflared` pod) being values, shown by rendering the same chart for
   k3d, k3s and a managed Kubernetes values file (DEC-967 item 6).
 - **E21-37 (Proposed, M8; lane C1; its drills test SC paths)** As the founder, I want a local and
@@ -2747,8 +2747,9 @@ enables `live` (ES-23, OPS-5).
   the database's; a local-cell drill restores to a point in time and passes journal spec §11 over
   every stream (OPS-8); a failover drill with intents in flight shows zero duplicates and zero lost
   acknowledged appends, and that the old primary is fenced before the standby is promoted
-  (DEC-434 item 15); the two instances run on different VMs in a spread placement group, and that
-  two VMs in one Hetzner location are one site, not two regions, is disclosed; and while the cell has one node the standby's shared failure domain is
+  (DEC-434 item 15); the two instances run on different droplets, and that two droplets in one
+  DigitalOcean region are one site, not two regions, and are not guaranteed separate hosts, is
+  disclosed (DEC-995 item 6); and while the cell has one node the standby's shared failure domain is
   disclosed in the cell's own status, not hidden.
 - **E21-42 (Proposed, M8; SC; lane M1)** As an owner, I want workspace services and my agent's
   processes to meet only in the journal, so that the API, the deployment manager or the approval

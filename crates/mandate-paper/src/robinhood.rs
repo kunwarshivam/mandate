@@ -578,6 +578,7 @@ fn with_bridge<T>(
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport: (),
     } = sources;
@@ -591,6 +592,7 @@ fn with_bridge<T>(
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport: bridge,
     }
