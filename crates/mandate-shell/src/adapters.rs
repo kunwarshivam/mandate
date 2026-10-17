@@ -57,7 +57,7 @@ use mandate_executor::{
     paper_only_fee_config,
 };
 use mandate_journal::{
-    AppendOutcome, ArtifactSource, ArtifactStore, MemoryJournal, StoredEvent, StreamId,
+    AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, MemoryJournal, StoredEvent, StreamId,
 };
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
@@ -939,7 +939,7 @@ fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<Ma
             author: context.author.clone(),
             timeout_s: i64::from(document.autonomy.approval.timeout_s),
             environment,
-            live_cli_confirm: None,
+            live_cli_confirm: context.live_cli_confirm.clone(),
         },
     })
 }
@@ -1568,6 +1568,13 @@ impl JournalWriter for StoreJournal {
         let Ok(stream) = Self::stream(stream) else {
             return AppendOutcome::Unavailable;
         };
+        if let Some(store) = self.content_store.as_deref_mut()
+            && drafts
+                .iter()
+                .any(|draft| put_request_content(store, draft).is_err())
+        {
+            return AppendOutcome::Unavailable;
+        }
         let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
         let recorded_at = self.recorded_at;
         match (&mut self.backend, self.artifacts.as_deref()) {
@@ -1611,6 +1618,31 @@ impl JournalWriter for StoreJournal {
             (StoreBackend::Unavailable, _) => AppendOutcome::Unavailable,
         }
     }
+}
+
+/// Puts an `ApprovalRequested` draft's canonical `content` in `store`, under the `content_hash`
+/// the draft states and lists in `artifact_refs` (journal spec §3, §9.7, §11 check 6; DEC-970
+/// item 4). A draft of any other type puts nothing. A request whose content is missing, or whose
+/// hash does not name exactly that content, or a put the store refuses, is an error, and the batch
+/// is not appended, so no record names an object the store does not hold and the ask is never
+/// made (`AGENTS.md` rule 3).
+fn put_request_content(store: &mut (dyn ArtifactStore + Send), draft: &[u8]) -> Result<(), ()> {
+    let body = mandate_canon::parse(draft).map_err(|_| ())?;
+    if body.get("event_type").and_then(Value::as_str) != Some("ApprovalRequested") {
+        return Ok(());
+    }
+    let payload = body.get("payload").ok_or(())?;
+    let content = payload.get("content").ok_or(())?;
+    let stated = payload
+        .get("content_hash")
+        .and_then(Value::as_str)
+        .and_then(ArtifactRef::parse)
+        .ok_or(())?;
+    let bytes = mandate_canon::to_canonical(content);
+    if ArtifactRef::of(&bytes) != stated {
+        return Err(());
+    }
+    store.put_artifact(&bytes).map(|_| ()).map_err(|_| ())
 }
 
 /// The runtime's `IntentSink`, handing to the executor with this deployment's `AgentId`.

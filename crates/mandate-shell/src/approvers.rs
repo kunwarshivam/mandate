@@ -15,7 +15,8 @@ use std::collections::BTreeSet;
 
 use mandate_canon::Value;
 use mandate_domain::Environment;
-use mandate_runtime::LiveScope;
+use mandate_num::Usd;
+use mandate_runtime::{LiveBroker, LiveScope, OpaqueUser};
 use mandate_spec::Mandate;
 use mandate_spec::document::ApproverRef;
 
@@ -98,6 +99,11 @@ pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String
         .collect()
 }
 
+/// One text member of `record`'s payload.
+fn text_of<'r>(record: &'r ControlRecord, name: &str) -> Option<&'r str> {
+    record.payload.get(name).and_then(Value::as_str)
+}
+
 /// DEC-923's scope for a live `cli_confirm` grant, read as `mandate approvals approve` reads it
 /// (DEC-970 item 1): on a `live` run, the mandate connection's latest record is a `live`
 /// `ConnectionEstablished`, its broker names the scope's broker, the confirmed mandate gives the
@@ -109,6 +115,42 @@ pub fn live_cli_confirm(
     mandate: &Mandate,
     environment: Environment,
 ) -> Option<LiveScope> {
-    let _ = (records, mandate, environment);
-    None
+    if environment != Environment::Live {
+        return None;
+    }
+    let connection = mandate.connection_id.as_str();
+    let Members::Owner(owner) = members(records, connection) else {
+        return None;
+    };
+
+    let latest = records
+        .iter()
+        .filter(|record| {
+            matches!(
+                record.event_type.as_str(),
+                "ConnectionEstablished" | "ConnectionRevoked"
+            ) && text_of(record, "connection_id") == Some(connection)
+        })
+        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"))?;
+    if text_of(latest, "environment") != Some("live") {
+        return None;
+    }
+    let broker = match text_of(latest, "broker") {
+        Some("robinhood") => LiveBroker::Robinhood,
+        Some(_) | None => LiveBroker::Other,
+    };
+    let Ok(max_order_usd) = Usd::parse(mandate.risk.max_order_usd.as_str()) else {
+        return None;
+    };
+    Some(LiveScope {
+        broker,
+        max_order_usd,
+        pinned_instruments: mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .map(|instrument| instrument.asset_id.as_str().to_owned())
+            .collect(),
+        workspace_owner: OpaqueUser(owner),
+    })
 }
