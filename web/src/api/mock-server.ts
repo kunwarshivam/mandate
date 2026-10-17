@@ -129,13 +129,17 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return { ...agentRow(agent), account_positions: positions };
   }
 
+  /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
+  const servedId = (approval: Approval) => approval.approval_id.replace(/^apr_/, "");
+  const approvalBy = (id: string) => workspace.approvals.find((a) => servedId(a) === id);
+
   const STATE: Record<ApprovalStatus, string> = { delivered: "pending", acted: "acted", gate_skipped: "canceled", rejected: "skipped", expired: "timed_out", superseded: "canceled" };
 
   /** `read-models/approvals`' row: the approval and the order it binds (#1499). */
   function approvalRow(approval: Approval) {
     const b = approval.bound;
     return {
-      approval_id: approval.approval_id,
+      approval_id: servedId(approval),
       agent_id: approval.agent_id,
       state: STATE[approval.status],
       requested_at: canonical(approval.requested_at),
@@ -163,7 +167,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     }
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
-      const approval = workspace.approvals.find((a) => a.approval_id === decodeURIComponent(approvalRoute[1]));
+      const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
       return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } } } }) : problem(404, "not_found", "none");
     }
     const status = route.match(/^\/commands\/([0-9A-Z]{26})$/);
@@ -187,7 +191,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
       if (agent.mode === "normal" || agent.mode === "exits_only") agent.mode = "paused";
     }
     const answer = path.match(/\/approvals\/([^/]+)\/responses$/);
-    const approval = answer ? workspace.approvals.find((a) => a.approval_id === decodeURIComponent(answer[1])) : undefined;
+    const approval = answer ? approvalBy(decodeURIComponent(answer[1])) : undefined;
     if (operation === "approval_response" && approval && approval.status === "delivered" && body.verdict === "skipped") {
       approval.status = "rejected";
       approval.resolution = { at: workspace.now, text: "Skipped by you. Nothing was sent." };

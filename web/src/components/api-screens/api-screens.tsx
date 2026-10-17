@@ -184,7 +184,7 @@ function Positions({ agent }: { agent: AgentDetail }) {
             <td className="py-2.5 font-mono tabular">{quantity(p.qty)}</td>
             <td className="py-2.5 font-mono tabular">
               {quantity(p.broker_qty)}
-              {p.mismatch ? <span className="ms-2 font-sans text-foreground">Differs from the account</span> : null}
+              {p.mismatch ? <span className="ms-2 font-sans text-foreground">Differs from the broker</span> : null}
             </td>
             <td className="py-2.5 text-muted-foreground">{clock(p.observed_at)}</td>
           </tr>
@@ -247,7 +247,7 @@ export function ApiAgent({ agentId }: { agentId: string }) {
 }
 
 const ENDED: Record<Exclude<ApprovalState, "pending">, string> = {
-  acted: "Approved and sent",
+  acted: "Approved",
   skipped: "Skipped",
   timed_out: "Skipped at the deadline",
   canceled: "Canceled",

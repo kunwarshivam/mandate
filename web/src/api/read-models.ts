@@ -115,13 +115,23 @@ const instrument = patterned(/^.{1,200}$/s);
 const day = patterned(/^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/);
 const label = patterned(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const assetClass = closedEnum<AssetClass>(["crypto", "us_equity"]);
+/** `common.schema.json`'s `Id` and `EventId`: an opaque id, and a ULID. */
+const id = patterned(/^[A-Za-z0-9_-]{1,64}$/);
+const eventId = patterned(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+
+/** At least one asset class, each once (`minItems: 1`, `uniqueItems`). */
+const assetClasses: Decoder<AssetClass[]> = (value, path) => {
+  const read = array(assetClass)(value, path);
+  if (!read.ok) return read;
+  return read.value.length > 0 && new Set(read.value).size === read.value.length ? read : fail(path, "not_canonical", JSON.stringify(read.value));
+};
 
 const mandateSummary = object<MandateSummary>({
   allocation_usd: decimal,
   max_loss_from_allocation: decimal,
   goal: closedEnum(["continuous", "accumulate", "profit_stop"]),
   goal_end_date: nullable(day),
-  asset_classes: array(assetClass),
+  asset_classes: assetClasses,
   max_position_usd: decimal,
   max_order_usd: decimal,
   max_orders_per_day: count(1),
@@ -130,7 +140,7 @@ const mandateSummary = object<MandateSummary>({
 });
 
 const agentMembers = {
-  agent_id: string,
+  agent_id: id,
   environment: closedEnum<Environment>(["paper", "live"]),
   mandate_version: contentRef,
   deployed_at: timestamp,
@@ -155,8 +165,8 @@ const boundOrder = object<BoundOrder>({
   protection: nullable(object<{ stop: string; take_profit: string | null }>({ stop: decimal, take_profit: nullable(decimal) })),
 });
 const approvalMembers = {
-  approval_id: string,
-  agent_id: string,
+  approval_id: eventId,
+  agent_id: id,
   state: closedEnum<ApprovalState>(["pending", "acted", "skipped", "timed_out", "canceled"]),
   requested_at: timestamp,
   deadline: count(0),

@@ -6,6 +6,8 @@ import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
+/** The API names an approval by its event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
+const servedId = (id: string) => id.replace(/^apr_/, "");
 const HASH = `sha256:${"ab".repeat(32)}` as const;
 const AT = "2026-10-08T14:30:00.000000000Z";
 
@@ -75,6 +77,10 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
     delete noHash.content_hash;
     expect(problem(approvalsRead({ approvals: [noHash] }, ""))).toBe("missing /approvals/0/content_hash");
     expect(problem(agentRead({ agent: ROW }, ""))).toBe("missing /agent/account_positions");
+    expect(problem(agentsRead({ agents: [{ ...ROW, agent_id: "agt/../x" }] }, ""))).toBe("not_canonical /agents/0/agent_id");
+    expect(problem(approvalsRead({ approvals: [{ ...APPROVAL, approval_id: "apr_01JBH3BTZ8K2M4N6P8R0S2T4V6" }] }, ""))).toBe("not_canonical /approvals/0/approval_id");
+    expect(problem(agentsRead({ agents: [{ ...ROW, mandate: { ...ROW.mandate, asset_classes: [] } }] }, ""))).toBe("not_canonical /agents/0/mandate/asset_classes");
+    expect(problem(agentsRead({ agents: [{ ...ROW, mandate: { ...ROW.mandate, asset_classes: ["crypto", "crypto"] } }] }, ""))).toBe("not_canonical /agents/0/mandate/asset_classes");
   });
 
   it("shows a deadline as the UTC time its risk-clock seconds name", () => {
@@ -115,9 +121,9 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
         expect(read.account_positions?.map((p) => p.instrument)).toEqual(agent.positions.map((p) => p.instrument.symbol));
         expect(read.pending_approvals).toBe(fixture.approvals.filter((a) => a.agent_id === agent.agent_id && a.status === "delivered").length);
       }
-      expect(view.approvals.map((a) => a.approval_id).sort(), scenario).toEqual(fixture.approvals.map((a) => a.approval_id).sort());
+      expect(view.approvals.map((a) => a.approval_id).sort(), scenario).toEqual(fixture.approvals.map((a) => servedId(a.approval_id)).sort());
       for (const approval of fixture.approvals) {
-        const read = view.approvals.find((a) => a.approval_id === approval.approval_id)!;
+        const read = view.approvals.find((a) => a.approval_id === servedId(approval.approval_id))!;
         expect(read.order.qty).toBe(approval.bound.qty);
         expect(read.order.limit).toBe(approval.bound.limit);
         expect(read.order.instrument).toBe(approval.bound.symbol);

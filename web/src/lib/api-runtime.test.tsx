@@ -102,7 +102,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     const fixture = buildWorkspace("approvals");
     expect(current().source).toBe("api");
     expect(view().agents.map((a) => a.agent_id)).toEqual(fixture.agents.map((a) => a.agent_id));
-    expect(view().approvals.map((a) => a.approval_id).sort()).toEqual(fixture.approvals.map((a) => a.approval_id).sort());
+    expect(view().approvals.map((a) => a.approval_id).sort()).toEqual(fixture.approvals.map((a) => a.approval_id.replace(/^apr_/, "")).sort());
     expect(current().ws.agents).toEqual([]);
     expect(current().reachable).toBe(true);
   });

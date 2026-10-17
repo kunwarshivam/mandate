@@ -38,7 +38,8 @@ function mount(node: React.ReactNode, scenario: Scenario = "approvals", tamper?:
 
 const fixture = buildWorkspace("approvals");
 const agentOf = (id: string) => fixture.agents.find((a) => a.agent_id === id)!;
-const pending = fixture.approvals.filter((a) => a.status === "delivered");
+/** The API names an approval by its event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
+const pending = fixture.approvals.filter((a) => a.status === "delivered").map((a) => ({ ...a, approval_id: a.approval_id.replace(/^apr_/, "") }));
 
 afterEach(() => {
   cleanup();
