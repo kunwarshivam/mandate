@@ -119,6 +119,32 @@ async fn the_probe_is_reused_across_restarts() {
 }
 
 #[tokio::test]
+async fn a_leftover_probe_that_is_not_compliance_locked_is_replaced() {
+    let Some(root) = common::root("leftover") else {
+        return;
+    };
+    common::create(&root, Some(SIX_YEARS)).await;
+    let probe = format!("{PREFIX}{PROBE_KEY}");
+    let later = Timestamp::now()
+        .checked_add(SignedDuration::from_hours(3000 * 24))
+        .unwrap_or_else(|error| panic!("in range: {error}"));
+    let planted = root
+        .put_object(&probe, b"left over", Some((LockMode::Governance, later)))
+        .await;
+    assert!(matches!(planted, Ok(Ok(Some(_)))), "{planted:?}");
+    let writer = common::narrowed(&root, common::WRITER_ACTIONS).await;
+    assert!(check_s3(&writer, PREFIX).await.is_ok());
+    let head = writer.head_object(&probe, None).await;
+    let Ok(Some(head)) = head else {
+        panic!("the probe exists: {head:?}");
+    };
+    assert_eq!(
+        head.retention.map(|(mode, _)| mode),
+        Some(LockMode::Compliance)
+    );
+}
+
+#[tokio::test]
 async fn a_writer_that_can_rewrite_the_rule_is_refused() {
     let Some(root) = common::root("rootwriter") else {
         return;

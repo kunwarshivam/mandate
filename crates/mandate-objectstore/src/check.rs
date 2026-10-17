@@ -2,7 +2,8 @@
 //!
 //! [`check_s3`] reads the bucket's settings and runs the probe with the writer's own credential:
 //! it keeps one probe object at `<prefix>_mandate/lockcheck`, writing a new version only when there
-//! is none or its retention has lapsed, so a restart adds nothing that stays locked for six years;
+//! is none, or the latest is not under compliance retention, or that retention has lapsed, so a
+//! restart adds nothing that stays locked for six years;
 //! then it tries, with that credential, to move the probe's retain-until date earlier, to delete
 //! the probe's version with the governance bypass, and to write the bucket's own lock
 //! configuration back. [`crate::lock::judge_s3`] judges what it found. Only an accepted judgement
@@ -66,7 +67,13 @@ pub async fn gather_s3(store: &S3, prefix: &str) -> Result<S3Evidence, S3Error> 
     let now = store.now();
     let existing = store.head_object(&key, None).await?;
     let head = match existing {
-        Some(head) if head.retention.is_some_and(|(_, until)| until > now) => head,
+        Some(head)
+            if head
+                .retention
+                .is_some_and(|(mode, until)| mode == LockMode::Compliance && until > now) =>
+        {
+            head
+        }
         _ => {
             write_probe(store, &key, now).await?;
             store
