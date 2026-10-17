@@ -39,10 +39,13 @@ The founder runs everything here; agents never get host access. The order of the
   `mandate-journal-pg` describes, reached through membership. It can read and append the journal
   tables and nothing else: it cannot update or delete events, create tables, or read the `deploy`
   schema. `PUBLIC` may not connect to `postgres` or `template1`.
-- **Migrations are tracked in `deploy.migrations`,** with each file's SHA-256. An applied file
-  whose content later changes stops the bootstrap, since a migration is never edited.
-  `mandate-journal-pg`'s embedded sqlx migrator keeps its own table. When a migration command
-  that uses it ships, it must take over from this table rather than run beside it.
+- **Migrations are tracked in `deploy.migrations`,** with each file's SHA-256, until
+  `mandate db migrate` first runs on the host. An applied file whose content later changes stops
+  the bootstrap, since a migration is never edited. The command takes this table's rows over into
+  its own ledger, `journal.schema_migrations`, applying nothing again, and from then on the
+  bootstrap skips its migration loop and leaves migrations to the command (E21-50,
+  [DEC-1180](../docs/project/decisions/DEC-1180.md)). Run it as `postgres`:
+  `sudo -u postgres mandate db migrate --journal "postgresql://postgres@localhost/owlhead?host=/var/run/postgresql"`.
 - **Secrets are systemd credentials, never environment variables** (DEC-822 item 4). Exactly three
   kinds live outside the vault, each a root:root 0600 file under `/etc/owlhead/credentials/`
   (0700):

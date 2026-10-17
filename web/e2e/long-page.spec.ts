@@ -64,7 +64,8 @@ test("each picture of the app has loaded, it is the one for the page's theme, an
   const mode = await page.evaluate(() => document.documentElement.dataset.mode);
   expect(mode === "light" || mode === "dark").toBe(true);
   const shots = page.locator("[data-slot=long-page] [data-slot=shot]");
-  expect(await shots.count()).toBe(6);
+  /** DEC-932 dropped the verdict and check pictures: these four remain, in this order. */
+  expect(await shots.evaluateAll((els) => els.map((el) => el.getAttribute("data-shot")))).toEqual(["agent", "ladder", "request", "ask"]);
   for (const shot of await shots.all()) {
     await shot.scrollIntoViewIfNeeded();
     const shown = shot.locator("img:visible");
