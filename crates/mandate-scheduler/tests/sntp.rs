@@ -125,3 +125,24 @@ fn every_server_is_asked_and_only_real_answers_are_samples() {
     assert_eq!(samples[0].stratum, 3);
     assert!((samples[0].offset_ns + 80_000_000).abs() < 1_000);
 }
+
+#[test]
+fn a_measurement_never_waits_past_its_deadline() {
+    use mandate_scheduler::TimeServers;
+    let silent: Vec<std::net::UdpSocket> = (0..5)
+        .map(|_| std::net::UdpSocket::bind("127.0.0.1:0").unwrap())
+        .collect();
+    let mut servers = mandate_scheduler::sntp::Servers {
+        names: silent
+            .iter()
+            .map(|s| s.local_addr().unwrap().to_string())
+            .collect(),
+        now: || at(T, 0),
+    };
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || done.send(servers.ask()).ok());
+    let answers = finished
+        .recv_timeout(mandate_scheduler::sntp::DEADLINE * 2)
+        .expect("five silent servers take one deadline, not five timeouts");
+    assert!(answers.is_empty());
+}

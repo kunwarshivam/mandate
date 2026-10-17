@@ -16,7 +16,7 @@
 //! `mandate-scheduler probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5).
 //! This is the one place the host clock is read (ES-05).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,7 +95,7 @@ fn host_now() -> UtcNanos {
 fn run(
     workspace: &str,
     servers: Vec<String>,
-    socket: &std::path::Path,
+    socket: &Path,
     fixture: bool,
 ) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
@@ -128,13 +128,12 @@ fn run(
 fn serve<S: ClockStore>(
     mut scheduler: Scheduler<S>,
     mut servers: Servers<fn() -> UtcNanos>,
-    socket: &std::path::Path,
+    socket: &Path,
     terminate: &AtomicBool,
 ) -> Result<u8, &'static str> {
     let status = Status::new(scheduler.lifecycle().snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
     let started = Instant::now();
-    let mut seconds: u32 = 0;
     loop {
         if let Some(stopped) = exit(&scheduler) {
             status.publish(scheduler.lifecycle().snapshot());
@@ -145,11 +144,11 @@ fn serve<S: ClockStore>(
             scheduler.drain(host_now());
             continue;
         }
-        scheduler.step(host_now(), &mut servers);
+        let elapsed = started.elapsed();
+        scheduler.step(host_now(), elapsed.as_secs(), &mut servers);
         status.publish(scheduler.lifecycle().snapshot());
-        seconds = seconds.saturating_add(1);
-        let next = TICK.saturating_mul(seconds);
-        thread::sleep(next.saturating_sub(started.elapsed()));
+        let into_second = Duration::from_nanos(u64::from(started.elapsed().subsec_nanos()));
+        thread::sleep(TICK.saturating_sub(into_second));
     }
 }
 

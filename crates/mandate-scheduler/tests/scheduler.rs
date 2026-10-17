@@ -52,6 +52,25 @@ impl TimeServers for Fixed {
     }
 }
 
+/// Steps a scheduler in a new monotonic second each time, as the binary's loop does.
+trait StepNext {
+    fn step_next(&mut self, host: UtcNanos, servers: &mut dyn TimeServers);
+}
+
+impl<S: ClockStore> StepNext for Scheduler<S> {
+    fn step_next(&mut self, host: UtcNanos, servers: &mut dyn TimeServers) {
+        SECOND.with(|second| {
+            let next = second.get() + 1;
+            second.set(next);
+            self.step(host, next, servers);
+        });
+    }
+}
+
+thread_local! {
+    static SECOND: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 fn start(store: &MemoryStore, now: i64) -> Scheduler<MemoryStore> {
     Scheduler::start(
         store.clone(),
@@ -89,7 +108,7 @@ fn a_scheduler_opens_its_stream_ticks_and_measures_at_start() {
     let store = MemoryStore::default();
     let mut scheduler = start(&store, FRIDAY_0900 - 3_600);
     assert_eq!(scheduler.lifecycle().state(), State::Ready);
-    scheduler.step(
+    scheduler.step_next(
         at(FRIDAY_0900 - 3_600),
         &mut Fixed(vec![2_000_000, -1_000_000, 3_000_000]),
     );
@@ -118,7 +137,7 @@ fn an_out_of_tolerance_clock_is_journaled_and_the_ticks_go_on() {
     let mut scheduler = start(&store, FRIDAY_0900 - 3_600);
     let mut hour_ahead = Fixed(vec![3_600_000_000_000, 3_600_000_000_000]);
     for second in 0..400 {
-        scheduler.step(at(FRIDAY_0900 - 3_600 + second), &mut hour_ahead);
+        scheduler.step_next(at(FRIDAY_0900 - 3_600 + second), &mut hour_ahead);
     }
     let rows = rows(&store);
     assert_eq!(ticks(&rows).len(), 400, "one tick per second, none held");
@@ -141,7 +160,7 @@ fn an_out_of_tolerance_clock_is_journaled_and_the_ticks_go_on() {
 fn a_measurement_no_server_answers_is_out_of_tolerance_with_no_offset() {
     let store = MemoryStore::default();
     let mut scheduler = start(&store, FRIDAY_0900);
-    scheduler.step(at(FRIDAY_0900), &mut Fixed(Vec::new()));
+    scheduler.step_next(at(FRIDAY_0900), &mut Fixed(Vec::new()));
     let rows = rows(&store);
     assert_eq!(
         kinds(&rows),
@@ -162,10 +181,10 @@ fn a_host_clock_that_steps_back_never_holds_or_reverses_the_ticks() {
     let store = MemoryStore::default();
     let mut scheduler = start(&store, FRIDAY_0900);
     let good = &mut Fixed(vec![0]);
-    scheduler.step(at(FRIDAY_0900), good);
-    scheduler.step(at(FRIDAY_0900 - 3_600), good);
-    scheduler.step(at(FRIDAY_0900 - 3_599), good);
-    scheduler.step(at(FRIDAY_0900 + 10), good);
+    scheduler.step_next(at(FRIDAY_0900), good);
+    scheduler.step_next(at(FRIDAY_0900 - 3_600), good);
+    scheduler.step_next(at(FRIDAY_0900 - 3_599), good);
+    scheduler.step_next(at(FRIDAY_0900 + 10), good);
     assert_eq!(
         ticks(&rows(&store)),
         [
@@ -184,7 +203,7 @@ fn a_trading_day_starts_in_the_batch_of_its_first_tick() {
     let mut scheduler = start(&store, thursday_2359);
     let good = &mut Fixed(vec![0]);
     for second in [0, 30, 60, 61] {
-        scheduler.step(at(thursday_2359 + second), good);
+        scheduler.step_next(at(thursday_2359 + second), good);
     }
     let rows = rows(&store);
     let day = rows
@@ -210,16 +229,16 @@ fn a_second_scheduler_fences_the_first_before_it_writes_anything() {
     let store = MemoryStore::default();
     let mut first = start(&store, FRIDAY_0900);
     let good = &mut Fixed(vec![0]);
-    first.step(at(FRIDAY_0900), good);
+    first.step_next(at(FRIDAY_0900), good);
     let mut second = start(&store, FRIDAY_0900 + 1);
-    second.step(at(FRIDAY_0900 + 1), good);
+    second.step_next(at(FRIDAY_0900 + 1), good);
     let before = rows(&store);
-    first.step(at(FRIDAY_0900 + 2), good);
+    first.step_next(at(FRIDAY_0900 + 2), good);
     assert_eq!(exit(&first), Some(Exit::Fenced));
     assert_eq!(rows(&store), before, "the fenced scheduler wrote nothing");
-    first.step(at(FRIDAY_0900 + 3), good);
+    first.step_next(at(FRIDAY_0900 + 3), good);
     assert_eq!(rows(&store), before, "nor after it exited");
-    second.step(at(FRIDAY_0900 + 2), good);
+    second.step_next(at(FRIDAY_0900 + 2), good);
     assert_eq!(exit(&second), None);
     assert_eq!(
         kinds(&rows(&store))
@@ -237,14 +256,14 @@ fn a_restart_replays_and_continues_after_the_last_tick() {
     let mut first = start(&store, FRIDAY_0900);
     let good = &mut Fixed(vec![0]);
     for second in 0..5 {
-        first.step(at(FRIDAY_0900 + second), good);
+        first.step_next(at(FRIDAY_0900 + second), good);
     }
     let mut restarted = start(&store, FRIDAY_0900 - 7_200);
     assert_eq!(
         restarted.last_tick(),
         Some(UtcNanos::from_parts(FRIDAY_0900 + 4, 0).unwrap())
     );
-    restarted.step(at(FRIDAY_0900 - 7_200), good);
+    restarted.step_next(at(FRIDAY_0900 - 7_200), good);
     let rows = rows(&store);
     assert_eq!(
         ticks(&rows).last().map(String::as_str),
@@ -315,7 +334,7 @@ fn a_batch_whose_append_is_in_doubt_is_retried_as_the_same_bytes_and_written_onc
     flaky.failures.set(2);
     let good = &mut Fixed(vec![0]);
     for second in 0..4 {
-        scheduler.step(at(FRIDAY_0900 + second), good);
+        scheduler.step_next(at(FRIDAY_0900 + second), good);
     }
     let rows = rows(&inner);
     let ticks = ticks(&rows);
@@ -333,11 +352,11 @@ fn a_batch_whose_append_is_in_doubt_is_retried_as_the_same_bytes_and_written_onc
 fn a_drain_writes_nothing_new_and_exits_drained() {
     let store = MemoryStore::default();
     let mut scheduler = start(&store, FRIDAY_0900);
-    scheduler.step(at(FRIDAY_0900), &mut Fixed(vec![0]));
+    scheduler.step_next(at(FRIDAY_0900), &mut Fixed(vec![0]));
     let before = rows(&store);
     scheduler.drain(at(FRIDAY_0900 + 1));
     assert_eq!(exit(&scheduler), Some(Exit::Drained));
-    scheduler.step(at(FRIDAY_0900 + 2), &mut Fixed(vec![0]));
+    scheduler.step_next(at(FRIDAY_0900 + 2), &mut Fixed(vec![0]));
     assert_eq!(rows(&store), before);
 }
 
@@ -368,4 +387,25 @@ fn a_ready_scheduler_answers_live_and_ready_and_a_stalled_one_neither() {
     let ask = |probe, secs| mandate_process::probe::answer(probe, snapshot, at(secs)).ok;
     assert!(ask(mandate_process::probe::Probe::Ready, FRIDAY_0900 + 5));
     assert!(!ask(mandate_process::probe::Probe::Live, FRIDAY_0900 + 11));
+}
+
+#[test]
+fn a_loop_that_falls_behind_writes_one_tick_per_second_and_never_runs_ahead() {
+    let store = MemoryStore::default();
+    let mut scheduler = start(&store, FRIDAY_0900);
+    let good = &mut Fixed(vec![0]);
+    scheduler.step(at(FRIDAY_0900), 0, good);
+    for _ in 0..20 {
+        scheduler.step(at(FRIDAY_0900 + 20), 20, good);
+    }
+    scheduler.step(at(FRIDAY_0900 + 21), 21, good);
+    assert_eq!(
+        ticks(&rows(&store)),
+        [
+            "2026-10-16T13:00:00.000000000Z",
+            "2026-10-16T13:00:20.000000000Z",
+            "2026-10-16T13:00:21.000000000Z",
+        ],
+        "a stall of 20 seconds writes one tick at the host's second, not a burst"
+    );
 }

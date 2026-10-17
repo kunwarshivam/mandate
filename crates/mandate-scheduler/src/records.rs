@@ -2,7 +2,7 @@
 //! §3 and deterministic event ids: a retried batch re-derives the same ids, so the journal answers
 //! `AlreadyCommitted` rather than writing it twice.
 
-use mandate_canon::{Int, Key, Object, Value, to_canonical};
+use mandate_canon::{Digest, Int, Key, Object, Value, to_canonical};
 use mandate_journal::Environment;
 use mandate_time::{Date, UtcNanos};
 
@@ -143,9 +143,7 @@ fn payload(workspace: &str, record: &Record) -> Option<(&'static str, Value)> {
 /// The actor: a `system` writer named `scheduler`, whose build names the crate and its version.
 /// It is not a reproducible-build digest, which is M9's (ES-01).
 fn actor() -> Option<Value> {
-    let digest = mandate_canon::Digest::of(
-        concat!("mandate-scheduler/", env!("CARGO_PKG_VERSION")).as_bytes(),
-    );
+    let digest = Digest::of(concat!("mandate-scheduler/", env!("CARGO_PKG_VERSION")).as_bytes());
     object(vec![
         ("build", Value::Str(format!("sha256:{}", digest.to_hex()))),
         ("id", text("scheduler")),

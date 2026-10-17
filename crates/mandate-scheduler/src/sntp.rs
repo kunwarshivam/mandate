@@ -2,6 +2,7 @@
 //! caller injects. The only network call the scheduler makes; it carries no credential.
 
 use std::net::{ToSocketAddrs, UdpSocket};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -28,22 +29,45 @@ pub struct Servers<C> {
     pub now: C,
 }
 
-impl<C: Fn() -> UtcNanos + Sync> TimeServers for Servers<C> {
-    /// Asks every server at once, each on a thread of its own, so a measurement takes at most one
-    /// [`TIMEOUT`] however many servers are silent, and the loop's next tick is not held longer.
+/// How long a measurement waits for its servers: one [`TIMEOUT`] and a margin for the name lookup
+/// and the threads to start. A server still resolving its name or waiting for an answer then is
+/// left out, and its thread ends on its own; the loop is never held longer.
+pub const DEADLINE: Duration = Duration::from_millis(1_500);
+
+/// One server's answer, or the deadline's word that the measurement is over.
+enum Heard {
+    Answer(Option<Sample>),
+    Deadline,
+}
+
+impl<C: Fn() -> UtcNanos + Clone + Send + 'static> TimeServers for Servers<C> {
+    /// Asks every server at once, each on a thread of its own, and takes the answers that arrive
+    /// before [`DEADLINE`], which a timer thread marks without reading a clock: so a measurement
+    /// takes at most the deadline however many servers are silent or slow to resolve.
     fn ask(&mut self) -> Vec<Sample> {
-        let now = &self.now;
-        thread::scope(|scope| {
-            let asked: Vec<_> = self
-                .names
-                .iter()
-                .map(|name| scope.spawn(move || query(name, now)))
-                .collect();
-            asked
-                .into_iter()
-                .filter_map(|handle| handle.join().ok().flatten())
-                .collect()
-        })
+        let (heard, hearing) = mpsc::channel();
+        for name in &self.names {
+            let (name, now, heard) = (name.clone(), self.now.clone(), heard.clone());
+            thread::spawn(move || heard.send(Heard::Answer(query(&name, &now))));
+        }
+        let deadline = heard.clone();
+        thread::spawn(move || {
+            thread::sleep(DEADLINE);
+            deadline.send(Heard::Deadline)
+        });
+        drop(heard);
+        let mut samples = Vec::new();
+        let mut waiting = self.names.len();
+        while waiting > 0 {
+            match hearing.recv() {
+                Ok(Heard::Answer(answer)) => {
+                    waiting = waiting.saturating_sub(1);
+                    samples.extend(answer);
+                }
+                Ok(Heard::Deadline) | Err(_) => break,
+            }
+        }
+        samples
     }
 }
 

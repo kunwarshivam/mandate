@@ -50,6 +50,8 @@ pub struct Scheduler<S> {
     schedule: Schedule,
     pending: Option<Pending>,
     lifecycle: Lifecycle,
+    /// The monotonic second of the last tick this process wrote: at most one tick per second.
+    ticked_at: Option<u64>,
 }
 
 impl<S: ClockStore> Scheduler<S> {
@@ -75,6 +77,7 @@ impl<S: ClockStore> Scheduler<S> {
             schedule: Schedule::default(),
             pending: None,
             lifecycle: Lifecycle::new(Kind::Writer, config.liveness, now),
+            ticked_at: None,
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Input::Failed);
@@ -109,17 +112,20 @@ impl<S: ClockStore> Scheduler<S> {
         this
     }
 
-    /// One second of the loop at the host clock's reading `host`: a retried batch first, then the
-    /// tick (with its trading day), then a measurement if one is due. Nothing is written once the
-    /// scheduler has exited.
-    pub fn step(&mut self, host: UtcNanos, servers: &mut dyn TimeServers) {
+    /// One pass of the loop at the host clock's reading `host` and the process's monotonic second
+    /// `second`: a retried batch first, then, once per monotonic second, the tick (with its trading
+    /// day) and a measurement if one is due. A pass in a second that already ticked writes no
+    /// tick, so a loop that falls behind and runs passes back to back never moves the risk clock
+    /// ahead of the host clock. Nothing is written once the scheduler has exited.
+    pub fn step(&mut self, host: UtcNanos, second: u64, servers: &mut dyn TimeServers) {
         if self.exited() {
             return;
         }
         self.lifecycle.observe(host, Input::Heartbeat);
-        if !self.flush(host) {
+        if !self.flush(host) || self.ticked_at.is_some_and(|last| second <= last) {
             return;
         }
+        self.ticked_at = Some(second);
         let Some(tick) = tick::next(self.last_tick, host) else {
             return;
         };
@@ -137,9 +143,7 @@ impl<S: ClockStore> Scheduler<S> {
             });
             let mut records = vec![Record::Measured(measurement)];
             records.extend(exceeded);
-            if self.write(host, records) {
-                self.schedule.measured_since_start = true;
-            }
+            self.write(host, records);
         }
     }
 
@@ -242,7 +246,10 @@ impl<S: ClockStore> Scheduler<S> {
         match record {
             Record::Advanced(clock) => self.last_tick = Some(*clock),
             Record::DayStarted(date) => self.last_day = Some(*date),
-            Record::Measured(m) => self.measured(m.trigger == Trigger::BeforeSession),
+            Record::Measured(m) => {
+                self.schedule.measured_since_start = true;
+                self.measured(m.trigger == Trigger::BeforeSession);
+            }
             Record::Opened | Record::Exceeded { .. } => {}
         }
     }

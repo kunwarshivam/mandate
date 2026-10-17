@@ -1,6 +1,6 @@
 //! Measurements of the host clock against its time servers (journal spec §5.4, §9.20).
 
-use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
+use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos, new_york_date_and_hour};
 
 /// How often a measurement is taken outside the other two triggers: half §5.4's 10-minute bound,
 /// so one lost measurement never leaves the executor's 15-minute window without one.
@@ -105,7 +105,7 @@ pub fn due(schedule: &Schedule, calendar: &ExchangeCalendar, tick: UtcNanos) -> 
 
 /// The trading date whose regular session opens within [`BEFORE_SESSION_SECS`] after `tick`.
 pub fn opening_soon(calendar: &ExchangeCalendar, tick: UtcNanos) -> Option<Date> {
-    let (date, _) = mandate_time::new_york_date_and_hour(tick).ok()?;
+    let (date, _) = new_york_date_and_hour(tick).ok()?;
     let regular = calendar
         .sessions(date)
         .ok()?
