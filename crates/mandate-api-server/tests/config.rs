@@ -149,7 +149,7 @@ fn a_database_url_without_a_password_is_accepted() {
 static DIRS: AtomicU32 = AtomicU32::new(0);
 
 fn credentials(contents: Option<&[u8]>, mode: u32) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-{}-{}",
         std::process::id(),
         DIRS.fetch_add(1, Ordering::SeqCst)

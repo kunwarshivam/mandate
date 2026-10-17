@@ -21,7 +21,7 @@ const APP: &str = "https://app.owlhead.test";
 static DIRS: AtomicU32 = AtomicU32::new(0);
 
 fn credentials() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-process-{}-{}",
         std::process::id(),
         DIRS.fetch_add(1, Ordering::SeqCst)

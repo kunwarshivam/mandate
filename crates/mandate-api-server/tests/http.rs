@@ -23,7 +23,7 @@ fn api() -> std::net::SocketAddr {
 fn app() -> App {
     use std::os::unix::fs::PermissionsExt;
     static APPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join(format!(
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-http-{}-{}",
         std::process::id(),
         APPS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)

@@ -27,7 +27,7 @@ fn expected(issuer: &str, subject: &str) -> String {
 static FILES: AtomicU32 = AtomicU32::new(0);
 
 fn links(text: &str, mode: u32) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-links-{}-{}",
         std::process::id(),
         FILES.fetch_add(1, Ordering::SeqCst)

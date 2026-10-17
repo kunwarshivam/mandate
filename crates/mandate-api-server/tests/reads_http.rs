@@ -48,7 +48,7 @@ fn fixture_with(
 ) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
-    let dir = std::env::temp_dir().join(format!(
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-reads-{}-{n}",
         std::process::id()
     ));
