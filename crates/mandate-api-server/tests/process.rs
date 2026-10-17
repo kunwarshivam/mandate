@@ -45,7 +45,6 @@ fn command(args: &[&str], extra: &[(&str, &str)]) -> Command {
         .env("MANDATE_API_ISSUER", "https://issuer.test/auth/v1")
         .env("MANDATE_API_AUDIENCE", "authenticated")
         .env("MANDATE_API_JWKS_URL", "http://127.0.0.1:9/jwks")
-        .env("MANDATE_API_SUBJECT_LINKS", "/nonexistent/subject-links")
         .env(
             "MANDATE_API_DATABASE_URL",
             "postgresql://owlhead_api@127.0.0.1:9/owlhead",

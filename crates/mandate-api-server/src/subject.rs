@@ -55,6 +55,9 @@ pub fn digest(issuer: &str, subject: &str) -> String {
     )
 }
 
+/// The one file the server reads subject links from (DEC-1023): fixed, never a setting.
+pub const SUBJECT_LINKS: &str = "";
+
 /// The principal `issuer`'s `subject` signs in as, read from the file at `path` now.
 ///
 /// # Errors
