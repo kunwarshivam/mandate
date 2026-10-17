@@ -1454,6 +1454,46 @@ impl<'s> Session<'s> {
     }
 }
 
+/// The watch's read of its entry (DEC-971 item 6): by its client order id where the connector's
+/// profile can query by it, and otherwise by the profile's own listing of the agent's orders in the
+/// instrument created since `since` less DEC-862 item 2's margin, so the watch never sends a query
+/// the connector refuses unsent.
+fn entry_read(
+    queryable: bool,
+    entry: &mandate_executor::ClientOrderId,
+    instrument: &InstrumentId,
+    since: mandate_executor::RiskClock,
+) -> BrokerRequest {
+    let _ = (queryable, instrument, since);
+    BrokerRequest::GetOrderByClientId(entry.clone())
+}
+
+/// The entry's broker status in `answer`, which the run's LT-10 question reads (DEC-912 item 3):
+/// the order an order query answered, or, from a listing, the one record that names the entry by
+/// its own id. A listing with none or several such records reads nothing, so the watch never
+/// takes another order's status for the entry's.
+fn entry_status(
+    answer: &Result<BrokerOutcome, mandate_executor::ConnectorError>,
+    entry: &mandate_executor::ClientOrderId,
+) -> Option<String> {
+    let _ = entry;
+    match answer {
+        Ok(BrokerOutcome::Order(order)) => Some(order.status.clone()),
+        Ok(BrokerOutcome::Submitted(..))
+        | Ok(BrokerOutcome::DuplicateClientOrderId { .. })
+        | Ok(BrokerOutcome::Rejected(..))
+        | Ok(BrokerOutcome::Absent { .. })
+        | Ok(BrokerOutcome::OpenOrders(..))
+        | Ok(BrokerOutcome::Positions(..))
+        | Ok(BrokerOutcome::Account(..))
+        | Ok(BrokerOutcome::Activities { .. })
+        | Ok(BrokerOutcome::CancelAccepted { .. })
+        | Ok(BrokerOutcome::AccountWideAccepted)
+        | Ok(BrokerOutcome::Listed { .. }) => None,
+        Err(..) => None,
+    }
+}
+
 fn consecutive_executor_journals(
     first: mandate_executor::EventDraft,
     effects: &mut VecDeque<mandate_executor::Effect>,
@@ -1487,7 +1527,100 @@ mod tests {
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
     use mandate_journal::StoredEvent;
 
-    use super::{consecutive_executor_journals, planned_request_version, with_environment};
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_executor::{
+        BrokerOrder, BrokerOutcome, BrokerRequest, ClientOrderId, ListedOrder, OrderListing,
+        OrderOrigin, OrderType, RiskClock, TimeInForce,
+    };
+    use mandate_num::Qty;
+
+    use super::{
+        consecutive_executor_journals, entry_read, entry_status, planned_request_version,
+        with_environment,
+    };
+
+    fn entry() -> Result<ClientOrderId, String> {
+        ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0").map_err(|e| e.to_string())
+    }
+
+    fn instrument() -> Result<InstrumentId, String> {
+        InstrumentId::new("5f0c3c1e-7d1a-4c8e-9b0a-2e6f1d3a9c41").map_err(|e| e.to_string())
+    }
+
+    /// DEC-971 item 6: a profile that queries by client order id is asked by it; one that cannot
+    /// is asked by its listing of the agent's orders in the instrument from five minutes before
+    /// the run, the margin DEC-862 item 2 sets.
+    #[test]
+    fn the_watch_reads_its_entry_the_way_the_profile_offers() -> Result<(), String> {
+        let (entry, instrument) = (entry()?, instrument()?);
+        let since = RiskClock::from_secs(1_000);
+        assert_eq!(
+            entry_read(true, &entry, &instrument, since),
+            BrokerRequest::GetOrderByClientId(entry.clone())
+        );
+        assert_eq!(
+            entry_read(false, &entry, &instrument, since),
+            BrokerRequest::ListOrders(OrderListing {
+                client_order_id: entry.clone(),
+                instrument,
+                origin: OrderOrigin::Agentic,
+                created_since: RiskClock::from_secs(700),
+            })
+        );
+        Ok(())
+    }
+
+    fn record(client_order_id: Option<&str>, status: &str) -> Result<ListedOrder, String> {
+        Ok(ListedOrder {
+            order: BrokerOrder {
+                broker_order_id: "rh-sim-000001".to_owned(),
+                client_order_id: client_order_id.map(str::to_owned),
+                instrument: instrument()?,
+                side: Side::Buy,
+                qty: Qty::parse("1").map_err(|e| e.to_string())?,
+                filled_qty: Qty::ZERO,
+                limit_price: None,
+                stop_price: None,
+                status: status.to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            },
+            order_type: OrderType::Limit,
+            tif: TimeInForce::Day,
+        })
+    }
+
+    /// The status the LT-10 question reads comes only from the one listed record naming the
+    /// entry by its own id: never from a look-alike, another order, or a listing naming it twice.
+    #[test]
+    fn the_watch_reads_the_status_of_the_one_record_naming_its_entry() -> Result<(), String> {
+        let entry = entry()?;
+        let listed = |orders: Vec<ListedOrder>| {
+            Ok(BrokerOutcome::Listed {
+                client_order_id: entry.as_str().to_owned(),
+                orders,
+            })
+        };
+        let ours = entry.as_str();
+        let answer = listed(vec![
+            record(None, "canceled")?,
+            record(Some("ref_id someone-else"), "canceled")?,
+            record(Some(ours), "filled")?,
+        ]);
+        assert_eq!(entry_status(&answer, &entry), Some("filled".to_owned()));
+        let twice = listed(vec![
+            record(Some(ours), "filled")?,
+            record(Some(ours), "filled")?,
+        ]);
+        assert_eq!(entry_status(&twice, &entry), None);
+        let none = listed(vec![record(None, "filled")?]);
+        assert_eq!(entry_status(&none, &entry), None);
+        let order = Ok(BrokerOutcome::Order(record(Some(ours), "accepted")?.order));
+        assert_eq!(entry_status(&order, &entry), Some("accepted".to_owned()));
+        Ok(())
+    }
 
     fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
         EventDraft {
