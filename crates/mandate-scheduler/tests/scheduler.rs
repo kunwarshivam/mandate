@@ -448,8 +448,8 @@ fn a_restarted_scheduler_starts_no_day_and_takes_no_before_session_measurement_t
     assert_eq!(count(&rows, "TradingDayStarted"), 1, "{:?}", kinds(&rows));
 }
 
-/// A start-up measurement taken before the session window is not the before-session one, in the
-/// process that took it or in one that replays it.
+/// A start-up measurement taken before the session window is not the before-session one when a
+/// restarted process replays it: the window still gets its own measurement.
 #[test]
 fn a_start_up_measurement_is_never_taken_for_the_before_session_one() {
     let store = MemoryStore::default();
