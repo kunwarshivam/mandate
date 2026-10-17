@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 use super::artifacts::reference;
 use super::context::{
     GateQuote, PaperClock, ReconcilingPaperContext, TrustedPaperContext, protection_prices,
+    stop_limit_offset,
 };
 use super::gate::{gate_mandate, gate_template};
 use super::{
@@ -523,6 +524,7 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         quote: GateQuote::of(&snapshot.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let executor_agent = ExecutorAgentId(AGENT.to_owned());
     let reviewed = symbol(OTHER_ASSET)?;
@@ -1272,6 +1274,59 @@ fn protection_derives_from_the_entry_and_rounds_each_sell_price_up() -> Result<(
     Ok(())
 }
 
+/// DEC-966 item 5: the stop-limit's offset is the mandate's when protection is on, and none when
+/// it is off or unset; the executor's view hands it to the reviewed agent alone.
+#[test]
+fn the_stop_limit_offset_is_the_mandates_and_only_the_reviewed_agents() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let mut protection = loaded.mandate.protection.clone();
+    protection.enabled = true;
+    protection.crypto_stop_limit_offset = Some(
+        mandate_spec::SchemaDec::parse("0.005", mandate_spec::DecGrammar::OpenFraction)
+            .map_err(|e| format!("{e:?}"))?,
+    );
+    let offset = Fraction::parse("0.005").map_err(text)?;
+    assert_eq!(stop_limit_offset(&protection).map_err(text)?, Some(offset));
+    let mut disabled = protection.clone();
+    disabled.enabled = false;
+    assert_eq!(stop_limit_offset(&disabled).map_err(text)?, None);
+    let mut unset = protection;
+    unset.crypto_stop_limit_offset = None;
+    assert_eq!(stop_limit_offset(&unset).map_err(text)?, None);
+
+    let snapshot = facts_at(NOW, NOW)?;
+    let template = gate_template(
+        &loaded,
+        &snapshot,
+        at(NOW)?,
+        loaded
+            .production_configuration()
+            .map_err(text)?
+            .gate
+            .clone(),
+    )
+    .map_err(text)?;
+    let trusted = TrustedPaperContext {
+        template,
+        agent: AGENT.to_owned(),
+        increment: loaded.instrument.increment,
+        fees: loaded.fees.clone(),
+        quote: GateQuote::of(&snapshot.broker.quote),
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: Some(offset),
+    };
+    assert_eq!(
+        trusted.crypto_stop_limit_offset(&ExecutorAgentId(AGENT.to_owned())),
+        Some(offset)
+    );
+    assert_eq!(
+        trusted.crypto_stop_limit_offset(&ExecutorAgentId("another-agent".to_owned())),
+        None
+    );
+    Ok(())
+}
+
 #[test]
 fn the_gate_uses_the_reviewed_config_and_the_mandates_exact_limits() -> Result<(), String> {
     let config = reviewed_gate_config()?;
@@ -1299,6 +1354,7 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
         quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let other_agent = ExecutorAgentId("other".to_owned());
@@ -1369,6 +1425,7 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
         ),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1403,6 +1460,7 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
                 .quote,
         ),
         clock: Rc::new(TestClock(close_clock)),
+        stop_limit_offset: None,
         ..trusted
     };
     assert!(
@@ -1434,6 +1492,7 @@ fn the_binding_gate_judges_the_quote_the_run_last_handed_it() -> Result<(), Stri
         quote: quote.clone(),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1602,6 +1661,7 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
