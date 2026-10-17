@@ -3822,7 +3822,10 @@ Both records are on the workspace control stream, at `schema_version` 1, and bot
 by artifact (§6.3): the canonical JSON object of the report, stored under `sha256:` of its bytes,
 before the record is appended (§5.2). The figures live in the report; the record holds what
 reproduces it. §9.2's conventions and types apply: every member present on every record (§4.2),
-`null` only where the type is nullable, any other member refused.
+`null` only where the type is nullable, any other member refused. Workspace services write
+both; the envelope's `actor` is the `user` who asked for the run or the `system` runner or evaluator
+that ran it, and any other kind is refused `schema` at `actor.kind`
+([DEC-1141](../project/decisions/DEC-1141.md)).
 
 **`BacktestRunRecorded`**: one backtest of a mandate version through its own decision path
 ([DEC-1000](../project/decisions/DEC-1000.md)).
