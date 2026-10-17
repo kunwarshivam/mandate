@@ -515,12 +515,22 @@ caller (DEC-132 item 13). The harness supplies it like this:
   model's word, with no corroboration and no approval (rule 2).
 - In `exits_only`, a run is review-only: its theses are discarded unjudged and only its
   invalidations count.
+- **The judging order.** The harness judges a response's invalidations first, against the run's
+  active theses, and then its theses, against the active theses left after those invalidations. So
+  a thesis on an instrument whose thesis the same response invalidates is a new thesis in a new
+  lineage, judged by admission (mandate spec §8.5), never a renewal of the invalidated one. This is
+  the judging order only: the call record's `verdicts` keep rule 151's index order, theses first and
+  then invalidations.
 - Invalidations are judged in response order against the active theses, and an accepted one ends
   its thesis at once. So a second invalidation of the same thesis in one response names no active
   thesis and is `unknown_thesis`. Each thesis has one record (journal spec §9.21 rule 168).
 - **The record.** An accepted invalidation is journaled as `ThesisInvalidated` (journal spec §9.21,
-  DEC-2202) in its call's judging batch, after the call record whose verdict it carries, and the
-  executor's `UniverseChanged` names it as its cause. Until `mandate-journal` registers it, no
+  DEC-2202) in its call's judging batch, after the call record whose verdict it carries and before
+  the batch's thesis records (`ThesisProposed`, `ThesisRevised`, and their `ModelOutputRecorded`),
+  and the executor's `UniverseChanged` names it as its cause. If `append` refuses a judging batch,
+  that is a writer defect: nothing in the batch is used, the runtime raises an operator alert, and
+  the thesis stays active until a later run invalidates it again. It is a disclosed residual, never
+  a silent drop. Until `mandate-journal` registers it, no
   research run starts (§6.2 preconditions): with no thesis, there is nothing to invalidate, and
   §8.6 holds unchanged. The same record serves the founder's DEC-433 item 19, under which revoking
   a source invalidates every live thesis that cites it (`cause` `source_revoked`); no writer emits

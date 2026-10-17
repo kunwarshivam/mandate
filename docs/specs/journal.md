@@ -4214,6 +4214,13 @@ the only candidates it hands on.
 | `evidence` | `[text]` | For `model`, the item ids the output cited as showing the condition holds, in the order given, duplicates kept; empty for `source_revoked`: rule 165 |
 | `source` | `text?` | For `source_revoked`, the revoked source's id; `null` exactly for `model`: rule 165 |
 
+In the call's judging batch, the `ThesisInvalidated` records follow the call record and precede its
+thesis records (`ThesisProposed` or `ThesisRevised`, with their `ModelOutputRecorded`), because the
+harness judges a response's invalidations before its theses ([agent harness spec §6.7](agent-harness.md)).
+So rule 168 judges each invalidation against the theses the response found, and a thesis the same
+response proposes on that instrument is a new admission, not a renewal. The `verdicts` array keeps
+rule 151's index order, theses first; that is the record's order, not the judging order.
+
 The envelope's `causation_id` names the cause: for `model`, the `event_id` of the call's
 `ModelInvocationRecorded` earlier in the same `append` batch (rule 167); for `source_revoked`, the
 `event_id` of the control stream's `ConfigSnapshotRegistered` of the first source allowlist version

@@ -49008,8 +49008,8 @@ thesis_invalidation:
         artifact_refs: []
         pii_refs: []
     expect: *id118
-  - name: a_renewal_invalidated
-    clause: 'rule 168: a renewal is a new thesis, invalidated once too'
+  - name: re_admitted_after_its_invalidation
+    clause: 'rule 168: an invalidated instrument may be admitted again, in a new lineage'
     batches:
     - - *id116
     - - *id117
@@ -49044,7 +49044,7 @@ thesis_invalidation:
         pii_refs: []
     - - envelope_version: 1
         environment: paper
-        event_id: 01J9GX30A000000000000000T1
+        event_id: 01J9GX31A000000000000000T2
         stream_id: agent:ws_01J8Z2:agent_a
         event_type: ThesisProposed
         schema_version: 1
@@ -49065,7 +49065,94 @@ thesis_invalidation:
           model_version: 0.1.0
           content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
           thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTC0
+          revision: 0
+          predecessor_thesis_id: null
+          autopsy_ref: null
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-22T14:00:00.000000000Z'
+          expires_at: '2026-09-27T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: market_data
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+          response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+          admitted: true
+          reason: null
+        artifact_refs:
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        pii_refs: []
+    expect: *id118
+  - name: a_re_admission_invalidated
+    clause: 'rule 168: a re-admission is a new thesis, invalidated once too'
+    batches:
+    - - *id116
+    - - *id117
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX11A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
           lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX31A000000000000000T2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisProposed
+        schema_version: 1
+        event_time: '2026-09-22T14:00:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTC0
           revision: 0
           predecessor_thesis_id: null
           autopsy_ref: null
@@ -49174,7 +49261,7 @@ thesis_invalidation:
           mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
         payload:
           thesis_id: th_01J8ZTC0
-          lineage_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTC0
           instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
           cause: model
           candidate: 0
@@ -49183,6 +49270,155 @@ thesis_invalidation:
           - item_bars_2026_09_22
           source: null
         artifact_refs: []
+        pii_refs: []
+    expect: *id118
+  - name: invalidated_then_a_new_thesis_in_one_response
+    clause: '§9.21 batch order: the invalidation follows the call and precedes the response''s thesis records'
+    batches:
+    - - *id116
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX13A000000000000000V1
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ModelInvocationRecorded
+        schema_version: 1
+        event_time: '2026-10-16T14:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        payload:
+          call_id: 01J9GX03A000000000000000C1
+          purpose: research
+          model:
+            model_id: llm.research_agent
+            model_version: 0.1.0
+            content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+          endpoint: openrouter:anthropic
+          request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+          sampling:
+            temperature: '0'
+            seed: 7
+          prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+          guard_rule: null
+          response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+          reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+          provider_request_id: gen-01
+          outcome: ok
+          attempts: 1
+          tokens:
+            input: 1800
+            output: 420
+            cached: 0
+          cost_usd: '0.0117'
+          price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+          cache_hit: false
+          deadline: '2026-10-16T14:01:00.000000000Z'
+          completed_at: '2026-10-16T14:00:41.250000000Z'
+          reservation: 01J9GW21A000000000000000M3
+          observations:
+          - 01J9GV00A000000000000000B1
+          - 01J9GV00B000000000000000B2
+          verdicts: &id121
+          - candidate: 0
+            kind: thesis
+            result: judged
+          - candidate: 1
+            kind: invalidation
+            result: judged
+        artifact_refs:
+        - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        pii_refs: []
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX13A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 1
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX31A000000000000000T2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisProposed
+        schema_version: 1
+        event_time: '2026-09-22T14:00:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTC0
+          revision: 0
+          predecessor_thesis_id: null
+          autopsy_ref: null
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-22T14:00:00.000000000Z'
+          expires_at: '2026-09-27T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: market_data
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+          response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+          admitted: true
+          reason: null
+        artifact_refs:
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
         pii_refs: []
     expect: *id118
   - name: in_one_batch
@@ -49629,6 +49865,153 @@ thesis_invalidation:
           instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
           cause: model
           candidate: 0
+          evidence:
+          - item_filing_10q_q3
+          - item_bars_2026_09_22
+          source: null
+        artifact_refs: []
+        pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.thesis_id
+  - name: a_new_thesis_before_its_invalidation_a_correct_writer_never_uses
+    clause: '§9.21 batch order: a thesis record before the invalidation supersedes it'
+    batches:
+    - - *id116
+    - - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX14A000000000000000V1
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ModelInvocationRecorded
+        schema_version: 1
+        event_time: '2026-10-16T14:00:00.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          model_version: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        payload:
+          call_id: 01J9GX04A000000000000000C1
+          purpose: research
+          model:
+            model_id: llm.research_agent
+            model_version: 0.1.0
+            content_hash: sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+          endpoint: openrouter:anthropic
+          request_digest: sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+          sampling:
+            temperature: '0'
+            seed: 7
+          prompt_ref: sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+          guard_rule: null
+          response_ref: sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+          reported_identity: anthropic/claude-sonnet-4.5@Anthropic
+          provider_request_id: gen-01
+          outcome: ok
+          attempts: 1
+          tokens:
+            input: 1800
+            output: 420
+            cached: 0
+          cost_usd: '0.0117'
+          price_table_ref: sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+          cache_hit: false
+          deadline: '2026-10-16T14:01:00.000000000Z'
+          completed_at: '2026-10-16T14:00:41.250000000Z'
+          reservation: 01J9GW21A000000000000000M3
+          observations:
+          - 01J9GV00A000000000000000B1
+          - 01J9GV00B000000000000000B2
+          verdicts: *id121
+        artifact_refs:
+        - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+        - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+        - sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+        - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
+        - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+        pii_refs: []
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX31A000000000000000T2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisProposed
+        schema_version: 1
+        event_time: '2026-09-22T14:00:05.000000000Z'
+        clock_source: local
+        causation_id: null
+        correlation_id: null
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+          model_version: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        payload:
+          model_id: llm.research_agent
+          model_version: 0.1.0
+          content_hash: sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+          thesis_id: th_01J8ZTC0
+          lineage_id: th_01J8ZTC0
+          revision: 0
+          predecessor_thesis_id: null
+          autopsy_ref: null
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          asset_class: us_equity
+          direction: long
+          as_of: '2026-09-22T14:00:00.000000000Z'
+          expires_at: '2026-09-27T14:00:00.000000000Z'
+          horizon_s: 432000
+          conviction: '0.62'
+          confidence: '0.7'
+          evidence_ref: sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+          evidence_sources:
+          - filings_sec_edgar
+          - news_wire_a
+          corroboration: market_data
+          invalidation: Guidance withdrawn, or a close below the prior quarter's low
+          allowlist_version: 7
+          prompt_ref: sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+          response_ref: sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+          admitted: true
+          reason: null
+        artifact_refs:
+        - sha256:312b1891c8dbfec089002f16688828a1db8f7942a7cbc53960c806c9af7c9883
+        - sha256:c85015ac809ffba899091276a597ec99f83e5c1656298aacd9d1d7e3221dafb2
+        - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
+        - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
+        pii_refs: []
+      - envelope_version: 1
+        environment: paper
+        event_id: 01J9GX21A000000000000000V2
+        stream_id: agent:ws_01J8Z2:agent_a
+        event_type: ThesisInvalidated
+        schema_version: 1
+        event_time: '2026-09-23T14:00:41.250000000Z'
+        clock_source: local
+        causation_id: 01J9GX14A000000000000000V1
+        correlation_id: 01J9GT00A000000000000000R1
+        actor:
+          kind: agent
+          id: agent_a
+          version: 0.1.0
+          build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        config_refs:
+          mandate_version: sha256:85b108dde1d86f7411942a7437e208f84e6bdb949ed68b371b55bfcbd5ae30ec
+        payload:
+          thesis_id: th_01J8ZTA0
+          lineage_id: th_01J8ZTA0
+          instrument_id: 7b4a1c2e-2222-4a2b-9c3d-000000000002
+          cause: model
+          candidate: 1
           evidence:
           - item_filing_10q_q3
           - item_bars_2026_09_22

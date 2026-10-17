@@ -325,6 +325,11 @@ def renewal() -> dict:
     return with_changes(BASE_ADMITTED, "01J9GX30A000000000000000T1", [change("payload.thesis_id", RENEWAL)])
 
 
+def new_thesis(event_id: str = "01J9GX31A000000000000000T2") -> dict:
+    """A new thesis in a new lineage for the same instrument, admitted after the old one ended."""
+    return with_changes(BASE_ADMITTED, event_id, [change("payload.thesis_id", RENEWAL), change("payload.lineage_id", RENEWAL)])
+
+
 def batch_cases() -> list[dict]:
     def case(name, clause, drafts, expect):
         return {"name": name, "clause": clause, "drafts": drafts, "expect": expect}
@@ -370,12 +375,16 @@ def stream_cases() -> list[dict]:
 
     admitted, revised, refused = DRAFTS[BASE_ADMITTED], DRAFTS[BASE_REVISED], DRAFTS[BASE_REFUSED]
     c1, c2 = call(1), call(2)
+    both = [gateway.verdict(0, "thesis", "judged"), gateway.verdict(1, "invalidation", "judged")]
+    c3, c4 = call(3, both), call(4, both)
     lineage = revised["payload"]["lineage_id"]
     return [
         case("invalidated_after_admission", "rule 168: an admitted thesis", [[admitted], [c1, invalidation(1, c1)]], ok),
         case("a_revision_invalidated", "rule 168: the revision holds its instrument", [[admitted], [revised], [c1, invalidation(1, c1, thesis_id=REVISION, lineage_id=lineage)]], ok),
         case("a_revoked_source", "rule 168: a revoked source's invalidation too", [[admitted], [invalidation(1, None)]], ok),
-        case("a_renewal_invalidated", "rule 168: a renewal is a new thesis, invalidated once too", [[admitted], [c1, invalidation(1, c1)], [renewal()], [c2, invalidation(2, c2, thesis_id=RENEWAL)]], ok),
+        case("re_admitted_after_its_invalidation", "rule 168: an invalidated instrument may be admitted again, in a new lineage", [[admitted], [c1, invalidation(1, c1)], [new_thesis()]], ok),
+        case("a_re_admission_invalidated", "rule 168: a re-admission is a new thesis, invalidated once too", [[admitted], [c1, invalidation(1, c1)], [new_thesis()], [c2, invalidation(2, c2, thesis_id=RENEWAL, lineage_id=RENEWAL)]], ok),
+        case("invalidated_then_a_new_thesis_in_one_response", "§9.21 batch order: the invalidation follows the call and precedes the response's thesis records", [[admitted], [c3, invalidation(1, c3, candidate=1), new_thesis()]], ok),
         case("in_one_batch", "rule 168: the admission is earlier in the batch", [[admitted, c1, invalidation(1, c1)]], ok),
         case("never_admitted", "rule 168: a thesis the stream admitted", [[c1, invalidation(1, c1)]], at(1, "payload.thesis_id")),
         case("before_its_admission", "rule 168: admitted earlier", [[c1, invalidation(1, c1), admitted]], at(1, "payload.thesis_id")),
@@ -385,6 +394,7 @@ def stream_cases() -> list[dict]:
         case("another_lineage", "rule 168: the thesis's own lineage", [[admitted], [c1, invalidation(1, c1, lineage_id="th_01J8ZTZZ")]], at(2, "payload.lineage_id")),
         case("a_substituted_instrument", "rule 168: the thesis's own instrument", [[admitted], [c1, invalidation(1, c1, instrument_id=OTHER_ASSET)]], at(2, "payload.instrument_id")),
         case("superseded_by_its_revision", "rule 168: the thesis that holds the instrument now", [[admitted], [revised], [c1, invalidation(1, c1)]], at(3, "payload.thesis_id")),
+        case("a_new_thesis_before_its_invalidation_a_correct_writer_never_uses", "§9.21 batch order: a thesis record before the invalidation supersedes it", [[admitted], [c4, new_thesis(), invalidation(1, c4, candidate=1)]], at(3, "payload.thesis_id")),
         case("superseded_by_a_renewal", "rule 168: a renewal holds it now", [[admitted], [renewal()], [c1, invalidation(1, c1)]], at(3, "payload.thesis_id")),
     ]
 
