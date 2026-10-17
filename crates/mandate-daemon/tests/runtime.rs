@@ -304,6 +304,24 @@ fn an_append_whose_answer_was_lost_is_handed_again_and_written_once() {
     assert_eq!(process.lifecycle().state(), State::Ready);
 }
 
+/// A pass whose input in doubt is settled on its retry goes on to the streams in that same pass: a
+/// tick the scheduler wrote meanwhile is the risk clock at once, not a pass later, and the batch
+/// whose answer was lost is written once.
+#[test]
+fn a_retry_that_commits_goes_on_to_the_streams_in_the_same_pass() {
+    let rig = Rig::default();
+    let mut process = start(&rig, NOW);
+    kill_switch(&rig);
+    rig.lose_answers.set(1);
+    process.step(at(NOW + 1));
+    assert_eq!(risk_clock(&process), None, "the batch is in doubt");
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
+    assert_eq!(risk_clock(&process), Some(NOW + 2));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
 #[test]
 fn whether_a_hint_came_changes_no_outcome() {
     let hinted = Rig::default();
