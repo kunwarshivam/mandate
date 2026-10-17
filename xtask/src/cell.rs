@@ -948,20 +948,48 @@ fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
         ])?;
         let (succeeded, failed) = status.trim().split_once('/').unwrap_or(("", ""));
         if succeeded == "1" || failed == "1" {
-            let logs = kubectl(&[
-                "logs",
-                &format!("job/{name}"),
-                "--namespace",
-                NAMESPACE,
-                "--all-containers",
-                "--prefix",
-            ])
-            .unwrap_or_else(|e| format!("(no logs: {e:#})"));
-            return Ok((succeeded == "1", logs));
+            return Ok((succeeded == "1", job_logs(&name, job)));
         }
         sleep(Duration::from_secs(2));
     }
     bail!("Job {name} neither succeeded nor failed in time")
+}
+
+/// Every container's logs of a finished Job. `--all-containers` refuses a pod with a container that
+/// never started, as when an init container failed, so it falls back to each container in turn,
+/// keeping the failed init container's report, which is where a seeded symptom is.
+fn job_logs(name: &str, job: &Value) -> String {
+    let job_ref = format!("job/{name}");
+    let all = kubectl(&[
+        "logs",
+        &job_ref,
+        "--namespace",
+        NAMESPACE,
+        "--all-containers",
+        "--prefix",
+    ]);
+    let Err(refused) = all else {
+        return all.unwrap_or_default();
+    };
+    let spec = &job["spec"]["template"]["spec"];
+    let containers = ["initContainers", "containers"]
+        .iter()
+        .filter_map(|k| spec[k].as_array())
+        .flatten()
+        .filter_map(|c| c["name"].as_str());
+    let mut logs = String::new();
+    for container in containers {
+        if let Ok(out) = kubectl(&["logs", &job_ref, "--namespace", NAMESPACE, "-c", container]) {
+            for line in out.lines() {
+                logs.push_str(&format!("[{container}] {line}\n"));
+            }
+        }
+    }
+    if logs.is_empty() {
+        format!("(no logs: {refused:#})")
+    } else {
+        logs
+    }
 }
 
 /// The process list, as `processes.json` holds it.
