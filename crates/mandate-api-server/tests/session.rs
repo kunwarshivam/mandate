@@ -773,7 +773,7 @@ fn a_just_rotated_cookie_serves_risk_reduction_briefly_and_is_reuse_otherwise() 
         .refresh(cookie.value(), granted(), at(T0 + 100))
         .expect("granted")
         .expect("a new cookie");
-    let again = store
+    let _again = store
         .refresh(rotated.value(), granted(), at(T0 + 110))
         .expect("granted")
         .expect("a third cookie");
@@ -789,7 +789,6 @@ fn a_just_rotated_cookie_serves_risk_reduction_briefly_and_is_reuse_otherwise() 
         "an older one is not, even within its own window"
     );
     assert!(store.is_empty(), "it is reuse");
-    let _ = again;
 
     let store = sessions();
     let cookie = store
@@ -864,7 +863,7 @@ fn a_graced_cookie_admits_no_more_than_the_session_does() {
             .expect("rotated");
     }
     let before = held.clone();
-    let last = late
+    let _last = late
         .refresh(held.value(), granted(), at(T0 + ABSOLUTE_S - 10))
         .expect("granted")
         .expect("rotated");
@@ -878,5 +877,4 @@ fn a_graced_cookie_admits_no_more_than_the_session_does() {
         Err(Unauthenticated),
         "but not past it, within the window or not"
     );
-    let _ = last;
 }

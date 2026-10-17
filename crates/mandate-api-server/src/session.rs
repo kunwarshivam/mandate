@@ -331,9 +331,10 @@ impl Sessions {
                 return Err(Unauthenticated);
             }
         }
-        let admitted = match current {
-            true => admitted_with_outage(entry, &secret, request, now),
-            false => entry.record.authorize(request, now),
+        let admitted = if current {
+            admitted_with_outage(entry, &secret, request, now)
+        } else {
+            entry.record.authorize(request, now)
         };
         match admitted {
             Ok(()) => {
@@ -453,7 +454,6 @@ fn live(entry: &Entry, now: i64, idle_s: i64) -> bool {
 /// The status a failed refresh is recorded with: an answer that is neither a grant nor an outage.
 const FAILED_STATUS: u16 = 401;
 
-/// Whether `secret` is the session's current one.
 /// `request` on the session whose current secret is `secret`: a pause or kill switch on lapsed
 /// access is served after an outage refresh the server records itself (§3.11 item 6).
 fn admitted_with_outage(
@@ -478,6 +478,7 @@ fn admitted_with_outage(
     }
 }
 
+/// Whether `secret` is the session's current one.
 fn holds(entry: &Entry, secret: &Secret) -> bool {
     entry.record.refresh_digest() == Some(digest_of(secret))
 }
