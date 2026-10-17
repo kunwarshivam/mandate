@@ -120,6 +120,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
   are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
   weaker.
+- **E1-9 (Must)** As a builder sharing GitHub's free runners with sixteen others, I want each
+  PR's CI scoped to what its diff can break, so that finished PRs stop waiting 30 to 60 minutes in
+  the queue without any gate weakening (the founder's "Gate by risk", 2026-10-17; DEC-1190).
+  *Accepted when:* `cargo xtask ci select` computes the changed crates, the crates naming a
+  changed path in their sources, and every reverse dependent of those; tests, doctests, pending
+  tests and the rehearsal and Postgres runs cover that set; `fast-python`, `fast-portable`,
+  `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when their inputs change;
+  build inputs, CI, xtask, any manifest and unknown paths select everything; mutants on the diff
+  are unchanged; `fast` and `full` stay required and accept a skip only where the selection
+  asked for one; the nightly runs everything on main and opens an opaque issue on failure; and
+  tests cover the selector, its reverse-dependent property, and a seeded break caught through a
+  dependency. Claim #1481.
 
 ### E2 Market data
 
