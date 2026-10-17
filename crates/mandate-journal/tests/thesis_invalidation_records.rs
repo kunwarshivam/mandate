@@ -1,9 +1,9 @@
-//! Journal spec v0.48 §9.21 (E19-5, DEC-2202): the agent stream's `ThesisInvalidated`, through the
+//! Journal spec v0.49 §9.22 (E19-5, DEC-2202): the agent stream's `ThesisInvalidated`, through the
 //! journal's own checks against the vectors' `thesis_invalidation` section. Every base and valid
-//! draft parses; every invalid draft is refused with its reason at its path (rules 165 and 166, the
-//! closed members and their types); every batch is judged by `check_batch` as it says (rule 167);
+//! draft parses; every invalid draft is refused with its reason at its path (rules 184 and 185, the
+//! closed members and their types); every batch is judged by `check_batch` as it says (rule 186);
 //! and every stream is judged batch by batch, by `check_batch` and then `check_stream` against the
-//! stream's earlier records, as it says (rule 168).
+//! stream's earlier records, as it says (rule 187).
 
 use std::path::Path;
 
@@ -134,7 +134,7 @@ fn every_invalid_thesis_invalidation_is_refused_with_its_reason_at_its_path() {
         "{} invalid drafts; never fewer",
         invalid.len()
     );
-    for rule in ["165", "166"] {
+    for rule in ["184", "185"] {
         assert!(
             invalid.iter().any(|c| text(c, "name").contains(rule)),
             "rule {rule} has an invalid draft"
@@ -142,7 +142,7 @@ fn every_invalid_thesis_invalidation_is_refused_with_its_reason_at_its_path() {
     }
 }
 
-/// Rule 167 over each batch vector: the first draft that breaks it, by its index in the batch.
+/// Rule 186 over each batch vector: the first draft that breaks it, by its index in the batch.
 #[test]
 fn every_thesis_invalidation_batch_is_judged_as_its_vector_says() {
     let section = section();
@@ -169,7 +169,7 @@ fn every_thesis_invalidation_batch_is_judged_as_its_vector_says() {
     );
 }
 
-/// Rule 168 over each stream vector, appended batch by batch: each batch is judged by
+/// Rule 187 over each stream vector, appended batch by batch: each batch is judged by
 /// `check_batch` and then by `check_stream` against the records of the batches before it, and the
 /// first record that breaks either is reported by its index across the whole stream.
 #[test]
@@ -229,7 +229,7 @@ fn the_catalogue_closes_thesis_invalidated_on_the_agent_stream_and_its_rule_read
         .and_then(|d| d.get("invalidated"))
         .cloned()
         .unwrap()]);
-    assert!(reads_stream(&invalidated), "rule 168 reads the stream");
+    assert!(reads_stream(&invalidated), "rule 187 reads the stream");
     let admitted = parsed(&[section
         .get("drafts")
         .and_then(|d| d.get("admitted"))
