@@ -13,16 +13,20 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, post};
+use axum::routing::{delete, get, post};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::encode;
 use mandate_canon::Value;
 
 use crate::clock::Clock;
+use crate::journal::Journal;
 use crate::lifecycle::{Drain, Lifecycle};
+use crate::members::{Hosted, ParseMembers};
+use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
+use crate::writes;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
 pub const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, PATCH";
@@ -58,6 +62,11 @@ pub struct App {
     /// The subject-link file (§3.11 item 7).
     pub links: PathBuf,
     pub clock: Arc<dyn Clock>,
+    pub journal: Arc<dyn Journal>,
+    /// How the control stream's rows become membership records.
+    pub members: Arc<ParseMembers>,
+    /// The one workspace this deployment hosts.
+    pub hosted: Hosted,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -83,6 +92,30 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             "/v1/sessions/current",
             delete(end_session).fallback(otherwise.clone()),
         )
+        .route(
+            "/v1/workspaces/{workspace}/agents",
+            get(routes::list_agents).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}",
+            get(routes::one_agent).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/approvals",
+            get(routes::list_approvals).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/approvals/{approval}",
+            get(routes::one_approval).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/pause",
+            post(writes::pause).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/kill-switch",
+            post(writes::kill_switch).fallback(otherwise.clone()),
+        )
         .fallback(otherwise)
         .with_state(Arc::new(app))
         .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
@@ -90,7 +123,7 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
 }
 
 /// The one 401 (API-1).
-fn unauthenticated() -> Response {
+pub(crate) fn unauthenticated() -> Response {
     problem(
         StatusCode::UNAUTHORIZED,
         problem_body(ProblemCode::Unauthenticated),
@@ -99,7 +132,7 @@ fn unauthenticated() -> Response {
 
 /// §3.3 item 1's check, which the browser-only session routes make first and refuse with 403: one
 /// `Origin`, exactly the app origin, and one `X-Mandate-Request: 1`.
-fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
+pub(crate) fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
     let mut marks = headers.get_all(CSRF_HEADER).iter();
     let marked = matches!((marks.next(), marks.next()), (Some(mark), None) if mark == "1");
     marked && is_app_origin(headers, app_origin)
@@ -111,7 +144,7 @@ fn forbidden() -> Response {
 }
 
 /// The session cookie's value when the request carries it exactly once.
-fn session_cookie(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_cookie(headers: &HeaderMap) -> Option<String> {
     let mut found = headers
         .get_all(header::COOKIE)
         .iter()
@@ -267,7 +300,7 @@ fn status(code: StatusCode, word: &'static str) -> Response {
     with_type(code, "application/json", Body::from(body))
 }
 
-fn with_type(code: StatusCode, media: &'static str, body: Body) -> Response {
+pub(crate) fn with_type(code: StatusCode, media: &'static str, body: Body) -> Response {
     let mut response = Response::new(body);
     *response.status_mut() = code;
     response
@@ -278,7 +311,7 @@ fn with_type(code: StatusCode, media: &'static str, body: Body) -> Response {
 
 /// The problem document for `code` with nothing recorded, as bytes. A code `mandate-api` cannot
 /// encode leaves the body empty; the status still says what happened.
-fn problem_body(code: ProblemCode) -> Bytes {
+pub(crate) fn problem_body(code: ProblemCode) -> Bytes {
     Problem::of(code, Effect::None, None, None)
         .ok()
         .and_then(|problem| encode(&problem).ok())
@@ -286,7 +319,7 @@ fn problem_body(code: ProblemCode) -> Bytes {
         .unwrap_or_default()
 }
 
-fn problem(code: StatusCode, body: Bytes) -> Response {
+pub(crate) fn problem(code: StatusCode, body: Bytes) -> Response {
     with_type(code, PROBLEM_JSON, Body::from(body))
 }
 

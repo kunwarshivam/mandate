@@ -22,7 +22,12 @@ fn api() -> std::net::SocketAddr {
 /// An app with no key set, no links, and a fixed clock: nothing can authenticate.
 fn app() -> App {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("mandate-api-server-http-{}", std::process::id()));
+    static APPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "mandate-api-server-http-{}-{}",
+        std::process::id(),
+        APPS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a directory");
     let file = dir.join(mandate_api_server::config::SESSION_KEY_FILE);
@@ -43,6 +48,9 @@ fn app() -> App {
         tokens: Arc::new(Issuer::new(config, Arc::new(FixedKeys(None)))),
         links: dir.join("absent"),
         clock: common::ManualClock::at(1_791_000_000),
+        journal: Arc::new(common::MemJournal::default()),
+        members: Arc::new(mandate_api_server::members::until_parser),
+        hosted: common::hosted(),
     }
 }
 

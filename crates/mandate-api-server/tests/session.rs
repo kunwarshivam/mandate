@@ -45,8 +45,12 @@ const KEY: [u8; MIN_SESSION_KEY_BYTES] = [0x6b; MIN_SESSION_KEY_BYTES];
 
 fn key() -> SessionKey {
     use std::os::unix::fs::PermissionsExt;
-    let dir =
-        std::env::temp_dir().join(format!("mandate-api-server-session-{}", std::process::id()));
+    static KEYS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "mandate-api-server-session-{}-{}",
+        std::process::id(),
+        KEYS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a directory");
     let file = dir.join(mandate_api_server::config::SESSION_KEY_FILE);

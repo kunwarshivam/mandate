@@ -46,6 +46,12 @@ fn command(args: &[&str], extra: &[(&str, &str)]) -> Command {
         .env("MANDATE_API_AUDIENCE", "authenticated")
         .env("MANDATE_API_JWKS_URL", "http://127.0.0.1:9/jwks")
         .env("MANDATE_API_SUBJECT_LINKS", "/nonexistent/subject-links")
+        .env(
+            "MANDATE_API_DATABASE_URL",
+            "postgresql://owlhead_api@127.0.0.1:9/owlhead",
+        )
+        .env("MANDATE_API_WORKSPACE", "01JB3K6F0C9R2V7N4M8Q1T5W3Y")
+        .env("MANDATE_API_ORG", "01JB3K6F0C9R2V7N4M8Q1T5W3X")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
