@@ -14,17 +14,18 @@ use common::research::{
 use common::{
     ACCOUNT_STREAM, AllowGate, FixedPlan, TestIds, clock, event, ports, text, universe, with_clock,
 };
-use mandate_canon::{Digest, Value};
+use mandate_canon::{Digest, Value, to_canonical};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::tools::ToolCall as GatewayToolCall;
 use mandate_gateway::{CallRecord, Outcome};
+use mandate_journal::{Draft, Invalid};
 use mandate_research::{AssetId, WorkingUniverse};
 use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool, ToolCallId, ToolOutcome};
 use mandate_research_run::{Retrieval, retrieve};
 use mandate_runtime::{
-    ActiveThesis, AgenticConfig, Command, DispatchRequest, DispatchedResult, FoldedEvent, Input,
-    Mode, Ports, ResearchInput, ResearchRequest, ResearchStep, RetrievedObservation, RiskClock,
-    TurnRequest, WriterEpoch,
+    ActiveThesis, AgenticConfig, Command, DispatchRequest, DispatchedResult, Effect, EventDraft,
+    FoldedEvent, Input, Mode, Ports, ResearchInput, ResearchRequest, ResearchStep,
+    RetrievedObservation, RiskClock, TurnRequest, WriterEpoch,
 };
 
 const PENDING: &str = "E19-13";
@@ -305,7 +306,7 @@ fn a_due_agentic_run_journals_run_started_with_its_kind_and_menu_before_its_seed
     assert!(
         step.artifacts
             .iter()
-            .any(|bytes| Digest::of(bytes).to_string() == universe_ref),
+            .any(|bytes| format!("sha256:{}", Digest::of(bytes)) == universe_ref),
         "the core hands the shell the data universe it names (DEC-2206 item 4)"
     );
 }
@@ -1296,5 +1297,108 @@ fn an_error_outcome_names_its_end() {
         answered(&mut run, record, &ports, &world);
         let ended = run.lp.events("RunEnded");
         assert_eq!(payload_str(ended[0], "reason"), Some(reason), "{outcome:?}");
+    }
+}
+
+fn digests(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(text) if text.len() == 71 && text.starts_with("sha256:") => {
+            out.insert(text.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|v| digests(v, out)),
+        Value::Object(members) => members.values().for_each(|v| digests(v, out)),
+        _ => {}
+    }
+}
+
+/// The draft in an agent-stream envelope of this file's own making, with the step's run as its
+/// `correlation_id`, both references a research record names (the model's, the pinned entry's
+/// content hash), and the payload's references listed
+/// (journal spec §3), parsed by the journal's registered schemas, which share no code with the core.
+fn parse_as_journal_draft(draft: &EventDraft, run: Option<&str>) -> Result<Draft, Invalid> {
+    let quoted =
+        |text: Option<&str>| text.map_or_else(|| "null".to_owned(), |t| format!("\"{t}\""));
+    let mut listed = BTreeSet::new();
+    digests(&draft.payload, &mut listed);
+    let refs: Vec<String> = listed.iter().map(|r| format!("\"{r}\"")).collect();
+    let body = format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{}",
+        "stream_id":"agent:ws1:agent-a","event_type":"{}","schema_version":1,
+        "event_time":"2026-10-16T20:00:00.000000000Z","clock_source":"scheduler",
+        "causation_id":{},"correlation_id":{},
+        "actor":{{"kind":"agent","id":"agent-a","version":"0.1.0","build":"sha256:{}"}},
+        "config_refs":{{"mandate_version":"sha256:{}","model_version":"sha256:{}"}},
+        "payload":{},"artifact_refs":[{}],"pii_refs":[]}}"#,
+        draft.event_id.0,
+        draft.event_type,
+        quoted(draft.causation_id.as_ref().map(|id| id.0.as_str())),
+        quoted(run),
+        "c".repeat(64),
+        "1".repeat(64),
+        common::research::pin().content_hash,
+        String::from_utf8_lossy(&to_canonical(&draft.payload)),
+        refs.join(",")
+    );
+    Draft::parse(body.as_bytes())
+}
+
+/// Journal spec §9.23, §3: every draft of a whole agentic run, from its start through a read, its
+/// result, and a final output to its end, is one the journal's own schemas accept, with the step's
+/// run as its `correlation_id`: the references it writes are `sha256:` digests, as `ref` requires.
+#[test]
+fn every_record_of_an_agentic_run_passes_the_journal_s_check() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    let turn = turn_of(&seed);
+    let record = reply(
+        &run,
+        &turn,
+        &world,
+        vec![call(
+            0,
+            "news.search",
+            r#"{"symbols":["AAPL"],"terms":["services"]}"#,
+        )],
+        None,
+    );
+    answered(&mut run, record, &ports, &world);
+    let next = go(
+        &mut run.lp,
+        ResearchInput::Dispatched {
+            run_id: run.run_id.clone(),
+            at: clock(CUT_OFF + 25),
+            results: vec![read_result(1, 0, r#"{"items":[]}"#)],
+        },
+        &ports,
+        &world,
+    );
+    let turn = turn_of(&next);
+    let record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
+    answered(&mut run, record, &ports, &world);
+    let mut seen = BTreeSet::new();
+    let mut failed = Vec::new();
+    for step in &run.lp.steps {
+        for effect in &step.effects {
+            if let Effect::Journal(draft) = effect {
+                seen.insert(draft.event_type.clone());
+                if let Err(refusal) = parse_as_journal_draft(draft, step.correlation_id.as_deref())
+                {
+                    failed.push(format!("{}: {refusal:?}", draft.event_type));
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+    for kind in [
+        "RunStarted",
+        "ModelInvocationRecorded",
+        "ToolCallRecorded",
+        "ToolResultRecorded",
+        "RunSummaryRecorded",
+        "RunEnded",
+    ] {
+        assert!(seen.contains(kind), "{kind} was checked: {seen:?}");
     }
 }
