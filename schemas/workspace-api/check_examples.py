@@ -133,13 +133,13 @@ def main() -> int:
         nonlocal checked
         checked += 1
         try:
-            errors = list(v.iter_errors(instance))
+            first = next(v.iter_errors(instance), None)
         except Unresolvable as error:
             problems.append(f"{label}: unresolvable $ref {error.ref!r}")
             return
-        if valid and errors:
-            problems.append(f"{label}: should be valid: {errors[0].message[:160]}")
-        if not valid and not errors:
+        if valid and first is not None:
+            problems.append(f"{label}: should be valid: {first.message[:160]}")
+        if not valid and first is None:
             problems.append(f"{label}: should be rejected, was accepted")
 
     for name, schema in sorted(schemas.items()):

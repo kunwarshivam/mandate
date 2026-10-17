@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/evaluation.schema.json",
+  "description": "GET /evaluations/{id} (§4.7, DEC-1002): the founder's forward-paper evaluation, internal paper workspaces only.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "evaluation"
+  ],
+  "properties": {
+    "evaluation": {
+      "$ref": "#/$defs/Evaluation"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One recorded evaluation (DEC-1002 items 6 and 7). Served only in an internal paper workspace; elsewhere the route is not_found.",
+      "required": [
+        "evaluation_id",
+        "report_ref",
+        "report"
+      ],
+      "properties": {
+        "evaluation_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "report_ref": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "report": {
+          "$ref": "#/$defs/Report"
+        }
+      }
+    },
+    "Report": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The forward-paper evaluation report artifact (DEC-1002 item 7), for the team's internal paper workspaces only (DEC-103).",
+      "required": [
+        "kind",
+        "report_version",
+        "decision",
+        "cut_off",
+        "inputs",
+        "baselines",
+        "groups",
+        "passed",
+        "disclosures"
+      ],
+      "properties": {
+        "kind": {
+          "const": "forward_paper_evaluation"
+        },
+        "report_version": {
+          "const": 1
+        },
+        "decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision_id",
+            "window_from",
+            "window_to",
+            "minimum_scoreable",
+            "z"
+          ],
+          "properties": {
+            "decision_id": {
+              "type": "string",
+              "pattern": "^DEC-[0-9]{1,5}$"
+            },
+            "window_from": {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            "window_to": {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            "minimum_scoreable": {
+              "$ref": "#/$defs/Count"
+            },
+            "z": {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            }
+          }
+        },
+        "cut_off": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "theses",
+            "closes",
+            "cost_model"
+          ],
+          "properties": {
+            "theses": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            "closes": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            },
+            "cost_model": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            }
+          }
+        },
+        "baselines": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basket",
+            "index"
+          ],
+          "properties": {
+            "basket": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "../common.schema.json#/$defs/AssetId"
+              }
+            },
+            "index": {
+              "$ref": "../common.schema.json#/$defs/AssetId"
+            }
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Group"
+          }
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "disclosures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "NOTE-FORWARD-PAPER-INTERNAL"
+            ]
+          }
+        }
+      }
+    },
+    "Group": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One signal model's scorecard (DEC-1002 item 4): exactly one of refusal and scorecard is non-null.",
+      "required": [
+        "signal_model",
+        "closed",
+        "open",
+        "outside_window",
+        "refusal",
+        "scorecard"
+      ],
+      "properties": {
+        "signal_model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model_id",
+            "model_version",
+            "content_hash"
+          ],
+          "properties": {
+            "model_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+            },
+            "model_version": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._+-]{1,64}$"
+            },
+            "content_hash": {
+              "$ref": "../common.schema.json#/$defs/ContentRef"
+            }
+          }
+        },
+        "closed": {
+          "$ref": "#/$defs/Count"
+        },
+        "open": {
+          "$ref": "#/$defs/Count"
+        },
+        "outside_window": {
+          "$ref": "#/$defs/Count"
+        },
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Code"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scorecard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scorecard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "refusal": {
+              "$ref": "#/$defs/Code"
+            },
+            "scorecard": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "refusal": {
+              "type": "null"
+            },
+            "scorecard": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "Scorecard": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "mandate_research::score::Scorecard, member for member (DEC-281).",
+      "required": [
+        "theses",
+        "unscoreable",
+        "scoreable_count",
+        "z",
+        "excess_sum_basket",
+        "excess_sum_index",
+        "mean_excess_basket",
+        "mean_excess_index",
+        "sample_variance_basket",
+        "sample_variance_index",
+        "margin_basket",
+        "margin_index",
+        "lower_bound_basket",
+        "lower_bound_index",
+        "passed"
+      ],
+      "properties": {
+        "theses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScoredThesis"
+          }
+        },
+        "unscoreable": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Unscoreable"
+          }
+        },
+        "scoreable_count": {
+          "$ref": "#/$defs/Count"
+        },
+        "z": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "excess_sum_basket": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "excess_sum_index": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "mean_excess_basket": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "mean_excess_index": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "sample_variance_basket": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sample_variance_index": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "margin_basket": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "margin_index": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "lower_bound_basket": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "lower_bound_index": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ScoredThesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "thesis_id",
+        "lineage_id",
+        "revision",
+        "instrument",
+        "entry",
+        "exit",
+        "round_trip_cost",
+        "net_return",
+        "excess_over_basket",
+        "excess_over_index"
+      ],
+      "properties": {
+        "thesis_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "lineage_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "revision": {
+          "$ref": "#/$defs/Count"
+        },
+        "instrument": {
+          "$ref": "../common.schema.json#/$defs/AssetId"
+        },
+        "entry": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "exit": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "round_trip_cost": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "net_return": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "excess_over_basket": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "excess_over_index": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        }
+      }
+    },
+    "Unscoreable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "thesis_id",
+        "reason"
+      ],
+      "properties": {
+        "thesis_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "reason": {
+          "enum": [
+            "no_entry_close",
+            "no_exit_close",
+            "no_series",
+            "not_scoreable_direction"
+          ]
+        }
+      }
+    },
+    "Code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "Count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "unevaluatedProperties": false
+}

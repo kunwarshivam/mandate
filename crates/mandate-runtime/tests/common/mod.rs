@@ -7,6 +7,7 @@
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
 pub mod escalation;
+pub mod research;
 
 use std::collections::{BTreeMap, BTreeSet};
 
