@@ -288,6 +288,11 @@ the spec invariants (DP-n) its tests cover.
   §9.18) is registered in `mandate-journal` with vectors for rules 143 and 144; `GET
   /backtests/{id}` serves `read-models/backtest` in the workspace that ran it only; disclosures
   stay DEC-1003's placeholder names.
+  *Registration landed* (claim [#1463](https://github.com/kunwarshivam/mandate/issues/1463), lane
+  I4): `mandate-journal` registers `BacktestRunRecorded` (`src/backtest_records.rs`) with rules 143
+  and 144, `rule` and `man` required, written by a `user` or `system` actor only
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors. The
+  report, the run's append, and the route remain.
 
 ### E5 Journal
 
@@ -2137,8 +2142,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   `check_thesis_record`, scores every closed thesis (admitted or not) by `score::evaluate`, one
   scorecard per research-agent `(model_id, model_version, content_hash)` (E15-3), costs each
   thesis against itself, and writes the report artifact and `EvaluationRunRecorded` (journal spec
-  §9.18, rule 145; registration with vectors follows). `GET /evaluations/{id}` serves it in an
-  internal paper workspace only.
+  §9.18, rule 145). `GET /evaluations/{id}` serves it in an internal paper workspace only.
+  *Registration landed* (lane I4): `mandate-journal` registers `EvaluationRunRecorded` with rule
+  145, `rule` required, written by a `user` or `system` actor only
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors; the harness
+  and the route remain.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled

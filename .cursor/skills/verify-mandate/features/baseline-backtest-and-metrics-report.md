@@ -4,7 +4,7 @@
   the tick), §2.2 (trade dates), §5.1 and §5.3 (the order policy the baseline obeys), §6.2 and §6.3
   (the instants fees are charged at), §8.2 to §8.4 (the backtest mark is the bar close, cash,
   settlement); PRD FR-4.1, FR-4.2, FR-4.5; `docs/specs/journal.md` §12 (`BacktestRunRecorded`,
-  appended by a later story). The metric definitions have no spec section yet: they live in
+  closed in §9.18 and registered by E4-5; appending it is the runner's later story). The metric definitions have no spec section yet: they live in
   `docs/project/tasks/E4-2-backtest-baseline.md` and DEC-127.
 - **Code:** `mandate-backtest`: `crates/mandate-backtest/src/lib.rs` (the loop's inputs, its per-bar
   order, the run's fills, orders, and observations), `crates/mandate-backtest/src/strategy.rs` (the
