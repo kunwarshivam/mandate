@@ -19,10 +19,12 @@ test("sign-in and app screens asked of the site move to the app with a 308, quer
   }
 });
 
-test("a path that looks like another host stays on the app", async ({ request, baseURL }) => {
-  const response = await request.get(`${SITE_ORIGIN}//evil.example/login`, { maxRedirects: 0 });
+test("a path that looks like another host never leaves the two origins", async ({ request, baseURL }) => {
+  const asked = `${SITE_ORIGIN}//evil.example/login`;
+  const response = await request.get(asked, { maxRedirects: 0 });
   expect(response.status()).toBe(308);
-  expect(new URL(response.headers()["location"]).origin).toBe(baseURL);
+  // Next answers a doubled slash itself, with a relative 308 to the same host; the middleware's own 308s are absolute.
+  expect([SITE_ORIGIN, baseURL]).toContain(new URL(response.headers()["location"], asked).origin);
 });
 
 test("the site keeps the public pages, and its sign-in link points at the app", async ({ page, baseURL }) => {
