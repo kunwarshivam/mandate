@@ -39,10 +39,10 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(nextConfig.images).toEqual({ unoptimized: true });
   });
 
-  it("pending E11-9: keeps vercel.json only while it deploys main alone, until the founder moves the domains (DEC-1005 item 4)", () => {
+  it("pending E21-38: flags any Vercel configuration at the repository root, since Workers alone hosts the app (DEC-1090)", () => {
+    expect(existsSync(join(WEB, "..", "vercel.json"))).toBe(false);
     expect(hostingProblems(tree({ "../vercel.json": null }))).toEqual([]);
-    expect(hostingProblems(tree({ "../vercel.json": '{ "git": { "deploymentEnabled": { "**": false, "main": true } } }' }))).toEqual([]);
-    for (const text of ['{ "git": {} }', "{}", '{ "git": { "deploymentEnabled": { "**": true, "main": true } } }', '{ "git": { "deploymentEnabled": { "**": false, "main": true, "preview": true } } }']) {
+    for (const text of ['{ "git": { "deploymentEnabled": { "**": false, "main": true } } }', '{ "git": {} }', "{}"]) {
       expect(hostingProblems(tree({ "../vercel.json": text })), text).toEqual(only("vercel.json"));
     }
   });
