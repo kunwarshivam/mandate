@@ -46,9 +46,12 @@ use mandate_api_server::journal::Postgres;
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{OsRandom, Sessions};
+use mandate_api_server::stepup::Unbound;
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
 use mandate_journal::ArtifactSource;
@@ -138,7 +141,7 @@ struct Start {
     keys: Arc<FetchedKeys>,
     database_url: String,
     hosted: Hosted,
-    artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    artifacts: Option<Arc<Objects<FsArtifactStore>>>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -247,7 +250,15 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         )?)),
         members: Arc::new(members::until_parser),
         hosted: start.hosted,
-        artifacts: start.artifacts,
+        artifacts: start.artifacts.clone().map(|store| {
+            let store: Arc<dyn ArtifactSource + Send + Sync> = store;
+            store
+        }),
+        objects: start.artifacts.map(|store| {
+            let store: Arc<dyn ObjectStore> = store;
+            store
+        }),
+        step_up: Arc::new(Unbound),
     };
     let api = spawn_listener(
         serve(

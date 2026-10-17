@@ -1877,18 +1877,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-dataservice"
+version = "0.0.0"
+dependencies = [
+ "mandate-domain",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-time",
+ "proptest",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
  "base64ct",
  "mandate-canon",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-notify",
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
  "proptest",
+ "ring",
+ "sqlx",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
