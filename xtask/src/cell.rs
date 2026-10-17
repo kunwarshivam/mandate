@@ -446,9 +446,8 @@ fn image_sets() -> Result<Vec<String>> {
 
 /// `cargo xtask cell up`: build the `mandate`, `api` and `runtime` images from this checkout (never
 /// with the `live` feature), bring up the k3d cluster if it is not up, install the CloudNativePG
-/// operator, the
-/// journal's Postgres and the workspace chart, and wait until every pod is ready and the
-/// migration Job has finished.
+/// operator, the journal's Postgres and the workspace chart, and wait until every pod is ready and
+/// the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -620,8 +619,9 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, `mandate-api-server` and the runtime's `mandate-daemon` (DEC-1013) linked
-/// statically, so their images need no base (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
-/// overflow checks, and the cell's journals are small.
+/// statically, so their images need no base (DEC-993 item 9), with no feature at all: never
+/// `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps overflow checks, and
+/// the cell's journals are small.
 fn build_binary() -> Result<()> {
     let args = [
         "build",
