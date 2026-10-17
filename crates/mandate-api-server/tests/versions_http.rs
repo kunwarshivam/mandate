@@ -1158,3 +1158,79 @@ fn the_unbound_port_counts_no_evidence() {
         Err(ProblemCode::StepUpMissing)
     );
 }
+
+/// Records `name`'s document as the CLI would have: stored, created, and confirmed.
+fn seed_version(f: &Fixture, name: &str) {
+    let document = document(name);
+    f.store
+        .put(&to_canonical(&json(&document)))
+        .expect("stored");
+    seed_control(
+        f,
+        "MandateVersionCreated",
+        &format!(
+            r#"{{"mandate_version":"{}","provenance":[],"record_ref":"{}"}}"#,
+            version(name),
+            reference("{}")
+        ),
+    );
+    seed_confirmation(f, name);
+}
+
+/// The control stream as one of `environment`: its first row's, which the server reads.
+fn workspace_in(f: &Fixture, environment: &str) {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.get_mut(&ctl()).expect("seeded");
+    rows[0].environment = environment.to_owned();
+}
+
+#[test]
+fn a_document_of_another_environment_than_the_workspaces_is_refused() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    workspace_in(&f, "live");
+    assert_eq!(
+        violations(&create(&f, &cookie, KEY, "v1")),
+        vec![("/environment".to_owned(), "environment".to_owned())]
+    );
+    assert!(events(&f, "MandateVersionCreated").is_empty());
+}
+
+#[test]
+fn a_deploy_of_a_live_or_foreign_environment_version_is_refused() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_version(&f, "live");
+    refused(
+        &deploy(&f, &cookie, KEY, &deploy_body("agt_a", "live", EVIDENCE)),
+        409,
+        ProblemCode::LiveUnavailable,
+    );
+    seed_version(&f, "v1");
+    workspace_in(&f, "live");
+    assert_eq!(
+        violations(&deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE))),
+        vec![("/mandate_version".to_owned(), "environment".to_owned())]
+    );
+    assert!(events(&f, "AgentDeployed").is_empty());
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+}
+
+#[test]
+fn a_deploy_records_the_backtest_shown() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    let shown = deploy_body("agt_a", "v1", EVIDENCE)
+        .replace(r#""backtest_id":null"#, r#""backtest_id":"bt_1""#);
+    assert_eq!(deploy(&f, &cookie, KEY, &shown).status, 202);
+    let deployed = events(&f, "AgentDeployed");
+    let record = stored(&f, text(&payload(&deployed[0]), &["record_ref"]));
+    assert_eq!(text(&record, &["backtest_id"]), "bt_1");
+    let malformed = deploy_body("agt_b", "v1", EVIDENCE)
+        .replace(r#""backtest_id":null"#, r#""backtest_id":"a b""#);
+    assert_eq!(
+        violations(&deploy(&f, &cookie, KEY_2, &malformed)),
+        vec![("/backtest_id".to_owned(), "non_canonical".to_owned())]
+    );
+}
