@@ -76,9 +76,22 @@ pub enum Drill {
     /// The Compose file on the host's docker: Postgres and the migration come up, the CLI opens a
     /// control stream, and it exports and verifies by journal spec §11. Needs no cluster.
     Compose,
+    /// The journal's Postgres primary is killed; once CloudNativePG brings it back, a stream
+    /// written before the kill still exports and verifies by journal spec §11.
+    Restart,
+    /// The kill switch with the exporter, the API and the deployment manager down (OPS-4, E21-34);
+    /// skipped, and named, until its processes and `mandate agent kill` are on `main`.
+    KillSwitch,
 }
 
-pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
+pub const DRILLS: [Drill; 6] = [
+    Drill::Boot,
+    Drill::Journal,
+    Drill::Egress,
+    Drill::Compose,
+    Drill::Restart,
+    Drill::KillSwitch,
+];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -87,6 +100,8 @@ impl Drill {
             Self::Journal => "journal",
             Self::Egress => "egress",
             Self::Compose => "compose",
+            Self::Restart => "restart",
+            Self::KillSwitch => "kill-switch",
         }
     }
 
@@ -110,6 +125,10 @@ impl Drill {
             Self::Compose => {
                 "the first event's hash changed in the exported segment before it is verified"
             }
+            Self::Restart => {
+                "the stream lost across the restart: a stream id the restart did not keep"
+            }
+            Self::KillSwitch => "none until the drill runs",
         }
     }
 }
@@ -123,6 +142,8 @@ impl Drill {
             Self::Boot => "NetworkPolicy/default-deny is not in the cell",
             Self::Journal | Self::Compose => "rehash_mismatch",
             Self::Egress => "reached the live trading host",
+            Self::Restart => "export_stream_empty",
+            Self::KillSwitch => "",
         }
     }
 }
@@ -133,6 +154,8 @@ impl Drill {
 pub enum Verdict {
     Held,
     Broken(String),
+    /// The drill's processes are not on `main` yet; named, never counted as held.
+    Skipped(String),
 }
 
 /// Whether docker, k3d and helm are all on the path; when one is not, the reason.
@@ -292,9 +315,73 @@ fn kubeconfig() -> Result<String> {
     Ok(state()?.join("kubeconfig").display().to_string())
 }
 
-/// The image tag of this checkout's build: the binary's own SHA-256, so an uncommitted edit gets a
-/// new image rather than the last one imported under the same commit.
+/// Names a published, signed `mandate` image (lane R2, E21-35) by digest, for a host that cannot
+/// build the static Linux binary itself.
+const IMAGE_ENV: &str = "MANDATE_CELL_IMAGE";
+
+/// Where the cell's `mandate` image comes from.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ImageSource {
+    /// Built from this checkout: only a linux/x86_64 host can link the static binary.
+    Build,
+    /// Pulled by digest: the R2 lane's signed image, named in `MANDATE_CELL_IMAGE`.
+    Pull(String),
+}
+
+/// The image source for a host `os`/`arch` and an optional pinned image. A pinned image must name
+/// a digest; any other host than linux/x86_64 needs one, since cargo cannot link the static Linux
+/// binary there without a cross toolchain, which no dependency kind covers (DEC-990 item 1).
+pub fn image_source(os: &str, arch: &str, pinned: Option<&str>) -> Result<ImageSource, String> {
+    match pinned.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(image) if pinned_by_digest(image) => Ok(ImageSource::Pull(image.to_string())),
+        Some(image) => Err(format!(
+            "{IMAGE_ENV}={image} is not `<repository>[:tag]@sha256:<64 lowercase hex>`, the form \
+             the workspace chart's schema takes"
+        )),
+        None if os == "linux" && arch == "x86_64" => Ok(ImageSource::Build),
+        None => Err(format!(
+            "this host is {os}/{arch}, where the static Linux `mandate` binary cannot be built; \
+             set {IMAGE_ENV} to the R2 lane's signed image by digest (E21-35). Until R2 publishes \
+             linux/arm64 and amd64 images there is none to pull, and the cell runs on linux/x86_64 \
+             only (deploy/cell/README.md, \"On a laptop\")"
+        )),
+    }
+}
+
+/// The workspace chart's image form (`values.schema.json`):
+/// `^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$`.
+fn pinned_by_digest(image: &str) -> bool {
+    let Some((name, digest)) = image.split_once("@sha256:") else {
+        return false;
+    };
+    let (repository, tag) = name.split_once(':').unwrap_or((name, ""));
+    let digest_ok = digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let repository_ok = !repository.is_empty()
+        && repository
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'/' | b'_' | b'-'));
+    let tag_ok = !name.contains(':')
+        || (!tag.is_empty()
+            && tag
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')));
+    digest_ok && repository_ok && tag_ok
+}
+
+fn host_image_source() -> Result<ImageSource> {
+    let pinned = env::var(IMAGE_ENV).ok();
+    image_source(env::consts::OS, env::consts::ARCH, pinned.as_deref()).map_err(anyhow::Error::msg)
+}
+
+/// The cell's `mandate` image: the pulled one, or this checkout's build tagged by the binary's own
+/// SHA-256, so an uncommitted edit gets a new image rather than the last one imported.
 fn image_tag() -> Result<String> {
+    if let ImageSource::Pull(image) = host_image_source()? {
+        return Ok(image);
+    }
     let digest = sha256(&static_binary())?;
     let short = digest
         .get(..12)
@@ -311,13 +398,20 @@ fn static_binary() -> String {
 /// journal's Postgres and the workspace chart, and wait until every pod is ready and the
 /// migration Job has finished.
 pub fn up() -> Result<()> {
-    build_binary()?;
+    let source = host_image_source()?;
+    if source == ImageSource::Build {
+        build_binary()?;
+    }
     let image = image_tag()?;
-    build_image(&image)?;
+    if source == ImageSource::Build {
+        build_image(&image)?;
+    }
     if !cluster_exists()? {
         create_cluster()?;
     }
-    sh("k3d", &["image", "import", "--cluster", CLUSTER, &image])?;
+    if source == ImageSource::Build {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, &image])?;
+    }
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -485,7 +579,7 @@ fn create_cluster() -> Result<()> {
     ]
     .map(String::from)
     .to_vec();
-    if !Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
+    if env::consts::OS == "linux" && !Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
         args.extend(["--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0"].map(String::from));
     }
     if let Some(bundle) = env::var_os(EXTRA_CA_ENV) {
@@ -637,11 +731,14 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Journal => journal(seeded),
             Drill::Egress => egress(seeded),
             Drill::Compose => compose_drill(seeded),
+            Drill::Restart => restart(seeded),
+            Drill::KillSwitch => kill_switch(),
         };
-        if seeded && d != Drill::Compose {
+        if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
         }
         match (verdict?, seeded) {
+            (Verdict::Skipped(why), _) => eprintln!("    skipped: {why}"),
             (Verdict::Held, false) => eprintln!("    held"),
             (Verdict::Broken(why), true) if why.contains(d.seeded_symptom()) => {
                 eprintln!("    caught the seeded bug: {why}");
@@ -851,20 +948,48 @@ fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
         ])?;
         let (succeeded, failed) = status.trim().split_once('/').unwrap_or(("", ""));
         if succeeded == "1" || failed == "1" {
-            let logs = kubectl(&[
-                "logs",
-                &format!("job/{name}"),
-                "--namespace",
-                NAMESPACE,
-                "--all-containers",
-                "--prefix",
-            ])
-            .unwrap_or_else(|e| format!("(no logs: {e:#})"));
-            return Ok((succeeded == "1", logs));
+            return Ok((succeeded == "1", job_logs(&name, job)));
         }
         sleep(Duration::from_secs(2));
     }
     bail!("Job {name} neither succeeded nor failed in time")
+}
+
+/// Every container's logs of a finished Job. `--all-containers` refuses a pod with a container that
+/// never started, as when an init container failed, so it falls back to each container in turn,
+/// keeping the failed init container's report, which is where a seeded symptom is.
+fn job_logs(name: &str, job: &Value) -> String {
+    let job_ref = format!("job/{name}");
+    let all = kubectl(&[
+        "logs",
+        &job_ref,
+        "--namespace",
+        NAMESPACE,
+        "--all-containers",
+        "--prefix",
+    ]);
+    let Err(refused) = all else {
+        return all.unwrap_or_default();
+    };
+    let spec = &job["spec"]["template"]["spec"];
+    let containers = ["initContainers", "containers"]
+        .iter()
+        .filter_map(|k| spec[k].as_array())
+        .flatten()
+        .filter_map(|c| c["name"].as_str());
+    let mut logs = String::new();
+    for container in containers {
+        if let Ok(out) = kubectl(&["logs", &job_ref, "--namespace", NAMESPACE, "-c", container]) {
+            for line in out.lines() {
+                logs.push_str(&format!("[{container}] {line}\n"));
+            }
+        }
+    }
+    if logs.is_empty() {
+        format!("(no logs: {refused:#})")
+    } else {
+        logs
+    }
 }
 
 /// The process list, as `processes.json` holds it.
@@ -1476,6 +1601,116 @@ fn generate_in(root: &Path, write: bool) -> Result<()> {
     Ok(())
 }
 
+/// Writes a control stream, kills the journal's primary, waits for CloudNativePG to bring the
+/// cluster back, and verifies the stream. Seeded, it asks for a stream id the restart did not keep,
+/// which must read as lost (`export_stream_empty`).
+fn restart(seeded: bool) -> Result<Verdict> {
+    let id = run_id()?;
+    let workspace = format!("restart{id}");
+    let args = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--environment",
+        "paper",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store"
+    ]);
+    let open = render(
+        &[format!("run.id=\"{id}\""), format!("run.args={args}")],
+        Some("templates/run.yaml"),
+    )?;
+    let (opened, logs) = run_job(open)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "`mandate workspace open` failed before the restart:\n{logs}"
+        )));
+    }
+    kubectl(&[
+        "delete",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        "cnpg.io/cluster=journal,cnpg.io/instanceRole=primary",
+        "--wait=true",
+    ])?;
+    let mut primary_ready = false;
+    for _ in 0..POLLS {
+        let ready = kubectl(&[
+            "get",
+            "pod",
+            "--namespace",
+            NAMESPACE,
+            "--selector",
+            "cnpg.io/cluster=journal,cnpg.io/instanceRole=primary",
+            "-o",
+            "jsonpath={.items[*].status.conditions[?(@.type==\"Ready\")].status}",
+        ])?;
+        if ready.trim() == "True" {
+            primary_ready = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if !primary_ready {
+        return Ok(Verdict::Broken(
+            "the journal's primary pod was not Ready again within the drill's polls".into(),
+        ));
+    }
+    kubectl(&[
+        "wait",
+        "--namespace",
+        NAMESPACE,
+        "--for=condition=Ready",
+        "cluster.postgresql.cnpg.io/journal",
+        "--timeout=300s",
+    ])?;
+    let stream = if seeded {
+        format!("ctl:{workspace}lost")
+    } else {
+        format!("ctl:{workspace}")
+    };
+    let verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={}", json!([stream])),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (verified, logs) = run_job(verify)?;
+    if verified {
+        Ok(Verdict::Held)
+    } else {
+        Ok(Verdict::Broken(format!(
+            "the stream written before the restart did not verify after it:\n{logs}"
+        )))
+    }
+}
+
+/// The kill-switch drill (OPS-4) needs the runtime and executor processes and `mandate agent
+/// kill` in the binary; until both are on `main` it is named as skipped.
+fn kill_switch() -> Result<Verdict> {
+    let built = processes()?
+        .iter()
+        .filter(|p| p["built"] == true)
+        .filter_map(|p| p["name"].as_str().map(String::from))
+        .collect::<Vec<_>>();
+    let agents = ["runtime", "executor"]
+        .iter()
+        .all(|n| built.iter().any(|b| b == n));
+    Ok(Verdict::Skipped(if agents {
+        "the runtime and executor are built, but the drill itself lands with O4 (E21-34)".into()
+    } else {
+        "the runtime and executor images are not on main yet (P1, #1451), nor `mandate agent \
+         kill` (O4, E21-34)"
+            .into()
+    }))
+}
+
 const COMPOSE_DIR: &str = "deploy/cell/compose";
 /// Where the compose drill keeps the secrets and the exported segment, owned by the Compose user;
 /// `secrets/` is ignored by git.
@@ -1892,6 +2127,54 @@ mod tests {
             "a wrapped description line is not a command"
         );
         Ok(())
+    }
+
+    #[test]
+    fn a_host_that_cannot_build_pulls_a_pinned_image_or_stops() {
+        let digest = format!("ghcr.io/x/mandate@sha256:{}", "a".repeat(64));
+        assert_eq!(
+            image_source("linux", "x86_64", None),
+            Ok(ImageSource::Build)
+        );
+        assert_eq!(
+            image_source("macos", "aarch64", Some(&digest)),
+            Ok(ImageSource::Pull(digest.clone()))
+        );
+        assert_eq!(
+            image_source("linux", "x86_64", Some(&digest)),
+            Ok(ImageSource::Pull(digest.clone())),
+            "a pinned image wins on any host"
+        );
+        let stop = image_source("macos", "aarch64", None)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            stop.contains("macos/aarch64") && stop.contains("E21-35"),
+            "{stop}"
+        );
+        assert!(image_source("linux", "aarch64", None).is_err());
+        for bad in [
+            "ghcr.io/x/mandate:latest",
+            "ghcr.io/x/mandate@sha256:abc",
+            &format!("ghcr.io/x/mandate@sha256:{}", "A".repeat(64)),
+            &format!("@sha256:{}", "a".repeat(64)),
+            &format!("localhost:5000/x@sha256:{}", "a".repeat(64)),
+            &format!("ghcr.io/X/mandate@sha256:{}", "a".repeat(64)),
+        ] {
+            assert!(
+                image_source("macos", "aarch64", Some(bad)).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            image_source("linux", "x86_64", Some("  ")),
+            Ok(ImageSource::Build)
+        );
+        let tagged = format!("ghcr.io/x/mandate:v1@sha256:{}", "b".repeat(64));
+        assert_eq!(
+            image_source("macos", "aarch64", Some(&tagged)),
+            Ok(ImageSource::Pull(tagged.clone()))
+        );
     }
 
     #[test]

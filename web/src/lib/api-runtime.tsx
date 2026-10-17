@@ -3,7 +3,8 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
-import { emptyWorkspace, loadWorkspace } from "@/api/reads";
+import { type ApiView, loadApi } from "@/api/read-models";
+import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
 import type { Iso, Workspace } from "@/fixtures/types";
@@ -78,7 +79,9 @@ export function ApiRuntimeProvider({
    * The last workspace the reads gave. Commands are prepared from it while the reads fail, so pause-all
    * still reaches every agent last seen and stop-all its connection (API-8, rule 13); nothing is shown from it.
    */
-  const lastRead = useRef<Workspace | null>(null);
+  const lastRead = useRef<{ ws: Workspace; view: ApiView } | null>(null);
+  /** The read models as last served; `null` whenever the screens must show none (loading, unreachable, signed out). */
+  const [view, setView] = useState<ApiView | null>(null);
   /** Each refresh's number: an answer to an older one never overwrites a newer one. */
   const reads = useRef(0);
   const nowRef = useRef(now);
@@ -111,18 +114,19 @@ export function ApiRuntimeProvider({
       if (!mounted.current || read !== reads.current) return;
       wsRef.current = emptyWorkspace(signedIn.current === "unreachable" ? "unreachable" : "signed_out", nowRef.current);
       setWs(wsRef.current);
+      setView(null);
       return;
     }
-    let loaded = await loadWorkspace(client);
-    if (!loaded.ok && loaded.error.code === "unauthenticated" && session && (await openSession())) loaded = await loadWorkspace(client);
+    let loaded = await loadApi(client);
+    if (!loaded.ok && loaded.error.code === "unauthenticated" && session && (await openSession())) loaded = await loadApi(client);
     if (!mounted.current || read !== reads.current) return;
     if (!loaded.ok && loaded.error.code === "unauthenticated" && session) {
       wsRef.current = emptyWorkspace("signed_out", nowRef.current);
     } else if (!loaded.ok && loaded.error.code === "membership_unavailable") {
-      wsRef.current = { ...emptyWorkspace("membership_unavailable", nowRef.current), environment: lastRead.current?.environment ?? "paper" };
+      wsRef.current = { ...emptyWorkspace("membership_unavailable", nowRef.current), environment: lastRead.current?.ws.environment ?? "unknown" };
     } else if (loaded.ok) {
       served.current = { at: loaded.ws.now, local: Date.now() };
-      lastRead.current = loaded.ws;
+      lastRead.current = { ws: loaded.ws, view: loaded.view };
       wsRef.current = loaded.ws;
     } else {
       const last = wsRef.current;
@@ -130,6 +134,7 @@ export function ApiRuntimeProvider({
       wsRef.current = last.status === "ready" ? { ...down, environment: last.environment, health: { ...last.health, deployment: { state: "down", as_of: last.health.deployment.as_of } } } : down;
     }
     setWs(wsRef.current);
+    setView(loaded.ok && wsRef.current === loaded.ws ? loaded.view : null);
   }, [client, openSession, session]);
 
   useEffect(() => {
@@ -198,7 +203,11 @@ export function ApiRuntimeProvider({
       const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
-      const prepared = prepareOwnerCommand(client, wsRef.current.status === "ready" ? wsRef.current : (lastRead.current ?? wsRef.current), kind, agentId, record);
+      const last = lastRead.current;
+      const scope = last
+        ? { agents: last.view.agents, connectionId: last.ws.connection.connection_id, environment: last.ws.environment }
+        : { agents: [], connectionId: "", environment: wsRef.current.environment };
+      const prepared = prepareOwnerCommand(client, scope, kind, agentId, record);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered" });
         const delivered = await Promise.all(prepared.commands.map(deliver));
@@ -223,7 +232,7 @@ export function ApiRuntimeProvider({
       const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current, record };
       const update = (patch: Partial<ApprovalResponse>) => setResponses((map) => ({ ...map, [approvalId]: { ...entry, ...map[approvalId], ...patch } }));
       setResponses((map) => ({ ...map, [approvalId]: entry }));
-      const approval = wsRef.current.approvals.find((a) => a.approval_id === approvalId);
+      const approval = lastRead.current?.view.approvals.find((a) => a.approval_id === approvalId);
       const prepared = approval ? prepareApprovalResponse(client, approval, response, record) : ({ ok: false, reason: "not_found" } as const);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered", reason: prepared.reason });
@@ -261,8 +270,8 @@ export function ApiRuntimeProvider({
   }, []);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
-    [ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
+    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

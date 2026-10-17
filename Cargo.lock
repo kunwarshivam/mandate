@@ -1507,6 +1507,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-alerts"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-notify",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-alpaca"
 version = "0.0.0"
 dependencies = [
