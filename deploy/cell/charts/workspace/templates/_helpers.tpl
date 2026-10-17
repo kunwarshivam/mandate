@@ -225,7 +225,6 @@ spec:
     {{- end }}
 {{- end -}}
 
-{{/* One container of process `p`: name, image, args, and optional extra mounts. */}}
 {{/*
 A service's launch from processes.json (DEC-1013): its `args`, and its `probe` asked `livez` and
 `readyz` (DEC-994 item 5), with `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and
@@ -247,6 +246,7 @@ process for no deployment.
 {{- $out | toJson -}}
 {{- end -}}
 
+{{/* One container of process `p`: name, image, args, probes, and optional extra mounts. */}}
 {{- define "mandate.container" -}}
 - name: {{ .name | quote }}
   image: {{ index .root.Values.images .p.image | quote }}
