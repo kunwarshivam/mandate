@@ -1,7 +1,7 @@
 //! The crate's one error enum, with a stable `code()` per variant (ADR-0001 ES-09).
 
 /// Why the worker could not build a value. None of these is a model's fault: a model's bad output
-/// is an [`crate::OutputRejection`], and a gateway's failure a [`crate::CallFailure`]. These say the
+/// is an [`crate::OutputRejection`], and a gateway's failure a [`mandate_gateway::CallRecord`]'s outcome. These say the
 /// worker's own inputs were not usable, and the run then makes no call (`AGENTS.md` rule 3).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResearchRunError {

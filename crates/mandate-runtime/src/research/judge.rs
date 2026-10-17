@@ -1,23 +1,25 @@
-//! Judging a committed research call (agent harness spec §6.2 step 5, §6.5; E19-4): the strict
-//! parse, the harness checks that need platform data, the platform's fill of every fact the model
-//! may not state (HI-18), `mandate_research`'s seventeen ordered checks, and the one batch that
-//! journals every candidate's verdict (HI-22).
+//! Judging a research call's output (agent harness spec §6.2 steps 4 and 5, §6.5; E19-4): the
+//! strict parse, the harness checks that need platform data, the platform's fill of every fact the
+//! model may not state (HI-18), and `mandate_research`'s seventeen ordered checks. The verdicts go
+//! in the call's own `ModelInvocationRecorded` (journal spec §9.19 rule 151), which heads the
+//! judging batch, so the record precedes every thesis record its output leads to (INF-10, HI-22).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value, to_canonical};
+use mandate_gateway::{CallRecord, CandidateKind, Verdict, VerdictResult};
 use mandate_num::Conviction;
 use mandate_research::{
-    AdmissionChange, AdmissionDecision, AdmissionFacts, AssetClass, AssetId, ContentHash,
-    Corroboration, Direction, FoldInput, GroupId, InstrumentFacts, Invalidation, LineageId,
-    ModelId, ModelVersion, OutputEnvelope, ProposedThesis, RefusalReason, ResearchEvent, SchemaDec,
-    SourceId as ResearchSource, Thesis, ThesisEntry, ThesisId, fold_theses,
+    AdmissionFacts, AssetClass, AssetId, ContentHash, Corroboration, Direction, FoldInput, GroupId,
+    InstrumentFacts, Invalidation, LineageId, ModelId, ModelVersion, OutputEnvelope,
+    ProposedThesis, RefusalReason, ResearchEvent, SchemaDec, SourceId as ResearchSource, Thesis,
+    ThesisEntry, ThesisId, fold_theses,
 };
 use mandate_research_run::{CandidateThesis, InstrumentFact, ItemKind, Symbol, parse_output};
 use mandate_time::UtcNanos;
 
-use super::{ItemFacts, Phase, ResearchConfig, ResearchContext, Run};
+use super::{Called, ItemFacts, ResearchConfig, ResearchContext, Run};
 use crate::error::RuntimeError;
 use crate::payload;
 use crate::step::Batch;
@@ -26,30 +28,6 @@ use crate::types::{EventId, ModelDirection, ModelOutput, ModelOutputIgnored, Ris
 /// The ordinals thesis ids are derived at: far above any draft's ordinal in a batch and far below
 /// the run and call ids' (`super::polled`), so no derived id meets another.
 const THESIS_ORDINALS: u32 = 1 << 30;
-
-/// A harness refusal (§6.5's table), journaled among the verdicts and never as a §8.5 reason.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HarnessRefusal {
-    UnknownInstrument,
-    UnknownEvidence,
-    DuplicateInstrument,
-    ForbiddenLanguage,
-    RevisionsNotEnabled,
-    UnknownThesis,
-}
-
-impl HarnessRefusal {
-    fn code(self) -> &'static str {
-        match self {
-            Self::UnknownInstrument => "unknown_instrument",
-            Self::UnknownEvidence => "unknown_evidence",
-            Self::DuplicateInstrument => "duplicate_instrument",
-            Self::ForbiddenLanguage => "forbidden_language",
-            Self::RevisionsNotEnabled => "revisions_not_enabled",
-            Self::UnknownThesis => "unknown_thesis",
-        }
-    }
-}
 
 /// Phrases that state a price target or a likely profit (DEC-126). The research agent may be
 /// directional (§8.1), so "buy" alone is not here. The gateway's output limits are the first layer;
@@ -92,130 +70,88 @@ struct Cited<'a> {
 
 /// One thesis candidate that passed the harness checks, with everything the platform filled.
 struct Passed<'a> {
-    index: usize,
     candidate: &'a CandidateThesis,
     proposal: ProposedThesis,
     evidence: Vec<EventId>,
 }
 
-/// One verdict line of the verdict record.
-struct Verdict {
-    candidate: &'static str,
-    index: usize,
-    subject: String,
-    verdict: String,
-    thesis_id: Option<String>,
+/// A thesis record the judging batch journals after the call record, with the research agent's
+/// §8.2 output when admission admits it or checks 1 to 3 refuse it.
+pub(super) struct ThesisDraft {
+    pub(super) event_type: &'static str,
+    pub(super) body: Value,
+    pub(super) output: Option<Value>,
 }
 
-/// Judges `run`, whose `ok` call record has committed, under the version in effect (HI-17), and
-/// journals one batch: each judged thesis's record, the output of each admitted one and of each
-/// checks 1 to 3 refuse, and the verdict record of every candidate.
+/// What judging decided: one verdict per candidate in response order, theses first (rule 151), and
+/// the thesis records to journal. Both are empty when nothing can be judged.
+#[derive(Default)]
+pub(super) struct Judged {
+    pub(super) verdicts: Vec<Verdict>,
+    pub(super) theses: Vec<ThesisDraft>,
+}
+
+/// Judges the `ok` record of `run`'s call under the version in effect (HI-17). An output the
+/// harness's strict read refuses, or one whose candidates the platform cannot fill or admission
+/// cannot decide, is judged as nothing: no verdict and no thesis record, so nothing reaches the
+/// order path (HI-6, DEC-1120 item 4).
 ///
 /// # Errors
-/// [`RuntimeError`] when a value cannot be written, or `mandate_research` cannot decide.
+/// [`RuntimeError`] when a value cannot be written.
 pub(super) fn judge(
     run: &Run,
+    called: &Called<'_>,
+    record: &CallRecord,
     config: &ResearchConfig,
     context: &ResearchContext<'_>,
-    batch: &mut Batch<'_>,
-) -> Result<(), RuntimeError> {
-    let Phase::Recorded {
-        invocation,
-        reply,
-        observations,
-        items,
-        ..
-    } = &run.phase
-    else {
-        return Ok(());
+    batch: &Batch<'_>,
+) -> Result<Judged, RuntimeError> {
+    let (Some(output), Some(prompt), Some(response)) = (
+        record.output.as_ref(),
+        record.prompt_ref,
+        record.response_ref,
+    ) else {
+        return Ok(Judged::default());
     };
-    let output = match parse_output(&reply.output, &config.bounds) {
-        Ok(output) => output,
-        Err(rejection) => {
-            let body = verdicts(
-                run,
-                invocation,
-                "output_rejected",
-                Some(rejection.code()),
-                &[],
-            )?;
-            batch.journal("CandidateVerdictsRecorded", Some(invocation.clone()), body)?;
-            return Ok(());
-        }
+    let Ok(output) = parse_output(&to_canonical(output), &config.bounds) else {
+        return Ok(Judged::default());
     };
-    if reply.reported != config.pin {
-        let lines: Vec<Verdict> = output
-            .theses
-            .iter()
-            .enumerate()
-            .map(|(index, thesis)| Verdict {
-                candidate: "thesis",
-                index,
-                subject: thesis.instrument.clone(),
-                verdict: "not_pinned".to_owned(),
-                thesis_id: None,
-            })
-            .chain(
-                output
-                    .invalidations
-                    .iter()
-                    .enumerate()
-                    .map(|(index, invalidation)| Verdict {
-                        candidate: "invalidation",
-                        index,
-                        subject: invalidation.thesis_id.clone(),
-                        verdict: "not_pinned".to_owned(),
-                        thesis_id: None,
-                    }),
-            )
-            .collect();
-        let body = verdicts(run, invocation, "not_pinned", None, &lines)?;
-        batch.journal("CandidateVerdictsRecorded", Some(invocation.clone()), body)?;
-        return Ok(());
-    }
-    let cited: BTreeMap<&str, Cited<'_>> = observations
+    let refs = Refs { prompt, response };
+    let cited: BTreeMap<&str, Cited<'_>> = called
+        .observations
         .iter()
-        .zip(items)
+        .zip(called.items)
         .map(|(observation, facts)| (facts.item_id.as_str(), Cited { observation, facts }))
         .collect();
-    let snapshot: BTreeMap<&Symbol, &InstrumentFact> = items
+    let snapshot: BTreeMap<&Symbol, &InstrumentFact> = called
+        .items
         .iter()
         .filter_map(|item| item.instrument.as_ref())
         .map(|fact| (&fact.symbol, fact))
         .collect();
-    let mut lines = Vec::new();
+    let mut results = Vec::new();
     let mut passed = Vec::new();
     let mut named = BTreeSet::new();
     for (index, candidate) in output.theses.iter().enumerate() {
         let fact = Symbol::new(&candidate.instrument)
             .ok()
             .and_then(|symbol| snapshot.get(&symbol).copied());
-        let refusal = refusal(candidate, fact, &cited, &mut named, config);
-        match (refusal, fact) {
+        match (refusal(candidate, fact, &cited, &mut named, config), fact) {
             (None, Some(fact)) => {
                 let ordinal = THESIS_ORDINALS.saturating_add(u32::try_from(index).unwrap_or(0));
                 let thesis_id = batch.id_at(ordinal);
-                let Ok(filled) = fill(
-                    index, candidate, fact, &cited, &thesis_id, run, config, context,
-                ) else {
-                    return unjudged(run, invocation, "unfillable_candidate", batch);
+                let Ok(filled) = fill(candidate, fact, &cited, &thesis_id, run, config, context)
+                else {
+                    return Ok(Judged::default());
                 };
                 passed.push(filled);
+                results.push(VerdictResult::Judged);
             }
-            (refused, _) => lines.push(Verdict {
-                candidate: "thesis",
-                index,
-                subject: candidate.instrument.clone(),
-                verdict: refused
-                    .unwrap_or(HarnessRefusal::UnknownInstrument)
-                    .code()
-                    .to_owned(),
-                thesis_id: None,
-            }),
+            (refused, _) => results.push(refused.unwrap_or(VerdictResult::UnknownInstrument)),
         }
     }
     let Ok(facts) = platform_facts(context.facts, &snapshot) else {
-        return unjudged(run, invocation, "unreadable_snapshot", batch);
+        return Ok(Judged::default());
     };
     let proposals: Vec<ProposedThesis> = passed.iter().map(|p| p.proposal.clone()).collect();
     let fold = fold_theses(&FoldInput {
@@ -226,10 +162,10 @@ pub(super) fn judge(
         facts: &facts,
         lineages: context.lineages,
     });
-    let fold = match fold {
-        Ok(fold) => fold,
-        Err(_) => return unjudged(run, invocation, "admission_undecided", batch),
+    let Ok(fold) = fold else {
+        return Ok(Judged::default());
     };
+    let mut theses = Vec::new();
     for (accepted, step) in passed.iter().zip(&fold.steps) {
         let entry = step
             .journal
@@ -246,11 +182,6 @@ pub(super) fn judge(
         } else {
             "ThesisProposed"
         };
-        let record = batch.journal(
-            event_type,
-            Some(invocation.clone()),
-            thesis_record(entry, accepted, &accepted.proposal.thesis.output, reply)?,
-        )?;
         let ignored = match step.decision.reason() {
             None => Some(None),
             Some(RefusalReason::DirectionNotAllowed) => {
@@ -262,73 +193,49 @@ pub(super) fn judge(
             }
             Some(_) => None,
         };
-        if let Some(ignored) = ignored {
-            let output = model_output(entry, accepted, run, reply.response_ref, ignored)?;
-            batch.journal(
-                "ModelOutputRecorded",
-                Some(record),
-                payload::model_output(&output)?,
-            )?;
-        }
-        lines.push(Verdict {
-            candidate: "thesis",
-            index: accepted.index,
-            subject: accepted.candidate.instrument.clone(),
-            verdict: match step.decision {
-                AdmissionDecision::Admitted {
-                    change: AdmissionChange::Renewed,
-                } => "renewed".to_owned(),
-                AdmissionDecision::Admitted {
-                    change: AdmissionChange::Admitted,
-                } => "admitted".to_owned(),
-                AdmissionDecision::Refused { reason } => reason.code().to_owned(),
-            },
-            thesis_id: Some(entry.thesis_id.as_str().to_owned()),
+        let output = match ignored {
+            Some(ignored) => Some(payload::model_output(&model_output(
+                entry,
+                accepted,
+                run,
+                refs.response,
+                ignored,
+            )?)?),
+            None => None,
+        };
+        theses.push(ThesisDraft {
+            event_type,
+            body: thesis_record(entry, accepted, &accepted.proposal.thesis.output, &refs)?,
+            output,
         });
     }
-    lines.sort_by_key(|line| line.index);
     let active: BTreeSet<&str> = context
         .active_theses
         .iter()
         .map(|thesis| thesis.thesis_id.as_str())
         .collect();
-    for (index, invalidation) in output.invalidations.iter().enumerate() {
-        let verdict = if !active.contains(invalidation.thesis_id.as_str()) {
-            HarnessRefusal::UnknownThesis.code()
-        } else if invalidation
-            .evidence
-            .iter()
-            .any(|id| !cited.contains_key(id.as_str()))
-        {
-            HarnessRefusal::UnknownEvidence.code()
-        } else {
-            "accepted"
-        };
-        lines.push(Verdict {
-            candidate: "invalidation",
-            index,
-            subject: invalidation.thesis_id.clone(),
-            verdict: verdict.to_owned(),
-            thesis_id: None,
-        });
-    }
-    let body = verdicts(run, invocation, "judged", None, &lines)?;
-    batch.journal("CandidateVerdictsRecorded", Some(invocation.clone()), body)?;
-    Ok(())
+    let verdicts = results
+        .into_iter()
+        .map(|result| Verdict {
+            kind: CandidateKind::Thesis,
+            result,
+        })
+        .chain(output.invalidations.iter().map(|invalidation| Verdict {
+            kind: CandidateKind::Invalidation,
+            result: if active.contains(invalidation.thesis_id.as_str()) {
+                VerdictResult::Judged
+            } else {
+                VerdictResult::UnknownThesis
+            },
+        }))
+        .collect();
+    Ok(Judged { verdicts, theses })
 }
 
-/// A run nothing can be admitted from, though its output parsed: one verdict record with the
-/// `output_rejected` outcome and the cause, before any thesis record is drafted, so every committed
-/// call still ends in a record (HI-22) and nothing reaches the order path (HI-6).
-fn unjudged(
-    run: &Run,
-    invocation: &EventId,
-    cause: &str,
-    batch: &mut Batch<'_>,
-) -> Result<(), RuntimeError> {
-    let body = verdicts(run, invocation, "output_rejected", Some(cause), &[])?;
-    batch.journal("CandidateVerdictsRecorded", Some(invocation.clone()), body)?;
-    Ok(())
+/// The artifacts a judged call's thesis records name.
+struct Refs {
+    prompt: Digest,
+    response: Digest,
 }
 
 /// §6.5's harness checks in the table's order; the first that fails decides.
@@ -338,25 +245,25 @@ fn refusal(
     cited: &BTreeMap<&str, Cited<'_>>,
     named: &mut BTreeSet<Symbol>,
     config: &ResearchConfig,
-) -> Option<HarnessRefusal> {
+) -> Option<VerdictResult> {
     let Some(fact) = fact else {
-        return Some(HarnessRefusal::UnknownInstrument);
+        return Some(VerdictResult::UnknownInstrument);
     };
     if candidate
         .evidence
         .iter()
         .any(|id| !cited.contains_key(id.as_str()))
     {
-        return Some(HarnessRefusal::UnknownEvidence);
+        return Some(VerdictResult::UnknownEvidence);
     }
     if !named.insert(fact.symbol.clone()) {
-        return Some(HarnessRefusal::DuplicateInstrument);
+        return Some(VerdictResult::DuplicateInstrument);
     }
     if forbidden(&candidate.thesis) || forbidden(&candidate.invalidation) {
-        return Some(HarnessRefusal::ForbiddenLanguage);
+        return Some(VerdictResult::ForbiddenLanguage);
     }
     if candidate.predecessor_thesis_id.is_some() && !config.revisions_enabled {
-        return Some(HarnessRefusal::RevisionsNotEnabled);
+        return Some(VerdictResult::RevisionsNotEnabled);
     }
     None
 }
@@ -384,7 +291,6 @@ fn not_canonical(field: &str) -> impl Fn(mandate_research::ResearchError) -> Run
     reason = "one thesis's fill reads the candidate, the snapshot fact, the cited items, its id, the run, the pin, and the context"
 )]
 fn fill<'a>(
-    index: usize,
     candidate: &'a CandidateThesis,
     fact: &InstrumentFact,
     cited: &BTreeMap<&str, Cited<'_>>,
@@ -471,7 +377,6 @@ fn fill<'a>(
             .map_err(not_canonical("invalidation"))?,
     };
     Ok(Passed {
-        index,
         candidate,
         proposal: ProposedThesis {
             thesis,
@@ -512,9 +417,9 @@ fn thesis_record(
     entry: &ThesisEntry,
     accepted: &Passed<'_>,
     output: &OutputEnvelope,
-    reply: &mandate_research_run::GatewayReply,
+    refs: &Refs,
 ) -> Result<Value, RuntimeError> {
-    let reference = |digest: &mandate_canon::Digest| payload::text(&format!("sha256:{digest}"));
+    let reference = |digest: &Digest| payload::text(&format!("sha256:{digest}"));
     payload::object(vec![
         ("model_id", payload::text(output.model_id.as_str())),
         (
@@ -575,8 +480,8 @@ fn thesis_record(
             "allowlist_version",
             payload::count(u64::from(entry.allowlist_version.0), "allowlist_version")?,
         ),
-        ("prompt_ref", reference(&reply.prompt_ref)),
-        ("response_ref", reference(&reply.response_ref)),
+        ("prompt_ref", reference(&refs.prompt)),
+        ("response_ref", reference(&refs.response)),
         ("admitted", Value::Bool(entry.admitted)),
         (
             "reason",
@@ -593,7 +498,7 @@ fn model_output(
     entry: &ThesisEntry,
     accepted: &Passed<'_>,
     run: &Run,
-    response_ref: mandate_canon::Digest,
+    response_ref: Digest,
     ignored: Option<ModelOutputIgnored>,
 ) -> Result<ModelOutput, RuntimeError> {
     let output = &accepted.proposal.thesis.output;
@@ -621,40 +526,4 @@ fn model_output(
         lineage_id: Some(entry.lineage_id.as_str().to_owned()),
         ignored,
     })
-}
-
-/// The provisional verdict record (DEC-996 item 4): the run, its call record, the outcome, and one
-/// line per candidate in the output's order, theses then invalidations (HI-22).
-fn verdicts(
-    run: &Run,
-    invocation: &EventId,
-    outcome: &str,
-    rejection: Option<&str>,
-    lines: &[Verdict],
-) -> Result<Value, RuntimeError> {
-    let lines = lines
-        .iter()
-        .map(|line| {
-            payload::object(vec![
-                ("candidate", payload::text(line.candidate)),
-                (
-                    "index",
-                    payload::count(u64::try_from(line.index).unwrap_or(u64::MAX), "index")?,
-                ),
-                ("subject", payload::text(&line.subject)),
-                ("verdict", payload::text(&line.verdict)),
-                (
-                    "thesis_id",
-                    line.thesis_id.as_deref().map_or(Value::Null, payload::text),
-                ),
-            ])
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    payload::object(vec![
-        ("run_id", payload::text(&run.run_id)),
-        ("invocation", payload::text(&invocation.0)),
-        ("outcome", payload::text(outcome)),
-        ("rejection", rejection.map_or(Value::Null, payload::text)),
-        ("verdicts", Value::Array(lines)),
-    ])
 }

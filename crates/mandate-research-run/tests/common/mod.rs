@@ -1,5 +1,5 @@
 //! Fixtures and doubles shared by the worker's tests: readers that answer from vectors, so a test
-//! states only what a reader returns, and a recorded gateway.
+//! states only what a reader returns, and the research gateway over the recorded fake.
 
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
@@ -8,10 +8,25 @@ use std::collections::BTreeSet;
 
 use mandate_canon::Digest;
 use mandate_domain::{AssetClass, AssetId};
+use mandate_gateway::fake::{Recorded, RecordedTransport};
+use mandate_gateway::guard::GuardContext;
+use mandate_gateway::meter::{Caps, MemoryMeter, Meter};
+use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
+use mandate_gateway::policy::EndpointPolicy;
+use mandate_gateway::provider::{
+    Clock, Delivery, HttpRequest, ManualClock, NoKeys, ProviderKey, SecretError, SecretSource,
+    SequentialIds, Transport,
+};
+use mandate_gateway::registry::{
+    Endpoint, Identity, Locality, Registry, Reported, Route, Snapshot, Status,
+};
+use mandate_gateway::{Gateway, RateCaps, Settings};
 use mandate_num::{Price, Qty};
 use mandate_research_run::{
-    Allowlist, Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId,
-    NewsItem, NewsReader, ReadError, Readers, RetrievalPlan, Scope, SourceId, Symbol, TextQuery,
+    Allowlist, Bar, BarReader, Filing, FilingReader, GatewayParts, InstrumentFact,
+    InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NoHostedTransport, OutputBounds,
+    ReadError, Readers, ResearchEntry, ResearchTransport, RetrievalPlan, Scope, Selection,
+    SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
 };
 use mandate_time::UtcNanos;
 
@@ -194,4 +209,174 @@ impl InstrumentReader for Fixture {
     fn instruments(&self, _symbols: &BTreeSet<Symbol>) -> Result<Vec<InstrumentFact>, ReadError> {
         self.answer(&self.instruments)
     }
+}
+
+/// The research entry's pinned model: one OpenRouter slug served by one upstream (DEC-997 item 2).
+pub const SLUG: &str = "anthropic/claude-sonnet-4.5";
+pub const UPSTREAM: &str = "anthropic";
+pub const REPORTED_PROVIDER: &str = "Anthropic";
+pub const HOST: &str = "openrouter.ai";
+pub const WORKSPACE: &str = "ws1";
+pub const AGENT: &str = "agent-a";
+
+pub fn identity() -> Identity {
+    Identity {
+        provider: "anthropic".to_owned(),
+        model_name: SLUG.to_owned(),
+        snapshot: Snapshot::Dated("claude-sonnet-4-5-20250929".to_owned()),
+        quantization: None,
+    }
+}
+
+pub fn entry() -> ResearchEntry {
+    ResearchEntry {
+        model_id: "llm.research_agent".to_owned(),
+        model_version: "0.1.0".to_owned(),
+        identity: identity(),
+        deadline_ms: 120_000,
+        max_output_tokens: 4_096,
+        seed: Some(7),
+        plan: RetrievalPlan::v0_1(),
+        bounds: OutputBounds::v0_1(),
+    }
+}
+
+pub fn endpoint() -> Endpoint {
+    Endpoint {
+        id: "openrouter:anthropic".to_owned(),
+        host: HOST.to_owned(),
+        region: "us".to_owned(),
+        locality: Locality::Hosted,
+        route: Route {
+            upstream: UPSTREAM.to_owned(),
+            reported_provider: REPORTED_PROVIDER.to_owned(),
+        },
+        prices: PriceTable::new(
+            TokenPrice::per_million(Usd6::parse("3").unwrap_or_else(|e| panic!("{e}"))),
+            TokenPrice::per_million(Usd6::parse("15").unwrap_or_else(|e| panic!("{e}"))),
+            TokenPrice::per_million(Usd6::parse("0.3").unwrap_or_else(|e| panic!("{e}"))),
+            Digest::of(b"openrouter anthropic price table 1"),
+        )
+        .unwrap_or_else(|e| panic!("{e}")),
+    }
+}
+
+/// The registry with the research entry registered, offered, and on its one endpoint.
+pub fn registry() -> (Registry, ModelPin) {
+    let mut registry = Registry::new();
+    let content = entry().content();
+    let pin = content.model_ref();
+    registry
+        .register(content)
+        .unwrap_or_else(|e| panic!("the research entry registers: {e}"));
+    let probe = Reported {
+        model: Some(SLUG.to_owned()),
+        provider: Some(REPORTED_PROVIDER.to_owned()),
+    };
+    registry
+        .add_endpoint(&pin, endpoint(), &[probe])
+        .unwrap_or_else(|e| panic!("{e}"));
+    registry
+        .set_status(&pin, Status::Offered)
+        .unwrap_or_else(|e| panic!("{e}"));
+    (registry, pin)
+}
+
+pub fn parts(caps: Caps) -> GatewayParts<MemoryMeter, ManualClock> {
+    GatewayParts {
+        settings: Settings {
+            workspace_id: WORKSPACE.to_owned(),
+            policy: EndpointPolicy::new(
+                BTreeSet::from([Locality::Hosted]),
+                Some(BTreeSet::from([UPSTREAM.to_owned()])),
+                None,
+            ),
+            guard: GuardContext::default(),
+            rate: RateCaps {
+                per_workspace: 100,
+                per_agent: 100,
+            },
+        },
+        registry: registry().0,
+        meter: Meter::new(MemoryMeter::new(), caps),
+        clock: ManualClock::at(at(CUT_OFF + 5)),
+        ids: Box::new(SequentialIds::starting_at(1 << 80)),
+    }
+}
+
+/// A key source holding one fixture key, never a real credential.
+pub struct FixtureVault;
+
+pub const FIXTURE_KEY: &str = "fixture-key-not-a-secret-0001";
+
+impl SecretSource for FixtureVault {
+    fn provider_key(&self, upstream: &str) -> Result<ProviderKey, SecretError> {
+        if upstream == UPSTREAM {
+            Ok(ProviderKey::new(FIXTURE_KEY.to_owned()))
+        } else {
+            Err(SecretError::Missing)
+        }
+    }
+}
+
+/// A stand-in for the cell's hosted transport: it replays like the recorded fake and records the
+/// key it was handed, so a test can show which transport a call went through.
+#[derive(Default)]
+pub struct HostedDouble {
+    pub inner: RecordedTransport,
+    pub keys: Vec<String>,
+}
+
+impl Transport for HostedDouble {
+    fn send(
+        &mut self,
+        request: &HttpRequest,
+        key: Option<&ProviderKey>,
+        deadline: UtcNanos,
+        clock: &mut dyn Clock,
+    ) -> Delivery {
+        self.keys
+            .extend(key.map(|key| key.expose_secret().to_owned()));
+        self.inner.send(request, key, deadline, clock)
+    }
+}
+
+pub type ResearchGateway = Gateway<ResearchTransport<NoHostedTransport>, MemoryMeter, ManualClock>;
+
+/// The default gateway: the recorded fake, with `replies` scripted in order, each 30 s long.
+pub fn recorded_gateway(replies: Vec<Vec<u8>>) -> (ResearchGateway, Selection) {
+    let mut recorded = RecordedTransport::new();
+    recorded.script(
+        replies
+            .into_iter()
+            .map(|body| Recorded {
+                latency_ms: 30_000,
+                delivery: Delivery::Response {
+                    status: 200,
+                    body,
+                    retry_after_ms: None,
+                },
+            })
+            .collect(),
+    );
+    research_gateway(
+        parts(Caps::demo()),
+        Box::new(NoKeys),
+        None::<NoHostedTransport>,
+        recorded,
+        UPSTREAM,
+    )
+}
+
+pub fn usage() -> Usage {
+    Usage {
+        input: 2_000,
+        output: 300,
+        cached: 0,
+    }
+}
+
+/// The pinned model's reply carrying `output`.
+pub fn reply(output: &str) -> Vec<u8> {
+    recorded_reply(output, SLUG, REPORTED_PROVIDER, usage())
 }
