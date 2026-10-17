@@ -402,7 +402,7 @@ fn a_reply_s_record_heads_its_tool_calls_and_its_reads_are_dispatched_after_them
         &turn,
         &world,
         vec![
-            call(0, "news.search", r#"{"terms":["AAPL"]}"#),
+            call(0, "news.search", r#"{"symbols":["AAPL"],"terms":["services"]}"#),
             call(1, "note", r#"{"text":"check services"}"#),
         ],
         None,
@@ -457,7 +457,7 @@ fn a_dispatch_s_results_are_journaled_before_the_next_turn_which_carries_the_tra
         &run,
         &turn,
         &world,
-        vec![call(0, "news.search", r#"{"terms":["AAPL"]}"#)],
+        vec![call(0, "news.search", r#"{"symbols":["AAPL"],"terms":["services"]}"#)],
         None,
     );
     let response = record.response_ref;
@@ -545,8 +545,8 @@ fn a_reply_over_the_tool_call_budget_runs_none_and_ends_the_run() {
         &turn,
         &world,
         vec![
-            call(0, "news.search", r#"{"terms":["AAPL"]}"#),
-            call(1, "news.search", r#"{"terms":["MSFT"]}"#),
+            call(0, "news.search", r#"{"symbols":["AAPL"],"terms":["services"]}"#),
+            call(1, "news.search", r#"{"symbols":["MSFT"],"terms":["services"]}"#),
         ],
         None,
     );
@@ -658,7 +658,7 @@ fn a_late_reply_is_journaled_with_no_verdicts_and_no_tool_calls() {
         &run,
         &turn,
         &world,
-        vec![call(0, "news.search", r#"{"terms":["AAPL"]}"#)],
+        vec![call(0, "news.search", r#"{"symbols":["AAPL"],"terms":["services"]}"#)],
         None,
     );
     let step = go(
@@ -742,7 +742,7 @@ fn an_agentic_run_replays_identically() {
             &run,
             &turn,
             &world,
-            vec![call(0, "news.search", r#"{"terms":["AAPL"]}"#)],
+            vec![call(0, "news.search", r#"{"symbols":["AAPL"],"terms":["services"]}"#)],
             None,
         );
         answered(&mut run, record, &ports, &world);
