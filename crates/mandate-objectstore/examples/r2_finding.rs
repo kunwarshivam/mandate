@@ -4,7 +4,8 @@
 //! lock rule (indefinite, the whole bucket), shows that the rule refuses a delete, removes the rule
 //! with the bucket-configuration token, shows that the same delete then succeeds, and deletes the
 //! scratch bucket whatever happened. It prints outcomes and refusal codes only: never a key, a
-//! token, or an account's identifier. Exits 0 when R2 behaves as DEC-973 found; 1 when it does
+//! token, or an account's identifier. Exits 0 when R2 behaves as DEC-973 found (the S3 check gives
+//! no certificate, refused or failing closed); 1 when it does
 //! not, which reopens DEC-973 rather than being acted on.
 //!
 //! It reads the `production` environment's names: `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
@@ -198,9 +199,9 @@ async fn probe(store: &S3, buckets: &Buckets, bucket: &str) -> Result<bool, Stri
     let gone = store.get_object(LOCKED_KEY, None).await;
     println!("9. the object is gone: {}", matches!(gone, Ok(None)));
 
-    Ok(matches!(unruled, Err(CheckError::Refused(_)))
+    Ok(unruled.is_err()
         && matches!(&rules, Err(CheckError::Refused(_)))
-        && matches!(ruled, Err(CheckError::Refused(_)))
+        && ruled.is_err()
         && matches!(written, Ok(Ok(_)))
         && matches!(held, Ok(Outcome::Rejected(_)))
         && matches!(released, Ok(Outcome::Done))

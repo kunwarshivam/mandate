@@ -3,7 +3,7 @@
 
 use jiff::Timestamp;
 use mandate_objectstore::check::{CheckError, check_s3};
-use mandate_objectstore::s3::{ConfigError, Endpoint, S3, S3Error};
+use mandate_objectstore::s3::{ConfigError, Endpoint, S3, S3Error, is_plain_key};
 use mandate_objectstore::sigv4::Credentials;
 use secrecy::SecretString;
 
@@ -94,4 +94,69 @@ async fn an_unreachable_store_fails_the_check_closed() {
         check_s3(&store, "cold/").await.map(|_| ()),
         Err(CheckError::Store(S3Error::Transport))
     );
+}
+
+#[test]
+fn a_key_is_plain_and_relative() {
+    for good in [
+        "a",
+        "cold/segments/s-1.jsonl",
+        "a.b/..c/c..",
+        "x y",
+        &"k".repeat(1024),
+    ] {
+        assert!(is_plain_key(good), "{good:?}");
+    }
+    for bad in [
+        "",
+        "/a",
+        "a/",
+        "a//b",
+        ".",
+        "..",
+        "../x",
+        "a/../b",
+        "a/./b",
+        "a/..",
+        "a\nb",
+        "a\u{7f}b",
+        &"k".repeat(1025),
+    ] {
+        assert!(!is_plain_key(bad), "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_traversing_key_or_prefix_is_refused_before_anything_is_sent() {
+    let endpoint = match Endpoint::new("http://127.0.0.1:1", "us-east-1", "journal-cold") {
+        Ok(endpoint) => endpoint,
+        Err(error) => panic!("valid: {error}"),
+    };
+    let key = Credentials::new("id".to_owned(), SecretString::from("secret"), None);
+    let store = match S3::new(endpoint, key, Timestamp::now) {
+        Ok(store) => store,
+        Err(error) => panic!("builds: {error}"),
+    };
+    for traversal in ["../other-bucket/x", "cold/../../x", "/x"] {
+        assert_eq!(
+            store.put_object(traversal, b"x", None).await,
+            Err(S3Error::InvalidKey),
+            "{traversal}"
+        );
+        assert_eq!(
+            store.get_object(traversal, None).await,
+            Err(S3Error::InvalidKey)
+        );
+        assert_eq!(
+            store.delete_object(traversal).await,
+            Err(S3Error::InvalidKey)
+        );
+    }
+    for prefix in ["../", "cold", "", "cold//"] {
+        assert_eq!(
+            check_s3(&store, prefix).await.map(|_| ()),
+            Err(CheckError::Store(S3Error::InvalidKey)),
+            "{prefix:?}"
+        );
+    }
 }

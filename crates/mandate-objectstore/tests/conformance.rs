@@ -17,7 +17,7 @@ use mandate_objectstore::check::{
 use mandate_objectstore::lock::{
     LockMode, REQUIRED_RETENTION_SECS, Refusal, Refused, RetentionPeriod,
 };
-use mandate_objectstore::s3::Outcome;
+use mandate_objectstore::s3::{Outcome, S3Error};
 
 const PREFIX: &str = "cold/";
 const SIX_YEARS: Option<(LockMode, RetentionPeriod)> =
@@ -76,6 +76,19 @@ async fn compliance_with_a_writer_that_cannot_touch_the_rule_is_accepted_and_wri
         until >= at_least,
         "retained until {until}, at least {at_least}"
     );
+
+    for outside in ["../x", "../../other-bucket/x", "segments/../../x"] {
+        assert_eq!(
+            locked.put(outside, b"x").await,
+            Err(WriteError::Store(S3Error::InvalidKey)),
+            "{outside}"
+        );
+    }
+    assert_eq!(
+        locked.put("_mandate/lockcheck", b"x").await,
+        Err(WriteError::ReservedKey)
+    );
+    assert!(matches!(locked.put("_mandatex/k", b"x").await, Ok(Some(_))));
 
     for client in [&writer, &root] {
         let deleted = client.delete_object_version(key, &version, true).await;

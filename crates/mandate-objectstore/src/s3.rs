@@ -104,6 +104,17 @@ impl Endpoint {
     }
 }
 
+/// Whether `key` is a plain relative object key: 1 to 1024 bytes, no control character, and
+/// `/`-separated segments that are neither empty, `.` nor `..`. A prefix is checked as a key
+/// with its trailing `/` removed.
+pub fn is_plain_key(key: &str) -> bool {
+    (1..=1024).contains(&key.len())
+        && !key.chars().any(char::is_control)
+        && key
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
 pub(crate) fn is_loopback(host: &str) -> bool {
     host == "localhost"
         || host
@@ -149,6 +160,11 @@ pub enum S3Error {
         /// The call.
         call: &'static str,
     },
+    /// An object key or prefix that is empty, absolute, holds an empty, `.` or `..` segment or a
+    /// control character, or is longer than 1024 bytes: refused before anything is sent, so no
+    /// key can resolve outside its prefix or bucket.
+    #[error("the object key is not a plain relative key")]
+    InvalidKey,
     /// The store declined a read the caller needs.
     #[error("the object store declined {call} with {status} {code}")]
     Rejected {
@@ -479,6 +495,9 @@ impl S3 {
         extra_headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<Answer, S3Error> {
+        if key.is_some_and(|key| !is_plain_key(key)) {
+            return Err(S3Error::InvalidKey);
+        }
         let path = match key {
             Some(key) => format!("/{}/{}", self.endpoint.bucket, sigv4::uri_encode(key, true)),
             None => format!("/{}", self.endpoint.bucket),
