@@ -96,8 +96,49 @@ struct Run {
 /// Starts a due run at the cut-off and seeds it from the recorded plane; returns the run and the
 /// seed's step, which asks for turn 1.
 fn seeded(ports: &Ports<'_>, world: &World) -> (Run, ResearchStep) {
+    seeded_after(ports, world, |_| {})
+}
+
+/// The agent's mode restricted to `exits_only` before the run is due, as the account stream
+/// applies a daily-loss restriction.
+fn exits_only(lp: &mut Loop) {
+    lp.shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            2,
+            "AgentModeApplied",
+            with_clock(
+                &[
+                    ("to", text("exits_only")),
+                    ("restriction", text("daily_loss")),
+                ],
+                CUT_OFF - 30,
+            ),
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// An active thesis on AAPL, so a `monitor` run is due.
+fn active_aapl() -> ActiveThesis {
+    ActiveThesis {
+        thesis_id: "01ACTIVE".to_owned(),
+        lineage_id: "01ACTIVE".to_owned(),
+        revision: 0,
+        instrument: AssetId::new(AAPL).unwrap_or_else(|e| panic!("{e}")),
+        symbol: mandate_research_run::Symbol::new("AAPL").unwrap_or_else(|e| panic!("{e}")),
+        expires_at: clock(CUT_OFF + 86_400),
+    }
+}
+
+/// [`seeded`], with `before` applied to the booted loop before the run is due.
+fn seeded_after(
+    ports: &Ports<'_>,
+    world: &World,
+    before: impl FnOnce(&mut Loop),
+) -> (Run, ResearchStep) {
     let mut lp = Loop::new(1);
     boot(&mut lp, ports);
+    before(&mut lp);
     let started = go(&mut lp, ResearchInput::Poll(clock(CUT_OFF)), ports, world);
     let Some((run_id, cut_off)) = started.requests.iter().find_map(|r| match r {
         ResearchRequest::Start { run_id, cut_off } => Some((run_id.clone(), *cut_off)),
@@ -521,6 +562,45 @@ fn a_final_output_is_judged_once_and_ends_the_run_done_with_its_summary() {
         "nothing follows the end"
     );
     assert!(run.lp.research.in_flight().is_none());
+}
+
+/// §6.9: a `monitor` run never proposes a thesis. The gateway pins its output schema without
+/// `theses`; should a reply carry one anyway, the core uses nothing of it, as the gateway's
+/// `schema_invalid` would: no thesis, no invalidation, no output, and the run ends `error`.
+#[test]
+fn a_monitor_reply_carrying_a_thesis_uses_nothing_and_ends_the_run_error() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let mut world = world();
+    world.active = vec![active_aapl()];
+    let (mut run, seed) = seeded_after(&ports, &world, exits_only);
+    assert_eq!(
+        payload_str(run.lp.events("RunStarted")[0], "kind"),
+        Some("monitor")
+    );
+    let turn = turn_of(&seed);
+    let before = run.lp.types().len();
+    let record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
+    answered(&mut run, record, &ports, &world);
+    let written: Vec<String> = run.lp.types()[before..].to_vec();
+    assert_eq!(
+        written,
+        ["ModelInvocationRecorded", "RunSummaryRecorded", "RunEnded"],
+        "the turn's record and the end, nothing judged"
+    );
+    let invocation = run.lp.events("ModelInvocationRecorded");
+    let last = invocation[invocation.len() - 1];
+    assert_eq!(
+        last.payload
+            .get("verdicts")
+            .and_then(Value::as_array)
+            .map(|verdicts| verdicts.len()),
+        Some(0)
+    );
+    assert_eq!(
+        payload_str(run.lp.events("RunEnded")[0], "reason"),
+        Some("error")
+    );
 }
 
 /// §6.9 step 4: a reply asking for more tool calls than the run has left runs none of them; each is
