@@ -432,3 +432,249 @@ async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<
 pub(crate) fn ref_text(reference: &Ref) -> Option<String> {
     json_string(&encode(reference).ok()?)
 }
+
+/// `POST /v1/workspaces/{ws}/agents/{id}/resume` (§3.11 item 12, DEC-2101): recorded with the
+/// evidence the port verified, or `null`, which the runtime refuses (§5.4).
+pub async fn resume(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path((workspace, agent))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (gate, request) = match strictly(&app, &headers, body, decode::<ResumeRequest>).await {
+        Ok(admitted) => admitted,
+        Err(refusal) => return *refusal,
+    };
+    let bound = Bound::command("resume", &agent);
+    let make = |step_up| Command::Resume {
+        agent: agent.clone(),
+        step_up,
+    };
+    let forwarded = Forwarded {
+        kind: StepUpActionKind::Resume,
+        bound,
+        presented: request.step_up.as_ref(),
+    };
+    stepped(&app, &gate, &workspace, &make, &forwarded).await
+}
+
+/// `POST /v1/workspaces/{ws}/agents/{id}/stop` (§3.11 item 12, DEC-2101 items 3 and 4): a Stop
+/// with release names the platform's own release warning, else `invalid` at `/warning_shown`.
+pub async fn stop(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path((workspace, agent))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (gate, request) = match strictly(&app, &headers, body, decode::<StopRequest>).await {
+        Ok(admitted) => admitted,
+        Err(refusal) => return *refusal,
+    };
+    let shown = request.warning_shown.as_ref().and_then(ref_text);
+    if request.release && shown.as_deref() != Some(release_warning().as_str()) {
+        return invalid(vec![schema_violation("/warning_shown", "warning_unknown")]);
+    }
+    let release = request.release;
+    let confirms = if release { "stop_release" } else { "stop" };
+    let make = |step_up| Command::Stop {
+        agent: agent.clone(),
+        release,
+        step_up,
+    };
+    let forwarded = Forwarded {
+        kind: StepUpActionKind::Stop,
+        bound: Bound::command(confirms, &agent),
+        presented: request.step_up.as_ref(),
+    };
+    stepped(&app, &gate, &workspace, &make, &forwarded).await
+}
+
+/// `POST /v1/workspaces/{ws}/agents/{id}/exits` (§3.11 item 12, §5.4, DEC-2101): an API-7
+/// operation, decoded leniently; recorded with the confirmed bid when all of it was sent, and no
+/// step-up, so it loses only the owner-exit privilege (mandate spec §6.1).
+pub async fn owner_exit(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path((workspace, agent))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (gate, kept) =
+        match admitted::<OwnerExitRequest>(&app, &headers, Request::Other, body).await {
+            Ok(accepted) => accepted,
+            Err(refusal) => return refusal.response(),
+        };
+    let request = &kept.value;
+    let Some(instrument) = asset_text(&request.instrument) else {
+        return Refused::Invalid.response();
+    };
+    let bid = match (&request.bid, &request.bid_size, &request.floor) {
+        (Some(bid), Some(size), Some(floor)) => {
+            match (decimal_text(bid), decimal_text(size), decimal_text(floor)) {
+                (Some(bid), Some(size), Some(floor)) => Some([bid, size, floor]),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    let command = Command::OwnerExit {
+        agent,
+        instrument,
+        bid,
+    };
+    recorded(&app, &gate, &workspace, &command, &kept.dropped, None).await
+}
+
+/// A strict command's gate and body, decoded as `T`, or its refusal: §3.3's checks, then
+/// `invalid` with the decoder's violations.
+async fn strictly<T>(
+    app: &App,
+    headers: &HeaderMap,
+    body: Body,
+    decoded: fn(&[u8]) -> Result<T, mandate_api::wire::Refused>,
+) -> Result<(Gate, T), Box<Response>> {
+    let (gate, body) = strict(app, headers, body)
+        .await
+        .map_err(|refused| Box::new(refused.response()))?;
+    match decoded(&body) {
+        Ok(request) => Ok((gate, request)),
+        Err(mandate_api::wire::Refused::Invalid { violations }) => {
+            Err(Box::new(invalid(violations)))
+        }
+    }
+}
+
+fn schema_violation(path: &str, code: &str) -> Violation {
+    Violation::Schema {
+        path: path.to_owned(),
+        code: code.to_owned(),
+        message: "The request does not meet this rule.".to_owned(),
+    }
+}
+
+/// DEC-279 item 1's object for a command, which the step-up digest binds (§3.6): what it
+/// confirms, the agent, and the control stream's head.
+struct Bound {
+    confirms: &'static str,
+    agent: String,
+}
+
+impl Bound {
+    fn command(confirms: &'static str, agent: &str) -> Self {
+        Self {
+            confirms,
+            agent: agent.to_owned(),
+        }
+    }
+
+    /// The SHA-256 of the canonical object at the control stream's head `head`.
+    fn digest(&self, head: u64) -> Option<Digest> {
+        let mut object = mandate_canon::Object::new();
+        let members = [
+            ("confirms", text_value(self.confirms)),
+            ("agent", text_value(&self.agent)),
+            ("control_head", text_value(&head.to_string())),
+            ("instrument", Value::Null),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("floor", Value::Null),
+            ("event", Value::Null),
+        ];
+        for (name, value) in members {
+            object.insert(mandate_canon::Key::new(name).ok()?, value);
+        }
+        Some(Digest::of(&to_canonical(&Value::Object(object))))
+    }
+}
+
+fn text_value(value: &str) -> Value {
+    Value::Str(value.to_owned())
+}
+
+/// What a step-up command forwards: its kind, its bound object, and the evidence presented.
+struct Forwarded<'a> {
+    kind: StepUpActionKind,
+    bound: Bound,
+    presented: Option<&'a StepUpEvidence>,
+}
+
+/// Authorizes the command `make` builds and records it with the presented evidence when the port
+/// verifies it, else with `null` (DEC-2101 item 4). A repeat whose key holds the command with the
+/// evidence as presented replays before the port is asked again (§3.4 step 1).
+async fn stepped(
+    app: &App,
+    gate: &Gate,
+    workspace: &str,
+    make: &(dyn Fn(Value) -> Command + Sync),
+    forwarded: &Forwarded<'_>,
+) -> Response {
+    let null = make(Value::Null);
+    let reader = match authorized(
+        app,
+        &gate.admitted,
+        gate.now,
+        workspace,
+        null.permission(),
+        Unreadable::Command,
+    )
+    .await
+    {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(presented) = journaled(forwarded.presented) else {
+        return Refused::Invalid.response();
+    };
+    let as_presented = make(presented.clone());
+    if let Some(row) = replayed(gate, &reader, &as_presented) {
+        return accepted(as_presented.id_member(), &row, gate.now, &[], None);
+    }
+    let head = reader.control.last().map_or(0, |row| row.seq);
+    let verified = match (forwarded.presented, forwarded.bound.digest(head)) {
+        (Some(evidence), Some(digest)) => {
+            let action = Action {
+                kind: forwarded.kind,
+                digest,
+            };
+            app.step_up
+                .verify(evidence, &action, gate.admitted.principal, gate.now)
+                .is_ok()
+        }
+        _ => false,
+    };
+    let command = if verified { as_presented } else { null };
+    committed(app, gate, &reader, &command, &[], None).await
+}
+
+/// The row the gate's key already holds for `command`, when it is that command.
+fn replayed(gate: &Gate, reader: &Reader, command: &Command) -> Option<StoredEvent> {
+    let (_, id) = derived(gate, &reader.workspace, command)?;
+    let issued = Issued {
+        workspace: &reader.workspace,
+        principal: &principal_text(gate)?,
+        event_id: &id,
+        environment: &reader.control.first()?.environment,
+        now: gate.now,
+        command,
+    };
+    match repeated(&reader.control, &id, &draft(&issued)?)? {
+        Settled::Stored(row) => Some(*row),
+        _ => None,
+    }
+}
+
+fn asset_text(asset: &Asset) -> Option<String> {
+    json_string(&encode(asset).ok()?)
+}
+
+fn decimal_text(decimal: &Decimal) -> Option<String> {
+    json_string(&encode(decimal).ok()?)
+}

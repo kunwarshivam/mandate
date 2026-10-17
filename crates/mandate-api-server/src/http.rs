@@ -25,6 +25,7 @@ use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
+use crate::status;
 use crate::stepup::StepUp;
 use crate::subject::{self, LinkRefusal, SubjectLinks};
 use crate::token::{Checked, TokenCheck};
@@ -144,6 +145,22 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/mandate-versions/{version}/confirm",
             post(version_routes::confirm).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/resume",
+            post(writes::resume).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/stop",
+            post(writes::stop).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/exits",
+            post(writes::owner_exit).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/commands/{command}",
+            get(status::status).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",

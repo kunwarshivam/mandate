@@ -144,24 +144,22 @@ impl Command {
     /// Its payload: journal spec §9.11's members for an owner command, §9.7's for a Skip, as the
     /// CLI writes each.
     fn payload(&self, workspace: &str, principal: &str, second: Int) -> Option<Value> {
-        match self {
-            Self::Skip {
-                agent,
-                approval,
-                content_hash,
-            } => {
-                return object(vec![
-                    ("agent", text(agent)),
-                    ("approval", text(approval)),
-                    ("verdict", text("skipped")),
-                    ("content_hash", text(content_hash)),
-                    ("submitted_at", Value::Int(second)),
-                    ("step_up", Value::Null),
-                    ("responder", text(principal)),
-                    ("role", text("approver")),
-                ]);
-            }
-            _ => {}
+        if let Self::Skip {
+            agent,
+            approval,
+            content_hash,
+        } = self
+        {
+            return object(vec![
+                ("agent", text(agent)),
+                ("approval", text(approval)),
+                ("verdict", text("skipped")),
+                ("content_hash", text(content_hash)),
+                ("submitted_at", Value::Int(second)),
+                ("step_up", Value::Null),
+                ("responder", text(principal)),
+                ("role", text("approver")),
+            ]);
         }
         let (agent, scope, subject) = self.named(workspace);
         let (release, warning_shown) = match self {
