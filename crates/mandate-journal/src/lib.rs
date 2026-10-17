@@ -35,6 +35,7 @@ mod membership;
 mod merkle;
 mod notices;
 mod records;
+mod runs;
 mod scheduler;
 mod schema;
 mod start;
@@ -56,25 +57,37 @@ pub fn closes(event_type: &str, schema_version: u64, stream: StreamType) -> bool
             || (stream == StreamType::Agent && agent::closes(event_type, schema_version)))
 }
 
-/// The event types the stream rules read: §9.19's rules 153 and 158 and §9.21's rule 168.
-pub const STREAM_RULE_TYPES: [&str; 6] = [
+/// The event types the stream rules read: §9.19's rules 153 and 158, §9.21's rule 168, and §9.22's
+/// rules 173 to 183.
+pub const STREAM_RULE_TYPES: [&str; 11] = [
     "ModelInvocationRecorded",
     "MeterReserved",
     "MeterSettled",
     "ThesisInvalidated",
     "ThesisProposed",
     "ThesisRevised",
+    "RunStarted",
+    "ToolCallRecorded",
+    "ToolResultRecorded",
+    "RunSummaryRecorded",
+    "RunEnded",
 ];
 
 /// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
-/// §9.21 rule 168), so `append` reads the stream's earlier records of [`STREAM_RULE_TYPES`] to
-/// judge it.
+/// §9.21 rule 168, §9.22 rules 173 to 183), so `append` reads the stream's earlier records of
+/// [`STREAM_RULE_TYPES`] to judge it.
 pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
         matches!(
             (draft.event_type(), draft.stream_id().stream_type()),
             (
-                "ModelInvocationRecorded" | "ThesisInvalidated",
+                "ModelInvocationRecorded"
+                    | "ThesisInvalidated"
+                    | "RunStarted"
+                    | "ToolCallRecorded"
+                    | "ToolResultRecorded"
+                    | "RunSummaryRecorded"
+                    | "RunEnded",
                 StreamType::Agent
             ) | ("MeterReserved" | "MeterSettled", StreamType::Meter)
         )
@@ -94,6 +107,10 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
 /// - 168: a `ThesisInvalidated` names a thesis no earlier invalidation names, that an earlier
 ///   admitted thesis record names with the same lineage and instrument, and that is still the
 ///   latest admitted thesis for its instrument.
+/// - 173 to 183: a run starts once, its records follow its start and precede its end, a tool call
+///   names its run's answered research turn and a tool on its menu, in reply order, a result names
+///   its call once and fits its class, a summary and an end are canonical, and no turn record
+///   follows its run's end unless the run was cancelled and the record judges nothing.
 pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, Invalid)> {
     for (i, draft) in batch.iter().enumerate() {
         let before: Vec<&Draft> = earlier
@@ -103,6 +120,7 @@ pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, In
             .collect();
         gateway::stream_rule(&before, draft).map_err(|error| (i, error))?;
         invalidation::stream_rule(&before, draft).map_err(|error| (i, error))?;
+        runs::stream_rule(&before, draft).map_err(|error| (i, error))?;
     }
     Ok(())
 }

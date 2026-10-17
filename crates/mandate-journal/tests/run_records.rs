@@ -1380,7 +1380,11 @@ fn rule_179_a_result_s_code_fits_its_outcome_and_its_call_s_class() {
         ),
         (
             "refused.call_budget",
-            |s| read_outcome(s, "refused", r#""call_budget""#),
+            |s| {
+                read_outcome(s, "refused", r#""call_budget""#);
+                put(s, PROPOSE_RESULT, "payload.result", r#""refused""#);
+                put(s, PROPOSE_RESULT, "payload.code", r#""call_budget""#);
+            },
             None,
         ),
         (
