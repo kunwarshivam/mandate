@@ -1,5 +1,17 @@
 [
   {
+    "label": "risk-increasing without step-up",
+    "set": {
+      "/step_up_required": false
+    }
+  },
+  {
+    "label": "risk-reducing with step-up",
+    "set": {
+      "/classification": "risk_reducing"
+    }
+  },
+  {
     "label": "an agent named",
     "set": {
       "/agent_id": "agt_1"
@@ -14,7 +26,8 @@
   {
     "label": "an unknown classification",
     "set": {
-      "/classification": "mutant_value"
+      "/classification": "mutant_value",
+      "/step_up_required": false
     }
   },
   {

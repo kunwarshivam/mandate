@@ -6,6 +6,29 @@
   "allOf": [
     {
       "$ref": "../envelope.schema.json#/$defs/Envelope"
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "const": "risk_increasing"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "step_up_required": {
+            "const": true
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "step_up_required": {
+            "const": false
+          }
+        }
+      }
     }
   ],
   "required": [

@@ -279,7 +279,7 @@ Errors are RFC 9457 problem documents with these members:
 | `invalid` | 422 | Schema, canonical form, or a value out of range |
 | `idempotency_conflict` | 409 | Same key, different body |
 | `stale_base` | 409 | The draft or version base moved (API-19); the body names the current base |
-| `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed |
+| `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed, or the screen's `screen_digest` is no longer the server's (§3.11 item 11); the client reloads the screen |
 | `step_up_required` | 401 | A call that needs step-up presents no evidence at all (§3.6, DEC-686) |
 | `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
 | `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at` |
@@ -606,7 +606,8 @@ per workspace deployment (item 6).
     /mandate-versions/{mandate_version}/confirm` (`confirm_version`), `POST /agents` (`deploy`),
     and `POST /agents/{agent_id}/go-live` (`go_live`). Each mutating route is checked in item 10's
     order (the session, the CSRF mark, `Idempotency-Key`, then the body, decoded strictly), then
-    authorized by its matrix row, and commits its one control-stream event, as the CLI writes it
+    authorized by its matrix row for a **user** principal only (a client's "propose only" cell
+    is not served, so no client-authored value is ever recorded `user_entered`), and commits its one control-stream event, as the CLI writes it
     (`mandate version create`, `version confirm`, `agent deploy`), before its answer.
     - **The step-up port.** The server judges step-up through one port, bound to an action's kind
       and digest (§3.6). Until E9-4 binds it, the port verifies nothing: a call that needs step-up
@@ -625,13 +626,19 @@ per workspace deployment (item 6).
       then commits `MandateVersionCreated` version 1 with every envelope path's provenance
       `user_entered`. Answer: `202` `commands/version-created`, with the version and the
       warnings' codes; a version the control stream already records answers `200` with that event
-      and commits nothing.
+      and commits nothing. A repeat whose key's event is stored is compared before anything is
+      validated again, and either answer carries the warnings as validated now.
     - **The confirmation screen.** The read the confirm binds (§5.1's `screen_digest`), for a new
       mandate only: the stored document, `agent_id` and `base_version` both `null`, the server's
       classification (a first version is `risk_increasing`: no earlier version bounds it, mandate
       spec §9.2), the envelope paths V-020 requires, the warnings' codes, whether step-up is
       required, and `screen_digest`, the SHA-256 of the canonical object of those members but the
-      document (`read-models/confirmation`). Worst-case figures, the unasked dollars, provenance
+      document, in journal spec §4's canonical form, written `sha256:<hex>`
+      (`read-models/confirmation`). Exactly those seven members are digested; a member added
+      later joins the digest only with a new version of this read. The warnings depend on the
+      journal and the validation date, so the digest can move between the read and the confirm,
+      which is then refused `classification_changed` and the client reloads. The read takes the
+      "Draft a mandate version" row, users only. Worst-case figures, the unasked dollars, provenance
       badges, and the crypto gap disclosure are not served yet.
     - **Confirm** (§5.1), for a new mandate only. `MandateConfirmed` version 1 has no agent link
       (version 2 is E10-15's), so a confirmation naming an `agent_id` is refused `invalid` at
@@ -656,7 +663,8 @@ per workspace deployment (item 6).
       instruments, else `invalid` with the V-codes; then step-up, bound to the SHA-256 of the
       canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` version 1
       with `config_refs.mandate_version`. A refusal commits nothing: `DeploymentRejected` is not
-      written until the deployment manager journals its own refusals.
+      written until the deployment manager journals its own refusals. Its `202`, and the `200`
+      of an agent already deployed with the version, are `commands/command-accepted`.
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
       after item 10's checks and before the body is read (B5, rule 8).
     - The content-addressed store (item 2) is written only by these routes, and only by adding an
@@ -682,7 +690,9 @@ per workspace deployment (item 6).
     - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
       verified evidence as `step_up`, or `null`. Until E9-4 binds the port that is always `null`,
       so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
-      refusal journaled where the specs put it (§5.4). An owner exit forwards `null` too, so it
+      refusal journaled where the specs put it (§5.4); the client renders that refusal from
+      §5.5, never "stopped". Under `independent_approval_required` an acknowledgment also fails
+      closed (`not_independent`), since `OwnerAcknowledged` does not yet carry its requester. An owner exit forwards `null` too, so it
       loses only the owner-exit privilege (mandate spec §6.1).
     - **Command status** (§5.5) finds the event by equality with a control-stream event id, else
       `not_found`. Its steps are the events on each deployed agent's stream and each account
@@ -693,7 +703,8 @@ per workspace deployment (item 6).
       `KillSwitchActivated`, a `MandateVersionApplied` `applied`, or an `ApprovalRevalidated`
       `act`; else `ended` for an `ApprovalRevalidated` `skip`, an `ApprovalTimedOut`, or an
       `ApprovalCanceled`; else `taken` for any step; and `recorded` with none. Only direct
-      causation counts: an order a kill switch canceled names its own cause.
+      causation counts: an order a kill switch canceled names its own cause. The read takes the
+      "View agents, positions, decisions" row, users only until client tokens land (E10-14).
     - The hold and its lift wait for the runtime, as item 10 says.
 
 ---
