@@ -76,7 +76,7 @@ pub(crate) struct Tool {
     pub(crate) member: &'static str,
 }
 
-/// The release build's tools (D-7, DEC-969; rows in `docs/dependencies.md`).
+/// The release build's tools (D-7, DEC-990; rows in `docs/dependencies.md`).
 pub(crate) const TOOLS: [Tool; 2] = [
     Tool {
         name: "cargo-auditable",
