@@ -35,8 +35,8 @@ Decision IDs (`DEC-`), open decisions (`OD-`), ADR numbers, and epic and story I
 silently between sessions: two open PRs have already minted the same DEC numbers.
 
 **Decision IDs (DEC-344).** Each decision is a file, `docs/project/decisions/DEC-<n>.md`, and its
-[README](../../../../docs/project/decisions/README.md) is the procedure: take the range your
-dispatch gives you, or the next integer after the highest on `main`; add the file with the status
+[README](../../../../docs/project/decisions/README.md) is the procedure: take the next integer in
+your category's range of 100 (DEC-2600); add the file with the status
 `Reserved` in your first commit; fill it in when you decide. The decision log takes no new decision
 or `DEC-` reservation rows, and a PR edits only its own decision files. Two PRs that take the same
 number add the same path and cannot both merge, so the second renumbers.
