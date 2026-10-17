@@ -6,7 +6,7 @@ import { ChevronDown } from "pixelarticons/react/ChevronDown.js";
 import { AsOf } from "@/components/domain/as-of";
 import { HeroFigure, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
-import type { Point } from "@/fixtures/market";
+import type { Market, Point } from "@/fixtures/market";
 import type { Agent, Workspace } from "@/fixtures/types";
 import { add, dec, sub, toFixed } from "@/lib/decimal";
 import { type Direction, direction, usd } from "@/lib/format";
@@ -211,8 +211,12 @@ function EquityHero({
  * the agents.
  */
 export function AccountEquityChart() {
-  const { ws } = useRuntime();
   const market = useMarket();
+  return market ? <AccountEquityChartDrawn market={market} /> : null;
+}
+
+function AccountEquityChartDrawn({ market }: { market: Market }) {
+  const { ws } = useRuntime();
   const { stale, asOf, now } = useStale();
   const [range, setRange] = useState<EquityRange>(ACCOUNT_RANGE);
   const unmanaged = unmanagedEquity(ws);
@@ -254,6 +258,10 @@ export function AccountEquityChart() {
 /** One agent's equity with its mandate's levels drawn as labelled dashed lines and listed in words. */
 export function AgentEquityChart({ agent }: { agent: Agent }) {
   const market = useMarket();
+  return market ? <AgentEquityChartDrawn agent={agent} market={market} /> : null;
+}
+
+function AgentEquityChartDrawn({ agent, market }: { agent: Agent; market: Market }) {
   const { stale, asOf, now } = useStale();
   const [range, setRange] = useState<EquityRange>("1D");
   const all = useMemo(() => market.equity[agent.agent_id] ?? [], [market.equity, agent.agent_id]);

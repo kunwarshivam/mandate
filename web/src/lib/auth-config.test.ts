@@ -66,7 +66,7 @@ describe("the Supabase clients", () => {
     for (const path of [
       "src/lib/supabase/server.ts",
       "src/lib/supabase/proxy.ts",
-      "src/proxy.ts",
+      "src/middleware.ts",
       "src/app/(site)/auth/callback/route.ts",
     ]) {
       expect(read(path), path).not.toMatch(/getSession\(/);
