@@ -10,8 +10,8 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::Write;
-use std::net::{Ipv4Addr, ToSocketAddrs};
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, TcpStream, ToSocketAddrs};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -46,6 +46,18 @@ const JOURNAL_VALUES: &str = "deploy/cell/values/k3d-journal-db.yaml";
 pub const PROCESSES: &str = "deploy/cell/charts/workspace/processes.json";
 pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
+/// The workspace API server's image, built beside `mandate` from the same static build.
+const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
+/// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
+/// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
+/// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
+/// to start (`MANDATE_API_JWKS_URL`).
+const HOST_CA_BUNDLES: [&str; 4] = [
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/ssl/cert.pem",
+];
 const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
@@ -385,46 +397,56 @@ fn image_tag() -> Result<String> {
     if let ImageSource::Pull(image) = host_image_source()? {
         return Ok(image);
     }
-    let digest = sha256(&static_binary())?;
+    local_tag("mandate", "mandate")
+}
+
+/// The cell's `api` image, this checkout's build of `mandate-api-server`: none when the cell pulls
+/// its `mandate` image, since no published API image exists yet, so the chart leaves the API out.
+fn api_image_tag() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag("api", "mandate-api-server").map(Some)
+}
+
+/// `mandate.local/<name>:<the first 12 hex digits of the binary's SHA-256>`.
+fn local_tag(name: &str, binary: &str) -> Result<String> {
+    let digest = sha256(&static_binary(binary))?;
     let short = digest
         .get(..12)
         .context("a SHA-256 shorter than 12 digits")?;
-    Ok(format!("mandate.local/mandate:{short}"))
+    Ok(format!("mandate.local/{name}:{short}"))
 }
 
-fn static_binary() -> String {
-    format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate")
+fn static_binary(binary: &str) -> String {
+    format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/{binary}")
 }
 
-fn runtime_binary() -> String {
-    format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate-daemon")
-}
-
-/// The cell's `runtime` image (DEC-1013): this checkout's `mandate-daemon`, tagged by the binary's
-/// own SHA-256. `None` where the `mandate` image is pulled: no signed runtime image is published
-/// yet, so the runtime is left out of that cell rather than built from something else.
+/// The cell's `runtime` image (DEC-1013): this checkout's `mandate-daemon`. `None` where the
+/// `mandate` image is pulled: no signed runtime image is published yet, so the runtime is left out
+/// of that cell rather than built from something else.
 fn runtime_image() -> Result<Option<String>> {
     if let ImageSource::Pull(_) = host_image_source()? {
         return Ok(None);
     }
-    let digest = sha256(&runtime_binary())?;
-    let short = digest
-        .get(..12)
-        .context("a SHA-256 shorter than 12 digits")?;
-    Ok(Some(format!("mandate.local/runtime:{short}")))
+    local_tag("runtime", "mandate-daemon").map(Some)
 }
 
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
-    let mut sets = vec![format!("images.mandate={}", image_tag()?)];
+    let mut sets = vec![
+        format!("images.mandate={}", image_tag()?),
+        format!("images.api={}", api_image_tag()?.unwrap_or_default()),
+    ];
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate` image from this checkout (never with the `live`
-/// feature), bring up the k3d cluster if it is not up, install the CloudNativePG operator, the
+/// `cargo xtask cell up`: build the `mandate`, `api` and `runtime` images from this checkout (never
+/// with the `live` feature), bring up the k3d cluster if it is not up, install the CloudNativePG
+/// operator, the
 /// journal's Postgres and the workspace chart, and wait until every pod is ready and the
 /// migration Job has finished.
 pub fn up() -> Result<()> {
@@ -433,16 +455,20 @@ pub fn up() -> Result<()> {
         build_binary()?;
     }
     let image = image_tag()?;
+    let api = api_image_tag()?;
     let runtime = runtime_image()?;
     if source == ImageSource::Build {
-        build_image(&image, &static_binary(), "mandate", IMAGE_DOCKERFILE)?;
+        build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
     }
     if let Some(runtime) = &runtime {
+        build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
+    }
+    if let Some(api) = &api {
         build_image(
-            runtime,
-            &runtime_binary(),
-            "mandate-daemon",
-            RUNTIME_DOCKERFILE,
+            api,
+            API_DOCKERFILE,
+            "mandate-api-server",
+            &[(&host_ca_bundle()?, "ca-certificates.crt")],
         )?;
     }
     if !cluster_exists()? {
@@ -450,6 +476,9 @@ pub fn up() -> Result<()> {
     }
     if source == ImageSource::Build {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, &image])?;
+    }
+    if let Some(api) = &api {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, api])?;
     }
     if let Some(runtime) = &runtime {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
@@ -519,9 +548,62 @@ pub fn up() -> Result<()> {
         install.extend(["--set", set.as_str()]);
     }
     install.extend(["--wait", "--wait-for-jobs", "--timeout", "5m"]);
-    helm(&install)?;
+    let installed = helm(&install);
+    if installed.is_err() && api.is_some() {
+        api_diagnosis();
+    }
+    installed?;
     eprintln!("    cell: up; `cargo xtask cell drill` runs the drills");
     Ok(())
+}
+
+/// What the API's pod says when the workspace release does not become ready: its pods, its
+/// containers' last logs, current and from the run before a restart, and the namespace's recent
+/// events, so a server that refused to start
+/// names its refusal in the run's own output.
+fn api_diagnosis() {
+    let selector = format!("mandate.dev/workspace={WORKSPACE},mandate.dev/process={API_PROCESS}");
+    let logs = |previous: &'static str| {
+        [
+            "logs",
+            "--namespace",
+            NAMESPACE,
+            "--selector",
+            selector.as_str(),
+            "--all-containers",
+            "--prefix",
+            previous,
+            "--tail",
+            "40",
+        ]
+    };
+    let pods = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "wide",
+    ];
+    let current = logs("--previous=false");
+    let previous = logs("--previous=true");
+    let events = [
+        "get",
+        "events",
+        "--namespace",
+        NAMESPACE,
+        "--sort-by",
+        ".lastTimestamp",
+    ];
+    let shown: [&[&str]; 4] = [&pods, &current, &previous, &events];
+    for args in shown {
+        match kubectl(args) {
+            Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
+            Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
+        }
+    }
 }
 
 /// `cargo xtask cell down`: delete the cluster and everything in it.
@@ -537,8 +619,8 @@ pub fn down() -> Result<()> {
 const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
-/// `mandate-cli` and the runtime's `mandate-daemon` (DEC-1013) linked statically, so the images
-/// need no base (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
+/// `mandate-cli`, `mandate-api-server` and the runtime's `mandate-daemon` (DEC-1013) linked
+/// statically, so their images need no base (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
 /// overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let args = [
@@ -546,6 +628,8 @@ fn build_binary() -> Result<()> {
         "--locked",
         "--package",
         "mandate-cli",
+        "--package",
+        "mandate-api-server",
         "--package",
         "mandate-daemon",
         "--target",
@@ -563,20 +647,58 @@ fn build_binary() -> Result<()> {
         .status()
         .context("starting cargo")?;
     if !status.success() {
-        bail!("the static build of mandate-cli and mandate-daemon failed with {status}");
+        bail!(
+            "the static build of mandate-cli, mandate-api-server and mandate-daemon failed with \
+             {status}"
+        );
     }
     Ok(())
 }
 
-/// Builds `image` from `dockerfile` over a context holding only `binary`, named `name`.
-fn build_image(image: &str, binary: &str, name: &str, dockerfile: &str) -> Result<()> {
-    let context = state()?.join("image").join(name);
+/// The host's CA bundle for the `api` image: `SSL_CERT_FILE` when set, else the first of
+/// [`HOST_CA_BUNDLES`] that is a file.
+fn host_ca_bundle() -> Result<String> {
+    let named = env::var("SSL_CERT_FILE").ok();
+    ca_bundle_from(named.as_deref(), |path| Path::new(path).is_file())
+}
+
+/// The CA bundle `named` (`SSL_CERT_FILE`) when set, else the first of [`HOST_CA_BUNDLES`] for
+/// which `exists` holds; refused, naming `SSL_CERT_FILE`, when none is found.
+pub fn ca_bundle_from(named: Option<&str>, exists: impl Fn(&str) -> bool) -> Result<String> {
+    if let Some(named) = named.map(str::trim).filter(|n| !n.is_empty()) {
+        if exists(named) {
+            return Ok(named.to_string());
+        }
+        bail!("SSL_CERT_FILE={named} is not a file; the api image needs the host's CA bundle");
+    }
+    HOST_CA_BUNDLES
+        .iter()
+        .find(|path| exists(path))
+        .map(|path| (*path).to_string())
+        .with_context(|| {
+            format!(
+                "no CA bundle at {}; set SSL_CERT_FILE to this host's, which the api image needs",
+                HOST_CA_BUNDLES.join(", ")
+            )
+        })
+}
+
+/// The image `image` from `dockerfile`, over a context holding only `binary` and each of `files`,
+/// copied from its host path under its context name.
+fn build_image(image: &str, dockerfile: &str, binary: &str, files: &[(&str, &str)]) -> Result<()> {
+    let context = state()?.join("image");
     if context.exists() {
         fs::remove_dir_all(&context).context("clearing the image context")?;
     }
     fs::create_dir_all(&context)?;
-    fs::copy(binary, context.join(name))
-        .with_context(|| format!("copying {binary} into the image context"))?;
+    let built = static_binary(binary);
+    fs::copy(&built, context.join(binary))
+        .with_context(|| format!("copying {built} into the image context"))?;
+    for (source, name) in files {
+        fs::copy(source, context.join(name)).with_context(|| {
+            format!("copying {source} into the image context; the {image} image needs it")
+        })?;
+    }
     let context = context.display().to_string();
     sh(
         "docker",
@@ -1441,6 +1563,15 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
         "postgres-superuser".into(),
         json!({"file": "./secrets/postgres-superuser"}),
     );
+    if all
+        .iter()
+        .any(|p| p["name"] == API_PROCESS && p["built"] == true)
+    {
+        secrets.insert(
+            API_SESSION_KEY.into(),
+            json!({"file": format!("./secrets/{API_SESSION_KEY}")}),
+        );
+    }
     let mut db_secrets = vec![json!("postgres-superuser")];
     db_secrets.extend(role_secrets.iter().map(|s| json!(s)));
     services.insert(
@@ -1562,6 +1693,9 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
                     test.extend(compose_words(probe, "readyz")?.into_iter().map(Value::from));
                     service["healthcheck"] = json!({"test": test, "interval": "5s", "retries": 6});
                 }
+                if name == API_PROCESS {
+                    compose_api(&mut service)?;
+                }
             }
             other => bail!("{name} has an unknown kind `{other}`"),
         }
@@ -1584,6 +1718,42 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
             "journal-roles": {"file": "../charts/journal-db/files/roles.sql"}
         }
     }))
+}
+
+/// The Compose file's secret holding the API server's session signing key, mounted owner-only as
+/// `session-signing-key` under its `CREDENTIALS_DIRECTORY` (workspace API spec §3.11 item 2).
+const API_SESSION_KEY: &str = "api-session-signing-key";
+
+/// The API server's own settings in the Compose file, as the chart's `api.yaml` gives them: both
+/// listeners on loopback, each setting from the host's environment, the session key a secret file.
+/// No subject links are mounted, so every sign-in is refused until the host adds them (DEC-1023).
+fn compose_api(service: &mut Value) -> Result<()> {
+    service["command"] = json!(["--bind", "127.0.0.1:8080", "--probe-bind", "127.0.0.1:8081"]);
+    let env = service["environment"]
+        .as_object_mut()
+        .context("the API's Compose service has no environment")?;
+    let dsn = env
+        .get("MANDATE_JOURNAL_DSN")
+        .cloned()
+        .context("the API's Compose service has no journal DSN")?;
+    env.insert("MANDATE_API_DATABASE_URL".into(), dsn);
+    for name in [
+        "MANDATE_API_ORG",
+        "MANDATE_API_WORKSPACE",
+        "MANDATE_API_ISSUER",
+        "MANDATE_API_AUDIENCE",
+        "MANDATE_API_JWKS_URL",
+        "MANDATE_API_APP_ORIGIN",
+        "MANDATE_DEPLOYMENT_TIER",
+    ] {
+        env.insert(name.into(), json!(format!("${{{name}:?set {name}}}")));
+    }
+    env.insert("CREDENTIALS_DIRECTORY".into(), json!("/run/secrets"));
+    service["secrets"]
+        .as_array_mut()
+        .context("the API's Compose service has no secrets")?
+        .push(json!({"source": API_SESSION_KEY, "target": "session-signing-key"}));
+    Ok(())
 }
 
 /// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}` and the
@@ -1618,9 +1788,15 @@ fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
 const RUNTIME_NOT_BUILT: &str = "mandate.local/runtime:0000000";
 
 /// The variables the Compose file requires (DEC-1013): the workspace, the `mandate` image, the
-/// runtime's image, and the runtime's deployment, read from the local cell's values so Compose and
-/// the k3d cell run one demo deployment.
-fn compose_env(root: &Path, image: &str, runtime: Option<&str>) -> Result<Vec<(String, String)>> {
+/// API server's settings ([`compose_api_settings`]), the runtime's image, and the runtime's
+/// deployment, read from the local cell's values so Compose and the k3d cell run one demo
+/// deployment.
+fn compose_env(
+    root: &Path,
+    image: &str,
+    api: &str,
+    runtime: Option<&str>,
+) -> Result<Vec<(String, String)>> {
     let mut env = vec![
         ("MANDATE_WORKSPACE".to_string(), WORKSPACE.to_string()),
         ("MANDATE_IMAGE_MANDATE".to_string(), image.to_string()),
@@ -1629,6 +1805,11 @@ fn compose_env(root: &Path, image: &str, runtime: Option<&str>) -> Result<Vec<(S
             runtime.unwrap_or(RUNTIME_NOT_BUILT).to_string(),
         ),
     ];
+    env.extend(
+        compose_api_settings(api)
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value)),
+    );
     for key in ["agent", "connection", "owner"] {
         env.push((
             format!("MANDATE_RUNTIME_{}", key.to_uppercase()),
@@ -1828,7 +2009,9 @@ const COMPOSE_SECRETS: &str = "deploy/cell/compose/secrets";
 
 /// `docker compose` with the Compose file, the drill's workspace label and this change's image.
 fn compose_cmd(args: &[&str]) -> Result<String> {
-    let env = compose_env(Path::new("."), &image_tag()?, runtime_image()?.as_deref())?;
+    let image = image_tag()?;
+    let api = api_image_tag()?.unwrap_or_else(|| image.clone());
+    let env = compose_env(Path::new("."), &image, &api, runtime_image()?.as_deref())?;
     let mut full = vec!["compose", "-f", "compose.json"];
     full.extend_from_slice(args);
     let out = Command::new("docker")
@@ -1846,6 +2029,25 @@ fn compose_cmd(args: &[&str]) -> Result<String> {
         bail!("`docker {}` failed: {text}", full.join(" "));
     }
     Ok(text)
+}
+
+/// The API server's settings the Compose file interpolates, the local cell's own (k3d.yaml's `api`
+/// block). The drill starts only the migration and one-off runs, never the API, so with no API
+/// image of its own (a pulled `mandate`) it names `api_image` only for the file to interpolate.
+fn compose_api_settings(api_image: &str) -> [(&'static str, String); 8] {
+    [
+        ("MANDATE_IMAGE_API", api_image.to_string()),
+        ("MANDATE_API_ORG", DEMO_ORG.to_string()),
+        ("MANDATE_API_WORKSPACE", DEMO_WORKSPACE.to_string()),
+        ("MANDATE_API_ISSUER", LOCAL_ISSUER.to_string()),
+        ("MANDATE_API_AUDIENCE", "authenticated".to_string()),
+        ("MANDATE_API_JWKS_URL", format!("{LOCAL_ISSUER}/jwks")),
+        (
+            "MANDATE_API_APP_ORIGIN",
+            "https://localhost:4317".to_string(),
+        ),
+        ("MANDATE_DEPLOYMENT_TIER", "dev".to_string()),
+    ]
 }
 
 /// Runs `script` as root in the Compose file's Postgres image with `dir` at `/s`: how the drill
@@ -1885,7 +2087,10 @@ fn compose_secrets(all: &[Value]) -> Result<()> {
             secret_name(&role)
         ));
     }
-    script.push_str("chown -R 999:999 /s\nchmod 0600 /s/postgres-superuser /s/*.pgpass\n");
+    script.push_str(&format!("head -c 32 /dev/urandom > {API_SESSION_KEY}\n"));
+    script.push_str(&format!(
+        "chown -R 999:999 /s\nchmod 0600 /s/postgres-superuser /s/*.pgpass /s/{API_SESSION_KEY}\n"
+    ));
     as_root_in(COMPOSE_SECRETS, &script).map(|_| ())
 }
 
@@ -1990,8 +2195,13 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
     }
 }
 
-/// The workspace `cargo xtask cell demo` opens, whose control stream it verifies.
-const DEMO_WORKSPACE: &str = "demo";
+/// The workspace `cargo xtask cell demo` opens, whose control stream it verifies: a ULID, since
+/// the API server hosts it by that id (`api.workspace` in the local cell's values).
+const DEMO_WORKSPACE: &str = "01KDEM0000000000000000000W";
+/// The demo workspace's organization (`api.org` in the local cell's values).
+const DEMO_ORG: &str = "01KDEM0000000000000000000R";
+/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI).
+const LOCAL_ISSUER: &str = "http://127.0.0.1:8090";
 /// Where `web/` serves on the developer's machine (its `npm run dev`).
 const WEB_URL: &str = "http://127.0.0.1:4317";
 /// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
@@ -2031,7 +2241,7 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
             skipped: None,
         },
         DemoPart {
-            name: "the workspace API server, through a port-forward",
+            name: API_PART,
             skipped: lane(
                 built(API_PROCESS),
                 "the API server is not on main yet (lane A1, E21-31)",
@@ -2101,7 +2311,19 @@ pub fn demo(web: bool) -> Result<()> {
             p["built"] = json!(false);
         }
     }
-    let parts = demo_parts(&listed, &help);
+    let mut parts = demo_parts(&listed, &help);
+    if api_image_tag()?.is_none() {
+        for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
+            if part.name.contains("API") {
+                part.skipped = Some(format!(
+                    "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
+                ));
+            }
+        }
+    }
+    let api_ready = parts
+        .iter()
+        .any(|p| p.name == API_PART && p.skipped.is_none());
     eprintln!("==> the local cell (paper and demo data only; local-cell results, never staging's)");
     for part in &parts {
         match &part.skipped {
@@ -2113,6 +2335,9 @@ pub fn demo(web: bool) -> Result<()> {
         "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
          stop: cargo xtask cell down"
     );
+    if api_ready {
+        api_port_forward()?;
+    }
     if !web {
         return Ok(());
     }
@@ -2143,6 +2368,104 @@ pub fn demo(web: bool) -> Result<()> {
     } else {
         bail!("`npm run dev` in web/ failed with {status}")
     }
+}
+
+/// The local port the demo forwards to the API server's listener on its pod's loopback.
+const API_LOCAL_PORT: u16 = 8787;
+
+/// The demo part that is the API server; `api_port_forward` runs only once it is ready.
+const API_PART: &str = "the workspace API server, through a port-forward";
+
+/// Forwards [`API_LOCAL_PORT`] on this machine to the API server's listener, with the host's own
+/// `kubectl` (the cell's nodes publish no port), and checks that `/v1` answers: with no session,
+/// the one 401 (API-1). The forward keeps running after the demo returns, until its pod goes or it
+/// is stopped; a later demo whose port still answers that way reuses it rather than starting one.
+fn api_port_forward() -> Result<()> {
+    let config = kubeconfig()?;
+    let forward = port_forward_args(&config);
+    let shown = forward.join(" ");
+    let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
+    if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
+        eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
+        return Ok(());
+    }
+    if output("kubectl", &["version", "--client"]).is_err() {
+        eprintln!("    api: no kubectl on this machine; forward it with `kubectl {shown}`");
+        return Ok(());
+    }
+    let log_path = state()?.join("api-port-forward.log");
+    let log =
+        fs::File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?;
+    let mut child = Command::new("kubectl")
+        .args(&forward)
+        .stdout(Stdio::null())
+        .stderr(log)
+        .spawn()
+        .context("starting `kubectl port-forward` to the API server")?;
+    let said = || fs::read_to_string(&log_path).unwrap_or_default();
+    for _ in 0..30 {
+        if let Some(status) = child.try_wait()? {
+            bail!("`kubectl {shown}` exited with {status}:\n{}", said());
+        }
+        if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
+            if status == 401 {
+                eprintln!(
+                    "    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (GET {path} is 401 \
+                     with no session, API-1)"
+                );
+                return Ok(());
+            }
+            bail!("the API server answered GET {path} with {status}, not the one 401");
+        }
+        sleep(Duration::from_secs(1));
+    }
+    bail!(
+        "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s through \
+         `kubectl {shown}`, which said:\n{}",
+        said()
+    )
+}
+
+/// `kubectl` arguments forwarding [`API_LOCAL_PORT`] on this machine's loopback to the API
+/// listener's port 8080: the address is its own flag, since a port spec is `LOCAL:REMOTE` only.
+pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
+    [
+        "--kubeconfig",
+        kubeconfig,
+        "--namespace",
+        NAMESPACE,
+        "port-forward",
+        "--address",
+        "127.0.0.1",
+        "deployment/api",
+        &format!("{API_LOCAL_PORT}:8080"),
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// The status code of an HTTP/1.1 `GET path` to 127.0.0.1:`port`.
+fn http_status(port: u16, path: &str) -> Result<u16> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    status_of(&reply).context("the reply is not HTTP/1.1")
+}
+
+/// The status code on an HTTP/1.1 reply's first line.
+pub fn status_of(reply: &str) -> Option<u16> {
+    reply
+        .lines()
+        .next()?
+        .strip_prefix("HTTP/1.1 ")?
+        .get(..3)?
+        .parse()
+        .ok()
 }
 
 /// Opens the demo workspace's control stream once (a second run finds it open and goes on), then
@@ -2251,12 +2574,12 @@ mod tests {
     }
 
     #[test]
-    fn api_is_a_planned_name() -> Result<()> {
+    fn api_is_a_built_service() -> Result<()> {
         let all = processes_in(&crate::repo_root()?)?;
         let listed = all.iter().find(|p| p["name"] == API_PROCESS);
         assert!(
-            listed.is_none_or(|p| p["kind"] == "service"),
-            "the API server, once listed, is a service named `{API_PROCESS}`"
+            listed.is_some_and(|p| p["kind"] == "service" && p["built"] == true),
+            "the API server is a built service named `{API_PROCESS}`"
         );
         let help = "Commands:\n  workspace  Open\n      membership is named in a wrapped line\n";
         let membership = demo_parts(&[], help)
@@ -2358,7 +2681,12 @@ mod tests {
             .collect();
         assert!(required.contains("MANDATE_RUNTIME_AGENT"), "{required:?}");
         for runtime in [Some("mandate.local/runtime:0123456789ab"), None] {
-            let env = compose_env(&root, "mandate.local/mandate:0123456789ab", runtime)?;
+            let env = compose_env(
+                &root,
+                "mandate.local/mandate:0123456789ab",
+                "mandate.local/api:0123456789ab",
+                runtime,
+            )?;
             let set: std::collections::BTreeSet<&str> = env
                 .iter()
                 .filter(|(_, v)| !v.is_empty())
@@ -2367,7 +2695,7 @@ mod tests {
             let missing: Vec<&&str> = required.iter().filter(|r| !set.contains(**r)).collect();
             assert!(missing.is_empty(), "the drill leaves {missing:?} unset");
         }
-        let agent = compose_env(&root, "i", None)?
+        let agent = compose_env(&root, "i", "a", None)?
             .into_iter()
             .find(|(k, _)| k == "MANDATE_RUNTIME_AGENT")
             .map(|(_, v)| v);
@@ -2421,6 +2749,142 @@ mod tests {
         assert_eq!(compose_memory("256Mi")?, "256M");
         assert!(compose_cpus("1").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn the_demo_is_the_workspace_the_local_api_hosts() -> Result<()> {
+        let values = fs::read_to_string(crate::repo_root()?.join(WORKSPACE_VALUES))?;
+        let api: Vec<&str> = values
+            .lines()
+            .skip_while(|l| *l != "api:")
+            .skip(1)
+            .take_while(|l| l.starts_with("  "))
+            .map(str::trim)
+            .collect();
+        for wanted in [
+            format!("org: {DEMO_ORG}"),
+            format!("workspace: {DEMO_WORKSPACE}"),
+            format!("issuer: {LOCAL_ISSUER}"),
+            format!("jwksUrl: {LOCAL_ISSUER}/jwks"),
+            "tier: dev".to_string(),
+        ] {
+            assert!(
+                api.contains(&wanted.as_str()),
+                "k3d.yaml's api block lacks `{wanted}`"
+            );
+        }
+        for ulid in [DEMO_ORG, DEMO_WORKSPACE] {
+            assert!(
+                ulid.len() == 26
+                    && ulid.starts_with(|c: char| ('0'..='7').contains(&c))
+                    && ulid
+                        .bytes()
+                        .all(|b| b.is_ascii_digit()
+                            || (b.is_ascii_uppercase() && !b"ILOU".contains(&b))),
+                "{ulid} is not a ULID, which the API server requires"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn every_compose_placeholder_is_one_the_drill_sets() -> Result<()> {
+        let root = crate::repo_root()?;
+        let text = serde_json::to_string(&compose_document(&root, &processes_in(&root)?)?)?;
+        let env = compose_env(&root, "x", "x", None)?;
+        let set: Vec<&str> = env.iter().map(|(name, _)| name.as_str()).collect();
+        let named: Vec<&str> = text
+            .split("${")
+            .skip(1)
+            .filter_map(|rest| rest.split(":?").next())
+            .collect();
+        assert!(!named.is_empty());
+        for name in &named {
+            assert!(
+                set.contains(name),
+                "the Compose file needs {name}, which no drill sets"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_composed_api_listens_on_loopback_with_its_key_as_a_file() -> Result<()> {
+        let root = crate::repo_root()?;
+        let doc = compose_document(&root, &processes_in(&root)?)?;
+        let api = &doc["services"][API_PROCESS];
+        assert_eq!(
+            api["command"],
+            json!(["--bind", "127.0.0.1:8080", "--probe-bind", "127.0.0.1:8081"])
+        );
+        assert_eq!(api["environment"]["CREDENTIALS_DIRECTORY"], "/run/secrets");
+        assert_eq!(
+            api["environment"]["MANDATE_API_DATABASE_URL"],
+            api["environment"]["MANDATE_JOURNAL_DSN"]
+        );
+        assert!(
+            api["secrets"].as_array().is_some_and(|s| s
+                .contains(&json!({"source": API_SESSION_KEY, "target": "session-signing-key"}))),
+            "the session key is the file the server reads"
+        );
+        assert!(doc["secrets"][API_SESSION_KEY]["file"].is_string());
+        Ok(())
+    }
+
+    #[test]
+    fn the_api_image_takes_the_named_bundle_else_the_first_on_the_host() -> Result<()> {
+        let fedora = |path: &str| path == "/etc/pki/tls/certs/ca-bundle.crt";
+        assert_eq!(
+            ca_bundle_from(None, fedora)?,
+            "/etc/pki/tls/certs/ca-bundle.crt"
+        );
+        let both = |path: &str| path.starts_with("/etc/");
+        assert_eq!(ca_bundle_from(None, both)?, HOST_CA_BUNDLES[0]);
+        assert_eq!(
+            ca_bundle_from(Some("/opt/ca.pem"), |_| true)?,
+            "/opt/ca.pem"
+        );
+        assert_eq!(
+            ca_bundle_from(Some("  "), fedora)?,
+            "/etc/pki/tls/certs/ca-bundle.crt"
+        );
+        let missing = ca_bundle_from(Some("/opt/ca.pem"), both).map_err(|e| e.to_string());
+        assert!(missing.is_err_and(|e| e.contains("SSL_CERT_FILE=/opt/ca.pem")));
+        let none = ca_bundle_from(None, |_| false).map_err(|e| e.to_string());
+        assert!(none.is_err_and(|e| e.contains("set SSL_CERT_FILE")));
+        Ok(())
+    }
+
+    #[test]
+    fn the_api_forward_binds_loopback_and_names_local_then_remote_port() {
+        let args = port_forward_args("k");
+        let at = |flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        };
+        assert_eq!(at("--address").as_deref(), Some("127.0.0.1"));
+        let spec = args.last().cloned().unwrap_or_default();
+        let ports: Vec<&str> = spec.split(':').collect();
+        assert_eq!(
+            ports,
+            [API_LOCAL_PORT.to_string().as_str(), "8080"],
+            "{spec}"
+        );
+        assert!(ports.iter().all(|p| p.parse::<u16>().is_ok()));
+    }
+
+    #[test]
+    fn a_reply_status_is_read_from_its_first_line() {
+        assert_eq!(status_of("HTTP/1.1 401 Unauthorized\r\n\r\n"), Some(401));
+        assert_eq!(
+            status_of("HTTP/1.1 200 OK\r\nx: HTTP/1.1 401\r\n"),
+            Some(200)
+        );
+        assert_eq!(status_of("HTTP/1.0 401 Unauthorized\r\n"), None);
+        assert_eq!(status_of(""), None);
+        assert_eq!(status_of("HTTP/1.1 4x1 Odd\r\n"), None);
     }
 
     #[test]

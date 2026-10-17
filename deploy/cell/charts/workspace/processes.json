@@ -47,6 +47,21 @@
       }
     },
     {
+      "name": "api",
+      "row": "Workspace API server (workspace API spec §3.11, DEC-978): Postgres and the identity provider's key set; it listens on its pod's loopback only, so nothing in the cluster reaches it until the tunnel's route lands",
+      "kind": "service",
+      "image": "api",
+      "built": true,
+      "db_role": "mandate_api",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres", "identity-provider"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "250m", "memory": "128Mi"}
+      }
+    },
+    {
       "name": "runtime",
       "row": "Agent runtime, one per agent deployment: no broker credential and no route to a broker (rule 12); on the deny-all wiring until the post-R0 hook (DEC-1013)",
       "kind": "service",

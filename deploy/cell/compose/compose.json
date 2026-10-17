@@ -15,6 +15,12 @@
     }
   },
   "secrets": {
+    "api-session-signing-key": {
+      "file": "./secrets/api-session-signing-key"
+    },
+    "journal-role-mandate-api": {
+      "file": "./secrets/journal-role-mandate-api.pgpass"
+    },
     "journal-role-mandate-control": {
       "file": "./secrets/journal-role-mandate-control.pgpass"
     },
@@ -44,6 +50,74 @@
     }
   },
   "services": {
+    "api": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "command": [
+        "--bind",
+        "127.0.0.1:8080",
+        "--probe-bind",
+        "127.0.0.1:8081"
+      ],
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "cpus": "0.25",
+            "memory": "128M"
+          },
+          "reservations": {
+            "cpus": "0.1",
+            "memory": "64M"
+          }
+        }
+      },
+      "environment": {
+        "CREDENTIALS_DIRECTORY": "/run/secrets",
+        "HOME": "/tmp",
+        "MANDATE_API_APP_ORIGIN": "${MANDATE_API_APP_ORIGIN:?set MANDATE_API_APP_ORIGIN}",
+        "MANDATE_API_AUDIENCE": "${MANDATE_API_AUDIENCE:?set MANDATE_API_AUDIENCE}",
+        "MANDATE_API_DATABASE_URL": "postgres://mandate_api@postgres:5432/mandate?sslmode=disable",
+        "MANDATE_API_ISSUER": "${MANDATE_API_ISSUER:?set MANDATE_API_ISSUER}",
+        "MANDATE_API_JWKS_URL": "${MANDATE_API_JWKS_URL:?set MANDATE_API_JWKS_URL}",
+        "MANDATE_API_ORG": "${MANDATE_API_ORG:?set MANDATE_API_ORG}",
+        "MANDATE_API_WORKSPACE": "${MANDATE_API_WORKSPACE:?set MANDATE_API_WORKSPACE}",
+        "MANDATE_DEPLOYMENT_TIER": "${MANDATE_DEPLOYMENT_TIER:?set MANDATE_DEPLOYMENT_TIER}",
+        "MANDATE_JOURNAL_DSN": "postgres://mandate_api@postgres:5432/mandate?sslmode=disable",
+        "PGPASSFILE": "/run/secrets/journal-role-mandate-api"
+      },
+      "image": "${MANDATE_IMAGE_API:?set the api image, pinned by digest}",
+      "labels": {
+        "mandate.dev/process": "api",
+        "mandate.dev/workspace": "${MANDATE_WORKSPACE:?set the workspace}"
+      },
+      "networks": [
+        "journal",
+        "egress"
+      ],
+      "read_only": true,
+      "restart": "unless-stopped",
+      "secrets": [
+        "journal-role-mandate-api",
+        {
+          "source": "api-session-signing-key",
+          "target": "session-signing-key"
+        }
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "tmpfs": [
+        "/tmp",
+        "/work"
+      ],
+      "user": "999:999"
+    },
     "control": {
       "cap_drop": [
         "ALL"
@@ -249,6 +323,7 @@
         "journal-role-mandate-migrator",
         "journal-role-mandate-control",
         "journal-role-mandate-verify",
+        "journal-role-mandate-api",
         "journal-role-mandate-runtime",
         "journal-role-mandate-executor",
         "journal-role-mandate-scheduler",

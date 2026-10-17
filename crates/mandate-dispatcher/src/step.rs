@@ -343,15 +343,11 @@ fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Result<Vec<Cause>, Di
     Ok(alerts)
 }
 
-/// One read of `stream`'s committed rows; a read that fails ends the step (DEC-2500 item 3).
-///
-/// The tests PR's stub (DEC-77, E8-10 slice D10a): a failed read already ends the step, so nothing
-/// more is issued, sent, or appended, but it answers [`DispatchError::Unimplemented`] where the
-/// pending tests expect the closed [`DispatchError::JournalUnavailable`].
+/// One read of `stream`'s committed rows; a read that fails ends the step with the store's closed
+/// [`DispatchError::JournalUnavailable`], so nothing more is issued, sent, or appended, and the
+/// failure is never read as an empty stream (DEC-2500 item 3).
 fn read(journal: &dyn Journal, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
-    journal
-        .committed(stream)
-        .map_err(|_| DispatchError::Unimplemented { story: "E8-10" })
+    journal.committed(stream)
 }
 
 /// One cause per notice key that has no `NoticeIssued` yet, in first-read order: the key's
