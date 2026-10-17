@@ -4,8 +4,10 @@
 //! `JournalUnavailable`. The suite's PG class: each test skips unless `MANDATE_PG_URL` is set, and
 //! fails without it where `MANDATE_PG_REQUIRED` is (DEC-109, DEC-519). Each first checks, with no
 //! database, that a DSN that does not parse is refused closed, so the adapter is reached on every
-//! run. The journal is a local test schema and nothing here carries a credential (`AGENTS.md`
-//! rules 7 and 8).
+//! run. Each then runs its database part on its own thread under [`DEADLINE`], so an adapter whose
+//! runtime stops driving between calls fails fast as a deadlock instead of hanging the suite past
+//! its ten-minute budget (DEC-464). The journal is a local test schema and nothing here carries a
+//! credential (`AGENTS.md` rules 7 and 8).
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
 #[allow(
@@ -25,7 +27,11 @@ mod support;
 
 use std::cell::RefCell;
 use std::error::Error;
+use std::panic;
 use std::rc::Rc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
 
 use mandate_dispatcher::{Config, DispatchError, Journal, NoticeWriter, PgNotices, step};
 use mandate_journal::{AppendOutcome, Environment, MemoryJournal, StoredEvent, StreamId};
@@ -50,6 +56,35 @@ const AUDIENCE: [(&str, PushChannel); 2] = [
 const KINDS: [&str; 3] = ["risk_limit", "agent_held", "kill_switch"];
 const MARK: &str = r#"{"instrument_id":"inst","price":"1","source":"quote","feed":"iex",
     "risk_clock":"2026-10-17T14:00:00.000000000Z"}"#;
+
+/// How long one test's database part may take: far beyond what a correct adapter needs, so only a
+/// deadlock reaches it.
+const DEADLINE: Duration = Duration::from_secs(60);
+
+/// Runs `body` on its own thread and waits at most [`DEADLINE`] for it: a panic in `body` is
+/// re-raised here with its own message, and a body still running at the deadline fails as a
+/// deadlock. A transaction the adapter drops (an append that is `Fenced`) is rolled back by sqlx on
+/// a spawned task, so an adapter whose runtime idles between calls keeps the stream's row locked
+/// and the next writer waits forever.
+fn within_deadline(body: fn() -> Checked) -> Checked {
+    let (done, finished) = mpsc::channel();
+    let running = thread::spawn(move || {
+        let outcome = body().map_err(|e| e.to_string());
+        let _ = done.send(outcome);
+    });
+    match finished.recv_timeout(DEADLINE) {
+        Ok(outcome) => Ok(outcome?),
+        Err(RecvTimeoutError::Timeout) => Err(format!(
+            "deadlocked: the adapter's runtime must keep driving after an append (see pg.rs); \
+             no answer within {DEADLINE:?}"
+        )
+        .into()),
+        Err(RecvTimeoutError::Disconnected) => match running.join() {
+            Err(panicked) => panic::resume_unwind(panicked),
+            Ok(()) => Err("the test's thread ended without an outcome".into()),
+        },
+    }
+}
 
 /// Before any database: a DSN that does not parse is refused as the closed `JournalUnavailable`,
 /// which carries no part of the DSN (`AGENTS.md` rule 7).
@@ -250,8 +285,12 @@ fn differential(db: &support::TestDb, batches: &[Vec<usize>]) -> Checked {
 
 #[test]
 #[ignore = "pending E8-10"]
-fn the_same_causes_give_the_same_notice_stream_on_postgres_as_in_memory() {
+fn the_same_causes_give_the_same_notice_stream_on_postgres_as_in_memory() -> Checked {
     a_dsn_that_does_not_parse_is_refused_closed();
+    within_deadline(the_same_notice_stream)
+}
+
+fn the_same_notice_stream() -> Checked {
     let batches = prop::collection::vec(prop::collection::vec(0..KINDS.len(), 0..3), 1..4);
     let mut runner = TestRunner::new(Cases {
         cases: 8,
@@ -264,12 +303,17 @@ fn the_same_causes_give_the_same_notice_stream_on_postgres_as_in_memory() {
         differential(&db, &batches).map_err(|e| TestCaseError::fail(e.to_string()))
     });
     assert_eq!(checked, Ok(()));
+    Ok(())
 }
 
 #[test]
 #[ignore = "pending E8-10"]
 fn a_second_dispatcher_on_postgres_fences_the_first_before_its_send() -> Checked {
     a_dsn_that_does_not_parse_is_refused_closed();
+    within_deadline(the_second_dispatcher_fences_the_first)
+}
+
+fn the_second_dispatcher_fences_the_first() -> Checked {
     let Some(db) = support::TestDb::new() else {
         return Ok(());
     };
@@ -311,6 +355,10 @@ fn a_second_dispatcher_on_postgres_fences_the_first_before_its_send() -> Checked
 #[ignore = "pending E8-10"]
 fn a_read_that_fails_on_postgres_is_journal_unavailable_and_sends_nothing() -> Checked {
     a_dsn_that_does_not_parse_is_refused_closed();
+    within_deadline(a_failed_read_sends_nothing)
+}
+
+fn a_failed_read_sends_nothing() -> Checked {
     let Some(db) = support::TestDb::new() else {
         return Ok(());
     };
