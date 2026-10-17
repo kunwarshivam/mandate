@@ -65,6 +65,9 @@
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
+#   8  mandate-telemetry, metrics through the OpenTelemetry API and a Prometheus pull exporter
+#      (E21-3, DEC-980): no workspace dependency, and its allowed_dependents list names only process
+#      binaries, so no core crate can record a metric or read one (OPS-11)
 #   9  mandate-agentd, the long-running agent process (E21-2, DEC-968), beside mandate-paper and
 #      kept from reaching it; mandate-paper, the paper adapter (E7-19 slice 5, DEC-503 item 2): the only crate that sees
 #      both the host and the shell, and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
@@ -80,7 +83,7 @@
 #      which its tests drive
 #   tool  mandate-refcases, xtask
 
-impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
+impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom", "opentelemetry", "opentelemetry_sdk", "opentelemetry-prometheus", "prometheus"]
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
@@ -403,6 +406,16 @@ allowed_external = ["thiserror"]
 # the journal's fencing lease, beside the paper adapter and above the shell whose stages it hosts.
 # It may never reach the paper adapter, the one crate that may declare `live`, so no live build of
 # it exists, nor the founder's CLI.
+# Metrics through the OpenTelemetry API with a Prometheus pull exporter (E21-3, infrastructure
+# design §8.1, DEC-980). Telemetry is never an input to a decision (OPS-11): only the process
+# binaries that host a cycle may depend on it, each recording after a call returns. The OpenTelemetry
+# and Prometheus crates are impure, so no pure crate can take them directly either.
+[crates.mandate-telemetry]
+layer = 8
+safety_critical = false
+pure = false
+allowed_dependents = ["mandate-agentd"]
+
 [crates.mandate-agentd]
 layer = 9
 safety_critical = true

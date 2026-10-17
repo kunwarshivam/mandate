@@ -412,6 +412,7 @@ fn run_context(
             gate: Some(advisory_gate_context(template)),
         }),
         governance: None,
+        live_cli_confirm: None,
     })
 }
 
