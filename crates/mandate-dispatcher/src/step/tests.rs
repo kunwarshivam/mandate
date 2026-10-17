@@ -16,6 +16,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::rc::Rc;
 
+mod approval;
 mod crash;
 mod retry;
 mod unread;
