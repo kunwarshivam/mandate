@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.47 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md)); v0.48 adds the owner's explainer's records, `ModelInvocationRecorded` version 2 on the control stream, and `MeterReserved` version 2, [DEC-2240](../project/decisions/DEC-2240.md); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.47 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md)); v0.48 adds the desk's `OwnerQuestionSubmitted`, [DEC-2240](../project/decisions/DEC-2240.md); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, and `model_gateway` section of §9.19; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -13,13 +13,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 ## Change history
 
 - **v0.48 ([DEC-2240](../project/decisions/DEC-2240.md); E12-5, E19-14):** §9.22 closes the
-  owner's explainer's control-stream records at schema version 1 before anything writes them:
-  `ExplanationRequested` and `ExplanationRecorded`, with `ModelInvocationRecorded` version 2 on the
-  control stream (purposes `compiler` and `explain`, §9.19's nullable `prompt_ref`, the turn's tool
-  requests) and `MeterReserved` version 2 (purpose `explain`, no agent), rules 180 to 189. Version 1
-  of both stays registered and unchanged. Agent-accepted under DEC-176: the records are new, none is
-  a risk input, and every reading is the one that adds no risk (a refused question is never stored;
-  one draft per approval; an owner's questions never spend the agent's research cap).
+  desk's `OwnerQuestionSubmitted` on the control stream at schema version 1 before anything writes
+  it, with rules 180 and 181. The run that answers is E19-13's, on its own records. Agent-accepted
+  under DEC-176: the record is new, is not a risk input, and a refused question is never stored.
 - **v0.47 ([DEC-1010](../project/decisions/DEC-1010.md); E21-29):** §9.20 closes the scheduler
   stream's five records at schema version 1 before the scheduler process writes them: its
   `StreamOpened`, `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`, and
@@ -821,7 +817,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 |---|---|---|---|
 | Account | `acct:{workspace_id}:{account_ref}` | The account's executor (trading spec §7.1); the risk gate is a pure library it calls | Intents received, gate decisions, orders, fills, fees, cash, settlement, corporate actions, reconciliation, account state, restrictions, protection changes, copies of gating facts from other streams |
 | Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, signal-model outputs, decisions, intents proposed, approvals, agent mode changes |
-| Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export, the control-plane link's records (§9.17), and the owner's explainer's records (§9.22) |
+| Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export, the control-plane link's records (§9.17), and the desk's owner questions (§9.22) |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
 | Meter | `meter:{workspace_id}` | The workspace's model-gateway meter writer, one replica at a time, fenced by epoch ([inference spec §3.6](inference.md#36-journaling)) | Model-call cost reservations and settlements (§9.19). Never a risk input; spend for caps folds from it |
 | Notice | `ntf:{workspace_id}` | The workspace's notification dispatcher ([notifications spec §5.1](notifications.md#51-the-dispatcher)) | Notices issued and every delivery attempt. Never a risk input; no other stream's owner copies from it |
@@ -1187,8 +1183,8 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | Event type | Required refs | Key payload fields |
 |---|---|---|
 | `MandateDraftSaved` | — | One explicit save of a mandate draft: draft, the draft stored (artifact), origin, the save it replaces, the version it started from; closed in §9.9 |
-| `ModelInvocationRecorded` | mod | The compiler's model call, for a draft ([inference spec §3.6](inference.md#36-journaling)); closed in §9.9; version 2, for the compiler and for each turn of the owner's explainer, with the turn's tool requests, closed in §9.22 |
-| `ExplanationRequested`, `ExplanationRecorded` | mod; — | The owner's explainer ([agent harness spec §15](agent-harness.md#15-the-owners-explainer)): an explanation's agent, kind (`question`, `approval_ask`), question (artifact, never stored when the guard refused it), approval, and registry entry; then its outcome, turns, tool calls and their results (artifacts), the answer (artifact), its citations, and the disclaimer key; closed in §9.22. Never a risk input |
+| `ModelInvocationRecorded` | mod | The compiler's model call, for a draft ([inference spec §3.6](inference.md#36-journaling)); closed in §9.9 |
+| `OwnerQuestionSubmitted` | — | A member's question to their agent at the desk ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)): agent, the question (artifact, never stored when the guard refused it, with the guard's rule); closed in §9.22. The runtime copies it and starts an `owner` run. Never a risk input |
 | `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque); `MandateConfirmed` version 2 also names the agent and the version it replaces (§9.9) |
 | `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
@@ -1239,7 +1235,7 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
 | `StreamOpened` | — | stream type, workspace; closed in §9.19 |
-| `MeterReserved` | — | A call's reservation of its maximum cost before its first attempt: call, agent, purpose, model, endpoint, key owner, price table, maximum cost, risk day; closed in §9.19; version 2 adds the purpose `explain`, closed in §9.22 |
+| `MeterReserved` | — | A call's reservation of its maximum cost before its first attempt: call, agent, purpose, model, endpoint, key owner, price table, maximum cost, risk day; closed in §9.19 |
 | `MeterSettled` | — | The call's settlement: call, reservation, outcome, attempts, tokens, cost; closed in §9.19 |
 
 **Notice stream** (owner: the workspace's notification dispatcher; [notifications spec §5.5](notifications.md#55-records))
@@ -4164,122 +4160,35 @@ the test vectors stay version 3: `mandate-journal`'s tests hold an invalid draft
 type and rule above and valid drafts for the cases a rule might be misread to refuse, and the
 scheduler's own tests hold the writer's rules for `clock`, `date`, and the tolerance batch.
 
-### 9.22 Explainer records ([DEC-2240](../project/decisions/DEC-2240.md))
+### 9.22 Desk question records ([DEC-2240](../project/decisions/DEC-2240.md))
 
-The owner's explainer ([agent harness spec §15](agent-harness.md#15-the-owners-explainer)) runs in
-the workspace services and writes the workspace's control stream only: one `ExplanationRequested`
-per explanation, one `ModelInvocationRecorded` version 2 per turn, and one `ExplanationRecorded` at
-the end. It writes no agent, account, meter, or notice stream; the gateway's meter writer records
-its spend on the meter stream as `MeterReserved` version 2. §9.2's conventions apply: every member
-is present, `null` only where the type is nullable, any other member is refused, and opaque text is
-non-empty. The rules number from 180. None of these records is a risk input or maps to a
-`JournaledFact`, and nothing on the trading path reads them (agent harness spec EX-9).
+The desk ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)) is where a
+member asks their agent about its own records. The run that answers is an `owner` run of E19-13's
+loop, recorded on the agent stream by E19-13's run records. The question itself is owner input, so
+it is journaled on the control stream first and copied by the runtime (§2), as `OwnerRequestSubmitted`
+is. §9.2's conventions apply: every member is present, `null` only where the type is nullable, any
+other member is refused, and opaque text is non-empty. The rules number from 180. The record is not
+a risk input and maps to no `JournaledFact`.
 
-**`ExplanationRequested`**: an explanation's start (agent harness spec §15.5 step 1). Its
-`event_id` is the explanation's id. `config_refs.model_version` names the explainer's registry
-entry (§9's `mod`).
+**`OwnerQuestionSubmitted`**: a member's desk message (workspace API §4.6.1). Its `event_id` is the
+idempotency key of the runtime's copy.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `agent_id` | `id` | The agent the explanation is about: the scope of every tool (agent harness spec §15.3) |
-| `kind` | `question` \| `approval_ask` | A member's typed question, or the platform's draft for an approval ask: rules 180 and 181 |
-| `question_ref` | `ref?` | The question, stored; `null` for an `approval_ask`, whose question is the platform's, and for a question the guard refused, which is never stored: rule 181 |
+| `agent_id` | `id` | The agent asked |
+| `question_ref` | `ref?` | The question as the member typed it, stored; `null` when the gateway's guard refused it, which is then never stored: rule 181 |
 | `guard_rule` | as §9.19's | The guard rule a refused question broke; the content is never recorded: rule 181 |
-| `approval` | `ulid?` | The `event_id` of the agent stream's `ApprovalRequested` the draft explains: rules 181 and 182. The link crosses streams, so `append` does not resolve it |
-| `model` | `{model_id: text, model_version: text, content_hash: ref}` | The explainer's registry entry: rule 183 |
-
-**`ModelInvocationRecorded`** version 2 on the control stream: one record per gateway call the
-workspace services made, for the compiler or for one turn of an explanation. Its members are
-§9.19's agent-stream members without `observations` and `verdicts`, then the subject and the turn's
-tool requests. Version 1 stays registered and unchanged (§8); the services write version 2 for
-both purposes, which also gives the compiler's record the nullable `prompt_ref` that DEC-998 item 2
-waits for (§9.9).
-
-| Member | Type | Meaning |
-|---|---|---|
-| `call_id` … `reservation` | as §9.19's | §9.19's members from `call_id` to `reservation`, in its order and with its types, except `purpose`, typed in the next row |
-| `purpose` | `compiler` \| `explain` | Inference §3.1: rule 184 |
-| `draft_id` | `id?` | The draft compiled, for `compiler`: rule 184 |
-| `draft` | `ref?` | The saved draft the compiler read, for `compiler`: rule 184 |
-| `explanation` | `ulid?` | The `ExplanationRequested` this turn belongs to, for `explain`; also the record's `correlation_id`: rule 184 |
-| `tool_requests` | `[{name: text, args_ref: ref}]` | The tools the turn's response asked for, in response order, each with its validated arguments stored: rule 185. Empty for an answer and for every outcome but `ok` |
-
-**`ExplanationRecorded`**: an explanation's end (agent harness spec §15.5 step 5), committed before
-any answer is returned (EX-8). Its `causation_id` is the `ExplanationRequested`.
-
-| Member | Type | Meaning |
-|---|---|---|
-| `explanation` | `ulid` | The `ExplanationRequested`: rule 188 |
-| `agent_id` | `id` | As the request's: rule 188 |
-| `outcome` | `answered` \| `input_rejected` \| `uncited_segment` \| `unknown_citation` \| `advice_language` \| `too_long` \| `turn_limit` \| `tool_limit` \| `timed_out` \| `budget_exhausted` \| `model_error` | Agent harness spec §15.5 and §15.7. `budget_exhausted` is a turn the gateway refused for a cap; `model_error` is any other turn that did not end `ok` |
-| `turns` | `[ulid]` | The `event_id`s of the explanation's `ModelInvocationRecorded` records, in turn order: rule 187 |
-| `tool_calls` | `[{turn: integer, name: text, args_ref: ref, result: ok \| not_found \| invalid_arguments \| cap_reached, result_ref: ref?, refs: integer}]` | Every tool call run, in order: the 0-based index into `turns` of the turn that asked for it, the tool, its arguments, its result, the result stored (`null` unless `ok`), and how many citable refs it returned: rule 187 |
-| `answer_ref` | `ref?` | The checked answer, stored; non-null exactly for `answered`: rule 186 |
-| `cited` | `[text]` | The refs the answer cites (`ev:<event_id>`, `art:<sha256>`), strictly ascending by bytes; empty unless `answered`: rule 186 |
-| `disclaimer` | `text` | The disclaimer key the answer was shown with, `NOTE-EXPLAINER-NOT-ADVICE` at this version ([DEC-2241](../project/decisions/DEC-2241.md)) |
-
-**`MeterReserved`** version 2 on the meter stream: version 1's members with `purpose` widened to
-`research` \| `llm_signal` \| `fast_signal` \| `compiler` \| `explain`. Version 1 stays registered;
-the meter writer writes version 2 for every purpose. Rules 155, 156's `max_cost_usd` half, and 158
-apply to it as to version 1; rule 189 replaces 156's `agent_id` half. `MeterSettled` is unchanged:
-it names the reservation, whatever its version. Spend folds over both versions alike.
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
-180. `ExplanationRequested`: the actor is a `user` when `kind` is `question` and a `system` when it
-     is `approval_ask` (`actor.kind`). A question is always a person's; a draft is the platform's.
-181. `ExplanationRequested`, the first that fails in this order: `approval` is non-null exactly when
-     `kind` is `approval_ask` (`payload.approval`); for an `approval_ask`, `question_ref` and
-     `guard_rule` are `null` (`payload.question_ref`, then `payload.guard_rule`); for a `question`,
-     `question_ref` is `null` exactly when `guard_rule` is not (`payload.question_ref`), so a
-     refused question is never stored and an accepted one always is.
-182. Control stream, one draft per approval: an `ExplanationRequested` of kind `approval_ask` names
-     an `approval` that no earlier `ExplanationRequested` of the stream names (`payload.approval`).
-     It is a stream rule: `append` reads the stream's earlier records, and a range judges it from
-     the stream's start.
-183. `ExplanationRequested`: `model.content_hash` equals `config_refs.model_version`
-     (`payload.model.content_hash`), as rule 71 does. A missing ref is already
-     `missing_config_ref`.
-184. `ModelInvocationRecorded` version 2 on the control stream, the first that fails in this order:
-     for `compiler`, `draft_id` and `draft` are non-null (each at itself, in that order) and
-     `explanation` is `null` (`payload.explanation`); for `explain`, `draft_id` and `draft` are
-     `null` (each at itself) and `explanation` is non-null (`payload.explanation`) and equals
-     `correlation_id` (`correlation_id`). Rules 71 to 76 apply to version 2 as to version 1, and
-     rules 148, 149, and 152 as on the agent stream, each at the same paths.
-185. `ModelInvocationRecorded` version 2 on the control stream: `tool_requests` is empty unless
-     `purpose` is `explain` and `outcome` is `ok` (`payload.tool_requests`). A tool request comes
-     only from a response that passed the gateway's schema check, and the compiler has no tools.
-186. `ExplanationRecorded`, the first that fails in this order: `answer_ref` is non-null exactly
-     when `outcome` is `answered` (`payload.answer_ref`); `cited` is non-empty exactly when
-     `outcome` is `answered` (`payload.cited`); `cited` is strictly ascending by bytes
-     (`payload.cited`, reason `non_canonical`).
-187. `ExplanationRecorded`, the first that fails in this order: `turns` is empty when `outcome`
-     is `input_rejected`, since a refused question makes no call, and non-empty for every outcome
-     but `input_rejected` and `timed_out` (`payload.turns`); a `timed_out` the services close after
-     a restart may have made no call (agent harness spec §15.5). Then, for
-     each item *i* of `tool_calls` in order, its `turn` is less than the length of `turns`
-     (`payload.tool_calls[i].turn`), no item's `turn` is less than the item before it
-     (`payload.tool_calls[i].turn`), `result_ref` is non-null exactly when `result` is `ok`
-     (`payload.tool_calls[i].result_ref`), and `refs` is 0 unless `result` is `ok`
-     (`payload.tool_calls[i].refs`).
-188. Control stream, one end per explanation: an `ExplanationRecorded` names as `explanation` the
-     `event_id` of an earlier `ExplanationRequested` of the stream that no earlier
-     `ExplanationRecorded` names (`payload.explanation`), its `causation_id` is that event id
-     (`causation_id`), and its `agent_id` equals the request's (`payload.agent_id`); the first that
-     fails. Its actor is a `system` (`actor.kind`). It is a stream rule, judged as rule 182 is.
-189. `MeterReserved` version 2: `agent_id` is `null` exactly when `purpose` is `compiler` or
-     `explain` (`payload.agent_id`). An owner's questions are the workspace's spend, never the
-     agent's, so they never spend an agent's research cap (agent harness spec §15.7).
+180. `OwnerQuestionSubmitted`: the actor is a `user` (`actor.kind`). A client has no desk
+     (workspace API §3.7), and a question is always a person's.
+181. `OwnerQuestionSubmitted`: `question_ref` is `null` exactly when `guard_rule` is not
+     (`payload.question_ref`), so a refused question is never stored and an accepted one always is.
 
-**Checked by no rule at append**, so the verifier owns them: that each of `turns` is a
-`ModelInvocationRecorded` version 2 of this explanation, earlier in `seq`, and that the tool
-requests of those records equal `tool_calls`, turn by turn; that `cited` is a subset of the refs the
-`ok` results returned; that the turn and tool-call counts are within the registry entry's bounds;
-and that the `MeterReserved` of each turn's `reservation` has purpose `explain`.
-
-**No vectors.** As for §9.15 and §9.20, `reference/journal` does not model these records, and the
-test vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member type
-and rule above and valid drafts for the cases a rule might be misread to refuse.
+**No vectors.** As for §9.15 and §9.20, `reference/journal` does not model this record, and the test
+vectors stay version 3: `mandate-journal`'s tests hold an invalid draft for every member type and
+rule above and valid drafts for the cases a rule might be misread to refuse.
 
 ## 10. Anchoring
 

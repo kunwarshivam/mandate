@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.4, draft (v0.4 adds the owner's explainer's purpose and caps, [DEC-2240](../project/decisions/DEC-2240.md), agent readings; earlier: [DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.3, draft ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,12 +13,6 @@ is not built (§11).
 
 ## Change history
 
-- **v0.4, the owner's explainer ([DEC-2240](../project/decisions/DEC-2240.md); E12-5, E19-14):**
-  §1.1 and §3.1 add the purpose `explain` for the explainer of [agent harness spec
-  §15](agent-harness.md#15-the-owners-explainer), which acts for a member and has no agent, so
-  `agent_id` is null for it as for the compiler. §3.6 puts its call records on the control stream
-  (journal spec §9.22). §7.3 meters it against the workspace's configured budget and the deployment cap, both settings. §8.3: its tools are
-  read-only and wait for E19-13's change to INF-5; until then it makes no call.
 - **v0.3 ([DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)):**
   - §3.6: the agent stream's `ModelInvocationRecorded` and the meter stream are closed in
     [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (E15-8). A refusal and a cache
@@ -69,7 +63,6 @@ is not built (§11).
 | LLM signal models (`llm.` prefix, §8.1) | Observations, evidence, invalidation | Slow | Planned |
 | Fast decision models (`fast.` prefix) | Typed answers with scores | Fast (30 to 300 ms) | Not defined (§5) |
 | Mandate compiler ([mandate spec §7](mandate.md#7-compiler-and-platform-proposals-dec-97)) | Extract stated values, propose envelope values | Slow, interactive | Planned |
-| The owner's explainer ([agent harness spec §15](agent-harness.md#15-the-owners-explainer)) | Answer a member's question about their agent, or draft an approval ask's explanation, from the agent's records through read-only tools, citing each record | Slow, interactive | Planned (E19-14); no call before E19-13's tool contract |
 | Future local models | Any of the above, served on the customer's site | As above | Planned |
 
 The **model gateway** is the one component that sends a request to a model. It lives in the data
@@ -156,8 +149,8 @@ Each oracle must catch a seeded bug before it is trusted (`AGENTS.md`, "Independ
 | Field | Rule |
 |---|---|
 | `call_id` | ULID, unique per call. Retries reuse it with a new `attempt` number |
-| `workspace_id`, `agent_id` | `agent_id` is null only for the compiler and the explainer, which act for a member, not an agent |
-| `purpose` | `research`, `llm_signal`, `fast_signal`, `compiler`, `explain`. Matches journal spec §9's `ModelInvocationRecorded` purposes (compiler, fast model, research, explainer), plus `llm_signal` |
+| `workspace_id`, `agent_id` | `agent_id` is null only for the compiler, which acts for a user, not an agent |
+| `purpose` | `research`, `llm_signal`, `fast_signal`, `compiler`. Matches journal spec §9's `ModelInvocationRecorded` purposes (compiler, fast model, research), plus `llm_signal` |
 | `model` | The registry reference: signal model id, version, and content hash (mandate spec §8.1), or the compiler's registry entry |
 | `inputs` | Typed inputs named by the model's contract; the gateway renders the prompt from them with the pinned template. Callers never pass free-form prompt text |
 | `as_of` | The data cut-off of the inputs (§8.2). Part of the canonical request |
@@ -266,11 +259,6 @@ existing ones. So:
   because INF-10 could not hold for it. Nor does it until the control-stream record lets
   `prompt_ref` be `null` for `input_rejected`, as the agent stream's does (journal spec §9.19 rule
   148), since a guard-refused prompt would otherwise be stored (DEC-998 item 2).
-- **The explainer's records are on the control stream** too (agent harness spec §15.6): one
-  `ModelInvocationRecorded` version 2 per turn, with purpose `explain`, the explanation in
-  `correlation_id`, and the turn's tool requests, between the explanation's `ExplanationRequested`
-  and `ExplanationRecorded` ([journal spec §9.22](journal.md#922-explainer-records-dec-2240)).
-  Version 2 has §9.19's nullable `prompt_ref`, so the compiler may write it as well.
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
   `ThesisProposed`), which carries the content hash the call used.
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
@@ -497,7 +485,6 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
 | Workspace monthly cap | [DEC-997](../project/decisions/DEC-997.md) item 3 (Proposed; until accepted, no live call runs at all): **$50 a month** for paper and demo, deployment configuration; per-agent monthly caps are deployment configuration too | All calls of the workspace per calendar month of risk days; per-agent monthly caps under it, each at most the workspace cap |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
-| Explainer spend | Settings ([DEC-2240](../project/decisions/DEC-2240.md) item 9): the workspace's configured model budget and the deployment cap, plus an optional `explain` share of the workspace budget, folded over the meter stream's `explain` reservations (agent harness spec §15.7). Who pays for a customer's explainer calls is [DEC-2242](../project/decisions/DEC-2242.md), Proposed | The explainer's calls, per workspace; every one also counts against the workspace caps above. No agent's cap: an explain reservation names no agent (journal spec §9.22 rule 189) |
 | Rate caps | Per agent: research calls only in proposal rounds no more often than `behavior.research.interval_s`; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
@@ -574,10 +561,7 @@ layer; mandate spec §8.4 and §8.5 list the others.
 - **Inputs are data.** Retrieved text is placed in delimited data sections of the pinned template.
   The template tells the model to treat them as untrusted, but no rule relies on the model obeying.
 - **No capabilities.** No tools, no function calls, no browsing (INF-5). Retrieval happens before the
-  call, in deterministic code, from allowlisted sources only (DEC-101). The explainer's entry lists
-  read-only tools over the asking member's own records (agent harness spec §15.4); it makes no call
-  until E19-13's change to INF-5 admits a tool-calling entry, and its tools take their scope from
-  the session, never from the model (EX-3).
+  call, in deterministic code, from allowlisted sources only (DEC-101).
 - **After the response:** schema validation, the output limits of §8.1, and the §8.5 checks. Then the
   order builder, autonomy, and the risk gate, none of which read model text.
 

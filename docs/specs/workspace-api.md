@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the explainer's route and read model, and §4.3's approval read its draft (E12-5, E19-14; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-14; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -439,7 +439,7 @@ How the API's operations map onto those rows:
 | One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
 | One's own notification channels: list | List one's own notification addresses |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
-| Ask why, read and list one's explanations (§4.6.1) | Chat thread with the agent. The approval draft (§4.3) is read with the approval: View agents, positions, decisions |
+| The desk: send, read one's own thread, an owner run's transcript (§4.6.1) | Chat thread with the agent. A cited record, a research or explain run's transcript, and an approval's explanation: View agents, positions, decisions |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
 (check 7) and by the executor at acknowledgment (mandate spec §5.8), with a client counted as its
@@ -730,42 +730,51 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | Dry run | `POST /agents/{id}/dry-run` | `RecordsAccessed` | DEC-190: the decision (`auto`, `ask`, `deny`) and the gate's reason code for a described order, with the client ceiling for a client. Places nothing, creates no approval |
 | Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.9) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
 | Chat | `POST /agents/{id}/chat`, `GET .../chat` | The model call, on the agent stream | A reply is quoted model output (API-18). When a message asks for an action, deterministic code returns a card: an owner request with the builder's proposal, gate verdict, and autonomy outcome, or a draft version that opens A6. Sending the card is a separate call carrying its `card_digest` (D14, DEC-192) |
-| Ask why (the explainer) | `POST /agents/{id}/explanations`, `GET /agents/{id}/explanations/{explanation_id}`, `GET /agents/{id}/explanations` | `ExplanationRequested`, each turn's `ModelInvocationRecorded` version 2, `ExplanationRecorded` (journal spec §9.22) | §4.6.1. A question about the agent's own records, answered by the explainer of [agent harness spec §15](agent-harness.md#15-the-owners-explainer) with citations; read only, never an action, never advice (E12-5, E19-14) |
+| The desk | `POST /agents/{id}/desk/messages`, `GET /agents/{id}/desk`, `GET /agents/{id}/desk/messages/{message_id}` | `OwnerQuestionSubmitted` (journal spec §9.22); the answer is an `owner` run on the agent stream | §4.6.1. A question about the agent's own records, answered with citations by an `owner` run ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)); read only in slice 1, never advice (E12-5, E19-14) |
 
-### 4.6.1 Explanations ([DEC-2240](../project/decisions/DEC-2240.md))
+### 4.6.1 The desk and the transcript view ([DEC-2240](../project/decisions/DEC-2240.md))
 
-The explainer's route. It changes nothing an agent, connection, policy, member, client, or approval
-may do, so API-3 does not apply to it; it commits its own records before it answers (agent harness
-spec EX-8, API-13).
+The desk's routes ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)).
+In slice 1 nothing here changes what an agent, connection, policy, member, client, or approval may
+do. A desk message is owner input, so it is journaled first and copied by the runtime (API-3's
+pattern); the answer is the runtime's, from the agent stream.
 
-- **Ask.** `POST /agents/{id}/explanations` with `{"question": text}` and an `Idempotency-Key`
-  (API-4: the same key and body return the same explanation). The *Chat thread with the agent*
-  row authorizes it (§3.7); a client has no chat and is refused `forbidden`. An agent of another
-  workspace, or none, is the same `not_found` (API-9). The server fixes the scope (workspace,
-  agent, principal) from the session before any turn (EX-3), refuses a question over 1,000
-  characters `invalid`, and refuses past agent harness spec §15.7's per-member bounds with `rate_limited`, journaling
-  nothing. Otherwise it commits `ExplanationRequested`, then returns `202` with the explanation's
-  id and `state: "running"`. A guard hit returns the same `202`, and the explanation ends
-  `input_rejected` without a call.
-- **Read one.** `GET /agents/{id}/explanations/{explanation_id}` returns
-  `read-models/explanation`: `explanation_id`, `agent_id`, `kind`, `state` (`running` until
-  `ExplanationRecorded` commits, then `answered` or `unavailable`), `outcome`, `asked_at`, the
-  question as the member typed it (never for a refused one), and, for `answered` only, `answer`:
-  each segment as `{"text": quoted model text, "author": "explainer", "cites": [ref]}`, the
-  `not_recorded` items, and `disclaimer` (`NOTE-EXPLAINER-NOT-ADVICE`, a named placeholder,
-  DEC-2241). `records` lists every cited ref, and for any other outcome every ref the tools
-  returned, newest first, each with its event type, stream, `seq`, `recorded_at`, and the link to
-  `GET /journal/events/{event_id}` or the read model that renders it; the web app renders the
-  record and its figures from there (EX-6). No member holds an action (API-18). `as_of` names the
-  control stream's watermark (API-14).
-- **List.** `GET /agents/{id}/explanations` returns the asking member's 50 most recent
-  explanations of that agent, newest first, without answers.
-- **The approval draft.** `GET /approvals/{id}` (§4.3) gains `explanation`: `null` while no draft
-  exists, otherwise `{explanation_id, state}`. The first read by a principal who may view the
-  approval, while it is pending, starts the draft (agent harness spec §15.9). The read never waits
-  for the draft, and the draft is outside `content` and `content_hash` (API-12).
-- **Never in a notice.** No notice, push payload, title, or URL carries explainer text or a cited
-  record's content (API-10).
+- **Send.** `POST /agents/{id}/desk/messages` with `{"question": text}` and an `Idempotency-Key`
+  (API-4). Authorized by the *Chat thread with the agent* row (§3.7); a client has no chat and is
+  refused `forbidden`. An agent of another workspace, or none, is the same `not_found` (API-9). A
+  question over 1,000 characters is `invalid`; past agent harness spec §15.7's per-member rate it
+  is `rate_limited`; both journal nothing. Otherwise the server runs the gateway's guard on the
+  question alone (inference §8.3), commits `OwnerQuestionSubmitted`, and returns `202` with the
+  message id (its `event_id`) and `state: "waiting"` (API-13: `unknown` on an ambiguous append).
+- **Read the thread.** `GET /agents/{id}/desk` returns `read-models/desk`: the asking member's own
+  50 most recent messages to that agent, newest first, each with its state (`waiting` until the
+  runtime's copy starts a run, `running`, then `answered` or `unavailable`). Other members'
+  messages are never served.
+- **Read one.** `GET /agents/{id}/desk/messages/{message_id}`, the asking member's only (another
+  member's id is the same `not_found`): the question as typed (never for a refused one), the
+  state, the run's ref, and for `answered` the answer: each segment as `{"text": quoted model
+  text, "author": "agent", "cites": [ref]}`, the `not_recorded` items, and `disclaimer`
+  (`NOTE-EXPLAINER-NOT-ADVICE`, a named placeholder, DEC-2241). `records` lists each cited ref, or
+  for any other state every ref the run's tools returned, newest first, each with its record type
+  and the path of the cited-record read below. No member holds an action (API-18). `as_of` names
+  the control and agent streams' watermarks (API-14).
+- **Read a cited record.** `GET /agents/{id}/runs/{run_id}/records/{ref}` serves the record a run
+  returned, through the projection the product read models already serve for its type (a decision,
+  approval, order, position, thesis, mode, or the mandate's fields as §4.7 serves them, figures
+  included), authorized by the *View agents, positions, decisions* row. A ref the run did not return
+  is the same `not_found`. It never serves the raw journal event, which stays *Read records* (§4.8).
+- **Transcript view.** `GET /agents/{id}/runs` and `GET /agents/{id}/runs/{run_id}`: every turn,
+  tool call, tool result, and verdict of a run as E19-13's records hold them, model text quoted and
+  attributed (API-18), tool results through the same projections. Research and explain runs under
+  the *View agents, positions, decisions* row; an `owner` run only to the member who asked, under
+  the chat row. A client's `read` scope (§3.8) does not include transcripts.
+- **The approval's explanation.** `GET /approvals/{id}` (§4.3) gains `explanation`: its state
+  (`none`, `running`, `shown`, `unavailable`) and, when `shown`, the answer in the shape above,
+  under the approval's own row. The read starts nothing and never waits (agent harness spec EX-9);
+  the explanation is outside `content` and `content_hash` (API-12). Until DEC-2241 item 3 is
+  decided it is served only where the deployment flag `desk.approval_explanations` is on.
+- **Never in a notice.** No notice, push payload, title, or URL carries a question, answer text, or
+  a cited record's content (API-10).
 
 ### 4.7 Read models
 

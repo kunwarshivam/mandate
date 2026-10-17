@@ -2287,31 +2287,30 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
 
 - **E19-14 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
   [#1536](https://github.com/kunwarshivam/mandate/issues/1536), lane EX)** As an owner, I want to
-  ask my agent "why did you buy X?", "why did you ask me?", "what are you watching?", or "why was
-  this refused?" and get an answer from my own records, with each claim linked to the record it
-  rests on, and a plain-language explanation under each approval ask, so that I understand what my
-  agent did without reading the journal ([agent harness spec §15](../specs/agent-harness.md#15-the-owners-explainer),
-  [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 with a bounded agent loop).
-  *Depends on:* E19-13's tool-call contract and bounded loop (lane AH), which it reuses; E15-6 to
-  E15-10 (the gateway); E21-31 (the API server). *Accepted when:*
-  - every tool is read-only and the explainer's crate depends on no runtime, executor, connector,
-    approval-writer, or vault crate (EX-1, rung 1); the streams after any explanation hold exactly
-    the explainer's own records more than before, under a compromised model;
+  ask my agent at the desk "why did you buy X?", "why did you ask me?", "what are you watching?", or
+  "why was this refused?" and get an answer from my own records, each claim linked to the record it
+  rests on, a plain-language explanation under each approval ask, and a transcript of every run, so
+  that I understand what my agent did without reading the journal
+  ([agent harness spec §15](../specs/agent-harness.md#15-owner-and-explain-runs-the-desk),
+  [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 as `owner` and `explain` runs).
+  *Depends on:* E19-13 (lane AH): the loop, its run records, and the tool contract, which it reuses
+  and does not duplicate; E15-6 to E15-10 (the gateway); E21-31 (the API server). *Accepted when:*
+  - the owner and explain tool sets are read, `note`, and `answer` only, and every stream after any
+    run holds only that run's records more than before, under a compromised model (EX-1);
   - cross-tenant and cross-agent reads: a property test over two workspaces and several agents with
-    canaries, random questions, and tool requests naming foreign ids finds no foreign canary in any
-    result, prompt, answer, or record, and byte-identical `not_found` bodies for foreign and absent
-    ids (EX-2, EX-3), with the oracle shown to catch a seeded scope bug;
-  - no answer with an uncited segment, an unread citation, or advice language is shown (EX-4,
-    EX-5); no prompt holds a quantity, price, dollar figure, or account reference (EX-6);
-  - the bounds of spec §15.7 hold under random model behaviour, and spend is metered against the
-    configured workspace budget and deployment cap, never a constant (EX-7), every turn is
-    journaled before use (EX-8), and approvals, exits, and kill switches are byte-identical with the
-    explainer absent, stalled, or failing (EX-9);
-  - CI and the demo run on recorded-fake gateway fixtures only, with no network; the disclaimer is
-    the placeholder `NOTE-EXPLAINER-NOT-ADVICE` until the founder decides DEC-2241.
-  *Slice 2 (planned, spec §15.12):* actions asked in chat become proposal cards built by
-  deterministic code through lane AH's action tools and sent only by the owner's own call with
-  step-up (lane SU); EX-12 to EX-14; its own spec change and DEC first.
+    canaries finds no foreign canary in any tool result, prompt, answer, or record, and identical
+    `not_found` results for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
+    scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
+  - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
+    (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);
+  - spend is reserved against the agent's, workspace's, and deployment's configured budgets, never a
+    constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
+    are byte-identical with the explain run absent, stalled, or failing (EX-9);
+  - CI and the demo use recorded fakes only; the disclaimer is the placeholder until DEC-2241, and
+    approval explanations stay behind `desk.approval_explanations` until its item 3 is decided.
+  *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
+  through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
+  its own spec change and DEC first.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
