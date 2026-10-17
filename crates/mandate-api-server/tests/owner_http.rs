@@ -106,7 +106,7 @@ fn fixture(accepting: bool) -> Fixture {
         },
         sessions: Arc::clone(&sessions),
         tokens: Arc::new(Issuer::new(config, Arc::new(FixedKeys(None)))),
-        links: dir.join("absent"),
+        links: Arc::new(common::LinksAt(dir.join("absent"))),
         clock: common::ManualClock::at(T0) as Arc<dyn mandate_api_server::clock::Clock>,
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| Ok(records.clone())),
