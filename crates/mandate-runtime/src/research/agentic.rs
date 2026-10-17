@@ -1,4 +1,4 @@
-//! An agentic research run in the core (agent harness spec v0.2 §6.9 to §6.11, journal spec §9.22's
+//! An agentic research run in the core (agent harness spec v0.2 §6.9 to §6.11, journal spec §9.23's
 //! run records, DEC-2206): the run's kind and menu, fixed at its start from the trigger and folded
 //! state; `RunStarted` before the seed; each turn's record heading its tool calls and the results
 //! refused in its batch; the reply's reads and thinks dispatched only after that batch; their
@@ -81,7 +81,7 @@ enum Stage {
     },
 }
 
-/// What `RunEnded` counts (journal spec §9.22).
+/// What `RunEnded` counts (journal spec §9.23).
 #[derive(Debug, Clone, Copy, Default)]
 struct Counts {
     turns: u64,
