@@ -53,14 +53,15 @@ impl Issuer {
 
 impl TokenCheck for Issuer {
     fn check(&self, token: &str, now: UtcNanos) -> Checked {
-        let _ = (
-            token,
-            now,
-            &self.config,
-            &self.keys,
-            verify,
-            TokenKind::AccessToken,
-        );
-        Checked::Refused
+        let Some(jwks) = self.keys.current() else {
+            return Checked::Unreachable;
+        };
+        match verify(token, &self.config, &jwks, TokenKind::AccessToken, now) {
+            Ok(verified) => Checked::Subject {
+                issuer: verified.issuer().to_owned(),
+                subject: verified.subject().to_owned(),
+            },
+            Err(_) => Checked::Refused,
+        }
     }
 }

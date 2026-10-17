@@ -298,7 +298,7 @@ fn opening_with_a_cookie_ends_the_earlier_session() {
     let (second, _) = set_cookie(&reply);
     assert_ne!(second, first);
     assert_eq!(f.sessions.len(), 1);
-    assert_eq!(f.sessions.subject(&first).is_err(), true);
+    assert!(f.sessions.subject(&first).is_err());
 }
 
 #[test]

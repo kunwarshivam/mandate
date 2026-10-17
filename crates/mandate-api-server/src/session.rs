@@ -20,8 +20,8 @@ use mandate_authn::{
 };
 use mandate_identity::{PrincipalId, SessionRef};
 use mandate_time::UtcNanos;
-use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
+use ring::{digest, hmac};
 
 use crate::config::SessionKey;
 
@@ -110,6 +110,21 @@ struct Entry {
     subject: String,
     reference: SessionRef,
     opened: u64,
+    absolute_until: i64,
+}
+
+const ID_BYTES: usize = 16;
+const SECRET_BYTES: usize = 32;
+const TAG_BYTES: usize = 32;
+const COOKIE_HEX: usize = (ID_BYTES + SECRET_BYTES + TAG_BYTES) * 2;
+
+type Id = [u8; ID_BYTES];
+type Secret = [u8; SECRET_BYTES];
+
+/// The live sessions, and a counter that orders their openings.
+struct Store {
+    opened: u64,
+    entries: BTreeMap<Id, Entry>,
 }
 
 /// The sessions this process holds.
@@ -117,7 +132,7 @@ pub struct Sessions {
     key: hmac::Key,
     random: Box<dyn Random>,
     limits: Result<SessionLimits, SessionRefusal>,
-    entries: Mutex<(u64, BTreeMap<[u8; 16], Entry>)>,
+    store: Mutex<Store>,
 }
 
 impl Sessions {
@@ -127,7 +142,10 @@ impl Sessions {
             key: hmac::Key::new(hmac::HMAC_SHA256, key.as_bytes()),
             random,
             limits: SessionLimits::resolve(OrgKind::Business, SessionPolicy::default()),
-            entries: Mutex::new((0, BTreeMap::new())),
+            store: Mutex::new(Store {
+                opened: 0,
+                entries: BTreeMap::new(),
+            }),
         }
     }
 
@@ -143,18 +161,53 @@ impl Sessions {
         replaced: Option<&str>,
         now: UtcNanos,
     ) -> Result<Cookie, Unauthenticated> {
-        let _ = (
-            principal,
-            subject,
-            replaced,
-            now,
-            &self.key,
-            &self.random,
-            &self.limits,
+        let limits = self.limits.map_err(|_| Unauthenticated)?;
+        let mut store = self.store.lock().map_err(|_| Unauthenticated)?;
+        if let Some((id, secret)) = replaced.and_then(|cookie| self.decode(cookie)) {
+            let current = store
+                .entries
+                .get(&id)
+                .is_some_and(|entry| holds(entry, &secret));
+            if current {
+                store.entries.remove(&id);
+            }
+        }
+        store
+            .entries
+            .retain(|_, entry| entry.absolute_until > now.secs());
+        let held: Vec<(u64, Id)> = store
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.principal == principal)
+            .map(|(id, entry)| (entry.opened, *id))
+            .collect();
+        if held.len() >= MAX_PER_PRINCIPAL
+            && let Some((_, oldest)) = held.iter().min()
+        {
+            store.entries.remove(oldest);
+        }
+        if store.entries.len() >= MAX_SESSIONS {
+            return Err(Unauthenticated);
+        }
+        let id: Id = self.fresh()?;
+        let secret: Secret = self.fresh()?;
+        let reference: [u8; 16] = self.fresh()?;
+        let record = SessionRecord::open(limits, &RefreshSecret(secret), now)
+            .map_err(|_| Unauthenticated)?;
+        store.opened = store.opened.saturating_add(1);
+        let opened = store.opened;
+        store.entries.insert(
+            id,
+            Entry {
+                record,
+                principal,
+                subject,
+                reference: SessionRef(u128::from_be_bytes(reference)),
+                opened,
+                absolute_until: now.secs().saturating_add(limits.absolute_s()),
+            },
         );
-        let _ = (EndReason::SignOut, ProviderAnswer::Granted, Request::Other);
-        let _ = |_: Refreshed, _: RefreshSecret| ();
-        Err(Unauthenticated)
+        Ok(self.encode(&id, &secret))
     }
 
     /// Refreshes the session `cookie` names with `answer` at `now`: a new cookie when its secret
@@ -169,8 +222,29 @@ impl Sessions {
         answer: Answer,
         now: UtcNanos,
     ) -> Result<Option<Cookie>, Unauthenticated> {
-        let _ = (cookie, answer, now);
-        Err(Unauthenticated)
+        let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
+        let next: Secret = self.fresh()?;
+        let mut store = self.store.lock().map_err(|_| Unauthenticated)?;
+        let entry = store.entries.get_mut(&id).ok_or(Unauthenticated)?;
+        let provider = match answer {
+            Answer::Granted { subject } if subject == entry.subject => ProviderAnswer::Granted,
+            Answer::Granted { .. } | Answer::Failed => ProviderAnswer::Status(FAILED_STATUS),
+            Answer::Unreachable => ProviderAnswer::Unreachable,
+        };
+        let refreshed =
+            entry
+                .record
+                .refresh(&RefreshSecret(secret), provider, &RefreshSecret(next), now);
+        match refreshed {
+            Ok(Refreshed::Rotated { .. }) => Ok(Some(self.encode(&id, &next))),
+            Ok(Refreshed::Outage) => Ok(None),
+            Err(_) => {
+                if entry.record.ended().is_some() {
+                    store.entries.remove(&id);
+                }
+                Err(Unauthenticated)
+            }
+        }
     }
 
     /// Ends the session `cookie` names (`sign_out`).
@@ -178,13 +252,20 @@ impl Sessions {
     /// # Errors
     /// [`Unauthenticated`] for a cookie that names no live session.
     pub fn end(&self, cookie: &str) -> Result<(), Unauthenticated> {
-        let _ = cookie;
-        Err(Unauthenticated)
+        let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
+        let mut store = self.store.lock().map_err(|_| Unauthenticated)?;
+        let mut entry = store.entries.remove(&id).ok_or(Unauthenticated)?;
+        if !holds(&entry, &secret) {
+            store.entries.insert(id, entry);
+            return Err(Unauthenticated);
+        }
+        entry.record.end(EndReason::SignOut);
+        Ok(())
     }
 
     /// Admits `request` on the session `cookie` names at `now`. A pause or kill switch on a full
     /// session whose access lapsed is served after an outage refresh the server records itself
-    /// (§3.11 item 6).
+    /// (§3.11 item 6). A rotated-away secret presented again ends the session, as reuse.
     ///
     /// # Errors
     /// [`Unauthenticated`] for every refusal.
@@ -194,16 +275,49 @@ impl Sessions {
         request: Request,
         now: UtcNanos,
     ) -> Result<Authenticated, Unauthenticated> {
-        let _ = (cookie, request, now);
-        Err(Unauthenticated)
+        let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
+        let unused: Secret = self.fresh()?;
+        let mut store = self.store.lock().map_err(|_| Unauthenticated)?;
+        let entry = store.entries.get_mut(&id).ok_or(Unauthenticated)?;
+        if !holds(entry, &secret) {
+            let presented = digest_of(&secret);
+            if entry.record.rotated_digests().contains(&presented) {
+                store.entries.remove(&id);
+            }
+            return Err(Unauthenticated);
+        }
+        let mut admitted = entry.record.authorize(request, now);
+        if admitted == Err(SessionRefusal::AccessExpired) && request != Request::Other {
+            let outage = entry.record.refresh(
+                &RefreshSecret(secret),
+                ProviderAnswer::Unreachable,
+                &RefreshSecret(unused),
+                now,
+            );
+            if outage == Ok(Refreshed::Outage) {
+                admitted = entry.record.authorize(request, now);
+            }
+        }
+        match admitted {
+            Ok(()) => Ok(Authenticated {
+                principal: entry.principal,
+                reference: entry.reference,
+            }),
+            Err(_) => {
+                if entry.record.ended().is_some() {
+                    store.entries.remove(&id);
+                }
+                Err(Unauthenticated)
+            }
+        }
     }
 
-    /// How many sessions are live, for the tests' independent count.
+    /// How many sessions are held, for the tests' independent count.
     pub fn len(&self) -> usize {
-        0
+        self.store.lock().map_or(0, |store| store.entries.len())
     }
 
-    /// Whether no session is live.
+    /// Whether no session is held.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -213,18 +327,64 @@ impl Sessions {
     /// # Errors
     /// [`Unauthenticated`] for a cookie that names no live session.
     pub fn subject(&self, cookie: &str) -> Result<String, Unauthenticated> {
-        let _ = cookie;
-        Err(Unauthenticated)
+        let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
+        let store = self.store.lock().map_err(|_| Unauthenticated)?;
+        store
+            .entries
+            .get(&id)
+            .filter(|entry| holds(entry, &secret))
+            .map(|entry| entry.subject.clone())
+            .ok_or(Unauthenticated)
+    }
+
+    fn fresh<const N: usize>(&self) -> Result<[u8; N], Unauthenticated> {
+        let mut out = [0; N];
+        self.random.fill(&mut out)?;
+        Ok(out)
+    }
+
+    fn encode(&self, id: &Id, secret: &Secret) -> Cookie {
+        let mut bytes = Vec::with_capacity(COOKIE_HEX / 2);
+        bytes.extend_from_slice(id);
+        bytes.extend_from_slice(secret);
+        let tag = hmac::sign(&self.key, &bytes);
+        bytes.extend_from_slice(tag.as_ref());
+        Cookie(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    }
+
+    /// The id and secret of a cookie whose tag verifies under the session key; `None` for
+    /// anything else, before any store is read.
+    fn decode(&self, cookie: &str) -> Option<(Id, Secret)> {
+        if cookie.len() != COOKIE_HEX
+            || !cookie
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return None;
+        }
+        let bytes: Vec<u8> = cookie
+            .as_bytes()
+            .chunks(2)
+            .filter_map(|pair| std::str::from_utf8(pair).ok())
+            .filter_map(|pair| u8::from_str_radix(pair, 16).ok())
+            .collect();
+        let (body, tag) = bytes.split_at_checked(ID_BYTES + SECRET_BYTES)?;
+        hmac::verify(&self.key, body, tag).ok()?;
+        let (id, secret) = body.split_at_checked(ID_BYTES)?;
+        Some((id.try_into().ok()?, secret.try_into().ok()?))
     }
 }
 
-/// Unused: keeps the entry's fields named until the implementation reads them.
-fn _fields(entry: &Entry) -> (&SessionRecord, PrincipalId, &str, SessionRef, u64) {
-    (
-        &entry.record,
-        entry.principal,
-        &entry.subject,
-        entry.reference,
-        entry.opened,
-    )
+/// The status a failed refresh is recorded with: an answer that is neither a grant nor an outage.
+const FAILED_STATUS: u16 = 401;
+
+/// Whether `secret` is the session's current one.
+fn holds(entry: &Entry, secret: &Secret) -> bool {
+    entry.record.refresh_digest() == Some(digest_of(secret))
+}
+
+fn digest_of(secret: &Secret) -> [u8; 32] {
+    let mut out = [0; 32];
+    out.copy_from_slice(digest::digest(&digest::SHA256, secret).as_ref());
+    out
 }
