@@ -109,7 +109,9 @@ function Progress({ request, agentId }: { request: MandateChangeRequest; agentId
     case "undelivered":
       return (
         <p data-phase="undelivered" role="alert" className="text-pretty">
-          Not delivered: your deployment did not answer, so nothing changed. Try again once it is reachable.
+          {request.reason === "not_sent"
+            ? "Not sent: changing a mandate on your deployment from here comes in a later release, so nothing changed."
+            : "Not delivered: your deployment did not answer, so nothing changed. Try again once it is reachable."}
         </p>
       );
     case "unknown":

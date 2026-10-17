@@ -26,8 +26,8 @@ export function responseSteps(approval: Approval, response: ApprovalResponse): S
     { key: "sent", label: "Sent", state: "done" },
     {
       key: "recorded",
-      label: response.phase === "unknown" && !recorded ? "Checking the journal" : "Recorded in the journal",
-      state: recorded ? "done" : "current",
+      label: response.phase === "undelivered" && !recorded ? "Not recorded" : response.phase === "unknown" && !recorded ? "Checking the journal" : "Recorded in the journal",
+      state: recorded ? "done" : response.phase === "undelivered" ? "waiting" : "current",
     },
     {
       key: "result",
