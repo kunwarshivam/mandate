@@ -1,0 +1,227 @@
+[
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790280000,
+  "open": "220.8",
+  "high": "222.5",
+  "low": "220.1",
+  "close": "221.4",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790366400,
+  "open": "221.4",
+  "high": "223.1",
+  "low": "220.7",
+  "close": "222",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790452800,
+  "open": "222.55",
+  "high": "224.25",
+  "low": "221.85",
+  "close": "223.15",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790539200,
+  "open": "222.2",
+  "high": "223.9",
+  "low": "221.5",
+  "close": "222.8",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790625600,
+  "open": "223.5",
+  "high": "225.2",
+  "low": "222.8",
+  "close": "224.1",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790712000,
+  "open": "225",
+  "high": "226.7",
+  "low": "224.3",
+  "close": "225.6",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790798400,
+  "open": "224.3",
+  "high": "226",
+  "low": "223.6",
+  "close": "224.9",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790884800,
+  "open": "225.7",
+  "high": "227.4",
+  "low": "225",
+  "close": "226.3",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1790971200,
+  "open": "226.4",
+  "high": "228.1",
+  "low": "225.7",
+  "close": "227",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791057600,
+  "open": "227.85",
+  "high": "229.55",
+  "low": "227.15",
+  "close": "228.45",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791144000,
+  "open": "227.3",
+  "high": "229",
+  "low": "226.6",
+  "close": "227.9",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791230400,
+  "open": "228.5",
+  "high": "230.2",
+  "low": "227.8",
+  "close": "229.1",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791316800,
+  "open": "229.65",
+  "high": "231.35",
+  "low": "228.95",
+  "close": "230.25",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791403200,
+  "open": "229.2",
+  "high": "230.9",
+  "low": "228.5",
+  "close": "229.8",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791489600,
+  "open": "230.4",
+  "high": "232.1",
+  "low": "229.7",
+  "close": "231",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791576000,
+  "open": "231.8",
+  "high": "233.5",
+  "low": "231.1",
+  "close": "232.4",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791662400,
+  "open": "231.15",
+  "high": "232.85",
+  "low": "230.45",
+  "close": "231.75",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791748800,
+  "open": "232.5",
+  "high": "234.2",
+  "low": "231.8",
+  "close": "233.1",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791835200,
+  "open": "233.4",
+  "high": "235.1",
+  "low": "232.7",
+  "close": "234",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1791921600,
+  "open": "234.6",
+  "high": "236.3",
+  "low": "233.9",
+  "close": "235.2",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1792008000,
+  "open": "235.45",
+  "high": "237.15",
+  "low": "234.75",
+  "close": "236.05",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "AAPL",
+  "knowledge_at": 1792094400,
+  "open": "234.9",
+  "high": "236.6",
+  "low": "234.2",
+  "close": "235.5",
+  "volume": "51234000"
+ },
+ {
+  "symbol": "MSFT",
+  "knowledge_at": 1791921600,
+  "open": "410",
+  "high": "414",
+  "low": "408",
+  "close": "412",
+  "volume": "20100000"
+ },
+ {
+  "symbol": "MSFT",
+  "knowledge_at": 1792008000,
+  "open": "410",
+  "high": "414",
+  "low": "408",
+  "close": "412",
+  "volume": "20100000"
+ },
+ {
+  "symbol": "MSFT",
+  "knowledge_at": 1792094400,
+  "open": "410",
+  "high": "414",
+  "low": "408",
+  "close": "412",
+  "volume": "20100000"
+ }
+]
