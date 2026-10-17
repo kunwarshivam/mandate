@@ -2627,7 +2627,7 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums and the
 /// `MANDATE_*` and `*_RESULT` names, `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
 /// the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and `web-deploy.yml` the
-/// build's public Supabase values and the deploy step's Cloudflare token and account (DEC-986).
+/// build's public Supabase values and the deploy step's Cloudflare token and account (DEC-1005).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
@@ -2737,7 +2737,7 @@ const READ_IMAGES: &[&str] =
 
 /// The `npx` commands a `web` job may run, by their exact arguments (B7): `web-e2e.yml`'s two
 /// Playwright installs, `web.yml`'s pinned Impeccable detector, and the Worker's dry run and
-/// `web-deploy.yml`'s deploy, both through the `wrangler` the lockfile pins (DEC-731, DEC-986). `npx` runs any package, so no
+/// `web-deploy.yml`'s deploy, both through the `wrangler` the lockfile pins (DEC-731, DEC-1005). `npx` runs any package, so no
 /// other form is read.
 const READ_NPX: &[&[&str]] = &[
     &[

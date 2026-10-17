@@ -15,7 +15,7 @@
 # the Cloudflare Worker (DEC-823). Wrangler's dry run writes the bundle it would upload, with no
 # account or credential, and `scripts/workers.mjs size` fails the job when it is over its budget
 # (DEC-731). This workflow never uploads and reads no secret or variable (ES-12): `web-deploy.yml` alone
-# deploys, from `main`, through the `production` environment (DEC-986).
+# deploys, from `main`, through the `production` environment (DEC-1005).
 name: web
 
 on:

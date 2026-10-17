@@ -26,7 +26,7 @@ npm test
 npm run pending    # every pending test fails at its stub when un-skipped (DEC-750)
 npm run build && npm start
 npm run cf:build   # the Cloudflare Worker through OpenNext (DEC-823, DEC-731); npm run cf:preview runs it locally
-                   # main deploys it through .github/workflows/web-deploy.yml alone (DEC-986)
+                   # main deploys it through .github/workflows/web-deploy.yml alone (DEC-1005)
 npm run shots      # every screen as PNG files with a contact sheet in .shots/, against a running dev server (DEC-516)
 
 npx playwright install --with-deps --only-shell chromium   # once
@@ -87,7 +87,7 @@ To run without sign-in, set neither variable (or leave `.env.local` out). To run
 
 Next reads `.env.local` for `npm run dev`, `npm run build` and `npm start`; the variables are
 inlined into the build, so rebuild after changing them. For the deployed Worker they are variables of
-the GitHub `production` environment, which `.github/workflows/web-deploy.yml` builds with (DEC-986
+the GitHub `production` environment, which `.github/workflows/web-deploy.yml` builds with (DEC-1005
 item 6). Open the app at `http://localhost:4317`
 rather than `127.0.0.1`: a passkey only works on a host that matches its relying-party ID.
 

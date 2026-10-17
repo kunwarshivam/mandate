@@ -39,7 +39,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(nextConfig.images).toEqual({ unoptimized: true });
   });
 
-  it("pending E11-9: keeps vercel.json only while it deploys main alone, until the founder moves the domains (DEC-986 item 4)", () => {
+  it("pending E11-9: keeps vercel.json only while it deploys main alone, until the founder moves the domains (DEC-1005 item 4)", () => {
     expect(hostingProblems(tree({ "../vercel.json": null }))).toEqual([]);
     expect(hostingProblems(tree({ "../vercel.json": '{ "git": { "deploymentEnabled": { "**": false, "main": true } } }' }))).toEqual([]);
     for (const text of ['{ "git": {} }', "{}", '{ "git": { "deploymentEnabled": { "**": true, "main": true } } }', '{ "git": { "deploymentEnabled": { "**": false, "main": true, "preview": true } } }']) {
@@ -154,7 +154,7 @@ const deployWith = (change: (yml: string) => string) => hostingProblems(tree({ [
 const BUILD_ENV = "          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}\n";
 const DEPLOY_ENV = "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n";
 
-describe("only the deploy job deploys, from main, through the production environment (E21-38, DEC-986, ES-12)", () => {
+describe("only the deploy job deploys, from main, through the production environment (E21-38, DEC-1005, ES-12)", () => {
   it("pending E21-38: passes this tree's deploy workflow, and flags it missing", () => {
     expect(hostingProblems(tree())).toEqual([]);
     expect(hostingProblems(tree({ [DEPLOY]: null }))).toEqual(only("web-deploy.yml: missing"));

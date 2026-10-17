@@ -1,6 +1,6 @@
 // The Cloudflare Worker that serves web/ through OpenNext (DEC-823, DEC-731 item 3). The deploy job of
 // .github/workflows/web-deploy.yml uploads it from main, with the account and token of the GitHub
-// production environment (DEC-986); this file names no account, route, build command, variable or
+// production environment (DEC-1005); this file names no account, route, build command, variable or
 // credential. scripts/workers.mjs checks it.
 {
   "$schema": "node_modules/wrangler/config-schema.json",

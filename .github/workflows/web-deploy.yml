@@ -1,4 +1,4 @@
-# Deploys the web app to Cloudflare Workers from `main` only (E21-38, DEC-986). This file and its
+# Deploys the web app to Cloudflare Workers from `main` only (E21-38, DEC-1005). This file and its
 # one job are the only place the repository deploys: the job runs on a push to `main` that touches
 # `web/` or this file, or on demand from `main`, and its `environment: production` is the only
 # holder of the Cloudflare API token, an environment secret GitHub hands only to jobs on `main`.
