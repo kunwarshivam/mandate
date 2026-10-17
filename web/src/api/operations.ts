@@ -27,6 +27,7 @@ export type ReadId =
   | "approvals"
   | "approval"
   | "connections"
+  | "backtest"
   | "command_status";
 
 const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
@@ -36,6 +37,7 @@ const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "approvals", method: "GET", route: "/approvals", query: ["state"], section: "§4.3" },
   { id: "approval", method: "GET", route: "/approvals/{approval}", query: [], section: "§4.3" },
   { id: "connections", method: "GET", route: "/connections", query: [], section: "§4.5" },
+  { id: "backtest", method: "GET", route: "/backtests/{backtest}", query: [], section: "§4.2" },
   { id: "command_status", method: "GET", route: "/commands/{event}", query: [], section: "§5.5" },
 ];
 

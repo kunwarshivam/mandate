@@ -8,6 +8,7 @@ import * as alerts from "@/app/(app)/alerts/page";
 import * as approval from "@/app/(app)/approvals/[approvalId]/page";
 import * as approvals from "@/app/(app)/approvals/page";
 import * as auditScreen from "@/app/(app)/audit/[screen]/page";
+import * as backtest from "@/app/(app)/backtests/[backtestId]/page";
 import * as audit from "@/app/(app)/audit/page";
 import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page";
@@ -18,6 +19,7 @@ import * as settings from "@/app/(app)/settings/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { StopControl } from "@/components/shell/stop-control";
 import { recordHref } from "@/components/stop/commands";
+import { BACKTEST_IDS } from "@/fixtures/backtests";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { canOpen, homeFor, routeNeeds } from "@/lib/access";
 import { ROLES, type Role, can } from "@/lib/roles";
@@ -54,6 +56,8 @@ const PATHS = [
   ...AGENT_SECTIONS.map((s) => agentHref(AGENT, s.key)),
   `/approvals/${APPROVAL_IDS.swingXyz}`,
   ...RECORDS,
+  `/backtests/${BACKTEST_IDS.lmnCompleted}`,
+  agentHref(AGENT_IDS.lmn, "prove/backtests"),
   "/design",
   ...STOP_RECORDS,
 ];
@@ -123,6 +127,7 @@ describe("route coverage", () => {
     await expect(pageFor(`/agents/${AGENT}/orders/${SWING.orders[0].client_order_id.slice(4)}`)).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(pageFor(`/agents/${AGENT}/decisions/cid_01JB5GQ`)).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(pageFor(`/agents/${AGENT}/approvals/${APPROVAL_IDS.swingXyz}`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor("/backtests/bt.1")).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });
 
@@ -130,7 +135,7 @@ describe("titles", () => {
   const generic = /^[A-Z][a-z]+( [a-z]+)*$/;
 
   it("keeps static titles generic", () => {
-    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design, positions]) {
+    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design, positions, backtest]) {
       const title = mod.metadata.title;
       const text = typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
       expect(text).toMatch(generic);

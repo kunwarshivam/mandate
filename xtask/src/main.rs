@@ -24,7 +24,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | objectstore | mutants | schema-mutants | cell | sweep; or one part
+                        postgres | objectstore | mutants | schema-mutants | cell | cell-demo | sweep; or one part
                         of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
                         pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
                         the crates the diff selects (DEC-1190); with no diff base, all of them
@@ -68,6 +68,9 @@ commands:
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
+  cell demo --scenario demo
+                        the demo's six steps in order on the local cell: each gesture on main run
+                        in the cell, each missing link named by its PR or story (E21-54)
   cell down             delete the local cell
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
@@ -265,6 +268,7 @@ fn run() -> Result<()> {
         ["cell", "down"] => cell::down(),
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
+        ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
         ["cell", "generate"] => cell::generate(false),
         ["cell", "generate", "--write"] => cell::generate(true),
         ["cell", "drill", rest @ ..] => {
@@ -309,6 +313,7 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
+        "cell-demo" => cell::scenario::ci(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -1391,7 +1396,9 @@ struct Finding {
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
 /// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
-/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
+/// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
+/// allowed in that test file alone, and any other value under the same setting there is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -1415,6 +1422,10 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let signer = "crates/mandate-objectstore/tests/sigv4.rs";
     let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
     let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
+    let process = "crates/mandate-api-server/tests/process.rs";
+    let ulid = concat!("01JB3K6F0C9R2V7N", "4M8Q1T5W3Y");
+    let setting = format!("        .env(\"MANDATE_API_WORKSPACE\", \"{ulid}\")");
+    let not_ulid = format!("        .env(\"MANDATE_API_ORG\", \"{page}\")");
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1447,6 +1458,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (bootstrap.to_owned(), fingerprint.clone(), None),
         ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
         (bootstrap.to_owned(), not_fingerprint, cloudflare),
+        (process.to_owned(), setting.clone(), None),
+        ("stray-process.rs".to_owned(), setting, generic),
+        (process.to_owned(), not_ulid, generic),
     ]
 }
 
@@ -9758,8 +9772,8 @@ mod tests {
 
     /// The policy as written puts the API contract, the audit reads, the dispatcher, the
     /// founder's CLI (Phase 1's control services) and the planned `cp-agent` on the workspace
-    /// side, and the agent process, the shell, the paper runner, the executor and its connectors
-    /// on the agent side; the workspace as built respects it, and a crossing added to it is found
+    /// side, and the agent process and the runtime process (E21-30, DEC-1012), the shell, the
+    /// paper runner, the executor and its connectors on the agent side; the workspace as built respects it, and a crossing added to it is found
     /// (E21-42, DEC-986).
     #[test]
     fn workspace_services_reach_no_agent_process_crate() -> Result<()> {
@@ -9781,6 +9795,7 @@ mod tests {
             [
                 "mandate-agentd",
                 "mandate-alpaca",
+                "mandate-daemon",
                 "mandate-executor",
                 "mandate-mcp",
                 "mandate-paper",
@@ -15213,10 +15228,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            12,
+            13,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, and `cell`"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
+             `cell-demo` (DEC-2002)"
         );
         for checkout in checkouts {
             assert!(
