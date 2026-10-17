@@ -2,7 +2,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
-import { type Backtest, type BacktestRead, type BacktestReport as Report, type Disclosure, type Metrics, OUTCOMES, servedBacktest } from "@/api/backtest";
+import { type Backtest, type BacktestRead, type BacktestReport as Report, DISCLOSURES, type Disclosure, type Metrics, OUTCOMES, servedBacktest } from "@/api/backtest";
 import type { ApiError } from "@/api/types";
 import { FixtureTag, Placeholder, type PlaceholderName } from "@/components/domain/placeholders";
 import { ScreenSkeleton, Section, WorkspaceGate } from "@/components/screens/common";
@@ -229,7 +229,7 @@ function Decisions({ report }: { report: Report }) {
       <CountTable caption="Outcomes" head="Outcome" entries={OUTCOMES.map((o) => [o, decisions.outcomes[o]])} />
       <CountTable caption="Gate reasons" head="Reason" entries={Object.entries(decisions.gate_reasons)} />
       <CountTable caption="Hold reasons" head="Reason" entries={Object.entries(decisions.hold_reasons)} />
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Each decision, scrolls sideways">
         <table className="w-full min-w-[48rem] text-sm">
           <caption className="mb-1 text-left text-h3">Each decision</caption>
           <thead>
@@ -244,7 +244,9 @@ function Decisions({ report }: { report: Report }) {
           <tbody>
             {decisions.rows.map((row, i) => (
               <tr key={i} className="border-t border-border/70">
-                <td className={`${TD} font-mono tabular`}>{row.date}</td>
+                <th scope="row" className={`${TD} text-left font-mono font-normal tabular`}>
+                  {row.date}
+                </th>
                 <td className={TD}>{row.purpose === null ? "hold" : <Code>{row.purpose}</Code>}</td>
                 <td className={TD}>
                   <Code>{row.outcome}</Code>
@@ -327,9 +329,18 @@ function Inputs({ report }: { report: Report }) {
   );
 }
 
-/** The legend on every report, first, then each other name the report carries, in its order. */
-function disclosuresOf(backtest: Backtest): Disclosure[] {
-  return [...new Set<Disclosure>(["LEGEND-HYPOTHETICAL", ...(backtest.report?.disclosures ?? [])])];
+/**
+ * The names shown, in DEC-1003's order, never fewer than DEC-1003 item 1 requires whatever the server
+ * lists (DEC-176: it only adds placeholders): the legend always; on a report, the limits note; on a
+ * research-agent version's report, the mechanics note. Any other name the report lists is shown too.
+ */
+export function disclosuresOf(backtest: Backtest): Disclosure[] {
+  const report = backtest.report;
+  const required = new Set<Disclosure>(["LEGEND-HYPOTHETICAL"]);
+  if (report) required.add("NOTE-BACKTEST-LIMITS");
+  if (report?.research_agent) required.add("NOTE-BACKTEST-MECHANICS");
+  for (const name of report?.disclosures ?? []) required.add(name);
+  return DISCLOSURES.filter((name) => required.has(name));
 }
 
 function TheRun({ backtest }: { backtest: Backtest }) {
@@ -412,13 +423,7 @@ function ReadFailed({ error }: { error: ApiError }) {
       <h1 className="text-h1">Backtest could not be read</h1>
       {issue ? (
         <p>
-          The answer could not be read: <Code>{issue.problem}</Code> at <Code>{issue.path === "" ? "/" : issue.path}</Code>
-          {issue.value !== null ? (
-            <>
-              , value <Code>{issue.value}</Code>
-            </>
-          ) : null}
-          . Nothing from it is shown.
+          The answer could not be read: <Code>{issue.problem}</Code> at <Code>{issue.path === "" ? "/" : issue.path}</Code>. Nothing from it is shown.
         </p>
       ) : (
         <p>
