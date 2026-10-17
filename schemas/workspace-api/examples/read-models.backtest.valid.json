@@ -49,7 +49,9 @@
         "single_instrument",
         "daily_decisions",
         "asks_unanswered_skip",
-        "participation_from_bar_volume"
+        "participation_from_bar_volume",
+        "marks_at_bar_close",
+        "trading_status_assumed"
       ],
       "/backtest/report/disclosures": [
         "LEGEND-HYPOTHETICAL",

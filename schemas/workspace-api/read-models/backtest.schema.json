@@ -379,6 +379,8 @@
               "daily_decisions",
               "asks_unanswered_skip",
               "participation_from_bar_volume",
+              "marks_at_bar_close",
+              "trading_status_assumed",
               "mechanics_not_thesis_quality"
             ]
           }
