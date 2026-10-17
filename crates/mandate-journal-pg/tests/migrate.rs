@@ -1,5 +1,5 @@
 //! The migration runner behind `mandate db migrate` (backlog E21-50, ADR-0001 ES-08, OPS-13,
-//! DEC-994): forward only, in order, each file once under the owner role, in one transaction that
+//! DEC-1180): forward only, in order, each file once under the owner role, in one transaction that
 //! a refusal or a failing file rolls back whole; a downgrade, a changed file, a ledger out of
 //! order and an unrecorded schema are refused. The ledger check is a pure function, fuzzed here
 //! against an oracle of its own; the rest runs against `MANDATE_PG_URL`, with migrations of the

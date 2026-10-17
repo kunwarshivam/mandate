@@ -1,7 +1,7 @@
 # The journal's migration command (E21-50, lane K0)
 
 - **Spec:** ADR-0001 ES-08; `docs/design/infrastructure.md` OPS-13 and §7.2; journal spec §6.1;
-  the managed-cells plan's lane K0; DEC-994.
+  the managed-cells plan's lane K0; DEC-1180.
 - **Code:** `crates/mandate-journal-pg/src/migrate.rs` (the runner: `migrations`, the pure ledger
   check `applied_prefix`, `migrate`, `migrate_dsn`, `migrate_known`; roles, schema, ledger and the
   `deploy.migrations` takeover in one locked transaction); `crates/mandate-cli/src/db.rs`

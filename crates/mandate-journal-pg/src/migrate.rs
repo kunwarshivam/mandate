@@ -1,6 +1,6 @@
 //! The journal schema's migration runner, which `mandate db migrate` runs as its own deploy step,
 //! before any process starts and never at start (ADR-0001 ES-08, infrastructure OPS-13 and §7.2,
-//! backlog E21-50, DEC-994). It is the one ledger of what is applied: it replaces the sqlx
+//! backlog E21-50, DEC-1180). It is the one ledger of what is applied: it replaces the sqlx
 //! embedded migrator, and takes over `deploy/bootstrap.sh`'s `deploy.migrations` rows the first
 //! time it runs on a host that script bootstrapped.
 //!

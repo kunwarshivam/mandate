@@ -120,7 +120,7 @@ SQL
 
 say "Migrations, in file order, each once, as mandate_journal_owner"
 # Once `mandate db migrate` has run here, its ledger journal.schema_migrations is the record and
-# it alone applies migrations (E21-50, DEC-994); this loop never runs beside it.
+# it alone applies migrations (E21-50, DEC-1180); this loop never runs beside it.
 if [ -n "$(query "$DB" "SELECT 1 FROM pg_tables WHERE schemaname = 'journal' AND tablename = 'schema_migrations'")" ]; then
   echo "journal.schema_migrations exists: \`mandate db migrate\` applies migrations on this host"
 else

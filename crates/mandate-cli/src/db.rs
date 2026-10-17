@@ -1,5 +1,5 @@
 //! `mandate db migrate` (backlog E21-50, ADR-0001 ES-08, infrastructure OPS-13 and §7.2,
-//! DEC-994): the deploy step that creates the journal's roles and schema and applies
+//! DEC-1180): the deploy step that creates the journal's roles and schema and applies
 //! `migrations/` forward only under the migration-owner role, before any process starts. A cell
 //! runs it as its migration Job; no process migrates at start, which the workspace's
 //! `disallowed-methods` lint enforces. Its whole interface is `--journal` and `--schema`, its

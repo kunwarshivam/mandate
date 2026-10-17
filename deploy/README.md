@@ -44,7 +44,7 @@ The founder runs everything here; agents never get host access. The order of the
   the bootstrap, since a migration is never edited. The command takes this table's rows over into
   its own ledger, `journal.schema_migrations`, applying nothing again, and from then on the
   bootstrap skips its migration loop and leaves migrations to the command (E21-50,
-  [DEC-994](../docs/project/decisions/DEC-994.md)). Run it as `postgres`:
+  [DEC-1180](../docs/project/decisions/DEC-1180.md)). Run it as `postgres`:
   `sudo -u postgres mandate db migrate --journal "postgresql://postgres@localhost/owlhead?host=/var/run/postgresql"`.
 - **Secrets are systemd credentials, never environment variables** (DEC-822 item 4). Exactly three
   kinds live outside the vault, each a root:root 0600 file under `/etc/owlhead/credentials/`

@@ -1,4 +1,4 @@
-//! `mandate db migrate` (backlog E21-50, ADR-0001 ES-08, OPS-13, DEC-994), run as the binary a
+//! `mandate db migrate` (backlog E21-50, ADR-0001 ES-08, OPS-13, DEC-1180), run as the binary a
 //! cell's migration Job runs: it creates the journal's roles and schema, applies `migrations/`
 //! forward only under the owner role, prints what it did, takes over a host `deploy/bootstrap.sh`
 //! migrated with each file applied once, refuses a downgrade or a changed file having changed
