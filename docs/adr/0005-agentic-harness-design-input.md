@@ -277,3 +277,45 @@ user-supplied code; perpetual delegations; the platform proposing `auto`.
 
 Risk: slices 2 to 4 are a lot for six days. The one-call run stays as the fallback mode, so the
 demo shows the agentic loop if slice 4 lands and the one-call run if it doesn't.
+
+## 16. Revisions from the research review (2026-10-17)
+
+The research memo (`0005-agentic-harness-research-memo.md`, beside this file) reviewed HybridAgent
+(arXiv 2610.18861) and about 20 other sources. The coordinator adopts these changes; each binds the
+spec work above, and where it conflicts with an earlier section, this section wins.
+
+1. **Demo path.** The guaranteed path for 10/26 is a read-and-think loop that ends in the existing
+   structured output (candidate theses and invalidations), judged by today's checks (§6.5). Action
+   tools with mid-run verdict feedback (§5) are the stretch goal, landing when ready.
+2. **Tool menus fixed per run kind, before anything untrusted is read.** The trigger chooses the
+   menu, and tools outside it are left out of the schema. A news- or event-triggered monitoring run
+   gets read and think tools plus risk-reducing actions only (`invalidate`, `propose_exit`). Only
+   scheduled ideation runs may propose a thesis or entry. Owner runs get what the owner's request
+   needs, confirmed per HI-26.
+3. **Provenance.** Every action, and every text shown to the owner, records which untrusted tool
+   results were in context when it was written ("written after reading: [result ids]"), so a
+   reviewer and the explain runs can see what may have steered it.
+4. **The platform computes corroboration** from its own reads, independent of what the model chose
+   to read (HI-18 extended).
+5. **Spotlighting.** Untrusted tool results are delimited and marked as data in every prompt. This
+   is a defence in depth only, never a control the invariants rest on.
+6. **Refusals** come back actionable but never reveal a limit value beyond what `mandate.read`
+   shows. A repeated identical denial ends the run.
+7. **Pin and record** the reasoning mode and effort, the sampling parameters, and the OpenRouter
+   provider, with provider fallbacks off (DEC-67: no substitution).
+8. **Run summaries are structured**, typed fields not free prose, and the next run treats them as
+   untrusted input.
+9. **Safety is tested at pass^k against an adaptive attacker**: a compromised-model double that
+   picks its tool calls from the run so far, not only random ones.
+10. **Scenario runs with a live model are graded on mechanics only**, never on returns: look-ahead
+    bias makes backtested LLM returns meaningless (DEC-99 stands).
+11. **Subruns**, when built after the demo, get read and think tools only and return a typed summary.
+12. **An optional monitor model that can only downgrade** (AUTO to ASK), journaled like any model
+    output; a missing monitor means no downgrade. After the demo.
+13. **A stable prompt prefix**: pinned system prompt, then tool schemas, then the brief, then
+    memory, then the trigger, so provider prompt caching cuts the cost of multi-turn runs.
+14. **Never adopted**: multi-agent bull/bear debate as risk management, code-execution actions, the
+    model choosing weights, allocations, sizes or leverage, self-rewriting prompts, and RL or
+    fine-tuning on our own outcomes. HybridAgent's latent reasoning is out while we use hosted
+    models, and out as audit evidence in any case: hidden reasoning is never evidence, and only
+    text actions and records count.
