@@ -271,7 +271,7 @@ existing ones. So:
   reservation is appended before the first attempt leaves the deployment, so a crash cannot lose a
   cost, and spend per agent and per workspace folds from that stream.
 - **The deployment's cap folds from the deployment meter stream** (`dmeter:{deployment_id}`,
-  [DEC-2204](../project/decisions/DEC-2204.md), journal spec §9.19), written by the deployment's one
+  [DEC-2207](../project/decisions/DEC-2207.md), journal spec §9.19), written by the deployment's one
   meter writer: a copy of every workspace's reservations and settlements. The workspace's holder
   checks its own caps and then asks the deployment's writer to reserve; that writer checks the
   deployment cap and appends in one step, and only then does the holder append to the workspace
@@ -293,7 +293,7 @@ existing ones. So:
   entry: a workspace append that fails after the deployment's reservation was appended. That
   reservation is an **orphan**: it stays open, counted at its maximum against the deployment's cap
   and never settled, so the deployment over-counts and never under-counts, and the operator is
-  alerted (DEC-2204 item 4).
+  alerted (DEC-2207 item 4).
 - **Hand-over.** A new holder takes the next epoch and folds the stream before it reserves. A
   reservation the old holder left unsettled stays counted (§7.3).
 - **A caller can read its own reservations** in the meter stream (agent harness spec §10.1 ask 2),

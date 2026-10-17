@@ -64,6 +64,8 @@
 #   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
+#   7  also mandate-api-server, the workspace API server (E21-31, DEC-978): above the journal's
+#      Postgres store and the API's contract, and kept from the runtime, executor and connectors
 #   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
 #      deleted with the tracer's signal path, DEC-475 item 6): the lowest layer that sees the
 #      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
@@ -242,12 +244,20 @@ pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-runtime", "mandate-executor", "mandate-mcp", "mandate-shell", "mandate-cli", "mandate-paper", "mandate-alpaca", "mandate-robinhood"]
 
+# The seal: only the workspace store and test support build memberships and identity sessions
+# (DEC-642 items 4 and 7). `mandate-api-server` is that store for a workspace deployment: it folds
+# the control stream's membership records per request (E21-31, DEC-978 item 8).
 [crates.mandate-identity-seal]
 layer = 0
 safety_critical = true
 pure = true
 allowed_external = []
-allowed_dependents = ["mandate-authn", "mandate-identity", "mandate-identity-testkit"]
+allowed_dependents = [
+    "mandate-api-server",
+    "mandate-authn",
+    "mandate-identity",
+    "mandate-identity-testkit",
+]
 
 [crates.mandate-tenant]
 layer = 0
@@ -556,6 +566,16 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The shell's research driver (DEC-996 item 2, DEC-2204): the trigger queue and the step machine
+# around the core's handle_research, pure, with the journal and the worker handed in. Above
+# mandate-runtime, whose research loop it drives, and below mandate-shell, which wires it into its
+# run path after R0.
+[crates.mandate-research-driver]
+layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-shell]
 layer = 8
 safety_critical = true
@@ -589,6 +609,26 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
 
+# The workspace API server (E21-31, DEC-978): the one door into a workspace deployment for people
+# and their tools. It records owner input on the control stream and serves reads from the journal;
+# it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
+# spec §1.4, `AGENTS.md` rule 12), so it may never reach the runtime, the executor, a connector,
+# the shell, the paper adapter, or the founder's CLI.
+[crates.mandate-api-server]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
+forbidden_internal = [
+    "mandate-alpaca",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+]
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over the
 # Postgres journal, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker
