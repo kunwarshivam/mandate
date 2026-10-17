@@ -45,18 +45,18 @@ interface Call {
 }
 
 /** A session keeper that records what the runtime asked of it. */
-function fakeSession(opens: SessionState[] = ["open"]) {
+function fakeSession(opens: SessionState[] = ["open"], refreshes: SessionState[] = []) {
   const asked: string[] = [];
   const session: SessionKeeper = {
     open: async () => (asked.push("open"), opens.shift() ?? "open"),
-    refresh: async () => (asked.push("refresh"), "open"),
+    refresh: async () => (asked.push("refresh"), refreshes.shift() ?? "open"),
     signOut: async () => (asked.push("signOut"), "signed_out"),
     guard: (call) => (asked.push("guard"), call()),
   };
   return { session, asked };
 }
 
-function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch, session?: SessionKeeper) {
+function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch, session?: SessionKeeper, timing: { refreshMs?: number; keepAliveMs?: number } = {}) {
   const server = createMockServer({ workspaceId: WS, scenario });
   const calls: Call[] = [];
   const recordingFetch: Fetch = (input, init) => {
@@ -64,7 +64,7 @@ function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch,
     return server.fetch(input, init);
   };
   render(
-    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={wrap ? wrap(recordingFetch) : recordingFetch} session={session} refreshMs={60_000} statusPollMs={5} retryMs={5}>
+    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={wrap ? wrap(recordingFetch) : recordingFetch} session={session} refreshMs={timing.refreshMs ?? 60_000} keepAliveMs={timing.keepAliveMs} statusPollMs={5} retryMs={5}>
       <Probe />
       <WorkspaceGate>
         <p data-testid="gated">workspace</p>
@@ -296,5 +296,20 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     });
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(new URL(posts()[0].url).pathname).toBe(`/v1/workspaces/${WS}/kill-switch`);
+  });
+
+  it("tries to open the session again on the next read after a refusal or no answer, and shows the workspace once it opens", async () => {
+    const { session, asked } = fakeSession(["unreachable", "refused", "open"]);
+    mount("approvals", undefined, session, { refreshMs: 20 });
+    await waitFor(() => expect(asked.filter((a) => a === "open")).toHaveLength(3));
+    await ready();
+  });
+
+  it("keeps the session alive after a refresh that got no answer, and tries again on the next beat", async () => {
+    const { session, asked } = fakeSession(["open"], ["unreachable", "unreachable", "open"]);
+    mount("approvals", undefined, session, { keepAliveMs: 15 });
+    await ready();
+    await waitFor(() => expect(asked.filter((a) => a === "refresh").length).toBeGreaterThanOrEqual(3));
+    expect(current().ws.status).toBe("ready");
   });
 });

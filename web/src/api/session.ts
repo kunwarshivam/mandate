@@ -11,7 +11,11 @@ import type { Fetch } from "./client";
 /** What the sign-in client gives: its access token, none (signed out), or `unreachable` (a provider outage). */
 export type AccessToken = string | null | "unreachable";
 
-/** How a session call ended. `outage`: the session keeps only pause and the kill switch (§3.11 item 6). */
+/**
+ * How a session call ended. `outage`: the session keeps only pause and the kill switch (§3.11 item 6).
+ * `refused`: the API's one 401 or a 403, so the token or the call was not accepted. `unreachable`: no
+ * answer, or any other status (a deploy, a drain's `busy`, a 5xx), which the caller tries again.
+ */
 export type SessionState = "open" | "outage" | "signed_out" | "refused" | "unreachable";
 
 /** The part of the Web Locks API the keeper uses (`navigator.locks`). */
@@ -37,6 +41,9 @@ export interface SessionKeeper {
   /** Runs `call` while no refresh is in flight in any tab. */
   guard<T>(call: () => Promise<T>): Promise<T>;
 }
+
+/** How long a session call may take before it counts as unanswered, so a hung call never holds the lock. */
+export const SESSION_CALL_TIMEOUT_MS = 10_000;
 
 /** Refresh one minute before the five-minute access lifetime ends. */
 export const REFRESH_EVERY_MS = 4 * 60_000;
@@ -76,8 +83,10 @@ export function createSessionKeeper(options: SessionOptions): SessionKeeper {
         credentials: "include",
         headers: { "Content-Type": "application/json", "X-Mandate-Request": "1" },
         ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(SESSION_CALL_TIMEOUT_MS),
       });
-      return response.status === 204 ? "ok" : "refused";
+      if (response.status === 204) return "ok";
+      return response.status === 401 || response.status === 403 ? "refused" : "unreachable";
     } catch {
       return "unreachable";
     }

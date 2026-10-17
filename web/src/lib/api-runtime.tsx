@@ -47,6 +47,7 @@ export function ApiRuntimeProvider({
   statusPollMs = 1000,
   retryMs = 1000,
   session,
+  keepAliveMs = REFRESH_EVERY_MS,
 }: {
   source: Pick<ApiSource, "origin" | "workspaceId">;
   children: ReactNode;
@@ -56,6 +57,7 @@ export function ApiRuntimeProvider({
   retryMs?: number;
   /** The API session (§3.11 items 5 and 6); none in the e2e build, whose mock API reads no cookie. */
   session?: SessionKeeper;
+  keepAliveMs?: number;
 }) {
   /** Reads wait while a refresh rotates the cookie; commands never wait (API-7). */
   const client = useMemo(() => {
@@ -86,20 +88,24 @@ export function ApiRuntimeProvider({
   const mounted = useRef(true);
 
   /** Opens the API session; a workspace that cannot be read for want of one says so and shows nothing. */
-  const openSession = useCallback(async (): Promise<boolean> => {
-    if (!session) return true;
-    const state = await session.open();
-    signedIn.current = state;
-    return state === "open";
+  const opening = useRef<Promise<boolean> | null>(null);
+  const openSession = useCallback((): Promise<boolean> => {
+    if (!session) return Promise.resolve(true);
+    opening.current ??= session.open().then((state) => {
+      signedIn.current = state;
+      opening.current = null;
+      return state === "open";
+    });
+    return opening.current;
   }, [session]);
 
   const refresh = useCallback(async () => {
     reads.current += 1;
     const read = reads.current;
-    if (signedIn.current === null) await openSession();
-    if (signedIn.current === "signed_out" || signedIn.current === "refused") {
+    if (signedIn.current !== "open" && signedIn.current !== "outage") await openSession();
+    if (signedIn.current !== "open" && signedIn.current !== "outage") {
       if (!mounted.current || read !== reads.current) return;
-      wsRef.current = emptyWorkspace("signed_out", nowRef.current);
+      wsRef.current = emptyWorkspace(signedIn.current === "unreachable" ? "unreachable" : "signed_out", nowRef.current);
       setWs(wsRef.current);
       return;
     }
@@ -128,8 +134,9 @@ export function ApiRuntimeProvider({
     const poll = window.setInterval(() => void refresh(), refreshMs);
     const keep = session
       ? window.setInterval(() => {
-          if (signedIn.current === "open" || signedIn.current === "outage") void session.refresh().then((state) => (signedIn.current = state));
-        }, REFRESH_EVERY_MS)
+          if (signedIn.current === "open" || signedIn.current === "outage" || signedIn.current === "unreachable")
+            void session.refresh().then((state) => (signedIn.current = state === "unreachable" && signedIn.current !== "unreachable" ? signedIn.current : state));
+        }, keepAliveMs)
       : null;
     const clock = window.setInterval(() => {
       const base = served.current;
@@ -143,7 +150,7 @@ export function ApiRuntimeProvider({
       if (keep !== null) window.clearInterval(keep);
       window.clearInterval(clock);
     };
-  }, [refresh, refreshMs, session]);
+  }, [refresh, refreshMs, session, keepAliveMs]);
 
   /** Sends one prepared gesture until the API answers, with the same key and body each time (API-4, API-13). */
   const deliver = useCallback(

@@ -13,16 +13,19 @@ interface Call {
 }
 
 /** A reader-writer lock, as `navigator.locks` grants one name: many shared holders or one exclusive. */
-function fakeLocks(): Locks & { names: string[] } {
+function fakeLocks(): Locks & { names: string[]; modes: string[] } {
   let shared = 0;
   let exclusive = false;
   const waiting: Array<() => void> = [];
   const wake = () => waiting.splice(0).forEach((w) => w());
   const names: string[] = [];
+  const modes: string[] = [];
   return {
     names,
+    modes,
     async request(name, { mode }, run) {
       names.push(name);
+      modes.push(mode);
       const free = () => (mode === "shared" ? !exclusive : !exclusive && shared === 0);
       while (!free()) await new Promise<void>((r) => waiting.push(r));
       if (mode === "shared") shared += 1;
@@ -48,7 +51,7 @@ function server(answer: (call: Call) => Response | Promise<Response> = () => new
   return { fetch, calls };
 }
 
-function keeper(token: AccessToken, answer?: Parameters<typeof server>[0], extra: { locks?: Locks; latest?: number; now?: number } = {}) {
+function keeper(token: AccessToken, answer?: Parameters<typeof server>[0], extra: { locks?: Locks; latest?: number; now?: number; deaf?: boolean } = {}) {
   const { fetch, calls } = server(answer);
   let latest = extra.latest ?? 0;
   const posted: number[] = [];
@@ -57,7 +60,7 @@ function keeper(token: AccessToken, answer?: Parameters<typeof server>[0], extra
     fetch,
     accessToken: async () => token,
     locks: extra.locks,
-    channel: { post: (at) => (posted.push(at), (latest = at)), latest: () => latest },
+    channel: { post: (at) => (posted.push(at), extra.deaf ? latest : (latest = at)), latest: () => latest },
     now: () => extra.now ?? 1_000_000,
   });
   return { session, calls, posted };
@@ -74,8 +77,9 @@ describe("the API session (workspace API spec §3.11 items 5 and 6)", () => {
     expect(calls[0].headers.has("Authorization")).toBe(false);
   });
 
-  it("is refused for anything but a 204, and sends nothing without a token", async () => {
-    for (const status of [401, 403, 500]) expect(await keeper("t", () => new Response(null, { status })).session.open(), String(status)).toBe("refused");
+  it("is refused on the one 401 or a 403, unanswered on any other status, and sends nothing without a token", async () => {
+    for (const status of [401, 403]) expect(await keeper("t", () => new Response(null, { status })).session.open(), String(status)).toBe("refused");
+    for (const status of [200, 429, 500, 503]) expect(await keeper("t", () => new Response(null, { status })).session.open(), String(status)).toBe("unreachable");
     const signedOut = keeper(null);
     expect(await signedOut.session.open()).toBe("signed_out");
     expect(signedOut.calls).toHaveLength(0);
@@ -103,18 +107,41 @@ describe("the API session (workspace API spec §3.11 items 5 and 6)", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("serializes refreshes across tabs under one exclusive lock, so a rotated cookie is never sent twice", async () => {
+  it("serializes refreshes under one exclusive lock, so a second never starts before the first's rotated cookie is set", async () => {
     const locks = fakeLocks();
-    let release: () => void = () => {};
-    const slow = new Promise<void>((r) => (release = r));
-    const { session, calls } = keeper("fresh", async () => (await slow, new Response(null, { status: 204 })), { locks });
+    let inFlight = 0;
+    let most = 0;
+    const releases: Array<() => void> = [];
+    const answer = async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise<void>((r) => releases.push(r));
+      inFlight -= 1;
+      return new Response(null, { status: 204 });
+    };
+    const { session, calls } = keeper("fresh", answer, { locks, deaf: true });
     const first = session.refresh();
     const second = session.refresh();
-    await Promise.resolve();
-    release();
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(calls).toHaveLength(1);
+    releases[0]();
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    releases[1]();
     expect(await Promise.all([first, second])).toEqual(["open", "open"]);
-    expect(calls.filter((c) => c.url.endsWith("/refresh"))).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    expect(most).toBe(1);
+  });
+
+  it("takes the lock exclusive to open, refresh and sign out, and shared to read", async () => {
+    const locks = fakeLocks();
+    const { session } = keeper("fresh", undefined, { locks, deaf: true });
+    await session.open();
+    await session.refresh();
+    await session.signOut();
+    await session.guard(async () => null);
     expect(locks.names.every((n) => n === SESSION_LOCK)).toBe(true);
+    expect(locks.modes).toEqual(["exclusive", "exclusive", "exclusive", "shared"]);
   });
 
   it("holds reads back while a refresh is in flight, and lets them through together otherwise", async () => {
