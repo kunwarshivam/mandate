@@ -419,14 +419,13 @@ fn create(f: &Fixture, cookie: &str, key: &str, name: &str) -> Reply {
     )
 }
 
-/// §5.1's confirm body for `name`, with `digest` as the screen digest shown.
-fn confirm_body(name: &str, digest: &str, step_up: &str) -> String {
+/// §5.1's confirm body, with `digest` as the screen digest shown.
+fn confirm_body(digest: &str, step_up: &str) -> String {
     let paths: Vec<String> = PATHS.iter().map(|p| format!("\"{p}\"")).collect();
     format!(
         r#"{{"agent_id":null,"base_version":null,"confirmed_paths":[{}],"warnings_acknowledged":["W-002"],"classification_shown":"risk_increasing","screen_digest":"{digest}","record":{RECORD},"step_up":{step_up}}}"#,
         paths.join(",")
     )
-    .replace("@V", &version(name))
 }
 
 /// The screen digest of a new mandate's version, which warns W-002 (its one warning): the SHA-256 of the canonical
@@ -469,7 +468,7 @@ fn confirmed(f: &Fixture, cookie: &str, name: &str) {
         cookie,
         KEY,
         name,
-        &confirm_body(name, &screen_digest(name), EVIDENCE),
+        &confirm_body(&screen_digest(name), EVIDENCE),
     );
     assert_eq!(
         reply.status,
@@ -731,15 +730,9 @@ fn a_confirm_is_refused_for_step_up_until_e9_4_binds_the_port() {
     let cookie = signed_in(&f, alice());
     create(&f, &cookie, KEY, "v1");
     let digest = screen_digest("v1");
-    let without = confirm(&f, &cookie, KEY, "v1", &confirm_body("v1", &digest, "null"));
+    let without = confirm(&f, &cookie, KEY, "v1", &confirm_body(&digest, "null"));
     refused(&without, 401, ProblemCode::StepUpRequired);
-    let with = confirm(
-        &f,
-        &cookie,
-        KEY,
-        "v1",
-        &confirm_body("v1", &digest, EVIDENCE),
-    );
+    let with = confirm(&f, &cookie, KEY, "v1", &confirm_body(&digest, EVIDENCE));
     refused(&with, 401, ProblemCode::StepUpMissing);
     assert!(events(&f, "MandateConfirmed").is_empty());
 }
@@ -755,7 +748,7 @@ fn a_verified_confirm_commits_mandate_confirmed_bound_to_its_digest() {
         &cookie,
         KEY,
         "v1",
-        &confirm_body("v1", &screen_digest("v1"), EVIDENCE),
+        &confirm_body(&screen_digest("v1"), EVIDENCE),
     );
     assert_eq!(
         reply.status,
@@ -813,7 +806,7 @@ fn a_verified_confirm_commits_mandate_confirmed_bound_to_its_digest() {
         &cookie,
         KEY,
         "v1",
-        &confirm_body("v1", &screen_digest("v1"), EVIDENCE),
+        &confirm_body(&screen_digest("v1"), EVIDENCE),
     );
     assert_eq!(again.status, 202, "a repeat replays");
     assert_eq!(
@@ -826,7 +819,7 @@ fn a_verified_confirm_commits_mandate_confirmed_bound_to_its_digest() {
         &cookie,
         KEY_2,
         "v1",
-        &confirm_body("v1", &screen_digest("v1"), EVIDENCE),
+        &confirm_body(&screen_digest("v1"), EVIDENCE),
     );
     assert_eq!(twice.status, 200, "already the last confirmed version");
     assert_eq!(events(&f, "MandateConfirmed").len(), 1);
@@ -838,7 +831,7 @@ fn a_confirm_is_judged_in_section_5_1s_order() {
     let cookie = signed_in(&f, alice());
     create(&f, &cookie, KEY, "v1");
     let digest = screen_digest("v1");
-    let good = confirm_body("v1", &digest, EVIDENCE);
+    let good = confirm_body(&digest, EVIDENCE);
     let agent = good.replace(r#""agent_id":null"#, r#""agent_id":"agt_a""#);
     assert_eq!(
         violations(&confirm(&f, &cookie, KEY_2, "v1", &agent)),
@@ -878,6 +871,23 @@ fn a_confirm_is_judged_in_section_5_1s_order() {
         &confirm(&f, &cookie, KEY_2, "v1", &moved),
         409,
         ProblemCode::ClassificationChanged,
+    );
+    let extra_ack = good.replace(r#"["W-002"]"#, r#"["W-002","W-001"]"#);
+    assert_eq!(
+        violations(&confirm(&f, &cookie, KEY_2, "v1", &extra_ack)),
+        vec![(
+            "/warnings_acknowledged".to_owned(),
+            "unacknowledged".to_owned()
+        )],
+        "a warning the screen never showed is not acknowledged"
+    );
+    let twice = good.replace(r#"["W-002"]"#, r#"["W-002","W-002"]"#);
+    assert_eq!(
+        violations(&confirm(&f, &cookie, KEY_2, "v1", &twice)),
+        vec![(
+            "/warnings_acknowledged".to_owned(),
+            "unacknowledged".to_owned()
+        )]
     );
     let unacknowledged = good.replace(r#"["W-002"]"#, "[]");
     assert_eq!(
@@ -977,6 +987,11 @@ fn a_verified_deploy_commits_agent_deployed_bound_to_its_version() {
 
     let again = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
     assert_eq!(again.status, 202, "a repeat replays");
+    assert_eq!(
+        f.asked.0.lock().expect("unpoisoned").len(),
+        1,
+        "before step-up is judged again"
+    );
     let same = deploy(&f, &cookie, KEY_2, &deploy_body("agt_a", "v1", EVIDENCE));
     assert_eq!(same.status, 200, "the agent already runs this version");
     assert_eq!(events(&f, "AgentDeployed").len(), 1);
@@ -1209,7 +1224,12 @@ fn a_deploy_of_a_live_or_foreign_environment_version_is_refused() {
     seed_version(&f, "v1");
     workspace_in(&f, "live");
     assert_eq!(
-        violations(&deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE))),
+        violations(&deploy(
+            &f,
+            &cookie,
+            KEY,
+            &deploy_body("agt_a", "v1", EVIDENCE)
+        )),
         vec![("/mandate_version".to_owned(), "environment".to_owned())]
     );
     assert!(events(&f, "AgentDeployed").is_empty());
@@ -1232,5 +1252,105 @@ fn a_deploy_records_the_backtest_shown() {
     assert_eq!(
         violations(&deploy(&f, &cookie, KEY_2, &malformed)),
         vec![("/backtest_id".to_owned(), "non_canonical".to_owned())]
+    );
+}
+
+#[test]
+fn a_different_body_under_a_used_key_is_a_conflict() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    let other = confirm_body(&screen_digest("v1"), EVIDENCE)
+        .replace(RECORD, &RECORD.replace("abab", "efef"));
+    refused(
+        &confirm(&f, &cookie, KEY, "v1", &other),
+        409,
+        ProblemCode::IdempotencyConflict,
+    );
+    assert_eq!(f.asked.0.lock().expect("unpoisoned").len(), 1);
+    assert_eq!(events(&f, "MandateConfirmed").len(), 1);
+}
+
+#[test]
+fn another_agents_stop_leaves_this_agents_deployment_active() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    seed_control(
+        &f,
+        "AgentDeployed",
+        &format!(
+            r#"{{"agent_id":"agt_a","mandate_version":"{}","record_ref":"{}"}}"#,
+            version("v1"),
+            reference("{}")
+        ),
+    );
+    seed_control(
+        &f,
+        "AgentStopped",
+        &format!(
+            r#"{{"agent_id":"agt_b","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}}"#
+        ),
+    );
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    assert_eq!(
+        reply.status,
+        200,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+}
+
+#[test]
+fn only_a_snapshot_after_the_last_revocation_counts() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    let revoked = seed_control(
+        &f,
+        "ConnectionRevoked",
+        &format!(r#"{{"connection_id":"{CONNECTION}"}}"#),
+    );
+    let snapshot_at = |recorded_at: &str| {
+        let mut snapshot = row(
+            &account(),
+            2,
+            "AccountSnapshotRecorded",
+            r#"{"equity":"25000"}"#,
+        );
+        snapshot.recorded_at = recorded_at.to_owned();
+        f.journal
+            .streams
+            .lock()
+            .expect("unpoisoned")
+            .insert(account(), vec![snapshot]);
+    };
+    snapshot_at(&revoked.recorded_at);
+    let same_instant = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    let codes: Vec<String> = violations(&same_instant)
+        .into_iter()
+        .map(|(_, c)| c)
+        .collect();
+    assert!(codes.contains(&"V-002".to_owned()), "{codes:?}");
+    snapshot_at("2026-10-17T11:00:00.000000000Z");
+    let later = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    let codes: Vec<String> = violations(&later).into_iter().map(|(_, c)| c).collect();
+    assert!(
+        !codes.contains(&"V-002".to_owned()),
+        "a later snapshot counts; the revoked connection fails on its own rules: {codes:?}"
+    );
+}
+
+#[test]
+fn another_connections_records_leave_the_documents_connection_unrecorded() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_control(&f, "ConnectionRevoked", r#"{"connection_id":"conn_other"}"#);
+    let reply = create(&f, &cookie, KEY, "v1");
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
     );
 }
