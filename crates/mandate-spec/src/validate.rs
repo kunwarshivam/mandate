@@ -538,8 +538,11 @@ fn stop_limit_offset<'m>(
 /// Whether a stop-limit protects any class the universe allows (V-008, W-002; DEC-539 item 2): one
 /// in `protected`, or, with the profile absent, any class at all.
 fn stop_limit_protected(mandate: &Mandate, protected: Option<&BTreeSet<AssetClass>>) -> bool {
-    let _ = protected;
-    mandate.universe.asset_classes.contains(&AssetClass::Crypto)
+    let allowed = &mandate.universe.asset_classes;
+    match protected {
+        Some(classes) => allowed.iter().any(|class| classes.contains(class)),
+        None => !allowed.is_empty(),
+    }
 }
 
 fn flag(violations: &mut BTreeSet<Violation>, broken: bool, violation: Violation) {

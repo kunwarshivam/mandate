@@ -782,8 +782,11 @@ pub fn unrecorded_stop_limit_asset_classes(mandate: &Mandate) -> Option<BTreeSet
 /// too. Any other broker is `None`, the absent profile, under which every class counts (fail closed,
 /// mandate spec §4).
 pub fn stop_limit_asset_classes(broker: &str) -> Option<BTreeSet<AssetClass>> {
-    let _ = broker;
-    None
+    match broker {
+        "alpaca" => Some(BTreeSet::from([AssetClass::Crypto])),
+        "robinhood" => Some(BTreeSet::from([AssetClass::Crypto, AssetClass::UsEquity])),
+        _ => None,
+    }
 }
 
 /// Whether `retired_on` is at most `days` days before `today`, or after it. A date `Date` cannot step
