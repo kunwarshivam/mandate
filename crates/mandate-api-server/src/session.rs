@@ -163,7 +163,8 @@ impl Sessions {
     }
 
     /// Opens a session for `principal`, whose subject's link digest is `subject`, at `now`, ending
-    /// the session `replaced` names, if any. Everything that can fail is done before the store
+    /// the session `replaced` names, if any: its tag verifying shows the server issued it to this
+    /// browser, current or rotated. Everything that can fail is done before the store
     /// changes, so a refused open ends no session.
     ///
     /// # Errors
@@ -188,13 +189,8 @@ impl Sessions {
             .entries
             .retain(|_, entry| live(entry, now.secs(), idle_s));
         let replaced = replaced
-            .filter(|(id, secret)| {
-                store
-                    .entries
-                    .get(id)
-                    .is_some_and(|entry| holds(entry, secret) || rotated(entry, secret))
-            })
-            .map(|(id, _)| id);
+            .map(|(id, _)| id)
+            .filter(|id| store.entries.contains_key(id));
         let mut held: Vec<(u64, Id)> = store
             .entries
             .iter()
@@ -292,8 +288,9 @@ impl Sessions {
     /// Admits `request` on the session `cookie` names at `now`. A pause or kill switch on a full
     /// session whose access lapsed is served after an outage refresh the server records itself
     /// (§3.11 item 6); that refresh needs no randomness and the store's lock is recovered if
-    /// poisoned, so neither can refuse risk reduction. A rotated-away secret presented again ends
-    /// the session, as reuse.
+    /// poisoned, so neither can refuse risk reduction. A cookie whose tag verifies but whose
+    /// secret is not the current one can only be one this session rotated away (the tag proves the
+    /// server issued that id and secret together): it ends the session, as reuse.
     ///
     /// # Errors
     /// [`Unauthenticated`] for every refusal.
@@ -307,18 +304,15 @@ impl Sessions {
         let mut store = self.store();
         let entry = store.entries.get_mut(&id).ok_or(Unauthenticated)?;
         if !holds(entry, &secret) {
-            if rotated(entry, &secret) {
-                store.entries.remove(&id);
-            }
+            store.entries.remove(&id);
             return Err(Unauthenticated);
         }
         let mut admitted = entry.record.authorize(request, now);
         if admitted == Err(SessionRefusal::AccessExpired) && request != Request::Other {
-            let unused = self.unused_secret(&id, &secret);
             let outage = entry.record.refresh(
                 &RefreshSecret(secret),
                 ProviderAnswer::Unreachable,
-                &RefreshSecret(unused),
+                &RefreshSecret(OUTAGE_NEXT),
                 now,
             );
             if outage == Ok(Refreshed::Outage) {
@@ -373,18 +367,6 @@ impl Sessions {
         Ok(out)
     }
 
-    /// The `next` secret an outage refresh requires but never installs (an outage keeps the
-    /// current secret): derived under the session key, so it needs no randomness.
-    fn unused_secret(&self, id: &Id, secret: &Secret) -> Secret {
-        let mut input = Vec::new();
-        input.extend_from_slice(OUTAGE_LABEL);
-        input.extend_from_slice(id);
-        input.extend_from_slice(secret);
-        let mut out = [0; SECRET_BYTES];
-        out.copy_from_slice(hmac::sign(&self.key, &input).as_ref());
-        out
-    }
-
     fn encode(&self, id: &Id, secret: &Secret) -> Cookie {
         let mut bytes = Vec::with_capacity(COOKIE_HEX / 2);
         bytes.extend_from_slice(id);
@@ -417,8 +399,10 @@ impl Sessions {
     }
 }
 
-/// The label the unused outage secret is derived under, apart from every cookie tag.
-const OUTAGE_LABEL: &[u8] = b"mandate-api-server outage refresh";
+/// The `next` secret an outage refresh requires and never installs: an outage keeps the current
+/// secret, so this one is never presented and needs no randomness, which could otherwise fail and
+/// refuse risk reduction.
+const OUTAGE_NEXT: Secret = [0; SECRET_BYTES];
 
 /// Whether the session can still admit anything at `now`: before its absolute end, and, while it
 /// is full, before its idle timeout from its last admitted request or granted refresh. An outage
@@ -427,11 +411,6 @@ fn live(entry: &Entry, now: i64, idle_s: i64) -> bool {
     let idle =
         entry.record.reach() == Reach::Full && now >= entry.last_active.saturating_add(idle_s);
     now < entry.absolute_until && !idle && entry.record.ended().is_none()
-}
-
-/// Whether `secret` is one the session rotated away.
-fn rotated(entry: &Entry, secret: &Secret) -> bool {
-    entry.record.rotated_digests().contains(&digest_of(secret))
 }
 
 /// The status a failed refresh is recorded with: an answer that is neither a grant nor an outage.
