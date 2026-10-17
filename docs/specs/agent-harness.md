@@ -845,9 +845,11 @@ the journal, a model may phrase the answer but adds no fact, and a fact the jour
 - **It reuses the research loop's machinery** (E19-13): the same gateway, the same turn and tool-call
   contract, the same journal-before-use ordering. It has its own registry entry, its own tools, its
   own bounds, and its own purpose, `explain` ([inference spec §3.1](inference.md#31-request)).
-- **It is not the chat thread's action path.** A question never becomes an owner request or a draft
-  version. The chat thread's cards (workspace API §4.6, DEC-192) stay deterministic and separate; the
-  explainer's answer has no member that can hold an action (API-18).
+- **In slice 1 it is not the chat thread's action path.** A question never becomes an owner request
+  or a draft version. The chat thread's cards (workspace API §4.6, DEC-192) stay deterministic and
+  separate; the explainer's answer has no member that can hold an action (API-18). Slice 2 (§15.12,
+  planned) lets a chat message lead to a proposal card, which deterministic code builds and only the
+  owner's own separate call can send.
 - **It is not advice.** It says what the agent did and why, from the record. It never recommends a
   trade, an answer to an approval, a mandate change, or any other action to the owner
   (compliance doc; `AGENTS.md` "Do not"). Its disclaimer is the founder's (§15.8).
@@ -869,7 +871,7 @@ turn, an arbitrary schema-valid tool request or answer chosen by the test.
 | EX-4 | **Every claim cites a record it read.** An answer is shown only if every segment cites at least one record, and every cited record was returned by a tool call of the same explanation (§15.5). An answer that fails either is not shown | Property with a compromised model that cites random ids, ids from other explanations, and nothing: no answer with an uncited segment or an unread citation reaches `answered`; an oracle that re-reads the tool results from the record's artifacts recomputes the readable set |
 | EX-5 | **Not advice.** No shown answer contains advice language (§15.5): a recommendation to buy, sell, hold, approve, skip, or change the mandate, a price target, or a likely profit (DEC-126). The disclaimer placeholder accompanies every shown answer (§15.8) | Property: a compromised model whose answers embed each phrase of the fixture list, in any case and spacing; none reaches `answered`. A second list of neutral sentences ("the agent bought", "the gate refused") all pass, so the check is not vacuous |
 | EX-6 | **Least context.** No prompt holds a quantity, price, dollar figure, account reference, broker account number, credential, personal data, or another workspace's data. Tool results reach the model through the redacted projection of §15.4; the numbers are shown to the owner from the cited records by deterministic code (`AGENTS.md` "Do not": no order details or positions leave the workspace deployment) | Canary test: plant canary quantities, prices, dollar amounts, account refs, and secrets in every record the tools read; scan every prompt artifact for them. The gateway's guard (inference §8.3) is the second layer |
-| EX-7 | **Bounded.** An explanation makes at most §15.7's turns and tool calls, reads at most its result caps, and ends within its wall time. Its spend counts against the workspace caps and the explainer's own caps before any byte leaves (INF-7). A bound reached ends the explanation with no model text shown | Property over random compromised-model behaviour (tool requests every turn, oversize requests, slow turns): an independent count over the record's `turns` and `tool_calls` never exceeds the bounds; the meter fold never exceeds a cap |
+| EX-7 | **Bounded.** An explanation makes at most §15.7's turns and tool calls, reads at most its result caps, and ends within its wall time. Its spend counts against the workspace's configured budget and the deployment cap before any byte leaves (INF-7). A bound reached ends the explanation with no model text shown | Property over random compromised-model behaviour (tool requests every turn, oversize requests, slow turns): an independent count over the record's `turns` and `tool_calls` never exceeds the bounds; the meter fold never exceeds a cap |
 | EX-8 | **Journaled before shown.** Every turn's `ModelInvocationRecorded` commits before its tool requests run or its answer is checked; the `ExplanationRecorded` commits before any answer is returned. An append that fails or is `Ambiguous` shows no model text (INF-10, API-13) | Fault injection on every append; no response body holds model text without a committed `ExplanationRecorded` naming it |
 | EX-9 | **Off every risk path.** No approval, kill switch, exit, gate decision, or tick waits on the explainer. An approval ask is shown, answered, and timed out exactly as without it; a missing or late draft only leaves the card without one (rule 3, INF-13) | Property: one approval sequence run with the explainer absent, stalled for ever, and failing; the agent and account streams are byte-identical across the three |
 | EX-10 | **Nothing in notifications.** No notice, push payload, page title, or URL carries explainer text or a cited record's content (rule 6, API-10) | Payload capture on every notice; a URL lint over the explainer's routes |
@@ -1004,10 +1006,14 @@ own research caps are never spent by its owner's questions (§15.7).
 | Wall time | 60 s from `ExplanationRequested`; each turn's deadline is the entry's `deadline_ms` within it |
 | Explanations in flight | 1 per member, 4 per workspace |
 | Questions | 30 per member per risk day |
-| Spend | The explainer's own caps under DEC-997's workspace cap: **$1.00 per workspace per risk day and $10.00 per workspace per month**, enforced by the gateway over the meter stream's `explain` reservations; every call still counts against the workspace's $50.00 a month (DEC-997 item 3) |
+| Spend | Settings, never constants: every explain call is metered by the gateway against the **workspace's configured model budget** and the **deployment cap** (inference §7.3), both deployment configuration, and against an optional `explain` share of the workspace budget folded over the meter stream's `explain` reservations. On the platform's demo and development workspaces the deployment cap is DEC-997's $50.00 a month of OpenRouter spend |
 
-The values are engineering values and tighten only (DEC-2240): they sit inside the founder's cap
-and spend less than it allows. Raising the workspace cap stays the founder's. A bound reached ends
+The non-money bounds are engineering values (DEC-2240). The money bounds are settings: the
+explainer adds no budget of its own, and a call it makes only ever counts against budgets that
+already exist, so it can only be refused sooner. Raising the deployment cap stays the founder's, and
+who pays for a customer's explainer calls is [DEC-2242](../project/decisions/DEC-2242.md), Proposed
+for the founder; until it is decided, explainer calls run only where the platform's own key pays,
+in the platform's demo and development workspaces, and CI uses recorded fakes. A bound reached ends
 the explanation `turn_limit`, `tool_limit`, `timed_out`, or `budget_exhausted`, with the fallback.
 No bound reached by the explainer changes anything the agent does (EX-9).
 
@@ -1053,3 +1059,44 @@ should answer.
 As of 2026-10-17: nothing of §15 is built. The gateway's HTTPS transport is in review (#1519); the
 tool-call contract and the bounded loop are E19-13 (lane AH); the workspace API server is
 E21-31 (#1457); the audit reads the fallback links to are E12-6. The work is backlog E19-14.
+
+### 15.12 Slice 2: actions asked in chat (planned)
+
+*Specified now so that slice 1 does not close the door on it; nothing of it is built in slice 1,
+and no slice-1 tool computes or sends a card.* The founder's framing (2026-10-17, relayed by the
+coordinator): the chat is the interactive session with your agent, "like Claude Code for trading".
+In slice 2 the owner may ask in chat for an action, such as "sell half of X" or "stop watching Y".
+
+1. **The model proposes, deterministic code builds, the owner sends.** The explainer's entry gains
+   proposal tools (lane AH's action tools, E19-13), each of which only computes a card and writes
+   nothing (EX-1 still holds for every tool):
+   - `propose_order` (`instrument`, `side`, `fraction?` of the agent's held quantity, or none for
+     the builder to size): deterministic code turns it into an owner request, runs the builder, the
+     gate's dry run, and the autonomy rules on it (DEC-190), and returns the card of workspace API
+     §4.6: the builder's proposal with its figures, the gate's verdict, the autonomy outcome, and its
+     `card_digest`. The model never names a quantity, price, or limit; `fraction` is applied to the
+     ledger by code;
+   - `propose_change` (a typed envelope or universe edit, such as removing an instrument from a
+     pinned list): deterministic code builds a draft version from the deployed one and classifies it
+     (mandate spec §9.2), and returns the A6 card with its classification.
+2. **Owner input, never the owner** (rule 11, DEC-141). The card is sent only by the owner's own
+   separate call carrying its `card_digest` (workspace API §4.6, D14), under the owner's own role row
+   (*Make an owner request*, *Draft a mandate version*, *Confirm a version*), and with step-up for
+   every chat-originated send (lane SU). That is stricter than the matrix, which needs none for an
+   owner request; it only tightens. The send journals `OwnerRequestSubmitted` or the draft and
+   confirmation records, and the runtime's builder, gate, and autonomy rules decide as for any owner
+   request; a confirmed version is the only way the envelope moves (API-5).
+3. **Never the only way to reduce risk** (rule 13). Owner exits, pause, hold, and the kill switch
+   keep their deterministic controls and API-7's guarantees. A chat that is down, rate-limited, or
+   out of budget only means the owner uses those controls; no exit waits on a model.
+4. **Invariants added with slice 2**, each a property test with a compromised model:
+   - **EX-12, no action without the owner's send:** no `OwnerRequestSubmitted`, draft, or
+     confirmation follows from a chat unless the owner's own call carrying that card's digest
+     precedes it;
+   - **EX-13, the card binds what was shown:** the figures sent are the card's, computed by code; a
+     send whose digest differs from the card's is refused and commits nothing;
+   - **EX-14, the model's text never becomes the action:** the card is built from the tool's typed
+     arguments alone, and no member of a card can hold model text (API-18).
+5. **Depends on:** E19-13's action tools, lane SU's step-up for chat sends, the card-send route of
+   workspace API §4.6, and a new DEC for slice 2's choices. Slice 2 opens with its own spec change.
+

@@ -17,7 +17,7 @@ is not built (§11).
   §1.1 and §3.1 add the purpose `explain` for the explainer of [agent harness spec
   §15](agent-harness.md#15-the-owners-explainer), which acts for a member and has no agent, so
   `agent_id` is null for it as for the compiler. §3.6 puts its call records on the control stream
-  (journal spec §9.22). §7.3 adds its own caps under DEC-997's workspace cap. §8.3: its tools are
+  (journal spec §9.22). §7.3 meters it against the workspace's configured budget and the deployment cap, both settings. §8.3: its tools are
   read-only and wait for E19-13's change to INF-5; until then it makes no call.
 - **v0.3 ([DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)):**
   - §3.6: the agent stream's `ModelInvocationRecorded` and the meter stream are closed in
@@ -497,7 +497,7 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
 | Workspace monthly cap | [DEC-997](../project/decisions/DEC-997.md) item 3 (Proposed; until accepted, no live call runs at all): **$50 a month** for paper and demo, deployment configuration; per-agent monthly caps are deployment configuration too | All calls of the workspace per calendar month of risk days; per-agent monthly caps under it, each at most the workspace cap |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
-| Explainer caps | [DEC-2240](../project/decisions/DEC-2240.md), engineering values inside DEC-997's workspace cap: **$1.00 per workspace per risk day and $10.00 per workspace per month**, folded over the meter stream's `explain` reservations (agent harness spec §15.7) | The explainer's calls, per workspace; every one also counts against the workspace caps above. No agent's cap: an explain reservation names no agent (journal spec §9.22 rule 189) |
+| Explainer spend | Settings ([DEC-2240](../project/decisions/DEC-2240.md) item 9): the workspace's configured model budget and the deployment cap, plus an optional `explain` share of the workspace budget, folded over the meter stream's `explain` reservations (agent harness spec §15.7). Who pays for a customer's explainer calls is [DEC-2242](../project/decisions/DEC-2242.md), Proposed | The explainer's calls, per workspace; every one also counts against the workspace caps above. No agent's cap: an explain reservation names no agent (journal spec §9.22 rule 189) |
 | Rate caps | Per agent: research calls only in proposal rounds no more often than `behavior.research.interval_s`; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of

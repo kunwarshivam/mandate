@@ -2303,11 +2303,15 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     ids (EX-2, EX-3), with the oracle shown to catch a seeded scope bug;
   - no answer with an uncited segment, an unread citation, or advice language is shown (EX-4,
     EX-5); no prompt holds a quantity, price, dollar figure, or account reference (EX-6);
-  - the bounds and caps of spec §15.7 hold under random model behaviour (EX-7), every turn is
+  - the bounds of spec §15.7 hold under random model behaviour, and spend is metered against the
+    configured workspace budget and deployment cap, never a constant (EX-7), every turn is
     journaled before use (EX-8), and approvals, exits, and kill switches are byte-identical with the
     explainer absent, stalled, or failing (EX-9);
   - CI and the demo run on recorded-fake gateway fixtures only, with no network; the disclaimer is
     the placeholder `NOTE-EXPLAINER-NOT-ADVICE` until the founder decides DEC-2241.
+  *Slice 2 (planned, spec §15.12):* actions asked in chat become proposal cards built by
+  deterministic code through lane AH's action tools and sent only by the owner's own call with
+  step-up (lane SU); EX-12 to EX-14; its own spec change and DEC first.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
