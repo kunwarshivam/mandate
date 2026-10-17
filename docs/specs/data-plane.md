@@ -340,7 +340,7 @@ interface in the workspace data service. The agent harness spec defines the tool
 | `instruments`, `kinds`, `window`, `limit` | Filters; instruments by `asset_id` |
 | `terms` | Optional, at most five terms, each 1 to 32 bytes of letters, digits, spaces, hyphens, and periods; a term with spaces is a phrase. An item matches only when **every** term appears, case-folded, as a whole word or phrase in its stored headline and summary (news) or its form and excerpt (filings), inside the data service, so a query's result is a deterministic function of the store and its arguments. A term only narrows, and is never sent to a source or any other host ([agent harness spec §6.10](agent-harness.md#610-tools), HI-28) |
 | `items` | Optional: item ids the caller already received |
-| `range` | Optional, with exactly one filing in `items`: `{offset, length}`, a byte range of that filing's stored text, cut on UTF-8 boundaries. Where the store holds only an excerpt, or `offset` is past the end, the read fails |
+| `range` | Optional, with exactly one filing in `items`: `{offset, length}`, a byte range of that filing's stored text, cut on UTF-8 boundaries. Two distinct answers: `out_of_range` when `offset` is past the end of the stored text, and `excerpt_only` when the store holds only an excerpt |
 
 **A query reads the store and never fetches.** It answers from what ingestion (§4.2) has already
 stored, as of `as_of`. No query, whatever its filters, makes the data service fetch from a source,

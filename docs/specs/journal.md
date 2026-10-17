@@ -3917,7 +3917,7 @@ names the model called (§9's `mod`).
 | `completed_at` | `timestamp` | When the gateway finished with it |
 | `reservation` | `ulid?` | The `event_id` of the call's `MeterReserved`, or `null` when it reserved nothing: rule 149. The link crosses streams, so `append` does not resolve it |
 | `observations` | `[ulid]` | The retrieved context: the `event_id`s of the `ObservationRecorded` records whose items the prompt holds, strictly ascending: rule 150. Empty for a call with no retrieval plan |
-| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (E19-5, not yet catalogued); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22) |
+| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (E19-5, not yet catalogued); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22). For an agentic run's turns, which calls are the candidates is §9.22's |
 
 Rules 72, 73 and 75 apply to this record as to the control stream's, and rule 74 does except where
 rule 152 says. Rules 71 and 76 are the control stream's alone.
@@ -4229,7 +4229,7 @@ the next turn's call is sent (agent harness spec HI-24).
 | `content_ref` | `ref` | The result as the model was given it, stored as an artifact, with licensed text replaced by its digest once licensed sources are read (agent harness spec §6.6); for a refusal or failure, the `{"error": code}` object |
 | `bytes` | `integer` | The byte length of the result as the model was given it |
 | `truncated` | `boolean` | A harness cap removed something from a read's result; the model's own `limit` or `count` is not a cap: rule 179 |
-| `observations` | `[ulid]` | The `event_id`s of the `ObservationRecorded` records of every item a read's result holds, earlier ones of the run included, strictly ascending; empty unless the call is a read and `result` is `ok`: rule 179 |
+| `observations` | `[ulid]` | The `event_id`s of the `ObservationRecorded` records of every item a read's result holds, earlier ones of this run or an earlier run included, strictly ascending; empty unless the call is a read and `result` is `ok`: rule 179 |
 
 **`RunSummaryRecorded`**: the run's typed summary, the memory the next run reads as untrusted
 input (agent harness spec §6.12), once per run that ends.
@@ -4282,9 +4282,10 @@ number order after the members' types:
      `non_canonical`) and empty unless `class` is `action` (`payload.provenance`).
 178. `ToolResultRecorded`: `tool_call` names an earlier `ToolCallRecorded` of the stream with the same
      `correlation_id`, and no earlier `ToolResultRecorded` names it (`payload.tool_call`).
-179. `ToolResultRecorded`, read against its `ToolCallRecorded`'s `class`: `code` is `null` only when
-     `result` is `ok` and the class is `read` or `think`, and is not `null` for an action or for any
-     `refused` or `failed` result (`payload.code`); `failed` only for a read (`payload.result`);
+179. `ToolResultRecorded`, read against its `ToolCallRecorded`'s `class`: `code` is `null` exactly
+     when `result` is `ok` and the class is `read` or `think` (`payload.code`); a `failed` result is
+     only a read's, and its `code` is `unavailable`, and a `refused` result's `code` is never
+     `unavailable` (`payload.result`);
      `observations` strictly ascending by bytes (`payload.observations`, reason `non_canonical`), and
      empty and `truncated` `false` unless the class is `read` and `result` is `ok`
      (`payload.observations`, `payload.truncated`); the first that fails.

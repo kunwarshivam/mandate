@@ -2300,7 +2300,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     run kind, and §6.11's bounds, each ending the run except result size;
   - the `final_output` path runs end to end: the runtime core (lane I2's E19-3 side) judges the final
     output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
-    feedback) follows in its own slice;
+    feedback) follows in its own slice once the founder decides DEC-2203 item 25;
   - `mandate-journal` registers the five §9.22 records with a draft for every rule 171 to 183;
   - HI-1, HI-2, HI-3, HI-4, HI-8, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25, and HI-28 hold as
     property tests with independent oracles, each shown to catch a seeded bug, against an adaptive
