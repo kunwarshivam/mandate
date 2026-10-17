@@ -124,5 +124,11 @@
     "remove": [
       "/approval"
     ]
+  },
+  {
+    "label": "state outside the closed set",
+    "set": {
+      "/approval/state": "mutant_value"
+    }
   }
 ]

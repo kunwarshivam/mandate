@@ -136,5 +136,17 @@
     "set": {
       "/agents": {}
     }
+  },
+  {
+    "label": "mode outside the closed set",
+    "set": {
+      "/agents/0/mode": "mutant_value"
+    }
+  },
+  {
+    "label": "environment outside the closed set",
+    "set": {
+      "/agents/0/environment": "mutant_value"
+    }
   }
 ]
