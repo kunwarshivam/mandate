@@ -111,6 +111,18 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(await screen.findByText(/Recorded in the journal/)).toBeTruthy();
   });
 
+  it("a request names its agent's environment, and says not reported, never paper, when the agent is not served (DEC-1096)", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />);
+    await screen.findByRole("button", { name: "Skip" });
+    expect(screen.getByText("PAPER")).toBeTruthy();
+    cleanup();
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", (route, body) => (route === "/agents" ? { ...body, agents: [] } : body));
+    await screen.findByRole("button", { name: "Skip" });
+    expect(screen.getByText("ENVIRONMENT NOT REPORTED")).toBeTruthy();
+    expect(screen.queryByText("PAPER")).toBeNull();
+  });
+
   it("an approve the deployment cannot take without step-up says nothing was approved", async () => {
     const approval = pending[0];
     mount(<ApiApproval approvalId={approval.approval_id} />);

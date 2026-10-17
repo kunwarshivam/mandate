@@ -326,7 +326,8 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     ["Deadline", clock(deadlineIso(approval.deadline))],
   ];
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`)];
-  const answer = (choice: "approve" | "skip") => respond(approval.approval_id, choice, { screen: "D6", environment: agent?.environment ?? "paper", shown, modelOutputExpanded: false });
+  const environment = agent?.environment ?? "unknown";
+  const answer = (choice: "approve" | "skip") => respond(approval.approval_id, choice, { screen: "D6", environment, shown, modelOutputExpanded: false });
   return (
     <WorkspaceGate api>
       <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="api-request-title">
@@ -335,7 +336,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
             <h1 id="api-request-title" className="text-sm font-medium text-muted-foreground">
               Approval request
             </h1>
-            {agent ? <EnvironmentBadge environment={agent.environment} /> : null}
+            <EnvironmentBadge environment={environment} />
           </div>
           <p className="text-muted-foreground">{agent ? <AgentName agent={agent} /> : <NotReported>Name not reported</NotReported>}</p>
           <p className="text-hero">{line}</p>
