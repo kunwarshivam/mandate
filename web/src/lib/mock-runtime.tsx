@@ -6,6 +6,7 @@ import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApprove
 import { clock } from "./format";
 import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
+import type { BacktestRead } from "@/api/backtest";
 import type { ApiView } from "@/api/read-models";
 
 /**
@@ -129,6 +130,8 @@ export interface Runtime {
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
   deploy: (request: NewAgent, record: DeployRecord) => Deployment;
   changeMandate: (proposal: Proposal, origin: Origin, record: ChangeRecord) => MandateChangeRequest;
+  /** One backtest (`GET /backtests/{id}`, DEC-2400): the fixture's served body or the API's answer, through the same decoder. */
+  readBacktest: (backtestId: string) => Promise<BacktestRead>;
 }
 
 export const RuntimeContext = createContext<Runtime | null>(null);
@@ -451,9 +454,14 @@ export function RuntimeProvider({
     [reachable, silent, recordAfterMs, recorded],
   );
 
+  const readBacktest = useCallback(async (backtestId: string): Promise<BacktestRead> => {
+    void backtestId;
+    throw new Error("Unimplemented: E4-5");
+  }, []);
+
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
-    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest }),
+    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
