@@ -1111,8 +1111,9 @@ fn layers() -> Result<()> {
 }
 
 /// Every way the CODEOWNERS text `text` breaks `policy` (ADR-0001 ES-13, DEC-2600 item 5): a
-/// safety-critical crate with no `/crates/<name>/` line, and crate lines out of sorted order, which
-/// would send two PRs adding two crates to the same place in the file.
+/// safety-critical crate with no `/crates/<name>/` line, crate lines out of sorted order, which
+/// would send two PRs adding two crates to the same place in the file, and a crate line kept
+/// twice, which a union merge of two edits to one line leaves.
 fn codeowners_problems(text: &str, policy: &Layers) -> Vec<String> {
     let lines: Vec<&str> = text
         .lines()
@@ -1130,11 +1131,15 @@ fn codeowners_problems(text: &str, policy: &Layers) -> Vec<String> {
     }
     for pair in lines.windows(2) {
         if let [before, after] = pair
-            && after < before
+            && after <= before
         {
-            problems.push(format!(
-                "CODEOWNERS: `{after}` must come before `{before}`; keep the crate lines sorted"
-            ));
+            problems.push(if after == before {
+                format!("CODEOWNERS: `{after}` has two lines; keep one")
+            } else {
+                format!(
+                    "CODEOWNERS: `{after}` must come before `{before}`; keep the crate lines sorted"
+                )
+            });
         }
     }
     problems
@@ -18736,9 +18741,19 @@ jq -r "$filter" "$src"
                 ("docs/project/decisions/README.md", "# Decisions\n"),
             ],
         )?;
+        let staged = Command::new("git")
+            .args(["add", "docs/project/decisions/DEC-2601.md"])
+            .current_dir(&clean)
+            .status()?;
+        assert!(staged.success(), "git add");
+        fs::remove_file(clean.join("docs/project/decisions/DEC-2601.md"))?;
         let passed = decision_numbers(&clean).map_err(|err| format!("{err:#}"));
         fs::remove_dir_all(&clean).ok();
-        assert_eq!(passed, Ok(()), "distinct numbers pass");
+        assert_eq!(
+            passed,
+            Ok(()),
+            "distinct numbers pass, and a tracked file deleted from the working tree is skipped"
+        );
         type Case<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a [&'a str]);
         let cases: [Case; 3] = [
             (
@@ -18852,7 +18867,8 @@ jq -r "$filter" "$src"
     }
 
     /// CODEOWNERS names every safety-critical crate on its own line, sorted, so two PRs adding two
-    /// crates touch two places; a missing crate and an out-of-order line are each refused
+    /// crates touch two places; a missing crate, a line kept twice, and an out-of-order line are each
+    /// refused
     /// (DEC-2600 item 5).
     #[test]
     fn codeowners_lists_every_safety_critical_crate_sorted() {
@@ -18880,6 +18896,15 @@ jq -r "$filter" "$src"
                 "safety-critical crate `mandate-c` has no `/crates/mandate-c/` line in CODEOWNERS"
                     .to_owned()
             ]
+        );
+        let twice = format!(
+            "{}/crates/mandate-a/ @other\n{}",
+            owner("mandate-a"),
+            owner("mandate-c")
+        );
+        assert_eq!(
+            codeowners_problems(&twice, &layers),
+            vec!["CODEOWNERS: `/crates/mandate-a/` has two lines; keep one".to_owned()]
         );
         let unsorted = format!("{}{}", owner("mandate-c"), owner("mandate-a"));
         assert_eq!(
