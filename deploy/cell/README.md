@@ -54,8 +54,10 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   `tmp/` (a writer's) or waits two minutes for them, read-only (a reader's): the API server refuses
   a root without `sha256/`. The modes are fixed in the chart by process type, never values; size,
   class and access mode are values (`artifacts`). The claim, and every mount of it, renders only
-  with a long-running process that mounts it, since local-path binds on first use and `helm --wait`
-  waits for that; so a cell without the API server's image gives the control run no store. It is
+  with the API server, its one long-running writer, since local-path binds on first use and `helm
+  --wait` waits for that, and a reader alone would wait for a layout no writer makes; so a cell
+  without the API server's image gives the control run and the runtime no store. The deployment
+  manager's read-only access applies once that process is in `processes.json`. It is
   ReadWriteOnce on local-path, so every pod that mounts it runs on one node; a hosted cell names a
   class that can, or the store moves to E21-40's object store. The Compose file has none yet
   (`deploy/tests/test_artifacts.py`).

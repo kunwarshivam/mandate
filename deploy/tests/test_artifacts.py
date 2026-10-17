@@ -40,8 +40,8 @@ def layout_problems(name: str, init: dict, want: str) -> list[str]:
     in a reader's."""
     script = " ".join(init.get("command", []))
     problems = [f"{name}'s layout step names no {d}" for d in LAYOUT_DIRS if d not in script]
-    if want == "rw" and "mkdir -p" not in script:
-        problems.append(f"{name}'s layout step does not make the store's directories")
+    if want == "rw" and init.get("command") != ["bash", "-c", f"mkdir -p {' '.join(LAYOUT_DIRS)}"]:
+        problems.append(f"{name}'s layout step does not make exactly the store's directories")
     if want == "ro" and ("mkdir" in script or "exit 1" not in script):
         problems.append(f"{name}'s layout step writes, or never gives up waiting")
     return problems
@@ -142,6 +142,16 @@ def test_no_claim_and_no_mount_without_a_long_running_process_to_bind_it():
     assert rendered_with_store(docs) == set()
 
 
+def test_no_store_for_a_reader_without_its_writer():
+    """The runtime without the API server: a claim with only a reader would wait for a layout that no
+    writer makes, so the runtime renders with no store, as the control run does."""
+    docs = render_all("--set", "images.api=")
+    assert "runtime" in {process_of(d) for d in docs if d["kind"] == "Deployment"}
+    assert not [d for d in docs if d["kind"] == "PersistentVolumeClaim"]
+    assert artifact_modes(docs) == []
+    assert rendered_with_store(docs) == set()
+
+
 def workload(docs: list[dict], name: str) -> dict:
     return next(d for d in docs if d["kind"] in ("Deployment", "Job") and process_of(d) == name)
 
@@ -202,6 +212,10 @@ def test_each_seeded_bug_is_caught():
         command = layout(workload(docs, "api"))["command"]
         command[-1] = command[-1].replace(f" {MOUNT}/tmp", "")
 
+    def api_layout_only_echoes(docs):
+        command = layout(workload(docs, "api"))["command"]
+        command[-1] = "echo " + command[-1]
+
     def runtime_layout_writes(docs):
         layout(workload(docs, "runtime"))["command"][-1] = f"mkdir -p {MOUNT}/sha256 {MOUNT}/tmp"
 
@@ -216,6 +230,7 @@ def test_each_seeded_bug_is_caught():
         api_without_layout,
         api_layout_without_tmp,
         runtime_layout_writes,
+        api_layout_only_echoes,
     ):
         assert artifact_modes(seeded(change)), change.__name__
 

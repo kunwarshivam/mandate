@@ -88,14 +88,15 @@ other process has no store at all.
 {{- end -}}
 
 {{/*
-Whether the claim renders: only with a long-running process that mounts it, since a claim on a
-class that binds on first use (local-path does) binds only when a pod uses it, and `helm --wait`
-waits for it to. "true" or empty.
+Whether the claim renders: only with a long-running process that writes it (the API server). A
+claim on a class that binds on first use (local-path does) binds only when a pod uses it, and `helm
+--wait` waits for it to; and a reader alone would wait for a layout no writer makes. "true" or
+empty.
 */}}
 {{- define "mandate.artifactsClaimed" -}}
 {{- $root := . -}}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
-{{- if include "mandate.artifactsRole" (dict "root" $root "p" .) -}}true{{- end -}}
+{{- if eq (include "mandate.artifactsRole" (dict "root" $root "p" .)) "rw" -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
 

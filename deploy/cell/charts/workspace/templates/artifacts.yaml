@@ -3,7 +3,7 @@ The workspace's shared artifact store (mandate documents, backtest reports), whi
 and the control runs write and the runtime and the deployment manager read (see
 "mandate.artifactsAccess"). One claim, so a document survives a pod's restart and an upgrade; it
 goes with the release on uninstall, since a kept claim loses Helm's ownership and a reinstall would
-refuse it. It renders only with a long-running process that mounts it ("mandate.artifactsClaimed"). ReadWriteOnce, as the local cell's local-path class offers:
+refuse it. It renders only with a long-running process that writes it, the API server ("mandate.artifactsClaimed"). ReadWriteOnce, as the local cell's local-path class offers:
 every pod that mounts it then runs on the claim's one node. A hosted cell names a class that can
 (or moves the store to the object store of E21-40) in `artifacts.storageClass`.
 */ -}}
