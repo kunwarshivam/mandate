@@ -241,7 +241,7 @@ fn a_reservation_is_admitted_exactly_when_the_vectors_admissions_say() {
             for r in &all {
                 store.append(r.clone()).unwrap();
             }
-            let mut meter = Meter::new(store, caps);
+            let mut meter = Meter::new(store, caps, common::deployment());
             let reservation = Reservation {
                 event_id: mandate_canon::encode_ulid(1 << 100),
                 call_id: mandate_canon::encode_ulid((1 << 101) + u128::try_from(n).unwrap()),
@@ -302,9 +302,9 @@ fn day(d: u8) -> Date {
 
 #[test]
 fn the_demo_cap_is_fifty_dollars_a_month_per_workspace() {
-    let caps = Caps::demo();
+    let caps = common::caps();
     assert_eq!(caps.workspace_monthly(), Usd6::dollars(50).unwrap());
-    let mut meter = Meter::new(MemoryMeter::new(), caps);
+    let mut meter = Meter::new(MemoryMeter::new(), caps, common::deployment());
     assert!(
         meter
             .reserve(reservation(
@@ -348,31 +348,31 @@ fn the_demo_cap_is_fifty_dollars_a_month_per_workspace() {
 
 #[test]
 fn per_agent_caps_sit_under_the_workspace_cap() {
-    let caps = Caps::demo()
+    let caps = common::caps()
         .with_agent_monthly("a", Usd6::dollars(5).unwrap())
         .unwrap()
         .with_agent_monthly_default(Usd6::dollars(10).unwrap())
         .unwrap();
     assert_eq!(
-        Caps::demo().with_agent_monthly("a", Usd6::dollars(51).unwrap()),
+        common::caps().with_agent_monthly("a", Usd6::dollars(51).unwrap()),
         Err(CapError::AboveWorkspace)
     );
     assert_eq!(
-        Caps::demo().with_agent_monthly_default(Usd6::dollars(51).unwrap()),
+        common::caps().with_agent_monthly_default(Usd6::dollars(51).unwrap()),
         Err(CapError::AboveWorkspace)
     );
     assert!(
-        Caps::demo()
+        common::caps()
             .with_agent_monthly_default(Usd6::dollars(50).unwrap())
             .is_ok(),
         "the workspace cap itself"
     );
     assert!(
-        Caps::demo()
+        common::caps()
             .with_agent_monthly("a", Usd6::dollars(50).unwrap())
             .is_ok()
     );
-    let mut meter = Meter::new(MemoryMeter::new(), caps);
+    let mut meter = Meter::new(MemoryMeter::new(), caps, common::deployment());
     assert!(
         meter
             .reserve(reservation(1, Some("a"), Purpose::LlmSignal, "5", day(2)))
@@ -424,10 +424,10 @@ fn per_agent_caps_sit_under_the_workspace_cap() {
 
 #[test]
 fn the_research_daily_cap_counts_one_risk_day_of_the_agents_calls() {
-    let caps = Caps::demo()
+    let caps = common::caps()
         .with_research_daily("a", Usd6::parse("0.5").unwrap())
         .unwrap();
-    let mut meter = Meter::new(MemoryMeter::new(), caps);
+    let mut meter = Meter::new(MemoryMeter::new(), caps, common::deployment());
     assert!(
         meter
             .reserve(reservation(1, Some("a"), Purpose::Research, "0.4", day(5)))
@@ -470,7 +470,11 @@ fn the_research_daily_cap_counts_one_risk_day_of_the_agents_calls() {
 
 #[test]
 fn settling_releases_what_a_call_did_not_spend_and_an_open_reservation_counts_whole() {
-    let mut meter = Meter::new(MemoryMeter::new(), Caps::new(Usd6::dollars(1).unwrap()));
+    let mut meter = Meter::new(
+        MemoryMeter::new(),
+        Caps::new(Usd6::dollars(1).unwrap()),
+        common::deployment(),
+    );
     let r = meter
         .reserve(reservation(1, Some("a"), Purpose::Research, "0.8", day(7)))
         .unwrap();
@@ -515,7 +519,7 @@ fn a_meter_that_cannot_be_read_or_appended_refuses() {
     for failure in [StoreError::Unavailable, StoreError::Fenced] {
         let mut store = MemoryMeter::new();
         store.fail_with(Some(failure));
-        let mut meter = Meter::new(store, Caps::demo());
+        let mut meter = Meter::new(store, common::caps(), common::deployment());
         assert_eq!(
             meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8))),
             Err(MeterRefusal::Unavailable)
@@ -528,19 +532,33 @@ fn a_meter_that_cannot_be_read_or_appended_refuses() {
     }
     let mut store = MemoryMeter::new();
     store.limit_appends(Some(0));
-    let mut meter = Meter::new(store, Caps::demo());
+    let mut meter = Meter::new(store, common::caps(), common::deployment());
     assert_eq!(
         meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8))),
         Err(MeterRefusal::Unavailable)
     );
+    assert!(meter.store().records().is_empty());
+    assert_eq!(
+        meter.deployment().spend(Period::Month {
+            year: 2026,
+            month: 10
+        }),
+        Ok(Usd6::parse("0.1").unwrap()),
+        "the copy appended before the failed workspace append is an orphan, counted at its maximum (DEC-2204 item 4)"
+    );
     meter.store_mut().limit_appends(None);
+    assert_eq!(
+        meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8))),
+        Err(MeterRefusal::Unavailable),
+        "the orphan holds its call id on the deployment stream, so trying again needs a new call (rule 158)"
+    );
     assert!(
         meter
-            .reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8)))
+            .reserve(reservation(2, Some("a"), Purpose::Research, "0.1", day(8)))
             .is_ok()
     );
     assert_eq!(
-        meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8))),
+        meter.reserve(reservation(2, Some("a"), Purpose::Research, "0.1", day(8))),
         Err(MeterRefusal::Unavailable),
         "a second reservation of one call is refused (rule 158)"
     );
@@ -558,11 +576,11 @@ fn an_empty_stream_spends_nothing() {
 #[test]
 fn a_research_cap_sits_under_the_workspace_cap_too() {
     assert_eq!(
-        Caps::demo().with_research_daily("a", Usd6::parse("50.000001").unwrap()),
+        common::caps().with_research_daily("a", Usd6::parse("50.000001").unwrap()),
         Err(CapError::AboveWorkspace)
     );
     assert!(
-        Caps::demo()
+        common::caps()
             .with_research_daily("a", Usd6::dollars(50).unwrap())
             .is_ok()
     );

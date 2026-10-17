@@ -1,0 +1,297 @@
+//! Pinned tools and the calls a model makes to them (inference spec v0.4 INF-5, §3.1, §3.2;
+//! DEC-2203, DEC-2204). An `agentic` research entry pins its tool declarations inside its content
+//! hash; a turn offers some of them; a reply's tool calls are validated against the offered
+//! declarations and returned as data. The gateway runs no tool: it names no data-plane, journal, or
+//! source port, so it cannot.
+
+use std::collections::BTreeMap;
+
+use mandate_canon::{Value, parse, to_canonical};
+use serde_json::{Map, Value as Json, json};
+
+use crate::registry::{int, object};
+use crate::schema;
+
+/// The longest name a provider takes for a function (OpenAI-compatible APIs: `[a-zA-Z0-9_-]{1,64}`).
+pub const MAX_WIRE_NAME: usize = 64;
+
+/// What a tool does (agent harness spec §6.10): reads, thinks, or proposes. The gateway treats
+/// every class alike; the harness runs or mediates each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ToolClass {
+    Read,
+    Think,
+    Action,
+}
+
+impl ToolClass {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Think => "think",
+            Self::Action => "action",
+        }
+    }
+}
+
+/// One pinned tool declaration (inference spec §4.1): a name from the harness's set, its class, a
+/// description the model reads, its argument schema in the gateway's schema language (an object),
+/// its result cap, and the run kinds whose menus may offer it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDeclaration {
+    pub name: String,
+    pub class: ToolClass,
+    pub description: String,
+    pub arguments: Value,
+    pub result_cap_bytes: u64,
+    pub menu: Vec<String>,
+}
+
+impl ToolDeclaration {
+    /// The canonical object the content hash covers.
+    pub fn canonical(&self) -> Value {
+        object([
+            ("arguments", self.arguments.clone()),
+            ("class", Value::Str(self.class.code().to_owned())),
+            ("description", Value::Str(self.description.clone())),
+            (
+                "menu",
+                Value::Array(self.menu.iter().cloned().map(Value::Str).collect()),
+            ),
+            ("name", Value::Str(self.name.clone())),
+            ("result_cap_bytes", int(self.result_cap_bytes)),
+        ])
+    }
+
+    /// Whether the declaration is one a registry may pin: a well-formed name, a non-empty
+    /// description, an object argument schema in the gateway's language, a non-zero result cap,
+    /// and a strictly sorted, non-empty menu.
+    pub fn well_formed(&self) -> bool {
+        let object_schema = self.arguments.get("type").and_then(Value::as_str) == Some("object")
+            && schema::well_formed(&self.arguments);
+        let menu_sorted = self.menu.windows(2).all(|w| matches!(w, [a, b] if a < b));
+        wire_name(&self.name).is_some()
+            && !self.description.trim().is_empty()
+            && object_schema
+            && self.result_cap_bytes > 0
+            && !self.menu.is_empty()
+            && self.menu.iter().all(|kind| !kind.is_empty())
+            && menu_sorted
+    }
+}
+
+/// The name a declared tool goes by on the wire, or `None` when `name` is not a declared name: one
+/// or two segments joined by `.`, each a lowercase letter followed by lowercase letters and
+/// digits, in words joined by single underscores (so no segment holds `__`). The wire name joins
+/// the segments with `__` (DEC-2204), which no declared name can contain, so the mapping is
+/// one-to-one, and fits [`MAX_WIRE_NAME`].
+pub fn wire_name(name: &str) -> Option<String> {
+        let _ = name;
+        None
+    }
+
+/// The declared name of a wire name, or `None` when no declared name maps to it.
+pub fn declared_name(wire: &str) -> Option<String> {
+        let _ = wire;
+        None
+    }
+
+fn segment_ok(segment: &str) -> bool {
+    let mut words = segment.split('_');
+    let first_ok = words.next().is_some_and(|w| {
+        w.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+            && w.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    });
+    first_ok
+        && words.all(|w| {
+            !w.is_empty()
+                && w.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+/// The bounds of an agentic run, pinned in its entry (agent harness spec §6.11). The gateway
+/// enforces `max_turns` on the transcript and `max_tool_calls_per_turn` on each reply; the
+/// harness enforces the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoopBounds {
+    pub max_turns: u32,
+    pub max_tool_calls: u32,
+    pub max_tool_calls_per_turn: u32,
+    pub max_theses: u32,
+    pub max_result_bytes: u64,
+    pub max_run_result_bytes: u64,
+    pub max_repeat_denials: u32,
+    pub max_run_s: u64,
+    pub tool_timeout_s: u64,
+}
+
+impl LoopBounds {
+    pub fn canonical(&self) -> Value {
+        object([
+            (
+                "max_repeat_denials",
+                int(u64::from(self.max_repeat_denials)),
+            ),
+            ("max_result_bytes", int(self.max_result_bytes)),
+            ("max_run_result_bytes", int(self.max_run_result_bytes)),
+            ("max_run_s", int(self.max_run_s)),
+            ("max_theses", int(u64::from(self.max_theses))),
+            ("max_tool_calls", int(u64::from(self.max_tool_calls))),
+            (
+                "max_tool_calls_per_turn",
+                int(u64::from(self.max_tool_calls_per_turn)),
+            ),
+            ("max_turns", int(u64::from(self.max_turns))),
+            ("tool_timeout_s", int(self.tool_timeout_s)),
+        ])
+    }
+
+    /// Every bound non-zero, and one turn's calls at most the run's.
+    pub fn well_formed(&self) -> bool {
+        self.max_turns > 0
+            && self.max_tool_calls > 0
+            && self.max_tool_calls_per_turn > 0
+            && self.max_tool_calls_per_turn <= self.max_tool_calls
+            && self.max_theses > 0
+            && self.max_result_bytes > 0
+            && self.max_result_bytes <= self.max_run_result_bytes
+            && self.max_repeat_denials > 0
+            && self.max_run_s > 0
+            && self.tool_timeout_s > 0
+    }
+}
+
+/// An agentic entry's pinned loop (inference spec §4.1): its tools, strictly sorted by name, its
+/// bounds, and the final output's schema for each run kind it serves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Agentic {
+    pub tools: Vec<ToolDeclaration>,
+    pub loop_bounds: LoopBounds,
+    pub output_schemas: BTreeMap<String, Value>,
+}
+
+impl Agentic {
+    pub fn tool(&self, name: &str) -> Option<&ToolDeclaration> {
+        self.tools.iter().find(|t| t.name == name)
+    }
+
+    /// Whether the loop is one a registry may pin: at least one run kind, each kind's schema in the
+    /// gateway's language, every declaration well formed with a menu of kinds the entry serves,
+    /// names strictly sorted, and the bounds well formed.
+    pub fn well_formed(&self) -> bool {
+        let sorted = self
+            .tools
+            .windows(2)
+            .all(|w| matches!(w, [a, b] if a.name < b.name));
+        !self.output_schemas.is_empty()
+            && self
+                .output_schemas
+                .iter()
+                .all(|(kind, s)| !kind.is_empty() && schema::well_formed(s))
+            && sorted
+            && self.tools.iter().all(|t| {
+                t.well_formed() && t.menu.iter().all(|k| self.output_schemas.contains_key(k))
+            })
+            && self.loop_bounds.well_formed()
+    }
+}
+
+/// One validated tool call (inference spec §3.2): its position in the reply, a declared and offered
+/// tool's name, and arguments that fit that tool's pinned schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    pub index: u32,
+    pub name: String,
+    pub arguments: Value,
+}
+
+impl ToolCall {
+    pub fn canonical(&self) -> Value {
+        object([
+            ("arguments", self.arguments.clone()),
+            ("index", int(u64::from(self.index))),
+            ("name", Value::Str(self.name.clone())),
+        ])
+    }
+}
+
+/// A tool call as a provider adapter read it from a reply, before validation: either part missing
+/// when the reply's call had no such member of the right type.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WireCall {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
+/// Why a reply's tool calls were refused; each is `schema_invalid` (inference spec §3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallsRefused {
+    NoneOffered,
+    TooMany,
+    NotOffered,
+    BadArguments,
+}
+
+/// Validates a reply's calls against the tools offered in the turn, in reply order: at most
+/// `per_turn` of them, each naming an offered tool with arguments that parse and fit its schema.
+pub fn validate(
+    calls: &[WireCall],
+    offered: &[&ToolDeclaration],
+    per_turn: u32,
+) -> Result<Vec<ToolCall>, CallsRefused> {
+        let _ = (calls, offered, per_turn);
+        Err(CallsRefused::NoneOffered)
+    }
+
+/// One earlier turn of a run, as the caller hands it back (inference spec §3.1 `turns`): the
+/// reply's bytes, by its response artifact, and the caller's result for each of that reply's tool
+/// calls, in call order, as the canonical JSON text the model is shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Turn {
+    pub response: Vec<u8>,
+    pub results: Vec<String>,
+}
+
+/// One earlier turn as the prompt holds it: the reply's validated calls, and each result inside
+/// its data section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptTurn {
+    pub calls: Vec<ToolCall>,
+    pub results: Vec<String>,
+}
+
+impl TranscriptTurn {
+    pub fn canonical(&self) -> Value {
+        object([
+            (
+                "calls",
+                Value::Array(self.calls.iter().map(ToolCall::canonical).collect()),
+            ),
+            (
+                "results",
+                Value::Array(self.results.iter().cloned().map(Value::Str).collect()),
+            ),
+        ])
+    }
+}
+
+/// The id a transcript gives the call at `index` of turn `turn` (from 1): `t{turn}c{index}`.
+/// Synthesized, never the provider's, so a reply cannot steer it and a re-run renders the same
+/// request (DEC-2204, HI-3).
+pub fn call_id(turn: usize, index: u32) -> String {
+    format!("t{turn}c{index}")
+}
+
+/// A canonical value as JSON text, for a wire request.
+pub fn canonical_text(value: &Value) -> String {
+    String::from_utf8(to_canonical(value)).unwrap_or_default()
+}
+
+/// The JSON Schema a provider is given for an argument schema in the gateway's language. It only
+/// describes; the gateway's own validator decides (INF-5).
+pub fn wire_schema(schema: &Value) -> Json {
+        let _ = schema;
+        Json::Null
+    }

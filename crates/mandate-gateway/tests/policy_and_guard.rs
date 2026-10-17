@@ -8,7 +8,6 @@ use std::collections::BTreeSet;
 
 use common::*;
 use mandate_gateway::guard::{self, GuardContext, GuardRule};
-use mandate_gateway::meter::Caps;
 use mandate_gateway::policy::{EgressAllowlist, EndpointPolicy, PolicyError};
 use mandate_gateway::registry::Locality;
 use mandate_gateway::{Outcome, Purpose};
@@ -21,7 +20,7 @@ fn set(items: &[&str]) -> Option<BTreeSet<String>> {
 fn with_no_policy_a_workspace_is_local_only_and_a_hosted_call_sends_nothing() {
     assert_eq!(EndpointPolicy::default(), EndpointPolicy::local_only());
     let (registry, model) = registry();
-    let mut gateway = gateway_with(EndpointPolicy::default(), Caps::demo(), registry);
+    let mut gateway = gateway_with(EndpointPolicy::default(), common::caps(), registry);
     gateway.transport_mut().script(vec![ok_reply(10)]);
     let record = gateway.call(&request(&model, 1)).unwrap();
     assert_eq!(record.outcome, Outcome::PolicyDenied);
@@ -51,7 +50,7 @@ fn a_disallowed_region_or_upstream_is_refused_before_any_byte() {
         EndpointPolicy::new(BTreeSet::from([Locality::Hosted]), set(&["openai"]), None),
     ] {
         let (registry, model) = registry();
-        let mut gateway = gateway_with(policy, Caps::demo(), registry);
+        let mut gateway = gateway_with(policy, common::caps(), registry);
         gateway.transport_mut().script(vec![ok_reply(10)]);
         assert_eq!(
             gateway.call(&request(&model, 1)).unwrap().outcome,
@@ -135,7 +134,7 @@ fn a_local_endpoint_is_called_with_no_key() {
     local.host = "127.0.0.1".to_owned();
     local.locality = Locality::Local;
     registry.add_endpoint(&model, local, &[reported()]).unwrap();
-    let mut gateway = gateway_with(EndpointPolicy::local_only(), Caps::demo(), registry);
+    let mut gateway = gateway_with(EndpointPolicy::local_only(), common::caps(), registry);
     gateway.transport_mut().script(vec![ok_reply(10)]);
     let record = gateway.call(&request(&model, 1)).unwrap();
     assert_eq!(record.outcome, Outcome::Ok);
