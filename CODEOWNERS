@@ -25,6 +25,7 @@
 # Safety-critical crates (ADR-0001 ES-02)
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-agentd/     @kunwarshivam
+/crates/mandate-alerts/     @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-api/        @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
