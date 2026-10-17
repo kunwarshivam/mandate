@@ -890,6 +890,43 @@ CP_RECORDS = (
 )
 CP_SEQUENCED = ("LicenseApplied", "ReleaseOffered", "ReleaseInstalled", "CatalogEntryRegistered", "DataBundleImported")
 
+# §9.18 v0.45 (DEC-1001, DEC-1002): the backtest's and the forward-paper evaluation's records, on the
+# control stream, each naming its report by artifact. Their writers are a `user` who asked or a
+# `system` runner, never another principal (DEC-1141).
+SCHEMAS[("ctl", "BacktestRunRecorded")] = rec(
+    ("backtest_id", IDENT_T),
+    ("mandate_version", REF),
+    ("data_snapshot", REF),
+    ("model_outputs", REF),
+    ("theses", REF),
+    ("configuration", REF),
+    ("code_build", REF),
+    ("report", opt(REF)),
+    ("report_version", INT),
+    ("marker", one_of("backtest")),
+    ("result", one_of("completed", "refused")),
+    ("refusal", opt(STR)),
+)
+SCHEMAS[("ctl", "EvaluationRunRecorded")] = rec(
+    ("evaluation_id", IDENT_T),
+    ("decision", STR),
+    ("cut_off", TS),
+    ("theses", REF),
+    ("theses_from", list_of(STR)),
+    ("theses_to", list_of(STR)),
+    ("theses_head", list_of(REF)),
+    ("closes", REF),
+    ("cost_model", REF),
+    ("code_build", REF),
+    ("report", REF),
+    ("report_version", INT),
+    ("passed", BOOL),
+)
+BACKTEST_RECORDS = ("BacktestRunRecorded", "EvaluationRunRecorded")
+BACKTEST_WRITERS = ("user", "system")
+REQUIRED_REFS["BacktestRunRecorded"] = ("rule_set", "mandate_version")
+REQUIRED_REFS["EvaluationRunRecorded"] = ("rule_set",)
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -1466,6 +1503,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += audit_violations(event_type, draft, skip)
     out += cold_violations(event_type, draft, skip)
     out += control_plane_violations(event_type, draft, skip)
+    out += backtest_violations(event_type, draft, skip)
     return out
 
 
@@ -2164,6 +2202,31 @@ def control_plane_violations(event_type: str, draft: dict, skip: frozenset[str])
         rule("142.reason", not unknown or p["reason"] in ("out_of_list", "malformed"), "payload.reason")
         rule("142.sequence", not unknown or p["sequence"] is None, "payload.sequence")
         rule("142.replayed", p["reason"] != "replayed" or p["sequence"] is not None, "payload.sequence")
+    return out
+
+
+def backtest_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.18's rules 143 to 145 and DEC-1141's writer, on a well-typed payload, in that order."""
+    if event_type not in BACKTEST_RECORDS:
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    if event_type == "BacktestRunRecorded":
+        refused = p["result"] == "refused"
+        rule("143.report", (p["report"] is None) == refused, "payload.report")
+        rule("143.refusal", (p["refusal"] is not None) == refused, "payload.refusal")
+        bound = draft["config_refs"].get("mandate_version")
+        rule("144", bound == p["mandate_version"], "payload.mandate_version")
+    else:
+        lengths = {len(p["theses_from"]), len(p["theses_to"]), len(p["theses_head"])}
+        rule("145.empty", bool(p["theses_from"]), "payload.theses_from")
+        rule("145.length", len(lengths) == 1, "payload.theses_from")
+    rule("writer", draft["actor"]["kind"] in BACKTEST_WRITERS, "actor.kind")
     return out
 
 

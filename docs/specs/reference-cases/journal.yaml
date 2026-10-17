@@ -47182,3 +47182,1930 @@ model_gateway:
       research_daily: '0.12'
     admitted: 2282
     refused: 620
+backtest_records:
+  spec: docs/specs/journal.md v0.45 §9.18 (DEC-1001, DEC-1002; writer DEC-1141)
+  artifacts:
+  - name: mandate_version
+    ref: sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    object:
+      kind: mandate
+      note: 'reference fixture: stands for the mandate version backtested'
+    canonical: '{"kind":"mandate","note":"reference fixture: stands for the mandate version backtested"}'
+  - name: rule_set
+    ref: sha256:6e1400786228d2e21363d61fc9dd986c551b8e61462f82a36e6ebf017227d02b
+    object:
+      kind: rule_set
+      note: 'reference fixture: stands for the rule set the run''s gate applied'
+    canonical: '{"kind":"rule_set","note":"reference fixture: stands for the rule set the run''s gate applied"}'
+  - name: data_snapshot
+    ref: sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+    object:
+      kind: data_snapshot
+      note: 'reference fixture: stands for the bars the run read, with coverage and first-bar medians'
+    canonical: '{"kind":"data_snapshot","note":"reference fixture: stands for the bars the run read, with coverage and first-bar medians"}'
+  - name: model_outputs
+    ref: sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+    object:
+      kind: model_outputs
+      note: 'reference fixture: stands for the recorded model outputs the run replayed'
+    canonical: '{"kind":"model_outputs","note":"reference fixture: stands for the recorded model outputs the run replayed"}'
+  - name: backtest_theses
+    ref: sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+    object:
+      kind: theses
+      note: 'reference fixture: stands for the thesis records the run replayed'
+    canonical: '{"kind":"theses","note":"reference fixture: stands for the thesis records the run replayed"}'
+  - name: configuration
+    ref: sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+    object:
+      kind: backtest_config
+      note: 'reference fixture: stands for the fill model, fees, gate settings, account, cash, metrics'
+    canonical: '{"kind":"backtest_config","note":"reference fixture: stands for the fill model, fees, gate settings, account, cash, metrics"}'
+  - name: runner_build
+    ref: sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+    object:
+      kind: code_build
+      note: 'reference fixture: stands for the backtest runner''s build'
+    canonical: '{"kind":"code_build","note":"reference fixture: stands for the backtest runner''s build"}'
+  - name: backtest_report
+    ref: sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+    object:
+      kind: backtest_report
+      note: 'reference fixture: stands for a report_version 2 backtest report (DEC-1001 item 2)'
+    canonical: '{"kind":"backtest_report","note":"reference fixture: stands for a report_version 2 backtest report (DEC-1001 item 2)"}'
+  - name: evaluation_theses
+    ref: sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+    object:
+      kind: theses
+      note: 'reference fixture: stands for the ThesisProposed and ThesisRevised records read'
+    canonical: '{"kind":"theses","note":"reference fixture: stands for the ThesisProposed and ThesisRevised records read"}'
+  - name: head_agent_a
+    ref: sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    object:
+      kind: record
+      note: 'reference fixture: stands for the last thesis record read on agent_a'
+    canonical: '{"kind":"record","note":"reference fixture: stands for the last thesis record read on agent_a"}'
+  - name: head_agent_b
+    ref: sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+    object:
+      kind: record
+      note: 'reference fixture: stands for the last thesis record read on agent_b'
+    canonical: '{"kind":"record","note":"reference fixture: stands for the last thesis record read on agent_b"}'
+  - name: closes
+    ref: sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+    object:
+      kind: closes
+      note: 'reference fixture: stands for the close series'
+    canonical: '{"kind":"closes","note":"reference fixture: stands for the close series"}'
+  - name: cost_model
+    ref: sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+    object:
+      kind: cost_model
+      note: 'reference fixture: stands for the round-trip cost model'
+    canonical: '{"kind":"cost_model","note":"reference fixture: stands for the round-trip cost model"}'
+  - name: evaluator_build
+    ref: sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+    object:
+      kind: code_build
+      note: 'reference fixture: stands for the evaluator''s build'
+    canonical: '{"kind":"code_build","note":"reference fixture: stands for the evaluator''s build"}'
+  - name: evaluation_report
+    ref: sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+    object:
+      kind: evaluation_report
+      note: 'reference fixture: stands for a report_version 1 evaluation report (DEC-1002)'
+    canonical: '{"kind":"evaluation_report","note":"reference fixture: stands for a report_version 1 evaluation report (DEC-1002)"}'
+  drafts:
+    backtest_run_recorded:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5BT00000000000000BT01
+      stream_id: ctl:ws_01J8Z2
+      event_type: BacktestRunRecorded
+      schema_version: 1
+      event_time: '2026-10-17T15:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: backtest_runner
+        version: 0.1.0
+        build: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      config_refs:
+        mandate_version: sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+        rule_set: sha256:6e1400786228d2e21363d61fc9dd986c551b8e61462f82a36e6ebf017227d02b
+      payload:
+        backtest_id: bt_01JBT0001
+        mandate_version: sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+        data_snapshot: sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+        model_outputs: sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+        theses: sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+        configuration: sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+        code_build: sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+        report: sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+        report_version: 2
+        marker: backtest
+        result: completed
+        refusal: null
+      artifact_refs:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+      pii_refs: []
+    evaluation_run_recorded:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5EV00000000000000EV01
+      stream_id: ctl:ws_01J8Z2
+      event_type: EvaluationRunRecorded
+      schema_version: 1
+      event_time: '2026-10-17T15:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: paper_evaluator
+        version: 0.1.0
+        build: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      config_refs:
+        rule_set: sha256:6e1400786228d2e21363d61fc9dd986c551b8e61462f82a36e6ebf017227d02b
+      payload:
+        evaluation_id: ev_01JEV0001
+        decision: DEC-122
+        cut_off: '2026-10-16T20:00:00.000000000Z'
+        theses: sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+        theses_from:
+        - agent:ws_01J8Z2:agent_a:2
+        - agent:ws_01J8Z2:agent_b:5
+        theses_to:
+        - agent:ws_01J8Z2:agent_a:41
+        - agent:ws_01J8Z2:agent_b:5
+        theses_head:
+        - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+        - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+        closes: sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+        cost_model: sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+        code_build: sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+        report: sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+        report_version: 1
+        passed: true
+      artifact_refs:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+      pii_refs: []
+  invalid_drafts:
+  - name: BacktestRunRecorded.backtest_id.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.backtest_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.backtest_id
+  - name: BacktestRunRecorded.backtest_id.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.backtest_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.backtest_id
+  - name: BacktestRunRecorded.backtest_id.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.backtest_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.backtest_id
+  - name: BacktestRunRecorded.mandate_version.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.mandate_version
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mandate_version
+  - name: BacktestRunRecorded.mandate_version.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.mandate_version
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.mandate_version
+  - name: BacktestRunRecorded.mandate_version.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.mandate_version
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mandate_version
+  - name: BacktestRunRecorded.data_snapshot.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.data_snapshot
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.data_snapshot
+  - name: BacktestRunRecorded.data_snapshot.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.data_snapshot
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.data_snapshot
+  - name: BacktestRunRecorded.data_snapshot.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.data_snapshot
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.data_snapshot
+  - name: BacktestRunRecorded.model_outputs.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.model_outputs
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_outputs
+  - name: BacktestRunRecorded.model_outputs.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.model_outputs
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.model_outputs
+  - name: BacktestRunRecorded.model_outputs.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.model_outputs
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.model_outputs
+  - name: BacktestRunRecorded.theses.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.theses
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses
+  - name: BacktestRunRecorded.theses.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.theses
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.theses
+  - name: BacktestRunRecorded.theses.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.theses
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses
+  - name: BacktestRunRecorded.configuration.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.configuration
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.configuration
+  - name: BacktestRunRecorded.configuration.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.configuration
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.configuration
+  - name: BacktestRunRecorded.configuration.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.configuration
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.configuration
+  - name: BacktestRunRecorded.code_build.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.code_build
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code_build
+  - name: BacktestRunRecorded.code_build.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.code_build
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.code_build
+  - name: BacktestRunRecorded.code_build.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.code_build
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code_build
+  - name: BacktestRunRecorded.report.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.report
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report
+  - name: BacktestRunRecorded.report.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.report
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.report
+  - name: BacktestRunRecorded.report_version.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.report_version
+      value: '2'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_version
+  - name: BacktestRunRecorded.report_version.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.report_version
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_version
+  - name: BacktestRunRecorded.marker.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.marker
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.marker
+  - name: BacktestRunRecorded.marker.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.marker
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.marker
+  - name: BacktestRunRecorded.marker.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.marker
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.marker
+  - name: BacktestRunRecorded.result.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.result
+  - name: BacktestRunRecorded.result.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.result
+  - name: BacktestRunRecorded.result.null
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.result
+  - name: BacktestRunRecorded.refusal.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.refusal
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.refusal
+  - name: BacktestRunRecorded.refusal.form
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.refusal
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.refusal
+  - name: BacktestRunRecorded.missing_backtest_id
+    clause: §9.18 closed (§4.2)
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.backtest_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.backtest_id
+  - name: BacktestRunRecorded.missing_refusal
+    clause: §9.18 closed (§4.2)
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.refusal
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.refusal
+  - name: BacktestRunRecorded.extra
+    clause: §9.18 closed
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.figures
+      value:
+        total_return: '0.1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.figures
+  - name: EvaluationRunRecorded.evaluation_id.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.evaluation_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evaluation_id
+  - name: EvaluationRunRecorded.evaluation_id.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.evaluation_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.evaluation_id
+  - name: EvaluationRunRecorded.evaluation_id.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.evaluation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evaluation_id
+  - name: EvaluationRunRecorded.decision.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.decision
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decision
+  - name: EvaluationRunRecorded.decision.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.decision
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: EvaluationRunRecorded.decision.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.decision
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decision
+  - name: EvaluationRunRecorded.cut_off.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.cut_off
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cut_off
+  - name: EvaluationRunRecorded.cut_off.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.cut_off
+      value: '2026-10-16'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cut_off
+  - name: EvaluationRunRecorded.cut_off.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.cut_off
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cut_off
+  - name: EvaluationRunRecorded.theses.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses
+  - name: EvaluationRunRecorded.theses.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.theses
+  - name: EvaluationRunRecorded.theses.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses
+  - name: EvaluationRunRecorded.theses_from.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.theses_from.item
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value:
+      - ''
+      - agent:ws_01J8Z2:agent_b:5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.theses_from[0]
+  - name: EvaluationRunRecorded.theses_from.item_kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value:
+      - agent:ws_01J8Z2:agent_a:2
+      - 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from[1]
+  - name: EvaluationRunRecorded.theses_from.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.theses_to.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_to
+  - name: EvaluationRunRecorded.theses_to.item
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value:
+      - ''
+      - agent:ws_01J8Z2:agent_b:5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.theses_to[0]
+  - name: EvaluationRunRecorded.theses_to.item_kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value:
+      - agent:ws_01J8Z2:agent_a:41
+      - 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_to[1]
+  - name: EvaluationRunRecorded.theses_to.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_to
+  - name: EvaluationRunRecorded.theses_head.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_head
+      value: x
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_head
+  - name: EvaluationRunRecorded.theses_head.item
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_head
+      value:
+      - sha256:short
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.theses_head[0]
+  - name: EvaluationRunRecorded.theses_head.item_kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_head
+      value:
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+      - 7
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_head[1]
+  - name: EvaluationRunRecorded.theses_head.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_head
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_head
+  - name: EvaluationRunRecorded.closes.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.closes
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.closes
+  - name: EvaluationRunRecorded.closes.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.closes
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.closes
+  - name: EvaluationRunRecorded.closes.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.closes
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.closes
+  - name: EvaluationRunRecorded.cost_model.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.cost_model
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_model
+  - name: EvaluationRunRecorded.cost_model.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.cost_model
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cost_model
+  - name: EvaluationRunRecorded.cost_model.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.cost_model
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cost_model
+  - name: EvaluationRunRecorded.code_build.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.code_build
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code_build
+  - name: EvaluationRunRecorded.code_build.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.code_build
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.code_build
+  - name: EvaluationRunRecorded.code_build.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.code_build
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code_build
+  - name: EvaluationRunRecorded.report.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.report
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report
+  - name: EvaluationRunRecorded.report.form
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.report
+      value: sha256:short
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.report
+  - name: EvaluationRunRecorded.report.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.report
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report
+  - name: EvaluationRunRecorded.report_version.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.report_version
+      value: '2'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_version
+  - name: EvaluationRunRecorded.report_version.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.report_version
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report_version
+  - name: EvaluationRunRecorded.passed.kind
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.passed
+      value: 'true'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.passed
+  - name: EvaluationRunRecorded.passed.null
+    clause: §9.18 types
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.passed
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.passed
+  - name: EvaluationRunRecorded.missing_evaluation_id
+    clause: §9.18 closed (§4.2)
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.evaluation_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.evaluation_id
+  - name: EvaluationRunRecorded.missing_passed
+    clause: §9.18 closed (§4.2)
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.passed
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.passed
+  - name: EvaluationRunRecorded.extra
+    clause: §9.18 closed
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.figures
+      value:
+        total_return: '0.1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.figures
+  - name: BacktestRunRecorded.refusal.form
+    clause: '§9.18 types: a refusal is non-empty text'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: refused
+    - path: payload.report
+      value: null
+    - path: payload.refusal
+      value: ''
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.refusal
+  - name: BacktestRunRecorded.refusal.kind
+    clause: §9.18 types
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: refused
+    - path: payload.report
+      value: null
+    - path: payload.refusal
+      value: 7
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.refusal
+  - name: BacktestRunRecorded.marker.paper
+    clause: '§9.18: the marker is always backtest, never a paper or live result'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.marker
+      value: paper
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.marker
+  - name: BacktestRunRecorded.marker.live
+    clause: '§9.18: the marker is always backtest, never a paper or live result'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.marker
+      value: live
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.marker
+  - name: BacktestRunRecorded.by_an_agent
+    clause: 'DEC-1141: a user who asked or the system that ran it writes the record'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: BacktestRunRecorded.by_a_broker
+    clause: 'DEC-1141: a user who asked or the system that ran it writes the record'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: alpaca
+        version: v2
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: BacktestRunRecorded.by_an_operator
+    clause: 'DEC-1141: a user who asked or the system that ran it writes the record'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: operator_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: BacktestRunRecorded.by_a_client
+    clause: 'rule 83: a client writes only its own records'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: client
+        id: client_01
+        version: '1'
+        build: null
+        on_behalf_of: user_owner_01
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: BacktestRunRecorded.on_an_agent_stream
+    clause: '§9.18: a workspace control-stream record'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: BacktestRunRecorded.at_version_2
+    clause: '§9.18: closed at schema version 1 only'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: BacktestRunRecorded.no_rule_set
+    clause: '§9 catalogue: the record requires rule'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: config_refs.rule_set
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.rule_set
+  - name: EvaluationRunRecorded.by_an_agent
+    clause: 'DEC-1141: a user who asked or the system that ran it writes the record'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: EvaluationRunRecorded.by_a_broker
+    clause: 'DEC-1141: a user who asked or the system that ran it writes the record'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: broker
+        id: alpaca
+        version: v2
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: EvaluationRunRecorded.by_an_operator
+    clause: 'DEC-1141: a user who asked or the system that ran it writes the record'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: operator_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: EvaluationRunRecorded.by_a_client
+    clause: 'rule 83: a client writes only its own records'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: client
+        id: client_01
+        version: '1'
+        build: null
+        on_behalf_of: user_owner_01
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: EvaluationRunRecorded.on_an_agent_stream
+    clause: '§9.18: a workspace control-stream record'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: EvaluationRunRecorded.at_version_2
+    clause: '§9.18: closed at schema version 1 only'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: EvaluationRunRecorded.no_rule_set
+    clause: '§9 catalogue: the record requires rule'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: config_refs.rule_set
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.rule_set
+  - name: BacktestRunRecorded.no_mandate_version
+    clause: '§9 catalogue: a backtest requires man'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: config_refs.mandate_version
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+      also:
+      - reason: schema
+        path: payload.mandate_version
+  - name: BacktestRunRecorded.completed_without_report
+    clause: 'rule 143: a completed run names its report'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.report
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report
+  - name: BacktestRunRecorded.refused_with_report
+    clause: 'rule 143: a refused run names no report'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: refused
+    - path: payload.refusal
+      value: no_bars
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report
+  - name: BacktestRunRecorded.refused_without_refusal
+    clause: 'rule 143: a refused run carries its reason code'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: refused
+    - path: payload.report
+      value: null
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.refusal
+  - name: BacktestRunRecorded.completed_with_refusal
+    clause: 'rule 143: a completed run carries no reason code'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.refusal
+      value: no_bars
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.refusal
+  - name: BacktestRunRecorded.refused_with_report_and_no_refusal
+    clause: 'rule 143: report first, then refusal'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: refused
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.report
+      also:
+      - reason: schema
+        path: payload.refusal
+  - name: BacktestRunRecorded.another_version
+    clause: 'rule 144: the version backtested is the version bound'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.mandate_version
+      value: sha256:9999999999999999999999999999999999999999999999999999999999999999
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:9999999999999999999999999999999999999999999999999999999999999999
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mandate_version
+  - name: BacktestRunRecorded.bound_to_another_version
+    clause: 'rule 144: the version backtested is the version bound'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: config_refs.mandate_version
+      value: sha256:9999999999999999999999999999999999999999999999999999999999999999
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mandate_version
+  - name: EvaluationRunRecorded.no_streams
+    clause: 'rule 145: at least one agent stream read'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value: []
+    - path: payload.theses_to
+      value: []
+    - path: payload.theses_head
+      value: []
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.to_shorter
+    clause: 'rule 145: one entry per stream in each list'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value:
+      - agent:ws_01J8Z2:agent_a:41
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.to_empty
+    clause: 'rule 145: one entry per stream in each list'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.head_longer
+    clause: 'rule 145: one entry per stream in each list'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_head
+      value:
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+      - sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.from_shorter
+    clause: 'rule 145: one entry per stream in each list'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value:
+      - agent:ws_01J8Z2:agent_a:2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+  - name: EvaluationRunRecorded.from_empty
+    clause: 'rule 145: not empty'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.theses_from
+      also:
+      - reason: schema
+        path: payload.theses_from
+  valid_drafts:
+  - name: BacktestRunRecorded.refused
+    clause: 'rule 143: a refused run, no report, its reason code'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.result
+      value: refused
+    - path: payload.report
+      value: null
+    - path: payload.refusal
+      value: no_bars
+    - path: artifact_refs
+      value:
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.by_the_owner
+    clause: 'DEC-1141: the user who asked'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.by_the_founder
+    clause: 'DEC-1141: the user who asked'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.by_control_services
+    clause: 'DEC-1141: any system actor'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.extra_refs
+    clause: '§9 catalogue: required refs are a floor, not a closed set'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: config_refs.fee_config
+      value: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.same_digest_twice
+    clause: '§3: artifact_refs is a set, so a digest named twice is listed once'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.theses
+      value: sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:58d38628ab85034e7fadfcbd239616984529753464b5032337b3eaecc172eb4e
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.configuration_names_the_version
+    clause: rule 144 binds mandate_version only
+    base_draft: backtest_run_recorded
+    changes:
+    - path: payload.configuration
+      value: sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    - path: artifact_refs
+      value:
+      - sha256:164c0a99aca221383284ccb7ddfb03816533b488f29d3ec31b98197fe96cb6f1
+      - sha256:3f1e9d754156c5a867a668c3aea8726c1024bc175a54c901c842ba1935a936b0
+      - sha256:77a1912b1e871cc2f6eb35653072cc69c7981573415f9246a2fc860ab154c5a6
+      - sha256:bd44bba282beaa4e87948db11af1523354ad5d2ab123be48d56c42fa4721110e
+      - sha256:ec72246134bc35ebc9cc759cddb15e56017e31c6159657326f0c4d8e00563bfd
+      - sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.one_stream
+    clause: 'rule 145: one agent stream read'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_from
+      value:
+      - agent:ws_01J8Z2:agent_a:2
+    - path: payload.theses_to
+      value:
+      - agent:ws_01J8Z2:agent_a:41
+    - path: payload.theses_head
+      value:
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.one_record_per_stream
+    clause: 'rule 145: the first and the last record read may be the same'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_to
+      value:
+      - agent:ws_01J8Z2:agent_a:2
+      - agent:ws_01J8Z2:agent_b:5
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.same_head
+    clause: rule 145 counts entries; it does not require distinct hashes
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.theses_head
+      value:
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    - path: artifact_refs
+      value:
+      - sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120
+      - sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435
+      - sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3
+      - sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e
+      - sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23
+      - sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.not_passed
+    clause: '§9.18: an evaluation that did not pass is recorded'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: payload.passed
+      value: false
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.with_a_mandate_version
+    clause: '§9 catalogue: an evaluation may carry refs it does not require'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: config_refs.mandate_version
+      value: sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.caused
+    clause: '§9.18: no rule reads the cause'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: causation_id
+      value: 01J8Z5B0A000000000000000Q1
+    expect:
+      outcome: Valid
+  - name: EvaluationRunRecorded.caused
+    clause: '§9.18: no rule reads the cause'
+    base_draft: evaluation_run_recorded
+    changes:
+    - path: causation_id
+      value: 01J8Z5B0A000000000000000Q1
+    expect:
+      outcome: Valid
+  - name: BacktestRunRecorded.live
+    clause: '§9.18: no rule reads the environment'
+    base_draft: backtest_run_recorded
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
