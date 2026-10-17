@@ -1,4 +1,4 @@
-# The workspace API server: process, probes, drain, sessions, and the single 401 (E21-31)
+# The workspace API server: process, probes, drain, sessions, the first reads, and the single 401 (E21-31)
 
 - **Spec:** [workspace API spec](../../../../docs/specs/workspace-api.md) §3.3 (CORS), §3.5 (the
   problem document), §3.11 (the server process: bind, environment, probes, drain), API-1;
@@ -26,4 +26,7 @@
   object, ownership and mode, malformed and duplicate lines. `tests/keys.rs`: URL rules, a fetched
   key set checking tokens, a failed fetch keeping the last set. `tests/sessions_http.rs`: the
   session routes, CSRF first with 403, every other refusal the one 401, the cookie's attributes.
+  `tests/reads.rs`: the folds against hand-built rows and hand-written views. `tests/reads_http.rs`:
+  the read routes' 401, 404 (absent, foreign, unjoined), 403, 503s, `reduction_only`, and bodies
+  and watermarks.
 - **Run:** `cargo nextest run -p mandate-api-server`.

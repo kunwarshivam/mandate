@@ -31,6 +31,7 @@ pub mod keys;
 pub mod lifecycle;
 pub mod members;
 pub mod reads;
+pub mod routes;
 pub mod session;
 pub mod subject;
 pub mod token;

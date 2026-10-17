@@ -6,10 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_identity::{
-    LookupFailed, Membership, MembershipLookup, MembershipQuery, MembershipRecord, OrgId,
-    PrincipalId, WorkspaceId,
+    LookupFailed, Membership, MembershipFold, MembershipLookup, MembershipQuery, MembershipRecord,
+    OrgId, PrincipalId, Role, Scope, WorkspaceId,
 };
-use mandate_identity_seal::LookupSeal;
+use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
@@ -58,26 +58,74 @@ impl ControlLookup {
 
     /// `member`'s memberships, for the session's roles snapshot; none when the lookup fails.
     pub fn snapshot(&self, member: PrincipalId) -> Vec<Membership> {
-        let _ = member;
-        Vec::new()
+        self.memberships(&MembershipQuery {
+            member: Some(member),
+            scope: self.scope(),
+        })
+        .unwrap_or_default()
+    }
+
+    /// The hosted workspace's scope.
+    fn scope(&self) -> Scope {
+        Scope::Workspace {
+            org: self.hosted.org,
+            workspace: self.hosted.workspace,
+        }
+    }
+
+    /// The control stream's fold, readable at `now`, or a failed lookup.
+    fn fold(&self) -> Result<MembershipFold, LookupFailed> {
+        let records = self.records.clone()?;
+        let fold = MembershipFold::new(Seal::grant(), records);
+        if fold.unreadable(self.now) {
+            return Err(LookupFailed);
+        }
+        Ok(fold)
     }
 }
 
 impl LookupSeal for ControlLookup {}
 
 impl MembershipLookup for ControlLookup {
+    /// One member's membership of the hosted workspace, as the fold reads it at the lookup's
+    /// instant: its state and the roles effective then. The query for every member of a scope
+    /// (the last-owner count of a role change) is not served here and fails.
     fn memberships(&self, query: &MembershipQuery) -> Result<Vec<Membership>, LookupFailed> {
-        let _ = (query, &self.records, self.now, BTreeMap::<u8, u8>::new());
-        Err(LookupFailed)
+        let member = query.member.ok_or(LookupFailed)?;
+        let fold = self.fold()?;
+        if query.scope != self.scope() {
+            return Ok(Vec::new());
+        }
+        let Some(state) = fold.state(member, self.now) else {
+            return Ok(Vec::new());
+        };
+        let roles: BTreeMap<Role, UtcNanos> = fold
+            .effective_roles(member, self.now)
+            .into_iter()
+            .map(|role| (role, self.now))
+            .collect();
+        Ok(vec![Membership::new(
+            Seal::grant(),
+            member,
+            query.scope,
+            state,
+            roles,
+        )])
     }
 
+    /// The hosted workspace, for its own organization; the store's read is the control stream's.
     fn workspaces(&self, org: OrgId) -> Result<BTreeSet<WorkspaceId>, LookupFailed> {
-        let _ = (org, self.hosted);
-        Err(LookupFailed)
+        self.records.as_ref().map_err(|_| LookupFailed)?;
+        Ok(if org == self.hosted.org {
+            BTreeSet::from([self.hosted.workspace])
+        } else {
+            BTreeSet::new()
+        })
     }
 
+    /// The hosted workspace's organization, from the deployment's settings; any other workspace
+    /// is not hosted here.
     fn workspace_org(&self, workspace: WorkspaceId) -> Result<Option<OrgId>, LookupFailed> {
-        let _ = workspace;
-        Err(LookupFailed)
+        Ok((workspace == self.hosted.workspace).then_some(self.hosted.org))
     }
 }

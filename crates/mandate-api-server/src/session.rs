@@ -346,8 +346,17 @@ impl Sessions {
     /// outage or reduction-only session), so a refused ordinary request answers `reduction_only`
     /// rather than the one 401 (§3.5). It changes nothing.
     pub fn reduction_only(&self, cookie: &str, now: UtcNanos) -> bool {
-        let _ = (cookie, now);
-        false
+        let Ok(limits) = self.limits else {
+            return false;
+        };
+        let Some((id, secret)) = self.decode(cookie) else {
+            return false;
+        };
+        self.store().entries.get(&id).is_some_and(|entry| {
+            holds(entry, &secret)
+                && entry.record.reach() != Reach::Full
+                && live(entry, now.secs(), limits.idle_s())
+        })
     }
 
     /// How many sessions are held, for the tests' independent count.

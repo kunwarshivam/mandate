@@ -196,13 +196,16 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
 }
 
 /// The inbox order: pending by deadline (then request order), then the [`RESOLVED_LISTED`] most
-/// recently requested resolved ones, narrowed by `filter`.
+/// recently requested resolved ones (by `requested_at`, then the later request first), narrowed
+/// by `filter`. Approvals of several agents may be given together.
 pub fn inbox(approvals: Vec<ApprovalView>, filter: Filter) -> Vec<ApprovalView> {
     let (mut pending, resolved): (Vec<_>, Vec<_>) = approvals
         .into_iter()
         .partition(|view| view.state == ApprovalState::Pending);
     pending.sort_by_key(|view| view.deadline);
-    let resolved = resolved.into_iter().rev().take(RESOLVED_LISTED);
+    let mut resolved: Vec<ApprovalView> = resolved.into_iter().rev().collect();
+    resolved.sort_by(|a, b| b.requested_at.cmp(&a.requested_at));
+    let resolved = resolved.into_iter().take(RESOLVED_LISTED);
     match filter {
         Filter::All => pending.into_iter().chain(resolved).collect(),
         Filter::Pending => pending,

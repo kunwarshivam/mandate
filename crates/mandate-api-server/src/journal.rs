@@ -27,8 +27,8 @@ pub struct Postgres(pub PgJournal);
 impl Journal for Postgres {
     fn rows<'a>(&'a self, stream: &'a str) -> Rows<'a> {
         Box::pin(async move {
-            let _ = (stream, &self.0, StreamId::parse);
-            Err(JournalUnavailable)
+            let id = StreamId::parse(stream).ok_or(JournalUnavailable)?;
+            self.0.rows(&id).await.map_err(|_| JournalUnavailable)
         })
     }
 }
