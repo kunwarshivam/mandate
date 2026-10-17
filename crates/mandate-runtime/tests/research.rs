@@ -16,8 +16,8 @@ use mandate_gateway::{CallRecord, Outcome, RequestError};
 use mandate_research::{AssetId, WorkingUniverse};
 use mandate_research_run::{CallPlan, ModelPin, Retrieval};
 use mandate_runtime::{
-    ActiveThesis, Command, Effect, Input, Mode, ResearchInput, ResearchRequest, RiskClock,
-    RuntimeError, WriterEpoch, handle,
+    ActiveThesis, Command, Effect, FoldedEvent, Input, Mode, ResearchInput, ResearchRequest,
+    RiskClock, RuntimeError, WriterEpoch, handle,
 };
 
 fn boot(lp: &mut Loop, ports: &mandate_runtime::Ports<'_>) {
@@ -74,8 +74,10 @@ impl Fixture {
     }
 }
 
+/// Agent harness spec §6.2: with both records registered (E15-8, E19-5), the production catalogue
+/// lets a due run start; a catalogue missing either still keeps every run from starting.
 #[test]
-fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
+fn a_run_starts_in_production_once_the_journal_records_both_verdicts() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
     let mut lp = Loop::new(1);
@@ -83,20 +85,20 @@ fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
     let mut world = World::open();
     world.preconditions = production_preconditions();
     assert!(
-        !world.preconditions.hold(),
-        "mandate-journal registers no invalidation verdict yet (E19-5)"
+        world.preconditions.hold(),
+        "mandate-journal registers both records"
     );
     let step = lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
     assert!(
-        step.requests.is_empty(),
-        "§6.2 preconditions: no run starts"
+        matches!(step.requests.first(), Some(ResearchRequest::Start { .. })),
+        "§6.2: the due run starts: {:?}",
+        step.requests
     );
-    assert!(step.effects.is_empty());
 }
 
 /// The shell's catalogue reads `mandate-journal`'s own registration, never a constant: §9.19 closes
-/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2201), and no
-/// invalidation verdict is registered until E19-5.
+/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2201), and §9.21
+/// closes `ThesisInvalidated` (E19-5, DEC-2202).
 #[test]
 fn the_journal_catalog_reads_mandate_journal_s_registration() {
     use mandate_runtime::{JournalCatalog, RecordCatalog, ResearchRecord};
@@ -108,8 +110,12 @@ fn the_journal_catalog_reads_mandate_journal_s_registration() {
             mandate_journal::StreamType::Agent
         )
     );
+    assert_eq!(
+        JournalCatalog.registers(ResearchRecord::InvalidationVerdict),
+        mandate_journal::closes("ThesisInvalidated", 1, mandate_journal::StreamType::Agent)
+    );
     assert!(JournalCatalog.registers(ResearchRecord::CandidateVerdicts));
-    assert!(!JournalCatalog.registers(ResearchRecord::InvalidationVerdict));
+    assert!(JournalCatalog.registers(ResearchRecord::InvalidationVerdict));
 }
 
 #[test]
@@ -2434,4 +2440,176 @@ fn a_cited_source_off_the_admission_allowlist_never_corroborates() {
         payload_text(record, "reason"),
         Some("source_not_allowlisted")
     );
+}
+
+fn active_on(instrument: &str, symbol: &str, id: &str) -> ActiveThesis {
+    ActiveThesis {
+        thesis_id: id.to_owned(),
+        lineage_id: id.to_owned(),
+        revision: 0,
+        instrument: AssetId::new(instrument).unwrap_or_else(|e| panic!("{e}")),
+        symbol: mandate_research_run::Symbol::new(symbol).unwrap_or_else(|e| panic!("{e}")),
+        expires_at: clock(CUT_OFF + 86_400),
+    }
+}
+
+fn in_universe(world: &mut World, instrument: &str) {
+    world.universe = WorkingUniverse::Known {
+        instruments: [AssetId::new(instrument).unwrap_or_else(|e| panic!("{e}"))]
+            .into_iter()
+            .collect(),
+        pinned: false,
+    };
+}
+
+/// Journal spec §9.21 and agent harness spec §6.7: an accepted invalidation is journaled as
+/// `ThesisInvalidated` in its call's judging batch, after the call record and before every thesis
+/// record, naming its verdict by index (theses first, rule 151) and its thesis as the run's inputs
+/// held it; the call record is its cause.
+#[test]
+fn a_judged_invalidation_is_journaled_after_its_call_record_and_before_any_thesis_record() {
+    let mut world = World::open();
+    world.active = vec![active_on(MSFT, "MSFT", "01ACTIVE")];
+    in_universe(&mut world, MSFT);
+    let lp = judged_with(
+        &format!(
+            r#"{{"theses":[{}],"invalidations":[{{"thesis_id":"01ACTIVE","evidence":["{SERVICES}","{SUPPLY}"]}}]}}"#,
+            thesis("AAPL", &[SERVICES, SUPPLY], "x")
+        ),
+        &world,
+    );
+    assert_eq!(
+        verdicts(&lp),
+        vec!["judged".to_owned(), "judged".to_owned()]
+    );
+    let judged: Vec<&str> = lp
+        .shell
+        .agent_journal
+        .iter()
+        .map(|e| e.event_type.as_str())
+        .skip_while(|t| *t != "ModelInvocationRecorded")
+        .take(3)
+        .collect();
+    assert_eq!(
+        judged,
+        vec![
+            "ModelInvocationRecorded",
+            "ThesisInvalidated",
+            "ThesisProposed"
+        ],
+        "§9.21: the invalidation records come before the thesis records"
+    );
+    let call = lp.events("ModelInvocationRecorded")[0];
+    let invalidated = lp.events("ThesisInvalidated");
+    let [invalidated] = invalidated.as_slice() else {
+        panic!("one record: {invalidated:?}");
+    };
+    assert_eq!(invalidated.causation_id.as_ref(), Some(&call.event_id));
+    let p = &invalidated.payload;
+    assert_eq!(payload_text(p, "thesis_id"), Some("01ACTIVE"));
+    assert_eq!(payload_text(p, "lineage_id"), Some("01ACTIVE"));
+    assert_eq!(payload_text(p, "instrument_id"), Some(MSFT));
+    assert_eq!(payload_text(p, "cause"), Some("model"));
+    assert_eq!(
+        p.get("candidate").and_then(Value::as_int),
+        Some(1),
+        "the theses' verdicts come first, so the invalidation is candidate 1"
+    );
+    assert_eq!(p.get("source"), Some(&Value::Null));
+    let evidence: Vec<&str> = p
+        .get("evidence")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(evidence, vec![SERVICES, SUPPLY], "as the output gave them");
+}
+
+/// §6.7: invalidations are judged in response order and an accepted one ends its thesis, so a
+/// second invalidation of it in the same response names no active thesis.
+#[test]
+fn a_thesis_invalidated_twice_in_one_response_is_journaled_once() {
+    let mut world = World::open();
+    world.active = vec![active_on(MSFT, "MSFT", "01ACTIVE")];
+    let lp = judged_with(
+        r#"{"theses":[],"invalidations":[{"thesis_id":"01ACTIVE","evidence":[]},{"thesis_id":"01ACTIVE","evidence":[]}]}"#,
+        &world,
+    );
+    assert_eq!(
+        verdicts(&lp),
+        vec!["judged".to_owned(), "unknown_thesis".to_owned()]
+    );
+    assert_eq!(lp.events("ThesisInvalidated").len(), 1);
+}
+
+/// §6.7's judging order: a response's invalidations are judged first and its theses against what
+/// is left, so a thesis on an instrument whose thesis the same response invalidates is judged
+/// exactly as it would be with that instrument out of the working universe: a new admission, never
+/// a renewal of the invalidated thesis.
+#[test]
+fn a_thesis_on_an_instrument_the_same_response_invalidates_is_judged_as_a_new_admission() {
+    let response = |invalidate: bool| {
+        format!(
+            r#"{{"theses":[{}],"invalidations":[{}]}}"#,
+            thesis("AAPL", &[SERVICES, SUPPLY], "x"),
+            if invalidate {
+                r#"{"thesis_id":"01ACTIVE","evidence":[]}"#
+            } else {
+                ""
+            }
+        )
+    };
+    let mut held = World::open();
+    held.active = vec![active_on(AAPL, "AAPL", "01ACTIVE")];
+    in_universe(&mut held, AAPL);
+    let lp = judged_with(&response(true), &held);
+    let fresh = judged_with(&response(false), &World::open());
+    let thesis_of = |lp: &Loop| {
+        let records: Vec<&FoldedEvent> = lp
+            .shell
+            .agent_journal
+            .iter()
+            .filter(|e| matches!(e.event_type.as_str(), "ThesisProposed" | "ThesisRevised"))
+            .collect();
+        let [record] = records.as_slice() else {
+            panic!("one thesis record: {records:?}");
+        };
+        let p = &record.payload;
+        (
+            record.event_type.clone(),
+            p.get("revision").cloned(),
+            p.get("admitted").cloned(),
+            p.get("reason").cloned(),
+        )
+    };
+    assert_eq!(lp.events("ThesisInvalidated").len(), 1);
+    assert_eq!(
+        thesis_of(&lp),
+        thesis_of(&fresh),
+        "judged as if the instrument had left the universe"
+    );
+    let record = lp.events("ThesisProposed");
+    assert_ne!(
+        record
+            .first()
+            .and_then(|r| payload_text(&r.payload, "lineage_id")),
+        Some("01ACTIVE"),
+        "a new lineage, never the invalidated one's"
+    );
+}
+
+/// An invalidation is never an opinion that adds risk: it journals no output and asks nothing of
+/// the order path (HI-1, rule 2).
+#[test]
+fn an_invalidation_adds_no_output_and_no_intent() {
+    let mut world = World::open();
+    world.active = vec![active_on(MSFT, "MSFT", "01ACTIVE")];
+    let lp = judged_with(
+        r#"{"theses":[],"invalidations":[{"thesis_id":"01ACTIVE","evidence":[]}]}"#,
+        &world,
+    );
+    assert_eq!(lp.events("ThesisInvalidated").len(), 1);
+    assert!(lp.events("ModelOutputRecorded").is_empty());
+    assert!(lp.events("IntentProposed").is_empty());
 }
