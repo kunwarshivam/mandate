@@ -1665,6 +1665,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-cp"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-identity",
+ "mandate-time",
+ "proptest",
+ "ring",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
