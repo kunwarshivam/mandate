@@ -60,6 +60,7 @@ const SOURCE: &str = "alpaca_iex_daily_bars";
 const FIRST: &str = "2026-09-29T17:00:00Z";
 const RESTART: &str = "2026-09-29T17:01:00Z";
 const ACCOUNT_STREAM: &str = "acct:ws_spy:acct_spy";
+const AGENT_STREAM: &str = "agent:ws_spy:agent_spy";
 
 /// The confirmed document as the file the run's mandate stage reads, written once per process so
 /// parallel test threads never read it half written.
@@ -487,9 +488,10 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
     assert_eq!(submitted(&rows).len(), 1, "no second OrderSubmitted");
 }
 
-/// DEC-529 item 4 and trading spec §5.3 rule 9: a place that never reached the broker lists
+/// DEC-529 item 4 and trading spec §5.3 rules 6 and 9: a place that never reached the broker lists
 /// nothing on the restart, so the order stays `Unknown`; the restart reconciles, runs its cycle
-/// on the same rising closes, and places no opening in SPY while the order is `Unknown`.
+/// on the same rising closes, and places no opening in SPY while the order is `Unknown`: the
+/// runtime's dry run holds it, since the first opening still works (DEC-1150 item 5).
 #[test]
 fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
     let server = broker(false);
@@ -542,11 +544,32 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
             )
         })
         .collect();
-    let held = ("deny".to_owned(), "unknown_order_in_flight".to_owned());
+    let decided: Vec<(String, String)> = stages
+        .journal
+        .read(AGENT_STREAM)
+        .unwrap()
+        .iter()
+        .filter(|row| row.event_type == "DecisionMade")
+        .map(|row| {
+            let decision = payload(row);
+            (
+                member(&decision, "dry_run").unwrap_or_default().to_owned(),
+                member(&decision, "reason_code")
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        })
+        .collect();
     assert_eq!(
-        gates.last(),
-        Some(&held),
-        "the restart's opening reached the gate, which denied it for the Unknown order: {gates:?}"
+        decided.last(),
+        Some(&("deny".to_owned(), "working_order_limit".to_owned())),
+        "the restart's opening is held while the Unknown one works, by the runtime's dry run \
+         (trading spec §5.3 rule 6, DEC-1150 item 5): {decided:?}"
+    );
+    assert_eq!(
+        gates.len(),
+        1,
+        "so it never reaches the gate, which decided only the first run's opening: {gates:?}"
     );
     if let Ok(report) = &outcome {
         assert!(report.submitted.is_empty(), "{report:?}");

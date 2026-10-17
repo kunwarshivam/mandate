@@ -1,0 +1,18 @@
+[package]
+name = "mandate-cp-agent"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The cell's control-plane agent: the closed inbound message set, signature checks against pinned keys, and the port workspace control services implement (control-plane design §3, §3.8; backlog E20-3)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-time.workspace = true
+ring.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
