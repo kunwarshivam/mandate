@@ -412,3 +412,13 @@ fn the_open_file_must_be_the_named_inode_with_its_owner() {
         );
     }
 }
+
+#[test]
+fn a_delete_that_fails_for_another_reason_than_absence_is_an_io_error() {
+    let layout = Layout::new();
+    let (api, executor) = layout.both();
+    let t = token("ws/c1", "c1");
+    fs::create_dir(layout.file(&t)).unwrap();
+    assert_eq!(executor.delete(&t), Err(VaultError::Io));
+    assert_eq!(api.delete(&t), Err(VaultError::Io));
+}

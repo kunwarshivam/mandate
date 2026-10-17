@@ -91,6 +91,34 @@ impl Read for Endless {
     }
 }
 
+/// A source that never ends and counts what it gave.
+struct Counted(usize);
+
+impl Read for Counted {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = buf.len().min(1000);
+        buf[..n].fill(b'z');
+        self.0 += n;
+        Ok(n)
+    }
+}
+
+#[test]
+fn the_import_reads_no_more_than_one_byte_past_the_longest_line() {
+    let layout = Layout::new();
+    let (_, executor) = layout.both();
+    let mut source = Counted(0);
+    assert_eq!(
+        import_client_secret(&executor, &mut source),
+        Err(VaultError::SecretSize)
+    );
+    assert_eq!(
+        source.0,
+        MAX_SECRET_LEN + 3,
+        "the secret, a \\r\\n, and one byte more"
+    );
+}
+
 /// A source whose read fails.
 struct Broken;
 
