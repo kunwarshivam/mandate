@@ -1,4 +1,4 @@
-//! `cargo xtask cell demo --scenario demo` (E21-53, DEC-2000): the demo's story, its six steps in
+//! `cargo xtask cell demo --scenario demo` (E21-54, DEC-2002): the demo's story, its six steps in
 //! order, on the local cell, with paper and demo data only and no credential. Every gesture whose
 //! pieces are on `main` runs for real, in one Job of the cell's own `control` process, so the
 //! artifact store its gestures share lives as long as they do; every link that is not on `main` is
@@ -162,9 +162,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 ),
                 Part::Gap {
                     what: "sign-in to web/ and the workspace read through the API",
-                    closes: "#1457 (the API server), #1486 and #1513 (subject links), the API's \
-                             cell image (an `api` entry to add to processes.json, lane A1 after #1457), and E21-52's \
-                             local-cell token issuer for POST /v1/sessions (lane SI)",
+                    closes: "the API server (#1457) and `mandate identity link` (#1529) are on \
+                             main; still needed: its cell image (an `api` entry to add to \
+                             processes.json, lane A1) and E21-52's stub token issuer for POST \
+                             /v1/sessions (spec #1535, crate not built; lane SI)",
                 },
             ],
         },
@@ -279,8 +280,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 Part::Gap {
                     what: "the kill switch from web/, recorded through the API",
-                    closes: "#1457 (POST /v1/workspaces/{ws}/kill-switch) and its cell image \
-                             (lane A1)",
+                    closes: "the API's cell image (lane A1); its POST \
+                             /v1/workspaces/{ws}/kill-switch is on main (#1457)",
                 },
                 Part::Gap {
                     what: "the agent's processes stop on it",

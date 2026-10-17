@@ -70,7 +70,7 @@ commands:
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell demo --scenario demo
                         the demo's six steps in order on the local cell: each gesture on main run
-                        in the cell, each missing link named by its PR or story (E21-53)
+                        in the cell, each missing link named by its PR or story (E21-54)
   cell down             delete the local cell
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
@@ -690,7 +690,7 @@ const EVERY_JOB_PATHS: [&str; 11] = [
 /// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
 /// Markdown anywhere is known too. A changed path outside every crate and outside this list
 /// selects everything, so a new top-level directory is never assumed unread.
-const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
+const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
     "docs/",
     "web/",
     "python/",
@@ -704,7 +704,6 @@ const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
     "assets/",
     ".cursor/",
     ".claude/",
-    "vercel.json",
     "_typos.toml",
     ".gitleaks.toml",
     "CODEOWNERS",
@@ -1395,7 +1394,9 @@ struct Finding {
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
 /// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
-/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
+/// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
+/// allowed in that test file alone, and any other value under the same setting there is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -1419,6 +1420,10 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let signer = "crates/mandate-objectstore/tests/sigv4.rs";
     let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
     let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
+    let process = "crates/mandate-api-server/tests/process.rs";
+    let ulid = concat!("01JB3K6F0C9R2V7N", "4M8Q1T5W3Y");
+    let setting = format!("        .env(\"MANDATE_API_WORKSPACE\", \"{ulid}\")");
+    let not_ulid = format!("        .env(\"MANDATE_API_ORG\", \"{page}\")");
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1451,6 +1456,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (bootstrap.to_owned(), fingerprint.clone(), None),
         ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
         (bootstrap.to_owned(), not_fingerprint, cloudflare),
+        (process.to_owned(), setting.clone(), None),
+        ("stray-process.rs".to_owned(), setting, generic),
+        (process.to_owned(), not_ulid, generic),
     ]
 }
 
@@ -3648,6 +3656,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
+    "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
@@ -15220,7 +15229,7 @@ mod tests {
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
-             `cell-demo` (DEC-2000)"
+             `cell-demo` (DEC-2002)"
         );
         for checkout in checkouts {
             assert!(

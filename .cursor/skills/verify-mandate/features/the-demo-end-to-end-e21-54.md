@@ -1,7 +1,7 @@
-# The demo, end to end, on the local cell (E21-53)
+# The demo, end to end, on the local cell (E21-54)
 
 - **Spec:** the managed-cells plan (`docs/project/tasks/managed-cells.md`), DEC-967, DEC-995 (the
-  2026-10-26 demo), DEC-2000; journal spec §11 for the closing verification.
+  2026-10-26 demo), DEC-2002; journal spec §11 for the closing verification.
 - **Code:** `xtask/src/cell/scenario.rs` (`cargo xtask cell demo --scenario demo`, `cargo xtask ci
   cell-demo`), and the demo's envelope and instrument under `deploy/cell/demo/`.
 - **Tests:** `xtask/src/cell/scenario.rs`'s unit tests: the demo files are canonical JSON and the

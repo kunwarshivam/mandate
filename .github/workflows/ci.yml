@@ -459,7 +459,7 @@ jobs:
       - run: cargo xtask ci cell
         if: steps.change.outputs.docs_only != 'true'
 
-  # E21-53 (DEC-2000): the demo's scenario on the runner's cell. `cargo xtask ci cell-demo` brings
+  # E21-54 (DEC-2002): the demo's scenario on the runner's cell. `cargo xtask ci cell-demo` brings
   # up the cell, runs every gesture of the demo's six steps that is on main and names each missing
   # link by its PR or story, then verifies the workspace's control stream. No required check needs
   # it; it keeps the ready steps green.

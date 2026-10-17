@@ -391,7 +391,6 @@ fn the_oracle_catches_a_restart_that_drops_the_send_in_flight_at_a_crash() -> Ch
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn with_approval_causes_a_restart_after_any_crash_makes_and_records_every_due_send() -> Checked {
     let mut plans: Vec<Vec<usize>> = (0..=APPROVAL_EFFECTS).map(|at| vec![at]).collect();
     for first in 0..APPROVAL_EFFECTS {
@@ -418,7 +417,6 @@ fn with_approval_causes_a_restart_after_any_crash_makes_and_records_every_due_se
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn with_approval_causes_the_oracle_catches_a_restart_that_drops_the_send_in_flight() -> Checked {
     let mut caught = 0usize;
     for at in 0..=APPROVAL_EFFECTS {
