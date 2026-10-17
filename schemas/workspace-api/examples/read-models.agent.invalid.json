@@ -130,5 +130,17 @@
     "remove": [
       "/agent"
     ]
+  },
+  {
+    "label": "mode outside the closed set",
+    "set": {
+      "/agent/mode": "mutant_value"
+    }
+  },
+  {
+    "label": "environment outside the closed set",
+    "set": {
+      "/agent/environment": "mutant_value"
+    }
   }
 ]

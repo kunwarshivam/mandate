@@ -124,5 +124,11 @@
     "set": {
       "/approvals": {}
     }
+  },
+  {
+    "label": "state outside the closed set",
+    "set": {
+      "/approvals/0/state": "mutant_value"
+    }
   }
 ]
