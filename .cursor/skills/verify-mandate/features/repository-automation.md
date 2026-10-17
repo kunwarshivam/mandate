@@ -16,6 +16,10 @@
   `xtask/layers.toml` (crate layers and safety-critical policy, and its `[process_groups]` table,
   which `process_group_problems` checks: no workspace-services crate reaches an agent-process
   crate or the reverse, E21-42, DEC-986), `.cargo/mutants.toml` (approved
-  equivalent mutants).
-- **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
-- **Run:** `cargo xtask check`.
+  equivalent mutants); `select`, `source_references` and `dependents_closure`, the affected-set
+  selection every scoped job follows, and `sweep_plan` with `sweep_scheduled`, the nightly's
+  whole-crate mutation sweep through the gate's own `gate_run` (DEC-1190).
+- **CI:** `.github/workflows/ci.yml` (`select`, then `fast`, `full`),
+  `.github/workflows/nightly.yml` (dispatches `ci` on main, Postgres 17, the reference extras,
+  the sweep).
+- **Run:** `cargo xtask check`; `cargo xtask ci select` says what the diff runs.

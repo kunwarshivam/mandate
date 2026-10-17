@@ -1507,6 +1507,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-alerts"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-notify",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-alpaca"
 version = "0.0.0"
 dependencies = [
@@ -1667,6 +1678,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-cp"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-identity",
+ "mandate-time",
+ "proptest",
+ "ring",
+]
+
+[[package]]
 name = "mandate-cp-agent"
 version = "0.0.0"
 dependencies = [
@@ -1698,6 +1720,7 @@ dependencies = [
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
+ "proptest",
  "thiserror",
 ]
 
@@ -1722,6 +1745,17 @@ dependencies = [
  "mandate-num",
  "mandate-risk",
  "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-gateway"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
  "mandate-time",
  "proptest",
  "serde_json",
@@ -2114,6 +2148,33 @@ dependencies = [
  "mandate-num",
  "mandate-time",
  "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-sources"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-research",
+ "mandate-time",
+ "proptest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "mandate-sources-http"
+version = "0.0.0"
+dependencies = [
+ "mandate-sources",
+ "reqwest",
+ "rustls",
+ "secrecy",
  "thiserror",
 ]
 

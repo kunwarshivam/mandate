@@ -1,0 +1,19 @@
+[package]
+name = "mandate-gateway"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The model gateway: the one component that calls a model, pinned, deadlined, metered and capped (inference spec, E15-6 to E15-10)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-time.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

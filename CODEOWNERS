@@ -25,6 +25,7 @@
 # Safety-critical crates (ADR-0001 ES-02)
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-agentd/     @kunwarshivam
+/crates/mandate-alerts/     @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
 /crates/mandate-api/        @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
@@ -37,10 +38,12 @@
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-connections/ @kunwarshivam
 /crates/mandate-cp-agent/   @kunwarshivam
+/crates/mandate-cp/         @kunwarshivam
 /crates/mandate-dataservice/ @kunwarshivam
 /crates/mandate-dispatcher/ @kunwarshivam
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
+/crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
 /crates/mandate-identity-system/ @kunwarshivam
 /crates/mandate-identity-testkit/ @kunwarshivam
@@ -67,6 +70,7 @@
 /crates/mandate-shell-rh-sim/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
+/crates/mandate-sources/    @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
