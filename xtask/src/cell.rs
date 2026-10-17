@@ -2028,7 +2028,7 @@ fn verify_streams(id: &str, streams: &[String]) -> Result<(bool, String)> {
 
 /// How long the drill's append waits on the fenced standby before the drill ends it: long enough
 /// that a primary committing alone would have answered many times over.
-const FENCED_APPEND_SECS: u32 = 40;
+const FENCED_APPEND_SECS: u32 = 60;
 
 /// OPS-2 with the synchronous standby down: the standby is fenced (CloudNativePG stops its
 /// Postgres), an append is tried, and it must wait on the standby rather than commit: the primary
@@ -2157,9 +2157,11 @@ fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
         Verdict::Broken(format!(
             "an append committed with the standby fenced: the primary holds {stored} events of {stream}, though the CLI never had its commit\n{logs}"
         ))
-    } else if job_end(&format!("control-{id}"))? != "DeadlineExceeded" {
+    } else if let end = job_end(&format!("control-{id}"))?
+        && end != "DeadlineExceeded"
+    {
         Verdict::Broken(format!(
-            "the append with the standby fenced failed rather than waited:\n{logs}"
+            "the append with the standby fenced failed (`{end}`) rather than waited:\n{logs}"
         ))
     } else if !waited {
         Verdict::Broken(format!(
@@ -2171,20 +2173,28 @@ fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
     Ok((verdict, stream))
 }
 
-/// Why a Job that failed ended, as its `Failed` condition says (`DeadlineExceeded` for one its
-/// deadline stopped).
+/// Why a Job that failed ended, as its `Failed` condition says, or its `FailureTarget` while the
+/// controller is still stopping its pod (`DeadlineExceeded` for one its deadline stopped); waited
+/// for, since a Job counts its failed pod before it sets either.
 fn job_end(name: &str) -> Result<String> {
-    Ok(kubectl(&[
-        "get",
-        "job",
-        name,
-        "--namespace",
-        NAMESPACE,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type==\"Failed\")].reason}",
-    ])?
-    .trim()
-    .to_string())
+    let mut reason = String::new();
+    until(|| {
+        reason = kubectl(&[
+            "get",
+            "job",
+            name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.conditions[?(@.type==\"FailureTarget\")].reason} {.status.conditions[?(@.type==\"Failed\")].reason}",
+        ])?
+        .split_whitespace()
+        .last()
+        .unwrap_or_default()
+        .to_string();
+        Ok(!reason.is_empty())
+    })?;
+    Ok(reason)
 }
 
 /// Sets the journal cluster's `dataDurability`, as only a seeded drill does.
@@ -2365,14 +2375,16 @@ fn base_backup(backup: &str) -> Result<std::result::Result<String, String>> {
             "--namespace",
             NAMESPACE,
             "-o",
-            "jsonpath={.status.phase}/{.status.backupId}",
+            "jsonpath={.status.phase}/{.status.backupId}/{.status.error}",
         ])?
         .trim()
         .to_string();
         Ok(phase.starts_with("completed/") || phase.starts_with("failed/"))
     })?;
     Ok(match phase.strip_prefix("completed/") {
-        Some(id) if !id.is_empty() => Ok(id.to_string()),
+        Some(rest) if !rest.starts_with('/') => {
+            Ok(rest.split('/').next().unwrap_or_default().to_string())
+        }
         _ => Err(phase),
     })
 }
