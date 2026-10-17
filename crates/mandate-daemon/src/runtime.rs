@@ -31,6 +31,10 @@ pub struct Wiring {
     pub flatten: Box<dyn FlattenPlanner>,
     pub refs: Box<dyn Refs>,
     pub view: MandateView,
+    /// The account the deployment's connection names, whose stream `acct:{workspace}:{account}` the
+    /// process folds at start and tails each pass (DEC-2209); `None` reads no account stream, and
+    /// the core keeps its startup hold.
+    pub account: Option<String>,
 }
 
 impl Wiring {

@@ -96,5 +96,6 @@ pub fn wiring(owner: &str) -> Wiring {
                 live_cli_confirm: None,
             },
         },
+        account: None,
     }
 }
