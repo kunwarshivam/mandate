@@ -610,6 +610,7 @@ const CONTEXT_KEYS: &[&str] = &[
     "previous_version",
     "current_mandate_version",
     "eligibility_failures",
+    "stop_limit_asset_classes",
 ];
 
 /// `validation_context_defaults` with the case's `context` laid over it.
@@ -652,6 +653,9 @@ fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, 
             "eligibility_failures" => context.eligibility_failures = assets(key)?,
             "workspace_users" => context.workspace_users = u32_of(stated, key)?,
             "approver_users" => context.approver_users = u32_of(stated, key)?,
+            "stop_limit_asset_classes" => {
+                context.stop_limit_asset_classes = stop_limit_classes(at(stated, key)?)?;
+            }
             "independent_approval_required" => {
                 context.independent_approval_required = at(stated, key)?
                     .as_bool()
@@ -1937,7 +1941,29 @@ fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
         current_mandate_version: None,
+        stop_limit_asset_classes: stop_limit_classes(at(defaults, "stop_limit_asset_classes")?)?,
     })
+}
+
+/// A context's `stop_limit_asset_classes`: the classes the connection's profile protects with a
+/// stop-limit, or `null` for the profile absent (DEC-539 item 2). Any other value, or a class this
+/// crate does not name, fails the case.
+fn stop_limit_classes(value: &Json) -> Result<Option<BTreeSet<AssetClass>>, String> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_array()
+        .ok_or("`stop_limit_asset_classes` is neither a list nor null")?
+        .iter()
+        .map(|class| {
+            class
+                .as_str()
+                .and_then(|text| AssetClass::parse(text).ok())
+                .ok_or_else(|| format!("`stop_limit_asset_classes` names {class}"))
+        })
+        .collect::<Result<BTreeSet<_>, String>>()
+        .map(Some)
 }
 
 /// The fixture's `signal_model_registry` shape, which V-007 compares the document's models against.

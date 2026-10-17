@@ -1499,6 +1499,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-journal",
  "mandate-process",
+ "mandate-release",
  "mandate-shell",
  "mandate-telemetry",
  "mandate-time",
@@ -2020,6 +2021,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-release"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "mandate-canon",
+ "proptest",
+ "ring",
+ "sha2 0.11.0",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-research"
 version = "0.0.0"
 dependencies = [
@@ -2038,6 +2051,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-domain",
+ "mandate-gateway",
  "mandate-num",
  "mandate-time",
  "proptest",
@@ -2099,6 +2113,7 @@ dependencies = [
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gateway",
  "mandate-journal",
  "mandate-num",
  "mandate-research",
@@ -2107,6 +2122,20 @@ dependencies = [
  "mandate-time",
  "proptest",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-scheduler"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]
@@ -4020,6 +4049,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "toml",
 ]
 

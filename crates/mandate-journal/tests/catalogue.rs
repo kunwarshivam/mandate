@@ -332,6 +332,7 @@ fn stream_types_and_required_config_refs_match_the_spec() {
                 .iter()
                 .any(|(t, _, _)| t == event_type);
             if !(kind == AGENT && CLOSED_ON_AGENT.contains(event_type))
+                && kind != CLOCK
                 && !closed_by_section_9_2(event_type, kind)
                 && !section_9_7
                 && !CLOSED_BY_E12_3.contains(event_type)

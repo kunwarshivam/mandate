@@ -288,10 +288,12 @@ fn a_confirmation_is_one_event_bound_to_the_version_shown_that_the_spec_fold_rea
     };
     let context = ValidationContext::from_journal(&mandate, args, &facts).unwrap();
     let violations = validate(&mandate, &context).unwrap().violations;
-    let supplied = BTreeSet::from([Violation::V001, Violation::V002]);
+    let supplied = BTreeSet::from([Violation::V001, Violation::V002, Violation::V008]);
     assert_eq!(
         violations, supplied,
-        "the run's two facts; V-002 alone did not refuse"
+        "the run's three facts: the bare fold knows no connection, so neither its environment \
+         (V-001) nor its profile (V-008, which fails closed, DEC-1152 item 1); V-002 alone did \
+         not refuse"
     );
 }
 
