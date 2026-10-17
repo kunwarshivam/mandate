@@ -443,7 +443,7 @@ fn an_entry_ending_after_its_bound_is_exited_whole_with_no_stop() {
 /// is accepted. B's start never ends A's interval, so at A's bound the owner is alerted and the
 /// whole position is exited, B's resting stop cancelled first (§5.4's marketable sequence).
 #[test]
-fn a_second_entry_never_ends_the_first_entrys_interval() {
+fn a_second_entry_never_ends_the_interval_of_the_first() {
     let (ids, mandates, instruments, config) = (
         TestIds,
         FixedMandate::covering(&[AAPL]),

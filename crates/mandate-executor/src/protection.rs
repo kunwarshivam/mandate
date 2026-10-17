@@ -2343,8 +2343,8 @@ fn oco(id: ClientOrderId, instrument: &InstrumentId, legs: OcoLegs) -> SubmitOrd
 /// confirmations re-place protection through [`settle`] — and the owner alerted once. On a profile
 /// with no OCO or bracket, an interval that names a plain entry whose stop is still not resting by
 /// then also exits the held quantity ([`flatten_unprotected`]) once the entry is terminal, so the
-/// exit covers everything it filled; an entry still working is cancelled first, and [`stop_after`]
-/// exits what it filled once it ends.
+/// exit covers everything it filled; an entry not yet terminal is cancelled first, and
+/// [`stop_after`] exits what it filled once it ends.
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
@@ -2381,17 +2381,15 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .get(&entry)
             .filter(|_| plain)
             .map(|order| order.state);
-        let working = matches!(
-            state,
-            Some(OrderState::Accepted | OrderState::PartiallyFilled)
-        );
-        if working && ask_cancel(batch, &entry)? {
+        let Some(state) = state else {
+            continue;
+        };
+        if state.is_terminal() {
+            flatten_unprotected(batch, &instrument, &entry, &alerted)?;
+        } else if ask_cancel(batch, &entry)? {
             batch.broker(BrokerRequest::Cancel {
                 client_order_id: entry.clone(),
             });
-        }
-        if state.is_some_and(OrderState::is_terminal) {
-            flatten_unprotected(batch, &instrument, &entry, &alerted)?;
         }
     }
     Ok(())
@@ -2399,12 +2397,14 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 
 /// §5.4's bound on a profile with no OCO or bracket: "if it is not resting by then, the executor
 /// exits the held quantity as a `risk_exit` through §5.6 and alerts the owner" (DEC-966 item 4).
-/// For an interval naming a plain entry (one sent with no bracket, whose intent carried a stop; both
-/// callers, [`bound`] and [`stop_after`], name only such an entry), the executor hands itself an intent like the watchdog's, `w-<record>` from the `interval_limit`
-/// record, or the `unprotected_end` that ends a late entry's interval (§2.3), for the long position less what exits already sell: a `risk_exit`, so it takes
-/// the marketable sequence, which cancels any stop still awaited before it sells (§5.4), and is
-/// never refused (rule 13). Its limit, the fallback when nothing prices it, is the lowest sane
-/// mark or bid ([`lowest_sane`]), or else the entry's stop. Its agent is the entry's.
+/// Both callers, [`bound`] and [`stop_after`], name only a plain entry: one sent with no bracket,
+/// whose intent carried a stop. The executor hands itself an intent like the watchdog's,
+/// `w-<record>` (§2.3), from the `interval_limit` record or from the `unprotected_end` that ends a
+/// late entry's interval. It sells the long position less what exits already sell, as a
+/// `risk_exit`, so it takes the marketable sequence, which cancels any stop still awaited before
+/// it sells (§5.4), and is never refused (rule 13). Its limit, the fallback when nothing prices
+/// it, is the lowest sane mark or bid ([`lowest_sane`]), or else the entry's stop. Its agent is
+/// the entry's.
 fn flatten_unprotected(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
