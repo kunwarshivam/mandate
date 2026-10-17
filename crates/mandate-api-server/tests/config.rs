@@ -155,6 +155,7 @@ fn credentials(contents: Option<&[u8]>, mode: u32) -> PathBuf {
         std::process::id(),
         DIRS.fetch_add(1, Ordering::SeqCst)
     ));
+    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("a directory");
     if let Some(contents) = contents {
         let file = dir.join(SESSION_KEY_FILE);
@@ -281,5 +282,12 @@ fn a_key_that_is_not_a_regular_file_is_refused_as_missing_and_never_opened() {
         fs::Permissions::from_mode(0o600),
     )
     .expect("its mode");
-    assert_eq!(read_session_key(&dir), Err(StartRefusal::SessionKeyMissing));
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(read_session_key(&dir));
+    });
+    let read = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("a FIFO is refused without being opened, so the read never blocks");
+    assert_eq!(read, Err(StartRefusal::SessionKeyMissing));
 }

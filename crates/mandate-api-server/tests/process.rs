@@ -26,6 +26,7 @@ fn credentials() -> PathBuf {
         std::process::id(),
         DIRS.fetch_add(1, Ordering::SeqCst)
     ));
+    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("a directory");
     let file = dir.join(SESSION_KEY_FILE);
     fs::write(&file, [0x42_u8; 32]).expect("the key");

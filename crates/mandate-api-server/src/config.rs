@@ -152,17 +152,18 @@ pub fn check_database_url(url: &str) -> Result<(), StartRefusal> {
 
 /// `text` with each `%XX` escape decoded, lossily; an escape that is not two hex digits stays.
 fn percent_decoded(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut rest = bytes;
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text.as_bytes();
     while let Some((&first, tail)) = rest.split_first() {
-        let escaped = match (first, tail) {
-            (b'%', [high, low, ..]) => hex(*high).zip(hex(*low)),
-            _ => None,
-        };
+        let escaped = (first == b'%')
+            .then(|| tail.get(..2))
+            .flatten()
+            .and_then(|digits| std::str::from_utf8(digits).ok())
+            .filter(|digits| digits.bytes().all(|b| b.is_ascii_hexdigit()))
+            .and_then(|digits| u8::from_str_radix(digits, 16).ok());
         match (escaped, tail.get(2..)) {
-            (Some((high, low)), Some(after)) => {
-                out.push(high.wrapping_shl(4) | low);
+            (Some(byte), Some(after)) => {
+                out.push(byte);
                 rest = after;
             }
             _ => {
@@ -172,12 +173,6 @@ fn percent_decoded(text: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex(digit: u8) -> Option<u8> {
-    char::from(digit)
-        .to_digit(16)
-        .and_then(|value| u8::try_from(value).ok())
 }
 
 /// Reads [`SESSION_KEY_FILE`] from `credentials_dir`: a regular file (a FIFO or directory is refused

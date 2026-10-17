@@ -107,11 +107,8 @@ fn app_origin() -> Result<String, StartRefusal> {
         && host
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
-    let port_ok = port.is_none_or(|port| {
-        port != "443"
-            && !port.starts_with('0')
-            && port.parse::<u16>().is_ok_and(|number| number > 0)
-    });
+    let port_ok = port
+        .is_none_or(|port| port != "443" && !port.starts_with('0') && port.parse::<u16>().is_ok());
     if host_ok && port_ok {
         Ok(origin)
     } else {
