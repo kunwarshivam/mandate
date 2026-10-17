@@ -1934,8 +1934,9 @@ struct ResolvedMetadata {
 /// pass `--all-features`, but one `cargo check -p <runner>` with only `live` may turn it on in the
 /// runner, and so may one `cargo nextest run -p <runner>` with exactly `live` and `rh-sim`, in the
 /// job [`REHEARSAL_LIVE_JOB`] of [`REHEARSAL_LIVE_WORKFLOW`] alone and only as
-/// [`rehearsal_job_problems`] allows it (DEC-964); that run may hold no live-only package. Problems name the file and job, the package with each package turning `live` on or
-/// depending on it; a failed resolve or an expanding word is a problem, not an abort.
+/// [`rehearsal_job_problems`] allows it (DEC-964); that run may hold no live-only package.
+/// Problems name the file and job, the package with each package turning `live` on or depending
+/// on it; a failed resolve or an expanding word is a problem, not an abort.
 fn resolved_live_problems(
     policy: &Layers,
     meta: &Metadata,
@@ -8027,7 +8028,7 @@ mod tests {
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
     };
-    use super::{CREDENTIAL_GUARD, rehearsal_live_run};
+    use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{unoptimised_config, unoptimised_packages};
 
@@ -12007,7 +12008,14 @@ mod tests {
             passed,
             "an environment without a credential name passes: {said}"
         );
-        for name in [
+        let script = fs::read_to_string(&guard)?;
+        let pattern = format!("grep -E -i '{}'", CREDENTIAL_NAME_PARTS.join("|"));
+        assert!(
+            script.contains(&pattern),
+            "the guard refuses exactly CREDENTIAL_NAME_PARTS: `{pattern}`"
+        );
+        let each_part = CREDENTIAL_NAME_PARTS.map(|part| format!("X_{}_Y", part.to_lowercase()));
+        let named = [
             "MANDATE_ALPACA_PAPER_KEY_ID",
             "MANDATE_ALPACA_PAPER_SECRET",
             "APCA_API_KEY_ID",
@@ -12016,7 +12024,8 @@ mod tests {
             "GITHUB_TOKEN",
             "DB_PASSWORD",
             "GOOGLE_APPLICATION_CREDENTIALS",
-        ] {
+        ];
+        for name in each_part.iter().map(String::as_str).chain(named) {
             let (passed, said) = run(&[(name, "not-a-real-value-7f3a")])?;
             assert!(!passed, "{name} fails the guard");
             assert!(said.contains(name), "the guard names {name}: {said}");
