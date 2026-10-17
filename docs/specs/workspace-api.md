@@ -103,7 +103,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token. Without one the API returns 401, reveals no data, and says nothing about whether the resource exists | A route table test: every registered route, called without credentials, returns 401 with the same body |
+| **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token; `POST /v1/sessions` carries the access token it exchanges (§3.11). Without one the API returns 401, reveals no data, and says nothing about whether the resource exists. The three browser-only session routes of §4.10 check `Origin` and `X-Mandate-Request` first, and refuse a failure 403 `forbidden` before any cookie or token is read | A route table test: every registered route, called without credentials, returns 401 with the same body; the three session routes return that 403 without `Origin` and the same 401 with it |
 | **API-2** | **Authorized on the server.** Each operation checks the principal's role in the workspace (§3.7) and, for a client, its scope (§3.8), on the server, before any read or write. The web app's role checks (`web/src/lib/roles.tsx`) are never authority | A matrix test: every route × every role and client scope, with the expected 403 or success from §3.7, computed from the table, not from the handler |
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
@@ -181,6 +181,8 @@ Owned by the [identity spec](identity.md). What the API requires of it:
      write.
    - A call authenticated by a sender-constrained token (item 2: the CLI, a client, a service
      account) sends no `Origin` and is not checked; a cross-site page cannot produce its proof.
+   - The browser-only session routes of §3.11 have no such caller: they check first, refuse a
+     missing `Origin`, and refuse 403 before reading a cookie or token.
    - The check applies to the API-7 operations too. A cookie call that fails it is not the owner's
      authenticated call, so its refusal is API-7's "failed authentication", not a new reason
      (DEC-682 item 19).
@@ -537,6 +539,10 @@ per workspace deployment (item 6).
    - a token that does not verify, or names another subject: a failed refresh, which ends the
      session (`refresh_failed`);
    - a rotated secret presented again ends the session (`refresh_reuse`).
+
+   - A pause or a kill switch on a full session whose access has lapsed with no refresh is not
+     refused for it: the server records an outage refresh itself (route 1) and serves the call, so
+     risk reduction never waits on the web app (API-7). Any other call on it gets the one 401.
 
    So a session's full reach never outlasts the last access token it was given by more than five
    minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie. Records live
