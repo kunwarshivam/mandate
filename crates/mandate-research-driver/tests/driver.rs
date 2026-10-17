@@ -218,6 +218,7 @@ fn an_unknown_append_holds_every_other_input_until_the_same_one_is_retried() {
     let mut driver = Driver::new();
     assert_eq!(p.step(&mut driver, poll(1)), Ok(Stepped::Held));
     assert_eq!(driver.pending(), Some(&poll(1)));
+    assert!(!driver.halted(), "an unknown append holds, it does not halt");
     assert!(
         !p.log().iter().any(|line| line.starts_with("hand")),
         "nothing is handed on before its drafts are known committed"
