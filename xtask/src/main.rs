@@ -5047,7 +5047,7 @@ fn pipeline_live_flag(
         let as_text = known_command(&named) && later_known && !consumer_executes;
         let position = command.command_position();
         let captured = as_text || (position.is_none() && later_known && !consumer_executes);
-        if !allowed_live && !as_text {
+        if flag != LiveFlag::CompileOnly && !as_text {
             reread.extend(
                 command
                     .words
@@ -13528,6 +13528,19 @@ jq -r "$filter" "$src"
                 "names the file and line: {problems:?}"
             );
         }
+        for line in [
+            "      - run: cargo check -p the-runner --features live --config \"cargo build --all-features\"",
+            "      - run: cargo nextest run -p the-runner --features live,rh-sim -E \"cargo build --all-features\"",
+            "      - run: echo \"cargo build --all-features\"",
+        ] {
+            let files = [ci_file(".github/workflows/ci.yml", line)];
+            let problems = live_feature_problems(&policy, &meta(), &files)?;
+            assert_eq!(
+                problems.len(),
+                1,
+                "a quoted word naming cargo is refused: {line}"
+            );
+        }
         let script = [ci_file(
             ".github/scripts/build.sh",
             &format!(
@@ -13784,6 +13797,19 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// The test's own reading of what cargo resolves for the rehearsal's runs: the runner turns
+    /// `live` on exactly when an invocation passes `--all-features` or a word one of whose items,
+    /// split on `,`, `/` and `=`, is `live`, so `live,rh-sim` turns it on as cargo would.
+    fn by_items(words: &[String]) -> Resolve {
+        let live =
+            |w: &String| w == "--all-features" || w.split([',', '/', '=']).any(|i| i == "live");
+        three(if words.iter().any(live) {
+            &["live"]
+        } else {
+            &[]
+        })
+    }
+
     /// `.github/workflows/ci.yml` holding `top` before its jobs, then the rehearsal job
     /// `fast-rh-sim-live` with the lines `job`, each four spaces in, and a `plain` job.
     fn rehearsal_workflow(top: &str, job: &[&str]) -> CiFile {
@@ -13813,7 +13839,7 @@ jq -r "$filter" "$src"
         let run = |flows: &[CiFile]| {
             let mut read: Vec<CiFile> = flows.iter().map(|f| ci_file(&f.path, &f.text)).collect();
             read.push(ci_file(CREDENTIAL_GUARD, "set -euo pipefail\n"));
-            check(&live_policy(), with_runner(vec![]), &read, by_flags)
+            check(&live_policy(), with_runner(vec![]), &read, by_items)
         };
         let steps = rehearsal_steps();
         let lines: Vec<&str> = steps.iter().map(String::as_str).collect();
@@ -13828,6 +13854,31 @@ jq -r "$filter" "$src"
         );
         let elsewhere = run(&[workflow(&[("other", REHEARSAL_RUN)])])?;
         names(&elsewhere, &["other", "fast-rh-sim-live"], &[]);
+        let guard_named = |problems: &[String]| problems.iter().any(|p| p.contains("run first"));
+        assert!(
+            !guard_named(&elsewhere),
+            "only the rehearsal job's own run is judged against the guard: {elsewhere:?}"
+        );
+        assert_eq!(
+            run(&[rehearsal_workflow("", &["steps:", "  - run: cargo test"])])?,
+            Vec::<String>::new(),
+            "a run without `live` in the job is not the rehearsal's"
+        );
+        for line in [
+            "cargo build -p the-runner --features live",
+            "cargo nextest run -p a-lib --features live,rh-sim",
+            "cargo nextest run -p the-runner --features live",
+        ] {
+            let step = format!("  - run: {line}");
+            let problems = run(&[rehearsal_workflow("", &["steps:", &step])])?;
+            assert!(
+                problems
+                    .iter()
+                    .any(|p| p.contains("resolves `live` in `the-runner`")),
+                "{line}: another form in the job may not resolve `live`: {problems:?}"
+            );
+            assert!(!guard_named(&problems), "{line}: {problems:?}");
+        }
         let other_file = ci_file(".github/workflows/nightly.yml", &guarded.text);
         let problems = run(&[other_file])?;
         names(&problems, &["fast-rh-sim-live"], &["plain"]);
@@ -13871,7 +13922,7 @@ jq -r "$filter" "$src"
         let run = |flows: &[CiFile]| {
             let mut read: Vec<CiFile> = flows.iter().map(|f| ci_file(&f.path, &f.text)).collect();
             read.push(ci_file(CREDENTIAL_GUARD, "set -euo pipefail\n"));
-            check(&live_policy(), with_runner(vec![]), &read, by_flags)
+            check(&live_policy(), with_runner(vec![]), &read, by_items)
         };
         let steps = rehearsal_steps();
         let with = |extra: &[&str]| {
