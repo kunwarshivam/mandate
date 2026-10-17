@@ -121,9 +121,9 @@ describe("the API session (workspace API spec §3.11 items 5 and 6)", () => {
     const locks = fakeLocks();
     let release: () => void = () => {};
     const slow = new Promise<void>((r) => (release = r));
-    const { session } = keeper("fresh", async () => (await slow, new Response(null, { status: 204 })), { locks });
     const order: string[] = [];
-    const refreshing = session.refresh().then(() => order.push("refreshed"));
+    const { session } = keeper("fresh", async () => (await slow, order.push("refreshed"), new Response(null, { status: 204 })), { locks });
+    const refreshing = session.refresh();
     await Promise.resolve();
     const read = session.guard(async () => order.push("read"));
     await new Promise((r) => setTimeout(r, 5));

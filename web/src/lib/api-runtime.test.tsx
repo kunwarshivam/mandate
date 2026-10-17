@@ -74,8 +74,10 @@ function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch,
   return { server, calls, posts: () => calls.filter((c) => c.method === "POST") };
 }
 
+/** Ready on screen and in the probe, whose effect runs after the render that shows it. */
 async function ready() {
   await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("ready"));
+  await waitFor(() => expect(seen.runtime?.ws.status).toBe("ready"));
 }
 
 afterEach(() => {

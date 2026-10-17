@@ -4,7 +4,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
 import { emptyWorkspace, loadWorkspace } from "@/api/reads";
-import type { SessionKeeper } from "@/api/session";
+import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
@@ -57,11 +57,14 @@ export function ApiRuntimeProvider({
   /** The API session (§3.11 items 5 and 6); none in the e2e build, whose mock API reads no cookie. */
   session?: SessionKeeper;
 }) {
-  void session;
-  const client = useMemo(
-    () => createWorkspaceClient({ workspaceId: source.workspaceId, baseUrl: source.origin, fetch: fetch ?? ((input, init) => window.fetch(input, init)) }),
-    [source.workspaceId, source.origin, fetch],
-  );
+  /** Reads wait while a refresh rotates the cookie; commands never wait (API-7). */
+  const client = useMemo(() => {
+    const send: Fetch = fetch ?? ((input, init) => window.fetch(input, init));
+    const guarded: Fetch = (input, init) => ((init.method ?? "GET") === "GET" && session ? session.guard(() => send(input, init)) : send(input, init));
+    return createWorkspaceClient({ workspaceId: source.workspaceId, baseUrl: source.origin, fetch: guarded });
+  }, [source.workspaceId, source.origin, fetch, session]);
+  /** Whether an API session is open; with no keeper the API's own cookie is the caller's business. */
+  const signedIn = useRef<SessionState | null>(session ? null : "open");
   const [ws, setWs] = useState<Workspace>(() => emptyWorkspace("loading", new Date().toISOString()));
   const [now, setNow] = useState<Iso>(ws.now);
   const [commands, setCommands] = useState<Command[]>([]);
@@ -82,12 +85,32 @@ export function ApiRuntimeProvider({
   const counter = useRef(0);
   const mounted = useRef(true);
 
+  /** Opens the API session; a workspace that cannot be read for want of one says so and shows nothing. */
+  const openSession = useCallback(async (): Promise<boolean> => {
+    if (!session) return true;
+    const state = await session.open();
+    signedIn.current = state;
+    return state === "open";
+  }, [session]);
+
   const refresh = useCallback(async () => {
     reads.current += 1;
     const read = reads.current;
-    const loaded = await loadWorkspace(client);
+    if (signedIn.current === null) await openSession();
+    if (signedIn.current === "signed_out" || signedIn.current === "refused") {
+      if (!mounted.current || read !== reads.current) return;
+      wsRef.current = emptyWorkspace("signed_out", nowRef.current);
+      setWs(wsRef.current);
+      return;
+    }
+    let loaded = await loadWorkspace(client);
+    if (!loaded.ok && loaded.error.code === "unauthenticated" && session && (await openSession())) loaded = await loadWorkspace(client);
     if (!mounted.current || read !== reads.current) return;
-    if (loaded.ok) {
+    if (!loaded.ok && loaded.error.code === "unauthenticated" && session) {
+      wsRef.current = emptyWorkspace("signed_out", nowRef.current);
+    } else if (!loaded.ok && loaded.error.code === "membership_unavailable") {
+      wsRef.current = { ...emptyWorkspace("membership_unavailable", nowRef.current), environment: lastRead.current?.environment ?? "paper" };
+    } else if (loaded.ok) {
       served.current = { at: loaded.ws.now, local: Date.now() };
       lastRead.current = loaded.ws;
       wsRef.current = loaded.ws;
@@ -97,12 +120,17 @@ export function ApiRuntimeProvider({
       wsRef.current = last.status === "ready" ? { ...down, environment: last.environment, health: { ...last.health, deployment: { state: "down", as_of: last.health.deployment.as_of } } } : down;
     }
     setWs(wsRef.current);
-  }, [client]);
+  }, [client, openSession, session]);
 
   useEffect(() => {
     mounted.current = true;
     void refresh();
     const poll = window.setInterval(() => void refresh(), refreshMs);
+    const keep = session
+      ? window.setInterval(() => {
+          if (signedIn.current === "open" || signedIn.current === "outage") void session.refresh().then((state) => (signedIn.current = state));
+        }, REFRESH_EVERY_MS)
+      : null;
     const clock = window.setInterval(() => {
       const base = served.current;
       const next = base ? later(Date.now() - base.local, base.at) : new Date().toISOString();
@@ -112,9 +140,10 @@ export function ApiRuntimeProvider({
     return () => {
       mounted.current = false;
       window.clearInterval(poll);
+      if (keep !== null) window.clearInterval(keep);
       window.clearInterval(clock);
     };
-  }, [refresh, refreshMs]);
+  }, [refresh, refreshMs, session]);
 
   /** Sends one prepared gesture until the API answers, with the same key and body each time (API-4, API-13). */
   const deliver = useCallback(
