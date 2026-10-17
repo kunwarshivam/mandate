@@ -259,7 +259,7 @@ the journal spec's catalogue has none, a journal spec change with test vectors c
 
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
-| K0 | **E21-50** (SC; first) | `mandate-cli db migrate`: forward-only migrations under the migration-owner role, taking over from `deploy/`'s table and the embedded migrator (OPS-13, ES-08). It does not exist yet; E5-3 left it "Not done" | `mandate-cli`, `mandate-journal-pg` | — |
+| K0 | **E21-50** (SC; first) | `mandate-cli db migrate`: forward-only migrations under the migration-owner role, taking over from `deploy/`'s table and the embedded migrator (OPS-13, ES-08); `mandate db migrate --journal <DSN> [--schema journal]`, its codes and how K1 and S2 run it are in [DEC-994](../decisions/DEC-994.md) | `mandate-cli`, `mandate-journal-pg` | — |
 | K1 | **E21-36** (SC) | One Helm chart and one Compose file for a workspace deployment, from the same process list: a pod (or service) per process, pod affinity per workspace (§3.2), requests equal to limits for the executor and scheduler (§3.3), default-deny `NetworkPolicy` per process type with exactly §3.1's egress (OPS-5, E21-1), no inbound to the data plane, the migration Job under the migration-owner role before processes roll (OPS-13), secrets only as mounted files (DEC-822 item 4). E13-1 and E13-2 (hybrid) reuse it | `mandate-cli` (`db migrate`, from K0) | — |
 
 K1 starts with Postgres, the migration Job (once K0 lands) and a `mandate journal verify` Job,
