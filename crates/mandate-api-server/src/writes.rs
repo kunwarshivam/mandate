@@ -283,3 +283,14 @@ fn unknown(id: EventId) -> Response {
         .unwrap_or_default();
     problem(StatusCode::SERVICE_UNAVAILABLE, body)
 }
+
+/// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10).
+pub async fn respond(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Body,
+) -> Response {
+    let _ = (app, headers, path, body);
+    crate::http::unauthenticated()
+}

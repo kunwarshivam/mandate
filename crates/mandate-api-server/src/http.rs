@@ -113,6 +113,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             post(writes::pause).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/approvals/{approval}/responses",
+            post(writes::respond).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/kill-switch",
             post(writes::kill_switch).fallback(otherwise.clone()),
         )

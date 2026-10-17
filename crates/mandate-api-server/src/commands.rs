@@ -39,6 +39,13 @@ pub enum Command {
     Pause(String),
     /// Engage the kill switch at a scope.
     KillSwitch(KillScope),
+    /// Skip an approval (§5.2): its agent, its `ApprovalRequested` id, and the content hash the
+    /// client rendered.
+    Skip {
+        agent: String,
+        approval: String,
+        content_hash: String,
+    },
 }
 
 impl Command {
@@ -47,6 +54,7 @@ impl Command {
         match self {
             Self::Pause(_) => "pause",
             Self::KillSwitch(_) => "kill_switch",
+            Self::Skip { .. } => "",
         }
     }
 
@@ -56,6 +64,7 @@ impl Command {
             Self::Pause(_) => Permission::Pause,
             Self::KillSwitch(KillScope::Agent(_)) => Permission::KillSwitchAgent,
             Self::KillSwitch(_) => Permission::KillSwitchConnectionOrWorkspace,
+            Self::Skip { .. } => Permission::Pause,
         }
     }
 
@@ -64,7 +73,13 @@ impl Command {
         match self {
             Self::Pause(_) => Request::Pause,
             Self::KillSwitch(_) => Request::KillSwitch,
+            Self::Skip { .. } => Request::Pause,
         }
+    }
+
+    /// The member of the `202` that names the event: `command_id`, or a Skip's `response_id`.
+    pub fn id_member(&self) -> &'static str {
+        "command_id"
     }
 
     /// The payload's `agent`, `scope`, and `subject` (journal spec §9.11, rule 91): the agent for
@@ -76,6 +91,7 @@ impl Command {
             }
             Self::KillSwitch(KillScope::Connection(connection)) => (None, "connection", connection),
             Self::KillSwitch(KillScope::Workspace) => (None, "workspace", workspace),
+            Self::Skip { agent, .. } => (Some(agent), "agent", agent),
         }
     }
 }
@@ -206,6 +222,7 @@ pub fn in_workspace(control: &[StoredEvent], command: &Command) -> bool {
     };
     match command {
         Command::Pause(id) | Command::KillSwitch(KillScope::Agent(id)) => agent(id),
+        Command::Skip { .. } => false,
         Command::KillSwitch(KillScope::Connection(id)) => connection(id),
         Command::KillSwitch(KillScope::Workspace) => !control.is_empty(),
     }
