@@ -174,8 +174,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     format!("founded ctl:{workspace} for member {FOUNDER}"),
                 ),
                 Part::Api(ApiCheck {
-                    shows: "the workspace API in the cell, refusing a read with no session \
-                            (the one 401, API-1)",
+                    shows: "the cell's API, through the demo's port-forward, refusing a read \
+                            of the demo workspace with no session (401)",
                     path: format!("/v1/workspaces/{DEMO_WORKSPACE}/agents"),
                     status: 401,
                 }),
@@ -527,26 +527,15 @@ pub fn run(name: &str) -> Result<()> {
                         failed = Some(g.container.clone());
                     }
                 }
-                Part::Api(check) => match api_status(&check.path)? {
-                    Ok(status) if status == check.status => {
-                        eprintln!(
-                            "    ran      {}: GET {} is {status}",
-                            check.shows, check.path
-                        );
+                Part::Api(check) => {
+                    let answer = api_status(&check.path)?;
+                    let required = env::var_os(CELL_REQUIRED_ENV).is_some();
+                    let (word, said, fails) = api_verdict(&answer, check.status, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
-                    Ok(status) => {
-                        eprintln!(
-                            "    failed   {}: GET {} is {status}, not {}",
-                            check.shows, check.path, check.status
-                        );
-                        failed.get_or_insert_with(|| format!("GET {}", check.path));
-                    }
-                    Err(why) if env::var_os(CELL_REQUIRED_ENV).is_some() => {
-                        eprintln!("    failed   {}: {why}", check.shows);
-                        failed.get_or_insert_with(|| format!("GET {}: {why}", check.path));
-                    }
-                    Err(why) => eprintln!("    not run  {}: {why}", check.shows),
-                },
+                }
                 Part::Gap { what, closes } => {
                     gaps += 1;
                     eprintln!("    gap      {what}: {closes}");
@@ -589,8 +578,26 @@ fn api_status(path: &str) -> Result<Result<u16, String>> {
             "no kubectl on this machine to forward the API's port with".into(),
         ));
     }
-    api_port_forward()?;
-    Ok(Ok(http_status(API_LOCAL_PORT, path)?))
+    if let Err(e) = api_port_forward() {
+        return Ok(Err(format!("the port-forward to the API failed: {e:#}")));
+    }
+    Ok(http_status(API_LOCAL_PORT, path).map_err(|e| format!("GET {path} failed: {e:#}")))
+}
+
+/// How an API check reads: `ran` only for the status it expects; `failed` for any other status,
+/// and for an API that cannot be asked where CI requires the cell; otherwise `not run`. Returns the
+/// word, what to print after it, and whether the run fails.
+pub fn api_verdict(
+    answer: &Result<u16, String>,
+    expected: u16,
+    required: bool,
+) -> (&'static str, String, bool) {
+    match answer {
+        Ok(status) if *status == expected => ("ran", format!("answered {status}"), false),
+        Ok(status) => ("failed", format!("answered {status}, not {expected}"), true),
+        Err(why) if required => ("failed", why.clone(), true),
+        Err(why) => ("not run", why.clone(), false),
+    }
 }
 
 /// `cargo xtask ci cell-demo`: the scenario on the CI runner's cell. Skipped without docker, k3d
@@ -762,6 +769,36 @@ mod tests {
         assert_eq!(
             check.path,
             format!("/v1/workspaces/{DEMO_WORKSPACE}/agents")
+        );
+    }
+
+    /// Only the expected status reads as run; another status always fails the run, and an API
+    /// that cannot be asked fails it only where CI requires the cell.
+    #[test]
+    fn an_api_check_runs_only_on_its_status_and_fails_where_the_cell_is_required() {
+        let unreachable: Result<u16, String> = Err("no kubectl".into());
+        for required in [false, true] {
+            assert_eq!(api_verdict(&Ok(401), 401, required).0, "ran");
+            assert!(
+                !api_verdict(&Ok(401), 401, required).2,
+                "a 401 never fails the run"
+            );
+            for status in [200, 403, 404, 500] {
+                let (word, _, fails) = api_verdict(&Ok(status), 401, required);
+                assert_eq!(
+                    (word, fails),
+                    ("failed", true),
+                    "{status}, required {required}"
+                );
+            }
+        }
+        assert_eq!(
+            api_verdict(&unreachable, 401, false),
+            ("not run", "no kubectl".into(), false)
+        );
+        assert_eq!(
+            api_verdict(&unreachable, 401, true),
+            ("failed", "no kubectl".into(), true)
         );
     }
 
