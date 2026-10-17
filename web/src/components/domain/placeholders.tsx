@@ -3,6 +3,7 @@
 import { type ReactNode, createContext, useContext, useId } from "react";
 import { Popover } from "@cloudflare/kumo/components/popover";
 import { CircleInfo } from "pixelarticons/react/CircleInfo.js";
+import { RuntimeContext } from "@/lib/mock-runtime";
 import { cn } from "@/lib/utils";
 
 /**
@@ -82,8 +83,14 @@ export function Placeholder({ name, className }: { name: PlaceholderName; classN
   );
 }
 
-/** Marks fixture values so no one reads them as a record. */
-export function FixtureTag({ className }: { className?: string; scope?: "workspace" | "section" }) {
+/**
+ * Marks fixture values so no one reads them as a record. A `workspace` tag marks the workspace's own
+ * figures, which are a record when they come from the workspace API (DEC-970), so it shows only over the
+ * fixtures; a `section` tag marks content that stays sample whatever the source.
+ */
+export function FixtureTag({ className, scope = "section" }: { className?: string; scope?: "workspace" | "section" }) {
+  const runtime = useContext(RuntimeContext);
+  if (scope === "workspace" && runtime?.source === "api") return null;
   return (
     <span data-slot="fixture-tag" className={cn("inline-flex h-5 shrink-0 items-center rounded-sm bg-muted px-1.5 text-label text-muted-foreground", className)}>
       Fixture data

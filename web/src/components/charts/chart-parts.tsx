@@ -8,9 +8,13 @@ import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { type ChartLevel, usdLabel } from "./options";
 
-export function useMarket(): Market {
-  const { ws } = useRuntime();
-  return useMemo(() => buildMarket(ws), [ws]);
+/**
+ * The seeded fixture market the charts draw, or `null` over the workspace API (DEC-970): the API serves
+ * no price or equity history yet, and seeded bars beside a deployment's figures would read as a record.
+ */
+export function useMarket(): Market | null {
+  const { ws, source } = useRuntime();
+  return useMemo(() => (source === "fixtures" ? buildMarket(ws) : null), [ws, source]);
 }
 
 function watchRoot(attribute: string): (onChange: () => void) => () => void {

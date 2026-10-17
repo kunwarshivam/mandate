@@ -65,9 +65,15 @@ export const WEB_OPERATIONS: readonly DocumentedOperation[] = [
 ];
 
 /** The documented operation a request is, or `null`: the path must sit under this workspace and match a route whole. */
+const MATCHERS = WEB_OPERATIONS.map((op) => ({ op, pattern: new RegExp(`^${op.route.replace(/\{[a-z]+\}/g, "[^/]+")}$`) }));
+
 export function operationFor(method: string, url: string, workspaceId: string): DocumentedOperation | null {
-  void method;
-  void url;
-  void workspaceId;
-  throw new Error("Unimplemented: E11-9");
+  const parsed = new URL(url, "http://relative.invalid");
+  const prefix = `/v1/workspaces/${workspaceId}`;
+  if (!parsed.pathname.startsWith(`${prefix}/`)) return null;
+  const route = parsed.pathname.slice(prefix.length);
+  const found = MATCHERS.find(({ op, pattern }) => op.method === method.toUpperCase() && pattern.test(route));
+  if (!found) return null;
+  for (const name of parsed.searchParams.keys()) if (!found.op.query.includes(name)) return null;
+  return found.op;
 }
