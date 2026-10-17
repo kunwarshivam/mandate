@@ -53,7 +53,7 @@ export function AgentCard({
 }) {
   const markAt = agent.positions[0]?.mark_as_of;
   const market = useMarket();
-  const today = useMemo(() => equityWindow(market.equity[agent.agent_id] ?? [], "1D", market.end), [market, agent.agent_id]);
+  const today = useMemo(() => (market ? equityWindow(market.equity[agent.agent_id] ?? [], "1D", market.end) : []), [market, agent.agent_id]);
   const daily = mandateLevels(agent).find((l) => l.key === "daily");
   return (
     <article

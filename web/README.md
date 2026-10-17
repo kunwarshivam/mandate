@@ -25,11 +25,15 @@ npm run typecheck
 npm test
 npm run pending    # every pending test fails at its stub when un-skipped (DEC-750)
 npm run build && npm start
+npm run cf:build   # the Cloudflare Worker through OpenNext (DEC-823, DEC-731); npm run cf:preview runs it locally
+                   # main deploys it through .github/workflows/web-deploy.yml alone, once the repository
+                   # variable WEB_DEPLOY_ENABLED is true (DEC-1005)
 npm run shots      # every screen as PNG files with a contact sheet in .shots/, against a running dev server (DEC-516)
 
 npx playwright install --with-deps --only-shell chromium   # once
 npm run test:e2e
 npm run test:e2e:auth   # sign-in on, against a stub Supabase
+npm run test:e2e:api    # the workspace API as the data source (DEC-975); npm run test:e2e runs it too
 ```
 
 The e2e suite (`e2e/`, Playwright, Chromium only, in light and dark) builds the app into `.next-e2e/`
@@ -84,7 +88,9 @@ To run without sign-in, set neither variable (or leave `.env.local` out). To run
 | `NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN` | `1` shows the email link on `/login`; leave it unset until the project has SMTP |
 
 Next reads `.env.local` for `npm run dev`, `npm run build` and `npm start`; the variables are
-inlined into the build, so rebuild after changing them. Open the app at `http://localhost:4317`
+inlined into the build, so rebuild after changing them. For the deployed Worker they are variables of
+the GitHub `production` environment, which `.github/workflows/web-deploy.yml` builds with (DEC-1005
+item 6). Open the app at `http://localhost:4317`
 rather than `127.0.0.1`: a passkey only works on a host that matches its relying-party ID.
 
 While sign-in is on, a signed-out visitor at `/` sees the welcome page (the address stays `/`), and
@@ -123,7 +129,10 @@ request, an email and an optional use, in one of two places:
   `supabase db push`). Row level security lets the publishable key add a row and never read one;
   read the list in the dashboard's table editor or with the secret key.
 - **A local file**, `web/.data/beta-requests.jsonl`, one JSON line per request, while Supabase is
-  not configured or the table does not exist yet. Git ignores `.data/`.
+  not configured or the table does not exist yet, in development and tests only. Git ignores
+  `.data/`. A production build has no file to fall back on (it runs on Cloudflare Workers,
+  DEC-823): there the form is closed, and sends nothing, until both Supabase variables are set
+  (DEC-987), and then answers unavailable until the table exists (DEC-731 item 4).
 
 A repeat address counts as stored, so the form never says whether someone is already on the list.
 
@@ -133,9 +142,39 @@ A repeat address counts as stored, so the form never says whether someone is alr
 `/v1/workspaces/{ws}`, one `Idempotency-Key` per gesture kept across retries, every failure as
 `{code, effect}` with an unanswered command reported as `effect: "unknown"`, decimals refused as
 JSON numbers, `as_of` watermarks on every read, and no order-placing method (DEC-528).
-`src/api/mock-server.ts` is a fixture-backed `fetch` for tests and `npm run dev`. The typed
-per-route layer comes once `schemas/workspace-api/` lands; until then the screens still read
-`src/fixtures/` directly.
+`src/api/mock-server.ts` is a fixture-backed `fetch` for tests, `npm run dev` and the e2e build.
+
+### Where the screens read from (DEC-975)
+
+The fixtures, unless the server's environment names a workspace deployment's API. It is read when a
+request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variable:
+
+| Variable | What it is |
+|---|---|
+| `OWLHEAD_DATA_SOURCE` | `fixtures` (the default when unset) or `api`. Anything else shows the deployment unreachable |
+| `OWLHEAD_API_ORIGIN` | The API's origin, `https://api.owlhead.ai` for the demo; `http` only on a loopback host |
+| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired |
+
+Over the API (`src/lib/api-runtime.tsx`) the browser reads the workspace with its own session
+cookie from the documented reads (`src/api/reads.ts`), polls them every five seconds, and sends
+each command and answer through the API's idempotent write routes (`src/api/commands.ts`),
+following it through `GET /commands/{id}`. A misconfigured or silent API shows the deployment
+unreachable, never the fixtures. `src/api/operations.ts` lists every operation the app calls, and
+`src/api/contract.test.ts` fails a call the spec does not document (E21-45). Setting up an agent and
+changing a mandate are not sent yet, step-up is not sent until E9-4 gives the browser its ceremony,
+and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
+provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
+`/demo` always reads the fixtures.
+
+To try it locally against the mock API the dev server serves at `/v1`:
+
+```sh
+OWLHEAD_DATA_SOURCE=api OWLHEAD_API_ORIGIN=http://127.0.0.1:4317 OWLHEAD_WORKSPACE_ID=ws_dev npm run dev
+npm run test:e2e:api   # the e2e build with the API as its source, on port 4319
+```
+
+The scenario switcher's cookie picks what the mock API serves. A production build answers 404 at
+`/v1` (`scripts/no-scenarios.mjs`).
 
 ## The mock-data rule
 
