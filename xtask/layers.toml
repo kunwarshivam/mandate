@@ -127,6 +127,7 @@ workspace_services = [
     "mandate-cp-agent",
     "mandate-cp-site",
     "mandate-deploy-manager",
+    "mandate-deployd",
     "mandate-dispatcher",
 ]
 agent_process = [
@@ -733,6 +734,31 @@ forbidden_internal = [
     "mandate-runtime",
     "mandate-shell",
 ]
+# The deployment manager's process (E21-33 slice 2, DEC-1172): mandate-deploy-manager over the
+# Postgres journal and the Kubernetes API, with mandate-process's lifecycle and probes. tokio drives
+# the journal, the orchestrator's HTTPS and the SIGTERM listener. Like the manager it wires, it may
+# never reach a crate that writes an agent or account stream, holds a broker credential, or edits a
+# mandate.
+[crates.mandate-deployd]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["serde_json", "tokio"]
+forbidden_internal = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-builder",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-risk",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+    "mandate-spec",
+]
+
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over the
 # Postgres journal, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker

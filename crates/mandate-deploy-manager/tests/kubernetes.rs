@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use common::block_on;
+use mandate_canon::Digest;
 use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes, MAX_BODY, SetupError};
 use mandate_deploy_manager::{Instance, Orchestrator, Phase, Process, Slot, Unavailable};
 use serde_json::{Value, json};
@@ -256,7 +257,13 @@ fn a_start_creates_a_bare_pod_the_orchestrator_never_restarts() {
     );
     assert_eq!(labels["mandate.dev/process"], "runtime");
     assert_eq!(labels["mandate.dev/generation"], "7");
-    assert_eq!(labels["mandate.dev/workspace"].as_str().unwrap().len(), 16);
+    let key = |text: &str| Digest::of(text.as_bytes()).to_hex()[..16].to_owned();
+    assert_eq!(labels["mandate.dev/workspace"], key("ws_01J8Z2").as_str());
+    assert_eq!(
+        labels["mandate.dev/subject-key"],
+        key("Agent_A").as_str(),
+        "a pod is selectable by its subject's key"
+    );
     assert_eq!(
         sent["metadata"]["annotations"]["mandate.dev/subject"],
         "Agent_A"

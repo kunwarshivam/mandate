@@ -9788,6 +9788,7 @@ mod tests {
                 "mandate-cp-agent",
                 "mandate-cp-site",
                 "mandate-deploy-manager",
+                "mandate-deployd",
                 "mandate-dispatcher"
             ]
         );

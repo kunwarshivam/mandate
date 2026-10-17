@@ -260,6 +260,12 @@ journals each start, stop and crash loop on the control stream before acting (jo
 [DEC-1170](../project/decisions/DEC-1170.md)): a restart is a `ProcessStartIssued` with `cause`
 `restart`, which the bound counts, and the pause is `ProcessCrashLooped`. A kill switch never
 makes it stop a process, and a process the switch covers that is down is started at once.
+In the cell it is its own process, `mandate-deployd` ([DEC-1172](../project/decisions/DEC-1172.md)),
+the one pod with a service-account token. Its namespaced Role creates, reads, lists and deletes
+pods and nothing else, only its pod may reach the API server, and its egress gate proves its policy
+by probing a destination that policy denies. The runtime's and executor's pods are the chart's
+templates, which it reads; each gets its identity as `MANDATE_WORKSPACE`, `MANDATE_PROCESS`,
+`MANDATE_SUBJECT` and `MANDATE_GENERATION`, as §3.5 says a process starts.
 
 **At most one writer is the fence's job.** The orchestrator may briefly run two copies of a
 process (a partition, a slow termination, a manual mistake). Safety does not depend on it: a new

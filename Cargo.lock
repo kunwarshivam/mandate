@@ -1904,6 +1904,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-deployd"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-deploy-manager",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [

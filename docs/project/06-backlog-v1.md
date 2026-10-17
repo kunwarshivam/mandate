@@ -2739,12 +2739,16 @@ enables `live` (ES-23, OPS-5).
   with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
   and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
-  crate's fold, driver, fake and Kubernetes adapter, with the property test. *Left:* the process
-  binary (loop, probes, Postgres journal port, the resolver over stored mandates), the chart's
-  templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell
-  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
-  an alert for an instance stuck `Pending` or `Unknown`; deleting exited pods; a check that the
-  pod templates mount no service-account token.
+  crate's fold, driver, fake and Kubernetes adapter, with the property test. *Slice 2*
+  ([DEC-1172](decisions/DEC-1172.md)): the process crate `mandate-deployd` (loop, exec probes,
+  drain, the Postgres journal port) and the cell's `deploy-manager` process: its image, its
+  ServiceAccount and a Role over pods alone, its `kube-api` egress and an egress gate that probes a
+  denied destination, the runtime's and executor's pod templates, which mount no service-account
+  token, and the `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
+  version 2 ([DEC-1171](decisions/DEC-1171.md)), until which the process starts nothing for a
+  deployment; the Compose adapter; the restart drill through `cargo xtask cell drill`; the owner's
+  resume lifting a crash-loop pause once the runtime copies the pause (E21-30); alerts through the
+  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
