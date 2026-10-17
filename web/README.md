@@ -30,7 +30,7 @@ npm run shots      # every screen as PNG files with a contact sheet in .shots/, 
 npx playwright install --with-deps --only-shell chromium   # once
 npm run test:e2e
 npm run test:e2e:auth   # sign-in on, against a stub Supabase
-npm run test:e2e:api    # the workspace API as the data source (DEC-970); npm run test:e2e runs it too
+npm run test:e2e:api    # the workspace API as the data source (DEC-975); npm run test:e2e runs it too
 ```
 
 The e2e suite (`e2e/`, Playwright, Chromium only, in light and dark) builds the app into `.next-e2e/`
@@ -136,7 +136,7 @@ A repeat address counts as stored, so the form never says whether someone is alr
 JSON numbers, `as_of` watermarks on every read, and no order-placing method (DEC-528).
 `src/api/mock-server.ts` is a fixture-backed `fetch` for tests, `npm run dev` and the e2e build.
 
-### Where the screens read from (DEC-970)
+### Where the screens read from (DEC-975)
 
 The fixtures, unless the server's environment names a workspace deployment's API. It is read when a
 request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variable:
@@ -154,7 +154,7 @@ following it through `GET /commands/{id}`. A misconfigured or silent API shows t
 unreachable, never the fixtures. `src/api/operations.ts` lists every operation the app calls, and
 `src/api/contract.test.ts` fails a call the spec does not document (E21-45). Setting up an agent and
 changing a mandate are not sent yet, step-up is not sent until E9-4 gives the browser its ceremony,
-and the charts and sample headlines are not drawn over the API: DEC-970 has the detail, including the
+and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
 `/demo` always reads the fixtures.
 

@@ -14,7 +14,7 @@ function sources(): Array<{ path: string; text: string }> {
     .map((path) => ({ path: relative(SRC, path), text: readFileSync(path, "utf8") }));
 }
 
-describe("the data source (DEC-970)", () => {
+describe("the data source (DEC-975)", () => {
   it("is the fixtures unless the server's configuration names the API", () => {
     expect(readDataSource({})).toEqual({ kind: "fixtures" });
     expect(readDataSource({ [DATA_SOURCE_ENV]: "" })).toEqual({ kind: "fixtures" });

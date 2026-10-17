@@ -1,7 +1,7 @@
 /**
  * A fixture-backed stand-in for the workspace API: a `fetch` implementation for tests, for `npm run dev`
  * and for the e2e build (`src/app/v1/`). It answers from `src/fixtures/` in the shapes of the workspace
- * API spec, and its reads in DEC-970's provisional bodies (`reads.ts`), keeps
+ * API spec, and its reads in DEC-975's provisional bodies (`reads.ts`), keeps
  * commands in memory by idempotency key and route (API-4), refuses a command without
  * `X-Mandate-Request: 1` as 403 `forbidden` before anything else (spec §3.3), plays `unreachable` as a network that
  * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
@@ -90,7 +90,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
   const servedAt = canonical(workspace.now);
   const read = (body: object) => respond(200, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), ...body });
 
-  /** An agent's read without what its positions and orders routes serve (DEC-970). */
+  /** An agent's read without what its positions and orders routes serve (DEC-975). */
   function agentCore(agent: Agent) {
     const served: Array<keyof Agent> = ["positions", "orders", "past_orders", "fills"];
     return Object.fromEntries(Object.entries(agent).filter(([key]) => !served.includes(key as keyof Agent)));

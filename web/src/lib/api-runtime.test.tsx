@@ -67,7 +67,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("the runtime over the workspace API (E11-9, DEC-970)", () => {
+describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   it("shows nothing until the reads answer, then the workspace they hold, marked as the API's", async () => {
     mount();
     expect(screen.getByTestId("status").textContent).toBe("loading");

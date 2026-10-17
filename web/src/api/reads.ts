@@ -1,7 +1,7 @@
 /**
  * The workspace as the screens read it, built from the workspace API's documented reads (spec §4.3,
- * §4.5, §4.7, §4.9) instead of `src/fixtures/` (E11-9, DEC-970). Until `schemas/workspace-api/read-models/`
- * lands, each read's body carries the fixture type of §4.9's table under one member, which DEC-970
+ * §4.5, §4.7, §4.9) instead of `src/fixtures/` (E11-9, DEC-975). Until `schemas/workspace-api/read-models/`
+ * lands, each read's body carries the fixture type of §4.9's table under one member, which DEC-975
  * pins; the decoders refuse what would mislead a screen: a decimal sent as a JSON number, a value a
  * closed safety enum does not list, an approval without the content hash an answer must bind.
  */

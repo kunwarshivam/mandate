@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { E2E_FLAG } from "./scripts/e2e-build.mjs";
 
 /**
- * The app with its data source set to the workspace API (DEC-970), against the e2e build. The server
+ * The app with its data source set to the workspace API (DEC-975), against the e2e build. The server
  * is configured as a deployment would be, by environment at start, never at build: the build is the
  * one `playwright.config.ts` makes. Until the API server (E21-31) is on `main`, the API it calls is the
  * e2e build's own fixture-backed mock at `/v1` (`src/app/v1/`), which a production build does not serve.

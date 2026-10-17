@@ -113,7 +113,7 @@ export interface MandateChangeRequest {
 }
 
 export interface Runtime {
-  /** Where the workspace comes from (DEC-970): the recorded fixtures, or a workspace deployment's API. */
+  /** Where the workspace comes from (DEC-975): the recorded fixtures, or a workspace deployment's API. */
   source: "fixtures" | "api";
   ws: Workspace;
   now: Iso;

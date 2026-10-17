@@ -2,7 +2,7 @@ import { type Page, type Request, expect, test } from "@playwright/test";
 import { operationFor } from "../src/api/operations";
 
 /**
- * The app with the workspace API as its data source (DEC-970): every screen reads through documented
+ * The app with the workspace API as its data source (DEC-975): every screen reads through documented
  * operations only (E21-45), nothing is labelled as fixtures, and an answer is recorded through the
  * API's idempotent write route. The scenario cookie picks what the e2e build's mock API serves.
  */

@@ -85,7 +85,7 @@ export function Placeholder({ name, className }: { name: PlaceholderName; classN
 
 /**
  * Marks fixture values so no one reads them as a record. A `workspace` tag marks the workspace's own
- * figures, which are a record when they come from the workspace API (DEC-970), so it shows only over the
+ * figures, which are a record when they come from the workspace API (DEC-975), so it shows only over the
  * fixtures; a `section` tag marks content that stays sample whatever the source.
  */
 export function FixtureTag({ className, scope = "section" }: { className?: string; scope?: "workspace" | "section" }) {

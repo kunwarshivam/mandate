@@ -1,7 +1,7 @@
 // Fails the build if the dev-only scenario switcher reached it, or if a production build (flag unset)
 // accepts a scenario. Run after `next build`: it scans the output for the switcher, then starts the
 // build and asks for the stale scenario by query parameter and by cookie, and for the mock workspace API
-// at `/v1` (DEC-970), which only the e2e build serves. The e2e build
+// at `/v1` (DEC-975), which only the e2e build serves. The e2e build
 // (`OWLHEAD_E2E_SCENARIOS=1`, scripts/e2e-build.mjs) must accept both, so the flag is checked both ways.
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -56,7 +56,7 @@ async function withBuild(run) {
   const origin = `http://127.0.0.1:${port}`;
   const next = spawn(join("node_modules", ".bin", "next"), ["start", "--hostname", "127.0.0.1", "--port", String(port)], {
     stdio: ["ignore", "ignore", "inherit"],
-    // The probe asks the build about scenarios, so it reads the fixtures whatever source the shell names (DEC-970).
+    // The probe asks the build about scenarios, so it reads the fixtures whatever source the shell names (DEC-975).
     env: { ...process.env, OWLHEAD_DATA_SOURCE: "fixtures" },
   });
   try {

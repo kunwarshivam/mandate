@@ -1,5 +1,5 @@
 /**
- * The screens' owner commands and approval answers as workspace API calls (spec §5.2, §5.4; DEC-970).
+ * The screens' owner commands and approval answers as workspace API calls (spec §5.2, §5.4; DEC-975).
  * Each gesture is prepared once, so a retry sends the same key and body (API-4). Nothing here sizes an
  * order or names a price the owner did not see: the web app only records what the owner chose.
  *

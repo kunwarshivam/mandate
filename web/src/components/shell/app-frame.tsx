@@ -15,7 +15,7 @@ import { signedInUser } from "@/lib/supabase/server";
  * The app's frame over the workspace: the shell with Stop and the dock. The `(app)` layout wraps every
  * screen in it, and the root not-found page wraps an unknown address in it, so Stop stays at the end of
  * the dock and the tab bar there too (brief P1). The server's configuration picks what the workspace is
- * (DEC-970): the fixtures, with the scenario switch where it is on, or a deployment's workspace API, read
+ * (DEC-975): the fixtures, with the scenario switch where it is on, or a deployment's workspace API, read
  * by the browser with its own session. A misconfigured API is shown unreachable, never as fixtures.
  */
 export async function AppFrame({ children }: { children: ReactNode }) {

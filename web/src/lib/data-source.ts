@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 
 /**
- * Where the app's screens read from and send to (DEC-970): the recorded fixtures, or one workspace
+ * Where the app's screens read from and send to (DEC-975): the recorded fixtures, or one workspace
  * deployment's API (workspace API spec §3). Chosen by server-side configuration alone, read when a
  * request is served and never inlined into the bundle (ES-12): `OWLHEAD_DATA_SOURCE` (`fixtures`, the
  * default, or `api`), `OWLHEAD_API_ORIGIN` and `OWLHEAD_WORKSPACE_ID`. Neither is a secret; the browser

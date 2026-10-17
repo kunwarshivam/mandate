@@ -4,7 +4,7 @@ import { isScenario } from "@/fixtures/workspace";
 import { SCENARIO_COOKIE, scenariosEnabled } from "@/lib/scenario";
 
 /**
- * The fixture-backed mock of the workspace API at `/v1` (DEC-970), for `npm run dev` and the e2e build
+ * The fixture-backed mock of the workspace API at `/v1` (DEC-975), for `npm run dev` and the e2e build
  * only: with `OWLHEAD_DATA_SOURCE=api` and `OWLHEAD_API_ORIGIN` set to the app's own origin, the app
  * reads its workspace through the API's documented routes without a deployment. A production build
  * answers 404 to every path here (`scripts/no-scenarios.mjs` checks it): the app has no route of its own

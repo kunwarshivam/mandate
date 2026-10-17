@@ -32,7 +32,7 @@ const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(re
 const later = (ms: number, iso: Iso): Iso => new Date(Date.parse(iso) + ms).toISOString();
 
 /**
- * The runtime the screens use when the data source is a workspace deployment (DEC-970): the same
+ * The runtime the screens use when the data source is a workspace deployment (DEC-975): the same
  * `Runtime` as the fixture stand-in, filled from the workspace API's reads and sending each command
  * through its idempotent write routes. Nothing is shown before the journal answers, nothing is
  * written to browser storage, and an answer that does not confirm a record is never shown as one.

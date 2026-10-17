@@ -11,7 +11,7 @@ import type { Workspace } from "@/fixtures/types";
 import type { CommandKind } from "@/lib/mock-runtime";
 
 /**
- * The web app is one client of the published workspace API (DEC-967 item 13, DEC-970): every call it
+ * The web app is one client of the published workspace API (DEC-967 item 13, DEC-975): every call it
  * makes is an operation the spec documents, under the workspace prefix, with a documented query. This
  * is E21-45's check from the web side; the OpenAPI document replaces the spec's tables when it is
  * published.
@@ -89,7 +89,7 @@ async function loaded(client: ReturnType<typeof recording>["client"]): Promise<W
 
 const KINDS: CommandKind[] = ["pause", "resume", "stop", "kill", "release", "pause_all", "stop_all", "close_all"];
 
-describe("the web app calls only documented workspace API operations (E21-45, DEC-970)", () => {
+describe("the web app calls only documented workspace API operations (E21-45, DEC-975)", () => {
   it("lists only operations the spec documents, with documented query members", () => {
     const spec = documented();
     for (const op of WEB_OPERATIONS) {

@@ -33,7 +33,7 @@ function Frame({ children }: { children: ReactNode }) {
 }
 
 /**
- * The providers over a deployment's workspace API (DEC-970). `source` is `null` when the server's
+ * The providers over a deployment's workspace API (DEC-975). `source` is `null` when the server's
  * configuration names the API but does not parse: the fixture stand-in then holds an unreachable
  * workspace with nothing in it, which takes no command, so nothing on screen passes for a record.
  */

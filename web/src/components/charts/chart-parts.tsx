@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { type ChartLevel, usdLabel } from "./options";
 
 /**
- * The seeded fixture market the charts draw, or `null` over the workspace API (DEC-970): the API serves
+ * The seeded fixture market the charts draw, or `null` over the workspace API (DEC-975): the API serves
  * no price or equity history yet, and seeded bars beside a deployment's figures would read as a record.
  */
 export function useMarket(): Market | null {

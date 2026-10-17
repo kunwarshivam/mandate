@@ -45,7 +45,7 @@ async function refusal(tamper: Tamper) {
   return loaded.error;
 }
 
-describe("the workspace from the workspace API (E11-9, DEC-970)", () => {
+describe("the workspace from the workspace API (E11-9, DEC-975)", () => {
   it("holds exactly what the fixtures hold, read from documented routes alone", async () => {
     for (const scenario of ["normal", "approvals", "paused", "drawdown", "unknown-order", "stale"] as const) {
       const fixture = buildWorkspace(scenario);
