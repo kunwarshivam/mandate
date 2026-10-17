@@ -351,7 +351,12 @@ grant() {
     "${AS_OWNER[@]}" "${JOURNAL[@]}" || true
 }
 
-run 2l ok '^would place '
+# The R0 mandate asks for every opening (DEC-529), so the dry run's answer to a fresh output is
+# the ask, which a run without --place-one-order never makes: it stops at Classify, non-zero, and
+# sends nothing (DEC-969 item 7). On a clock whose last completed session closed more than the
+# model's max_output_age_s earlier (a Monday, or the day after a holiday) the output is not fresh
+# and the dry run decides nothing, so this step fails there by design (DEC-969 item 6).
+run 2l refused 'Classify: the proposal classified ask'
 run 2m ok '^submitted ' --place-one-order
 for stream in "ctl:$WORKSPACE" "agent:$WORKSPACE:$AGENT" "acct:$WORKSPACE:$ACCOUNT_REF"; do
   name=${stream%%:*}
