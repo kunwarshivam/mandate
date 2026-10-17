@@ -686,7 +686,7 @@ const EVERY_JOB_PATHS: [&str; 11] = [
 /// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
 /// Markdown anywhere is known too. A changed path outside every crate and outside this list
 /// selects everything, so a new top-level directory is never assumed unread.
-const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
+const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
     "docs/",
     "web/",
     "python/",
@@ -700,7 +700,6 @@ const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
     "assets/",
     ".cursor/",
     ".claude/",
-    "vercel.json",
     "_typos.toml",
     ".gitleaks.toml",
     "CODEOWNERS",
@@ -3645,6 +3644,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
+    "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
