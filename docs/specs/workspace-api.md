@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -520,6 +520,20 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Re-enable a halted scope | **None in v0.1** | — | The halted state is Proposed (DEC-437 item 21; interim: no halted state), so a kill switch leaves no scope halted and there is nothing to re-enable. If the founder accepts item 21, this spec adds a route, a step-up kind, and the events `ScopeHalted` and `ScopeReenabled` (identity spec §12.1) in its own change |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
 
+`GET /backtests/{id}` returns `read-models/backtest` ([DEC-1001](../project/decisions/DEC-1001.md)):
+the backtest's id, its mandate version, `state` (`running` until `BacktestRunRecorded` commits,
+then `completed` or `refused`), the run's stable `refusal` code when refused, and for a completed
+run `report_ref` (the report artifact, journal spec §6.3) and `report`, the artifact's object. The
+report is a run of the version's own decision path (the risk state, the order builder, the gate's
+dry run, autonomy, and the executor's protection, over historical bars, on recorded model outputs
+and theses only; [DEC-1000](../project/decisions/DEC-1000.md)). It holds FR-4.2's figures for the
+version and for buy-and-hold of the same instrument, one row per decision with its outcome and
+reason, the limits that latched, the equity per period, and two closed lists: `limitations`, the
+codes for what the run cannot know or does not model, and `disclosures`, placeholder names only
+([DEC-1003](../project/decisions/DEC-1003.md)). It holds no thesis-quality figure for any version
+(DEC-99). A backtest is the owner's own strategy's simulated history: the read answers only in the
+workspace that ran it, and no route aggregates backtests across workspaces.
+
 ### 4.3 Approvals (approval service)
 
 | Operation | Method and path | Event | Notes |
@@ -590,8 +604,20 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | Plan view | `GET /agents/{id}/plan` | D12: what it watches, what it would do next and under which rule, whether that would run, ask, or be denied, and what would stop it. Writes nothing |
 | Daily brief | `GET /agents/{id}/briefs/{date}` | D13: counts and sources only; no profit or outcome claims |
 | Scorecards | `GET /agents/{id}/scorecards` | FR-8.4: the user's own results only. Never embedded in an approval, the model picker, or another workspace's view |
+| Forward-paper evaluation | `GET /evaluations/{id}` | E17-8, E15-3: the founder's evaluation of the research agent's theses, one scorecard per signal model beside the baselines. Only in the team's internal paper workspaces (DEC-103); elsewhere `not_found`. Never an owner's scorecard ([DEC-1002](../project/decisions/DEC-1002.md) item 6) |
 | Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names |
 | Health | `GET /health` | The status strip (G1): market data, broker, deployment, relay, each with its last observation time |
+
+`GET /evaluations/{id}` returns `read-models/evaluation` ([DEC-1002](../project/decisions/DEC-1002.md)):
+the evaluation's id, `report_ref`, and `report`, the artifact `EvaluationRunRecorded` names. The
+report echoes the registered decision (DEC-122's window, minimum, and `z`), the cut-off, the input
+digests, and the baselines, then one group per signal model, keyed by model id, version, and
+content hash: how many of its theses were closed, still open, and outside the window, and either
+its scorecard (`mandate_research::score::Scorecard`, member for member) or the scorer's refusal
+code, never both. `passed` is true only when at least one group was scored and every scored group
+passed. Its one disclosure is the placeholder `NOTE-FORWARD-PAPER-INTERNAL` (DEC-1003). Until
+counsel answers compliance question 35, nothing here reaches an owner, an approval, or the model
+picker.
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -1603,6 +1629,8 @@ risk-reducing call never consults one (API-7, API-8).
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
 | Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
+| The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
+| The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
