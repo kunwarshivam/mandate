@@ -739,6 +739,92 @@ SCHEMAS[("ctl", "SegmentExported")] = rec(
     ("manifest_hash", DIGEST_HEX),
 )
 
+# §9.17 v0.44 (DEC-981): the control-plane link's records, written by workspace control services on
+# the control stream. No member is free text (design CP-1): IDs, enumerations, integers, timestamps,
+# and bare-hex digests only.
+LICENSE_STATES = ("valid", "renewal_due", "grace", "lapsed")
+CP_MESSAGES = ("license", "release_manifest", "release_withdrawn", "catalog_entry", "data_bundle", "unknown")
+CP_REFUSALS = ("unsigned", "bad_signature", "unknown_key", "replayed", "out_of_list", "malformed", "not_addressed")
+SCHEMAS[("ctl", "ControlPlaneEnrolled")] = rec(
+    ("deployment_id", IDENT_T),
+    ("org_id", IDENT_T),
+    ("mode", one_of("managed_cell", "hybrid")),
+    ("certificate_fingerprint", DIGEST_HEX),
+)
+SCHEMAS[("ctl", "LicenseApplied")] = rec(
+    ("license_id", IDENT_T),
+    ("sequence", INT),
+    ("org_id", IDENT_T),
+    ("deployment_ids", list_of(IDENT_T)),
+    ("max_workspaces", INT),
+    ("max_agents_deployed", INT),
+    ("features", list_of(one_of("hybrid", "connected_clients"))),
+    ("not_before", TS),
+    ("not_after", TS),
+    ("grace_days", INT),
+    ("key_id", IDENT_T),
+    ("document_digest", DIGEST_HEX),
+)
+SCHEMAS[("ctl", "LicenseStateChanged")] = rec(
+    ("license_id", IDENT_T),
+    ("from", opt(one_of(*LICENSE_STATES))),
+    ("to", one_of(*LICENSE_STATES)),
+    ("judged_at", TS),
+)
+SCHEMAS[("ctl", "ReleaseOffered")] = rec(
+    ("release_id", IDENT_T), ("sequence", INT), ("manifest_digest", DIGEST_HEX), ("key_id", IDENT_T)
+)
+SCHEMAS[("ctl", "ReleaseInstalled")] = rec(
+    ("release_id", IDENT_T),
+    ("sequence", INT),
+    ("manifest_digest", DIGEST_HEX),
+    ("trigger", one_of("promotion", "operator", "update_window", "rollback")),
+)
+SCHEMAS[("ctl", "ReleaseWithdrawnNoticed")] = rec(
+    ("release_id", IDENT_T),
+    ("reason", one_of("defect", "security", "superseded")),
+    ("key_id", IDENT_T),
+    ("document_digest", DIGEST_HEX),
+)
+SCHEMAS[("ctl", "CatalogEntryRegistered")] = rec(
+    ("kind", one_of("connector_package", "model_registry_entry")),
+    ("entry_id", IDENT_T),
+    ("content_hash", DIGEST_HEX),
+    ("sequence", INT),
+    ("key_id", IDENT_T),
+)
+SCHEMAS[("ctl", "DataBundleImported")] = rec(
+    ("dataset", IDENT_T), ("bundle_digest", DIGEST_HEX), ("sequence", INT), ("key_id", IDENT_T)
+)
+SCHEMAS[("ctl", "UsageReportSealed")] = rec(
+    ("report_id", IDENT_T),
+    ("deployment_id", IDENT_T),
+    ("org_id", IDENT_T),
+    ("period_start", TS),
+    ("period_end", TS),
+    ("prev_report_hash", DIGEST_HEX),
+    ("report_digest", DIGEST_HEX),
+)
+SCHEMAS[("ctl", "ControlPlaneMessageRefused")] = rec(
+    ("message", one_of(*CP_MESSAGES)),
+    ("reason", one_of(*CP_REFUSALS)),
+    ("sequence", opt(INT)),
+    ("document_digest", DIGEST_HEX),
+)
+CP_RECORDS = (
+    "ControlPlaneEnrolled",
+    "LicenseApplied",
+    "LicenseStateChanged",
+    "ReleaseOffered",
+    "ReleaseInstalled",
+    "ReleaseWithdrawnNoticed",
+    "CatalogEntryRegistered",
+    "DataBundleImported",
+    "UsageReportSealed",
+    "ControlPlaneMessageRefused",
+)
+CP_SEQUENCED = ("LicenseApplied", "ReleaseOffered", "ReleaseInstalled", "CatalogEntryRegistered", "DataBundleImported")
+
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
 ACCOUNT_STREAM_REF_ALT = "01J8Z2ACCT00000000000000A2"
@@ -1314,6 +1400,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += membership_violations(event_type, draft, skip)
     out += audit_violations(event_type, draft, skip)
     out += cold_violations(event_type, draft, skip)
+    out += control_plane_violations(event_type, draft, skip)
     return out
 
 
@@ -1904,6 +1991,42 @@ def cold_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[
         if typed and isinstance(p["manifest_hash"], str):
             rule("117", p["manifest_hash"] == manifest_hash(p), "payload.manifest_hash")
         rule("118", kind == "system", "actor.kind")
+    return out
+
+
+def control_plane_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.17's rules 137 to 142, on a well-typed payload, in number order. Timestamps are canonical
+    and fixed-width (§4.7), so their bytes order them as instants."""
+    if event_type not in CP_RECORDS:
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str, reason: str = "schema") -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", reason, path))
+
+    rule("137", draft["actor"]["kind"] == "system", "actor.kind")
+    if event_type == "LicenseApplied":
+        rule("138.empty", bool(p["deployment_ids"]), "payload.deployment_ids")
+        rule("138.deployments", ascending(encoded(p["deployment_ids"])), "payload.deployment_ids", "non_canonical")
+        rule("138.features", ascending(encoded(p["features"])), "payload.features", "non_canonical")
+        rule("138.validity", p["not_before"] < p["not_after"], "payload.not_after")
+    sequenced = event_type in CP_SEQUENCED or (
+        event_type == "ControlPlaneMessageRefused" and p["sequence"] is not None
+    )
+    if sequenced and is_integer(p["sequence"]):
+        least = 0 if "boundary.rule_139" in skip else 1
+        rule("139", p["sequence"] >= least, "payload.sequence")
+    if event_type == "LicenseStateChanged":
+        rule("140", p["from"] != p["to"], "payload.to")
+    if event_type == "UsageReportSealed":
+        rule("141", p["period_start"] < p["period_end"], "payload.period_end")
+    if event_type == "ControlPlaneMessageRefused":
+        unknown = p["message"] == "unknown"
+        rule("142.reason", not unknown or p["reason"] in ("out_of_list", "malformed"), "payload.reason")
+        rule("142.sequence", not unknown or p["sequence"] is None, "payload.sequence")
+        rule("142.replayed", p["reason"] != "replayed" or p["sequence"] is not None, "payload.sequence")
     return out
 
 

@@ -56,7 +56,9 @@ use mandate_executor::{
     Order as ExecutorOrder, Ports, Seq, WorkspaceId, WriterEpoch, fold, is_protected,
     paper_only_fee_config,
 };
-use mandate_journal::{AppendOutcome, ArtifactSource, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal::{
+    AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, MemoryJournal, StoredEvent, StreamId,
+};
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
@@ -72,8 +74,8 @@ use mandate_risk::{
 use mandate_robinhood::Tools;
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, DecisionClip, ExitOrigin, FlattenLeg,
-    FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, MandateView, ModelDirection,
-    OrderExecution, Proposal, Purpose, RiskClock, SignalInputs, TimeInForce,
+    FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, LiveScope, MandateView,
+    ModelDirection, OrderExecution, Proposal, Purpose, RiskClock, SignalInputs, TimeInForce,
 };
 use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
@@ -863,6 +865,9 @@ pub struct RunContext {
     /// `model_registry` refs, appended through the store's artifact-aware append (journal spec
     /// v0.16). `None` keeps the version-1 records of a run nothing governs yet.
     pub governance: Option<Governance>,
+    /// DEC-923's scope for a live `cli_confirm` grant, which the runtime's admission reads
+    /// (DEC-970 item 1). `None` refuses every live `cli_confirm` grant `step_up_method`.
+    pub live_cli_confirm: Option<LiveScope>,
 }
 
 fn required_context(context: &Option<Rc<RunContext>>) -> Result<&RunContext, Cause> {
@@ -934,7 +939,7 @@ fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<Ma
             author: context.author.clone(),
             timeout_s: i64::from(document.autonomy.approval.timeout_s),
             environment,
-            live_cli_confirm: None,
+            live_cli_confirm: context.live_cli_confirm.clone(),
         },
     })
 }
@@ -1446,6 +1451,8 @@ pub struct StoreJournal {
     /// through `append_with_config_artifacts`; `None` keeps the plain append, which refuses every
     /// version-2 record that names a configuration object (journal spec §5.1, §11 check 6).
     artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// Where each appended `ApprovalRequested`'s content object is put first, or `None`.
+    content_store: Option<Box<dyn ArtifactStore + Send>>,
 }
 
 enum StoreBackend {
@@ -1464,6 +1471,7 @@ impl StoreJournal {
             backend: StoreBackend::Memory(MemoryJournal::new()),
             recorded_at,
             artifacts: None,
+            content_store: None,
         }
     }
 
@@ -1492,6 +1500,7 @@ impl StoreJournal {
             backend,
             recorded_at,
             artifacts: None,
+            content_store: None,
         }
     }
 
@@ -1499,6 +1508,16 @@ impl StoreJournal {
     #[must_use]
     pub fn with_artifacts(self, artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>) -> Self {
         Self { artifacts, ..self }
+    }
+
+    /// The same journal, putting each `ApprovalRequested`'s canonical `content` in `store` before
+    /// the append that lists its hash (DEC-970 item 4).
+    #[must_use]
+    pub fn with_content_store(self, store: Option<Box<dyn ArtifactStore + Send>>) -> Self {
+        Self {
+            content_store: store,
+            ..self
+        }
     }
 
     fn stream(stream: &str) -> Result<StreamId, Cause> {
@@ -1549,6 +1568,13 @@ impl JournalWriter for StoreJournal {
         let Ok(stream) = Self::stream(stream) else {
             return AppendOutcome::Unavailable;
         };
+        if let Some(store) = self.content_store.as_deref_mut()
+            && drafts
+                .iter()
+                .any(|draft| put_request_content(store, draft).is_err())
+        {
+            return AppendOutcome::Unavailable;
+        }
         let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
         let recorded_at = self.recorded_at;
         match (&mut self.backend, self.artifacts.as_deref()) {
@@ -1592,6 +1618,31 @@ impl JournalWriter for StoreJournal {
             (StoreBackend::Unavailable, _) => AppendOutcome::Unavailable,
         }
     }
+}
+
+/// Puts an `ApprovalRequested` draft's canonical `content` in `store`, under the `content_hash`
+/// the draft states and lists in `artifact_refs` (journal spec §3, §9.7, §11 check 6; DEC-970
+/// item 4). A draft of any other type puts nothing. A request whose content is missing, or whose
+/// hash does not name exactly that content, or a put the store refuses, is an error, and the batch
+/// is not appended, so no record names an object the store does not hold and the ask is never
+/// made (`AGENTS.md` rule 3).
+fn put_request_content(store: &mut (dyn ArtifactStore + Send), draft: &[u8]) -> Result<(), ()> {
+    let body = mandate_canon::parse(draft).map_err(|_| ())?;
+    if body.get("event_type").and_then(Value::as_str) != Some("ApprovalRequested") {
+        return Ok(());
+    }
+    let payload = body.get("payload").ok_or(())?;
+    let content = payload.get("content").ok_or(())?;
+    let stated = payload
+        .get("content_hash")
+        .and_then(Value::as_str)
+        .and_then(ArtifactRef::parse)
+        .ok_or(())?;
+    let bytes = mandate_canon::to_canonical(content);
+    if ArtifactRef::of(&bytes) != stated {
+        return Err(());
+    }
+    store.put_artifact(&bytes).map(|_| ()).map_err(|_| ())
 }
 
 /// The runtime's `IntentSink`, handing to the executor with this deployment's `AgentId`.
@@ -2116,6 +2167,10 @@ pub struct Sources<T> {
     /// it commits the record, so `None`, or a store missing either object, stops a governed run
     /// at its first version-2 append, before any intent (journal spec §5.1, §11 check 6).
     pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// Where the journal puts the content object of each `ApprovalRequested` it appends, before the
+    /// append, so the `content_hash` the record lists in `artifact_refs` names a stored object
+    /// (journal spec §3, §11 check 6; DEC-970 item 4). `None` stores nothing: a scratch run.
+    pub content_store: Option<Box<dyn ArtifactStore + Send>>,
     /// The broker's ticker for each instrument the run registered, so the connector's answers
     /// name it by the asset id the executor sent (DEC-938 item 1). Empty maps nothing.
     pub symbols: BrokerSymbols,
@@ -2134,6 +2189,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport,
     } = sources;
@@ -2147,6 +2203,7 @@ pub fn production<T: TradingTransport + Clone + 'static>(sources: Sources<T>) ->
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport: Box::new(AlpacaConnector { transport }),
     })
@@ -2167,6 +2224,7 @@ pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport: bridge,
     } = sources;
@@ -2182,6 +2240,7 @@ pub fn robinhood_stages<T: Tools + 'static>(sources: Sources<Rc<RobinhoodBridge<
             executor,
             run,
             artifacts,
+            content_store,
             symbols,
             transport: connector,
         },
@@ -2237,7 +2296,8 @@ fn assembled(
         gate: Box::new(RiskGate { context: run }),
         journal: Box::new(
             StoreJournal::from_dsn(sources.journal, sources.recorded_at)
-                .with_artifacts(sources.artifacts.clone()),
+                .with_artifacts(sources.artifacts.clone())
+                .with_content_store(sources.content_store),
         ),
         sink: Box::new(ExecutorSink {
             agent: sources.agent,
@@ -2266,6 +2326,7 @@ mod tests {
     };
     use mandate_canon::{DecStr, Value};
     use mandate_journal::AppendOutcome;
+    use mandate_journal::{ArtifactSource, ArtifactStore};
     use mandate_marketdata::actions::{RecordedActions, write_actions};
     use mandate_marketdata::dataset::{Store, partition_name};
     use mandate_marketdata::inspect::{self, ActionsReport, Problem};
@@ -2439,6 +2500,140 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let row = rows.first().ok_or("the committed row is absent")?;
         assert_eq!(row.recorded_at, recorded_at.to_string());
+        Ok(())
+    }
+
+    /// A content store the test keeps a handle on, refusing every put when `refusing`.
+    #[derive(Clone, Default)]
+    struct Contents {
+        objects: std::sync::Arc<std::sync::Mutex<BTreeMap<mandate_canon::Digest, Vec<u8>>>>,
+        refusing: bool,
+    }
+
+    impl ArtifactSource for Contents {
+        fn read_artifact(
+            &self,
+            reference: &mandate_journal::ArtifactRef,
+        ) -> Result<Vec<u8>, mandate_journal::ArtifactError> {
+            self.objects
+                .lock()
+                .map_err(|_| mandate_journal::ArtifactError::Unavailable)?
+                .read_artifact(reference)
+        }
+    }
+
+    impl ArtifactStore for Contents {
+        fn put_artifact(
+            &mut self,
+            bytes: &[u8],
+        ) -> Result<mandate_journal::ArtifactRef, mandate_journal::ArtifactError> {
+            if self.refusing {
+                return Err(mandate_journal::ArtifactError::Unavailable);
+            }
+            self.objects
+                .lock()
+                .map_err(|_| mandate_journal::ArtifactError::Unavailable)?
+                .put_artifact(bytes)
+        }
+    }
+
+    impl Contents {
+        fn len(&self) -> usize {
+            self.objects
+                .lock()
+                .map_or(usize::MAX, |objects| objects.len())
+        }
+    }
+
+    /// An agent-stream draft of `event_type` whose payload carries `content` and `content_hash`.
+    fn content_draft(
+        event_type: &str,
+        content: &Value,
+        content_hash: &str,
+    ) -> Result<Vec<u8>, String> {
+        let at = UtcNanos::parse("2026-10-20T15:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let payload = value_object(&[
+            ("content", content.clone()),
+            ("content_hash", Value::Str(content_hash.to_owned())),
+        ])?;
+        let config_refs = mandate_canon::Object::new();
+        draft_bytes(
+            &Envelope {
+                stream: "agent:tracer:agent",
+                writer: Writer::Agent,
+                actor_id: "agent",
+                event_time: at,
+                environment: mandate_journal::Environment::Live,
+            },
+            &DraftFields {
+                event_id: "10000100000000000000000001",
+                event_type,
+                schema_version: 1,
+                causation_id: None,
+                config_refs: &config_refs,
+                payload: &payload,
+            },
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    fn appended(contents: &Contents, draft: Vec<u8>) -> Result<AppendOutcome, String> {
+        let at = UtcNanos::parse("2026-10-20T15:00:00.000000000Z").map_err(|e| e.to_string())?;
+        let mut journal =
+            StoreJournal::memory(at).with_content_store(Some(Box::new(contents.clone())));
+        let epoch = journal
+            .take_ownership("agent:tracer:agent")
+            .map_err(|e| e.to_string())?;
+        Ok(journal.append("agent:tracer:agent", 0, epoch, &[draft]))
+    }
+
+    /// Journal spec §3, §11 check 6 (DEC-970 item 4): a request's canonical `content` is put under
+    /// its `content_hash` before the append; a hash that does not name that content, or a store
+    /// that refuses the put, appends nothing (`Unavailable`, so the ask is never made); a record of
+    /// another type puts nothing.
+    #[test]
+    fn a_request_puts_its_content_object_before_the_append() -> Result<(), String> {
+        let content = value_object(&[("default", Value::Str("skip".to_owned()))])?;
+        let bytes = mandate_canon::to_canonical(&content);
+        let hash = mandate_journal::ArtifactRef::of(&bytes).to_string();
+        let contents = Contents::default();
+        let outcome = appended(
+            &contents,
+            content_draft("ApprovalRequested", &content, &hash)?,
+        )?;
+        assert!(
+            !matches!(outcome, AppendOutcome::Unavailable),
+            "the put succeeded, so the append is the journal's to judge: {outcome:?}"
+        );
+        let reference = mandate_journal::ArtifactRef::parse(&hash).ok_or("the hash parses")?;
+        assert_eq!(
+            mandate_journal::get_artifact(&contents, &reference).map_err(|e| format!("{e:?}"))?,
+            bytes
+        );
+        assert_eq!(contents.len(), 1);
+
+        let other = Contents::default();
+        let wrong = format!("sha256:{}", "0".repeat(64));
+        let outcome = appended(
+            &other,
+            content_draft("ApprovalRequested", &content, &wrong)?,
+        )?;
+        assert!(matches!(outcome, AppendOutcome::Unavailable), "{outcome:?}");
+        assert_eq!(other.len(), 0, "a mismatched hash puts nothing");
+
+        let refusing = Contents {
+            refusing: true,
+            ..Contents::default()
+        };
+        let outcome = appended(
+            &refusing,
+            content_draft("ApprovalRequested", &content, &hash)?,
+        )?;
+        assert!(matches!(outcome, AppendOutcome::Unavailable), "{outcome:?}");
+
+        let untouched = Contents::default();
+        appended(&untouched, content_draft("DecisionMade", &content, &hash)?)?;
+        assert_eq!(untouched.len(), 0, "only a request's content is put");
         Ok(())
     }
 
@@ -3668,6 +3863,7 @@ mod tests {
                 gate: Some(gate),
             }),
             governance: None,
+            live_cli_confirm: None,
         };
         let proposal = mandate_runtime::Proposal {
             instrument: mandate_accounting::InstrumentId::new(
