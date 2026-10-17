@@ -288,16 +288,6 @@ forbidden_internal = [
     "mandate-paper",
 ]
 
-# Workspace control services' side of the control-plane link (E20-3, DEC-983; control-plane design
-# CP-5, CP-9): it implements cp-agent's port, judges each instruction against the journaled
-# sequence, and writes §9.17 records through a port of its own, so it needs no journal crate
-# outside its tests. It never reaches a runtime, executor, connector, vault, or process crate.
-[crates.mandate-cp-site]
-layer = 2
-safety_critical = true
-pure = true
-allowed_external = []
-forbidden_internal = [
 # The global control plane's first slice (E21-43 with E20-1, E20-2, E20-5; DEC-984): the
 # directory, enrollment, routing and fleet health, over a store it declares. It runs outside every
 # cell (design §3), so it reaches no journal, runtime, executor, connector, vault, or process crate,
@@ -312,6 +302,26 @@ forbidden_internal = [
     "mandate-journal",
     "mandate-journal-pg",
     "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
+
+# Workspace control services' side of the control-plane link (E20-3, DEC-983; control-plane design
+# CP-5, CP-9): it implements cp-agent's port, judges each instruction against the journaled
+# sequence, and writes §9.17 records through a port of its own, so it needs no journal crate
+# outside its tests. It never reaches a runtime, executor, connector, vault, or process crate.
+[crates.mandate-cp-site]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = []
+forbidden_internal = [
     "mandate-spec",
     "mandate-runtime",
     "mandate-executor",
