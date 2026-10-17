@@ -38,6 +38,7 @@
 /crates/mandate-identity-testkit/ @kunwarshivam
 /crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
+/crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-api/        @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam

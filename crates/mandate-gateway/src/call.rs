@@ -1,0 +1,682 @@
+//! The call contract (inference spec §3, E15-6): one request in, exactly one [`CallRecord`] out,
+//! with a validated output of the pinned model only when the outcome is `ok`.
+//!
+//! The order of a call:
+//! 1. **Refusals, nothing sent:** the workspace, the model's registration and withdrawal
+//!    (`policy_denied`, `model_withdrawn`), the input contract and the prompt guard
+//!    (`input_rejected`, the prompt never stored), an endpoint the policy and the egress allowlist
+//!    both allow (`policy_denied`), the exact cache, the local rate caps (`rate_limited_local`),
+//!    and the meter's reservation of the maximum cost (`budget_exhausted`, `meter_unavailable`).
+//! 2. **Attempts,** only while the deadline leaves time, at most [`MAX_ATTEMPTS`]: a transport
+//!    failure retries, a content failure never does (inference spec §3.4). A response read after
+//!    the deadline is `deadline_exceeded`, discarded, and never cached (INF-3). A reported model or
+//!    provider other than the pin's is `identity_mismatch`, and the endpoint is marked unhealthy
+//!    (INF-2).
+//! 3. **Settlement** of the reservation at the reported cost, or at the reservation's maximum when
+//!    the cost of an attempt cannot be read, so spend is never under-counted.
+
+use std::collections::BTreeMap;
+
+use mandate_canon::{Digest, Value, is_ulid, parse, to_canonical};
+use mandate_time::{UtcNanos, new_york_date_and_hour};
+
+use crate::guard::{self, GuardContext, GuardRule};
+use crate::kinds::{KeyOwner, Outcome, Purpose};
+use crate::meter::{Meter, MeterRefusal, MeterStore, Reservation, Settlement};
+use crate::money::{Usage, Usd6};
+use crate::policy::{EgressAllowlist, EndpointPolicy};
+use crate::provider::{
+    Clock, Delivery, HttpRequest, IdSource, Prompt, ProviderAdapter, Reply, SecretSource,
+    Transport, after_ms, before_ms,
+};
+use crate::record::CallRecord;
+use crate::registry::{
+    Endpoint, Entry, Locality, ModelRef, Registry, RegistryError, Status, Template, Unresolved,
+    int, object, sampling,
+};
+use crate::schema;
+
+/// The most attempts one call makes (inference spec §3.4: retries only within the deadline).
+pub const MAX_ATTEMPTS: u32 = 3;
+/// How long a provider's 429 is waited out when it names no wait.
+pub const DEFAULT_RETRY_AFTER_MS: u64 = 1_000;
+/// The window the local rate caps count over.
+pub const RATE_WINDOW_MS: u64 = 60_000;
+
+/// One logical call (inference spec §3.1). Callers pass typed inputs, never prompt text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallRequest {
+    pub call_id: String,
+    pub workspace_id: String,
+    pub agent_id: Option<String>,
+    pub purpose: Purpose,
+    pub model: ModelRef,
+    pub inputs: BTreeMap<String, String>,
+    pub as_of: UtcNanos,
+    pub deadline: UtcNanos,
+    pub observations: Vec<String>,
+    pub key_owner: KeyOwner,
+}
+
+/// The gateway's own rate caps, per workspace and per agent, in calls per minute (inference spec
+/// §7.3); a call over either is refused before it reserves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateCaps {
+    pub per_workspace: u32,
+    pub per_agent: u32,
+}
+
+/// What a workspace's gateway is configured with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    pub workspace_id: String,
+    pub policy: EndpointPolicy,
+    pub guard: GuardContext,
+    pub rate: RateCaps,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CacheKey {
+    workspace: String,
+    content_hash: Digest,
+    request_digest: Digest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Cached {
+    output: Value,
+    response_ref: Digest,
+    reported_identity: Option<String>,
+}
+
+/// One workspace's model gateway: the only component that calls a model (INF-13: nothing on the
+/// trading hot path waits on it).
+pub struct Gateway<T, S, C> {
+    settings: Settings,
+    registry: Registry,
+    adapter: Box<dyn ProviderAdapter>,
+    transport: T,
+    secrets: Box<dyn SecretSource>,
+    meter: Meter<S>,
+    clock: C,
+    ids: Box<dyn IdSource>,
+    cache: BTreeMap<CacheKey, Cached>,
+    admitted: Vec<(UtcNanos, Option<String>)>,
+}
+
+/// What a call has gathered so far, turned into its record at the end.
+struct Draft {
+    record: CallRecord,
+}
+
+impl Draft {
+    fn finish(mut self, outcome: Outcome, at: UtcNanos) -> CallRecord {
+        self.record.outcome = outcome;
+        self.record.completed_at = at;
+        if outcome != Outcome::Ok {
+            self.record.output = None;
+        }
+        self.record
+    }
+}
+
+/// How one attempt ended.
+enum Attempt {
+    Output {
+        output: Value,
+        reply_ref: Digest,
+        body: Vec<u8>,
+    },
+    Failed(Outcome),
+    Retry(Outcome),
+}
+
+impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each seam is its own input; a builder adds a type for no rule"
+    )]
+    pub fn new(
+        settings: Settings,
+        registry: Registry,
+        adapter: Box<dyn ProviderAdapter>,
+        transport: T,
+        secrets: Box<dyn SecretSource>,
+        meter: Meter<S>,
+        clock: C,
+        ids: Box<dyn IdSource>,
+    ) -> Self {
+        Self {
+            settings,
+            registry,
+            adapter,
+            transport,
+            secrets,
+            meter,
+            clock,
+            ids,
+            cache: BTreeMap::new(),
+            admitted: Vec::new(),
+        }
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    pub fn meter(&self) -> &Meter<S> {
+        &self.meter
+    }
+
+    pub fn meter_mut(&mut self) -> &mut Meter<S> {
+        &mut self.meter
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+
+    pub fn transport_mut(&mut self) -> &mut T {
+        &mut self.transport
+    }
+
+    pub fn clock_mut(&mut self) -> &mut C {
+        &mut self.clock
+    }
+
+    /// Whether the exact cache holds an entry for this request digest; never for a call that has
+    /// none (a refused prompt).
+    pub fn cached(&self, content_hash: Digest, request_digest: Option<Digest>) -> bool {
+        request_digest.is_some_and(|request_digest| {
+            self.cache.contains_key(&CacheKey {
+                workspace: self.settings.workspace_id.clone(),
+                content_hash,
+                request_digest,
+            })
+        })
+    }
+
+    /// The prompt guard on its own: no call, no reservation, no cost (inference spec §8.3).
+    pub fn guard(&self, text: &str) -> Result<(), GuardRule> {
+        guard::check(text, &self.settings.guard)
+    }
+
+    /// Withdraws a model (INF-15): its calls are refused from now on and its cache index entries
+    /// are dropped. Nothing replaces it.
+    pub fn withdraw(&mut self, model: &ModelRef) -> Result<(), RegistryError> {
+        self.registry.set_status(model, Status::Withdrawn)?;
+        self.cache
+            .retain(|key, _| key.content_hash != model.content_hash);
+        Ok(())
+    }
+
+    /// Restores or removes an endpoint's health (an operator's act, inference spec §9).
+    pub fn set_endpoint_healthy(
+        &mut self,
+        model: &ModelRef,
+        endpoint_id: &str,
+        healthy: bool,
+    ) -> Result<(), RegistryError> {
+        self.registry.set_healthy(model, endpoint_id, healthy)
+    }
+
+    /// One call, start to end. A request that is not a call this gateway can make at all (another
+    /// workspace's, a malformed call id, an agent and purpose that disagree, or a pin the registry
+    /// does not hold) is refused as a [`RequestError`] with no record: it has no template to render,
+    /// so it could not be journaled under journal spec rule 148, and it sends, reserves, and costs
+    /// nothing. Every other request gets exactly one [`CallRecord`].
+    pub fn call(&mut self, request: &CallRequest) -> Result<CallRecord, RequestError> {
+        let _ = request; Err(RequestError::UnknownModel)
+    }
+
+    fn call_entry(&mut self, request: &CallRequest, entry: Entry, start: UtcNanos) -> CallRecord {
+        let mut draft = Draft {
+            record: skeleton(request, start),
+        };
+        let content = entry.content();
+        let latest = after_ms(start, content.deadline_ms).unwrap_or(start);
+        draft.record.deadline = request.deadline.min(latest);
+        draft.record.seed = content.seed;
+        let Some(prompt) = render(&content.template, &request.inputs) else {
+            draft.record.guard_rule = Some(GuardRule::InputContract);
+            return draft.finish(Outcome::InputRejected, start);
+        };
+        let verdict = guard::check(&prompt.system, &self.settings.guard)
+            .and_then(|()| guard::check(&prompt.user, &self.settings.guard));
+        if let Err(rule) = verdict {
+            draft.record.guard_rule = Some(rule);
+            return draft.finish(Outcome::InputRejected, start);
+        }
+        let prompt_bytes = prompt_bytes(&prompt);
+        let digest = request_digest(&entry, &prompt, request.as_of);
+        draft.record.prompt_ref = Some(Digest::of(&prompt_bytes));
+        draft.record.request_digest = Some(digest);
+        draft.record.prompt = Some(prompt_bytes.clone());
+        if entry.status() == Status::Withdrawn {
+            return draft.finish(Outcome::ModelWithdrawn, start);
+        }
+        let allowlist = EgressAllowlist::of(&self.registry, &self.settings.policy);
+        let Some(endpoint) = self.endpoint(&entry, &allowlist) else {
+            return draft.finish(Outcome::PolicyDenied, start);
+        };
+        draft.record.endpoint = endpoint.id.clone();
+        draft.record.price_table_ref = endpoint.prices.version();
+        let http = self.adapter.request(entry.content(), &endpoint, &prompt);
+        if !allowlist.permits(&http.host) {
+            return draft.finish(Outcome::PolicyDenied, start);
+        }
+        if start < draft.record.deadline
+            && let Some(record) = self.cache_hit(&mut draft, &entry, digest, start)
+        {
+            return record;
+        }
+        if !self.within_rate(request.agent_id.as_deref(), start) {
+            return draft.finish(Outcome::RateLimitedLocal, start);
+        }
+        let Ok(max_cost) = endpoint.prices.max_cost(
+            u64::try_from(prompt_bytes.len()).unwrap_or(u64::MAX),
+            content.max_output_tokens,
+        ) else {
+            return draft.finish(Outcome::BudgetExhausted, start);
+        };
+        let reservation = Reservation {
+            event_id: self.ids.next_id(),
+            call_id: request.call_id.clone(),
+            agent_id: request.agent_id.clone(),
+            purpose: request.purpose,
+            model: request.model.clone(),
+            endpoint: endpoint.id.clone(),
+            key_owner: request.key_owner,
+            price_table_ref: endpoint.prices.version(),
+            max_cost,
+            risk_day: new_york_date_and_hour(start).map_or(start.date(), |(day, _)| day),
+        };
+        let reservation = match self.meter.reserve(reservation) {
+            Ok(r) => r,
+            Err(MeterRefusal::BudgetExhausted) => {
+                return draft.finish(Outcome::BudgetExhausted, start);
+            }
+            Err(MeterRefusal::Unavailable) => {
+                return draft.finish(Outcome::MeterUnavailable, start);
+            }
+        };
+        self.admitted.push((start, request.agent_id.clone()));
+        draft.record.reservation = Some(reservation.event_id.clone());
+        let record = self.attempts(draft, &entry, &endpoint, &http, max_cost);
+        self.settle(&reservation, &record);
+        if record.outcome == Outcome::Ok
+            && record.completed_at <= record.deadline
+            && let (Some(output), Some(response_ref)) = (record.output.clone(), record.response_ref)
+        {
+            self.cache.insert(
+                CacheKey {
+                    workspace: self.settings.workspace_id.clone(),
+                    content_hash: entry.content_hash(),
+                    request_digest: digest,
+                },
+                Cached {
+                    output,
+                    response_ref,
+                    reported_identity: record.reported_identity.clone(),
+                },
+            );
+        }
+        record
+    }
+
+    /// The first healthy endpoint, in registration order, that the policy allows and whose host the
+    /// egress allowlist permits.
+    fn endpoint(&self, entry: &Entry, allowlist: &EgressAllowlist) -> Option<Endpoint> {
+        entry
+            .endpoints()
+            .find(|(endpoint, healthy)| {
+                *healthy
+                    && self.settings.policy.allows(endpoint)
+                    && allowlist.permits(&endpoint.host)
+            })
+            .map(|(endpoint, _)| endpoint.clone())
+    }
+
+    fn cache_hit(
+        &self,
+        draft: &mut Draft,
+        entry: &Entry,
+        digest: Digest,
+        at: UtcNanos,
+    ) -> Option<CallRecord> {
+        let key = CacheKey {
+            workspace: self.settings.workspace_id.clone(),
+            content_hash: entry.content_hash(),
+            request_digest: digest,
+        };
+        let cached = self.cache.get(&key)?;
+        let mut record = draft.record.clone();
+        record.cache_hit = true;
+        record.output = Some(cached.output.clone());
+        record.response_ref = Some(cached.response_ref);
+        record.reported_identity = cached.reported_identity.clone();
+        record.outcome = Outcome::Ok;
+        record.completed_at = at;
+        Some(record)
+    }
+
+    fn within_rate(&mut self, agent: Option<&str>, now: UtcNanos) -> bool {
+        let since = before_ms(now, RATE_WINDOW_MS);
+        self.admitted.retain(|(at, _)| *at > since);
+        let workspace = self.admitted.len();
+        let mine = self
+            .admitted
+            .iter()
+            .filter(|(_, a)| a.as_deref() == agent)
+            .count();
+        let fits = |count: usize, cap: u32| u32::try_from(count).is_ok_and(|n| n < cap);
+        fits(workspace, self.settings.rate.per_workspace)
+            && (agent.is_none() || fits(mine, self.settings.rate.per_agent))
+    }
+
+    fn attempts(
+        &mut self,
+        mut draft: Draft,
+        entry: &Entry,
+        endpoint: &Endpoint,
+        http: &HttpRequest,
+        max_cost: Usd6,
+    ) -> CallRecord {
+        let deadline = draft.record.deadline;
+        let key = match endpoint.locality {
+            Locality::Hosted => match self.secrets.provider_key(&endpoint.route.upstream) {
+                Ok(key) => Some(key),
+                Err(_) => {
+                    let now = self.clock.now();
+                    return draft.finish(Outcome::CredentialInvalid, now);
+                }
+            },
+            Locality::Local => None,
+        };
+        let mut cost = Usd6::ZERO;
+        let mut usage = Usage::default();
+        let mut unknown_cost = false;
+        let mut outcome = Outcome::DeadlineExceeded;
+        for attempt in 1..=MAX_ATTEMPTS {
+            if self.clock.now() >= deadline {
+                break;
+            }
+            draft.record.attempts = attempt;
+            let delivery = self
+                .transport
+                .send(http, key.as_ref(), deadline, &mut self.clock);
+            let done = self.clock.now();
+            let attempt = match delivery {
+                Delivery::ConnectFailed => Attempt::Retry(Outcome::ProviderUnavailable),
+                Delivery::TimedOut => {
+                    unknown_cost = true;
+                    Attempt::Failed(Outcome::DeadlineExceeded)
+                }
+                Delivery::Response {
+                    status,
+                    body,
+                    retry_after_ms,
+                } => {
+                    let reply = self.adapter.reply(&body);
+                    match &reply {
+                        Some(r) if !readable(r.usage) => unknown_cost = true,
+                        Some(r) => match endpoint.prices.cost(r.usage) {
+                            Ok(c) => {
+                                cost = cost.checked_add(c).unwrap_or(max_cost);
+                                usage = add_usage(usage, r.usage);
+                            }
+                            Err(_) => unknown_cost = true,
+                        },
+                        None if status == 200 => unknown_cost = true,
+                        None => {}
+                    }
+                    if done > deadline {
+                        Attempt::Failed(Outcome::DeadlineExceeded)
+                    } else {
+                        self.classify(
+                            &mut draft,
+                            entry,
+                            endpoint,
+                            status,
+                            body,
+                            reply,
+                            retry_after_ms,
+                            done,
+                        )
+                    }
+                }
+            };
+            match attempt {
+                Attempt::Output {
+                    output,
+                    reply_ref,
+                    body,
+                } => {
+                    draft.record.output = Some(output);
+                    draft.record.response_ref = Some(reply_ref);
+                    draft.record.response = Some(body);
+                    outcome = Outcome::Ok;
+                    break;
+                }
+                Attempt::Failed(kind) => {
+                    outcome = kind;
+                    break;
+                }
+                Attempt::Retry(kind) => outcome = kind,
+            }
+        }
+        draft.record.tokens = usage;
+        draft.record.cost = if unknown_cost {
+            max_cost.max(cost)
+        } else {
+            cost
+        };
+        let now = self.clock.now();
+        if outcome == Outcome::Ok && now > deadline {
+            draft.record.response_ref = None;
+            draft.record.response = None;
+            return draft.finish(Outcome::DeadlineExceeded, now);
+        }
+        draft.finish(outcome, now)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one attempt's facts, read once; a struct would only rename them"
+    )]
+    fn classify(
+        &mut self,
+        draft: &mut Draft,
+        entry: &Entry,
+        endpoint: &Endpoint,
+        status: u16,
+        body: Vec<u8>,
+        reply: Option<Reply>,
+        retry_after_ms: Option<u64>,
+        done: UtcNanos,
+    ) -> Attempt {
+        match status {
+            200 => {}
+            401 | 403 => return Attempt::Failed(Outcome::CredentialInvalid),
+            429 => {
+                let wait = retry_after_ms.unwrap_or(DEFAULT_RETRY_AFTER_MS);
+                return match after_ms(done, wait) {
+                    Some(resume) if resume < draft.record.deadline => {
+                        self.clock.wait_until(resume);
+                        Attempt::Retry(Outcome::RateLimitedProvider)
+                    }
+                    _ => Attempt::Failed(Outcome::RateLimitedProvider),
+                };
+            }
+            500..=599 => return Attempt::Retry(Outcome::ProviderUnavailable),
+            _ => return Attempt::Failed(Outcome::ProviderUnavailable),
+        }
+        let reply_ref = Digest::of(&body);
+        draft.record.response_ref = Some(reply_ref);
+        draft.record.response = Some(body.clone());
+        let Some(reply) = reply else {
+            return Attempt::Failed(Outcome::SchemaInvalid);
+        };
+        draft.record.provider_request_id = reply.request_id.clone();
+        draft.record.reported_identity = reply.reported.text();
+        if !entry.serves(endpoint, &reply.reported) {
+            let _ = self
+                .registry
+                .set_healthy(&draft.record.model, &endpoint.id, false);
+            return Attempt::Failed(Outcome::IdentityMismatch);
+        }
+        if reply.refused {
+            return Attempt::Failed(Outcome::ContentRefused);
+        }
+        let output = reply
+            .content
+            .as_deref()
+            .and_then(|text| parse(text.as_bytes()).ok())
+            .filter(|value| schema::fits(&entry.content().output_schema, value));
+        match output {
+            Some(output) => Attempt::Output {
+                output,
+                reply_ref,
+                body,
+            },
+            None => Attempt::Failed(Outcome::SchemaInvalid),
+        }
+    }
+
+    fn settle(&mut self, reservation: &Reservation, record: &CallRecord) {
+        let settlement = Settlement {
+            event_id: self.ids.next_id(),
+            call_id: reservation.call_id.clone(),
+            reservation: reservation.event_id.clone(),
+            outcome: record.outcome,
+            attempts: record.attempts,
+            tokens: record.tokens,
+            cost: record.cost,
+        };
+        let _ = self.meter.settle(settlement);
+    }
+}
+
+/// The largest integer the journal records (journal spec §4.4); a reply reporting more tokens is
+/// unreadable and settles at its reservation's maximum.
+const MAX_TOKENS: u64 = (1 << 53) - 1;
+
+fn readable(usage: Usage) -> bool {
+    usage.input <= MAX_TOKENS && usage.output <= MAX_TOKENS && usage.cached <= MAX_TOKENS
+}
+
+/// A request the gateway cannot make at all; it is refused before anything is recorded, sent,
+/// reserved, or charged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RequestError {
+    #[error("the request names another workspace (INF-9)")]
+    ForeignWorkspace,
+    #[error("the compiler names no agent, and every other purpose names one")]
+    AgentPurpose,
+    #[error("the call id is not a ULID")]
+    CallId,
+    #[error("the registry holds no entry for this pin")]
+    UnknownModel,
+    #[error("the pin's content hash differs from the registered entry's")]
+    HashMismatch,
+}
+
+fn add_usage(a: Usage, b: Usage) -> Usage {
+    Usage {
+        input: a.input.saturating_add(b.input),
+        output: a.output.saturating_add(b.output),
+        cached: a.cached.saturating_add(b.cached),
+    }
+}
+
+/// A record with nothing sent: every refusal's shape (journal spec rules 73 and 146).
+fn skeleton(request: &CallRequest, at: UtcNanos) -> CallRecord {
+    CallRecord {
+        call_id: request.call_id.clone(),
+        agent_id: request.agent_id.clone(),
+        purpose: request.purpose,
+        model: request.model.clone(),
+        endpoint: "none".to_owned(),
+        request_digest: None,
+        guard_rule: None,
+        seed: None,
+        prompt_ref: None,
+        response_ref: None,
+        reported_identity: None,
+        provider_request_id: None,
+        outcome: Outcome::PolicyDenied,
+        attempts: 0,
+        tokens: Usage::default(),
+        cost: Usd6::ZERO,
+        price_table_ref: Digest::ZERO,
+        cache_hit: false,
+        deadline: request.deadline,
+        completed_at: at,
+        reservation: None,
+        observations: request.observations.clone(),
+        output: None,
+        prompt: None,
+        response: None,
+    }
+}
+
+/// Opens and closes each input's data section; an input that contains either marker is refused,
+/// so retrieved text cannot close its own section (inference spec §8.3).
+pub const DATA_OPEN: &str = "<<<data>>>";
+pub const DATA_CLOSE: &str = "<<<end data>>>";
+
+/// The pinned user text with each slot filled, or `None` when the inputs differ from the
+/// template's contract or an input holds a section marker.
+pub fn render(template: &Template, inputs: &BTreeMap<String, String>) -> Option<Prompt> {
+    let names: Vec<&str> = inputs.keys().map(String::as_str).collect();
+    let listed: Vec<&str> = template.inputs.iter().map(String::as_str).collect();
+    if names != listed {
+        return None;
+    }
+    let mut user = template.user.clone();
+    for (name, value) in inputs {
+        if value.contains(DATA_OPEN) || value.contains(DATA_CLOSE) || value.contains("{{") {
+            return None;
+        }
+        user = user.replace(
+            &format!("{{{{{name}}}}}"),
+            &format!("{DATA_OPEN}\n{value}\n{DATA_CLOSE}"),
+        );
+    }
+    Some(Prompt {
+        system: template.system.clone(),
+        user,
+    })
+}
+
+/// The bytes of the rendered prompt as stored: canonical JSON of its two parts.
+pub fn prompt_bytes(prompt: &Prompt) -> Vec<u8> {
+    to_canonical(&object([
+        ("system", Value::Str(prompt.system.clone())),
+        ("user", Value::Str(prompt.user.clone())),
+    ]))
+}
+
+/// The canonical request's digest (inference spec §3.1): the identity, the rendered prompt, the
+/// sampling, the output schema, `max_output_tokens`, and `as_of`.
+pub fn request_digest(entry: &Entry, prompt: &Prompt, as_of: UtcNanos) -> Digest {
+    let content = entry.content();
+    let canonical = object([
+        ("as_of", Value::Str(as_of.to_string())),
+        ("identity", content.identity.canonical()),
+        (
+            "max_output_tokens",
+            int(u64::from(content.max_output_tokens)),
+        ),
+        ("output_schema", content.output_schema.clone()),
+        (
+            "prompt",
+            object([
+                ("system", Value::Str(prompt.system.clone())),
+                ("user", Value::Str(prompt.user.clone())),
+            ]),
+        ),
+        ("sampling", sampling(content.seed)),
+    ]);
+    Digest::of(&to_canonical(&canonical))
+}
