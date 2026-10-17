@@ -7,19 +7,51 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::{get, send, serve};
 use mandate_api_server::http::{
-    self, ALLOW_HEADERS, ALLOW_METHODS, EXPOSE_HEADERS, PROBLEM_JSON, Settings,
+    self, ALLOW_HEADERS, ALLOW_METHODS, App, EXPOSE_HEADERS, PROBLEM_JSON, Settings,
 };
 use mandate_api_server::lifecycle::{Drain, Lifecycle, Local};
+use mandate_api_server::session::{OsRandom, Sessions};
+use mandate_api_server::token::{FixedKeys, Issuer};
 
 const APP: &str = "https://app.owlhead.test";
 
 fn api() -> std::net::SocketAddr {
-    serve(http::api(
-        Settings {
+    serve(http::api(app(), Drain::new()))
+}
+
+/// An app with no key set, no links, and a fixed clock: nothing can authenticate.
+fn app() -> App {
+    use std::os::unix::fs::PermissionsExt;
+    static APPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "mandate-api-server-http-{}-{}",
+        std::process::id(),
+        APPS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let file = dir.join(mandate_api_server::config::SESSION_KEY_FILE);
+    std::fs::write(&file, [9_u8; 32]).expect("the key");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
+    let key = mandate_api_server::config::read_session_key(&dir).expect("the key");
+    let config = mandate_authn::IssuerConfig::new(
+        "https://issuer.test/auth/v1",
+        &["authenticated"],
+        &[mandate_authn::Algorithm::Es256],
+    )
+    .expect("the issuer");
+    App {
+        settings: Settings {
             app_origin: APP.to_owned(),
         },
-        Drain::new(),
-    ))
+        sessions: Arc::new(Sessions::new(&key, Box::new(OsRandom::new()))),
+        tokens: Arc::new(Issuer::new(config, Arc::new(FixedKeys(None)))),
+        links: dir.join("absent"),
+        clock: common::ManualClock::at(1_791_000_000),
+        journal: Arc::new(common::MemJournal::default()),
+        members: Arc::new(mandate_api_server::members::until_parser),
+        hosted: common::hosted(),
+    }
 }
 
 struct Switch(AtomicBool);

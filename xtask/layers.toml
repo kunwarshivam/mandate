@@ -173,12 +173,20 @@ pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-runtime", "mandate-executor", "mandate-mcp", "mandate-shell", "mandate-cli", "mandate-paper", "mandate-alpaca", "mandate-robinhood"]
 
+# The seal: only the workspace store and test support build memberships and identity sessions
+# (DEC-642 items 4 and 7). `mandate-api-server` is that store for a workspace deployment: it folds
+# the control stream's membership records per request (E21-31, DEC-978 item 8).
 [crates.mandate-identity-seal]
 layer = 0
 safety_critical = true
 pure = true
 allowed_external = []
-allowed_dependents = ["mandate-authn", "mandate-identity", "mandate-identity-testkit"]
+allowed_dependents = [
+    "mandate-api-server",
+    "mandate-authn",
+    "mandate-identity",
+    "mandate-identity-testkit",
+]
 
 [crates.mandate-tenant]
 layer = 0
@@ -402,7 +410,7 @@ forbidden_internal = ["mandate-cli", "mandate-paper"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["axum", "tokio"]
+allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
 forbidden_internal = [
     "mandate-alpaca",
     "mandate-cli",

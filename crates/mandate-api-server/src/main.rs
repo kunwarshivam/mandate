@@ -35,11 +35,21 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mandate_api_server::clock::SystemClock;
+use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
     StartRefusal, check_bind, check_database_url, check_environment, read_session_key,
 };
-use mandate_api_server::http::{self, Settings};
+use mandate_api_server::http::{self, App, Settings};
+use mandate_api_server::journal::Postgres;
+use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
+use mandate_api_server::members::{self, Hosted};
+use mandate_api_server::session::{OsRandom, Sessions};
+use mandate_api_server::token::Issuer;
+use mandate_authn::{Algorithm, IssuerConfig};
+use mandate_identity::{OrgId, WorkspaceId};
+use mandate_journal_pg::PgJournal;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
@@ -117,25 +127,74 @@ fn app_origin() -> Result<String, StartRefusal> {
 }
 
 /// Every start check, in order, then the two listeners' addresses and the settings.
-fn checked() -> Result<(Args, Settings), StartRefusal> {
+/// What the start checks hand the process.
+struct Start {
+    settings: Settings,
+    key: SessionKey,
+    issuer: IssuerConfig,
+    keys: Arc<FetchedKeys>,
+    links: PathBuf,
+    database_url: String,
+    hosted: Hosted,
+}
+
+/// A required setting's value, refused when absent, empty, or not Unicode.
+fn setting(name: &'static str) -> Result<String, StartRefusal> {
+    env::var(name)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .ok_or(StartRefusal::Setting { name })
+}
+
+fn checked() -> Result<(Args, Start), StartRefusal> {
     check_environment(env::vars_os())?;
     let args = args(env::args_os().skip(1))?;
     check_bind(args.bind, args.pod_address)?;
     check_bind(args.probe_bind, args.pod_address)?;
-    if let Some(url) = env::var_os("MANDATE_API_DATABASE_URL") {
-        let url = url.into_string().map_err(|_| StartRefusal::Setting {
-            name: "MANDATE_API_DATABASE_URL",
-        })?;
-        check_database_url(&url)?;
-    }
+    let database_url = setting("MANDATE_API_DATABASE_URL")?;
+    check_database_url(&database_url)?;
+    let hosted = Hosted {
+        org: OrgId::from_ulid_text(&setting("MANDATE_API_ORG")?).map_err(|_| {
+            StartRefusal::Setting {
+                name: "MANDATE_API_ORG",
+            }
+        })?,
+        workspace: WorkspaceId::from_ulid_text(&setting("MANDATE_API_WORKSPACE")?).map_err(
+            |_| StartRefusal::Setting {
+                name: "MANDATE_API_WORKSPACE",
+            },
+        )?,
+    };
     let credentials = env::var_os("CREDENTIALS_DIRECTORY")
         .map(PathBuf::from)
         .ok_or(StartRefusal::SessionKeyMissing)?;
-    read_session_key(&credentials)?;
+    let key = read_session_key(&credentials)?;
     let settings = Settings {
         app_origin: app_origin()?,
     };
-    Ok((args, settings))
+    let issuer = IssuerConfig::new(
+        &setting("MANDATE_API_ISSUER")?,
+        &[setting("MANDATE_API_AUDIENCE")?.as_str()],
+        &[Algorithm::Es256],
+    )
+    .map_err(|_| StartRefusal::Setting {
+        name: "MANDATE_API_ISSUER",
+    })?;
+    let keys =
+        FetchedKeys::new(&setting("MANDATE_API_JWKS_URL")?).map_err(|_| StartRefusal::Setting {
+            name: "MANDATE_API_JWKS_URL",
+        })?;
+    let links = PathBuf::from(setting("MANDATE_API_SUBJECT_LINKS")?);
+    let start = Start {
+        settings,
+        key,
+        issuer,
+        keys: Arc::new(keys),
+        links,
+        database_url,
+        hosted,
+    };
+    Ok((args, start))
 }
 
 /// Serves until `stop` resolves and in-flight requests finish.
@@ -155,7 +214,7 @@ enum Wake {
     ListenerEnded,
 }
 
-async fn run(args: Args, settings: Settings) -> io::Result<()> {
+async fn run(args: Args, start: Start) -> io::Result<()> {
     let drain = Drain::new();
     let api = TcpListener::bind(args.bind).await?;
     let probes = TcpListener::bind(args.probe_bind).await?;
@@ -167,10 +226,29 @@ async fn run(args: Args, settings: Settings) -> io::Result<()> {
     );
     let (stopped, stop) = watch::channel(false);
     let (wake, mut woken) = mpsc::unbounded_channel();
+    let fetcher = Arc::clone(&start.keys);
+    tokio::spawn(async move {
+        loop {
+            let _ = fetcher.fetch().await;
+            tokio::time::sleep(REFETCH).await;
+        }
+    });
+    let app = App {
+        settings: start.settings,
+        sessions: Arc::new(Sessions::new(&start.key, Box::new(OsRandom::new()))),
+        tokens: Arc::new(Issuer::new(start.issuer, start.keys)),
+        links: start.links,
+        clock: Arc::new(SystemClock),
+        journal: Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
+            |_| io::Error::other("the journal's connection settings are refused"),
+        )?)),
+        members: Arc::new(members::until_parser),
+        hosted: start.hosted,
+    };
     let api = spawn_listener(
         serve(
             api,
-            http::api(settings, Arc::clone(&drain)),
+            http::api(app, Arc::clone(&drain)),
             wait_for(stop.clone()),
         ),
         wake.clone(),
@@ -222,7 +300,7 @@ async fn wait_for(mut stop: watch::Receiver<bool>) {
 }
 
 fn main() -> ExitCode {
-    let (args, settings) = match checked() {
+    let (args, start) = match checked() {
         Ok(checked) => checked,
         Err(refusal) => {
             eprintln!("refused: {refusal}");
@@ -239,7 +317,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match runtime.block_on(run(args, settings)) {
+    match runtime.block_on(run(args, start)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("stopped: {error}");

@@ -4,6 +4,7 @@
 //! headers only for the configured app origin. The probes' router answers `/livez` and `/readyz`
 //! and a bodiless 404 for anything else.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -12,10 +13,20 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, post};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::encode;
+use mandate_canon::Value;
 
+use crate::clock::Clock;
+use crate::journal::Journal;
 use crate::lifecycle::{Drain, Lifecycle};
+use crate::members::{Hosted, ParseMembers};
+use crate::routes;
+use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
+use crate::subject::{self, LinkRefusal};
+use crate::token::{Checked, TokenCheck};
+use crate::writes;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
 pub const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, PATCH";
@@ -39,17 +50,222 @@ pub struct Settings {
     pub app_origin: String,
 }
 
+/// The custom header a cross-site form cannot set (§3.3 item 1).
+pub const CSRF_HEADER: &str = "x-mandate-request";
+
+/// Everything the API router serves from.
+#[derive(Clone)]
+pub struct App {
+    pub settings: Settings,
+    pub sessions: Arc<Sessions>,
+    pub tokens: Arc<dyn TokenCheck>,
+    /// The subject-link file (§3.11 item 7).
+    pub links: PathBuf,
+    pub clock: Arc<dyn Clock>,
+    pub journal: Arc<dyn Journal>,
+    /// How the control stream's rows become membership records.
+    pub members: Arc<ParseMembers>,
+    /// The one workspace this deployment hosts.
+    pub hosted: Hosted,
+}
+
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
 /// Each request is counted in flight on `drain` until its response is ready.
-pub fn api(settings: Settings, drain: Arc<Drain>) -> Router {
+pub fn api(app: App, drain: Arc<Drain>) -> Router {
+    let settings = app.settings.clone();
     let unauthenticated = problem_body(ProblemCode::Unauthenticated);
+    let refused = unauthenticated.clone();
+    let otherwise = move || {
+        let body = refused.clone();
+        async move { problem(StatusCode::UNAUTHORIZED, body) }
+    };
     let routes = Router::new()
-        .fallback(move || {
-            let body = unauthenticated.clone();
-            async move { problem(StatusCode::UNAUTHORIZED, body) }
-        })
+        .route(
+            "/v1/sessions",
+            post(open_session).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/sessions/refresh",
+            post(refresh_session).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/sessions/current",
+            delete(end_session).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents",
+            get(routes::list_agents).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}",
+            get(routes::one_agent).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/approvals",
+            get(routes::list_approvals).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/approvals/{approval}",
+            get(routes::one_approval).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/pause",
+            post(writes::pause).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/kill-switch",
+            post(writes::kill_switch).fallback(otherwise.clone()),
+        )
+        .fallback(otherwise)
+        .with_state(Arc::new(app))
         .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
     counted(routes, drain)
+}
+
+/// The one 401 (API-1).
+pub(crate) fn unauthenticated() -> Response {
+    problem(
+        StatusCode::UNAUTHORIZED,
+        problem_body(ProblemCode::Unauthenticated),
+    )
+}
+
+/// §3.3 item 1's check, which the browser-only session routes make first and refuse with 403: one
+/// `Origin`, exactly the app origin, and one `X-Mandate-Request: 1`.
+pub(crate) fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
+    let mut marks = headers.get_all(CSRF_HEADER).iter();
+    let marked = matches!((marks.next(), marks.next()), (Some(mark), None) if mark == "1");
+    marked && is_app_origin(headers, app_origin)
+}
+
+/// The 403 a failed [`browser`] check answers, before any cookie or token is read.
+fn forbidden() -> Response {
+    problem(StatusCode::FORBIDDEN, problem_body(ProblemCode::Forbidden))
+}
+
+/// The session cookie's value when the request carries it exactly once.
+pub(crate) fn session_cookie(headers: &HeaderMap) -> Option<String> {
+    let mut found = headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .filter(|(name, _)| *name == COOKIE_NAME)
+        .map(|(_, value)| value.to_owned());
+    match (found.next(), found.next()) {
+        (Some(value), None) => Some(value),
+        _ => None,
+    }
+}
+
+/// `{"access_token": ...}` and nothing else: `Some(Some(token))`, `Some(None)` for `null`, and
+/// `None` for anything else.
+fn access_token(body: &[u8]) -> Option<Option<String>> {
+    let Ok(Value::Object(members)) = mandate_canon::parse(body) else {
+        return None;
+    };
+    let mut members = members.into_iter();
+    match (members.next(), members.next()) {
+        (Some((key, value)), None) if key.as_str() == "access_token" => match value {
+            Value::Str(token) => Some(Some(token)),
+            Value::Null => Some(None),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn set_cookie(value: &str, max_age_s: i64) -> Response {
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    let cookie = format!(
+        "{COOKIE_NAME}={value}; Path=/; Max-Age={max_age_s}; Secure; HttpOnly; SameSite=Strict"
+    );
+    if let Ok(cookie) = HeaderValue::from_str(&cookie) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
+}
+
+/// `POST /v1/sessions` (§3.11 item 5).
+async fn open_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
+    if !browser(&headers, &app.settings.app_origin) {
+        return forbidden();
+    }
+    let opened = (|| {
+        let token = access_token(&body)??;
+        let now = app.clock.now()?;
+        let Checked::Subject { issuer, subject } = app.tokens.check(&token, now) else {
+            return None;
+        };
+        let principal = subject::principal(&app.links, &issuer, &subject).ok()?;
+        let replaced = session_cookie(&headers);
+        app.sessions
+            .open(
+                principal,
+                subject::digest(&issuer, &subject),
+                replaced.as_deref(),
+                now,
+            )
+            .ok()
+    })();
+    match opened {
+        Some(cookie) => set_cookie(cookie.value(), COOKIE_MAX_AGE_S),
+        None => unauthenticated(),
+    }
+}
+
+/// `POST /v1/sessions/refresh` (§3.11 item 6).
+async fn refresh_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
+    if !browser(&headers, &app.settings.app_origin) {
+        return forbidden();
+    }
+    let refreshed = (|| {
+        let cookie = session_cookie(&headers)?;
+        let token = access_token(&body)?;
+        let now = app.clock.now()?;
+        let answer = match token.map(|token| app.tokens.check(&token, now)) {
+            None | Some(Checked::Unreachable) => Answer::Unreachable,
+            Some(Checked::Refused) => Answer::Failed,
+            Some(Checked::Subject { issuer, subject }) => {
+                match subject::principal(&app.links, &issuer, &subject) {
+                    Ok(principal) => Answer::Granted {
+                        subject: subject::digest(&issuer, &subject),
+                        principal,
+                    },
+                    Err(LinkRefusal::Unreadable | LinkRefusal::Exposed) => Answer::Unreachable,
+                    Err(_) => Answer::Failed,
+                }
+            }
+        };
+        app.sessions.refresh(&cookie, answer, now).ok()
+    })();
+    match refreshed {
+        Some(Some(cookie)) => set_cookie(cookie.value(), COOKIE_MAX_AGE_S),
+        Some(None) => StatusCode::NO_CONTENT.into_response(),
+        None => unauthenticated(),
+    }
+}
+
+/// `DELETE /v1/sessions/current` (§3.11 item 6).
+async fn end_session(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if !browser(&headers, &app.settings.app_origin) {
+        return forbidden();
+    }
+    let presented = session_cookie(&headers);
+    match presented.as_deref().map(|cookie| app.sessions.end(cookie)) {
+        Some(Ok(())) => set_cookie("", 0),
+        Some(Err(_)) => {
+            let mut refused = unauthenticated();
+            if let Some(cleared) = set_cookie("", 0).headers().get(header::SET_COOKIE) {
+                refused
+                    .headers_mut()
+                    .insert(header::SET_COOKIE, cleared.clone());
+            }
+            refused
+        }
+        None => unauthenticated(),
+    }
 }
 
 /// `router`, with each request counted in flight on `drain` until its response is ready, so a
@@ -84,7 +300,7 @@ fn status(code: StatusCode, word: &'static str) -> Response {
     with_type(code, "application/json", Body::from(body))
 }
 
-fn with_type(code: StatusCode, media: &'static str, body: Body) -> Response {
+pub(crate) fn with_type(code: StatusCode, media: &'static str, body: Body) -> Response {
     let mut response = Response::new(body);
     *response.status_mut() = code;
     response
@@ -95,7 +311,7 @@ fn with_type(code: StatusCode, media: &'static str, body: Body) -> Response {
 
 /// The problem document for `code` with nothing recorded, as bytes. A code `mandate-api` cannot
 /// encode leaves the body empty; the status still says what happened.
-fn problem_body(code: ProblemCode) -> Bytes {
+pub(crate) fn problem_body(code: ProblemCode) -> Bytes {
     Problem::of(code, Effect::None, None, None)
         .ok()
         .and_then(|problem| encode(&problem).ok())
@@ -103,7 +319,7 @@ fn problem_body(code: ProblemCode) -> Bytes {
         .unwrap_or_default()
 }
 
-fn problem(code: StatusCode, body: Bytes) -> Response {
+pub(crate) fn problem(code: StatusCode, body: Bytes) -> Response {
     with_type(code, PROBLEM_JSON, Body::from(body))
 }
 
