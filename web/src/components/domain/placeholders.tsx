@@ -83,7 +83,7 @@ export function Placeholder({ name, className }: { name: PlaceholderName; classN
 }
 
 /** Marks fixture values so no one reads them as a record. */
-export function FixtureTag({ className }: { className?: string }) {
+export function FixtureTag({ className }: { className?: string; scope?: "workspace" | "section" }) {
   return (
     <span data-slot="fixture-tag" className={cn("inline-flex h-5 shrink-0 items-center rounded-sm bg-muted px-1.5 text-label text-muted-foreground", className)}>
       Fixture data

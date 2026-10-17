@@ -54,9 +54,11 @@ export interface ApprovalRecord {
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  phase: "sent" | "recorded" | "decided" | "unknown";
+  /** `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason in `reason`. */
+  phase: "sent" | "recorded" | "decided" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
+  reason?: string;
   record: ApprovalRecord;
 }
 
@@ -111,6 +113,8 @@ export interface MandateChangeRequest {
 }
 
 export interface Runtime {
+  /** Where the workspace comes from (DEC-970): the recorded fixtures, or a workspace deployment's API. */
+  source: "fixtures" | "api";
   ws: Workspace;
   now: Iso;
   reachable: boolean;
@@ -124,7 +128,7 @@ export interface Runtime {
   changeMandate: (proposal: Proposal, origin: Origin, record: ChangeRecord) => MandateChangeRequest;
 }
 
-const RuntimeContext = createContext<Runtime | null>(null);
+export const RuntimeContext = createContext<Runtime | null>(null);
 
 const SEVERITY: Record<AgentMode, number> = { normal: 0, exits_only: 1, paused: 2, stopped: 3 };
 
@@ -445,7 +449,7 @@ export function RuntimeProvider({
   );
 
   const value = useMemo(
-    () => ({ ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
+    () => ({ source: "fixtures" as const, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
     [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
