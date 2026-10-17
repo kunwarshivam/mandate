@@ -2417,6 +2417,7 @@ mod tests {
                 writer: Writer::Executor,
                 actor_id: "executor",
                 event_time: recorded_at,
+                environment: mandate_journal::Environment::Paper,
             },
             &DraftFields {
                 event_id: "10000100000000000000000000",

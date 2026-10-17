@@ -13,7 +13,7 @@ use mandate_accounting::InstrumentId;
 use mandate_alpaca::{LatestQuote, Pause};
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_executor::{BrokerOutcome, BrokerRequest, ReconciliationVerdict};
-use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, get_artifact};
+use mandate_journal::{AppendOutcome, ArtifactRef, StoredEvent, get_artifact};
 use mandate_num::Price;
 use mandate_runtime::{
     ActorKind, Autonomy, Classified, Deployment, DryRunVerdict, Effect, EventDraft, FlattenPlan,
@@ -25,7 +25,7 @@ use mandate_time::UtcNanos;
 
 use crate::envelope::{
     DraftFields, Envelope, IdSpace, Ids, Writer, account_stream, agent_stream, control_stream,
-    draft_bytes,
+    draft_bytes, journal_environment,
 };
 use crate::error::{Cause, ShellError, refused};
 use crate::lt10::watch_may_end;
@@ -53,6 +53,10 @@ pub struct Setup {
     pub place_one_order: bool,
     /// Lets a run start a new cycle on an agent stream that already carries an intent (TI-12).
     pub new_cycle: bool,
+    /// The environment of the connection the run chose (the live door's choice): the one
+    /// environment the admitted mandate may name and every draft of the run carries (TI-7 as
+    /// DEC-965 reads it).
+    pub connection_environment: mandate_domain::Environment,
 }
 
 /// What a run did.
@@ -81,7 +85,7 @@ pub fn run_observed(
     observation: Observation,
     output: mandate_runtime::ModelOutput,
 ) -> Result<Report, ShellError> {
-    let admitted = admit(stages)?;
+    let admitted = admit(stages, setup)?;
     execute_cycle(stages, setup, &admitted, Some(observation), output)
 }
 
@@ -102,14 +106,14 @@ pub fn run_observed_watched<P: Pause>(
     output: mandate_runtime::ModelOutput,
     watch: &Watch<P>,
 ) -> Result<Report, ShellError> {
-    let admitted = admit(stages)?;
+    let admitted = admit(stages, setup)?;
     let instrument = pinned(&admitted.view)?;
     let mut session = open_cycle(stages, setup, &admitted, Some(observation), output)?;
     session.watch(&instrument, watch, &watch_may_end)?;
     Ok(session.report)
 }
 
-fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
+fn admit(stages: &mut Stages, setup: &Setup) -> Result<Admitted, ShellError> {
     stages.exit.probe().map_err(refused(Stage::FlattenProbe))?;
     stages
         .protection
@@ -119,8 +123,8 @@ fn admit(stages: &mut Stages) -> Result<Admitted, ShellError> {
         .mandate
         .admitted()
         .map_err(refused(Stage::Validate))?;
-    if admitted.environment != Environment::Paper {
-        return Err(ShellError::NonPaperEnvironment);
+    if admitted.environment != journal_environment(setup.connection_environment) {
+        return Err(ShellError::EnvironmentMismatch);
     }
     pinned(&admitted.view)?;
     Ok(admitted)
@@ -221,7 +225,7 @@ impl ProductionCycle {
     /// # Errors
     /// Every [`ShellError`] is a fail-closed stop after which nothing further is sent.
     pub fn run(&mut self, output: mandate_runtime::ModelOutput) -> Result<Report, ShellError> {
-        let admitted = admit(&mut self.stages)?;
+        let admitted = admit(&mut self.stages, &self.setup)?;
         execute_cycle(&mut self.stages, &self.setup, &admitted, None, output)
     }
 
@@ -248,7 +252,7 @@ impl ProductionCycle {
         observation: Observation,
         output: mandate_runtime::ModelOutput,
     ) -> Result<Report, ShellError> {
-        let admitted = admit(&mut self.stages)?;
+        let admitted = admit(&mut self.stages, &self.setup)?;
         execute_cycle(
             &mut self.stages,
             &self.setup,
@@ -407,7 +411,7 @@ where
     E: From<ShellError>,
     W: FnOnce(&mut dyn AskedCycle) -> Result<(), E>,
 {
-    let admitted = admit(stages)?;
+    let admitted = admit(stages, setup)?;
     let instrument = pinned(&admitted.view)?;
     let (mut session, asked) = open_asking(
         stages,
@@ -709,6 +713,7 @@ impl<'s> Session<'s> {
                 writer: Writer::Executor,
                 actor_id: "executor",
                 event_time: mark.at,
+                environment: journal_environment(self.setup.connection_environment),
             },
             &DraftFields {
                 event_id: &event_id,
@@ -791,6 +796,7 @@ impl<'s> Session<'s> {
                 writer,
                 actor_id,
                 event_time: self.event_time,
+                environment: journal_environment(self.setup.connection_environment),
             },
             &DraftFields {
                 event_id: &event_id,
@@ -1315,6 +1321,7 @@ impl<'s> Session<'s> {
                         writer: Writer::Agent,
                         actor_id: &self.setup.deployment.agent.0,
                         event_time: self.event_time,
+                        environment: journal_environment(self.setup.connection_environment),
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,
@@ -1344,6 +1351,7 @@ impl<'s> Session<'s> {
                         writer: Writer::Executor,
                         actor_id: "executor",
                         event_time: self.event_time,
+                        environment: journal_environment(self.setup.connection_environment),
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,

@@ -249,8 +249,22 @@ fn stages(now: &str, bridge: &Rc<RobinhoodBridge<Loopback>>, store: Vec<u8>) -> 
         .unwrap();
     let agent = deployed.deployment().agent.clone();
     let facts = spy_facts(SPY, "SPY", Exchange::Arca, at(now));
-    let contexts = load_contexts(&artifacts, &facts, at(now), &agent).unwrap();
-    let reconciled = load_contexts(&artifacts, &facts, at(now), &agent).unwrap();
+    let contexts = load_contexts(
+        &artifacts,
+        &facts,
+        at(now),
+        &agent,
+        mandate_domain::Environment::Paper,
+    )
+    .unwrap();
+    let reconciled = load_contexts(
+        &artifacts,
+        &facts,
+        at(now),
+        &agent,
+        mandate_domain::Environment::Paper,
+    )
+    .unwrap();
     let file = MANDATE_FILE.get_or_init(|| {
         let path = std::env::temp_dir().join(format!(
             "mandate-shell-rh-sim-restart-{}.json",
@@ -281,6 +295,7 @@ fn stages(now: &str, bridge: &Rc<RobinhoodBridge<Loopback>>, store: Vec<u8>) -> 
         now: at(now),
         place_one_order: true,
         new_cycle: true,
+        connection_environment: mandate_domain::Environment::Paper,
     };
     let mut stages = over(sources);
     let scope = AccountScope {
