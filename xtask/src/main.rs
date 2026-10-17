@@ -601,6 +601,16 @@ const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
 /// both run exactly when it is selected.
 const RUNNER_CRATE: &str = "mandate-paper";
 
+/// The binaries a test runs by a path an environment variable names, each with the crate that
+/// builds it (DEC-1006 item 2): `mandate-mcp`'s rehearsal tests run the simulator `test-rh-sim`
+/// builds (DEC-922 item 3) without depending on its crate. A crate whose sources name the variable
+/// is selected whenever the binary's crate is, as if it depended on it.
+const BINARY_COUPLINGS: [(&str, &str); 1] = [(RH_SIM_BIN_ENV, "mandate-rh-sim")];
+
+/// The prefix [`source_references`] gives a [`BINARY_COUPLINGS`] reference, a crate rather than a
+/// path, so no path matches it.
+const BINARY_REFERENCE: &str = "bin:";
+
 /// The packages whose tests need the database (ADR-0001 ES-08, DEC-520): `cargo xtask ci postgres`
 /// runs those of them the selection holds.
 const PG_TESTED: [&str; 2] = ["mandate-journal-pg", "mandate-cli"];
@@ -649,9 +659,10 @@ struct CrateGraph {
     /// The members each member depends on directly, of every kind (normal, dev and build): a
     /// dependent's tests link what it depends on.
     deps: BTreeMap<String, BTreeSet<String>>,
-    /// Whether some member turns a feature of another member on or its defaults off: a
-    /// `--package` build would then unify that member's features differently from the
-    /// `--workspace` build, so the selection takes everything rather than reason about it.
+    /// Whether some member turns a feature of another member on, directly or by forwarding one of
+    /// its own (`x = ["member/feat"]`), or turns its defaults off: a `--package` build would then
+    /// unify that member's features differently from the `--workspace` build, so the selection
+    /// takes everything rather than reason about it.
     member_features: bool,
 }
 
@@ -672,7 +683,16 @@ fn crate_graph(root: &Path) -> Result<CrateGraph> {
             .collect();
         graph.member_features |= on
             .iter()
-            .any(|dep| !dep.features.is_empty() || !dep.uses_default_features);
+            .any(|dep| !dep.features.is_empty() || !dep.uses_default_features)
+            || pkg.features.values().flatten().any(|value| {
+                let named = value.trim_start_matches("dep:");
+                let named = named
+                    .split('/')
+                    .next()
+                    .unwrap_or(named)
+                    .trim_end_matches('?');
+                value.contains('/') && on.iter().any(|dep| dep.name == named)
+            });
         graph.deps.insert(
             pkg.name.clone(),
             on.iter().map(|dep| dep.name.clone()).collect(),
@@ -713,9 +733,11 @@ fn owning_crate<'g>(graph: &'g CrateGraph, path: &str) -> Option<&'g str> {
 }
 
 /// The repository paths each member's Rust sources name (DEC-1006 item 2): every piece of every
-/// string literal that could be a path, resolved against the file's directory (`include_str!`),
-/// the crate's directory (`CARGO_MANIFEST_DIR`) and the repository root, so a test reading
-/// `docs/specs/identity.md` or another crate's fixtures is selected when that file changes. A
+/// string literal that could be a path, a leading `/` dropped (`concat!(env!(..), "/../..")`),
+/// resolved against the file's directory (`include_str!`), the crate's directory
+/// (`CARGO_MANIFEST_DIR`), `crates/` (a sibling crate named from a computed `crates` directory)
+/// and the repository root, so a test reading `docs/specs/identity.md`, another crate's fixtures
+/// or another crate's source is selected when that file changes. A
 /// piece with `*` is kept as a prefix ending in `*`. The scan over-approximates on purpose: a
 /// literal that is not a path costs at most a crate selected more, never one selected less. The
 /// one reading it drops is a directory above the crate's own, `crates` itself: a `..` piece read
@@ -749,6 +771,12 @@ fn source_references(
         for (token, _) in tokens(&text) {
             if let Token::Str(literal) = token {
                 named.extend(
+                    BINARY_COUPLINGS
+                        .iter()
+                        .filter(|(var, _)| literal == *var)
+                        .map(|(_, binary)| format!("{BINARY_REFERENCE}{binary}")),
+                );
+                named.extend(
                     literal_paths(&literal, file_dir, &crate_dir)
                         .into_iter()
                         .filter(|path| !path_under(&crate_dir, &format!("{path}/"))),
@@ -772,14 +800,9 @@ fn literal_paths(literal: &str, file_dir: &str, crate_dir: &str) -> BTreeSet<Str
             Some((before, _)) => (before, true),
             None => (piece, false),
         };
-        let rooted = piece.strip_prefix('/');
-        let bases: Vec<&str> = if rooted.is_some() {
-            vec![""]
-        } else {
-            vec![file_dir, crate_dir, ""]
-        };
-        for base in bases {
-            if let Some(mut path) = normalized_join(base, rooted.unwrap_or(piece)) {
+        let piece = piece.trim_start_matches('/');
+        for base in [file_dir, crate_dir, "crates", ""] {
+            if let Some(mut path) = normalized_join(base, piece) {
                 if glob {
                     path.push('*');
                 }
@@ -960,9 +983,29 @@ fn select(
             .iter()
             .any(|entry| path_under(path, entry));
     }
+    let mut crates = dependents_closure(graph, &seeds);
+    loop {
+        let coupled: BTreeSet<String> = references
+            .iter()
+            .filter(|(krate, named)| {
+                !crates.contains(*krate)
+                    && named.iter().any(|reference| {
+                        reference
+                            .strip_prefix(BINARY_REFERENCE)
+                            .is_some_and(|binary| crates.contains(binary))
+                    })
+            })
+            .map(|(krate, _)| krate.clone())
+            .collect();
+        if coupled.is_empty() {
+            break;
+        }
+        seeds.extend(coupled);
+        crates = dependents_closure(graph, &seeds);
+    }
     Selection {
         everything: None,
-        crates: dependents_closure(graph, &seeds),
+        crates,
         python,
         full_checks,
         schema_mutants,
@@ -970,21 +1013,25 @@ fn select(
 }
 
 /// The paths a change touches against `base`, renames as a deletion and an addition so both
-/// sides count.
+/// sides count: the working tree against the merge base of `base` and HEAD, so a local run counts
+/// what is not committed yet, and untracked files too. In CI the tree is the commit, so this is
+/// `base...HEAD`.
 fn changed_paths(root: &Path, base: &str) -> Result<Vec<String>> {
-    Ok(output_in(
+    let merge_base = output_in(root, "git", &["merge-base", base, "HEAD"])?;
+    let mut changed: BTreeSet<String> = output_in(
         root,
         "git",
-        &[
-            "diff",
-            "--name-only",
-            "--no-renames",
-            &format!("{base}...HEAD"),
-        ],
+        &["diff", "--name-only", "--no-renames", merge_base.trim()],
     )?
     .lines()
     .map(str::to_owned)
-    .collect())
+    .collect();
+    changed.extend(
+        output_in(root, "git", &["ls-files", "--others", "--exclude-standard"])?
+            .lines()
+            .map(str::to_owned),
+    );
+    Ok(changed.into_iter().collect())
 }
 
 /// The selection for the repository at `root` against `base` ([`select`]).
@@ -3116,8 +3163,14 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// world's program list ([`closed_world`]) refuses them (DEC-873 item 4). A line not listed is
 /// refused until a person adds it in a change a reviewer sees, as [`PARSER_LIMITED_LINES`] works:
 /// `web-e2e.yml`'s `node -p` probe prints the Playwright version from a `package.json`, and its
-/// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists.
+/// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists. `nightly.yml`'s clock
+/// line writes the runner's time, in seconds, to the step's outputs for the sweep's rotation
+/// (DEC-1006 item 5).
 const READ_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/nightly.yml",
+        r##"echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT""##,
+    ),
     (
         ".github/workflows/web-e2e.yml",
         r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
@@ -3186,7 +3239,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_PR_BODY",
     "MANDATE_PR_NUMBER",
     "MANDATE_SCHEMA_SHARD",
-    "MANDATE_SWEEP_NIGHT",
+    "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
@@ -6376,10 +6429,9 @@ fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
 /// `ceil(n / ceil(n / 8))` mutants, never more than this.
 const SWEEP_SHARD_MUTANTS: usize = 8;
 
-/// The fewest nightly runs one whole-crate sweep is spread over (DEC-1006 item 5): shard `k` runs
-/// in the runs whose number is `k` modulo the rotation, so every mutant is tested once every seven
-/// nightly runs, about weekly, and a night's matrix leaves most of the shared runners to pull
-/// requests. [`SweepPlan::rotation_for`] lengthens it once a seventh would not fit one matrix.
+/// The fewest days one whole-crate sweep is spread over (DEC-1006 item 5): shard `k` runs on the
+/// days whose index is `k` modulo the rotation, so every mutant is tested once a week, and a
+/// night's matrix leaves most of the shared runners to pull requests. [`SweepPlan::rotation_for`] lengthens it once a seventh would not fit one matrix.
 const SWEEP_ROTATION: u64 = 7;
 
 /// GitHub's ceiling on one matrix's jobs.
@@ -6438,18 +6490,20 @@ impl SweepPlan {
     }
 }
 
-/// The variable the nightly sets to its own run number, which picks the run's share of the
-/// [`SWEEP_ROTATION`]: time is an input (ES-05), and consecutive runs cover every residue.
-const SWEEP_NIGHT_ENV: &str = "MANDATE_SWEEP_NIGHT";
+/// The variable the nightly sets to the runner's clock, in seconds since the Unix epoch: time is
+/// an input (ES-05). Its day picks the day's share of the rotation, so consecutive days cover every
+/// share whatever runs were dispatched or skipped.
+const SWEEP_CLOCK_ENV: &str = "MANDATE_SWEEP_CLOCK";
 
-/// This run's index in the rotation, from [`SWEEP_NIGHT_ENV`], which the plan requires.
+/// Today's index in the rotation, the days since the Unix epoch of [`SWEEP_CLOCK_ENV`], which the
+/// plan requires.
 fn sweep_night() -> Result<u64> {
-    let value = env::var(SWEEP_NIGHT_ENV).with_context(|| {
-        format!("{SWEEP_NIGHT_ENV} names this run's index in the sweep's rotation")
-    })?;
-    value
+    let value = env::var(SWEEP_CLOCK_ENV)
+        .with_context(|| format!("{SWEEP_CLOCK_ENV} gives the clock the sweep's rotation reads"))?;
+    let seconds = value
         .parse::<u64>()
-        .with_context(|| format!("{SWEEP_NIGHT_ENV} must be a number; got {value:?}"))
+        .with_context(|| format!("{SWEEP_CLOCK_ENV} must be whole seconds; got {value:?}"))?;
+    Ok(seconds / 86_400)
 }
 
 /// `cargo xtask ci sweep --plan`: tonight's share of the whole-crate sweep, from the gate's own
@@ -12684,8 +12738,8 @@ mod tests {
             "a newer run of the same ref cancels the older one"
         );
         let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
-                      github.ref == 'refs/heads/main' && (needs.fast.result != 'success' || \
-                      needs.full.result != 'success') }}";
+                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
+                      needs.full.result == 'failure') }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -13366,7 +13420,8 @@ mod tests {
         assert!(has(&dispatch, "actions: write"));
         let plan = trimmed(&nightly, "sweep-plan")?;
         for line in [
-            "MANDATE_SWEEP_NIGHT: ${{ github.run_number }}",
+            "MANDATE_SWEEP_CLOCK: ${{ steps.clock.outputs.seconds }}",
+            "run: echo \"seconds=$(date -u +%s)\" >> \"$GITHUB_OUTPUT\"",
             "run: cargo xtask ci sweep --plan >> \"$GITHUB_OUTPUT\"",
             "mutants: ${{ steps.plan.outputs.mutants }}",
             "shards: ${{ steps.plan.outputs.shards }}",
@@ -13713,6 +13768,26 @@ mod tests {
                 .is_some(),
             "a member turning on another member's feature selects everything"
         );
+        let coupled: BTreeMap<String, BTreeSet<String>> = [(
+            "mandate-canon".to_owned(),
+            crate_set(&["bin:mandate-identity"]),
+        )]
+        .into_iter()
+        .collect();
+        let changed = vec!["crates/mandate-num/src/lib.rs".to_owned()];
+        assert!(
+            select(Some(&changed), &graph, &coupled)
+                .crates
+                .contains("mandate-canon"),
+            "a crate running another's binary is selected with it, through its dependencies too"
+        );
+        let changed = vec!["crates/mandate-risk/src/lib.rs".to_owned()];
+        assert!(
+            !select(Some(&changed), &graph, &coupled)
+                .crates
+                .contains("mandate-canon"),
+            "and only then"
+        );
         let nothing = select(Some(&[]), &graph, &references);
         assert_eq!(
             (
@@ -13902,6 +13977,17 @@ mod tests {
             "../../../docs/specs/identity.md",
             "docs/specs/identity.md"
         ));
+        assert!(
+            named(
+                "/../../schemas/mandate.schema.json",
+                "schemas/mandate.schema.json"
+            ),
+            "a `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../..\")` piece resolves from the crate"
+        );
+        assert!(
+            named("mandate-cli/src", "crates/mandate-cli/src/main.rs"),
+            "a sibling crate named from a computed `crates` directory"
+        );
         assert!(named(
             "../../fixtures/refcases/journal.json",
             "fixtures/refcases/journal.json"
@@ -13970,6 +14056,10 @@ mod tests {
             ),
             ("mandate-spec", "schemas/mandate.schema.json"),
             ("mandate-refcases", "docs/specs/mandate.md"),
+            ("mandate-notify", "schemas/mandate.schema.json"),
+            ("mandate-marketdata", "crates/mandate-cli/src/main.rs"),
+            ("mandate-mcp", "crates/mandate-rh-sim/src/lib.rs"),
+            ("mandate-mcp", "crates/mandate-rh-sim/contract/tools.json"),
         ] {
             let changed = vec![path.to_owned()];
             let selected = select(Some(&changed), &graph, &references);
@@ -13991,6 +14081,127 @@ mod tests {
             selected.runner() && !selected.crates.contains("mandate-risk"),
             "the runner's own file selects the runner and not the crates it is built on: {}",
             selected.reasons()
+        );
+        Ok(())
+    }
+
+    /// The paths a crate's raw text could name, found without the tokenizer: every run of path
+    /// characters on each line not starting with `//` (a doc comment cites files it never reads),
+    /// a URL's aside, resolved against the file's directory,
+    /// the crate's, `crates/` and the root, and kept only when it is a tracked file or directory
+    /// outside the crate other than `crates` itself. An independent reading of what
+    /// [`source_references`] must cover.
+    fn raw_outside_paths(
+        root: &Path,
+        graph: &CrateGraph,
+        tracked: &BTreeSet<String>,
+    ) -> Result<BTreeMap<String, BTreeSet<String>>> {
+        let mut found: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (krate, dir) in &graph.dirs {
+            let prefix = format!("{dir}/");
+            for file in tracked
+                .iter()
+                .filter(|f| f.starts_with(&prefix) && f.ends_with(".rs"))
+            {
+                let text = fs::read_to_string(root.join(file))?;
+                let file_dir = file.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+                let code: String = text
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with("//"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let runs = code.split(|c: char| !(c.is_ascii_alphanumeric() || "-_./".contains(c)));
+
+                for run in runs.filter(|run| run.contains('/') || run.contains('.')) {
+                    if run.contains("//") {
+                        continue;
+                    }
+                    let run = run.trim_start_matches('/');
+                    for base in [file_dir, dir.as_str(), "crates", ""] {
+                        let mut parts: Vec<&str> = Vec::new();
+                        let mut escaped = false;
+                        for part in base.split('/').chain(run.split('/')) {
+                            match part {
+                                "" | "." => {}
+                                ".." => escaped |= parts.pop().is_none(),
+                                part => parts.push(part),
+                            }
+                        }
+                        let path = parts.join("/");
+                        if escaped
+                            || path.is_empty()
+                            || path == "crates"
+                            || path.starts_with(&prefix)
+                            || path == *dir
+                            || !tracked.contains(&path)
+                        {
+                            continue;
+                        }
+                        found.entry(krate.clone()).or_default().insert(path);
+                    }
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// The tracked files of the repository at `root`, with every directory above one.
+    fn tracked_paths(root: &Path) -> Result<BTreeSet<String>> {
+        let mut tracked = BTreeSet::new();
+        for file in output_in(root, "git", &["ls-files"])?.lines() {
+            let mut dir = file;
+            tracked.insert(file.to_owned());
+            while let Some((parent, _)) = dir.rsplit_once('/') {
+                tracked.insert(parent.to_owned());
+                dir = parent;
+            }
+        }
+        Ok(tracked)
+    }
+
+    /// Each `(crate, path)` the raw reading finds that `references` does not name.
+    fn uncovered(
+        raw: &BTreeMap<String, BTreeSet<String>>,
+        references: &BTreeMap<String, BTreeSet<String>>,
+    ) -> Vec<(String, String)> {
+        raw.iter()
+            .flat_map(|(krate, paths)| paths.iter().map(move |path| (krate, path)))
+            .filter(|(krate, path)| {
+                !references
+                    .get(*krate)
+                    .is_some_and(|named| named.iter().any(|r| references_path(r, path)))
+            })
+            .map(|(krate, path)| (krate.clone(), path.clone()))
+            .collect()
+    }
+
+    /// DEC-1006 item 2, the scan's oracle: every tracked path outside a crate that any run of path
+    /// characters in the crate's text names, read without the tokenizer, is one the scan says the
+    /// crate reads, so changing it selects the crate. The oracle is shown to catch a scan that
+    /// misses a rooted `concat!` piece, the gap the independent review found in `mandate-notify`.
+    #[test]
+    fn every_outside_path_a_crate_names_is_one_the_scan_covers() -> Result<()> {
+        let root = repo_root()?;
+        let graph = crate_graph(&root)?;
+        let references = source_references(&root, &graph)?;
+        let tracked = tracked_paths(&root)?;
+        let raw = raw_outside_paths(&root, &graph, &tracked)?;
+        assert!(
+            raw.get("mandate-notify")
+                .is_some_and(|paths| paths.contains("schemas/mandate.schema.json")),
+            "the raw reading sees mandate-notify's schema read"
+        );
+        assert_eq!(uncovered(&raw, &references), Vec::<(String, String)>::new());
+        let mut seeded = references.clone();
+        if let Some(named) = seeded.get_mut("mandate-notify") {
+            named.retain(|r| !references_path(r, "schemas/mandate.schema.json"));
+        }
+        assert!(
+            uncovered(&raw, &seeded).contains(&(
+                "mandate-notify".to_owned(),
+                "schemas/mandate.schema.json".to_owned()
+            )),
+            "a scan missing the rooted piece is caught"
         );
         Ok(())
     }

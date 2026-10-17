@@ -202,7 +202,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   than removing tests, baselines, mutants, or safety gates (DEC-464). Both CI and `cargo xtask
   check` scope the jobs to the diff (DEC-1006): `cargo xtask ci select` takes the changed paths,
   the crates that own them or name them in their sources, and every crate built on those. Tests,
-  doctests, pending tests, and the rehearsal and Postgres runs cover only those crates.
+  doctests, pending tests, and the rehearsal and Postgres runs cover only those crates, and a
+  crate handed another's binary (`MANDATE_RH_SIM_BIN`) follows that crate.
   `fast-python`, `fast-portable` (the runner's crates), `fast-rh-sim-live`, `full-checks` (any
   path outside the documentation and `web/`), and `schema-mutants` (`schemas/`, the specs, the
   backlog, the pinned Python requirements) start only when the diff needs them. Lint, the spec

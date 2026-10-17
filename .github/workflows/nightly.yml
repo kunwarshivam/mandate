@@ -5,8 +5,8 @@
 # that run opens an issue itself if it fails (`ci.yml`'s `report-main`). Beside it, this workflow
 # runs the Postgres journal tests on the oldest supported version, the long fuzz seeds, the
 # seeded-bug mutation check of the reference implementation and a full-history secret scan, and
-# the whole-crate mutation sweep of every safety-critical crate, a seventh of it a run so every
-# mutant is tested once every seven runs, about weekly, while most shared runners stay with PRs
+# the whole-crate mutation sweep of every safety-critical crate, a seventh of it a day so every
+# mutant is tested once a week, while most shared runners stay with pull requests
 # (DEC-1006 item 5). A failure opens an issue naming only the run and the jobs. Weekly from
 # DEC-256 until DEC-1006; skipped when main has not changed since the last successful run.
 name: nightly
@@ -129,10 +129,9 @@ jobs:
 
   # DEC-1006 item 5. Tonight's share of the whole-crate mutation sweep: the gate's own listing of
   # every safety-critical crate's source, cut into shards of at most eight mutants, of which the
-  # shards whose index is this run's number modulo seven run.
+  # shards whose index is today's (days since the Unix epoch) modulo the rotation run. It runs even
+  # when main is unchanged, so no day's share is skipped and every shard runs once a rotation.
   sweep-plan:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -156,10 +155,13 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: select
+      - name: Read the clock
+        id: clock
+        run: echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT"
       - name: Plan tonight's share of the sweep
         id: plan
         env:
-          MANDATE_SWEEP_NIGHT: ${{ github.run_number }}
+          MANDATE_SWEEP_CLOCK: ${{ steps.clock.outputs.seconds }}
         run: cargo xtask ci sweep --plan >> "$GITHUB_OUTPUT"
 
   # One shard of tonight's share, as a per-PR mutation shard runs (DEC-519, DEC-931, DEC-538), at

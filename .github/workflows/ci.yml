@@ -549,9 +549,10 @@ jobs:
 
   # DEC-1006 item 5. The nightly dispatches this workflow on main, where `select` has no diff base
   # and selects everything; when that run fails, this opens an issue naming only the run and the
-  # verdicts, never a log line. A dispatch on any other branch reports nothing.
+  # verdicts, never a log line. A run cancelled by a newer dispatch reports nothing, nor does a
+  # dispatch on any other branch.
   report-main:
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (needs.fast.result != 'success' || needs.full.result != 'success') }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
     needs: [fast, full]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
