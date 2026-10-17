@@ -124,7 +124,6 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
-            (_, StreamType::Meter) => None,
             _ => schema(event_type, schema_version),
         })
 }

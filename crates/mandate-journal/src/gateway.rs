@@ -1,5 +1,5 @@
 //! The records journal spec v0.46 §9.19 closes for the model gateway (DEC-998, E15-8's code half,
-//! DEC-2200): the agent stream's `ModelInvocationRecorded`, with rules 146 to 152, and the meter
+//! DEC-2201): the agent stream's `ModelInvocationRecorded`, with rules 146 to 152, and the meter
 //! stream `meter:{workspace_id}`'s `StreamOpened`, `MeterReserved`, and `MeterSettled`, with rules
 //! 154 to 157. Rules 153 and 158 are stream rules, [`check_stream`]'s: `append` hands it the
 //! stream's earlier records. Every rule only refuses a draft.

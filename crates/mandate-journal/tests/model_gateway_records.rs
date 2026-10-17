@@ -1,4 +1,4 @@
-//! Journal spec v0.46 §9.19 (DEC-998, E15-8's code half, DEC-2200): the agent stream's closed
+//! Journal spec v0.46 §9.19 (DEC-998, E15-8's code half, DEC-2201): the agent stream's closed
 //! `ModelInvocationRecorded` and the gateway's meter stream, through the journal's own checks
 //! against the vectors' `model_gateway` section. Every base and valid draft parses; every invalid
 //! draft is refused with its reason at its path (rules 146 to 152 and 154 to 157, the closed members
@@ -326,4 +326,35 @@ fn object(members: &[(&str, &str)]) -> Value {
         object.insert(Key::new(key).unwrap(), Value::Str((*value).to_owned()));
     }
     Value::Object(object)
+}
+
+/// `closes` answers for the records the agent stream's own module closes too, at their versions
+/// only, and nowhere the catalogue does not admit them.
+#[test]
+fn the_catalogue_answers_for_the_agent_streams_own_records() {
+    use mandate_journal::closes;
+    assert!(closes("ObservationRecorded", 1, StreamType::Agent));
+    assert!(!closes("ObservationRecorded", 2, StreamType::Agent));
+    assert!(!closes("ObservationRecorded", 1, StreamType::Control));
+    assert!(closes("ApprovalRequested", 2, StreamType::Agent));
+    assert!(!closes("ThesisInvalidated", 1, StreamType::Agent));
+}
+
+/// `append` reads a stream's earlier records exactly when a draft of the batch is one rules 153
+/// and 158 judge: an agent stream's `ModelInvocationRecorded` or a meter stream's reservation or
+/// settlement, and no other record or stream.
+#[test]
+fn a_batch_reads_its_stream_only_for_the_records_the_stream_rules_judge() {
+    use mandate_journal::reads_stream;
+    let section = section();
+    let call = base(&section, "call");
+    let opened = base(&section, "opened");
+    let reserved = base(&section, "reserved");
+    let settled = base(&section, "settled");
+    assert!(reads_stream(std::slice::from_ref(&call)));
+    assert!(reads_stream(std::slice::from_ref(&reserved)));
+    assert!(reads_stream(std::slice::from_ref(&settled)));
+    assert!(reads_stream(&[opened.clone(), reserved]));
+    assert!(!reads_stream(std::slice::from_ref(&opened)));
+    assert!(!reads_stream(&[]));
 }

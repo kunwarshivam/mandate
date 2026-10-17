@@ -95,7 +95,7 @@ fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
 }
 
 /// The shell's catalogue reads `mandate-journal`'s own registration, never a constant: §9.19 closes
-/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2200), and no
+/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2201), and no
 /// invalidation verdict is registered until E19-5.
 #[test]
 fn the_journal_catalog_reads_mandate_journal_s_registration() {

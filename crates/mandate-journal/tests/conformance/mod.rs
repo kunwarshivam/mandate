@@ -830,7 +830,7 @@ const APPENDS: &[(&str, &[&str], Drafts)] = &[
 ];
 
 /// Every append case of the journal vectors, each on a fresh backend holding the vectors' chain.
-/// Journal spec v0.46 §9.19's stream rules through `append` (rules 153 and 158, DEC-2200): each
+/// Journal spec v0.46 §9.19's stream rules through `append` (rules 153 and 158, DEC-2201): each
 /// `model_gateway` stream vector appended to a fresh backend, one record per append and then as one
 /// batch, refuses at the vector's record with its reason and path and stores nothing from there on.
 /// The agent-stream vectors start after the stream's `StreamOpened`, which the agent-stream chain

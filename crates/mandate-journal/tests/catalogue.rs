@@ -1496,7 +1496,7 @@ fn refused(event_type: &str, kind: &str, refs: &[&str]) -> (InvalidReason, Strin
 }
 
 /// The compiler's record is on the control stream (§9.9), and E15-8 closes the agent stream's at
-/// schema version 1 (journal spec v0.46 §9.19, DEC-998, DEC-2200): an unlisted member is refused
+/// schema version 1 (journal spec v0.46 §9.19, DEC-998, DEC-2201): an unlisted member is refused
 /// `schema` there too, and `model_version` is still required.
 #[test]
 fn the_model_invocation_is_closed_on_the_agent_stream() {
