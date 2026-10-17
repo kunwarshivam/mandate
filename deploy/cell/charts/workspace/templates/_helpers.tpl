@@ -87,6 +87,8 @@ capabilities:
 {{- end }}
 - name: HOME
   value: /tmp
+- name: MANDATE_DEPLOYMENT_TIER
+  value: {{ .root.Values.deploymentTier | quote }}
 {{- end -}}
 
 {{- define "mandate.mounts" -}}

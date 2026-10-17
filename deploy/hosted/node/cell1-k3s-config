@@ -1,0 +1,44 @@
+#!/bin/sh
+# Writes /etc/rancher/k3s/config.yaml for this node's role, from the droplet's own private address
+# (the VPC interface, eth1), at first boot. k3s is not started here; `cell1-k3s-start` starts it.
+#   cell1-k3s-config server
+#   cell1-k3s-config agent <server private address>
+set -eu
+role="$1"
+ip="$(curl -sSf --max-time 10 http://169.254.169.254/metadata/v1/interfaces/private/0/ipv4/address)"
+case "$ip" in
+  10.* | 172.* | 192.168.*) ;;
+  *)
+    echo "the private address '$ip' is not a VPC address" >&2
+    exit 1
+    ;;
+esac
+install -d -m 0700 /etc/rancher/k3s
+case "$role" in
+  server)
+    cat >/etc/rancher/k3s/config.yaml <<CONFIG
+node-ip: "$ip"
+flannel-iface: eth1
+# Pod traffic between the droplets is encrypted, though the VPC is private (DEC-2000 item 5).
+flannel-backend: wireguard-native
+disable: [traefik, servicelb]
+secrets-encryption: true
+write-kubeconfig-mode: "0600"
+agent-token-file: /etc/rancher/k3s/agent-token
+CONFIG
+    ;;
+  agent)
+    server="$2"
+    cat >/etc/rancher/k3s/config.yaml <<CONFIG
+server: "https://$server:6443"
+node-ip: "$ip"
+flannel-iface: eth1
+token-file: /etc/rancher/k3s/agent-token
+CONFIG
+    ;;
+  *)
+    echo "the role is server or agent, not '$role'" >&2
+    exit 2
+    ;;
+esac
+chmod 0600 /etc/rancher/k3s/config.yaml

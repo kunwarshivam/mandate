@@ -459,6 +459,44 @@ jobs:
       - run: cargo xtask ci cell
         if: steps.change.outputs.docs_only != 'true'
 
+  # E21-51, DEC-2000 item 11. Cell #1's `cluster` step, the same code the founder runs against the
+  # droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the
+  # default service account, the CloudNativePG operator, journal-db and the workspace chart with
+  # cell #1's values, the tunnel off. Not a required check; skipped for a documentation-only
+  # change (DEC-112).
+  hosted-k3d:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; nothing to bring up"
+      - name: Install k3d and helm (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - run: cargo xtask cell hosted
+        if: steps.change.outputs.docs_only != 'true'
+
   # DEC-538. Sizes the mutation matrix to the diff: `cargo xtask ci mutants --plan` lists, without
   # building, exactly the mutants the gate would test (its own diff and listing code), and reports
   # the count and `min(192, count)` shard indices. A diff with no mutants, a documentation-only one

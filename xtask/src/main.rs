@@ -69,6 +69,8 @@ commands:
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell down             delete the local cell
+  cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
+                        its own, the tunnel off
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
                         (drift check unless --write)
@@ -263,6 +265,7 @@ fn run() -> Result<()> {
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
+        ["cell", "hosted"] => cell::hosted(),
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "generate"] => cell::generate(false),
@@ -15211,10 +15214,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            12,
+            13,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, and `cell`"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
+             `hosted-k3d` (E21-51)"
         );
         for checkout in checkouts {
             assert!(

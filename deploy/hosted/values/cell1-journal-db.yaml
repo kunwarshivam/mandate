@@ -1,0 +1,10 @@
+# Cell #1's journal Postgres (E21-51, DEC-2000), on k3s's default local-path class, whose
+# directory, /var/lib/rancher, is the node's block volume. One instance until lane S2 (E21-41)
+# adds the synchronous standby on the second droplet.
+instances: 1
+storage:
+  size: 30Gi
+  storageClass: ""
+resources:
+  cpu: "1"
+  memory: 2Gi
