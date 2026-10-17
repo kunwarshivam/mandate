@@ -1878,7 +1878,7 @@ fn brake_in_cell(selector: &str, seeded: bool) -> Result<Verdict> {
     }
     for (n, args) in runs.iter().enumerate() {
         let job = render(
-            &[format!("run.id=\"{id}-{n}\""), format!("run.args={args}")],
+            &[format!("run.id=\"{id}{n}\""), format!("run.args={args}")],
             Some("templates/run.yaml"),
         )?;
         let (done, logs) = run_job(job)?;
