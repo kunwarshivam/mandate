@@ -35,8 +35,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     second, so a host clock that steps back never freezes or reverses the risk clock.
     `TradingDayStarted` follows the first tick of each new trading date in its batch. `append` does
     not compare ticks or dates across records at this version.
-  - **Versions.** v0.45 and v0.46 are held by open changes (the backtest and gateway lanes); this
-    change takes v0.47 and lists no change for them.
+  - **Versions.** v0.45 and v0.46, §9.18 and §9.19, and rules up to 158 are held by open changes
+    (the backtest and gateway lanes); this change takes v0.47, §9.20, and rules 159 to 164, and is
+    renumbered at merge if those change.
 
 - **v0.44 ([DEC-981](../project/decisions/DEC-981.md); E20-3):** §9.17 registers the ten records of
   [control-plane design §3.8](../design/control-plane.md#38-the-closed-message-set), closed at schema
@@ -3817,7 +3818,7 @@ order. `append` does not compare dates across records at this version.
 | `samples` | `[clock_sample]` | The servers that answered, strictly ascending by `server`: rule 161. A server that did not answer, or answered unsynchronized (stratum 0 or 16), is not a sample |
 | `offset` | `decimal?` | The host clock minus the servers' time, in seconds: the sample offset rule 162 selects, `null` when there is no sample |
 | `tolerance` | `decimal` | The tolerance it was judged against, in seconds (default `0.05`, 50 ms): rule 161 |
-| `within_tolerance` | `boolean` | Rule 147: `true` only when `offset` is non-null and its magnitude is at most `tolerance`. A measurement no server answered is out of tolerance (`AGENTS.md` rule 3) |
+| `within_tolerance` | `boolean` | Rule 163: `true` only when `offset` is non-null and its magnitude is at most `tolerance`. A measurement no server answered is out of tolerance (`AGENTS.md` rule 3) |
 
 `clock_sample` is an object with exactly these members, each present:
 
